@@ -50,7 +50,7 @@ const ALLOWED_SLUGS = new Set([
   "publishing",
   "analytics",
   "inbox",
-  "billing",
+  "resource-limits",
   "agent",
   "settings",
   "troubleshooting",

@@ -5,7 +5,6 @@ import type { DatabaseError } from "@meltiply/domain";
 import { CoreApiError } from "./core-types";
 import { withSystemTransactionEffect } from "./database";
 import { hashIdempotencyRequestEffect } from "./idempotency";
-import { lockOrganizationEffect } from "./organization-lock";
 import type {
   OperatorDistributionResolution,
   OperatorReconciliationService,
@@ -32,7 +31,6 @@ interface DistributionResolutionState extends Record<string, unknown> {
   provider_operation_id: string | null;
   status: string;
 }
-
 
 /**
  * Extracts a normalized before/after audit snapshot from a `DistributionResolutionState` row.
@@ -66,7 +64,6 @@ function distributionRequestHashValue(
 ): string {
   return JSON.stringify({ distributionId, ...input });
 }
-
 
 /**
  * Locks an operator action idempotency key and checks for a completed replay in `operator_actions`.
@@ -135,7 +132,6 @@ function lockAndFindReplay(
  */
 export function createOperatorReconciliationService(): OperatorReconciliationService {
   return {
-
     /**
      * Resolves an ambiguous or failed distribution requiring manual operator reconciliation.
      *

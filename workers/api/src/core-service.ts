@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 import { isoDateTime, rateLimitBudgetFreshSeconds } from "@meltiply/domain";
 import { ProviderRegistry } from "@meltiply/providers";
@@ -11,7 +10,6 @@ import {
 import { disconnectPlatformAccountEffect } from "./brand-profile-service";
 import { CoreApiError, type CoreApiService } from "./core-types";
 import { activeOrganizationIdEffect, withTenantTransactionEffect } from "./database";
-import type { ApiWorkerEnv } from "./env";
 import {
   completeIdempotencyEffect,
   hashIdempotencyRequestEffect,
@@ -122,7 +120,6 @@ interface InboxRow extends Record<string, unknown> {
   synced_at: Date | string;
   updated_at: Date | string;
 }
-
 
 interface ReplyTargetRow extends InboxRow {
   account_connection_status: Schemas["ConnectionStatus"] | null;
@@ -348,7 +345,6 @@ function mapInboxComment(row: InboxRow): InboxComment {
     updated_at: isoDateTime(row.updated_at),
   };
 }
-
 
 /**
  * Factory creating the unified core API service instance for Meltiply.
@@ -969,7 +965,5 @@ export function createCoreApiService(
         );
       });
     },
-
   };
 }
-

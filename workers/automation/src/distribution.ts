@@ -102,7 +102,6 @@ interface DistributionRow extends Record<string, unknown> {
   token_expires_at: Date | string | null;
 }
 
-
 /**
  * Claim outcome: a claimed row always carries the composition snapshot that
  * was frozen with its Provider operation, so publish, poll, retry, resume, and

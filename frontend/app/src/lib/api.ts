@@ -1174,5 +1174,3 @@ export function getCalendar(
     options?.signal,
   );
 }
-
-

@@ -1918,14 +1918,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  ;
-
-  ;
-
-  ;
-
-  ;
-
   // Second Alpha Asset used by multi-attachment composition scenarios. It is a
   // verified image with its own ready original object, so a Post attaching both
   // Assets can be scheduled once processing has produced publishable media.
@@ -2598,17 +2590,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         distributions: String(distributionAllowance),
         idempotency_count: 0,
       });
-
     } finally {
       await purgeIntegrationPosts(
         [postId],
-        [
-          "integration-post-multi-draft",
-          idempotencyKey,
-          invalidKey,
-          duplicateKey,
-          quotaKey,
-        ],
+        ["integration-post-multi-draft", idempotencyKey, invalidKey, duplicateKey, quotaKey],
       );
       await restoreUsageCount(usageBefore);
     }
@@ -4490,7 +4475,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   // A plan change racing an in-flight schedule is serialized behind it, so the
   // admitted command sees one consistent entitlement decision.
-  ;
 
   // Creator text is stored verbatim and parameterized, so SQL-shaped and
   // markup-shaped content is inert text that survives reloads, stays invisible

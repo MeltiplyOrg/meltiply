@@ -134,5 +134,4 @@ describe("asset upload policy", () => {
       expect(layout.maxParallelParts).toBe(ASSET_UPLOAD_POLICY.maxParallelParts);
     }
   });
-
 });

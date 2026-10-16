@@ -87,7 +87,6 @@ function request(
   );
 }
 
-
 describe("Access-protected operator reconciliation route", () => {
   it("rejects a missing Access assertion and the public API hostname", async () => {
     const resolveDistribution = vi.fn();
@@ -177,5 +176,4 @@ describe("Access-protected operator reconciliation route", () => {
     expect(mismatchedEvidence.status).toBe(400);
     expect(resolveDistribution).not.toHaveBeenCalled();
   });
-
 });

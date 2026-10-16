@@ -102,7 +102,6 @@ const stagingAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET"];
 // Check mail capability and normalized sender configuration, not mere presence.
 const stagingMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
 
-
 /**
  * Reports readiness status for required and environment-specific Worker bindings.
  *

@@ -502,10 +502,9 @@ function lockCapacityWindow(
         message: "This workspace's storage usage could not be confirmed. Try again.",
       });
     const organization = yield* client
-      .query<{ id: string }>(
-        `SELECT id FROM organizations WHERE id = $1 FOR UPDATE`,
-        [organizationId],
-      )
+      .query<{ id: string }>(`SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, [
+        organizationId,
+      ])
       .pipe(Effect.mapError(capacityReadFailed));
     if (!organization.rows[0]) {
       return yield* Effect.fail(

@@ -3,10 +3,7 @@ import type { Context, Hono } from "hono";
 
 import { CoreApiError } from "./core-types";
 import type { ApiWorkerEnvironment } from "./env";
-import {
-  type OperatorReconciliationService,
-  parseOperatorResolution,
-} from "./operator-resolution";
+import { type OperatorReconciliationService, parseOperatorResolution } from "./operator-resolution";
 import { idempotencyHeaders } from "./idempotent-response";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
@@ -133,7 +130,6 @@ export function registerOperatorRoutes(
   dependencies: OperatorRouteDependencies = {},
 ): void {
   const service = dependencies.operatorReconciliationService ?? lazyOperatorReconciliationService();
-
 
   app.post("/operator/v1/distributions/:id/reconciliation", (c) =>
     runRouteEffect(

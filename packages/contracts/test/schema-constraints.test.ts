@@ -12,7 +12,6 @@ interface JsonSchema {
   type?: string | string[];
 }
 
-
 function findUnconstrainedObjects(
   schema: JsonSchema,
   path: string,

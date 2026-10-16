@@ -1730,11 +1730,7 @@ export function createPostApiService(
               }
             }
             if (created.length > 0) {
-              yield* usageGuardEffect(
-                client,
-                organizationId,
-                created.length,
-              );
+              yield* usageGuardEffect(client, organizationId, created.length);
             }
             const scheduled =
               input.scheduledAt !== null && input.scheduledAt.getTime() > now.getTime();

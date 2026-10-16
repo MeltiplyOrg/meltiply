@@ -247,7 +247,6 @@ describe("tunnelNameFor", () => {
 });
 
 describe("tunnel-hostname CLI", () => {
-
   it("honours MELTIPLY_TUNNEL_DOMAIN and MELTIPLY_TUNNEL_DEV_LABEL", () => {
     const result = runScript(["--branch", "dev-tunnel"], {
       MELTIPLY_TUNNEL_DOMAIN: "staging.example.test",
@@ -283,7 +282,6 @@ describe("tunnel-hostname CLI", () => {
     assert.equal(result.status, 0);
     assert.equal(result.stdout, "*.meltiply.com\n");
   });
-
 
   it("refuses hostname generation without an explicitly configured owned domain", () => {
     const result = runScript(["--branch", "dev-tunnel"], { MELTIPLY_TUNNEL_DOMAIN: "" });

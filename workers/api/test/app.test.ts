@@ -419,8 +419,6 @@ describe("API Worker foundation", () => {
     expect(JSON.stringify(error.mock.calls)).not.toContain("private-database-value");
   });
 
-  ;
-
   it("fails readiness when required bindings are absent", async () => {
     const response = await exports.default.fetch("http://example.test/api/v1/ready");
     expect(response.status).toBe(503);

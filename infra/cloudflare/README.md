@@ -120,16 +120,16 @@ directory for a different commit or release ID.
 
 Continue in this order, following each command's `--help` for phase/step arguments:
 
-| Order | Transition |
-| --- | --- |
-| 1 | `release:restore-point`, then `release:migrate --phase bootstrap` for a new deployment or `--phase expand` for a compatible update. |
-| 2 | Deploy State, inject protected secrets, then deploy Automation without triggers. |
-| 3 | Plan/review/apply `paused-consumers`; refresh rendered configs from its outputs. |
-| 4 | Deploy API and inject its secrets; verify candidate identity with `release:smoke`. |
-| 5 | Plan/review `domain`, create its `release:approve traffic` receipt before applying, then verify live identity. |
-| 6 | For updates, use the traffic receipt with `release:deploy --phase api-rollout` at 5%, 25%, 50%, and 100%, smoking each stage. |
-| 7 | Plan/review `unpause`, create `release:approve queue-resume`, apply it, then enable the exact canonical Cron schedule with `release:cron`. |
-| 8 | Finish live smoke and `release:manifest`; do not run destructive schema contraction during rollout. |
+| Order | Transition                                                                                                                                 |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | `release:restore-point`, then `release:migrate --phase bootstrap` for a new deployment or `--phase expand` for a compatible update.        |
+| 2     | Deploy State, inject protected secrets, then deploy Automation without triggers.                                                           |
+| 3     | Plan/review/apply `paused-consumers`; refresh rendered configs from its outputs.                                                           |
+| 4     | Deploy API and inject its secrets; verify candidate identity with `release:smoke`.                                                         |
+| 5     | Plan/review `domain`, create its `release:approve traffic` receipt before applying, then verify live identity.                             |
+| 6     | For updates, use the traffic receipt with `release:deploy --phase api-rollout` at 5%, 25%, 50%, and 100%, smoking each stage.              |
+| 7     | Plan/review `unpause`, create `release:approve queue-resume`, apply it, then enable the exact canonical Cron schedule with `release:cron`. |
+| 8     | Finish live smoke and `release:manifest`; do not run destructive schema contraction during rollout.                                        |
 
 Every mutating release command still needs `--apply`, the exact
 `--confirm "release staging <git-sha>"`, `--plan-digest`, and the appropriate
@@ -141,7 +141,6 @@ migration, identity, traffic, Queue, or Cron evidence.
 An update first plans/reviews/applies `pause`, verifies Queue delivery is paused,
 and removes/verifies Automation schedules before changing Worker versions.
 Retain the previous versions and restore-point evidence until acceptance is complete.
-
 
 API smoke is not async acceptance. There is no synthetic canary Queue: approved
 real staging messages and durable outcomes are still required for async acceptance.

@@ -6425,8 +6425,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     });
   });
 
-  ;
-
   it("schedules only bounded safe provider retries with provider backoff", async () => {
     const distributionId = "93000000-0000-4000-8000-000000000008";
     await runSystemTransaction(env, async (client) => {

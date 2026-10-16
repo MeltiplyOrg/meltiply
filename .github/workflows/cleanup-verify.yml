@@ -28,6 +28,7 @@ jobs:
           bun run --cwd frontend/app type-check
           bunx vp run --filter './packages/*' --filter './workers/*' --concurrency-limit 1 type-check
       - name: Check cleanup behavior
+        if: always()
         run: |
           bun run test:ci-routing
           bun run release:test
@@ -39,6 +40,26 @@ jobs:
           bun run test:tunnel-hostname
           bun run docs:links
       - name: Build and smoke portable devcontainer tools
+        if: always()
         run: |
           npx --yes @devcontainers/cli up --workspace-folder "$PWD"
           npx --yes @devcontainers/cli exec --workspace-folder "$PWD" bash -lc 'node --version && bun --version && git --version && docker version && gh --version && test "$(id -un)" = node && test "${MELTIPLY_DEV_TUNNEL}" = 0'
+      - name: Smoke real operator approval CLI
+        if: always()
+        run: |
+          scratch="$(mktemp -d)"
+          export MELTIPLY_RELEASE_DIR="$scratch/evidence"
+          node --input-type=module - "$scratch" <<'JS'
+          import { readFile, writeFile } from "node:fs/promises";
+          const dir = process.argv[2];
+          const spec = JSON.parse(await readFile("scripts/release/release-input.example.json", "utf8"));
+          spec.restore_point_expires_at = new Date(Date.now() + 14 * 86400000).toISOString();
+          await writeFile(`${dir}/input.json`, JSON.stringify(spec));
+          await writeFile(`${dir}/reviewed.tfplan`, "operator-reviewed-smoke-plan");
+          JS
+          digest="$(sha256sum "$scratch/reviewed.tfplan" | cut -d' ' -f1)"
+          sha=0000000000000000000000000000000000000000
+          bun run release:approve foundation "$scratch/input.json" "$scratch/reviewed.tfplan" operator@example.test "approve $sha $digest"
+          test -s "$MELTIPLY_RELEASE_DIR/approval-foundation.json"
+          if bun run release:approve traffic "$scratch/input.json" "$scratch/reviewed.tfplan" operator@example.test "approve wrong"; then exit 1; fi
+          rm -rf "$scratch"

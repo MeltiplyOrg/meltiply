@@ -24,7 +24,6 @@ interface OperatorResolutionResult {
   status: OperatorDistributionResolution;
 }
 
-
 /**
  * Operator reconciliation contract: each method returns an Effect program the
  * operator route boundary executes once via runRouteEffect, keeping transaction
@@ -72,7 +71,6 @@ function reason(value: unknown): string {
   }
   return normalized;
 }
-
 
 /**
  * Validates that an optional provider URL is a bounded, canonical HTTPS URL without credentials or query fragments.

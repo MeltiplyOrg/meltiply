@@ -412,11 +412,7 @@ export function usageGuardEffect(
     );
     if (usage.rowCount !== 1) {
       return yield* Effect.fail(
-        new CoreApiError(
-          403,
-          "quota_exceeded",
-          "The monthly distribution quota has been reached.",
-        ),
+        new CoreApiError(403, "quota_exceeded", "The monthly distribution quota has been reached."),
       );
     }
   });

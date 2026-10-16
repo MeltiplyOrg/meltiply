@@ -937,7 +937,3 @@ describe("runtime contract cases", () => {
     });
   }
 });
-
-;
-
-;

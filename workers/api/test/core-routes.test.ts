@@ -2603,10 +2603,6 @@ describe("core API routes", () => {
       "disconnect-with-revoke-failure",
     );
   });
-
-  ;
-
-  ;
   it("rejects oversized mutation JSON with a non-retryable payload error", async () => {
     const createPost = vi.fn(() => Effect.die(new Error("unexpected call")));
     const app = authenticatedApp(service(), {

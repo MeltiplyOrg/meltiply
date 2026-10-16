@@ -75,7 +75,6 @@ describe("generated API client adapters", () => {
     vi.restoreAllMocks();
   });
 
-
   it("preserves the normative error envelope, request ID, and retry delay", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -125,7 +124,9 @@ describe("generated API client adapters", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const error = await Effect.runPromise(api.getCurrentUser(null)).catch((caught: unknown) => caught);
+    const error = await Effect.runPromise(api.getCurrentUser(null)).catch(
+      (caught: unknown) => caught,
+    );
 
     expect(error).toMatchObject({
       code: "unknown_error",

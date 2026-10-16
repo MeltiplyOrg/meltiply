@@ -39,7 +39,9 @@ describe("userFacingErrorMessage", () => {
 
 describe("apiErrorCode", () => {
   it("exposes the code so a surface can branch on a masked infrastructure state", () => {
-    expect(apiErrorCode({ code: "provider_unavailable", status: 503 })).toBe("provider_unavailable");
+    expect(apiErrorCode({ code: "provider_unavailable", status: 503 })).toBe(
+      "provider_unavailable",
+    );
   });
 
   it("returns undefined when no code is present", () => {

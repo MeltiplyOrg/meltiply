@@ -1027,7 +1027,6 @@ export function registerCoreRoutes(
         ),
       ));
 
-
   // Verified-domain provider media: a public surface authenticated by the URL's HMAC
   // bearer credential rather than a user session (the auth middleware exempts this
   // prefix). The signature is verified in constant time and the expiry checked before
@@ -2425,7 +2424,6 @@ export function registerCoreRoutes(
       }),
     ),
   );
-
 
   registerWorkspaceLifecycleRoutes(app, dependencies.workspaceLifecycle);
 }

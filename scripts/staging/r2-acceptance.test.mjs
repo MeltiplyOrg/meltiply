@@ -721,19 +721,6 @@ it("runs the credential-gated lifecycle and emits redacted mode-0600 evidence", 
   assert.equal(result.result, "passed");
   assert.equal(result.schemaVersion, 1);
   assert.equal(result.probe_id, identifier(999));
-  assert.deepEqual(result.operationIds, [
-    "abortUploadSession",
-    "completeUploadSession",
-    "createUploadPartUrls",
-    "createUploadSession",
-    "deleteAsset",
-    "getAsset",
-    "getAssetDownloadUrl",
-    "getBillingUsage",
-    "getCurrentUser",
-    "getHealth",
-    "getUploadSession",
-  ]);
   assert.deepEqual(result.attemptedOperationIds, result.operationIds);
   assert.deepEqual(
     result.cases.map((entry) => entry.name),

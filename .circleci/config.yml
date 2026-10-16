@@ -1,0 +1,106 @@
+# CircleCI setup pipeline (dynamic configuration).
+#
+# It has exactly two jobs to do:
+#   1. map the changed paths to the automatic fast lanes (`run-frontend`,
+#      `run-cloudflare`) so a change touching one side does not pay for the
+#      other side;
+#   2. forward the opt-in heavy-workflow flags to the continuation pipeline.
+#
+# Heavy lanes (browser/Lighthouse, live local stack + k6, SBOM/IaC/release
+# harnesses, protected staging release) never run automatically. Trigger them
+# from the CircleCI web app ("Trigger Pipeline" > Add Parameters) or the API:
+#
+#   curl -X POST "https://circleci.com/api/v2/project/<project-slug>/pipeline" \
+#     -H "Circle-Token: $CIRCLE_TOKEN" -H 'Content-Type: application/json' \
+#     -d '{"branch":"master","parameters":{"cloudflare-integration":true}}'
+#
+# The manual flags are declared here and, because CircleCI also forwards
+# trigger-time pipeline parameters to the continuation pipeline, under the same
+# names in .circleci/continue-config.yml. The continuation payload below must
+# carry only the path-filtering results: re-sending a trigger-time parameter
+# there makes CircleCI report conflicting pipeline parameters.
+#
+# REQUIRES: "dynamic config" enabled in Project Settings > Advanced.
+version: 2.1
+setup: true
+
+parameters:
+  frontend-full:
+    type: boolean
+    default: false
+    description: Run the manual frontend browser/Lighthouse workflow.
+  cloudflare-integration:
+    type: boolean
+    default: false
+    description: Run the manual live PostgreSQL/Worker/k6 workflow.
+  cloudflare-extended:
+    type: boolean
+    default: false
+    description: Run the manual SBOM, IaC, and release-harness workflow.
+  staging-release:
+    type: boolean
+    default: false
+    description: Run the protected staging release workflow (master only).
+
+orbs:
+  path-filtering: circleci/path-filtering@3.0.0
+  continuation: circleci/continuation@1.0.0
+
+jobs:
+  filter:
+    executor: path-filtering/default
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Unshallow git repository
+          command: |
+            # Connect HEAD history to master so the path diff can resolve.
+            git fetch --unshallow || true
+            git fetch origin master:master --depth=100 || true
+      - path-filtering/set-parameters:
+          base-revision: master
+          config-path: .circleci/continue-config.yml
+          mapping: |
+            ^\.circleci/.* run-frontend true
+            ^\.circleci/.* run-cloudflare true
+            ^\.github/.* run-cloudflare true
+            ^\.node-version$ run-frontend true
+            ^\.node-version$ run-cloudflare true
+            ^\.typos\.toml$ run-cloudflare true
+            ^Makefile$ run-frontend true
+            ^Makefile$ run-cloudflare true
+            ^docker-compose\.cloudflare\.yml$ run-cloudflare true
+            ^frontend/.* run-frontend true
+            ^infra/.* run-cloudflare true
+            ^knip\.json$ run-cloudflare true
+            ^package\.json$ run-frontend true
+            ^package\.json$ run-cloudflare true
+            ^patches/.* run-frontend true
+            ^patches/.* run-cloudflare true
+            ^lint/.* run-frontend true
+            ^lint/.* run-cloudflare true
+            ^packages/.* run-cloudflare true
+            ^bun\.lock$ run-frontend true
+            ^bun\.lock$ run-cloudflare true
+            ^bunfig\.toml$ run-frontend true
+            ^bunfig\.toml$ run-cloudflare true
+            ^redocly\.yaml$ run-cloudflare true
+            ^scripts/ci/(cancel-siblings-on-failure\.sh|cancel-siblings-on-failure\.test\.sh|path-filtering\.test\.mjs)$ run-cloudflare true
+            ^scripts/cloudflare-local/.* run-cloudflare true
+            ^scripts/infra/.* run-cloudflare true
+            ^scripts/release/.* run-cloudflare true
+            ^scripts/staging/.* run-cloudflare true
+            ^tsconfig\.base\.json$ run-frontend true
+            ^tsconfig\.base\.json$ run-cloudflare true
+            ^vite\.config\.ts$ run-frontend true
+            ^vite\.config\.ts$ run-cloudflare true
+            ^workers/.* run-cloudflare true
+      - continuation/continue:
+          configuration_path: .circleci/continue-config.yml
+          parameters: /tmp/pipeline-parameters.json
+
+workflows:
+  setup:
+    jobs:
+      - filter

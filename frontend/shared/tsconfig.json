@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["vite-plus/client"],
+    "paths": {
+      "@meltiply/ui": ["./src/components/ui"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}

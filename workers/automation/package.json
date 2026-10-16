@@ -1,0 +1,32 @@
+{
+  "name": "@meltiply/automation-worker",
+  "version": "1.0.0-target.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "dev": "wrangler dev",
+    "smoke:processor": "processor/smoke/run.sh",
+    "test": "vp test run",
+    "test:integration": "vp test run --config vitest.integration.config.ts",
+    "type-check": "tsc --project tsconfig.json",
+    "types": "wrangler types worker-configuration.d.ts --env-interface WranglerEnv"
+  },
+  "dependencies": {
+    "@meltiply/database": "workspace:*",
+    "@meltiply/domain": "workspace:*",
+    "@meltiply/observability": "workspace:*",
+    "@meltiply/providers": "workspace:*",
+    "@meltiply/secrets": "workspace:*",
+    "@meltiply/storage": "workspace:*",
+    "effect": "4.0.0-rc.115"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

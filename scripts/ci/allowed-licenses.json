@@ -1,0 +1,94 @@
+{
+  "javascript": [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BlueOak-1.0.0",
+    "CC-BY-3.0",
+    "CC-BY-4.0",
+    "CC0-1.0",
+    "EPL-2.0",
+    "ISC",
+    "LGPL-3.0-or-later",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Python-2.0",
+    "Unlicense"
+  ],
+  "developmentExceptions": [
+    {
+      "name": "agentation",
+      "version": "3.0.2",
+      "license": "PolyForm-Shield-1.0.0",
+      "reason": "Development-only UI feedback tooling, not a competing product. Preserve LICENSES/agentation.txt; production dependencies receive no exceptions."
+    },
+    {
+      "name": "react-doctor",
+      "version": "0.9.14",
+      "license": "LicenseRef-React-Doctor",
+      "reason": "Development-only code analysis, not training/evaluation data or a resold analyzer service. Preserve LICENSES/react-doctor-0.9.14.txt."
+    },
+    {
+      "name": "oxlint-plugin-react-doctor",
+      "version": "0.9.14",
+      "license": "LicenseRef-React-Doctor",
+      "reason": "Development-only code analysis under the same reviewed Million Software terms, not a production dependency."
+    }
+  ],
+  "licenseMetadata": [
+    {
+      "name": "agentation",
+      "version": "3.0.2",
+      "declared": "PolyForm-Shield-1.0.0",
+      "license": "PolyForm-Shield-1.0.0",
+      "file": "LICENSE",
+      "sha256": "29eb64b5c188e2d6f739a8beadf09bcbb3a386bf78ae44e07343975331fd9775"
+    },
+    {
+      "name": "khroma",
+      "version": "2.1.0",
+      "license": "MIT",
+      "file": "license",
+      "sha256": "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49"
+    },
+    {
+      "name": "zod-to-ts",
+      "version": "1.2.0",
+      "license": "MIT",
+      "file": "LICENSE",
+      "sha256": "901eb546213d344758178277346c83df776b3566895c507a82ee36447c6662ba"
+    },
+    {
+      "name": "parse-cache-control",
+      "version": "1.0.1",
+      "license": "BSD-3-Clause",
+      "file": "LICENSE",
+      "sha256": "111f42b37daecc6c387d037ef25955bd269e7f9a46a736d5257a23560534763f"
+    },
+    {
+      "name": "@react-grab/cli",
+      "version": "0.2.0",
+      "license": "MIT",
+      "file": "LICENSE",
+      "sha256": "3cb91aec78b7a54136b60a81055a3e1e5bac3c2d47d06dc866948129e4cd4f45"
+    },
+    {
+      "name": "react-doctor",
+      "version": "0.9.14",
+      "declared": "SEE LICENSE IN LICENSE",
+      "license": "LicenseRef-React-Doctor",
+      "file": "LICENSE",
+      "sha256": "aa9b278de35d20d320e40789db8b3e242096ed4a89c5aaf8fbe23a5e55c08ff1"
+    },
+    {
+      "name": "oxlint-plugin-react-doctor",
+      "version": "0.9.14",
+      "declared": "SEE LICENSE IN LICENSE",
+      "license": "LicenseRef-React-Doctor",
+      "file": "LICENSE",
+      "sha256": "aa9b278de35d20d320e40789db8b3e242096ed4a89c5aaf8fbe23a5e55c08ff1"
+    }
+  ]
+}

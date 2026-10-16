@@ -1,0 +1,4631 @@
+openapi: 3.1.0
+info:
+  title: Meltiply API
+  version: 1.0.0-target.0
+  summary: Contract for the Meltiply frontend and Worker API.
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-Proprietary
+  description: |
+    This is the target v1 contract for the Cloudflare Workers migration.
+    It is executable planning input, not evidence that every operation is
+    implemented in the current Worker API.
+servers:
+  - url: http://localhost:8787/api/v1
+    description: Local Worker API
+  - url: https://api.staging.meltiply.com/api/v1
+    description: Staging Worker API
+security:
+  - bearerAuth: []
+tags:
+  - name: Operations
+    description: Liveness and dependency readiness.
+  - name: Auth
+    description: |
+      Better Auth browser session lifecycle served under /api/auth. The
+      HttpOnly session cookie authenticates these lifecycle calls only; the
+      bearer JWT that authorizes /api/v1 requests is minted and renewed
+      through the `set-auth-jwt` response header on GET /api/auth/get-session.
+  - name: Users
+    description: Authenticated user and active workspace.
+  - name: Workspaces
+    description: |
+      Native workspace, membership, and invitation lifecycle. These operations
+      resolve the workspace from the path (or the invitation token), not from
+      X-Workspace-ID; the caller must be a member of the addressed workspace,
+      and manager actions require the admin role.
+  - name: Brand Profiles
+    description: |
+      Named, color-labelled ownership scopes inside a workspace. Every Asset,
+      Platform account (Channel), and Distribution belongs to exactly one
+      Brand Profile; management mutations require the workspace admin role.
+  - name: Platforms
+    description: Provider capabilities, accounts, and OAuth.
+  - name: Assets
+    description: |
+      Internal post-owned media uploads. Assets are created only through
+      direct R2 upload sessions inside the composer; they are not a
+      browsable library and carry no Post content.
+  - name: Posts
+    description: |
+      Durable Post compositions with ordered media attachments, saved
+      per-Channel target settings, and per-target Distribution outcomes.
+      Drafts are Posts, not a separate asset type; scheduling or immediate
+      publication keeps the same Post identity.
+  - name: Distributions
+    description: |
+      Per-Channel publication outcomes for a Post. Distributions are created
+      and edited only through Post scheduling; existing outcomes stay
+      independently readable, editable while pending, cancellable, and
+      retryable.
+  - name: Calendar
+    description: Distribution timeline events.
+  - name: Analytics
+    description: Aggregate and per-distribution metrics.
+  - name: Inbox
+    description: Synchronized comments and replies.
+  - name: Billing
+    description: Plan, usage, checkout, portal, and webhooks.
+paths:
+  /health:
+    get:
+      tags: [Operations]
+      operationId: getHealth
+      security: []
+      summary: Liveness check
+      responses:
+        "200":
+          description: Process is live.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: ok
+                version: 01JZRELEASE
+                environment: staging
+  /ready:
+    get:
+      tags: [Operations]
+      operationId: getReadiness
+      security: []
+      summary: Bounded dependency readiness check
+      responses:
+        "200":
+          description: Required dependencies are ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+        "503":
+          description: One or more required dependencies are unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+  /api/auth/sign-in/email:
+    servers:
+      - url: http://localhost:8787
+        description: Local Worker API
+      - url: https://staging.meltiply.com
+        description: Staging same-origin frontend
+    post:
+      tags: [Auth]
+      operationId: signInWithEmail
+      security: []
+      summary: Sign in with email and password
+      description: |
+        Verifies credentials and, on success, sets the HttpOnly session cookie
+        and returns the session token and user. The cookie authenticates
+        /api/auth lifecycle calls only; the bearer JWT for /api/v1 is minted
+        by the `set-auth-jwt` response header on GET /api/auth/get-session.
+        Subject to the database-backed fixed-window authentication rate limit
+        keyed by action and normalized email/IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignInEmailRequest"
+      responses:
+        "200":
+          description: Authenticated session and user.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenResult"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "403":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/sign-up/email:
+    servers:
+      - url: http://localhost:8787
+        description: Local Worker API
+      - url: https://staging.meltiply.com
+        description: Staging same-origin frontend
+    post:
+      tags: [Auth]
+      operationId: signUpWithEmail
+      security: []
+      summary: Register with name, email, and password
+      description: |
+        Creates the Better Auth credential account and, when auto sign-in is
+        enabled, sets the HttpOnly session cookie and returns the session
+        token and user. The cookie authenticates /api/auth lifecycle calls
+        only; the bearer JWT for /api/v1 is minted by the `set-auth-jwt`
+        response header on GET /api/auth/get-session. Subject to the
+        database-backed fixed-window authentication rate limit keyed by
+        action and normalized email/IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignUpEmailRequest"
+      responses:
+        "200":
+          description: Created user and session token.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenResult"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "422":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/sign-out:
+    servers:
+      - url: http://localhost:8787
+        description: Local Worker API
+      - url: https://staging.meltiply.com
+        description: Staging same-origin frontend
+    post:
+      tags: [Auth]
+      operationId: signOut
+      security:
+        - sessionCookie: []
+      summary: Revoke the active session
+      description: |
+        Deletes the database session row for the presented session cookie and
+        emits an expired Set-Cookie header so the browser clears it. Clients
+        discard the in-memory bearer JWT afterwards: it is never reissued
+        because get-session can no longer resolve a session.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Session revoked.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSuccessResult"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/get-session:
+    servers:
+      - url: http://localhost:8787
+        description: Local Worker API
+      - url: https://staging.meltiply.com
+        description: Staging same-origin frontend
+    get:
+      tags: [Auth]
+      operationId: getAuthSession
+      security: []
+      summary: Read the current session
+      description: |
+        Returns the session and user for the presented session cookie, or null
+        when the cookie is absent, expired, or revoked. When a session is
+        active the response also carries the `set-auth-jwt` header — a fresh
+        short-lived bearer JWT the client holds in memory and sends as
+        `Authorization: Bearer` on /api/v1 requests. This is the only channel
+        that issues or renews the bearer credential.
+      responses:
+        "200":
+          description: Active session and user, or null when unauthenticated.
+          headers:
+            set-auth-jwt:
+              $ref: "#/components/headers/AuthJwt"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AuthSessionResult"
+                  - type: "null"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/request-password-reset:
+    servers:
+      - url: http://localhost:8787
+        description: Local Worker API
+      - url: https://staging.meltiply.com
+        description: Staging same-origin frontend
+    post:
+      tags: [Auth]
+      operationId: requestPasswordReset
+      security: []
+      summary: Send a password reset email
+      description: |
+        Issues a single-use recovery token and delivers the reset link through
+        the configured transactional email provider. Subject to the
+        database-backed fixed-window authentication rate limit keyed by action
+        and normalized email/IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestPasswordResetRequest"
+      responses:
+        "200":
+          description: Reset email accepted for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatusResult"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/reset-password:
+    servers:
+      - url: http://localhost:8787
+        description: Local Worker API
+      - url: https://staging.meltiply.com
+        description: Staging same-origin frontend
+    post:
+      tags: [Auth]
+      operationId: resetPassword
+      security: []
+      summary: Reset the password with a recovery token
+      description: |
+        Consumes the single-use recovery token and sets a new credential
+        password. Other sessions for the account are revoked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatusResult"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/verify-email:
+    servers:
+      - url: http://localhost:8787
+        description: Local Worker API
+      - url: https://staging.meltiply.com
+        description: Staging same-origin frontend
+    get:
+      tags: [Auth]
+      operationId: verifyEmail
+      security: []
+      summary: Verify an email address from a token link
+      description: |
+        Verifies the email address bound to the token. When callbackURL is
+        supplied the response redirects there; otherwise a JSON status is
+        returned.
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 16
+        - name: callbackURL
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+      responses:
+        "200":
+          description: Email verified.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyEmailResult"
+        "302":
+          description: Redirect to callbackURL with the verification outcome.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/change-password:
+    servers:
+      - url: http://localhost:8787
+        description: Local Worker API
+      - url: https://staging.meltiply.com
+        description: Staging same-origin frontend
+    post:
+      tags: [Auth]
+      operationId: changePassword
+      security:
+        - sessionCookie: []
+      summary: Change the password within an authenticated session
+      description: |
+        Verifies the current password, sets the new credential password, and
+        optionally revokes every other session for the account. When other
+        sessions are revoked a replacement session is created and delivered
+        through Set-Cookie; the bearer JWT is renewed separately via
+        GET /api/auth/get-session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed; a fresh session token is returned when other sessions were revoked.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenResult"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /billing/webhook:
+    post:
+      tags: [Billing]
+      operationId: handleBillingWebhook
+      security: []
+      summary: Receive a signed Polar Standard Webhooks event
+      parameters:
+        - in: header
+          name: webhook-id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: webhook-timestamp
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: webhook-signature
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "204":
+          description: Verified event was applied, deduplicated, or deliberately ignored.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /users/me:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Users]
+      operationId: getCurrentUser
+      summary: Get the authenticated user and active workspace
+      responses:
+        "200":
+          description: Current user profile.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /workspaces:
+    post:
+      tags: [Workspaces]
+      operationId: createWorkspace
+      summary: Create a team workspace
+      description: |
+        Creates a team workspace owned by the authenticated user, who becomes
+        its admin member. Personal workspaces are provisioned automatically at
+        sign-up and cannot be created through this operation.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+      responses:
+        "201":
+          description: Created workspace with the caller's admin membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /workspaces/{workspaceId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceIdPath"
+    patch:
+      tags: [Workspaces]
+      operationId: updateWorkspace
+      summary: Rename or re-slug a workspace
+      description: |
+        Updates workspace display fields. Requires the admin role in the
+        addressed workspace; personal workspaces cannot be renamed.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceRequest"
+      responses:
+        "200":
+          description: Updated workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /workspaces/{workspaceId}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceIdPath"
+    post:
+      tags: [Workspaces]
+      operationId: createWorkspaceInvitation
+      summary: Invite a member to a team workspace
+      description: |
+        Creates a pending invitation and delivers the acceptance link through
+        the configured transactional email provider. Requires the admin role;
+        personal workspaces cannot issue invitations, and at most one pending
+        invitation may exist per workspace and email.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceInvitationRequest"
+      responses:
+        "201":
+          description: Pending invitation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceInvitation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /workspaces/{workspaceId}/invitations/{invitationId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceIdPath"
+      - $ref: "#/components/parameters/InvitationId"
+    delete:
+      tags: [Workspaces]
+      operationId: revokeWorkspaceInvitation
+      summary: Revoke a pending invitation
+      description: |
+        Marks a pending invitation revoked so its token can no longer be
+        accepted. Requires the admin role in the addressed workspace.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Invitation revoked or prior revocation replayed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /workspace-invitations/{token}/accept:
+    parameters:
+      - $ref: "#/components/parameters/InvitationToken"
+    post:
+      tags: [Workspaces]
+      operationId: acceptWorkspaceInvitation
+      summary: Accept a workspace invitation
+      description: |
+        Consumes a pending invitation token and atomically creates the
+        caller's membership in the invited workspace. The invitation token is
+        the idempotency credential; replayed acceptance returns the existing
+        membership.
+      responses:
+        "200":
+          description: Accepted membership and its workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptWorkspaceInvitationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /workspaces/{workspaceId}/members/{memberId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceIdPath"
+      - $ref: "#/components/parameters/MemberId"
+    patch:
+      tags: [Workspaces]
+      operationId: updateWorkspaceMember
+      summary: Change a member's role
+      description: |
+        Updates a member's role in the addressed workspace. Requires the admin
+        role; the last remaining admin cannot be demoted.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceMemberRequest"
+      responses:
+        "200":
+          description: Updated membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceMember"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [Workspaces]
+      operationId: removeWorkspaceMember
+      summary: Remove a member from a workspace
+      description: |
+        Removes the membership row, severing the member's access to the
+        workspace. Requires the admin role, except that any member may remove
+        their own membership; the last remaining admin cannot be removed.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Member removed or prior removal replayed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /brand-profiles:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Brand Profiles]
+      operationId: listBrandProfiles
+      summary: List active brand profiles
+      description: |
+        Returns every active Brand Profile in the active workspace, ordered by
+        name. Soft-deleted profiles are excluded; workspace admins list them
+        through GET /brand-profiles/deleted.
+      responses:
+        "200":
+          description: Active brand profiles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfileListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Brand Profiles]
+      operationId: createBrandProfile
+      summary: Create a brand profile
+      description: |
+        Creates an active Brand Profile in the active workspace. The name must
+        normalize uniquely within the workspace, including names reserved by
+        soft-deleted profiles awaiting purge. Requires the workspace admin
+        role.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBrandProfileRequest"
+      responses:
+        "201":
+          description: Created brand profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /brand-profiles/deleted:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Brand Profiles]
+      operationId: listDeletedBrandProfiles
+      summary: List soft-deleted brand profiles
+      description: |
+        Returns soft-deleted Brand Profiles still inside their retention
+        window, ordered by deletion time. Requires the workspace admin role.
+      responses:
+        "200":
+          description: Soft-deleted brand profiles awaiting purge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfileListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /brand-profiles/{profile_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Brand Profiles]
+      operationId: getBrandProfile
+      summary: Get a brand profile
+      description: |
+        Returns one Brand Profile. Soft-deleted profiles resolve only for
+        workspace admins; other members receive 404.
+      responses:
+        "200":
+          description: Brand profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Brand Profiles]
+      operationId: updateBrandProfile
+      summary: Rename or recolor a brand profile
+      description: |
+        Updates an active Brand Profile's name or color label. The name must
+        normalize uniquely within the workspace, including names reserved by
+        soft-deleted profiles awaiting purge. Requires the workspace admin
+        role; soft-deleted profiles must be restored before they can change.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBrandProfileRequest"
+      responses:
+        "200":
+          description: Updated brand profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [Brand Profiles]
+      operationId: deleteBrandProfile
+      summary: Permanently delete a brand profile
+      description: |
+        Permanently removes a Brand Profile and its profile-owned data. Its
+        Channels are locally disconnected first so provider revocation can run
+        from the durable outbox. Requires the workspace admin role.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Permanently deleted brand profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /brand-profiles/{profile_id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Brand Profiles]
+      operationId: restoreBrandProfile
+      summary: Restore a soft-deleted brand profile
+      description: |
+        Restores a soft-deleted Brand Profile inside its retention window.
+        Disconnected Channels stay disconnected and cancelled Distributions
+        stay cancelled; only the profile and its retained data return.
+        Requires the workspace admin role.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Restored active brand profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /platforms/capabilities:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Platforms]
+      operationId: listPlatformCapabilities
+      summary: List authoritative provider capabilities
+      responses:
+        "200":
+          description: Capability rows for every known platform.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformCapabilitiesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /platforms:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Platforms]
+      operationId: listPlatformAccounts
+      summary: List connected accounts for the active organization
+      parameters:
+        - $ref: "#/components/parameters/BrandProfileId"
+      responses:
+        "200":
+          description: Connected platform accounts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformAccountsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /platforms/{platform}/connect:
+    parameters:
+      - $ref: "#/components/parameters/Platform"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Platforms]
+      operationId: startPlatformOAuth
+      summary: Start provider OAuth
+      description: |
+        Begins the provider authorization handoff for the Brand Profile named
+        by brand_profile_id. The selection is pinned in durable OAuth state so
+        the callback attaches the connected Channel to the same Brand Profile
+        even if the caller's UI state changed meanwhile.
+      parameters:
+        - name: brand_profile_id
+          in: query
+          required: true
+          description: |
+            Active Brand Profile that will own the connected Channel. Connect
+            fails when the profile is missing, soft-deleted, or outside the
+            active workspace.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Provider authorization URL for authenticated browser clients.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthStartResponse"
+        "307":
+          description: Redirect to the provider authorization URL.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platforms/{platform}/callback:
+    parameters:
+      - $ref: "#/components/parameters/Platform"
+    get:
+      tags: [Platforms]
+      operationId: completePlatformOAuth
+      security: []
+      summary: Complete provider OAuth with consume-once state
+      description: |
+        Completes the provider OAuth exchange using consume-once state. For single-account
+        providers, the connection is persisted immediately and redirects to the frontend
+        result route. For multi-account providers such as Facebook Pages, the callback
+        discovers selectable Pages, stages a short-lived pending selection session, and
+        redirects (302) to the Page selection view (/channels?oauth=select_account&provider={platform}&selection_id={selection_id})
+        before any connection is persisted.
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 16
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: |
+            Redirect to the configured frontend result route or to the Page selection
+            route (/channels?oauth=select_account&provider={platform}&selection_id={selection_id})
+            before persistence when multiple candidate accounts are discovered.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /oauth-selections/{selection_id}:
+    parameters:
+      - $ref: "#/components/parameters/SelectionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Platforms]
+      operationId: getOAuthSelection
+      summary: Get pending OAuth account selection session
+      description: |
+        Retrieves the public candidate accounts discovered during OAuth authorization
+        for explicit user selection. Only metadata is returned; external credentials
+        remain encrypted server-side in durable state.
+      responses:
+        "200":
+          description: Pending OAuth account selection session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthSelection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Platforms]
+      operationId: cancelOAuthSelection
+      summary: Cancel pending OAuth account selection session
+      description: |
+        Discards a pending OAuth account selection session and its retained
+        credentials. Cancellation is idempotent and guarantees no platform
+        account is connected.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: OAuth account selection session cancelled and discarded.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /oauth-selections/{selection_id}/confirm:
+    parameters:
+      - $ref: "#/components/parameters/SelectionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Platforms]
+      operationId: confirmOAuthSelection
+      summary: Confirm and connect chosen platform account
+      description: |
+        Completes the pending OAuth selection session by connecting exactly one
+        chosen candidate account to the pinned Brand Profile.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OAuthSelectionConfirmRequest"
+      responses:
+        "204":
+          description: Chosen account connected to the Brand Profile.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platforms/{account_id}:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    delete:
+      tags: [Platforms]
+      operationId: disconnectPlatformAccount
+      summary: Disconnect a platform account
+      description: |
+        Removes the Channel from its Brand Profile and cancels its scheduled
+        Distributions immediately. Remote provider revocation is attempted and
+        retried durably in the background; a failed revocation never restores
+        local use.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Account disconnected.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /platforms/{account_id}/publishing-requirements:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Platforms]
+      operationId: getPlatformPublishingRequirements
+      summary: Get current provider publication requirements for an account
+      responses:
+        "200":
+          description: Current normalized creator and publication requirements.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishingRequirements"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /posts:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Posts]
+      operationId: listPosts
+      summary: List Posts with ordered attachments and per-Channel outcomes
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/PostStatus"
+        - $ref: "#/components/parameters/BrandProfileId"
+      responses:
+        "200":
+          description: Paginated Posts in stable identity order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Posts]
+      operationId: createPost
+      summary: Create a nonempty authoritative draft Post
+      description: |
+        Creates one durable Post that owns its default content, ordered
+        attachments, and saved per-Channel target settings. A draft needs no
+        target Channels: the request must carry text or at least one
+        attachment so an empty composer never persists an empty Post. Saving
+        the same composition again is an updatePost call on the returned id,
+        not another createPost.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePostRequest"
+      responses:
+        "201":
+          description: Draft Post created.
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /posts/{post_id}:
+    parameters:
+      - $ref: "#/components/parameters/PostId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Posts]
+      operationId: getPost
+      summary: Get a Post with ordered attachments, targets, and outcomes
+      responses:
+        "200":
+          description: Post.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "304":
+          description: Not modified.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Posts]
+      operationId: updatePost
+      summary: Save the same Post's content, attachments, and target settings
+      description: |
+        Authoritatively persists the whole draft surface of one Post —
+        default text, ordered attachment set, and per-Channel target
+        settings — without requiring any target Channel. Attachments may
+        reference Assets that are still uploading or processing; readiness
+        is required only by schedulePost. The request must name the Post's
+        owning Brand Profile and cannot leave the Post empty (no text and no
+        attachments); pending attachments keep their ownership while
+        asynchronous processing continues. Already-claimed or published
+        Distribution outcomes are never rewritten by a save.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePostRequest"
+      responses:
+        "200":
+          description: Saved Post.
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+    delete:
+      tags: [Posts]
+      operationId: deletePost
+      summary: Soft-delete a Post and release its attachment references
+      description: |
+        Deletes the Post draft surface and stops publishing its pending
+        Distributions. Distribution outcomes already delivered to a Provider
+        remain immutable publication history — deleting a Post never
+        unpublishes live Channel copies — and referenced Assets stay alive
+        while another retained Post, an in-flight processing job, or an
+        unfinished attempt still needs them; otherwise each detached Asset
+        starts its own orphan grace period.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeletePostRequest"
+      responses:
+        "200":
+          description: Deleted Post snapshot.
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /posts/{post_id}/schedule:
+    parameters:
+      - $ref: "#/components/parameters/PostId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Posts]
+      operationId: schedulePost
+      summary: Schedule or immediately publish a Post to its target Channels
+      description: |
+        Resolves every requested or already-saved target into one pending
+        Distribution per Post and Platform account, validating each target
+        against Platform capabilities and confirmed-ready attachment
+        renditions before accepting it. A null scheduled_at publishes
+        immediately; otherwise the same time applies to every target. The
+        operation atomically creates or updates only still-editable pending
+        Distributions and never republishes, mutates, or rewrites an
+        already-claimed, published, cancelled, or reconciliation-bound
+        outcome; eligible retries go through retryDistribution. Repeating
+        the same scheduling intent cannot create a second Post or duplicate
+        Distribution row.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchedulePostRequest"
+      responses:
+        "200":
+          description: Post with the updated per-Channel pending outcomes.
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /asset-upload-sessions:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Assets]
+      operationId: createUploadSession
+      summary: Create a direct single or multipart R2 upload session
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUploadSessionRequest"
+      responses:
+        "201":
+          description: Upload session and pending asset.
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /asset-upload-sessions/{session_id}:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Assets]
+      operationId: getUploadSession
+      summary: Get resumable upload state
+      responses:
+        "200":
+          description: Upload session, asset, and authoritative uploaded parts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSessionDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Assets]
+      operationId: abortUploadSession
+      summary: Abort a single or multipart upload
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Upload aborted or prior abort replayed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /asset-upload-sessions/{session_id}/parts:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Assets]
+      operationId: createUploadPartUrls
+      summary: Sign a bounded set of multipart upload parts
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUploadPartsRequest"
+      responses:
+        "200":
+          description: Signed part requests.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateUploadPartsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /asset-upload-sessions/{session_id}/complete:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Assets]
+      operationId: completeUploadSession
+      summary: Complete and authoritatively verify an upload
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteUploadRequest"
+      responses:
+        "202":
+          description: Verified asset accepted for processing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /assets/{asset_id}:
+    parameters:
+      - $ref: "#/components/parameters/AssetId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Assets]
+      operationId: getAsset
+      summary: Get an asset
+      responses:
+        "200":
+          description: Asset.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /assets/{asset_id}/download-url:
+    parameters:
+      - $ref: "#/components/parameters/AssetId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Assets]
+      operationId: getAssetDownloadUrl
+      summary: Get a short-lived private asset download URL
+      responses:
+        "200":
+          description: Signed download URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedUrlResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /assets/{asset_id}/preview-url:
+    parameters:
+      - $ref: "#/components/parameters/AssetId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Assets]
+      operationId: getAssetPreviewUrl
+      summary: Get a short-lived private asset preview URL
+      responses:
+        "200":
+          description: Signed inline preview URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedUrlResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /distributions:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Distributions]
+      operationId: listDistributions
+      summary: List per-Channel distribution outcomes for Posts
+      description: |
+        Distributions are the per-Channel publication outcomes of a Post.
+        They are created and edited only through schedulePost; this read
+        surface remains for independent outcome inspection.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/DistributionStatus"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/Platform"
+        - name: post_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/BrandProfileId"
+        - $ref: "#/components/parameters/Start"
+        - $ref: "#/components/parameters/End"
+      responses:
+        "200":
+          description: Paginated distributions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DistributionListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /distributions/{distribution_id}:
+    parameters:
+      - $ref: "#/components/parameters/DistributionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Distributions]
+      operationId: getDistribution
+      summary: Get a distribution
+      responses:
+        "200":
+          description: Distribution.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Distribution"
+        "304":
+          description: Not modified.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Distributions]
+      operationId: updateScheduledDistribution
+      summary: Update a distribution while it is still scheduled
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDistributionRequest"
+      responses:
+        "200":
+          description: Updated scheduled distribution.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Distribution"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+    delete:
+      tags: [Distributions]
+      operationId: cancelDistribution
+      summary: Cancel or request cancellation
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Cancellation requested for in-flight work.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Distribution"
+        "204":
+          description: Scheduled/queued distribution cancelled.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /distributions/{distribution_id}/retry:
+    parameters:
+      - $ref: "#/components/parameters/DistributionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Distributions]
+      operationId: retryDistribution
+      summary: Retry a safely retryable failed distribution
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Retry durably queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Distribution"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /calendar:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Calendar]
+      operationId: listCalendarEvents
+      summary: List distribution events in a bounded range
+      parameters:
+        - $ref: "#/components/parameters/RequiredStart"
+        - $ref: "#/components/parameters/RequiredEnd"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 500
+        - $ref: "#/components/parameters/BrandProfileId"
+      responses:
+        "200":
+          description: Ordered calendar events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /analytics:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Analytics]
+      operationId: getAnalyticsSummary
+      summary: Get aggregate analytics for a date range
+      parameters:
+        - $ref: "#/components/parameters/RequiredStart"
+        - $ref: "#/components/parameters/RequiredEnd"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/Platform"
+        - $ref: "#/components/parameters/BrandProfileId"
+      responses:
+        "200":
+          description: Aggregate and per-platform analytics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /analytics/{distribution_id}:
+    parameters:
+      - $ref: "#/components/parameters/DistributionId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Analytics]
+      operationId: getDistributionAnalytics
+      summary: Get one distribution's analytics snapshots
+      parameters:
+        - $ref: "#/components/parameters/Start"
+        - $ref: "#/components/parameters/End"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Ordered analytics snapshots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSnapshotsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /inbox:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Inbox]
+      operationId: listInboxComments
+      summary: List synchronized comments
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: unreplied
+          in: query
+          schema:
+            type: boolean
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/Platform"
+        - name: distribution_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: reply_status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ReplyStatus"
+        - $ref: "#/components/parameters/BrandProfileId"
+      responses:
+        "200":
+          description: Paginated comments.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /inbox/{comment_id}/reply:
+    parameters:
+      - $ref: "#/components/parameters/CommentId"
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Inbox]
+      operationId: replyToComment
+      summary: Durably queue a provider comment reply
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyToCommentRequest"
+      responses:
+        "202":
+          description: Reply durably queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxComment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /billing/plan:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Billing]
+      operationId: getBillingPlan
+      summary: Get plan, status, limits, and renewal state
+      responses:
+        "200":
+          description: Current plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /billing/usage:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Billing]
+      operationId: getBillingUsage
+      summary: Get reconciled current-period usage
+      responses:
+        "200":
+          description: Current usage, plan, and limits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /billing/checkout-sessions:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Billing]
+      operationId: createCheckoutSession
+      summary: Create a short-lived billing checkout URL
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCheckoutSessionRequest"
+      responses:
+        "201":
+          description: Checkout URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedUrlResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  /billing/portal-sessions:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    post:
+      tags: [Billing]
+      operationId: createBillingPortalSession
+      summary: Create a short-lived billing portal URL
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePortalSessionRequest"
+      responses:
+        "201":
+          description: Portal URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedUrlResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Short-lived Better Auth JWT sent as `Authorization: Bearer <jwt>` on
+        /api/v1 requests. The JWT plugin mints it and delivers it through the
+        `set-auth-jwt` response header on GET /api/auth/get-session; the
+        frontend holds it in memory only and renews it through the session
+        lifecycle. The HttpOnly session cookie is not an /api/v1 credential:
+        it authenticates /api/auth minting and lifecycle calls only.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: better-auth.session_token
+      description: |
+        HttpOnly Better Auth session cookie on the same origin, required by
+        /api/auth operations that act on the active session (sign-out,
+        change-password). Over HTTPS the cookie carries the `__Secure-`
+        prefix (`__Secure-better-auth.session_token`); both names refer to
+        the same credential. It is internal to the /api/auth lifecycle and
+        never authorizes /api/v1 endpoints.
+  headers:
+    RequestId:
+      description: Correlation identifier for this request.
+      schema:
+        type: string
+    RetryAfter:
+      description: Seconds before the caller should retry.
+      schema:
+        type: integer
+        minimum: 0
+    IdempotencyReplayed:
+      description: True when the original stored response was replayed.
+      schema:
+        type: string
+        enum: ["true"]
+    SessionCookie:
+      description: |
+        Establishes, rotates, or expires the Better Auth session cookie
+        (`better-auth.session_token`, or `__Secure-better-auth.session_token`
+        over HTTPS). HttpOnly; SameSite=Lax; Path=/. Internal to the /api/auth
+        session lifecycle; it is not an /api/v1 credential.
+      schema:
+        type: string
+    AuthJwt:
+      description: |
+        Short-lived bearer JWT minted by the Better Auth JWT plugin. Sent only
+        on GET /api/auth/get-session responses that resolve an active session;
+        the client holds it in memory and forwards it as
+        `Authorization: Bearer <jwt>` on /api/v1 requests.
+      schema:
+        type: string
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+        pattern: '^[\x20-\x7E]+$'
+    XWorkspaceId:
+      name: X-Workspace-ID
+      in: header
+      required: false
+      description: |
+        Optional workspace selection for the authenticated caller. When
+        present, the server resolves the caller's org_members membership and
+        role for this workspace before it becomes the actor and RLS claims;
+        when absent, the caller's personal workspace is used. A UUID that is
+        not a workspace the caller belongs to fails with 403
+        `inaccessible_workspace`.
+      schema:
+        type: string
+        format: uuid
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Start:
+      name: start
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    End:
+      name: end
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    RequiredStart:
+      name: start
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date-time
+    RequiredEnd:
+      name: end
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date-time
+    Platform:
+      name: platform
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Platform"
+    AccountId:
+      name: account_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SelectionId:
+      name: selection_id
+      in: path
+      required: true
+      description: Opaque OAuth selection session identifier.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 256
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AssetId:
+      name: asset_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PostId:
+      name: post_id
+      in: path
+      required: true
+      description: Durable Post identifier within the active workspace.
+      schema:
+        type: string
+        format: uuid
+    DistributionId:
+      name: distribution_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CommentId:
+      name: comment_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    WorkspaceIdPath:
+      name: workspaceId
+      in: path
+      required: true
+      description: |
+        Workspace UUID addressed by this lifecycle operation. The server
+        resolves the caller's membership and role for this workspace; the
+        X-Workspace-ID header is not used on workspace lifecycle routes.
+      schema:
+        type: string
+        format: uuid
+    InvitationId:
+      name: invitationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    InvitationToken:
+      name: token
+      in: path
+      required: true
+      description: Single-use invitation token from the invitation email link.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 255
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      description: UUID of the member's user within the addressed workspace.
+      schema:
+        type: string
+        format: uuid
+    BrandProfileId:
+      name: brand_profile_id
+      in: query
+      required: false
+      description: |
+        Restricts the result to one Brand Profile. When omitted, the operation
+        returns the workspace-wide aggregate across all active Brand Profiles
+        (the read-only All Brand Profiles view).
+      schema:
+        type: string
+        format: uuid
+    ProfileId:
+      name: profile_id
+      in: path
+      required: true
+      description: Brand Profile UUID within the active workspace.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Malformed request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    AuthError:
+      description: |
+        Better Auth rejected the request; the envelope carries a machine
+        `code` and human-readable `message` rather than the v1 ErrorEnvelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AuthError"
+    Unauthorized:
+      description: Bearer JWT is missing, expired, or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: Active identity lacks workspace membership, role, entitlement, or quota.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: Resource is absent or not visible to the active organization.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: Request conflicts with resource or idempotency state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    PayloadTooLarge:
+      description: API or asset payload exceeds a bound.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    UnsupportedMediaType:
+      description: API or asset media type is unsupported.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unprocessable:
+      description: Request is syntactically valid but semantically invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    RateLimited:
+      description: Request is temporarily rate limited.
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    InternalError:
+      description: Unexpected internal failure.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    UpstreamError:
+      description: Required synchronous upstream failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    ServiceUnavailable:
+      description: A required dependency or service is temporarily unavailable.
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    Platform:
+      type: string
+      enum: [tiktok, youtube, instagram, facebook, threads]
+    AssetType:
+      type: string
+      enum: [image, video]
+    PostStatus:
+      type: string
+      enum: [draft, active]
+    AssetStatus:
+      type: string
+      enum: [pending_upload, uploading, processing, ready, failed, deleting, deleted]
+    DistributionStatus:
+      type: string
+      enum:
+        - scheduled
+        - queued
+        - processing
+        - awaiting_provider
+        - published
+        - failed
+        - cancel_requested
+        - cancelled
+        - needs_reconciliation
+    ReplyStatus:
+      type: string
+      enum: [not_replied, queued, processing, replied, failed, needs_reconciliation]
+    ConnectionStatus:
+      type: string
+      enum: [connected, expiring, expired, revoked, reconnect_required]
+    BillingStatus:
+      type: string
+      enum: [free, trialing, active, past_due, cancelled]
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        field:
+          type: [string, "null"]
+        code:
+          type: string
+        constraint:
+          type: string
+        limit:
+          type: number
+        actual:
+          type: number
+        message:
+          type: string
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id, retryable, details]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+        retryable:
+          type: boolean
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationIssue"
+    ValidationIssue:
+      type: object
+      additionalProperties: false
+      required: [field, constraint, message]
+      properties:
+        field:
+          type: string
+        constraint:
+          type: string
+        message:
+          type: string
+        limit:
+          type: number
+        actual:
+          type: number
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/Error"
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status, version, environment]
+      properties:
+        status:
+          type: string
+          const: ok
+        version:
+          type: string
+        environment:
+          type: string
+    ReadinessComponent:
+      type: object
+      additionalProperties: false
+      required: [name, status]
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ready, degraded, unavailable]
+    Readiness:
+      type: object
+      additionalProperties: false
+      required: [status, components]
+      properties:
+        status:
+          type: string
+          enum: [ready, unavailable]
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReadinessComponent"
+    AuthUser:
+      type: object
+      additionalProperties: false
+      required: [id, email, emailVerified, name, image, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Better Auth user subject; maps one-to-one to users.auth_user_id.
+        email:
+          type: string
+          format: email
+        emailVerified:
+          type: boolean
+        name:
+          type: [string, "null"]
+        image:
+          type: [string, "null"]
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AuthSession:
+      type: object
+      additionalProperties: false
+      required: [id, userId, expiresAt]
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+          description: Better Auth user subject owning this session.
+        token:
+          type: string
+          description: Internal Better Auth session token transported by the HttpOnly cookie; it is not the /api/v1 bearer JWT.
+        expiresAt:
+          type: string
+          format: date-time
+        ipAddress:
+          type: [string, "null"]
+        userAgent:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AuthSessionResult:
+      type: object
+      additionalProperties: false
+      required: [session, user]
+      properties:
+        session:
+          $ref: "#/components/schemas/AuthSession"
+        user:
+          $ref: "#/components/schemas/AuthUser"
+    AuthTokenResult:
+      type: object
+      additionalProperties: false
+      required: [token, user]
+      properties:
+        redirect:
+          type: boolean
+          description: True when the request asked for a callbackURL redirect.
+        token:
+          type: [string, "null"]
+          description: |
+            Internal Better Auth session token — not the /api/v1 bearer JWT;
+            null when sign-up did not auto sign in or when a password change
+            did not mint a replacement session.
+        url:
+          type: [string, "null"]
+          format: uri
+        user:
+          $ref: "#/components/schemas/AuthUser"
+    AuthStatusResult:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: boolean
+        message:
+          type: string
+    AuthSuccessResult:
+      type: object
+      additionalProperties: false
+      required: [success]
+      properties:
+        success:
+          type: boolean
+    VerifyEmailResult:
+      type: object
+      additionalProperties: false
+      required: [status, user]
+      properties:
+        status:
+          type: boolean
+        user:
+          $ref: "#/components/schemas/AuthUser"
+    AuthError:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        code:
+          type: string
+          description: Better Auth error code such as INVALID_EMAIL_OR_PASSWORD.
+        message:
+          type: string
+    SignInEmailRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+        callbackURL:
+          type: string
+          format: uri
+        rememberMe:
+          type: boolean
+          default: true
+    SignUpEmailRequest:
+      type: object
+      additionalProperties: false
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+        callbackURL:
+          type: string
+          format: uri
+    RequestPasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        redirectTo:
+          type: string
+          format: uri
+          description: Frontend URL the reset link redirects to with the token.
+    ResetPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [newPassword, token]
+      properties:
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 128
+        token:
+          type: string
+          minLength: 1
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 128
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 128
+        revokeOtherSessions:
+          type: boolean
+          default: false
+    OrganizationSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, slug, role, plan]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        role:
+          type: string
+        plan:
+          type: string
+    UserProfile:
+      type: object
+      additionalProperties: false
+      required: [id, email, display_name, avatar_url, active_organization, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: [string, "null"]
+        avatar_url:
+          type: [string, "null"]
+          format: uri
+        active_organization:
+          $ref: "#/components/schemas/OrganizationSummary"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    WorkspaceRole:
+      type: string
+      enum: [admin, member]
+    Workspace:
+      type: object
+      additionalProperties: false
+      required: [id, name, slug, plan, is_personal, role, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        plan:
+          type: string
+        is_personal:
+          type: boolean
+          description: |
+            True for the auto-provisioned personal workspace; personal
+            workspaces cannot be renamed, invite members, or change roles.
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+          description: Caller's membership role in this workspace.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    WorkspaceMember:
+      type: object
+      additionalProperties: false
+      required: [user_id, email, display_name, avatar_url, role, created_at, updated_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Internal user UUID; the memberId path parameter.
+        email:
+          type: string
+          format: email
+        display_name:
+          type: [string, "null"]
+        avatar_url:
+          type: [string, "null"]
+          format: uri
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    WorkspaceInvitationStatus:
+      type: string
+      enum: [pending, accepted, revoked, expired]
+    WorkspaceInvitation:
+      type: object
+      additionalProperties: false
+      required: [id, org_id, email, role, status, expires_at, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+        status:
+          $ref: "#/components/schemas/WorkspaceInvitationStatus"
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          description: URL-safe slug; derived from name when omitted.
+    UpdateWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    CreateWorkspaceInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+          default: member
+    UpdateWorkspaceMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+    AcceptWorkspaceInvitationResponse:
+      type: object
+      additionalProperties: false
+      required: [workspace, member]
+      properties:
+        workspace:
+          $ref: "#/components/schemas/Workspace"
+        member:
+          $ref: "#/components/schemas/WorkspaceMember"
+    BrandProfileColor:
+      type: string
+      description: |
+        Fixed accessible palette for Brand Profile color labels. Labels are
+        lowercase hex values chosen for legible contrast in the interface;
+        arbitrary custom colors are not accepted.
+      enum:
+        - "#b91c1c"
+        - "#991b1b"
+        - "#7f1d1d"
+        - "#c2410c"
+        - "#9a3412"
+        - "#7c2d12"
+        - "#b45309"
+        - "#92400e"
+        - "#78350f"
+        - "#a16207"
+        - "#854d0e"
+        - "#713f12"
+        - "#4d7c0f"
+        - "#3f6212"
+        - "#365314"
+        - "#15803d"
+        - "#166534"
+        - "#14532d"
+        - "#0f766e"
+        - "#115e59"
+        - "#134e4a"
+        - "#0e7490"
+        - "#155e75"
+        - "#164e63"
+        - "#0369a1"
+        - "#075985"
+        - "#0c4a6e"
+        - "#1d4ed8"
+        - "#1e40af"
+        - "#1e3a8a"
+        - "#4338ca"
+        - "#3730a3"
+        - "#312e81"
+        - "#6d28d9"
+        - "#5b21b6"
+        - "#4c1d95"
+        - "#7e22ce"
+        - "#6b21a8"
+        - "#581c87"
+        - "#a21caf"
+        - "#86198f"
+        - "#701a75"
+        - "#be185d"
+        - "#9d174d"
+        - "#831843"
+        - "#be123c"
+        - "#9f1239"
+        - "#881337"
+        - "#374151"
+        - "#1f2937"
+        - "#111827"
+    BrandProfile:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - org_id
+        - name
+        - description
+        - color
+        - deleted_at
+        - purge_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+          description: Workspace that owns this Brand Profile.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^(?=.*\\S)[^\\x00-\\x1F\\x7F]+$"
+          description: |
+            Display name; unique within the workspace after normalization and
+            stays reserved while the profile is soft-deleted.
+        description:
+          type: [string, "null"]
+          maxLength: 280
+          pattern: "^(?=.*\\S)[^\\x00-\\x1F\\x7F]+$"
+          description: Optional short plain-text profile summary; null when not provided.
+        color:
+          $ref: "#/components/schemas/BrandProfileColor"
+        deleted_at:
+          type: [string, "null"]
+          format: date-time
+          description: Set when the profile was soft-deleted; null while active.
+        purge_at:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            Scheduled permanent deletion of the profile and all its owned
+            data, seven days after deleted_at; null while active.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BrandProfileListResponse:
+      type: object
+      additionalProperties: false
+      required: [profiles]
+      properties:
+        profiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrandProfile"
+    CreateBrandProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [name, color]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^(?=.*\\S)[^\\x00-\\x1F\\x7F]+$"
+        color:
+          $ref: "#/components/schemas/BrandProfileColor"
+        description:
+          type: [string, "null"]
+          maxLength: 280
+          pattern: "^(?=.*\\S)[^\\x00-\\x1F\\x7F]+$"
+    UpdateBrandProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^(?=.*\\S)[^\\x00-\\x1F\\x7F]+$"
+        color:
+          $ref: "#/components/schemas/BrandProfileColor"
+        description:
+          type: [string, "null"]
+          maxLength: 280
+          pattern: "^(?=.*\\S)[^\\x00-\\x1F\\x7F]+$"
+    PlatformCapability:
+      type: object
+      additionalProperties: false
+      required:
+        - platform
+        - connect_available
+        - asset_types
+        - publish
+        - analytics
+        - comments
+        - reply
+        - max_caption_length
+        - max_hashtags
+        - max_media_count
+        - min_media_count
+        - multi_asset_types
+        - max_file_size
+        - max_video_duration_sec
+        - accepted_mime_types
+        - notes
+      properties:
+        platform:
+          $ref: "#/components/schemas/Platform"
+        connect_available:
+          type: boolean
+        asset_types:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AssetType"
+        publish:
+          type: boolean
+        analytics:
+          type: boolean
+        comments:
+          type: boolean
+        reply:
+          type: boolean
+        max_caption_length:
+          type: [integer, "null"]
+          minimum: 0
+        max_hashtags:
+          type: [integer, "null"]
+          minimum: 0
+        max_media_count:
+          type: [integer, "null"]
+          minimum: 1
+          description: |
+            Authoritative per-Platform bound on the number of media
+            attachments one target Channel accepts. schedulePost validates
+            each target's resolved attachment set against this limit; null
+            means the Platform publishes no usable media bound.
+        min_media_count:
+          type: [integer, "null"]
+          minimum: 0
+          description: |
+            Minimum attachments one target Channel requires to publish. 0
+            permits a text-only publication; 1 or more makes media
+            mandatory. Text-only permission lives here because AssetType no
+            longer enumerates a text kind. null means no usable bound.
+        multi_asset_types:
+          type: [array, "null"]
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AssetType"
+          description: |
+            Media kinds permitted inside a publication carrying more than
+            one attachment. An empty list (or null) means the Platform
+            publishes no multi-attachment composition. schedulePost rejects
+            any target whose resolved attachment set violates these bounds
+            and reports that Channel without discarding the shared Post.
+        max_file_size:
+          type: [integer, "null"]
+          minimum: 1
+        max_video_duration_sec:
+          type: [number, "null"]
+          minimum: 0
+        accepted_mime_types:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        notes:
+          type: array
+          items:
+            type: string
+    PlatformCapabilitiesResponse:
+      type: object
+      additionalProperties: false
+      required: [capabilities]
+      properties:
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformCapability"
+    OAuthStartResponse:
+      type: object
+      additionalProperties: false
+      required: [authorization_url]
+      properties:
+        authorization_url:
+          type: string
+          format: uri
+    OAuthSelectionAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - display_name
+        - username
+        - avatar_url
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: External provider account or Page identifier.
+        display_name:
+          type: [string, "null"]
+          description: Human-readable display name of the account or Page.
+        username:
+          type: [string, "null"]
+          maxLength: 255
+          description: External provider handle or vanity username, if known.
+        avatar_url:
+          type: [string, "null"]
+          format: uri
+          description: Public avatar or profile picture URL, if available.
+    OAuthSelection:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - platform
+        - brand_profile_id
+        - expires_at
+        - accounts
+      properties:
+        id:
+          type: string
+          minLength: 16
+          maxLength: 256
+          description: Opaque OAuth selection session identifier.
+        platform:
+          $ref: "#/components/schemas/Platform"
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Brand Profile that will own the selected account.
+        expires_at:
+          type: string
+          format: date-time
+          description: Expiration timestamp for this selection ticket.
+        accounts:
+          type: array
+          maxItems: 1000
+          description: Discovered accounts available for selection.
+          items:
+            $ref: "#/components/schemas/OAuthSelectionAccount"
+    OAuthSelectionConfirmRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - account_id
+      properties:
+        account_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: External provider account or Page identifier to connect.
+    PlatformAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - org_id
+        - brand_profile_id
+        - platform
+        - platform_user_id
+        - display_name
+        - username
+        - avatar_url
+        - connection_status
+        - token_expires_at
+        - last_synced_at
+        - scopes
+        - capabilities
+        - rate_limit_budget
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Brand Profile that owns this Channel.
+        platform:
+          $ref: "#/components/schemas/Platform"
+        platform_user_id:
+          type: string
+          description: |
+            Provider-side account identity. Globally unique per platform: the
+            same external account cannot connect to another Brand Profile or
+            Workspace until it is locally disconnected.
+        display_name:
+          type: [string, "null"]
+        username:
+          type: [string, "null"]
+          maxLength: 255
+          description: External provider handle or vanity username, if known.
+        avatar_url:
+          type: [string, "null"]
+          format: uri
+        connection_status:
+          $ref: "#/components/schemas/ConnectionStatus"
+        token_expires_at:
+          type: [string, "null"]
+          format: date-time
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+        scopes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        capabilities:
+          $ref: "#/components/schemas/PlatformCapability"
+        rate_limit_budget:
+          oneOf:
+            - $ref: "#/components/schemas/RateLimitBudget"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    RateLimitBudget:
+      type: object
+      additionalProperties: false
+      required: [remaining, percent_used, resets_at]
+      properties:
+        remaining:
+          type: [integer, "null"]
+          minimum: 0
+        percent_used:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100
+        resets_at:
+          type: [string, "null"]
+          format: date-time
+    PlatformAccountsResponse:
+      type: object
+      additionalProperties: false
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformAccount"
+    TikTokCreatorProfile:
+      type: object
+      additionalProperties: false
+      required: [display_name, username, avatar_url]
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 500
+        username:
+          type: string
+          minLength: 1
+          maxLength: 255
+        avatar_url:
+          type: [string, "null"]
+          format: uri
+    TikTokPublishingRequirements:
+      type: object
+      additionalProperties: false
+      required:
+        - platform
+        - creator
+        - privacy_levels
+        - comment_allowed
+        - duet_allowed
+        - stitch_allowed
+        - max_video_duration_sec
+      properties:
+        platform:
+          type: string
+          const: tiktok
+        creator:
+          $ref: "#/components/schemas/TikTokCreatorProfile"
+        privacy_levels:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/TikTokPrivacyLevel"
+        comment_allowed:
+          type: boolean
+        duet_allowed:
+          type: boolean
+        stitch_allowed:
+          type: boolean
+        max_video_duration_sec:
+          type: integer
+          minimum: 1
+          maximum: 600
+    PublishingRequirements:
+      oneOf:
+        - $ref: "#/components/schemas/TikTokPublishingRequirements"
+      discriminator:
+        propertyName: platform
+        mapping:
+          tiktok: "#/components/schemas/TikTokPublishingRequirements"
+    FailureSummary:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, last_occurred_at]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        last_occurred_at:
+          type: string
+          format: date-time
+    Asset:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - org_id
+        - brand_profile_id
+        - uploaded_by
+        - asset_type
+        - title
+        - status
+        - file_size
+        - mime_type
+        - width
+        - height
+        - duration_sec
+        - thumbnail_url
+        - download_url
+        - failure
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Brand Profile that owns this Asset.
+        uploaded_by:
+          type: [string, "null"]
+          format: uuid
+        asset_type:
+          $ref: "#/components/schemas/AssetType"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        file_size:
+          type: [integer, "null"]
+          minimum: 0
+        mime_type:
+          type: [string, "null"]
+        width:
+          type: [integer, "null"]
+          minimum: 0
+        height:
+          type: [integer, "null"]
+          minimum: 0
+        duration_sec:
+          type: [number, "null"]
+          minimum: 0
+        thumbnail_url:
+          type: [string, "null"]
+          format: uri
+        download_url:
+          type: [string, "null"]
+          format: uri
+        failure:
+          oneOf:
+            - $ref: "#/components/schemas/FailureSummary"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateUploadSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [asset_type, brand_profile_id, filename, content_type, file_size, title]
+      properties:
+        asset_type:
+          type: string
+          enum: [image, video]
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Active Brand Profile that will own the uploaded Asset.
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content_type:
+          type: string
+          minLength: 3
+          maxLength: 100
+        file_size:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+    SignedRequest:
+      type: object
+      additionalProperties: false
+      required: [url, method, headers, expires_at]
+      properties:
+        url:
+          type: string
+          format: uri
+        method:
+          type: string
+          enum: [PUT]
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+    MultipartInfo:
+      type: object
+      additionalProperties: false
+      required: [part_size, part_count, max_parallel_parts]
+      properties:
+        part_size:
+          type: integer
+          minimum: 5242880
+        part_count:
+          type: integer
+          minimum: 2
+          maximum: 10000
+        max_parallel_parts:
+          type: integer
+          minimum: 1
+          maximum: 16
+    UploadSession:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          asset_id,
+          strategy,
+          status,
+          expires_at,
+          content_type,
+          file_size,
+          single_upload,
+          multipart,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        asset_id:
+          type: string
+          format: uuid
+        strategy:
+          type: string
+          enum: [single, multipart]
+        status:
+          type: string
+          enum: [created, uploading, completing, completed, aborted, expired]
+        expires_at:
+          type: string
+          format: date-time
+        content_type:
+          type: string
+        file_size:
+          type: integer
+          minimum: 1
+        single_upload:
+          oneOf:
+            - $ref: "#/components/schemas/SignedRequest"
+            - type: "null"
+        multipart:
+          oneOf:
+            - $ref: "#/components/schemas/MultipartInfo"
+            - type: "null"
+    UploadedPart:
+      type: object
+      additionalProperties: false
+      required: [part_number, etag, size]
+      properties:
+        part_number:
+          type: integer
+          minimum: 1
+        etag:
+          type: string
+        size:
+          type: integer
+          minimum: 1
+    UploadSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [asset, upload_session]
+      properties:
+        asset:
+          $ref: "#/components/schemas/Asset"
+        upload_session:
+          $ref: "#/components/schemas/UploadSession"
+    UploadSessionDetailResponse:
+      type: object
+      additionalProperties: false
+      required: [asset, upload_session, uploaded_parts]
+      properties:
+        asset:
+          $ref: "#/components/schemas/Asset"
+        upload_session:
+          $ref: "#/components/schemas/UploadSession"
+        uploaded_parts:
+          type: array
+          items:
+            $ref: "#/components/schemas/UploadedPart"
+    CreateUploadPartsRequest:
+      type: object
+      additionalProperties: false
+      required: [part_numbers]
+      properties:
+        part_numbers:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+            maximum: 10000
+    SignedPart:
+      type: object
+      additionalProperties: false
+      required: [url, method, headers, expires_at, part_number]
+      properties:
+        url:
+          type: string
+          format: uri
+        method:
+          type: string
+          enum: [PUT]
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+        part_number:
+          type: integer
+          minimum: 1
+    CreateUploadPartsResponse:
+      type: object
+      additionalProperties: false
+      required: [parts]
+      properties:
+        parts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SignedPart"
+    CompletedPart:
+      type: object
+      additionalProperties: false
+      required: [part_number, etag]
+      properties:
+        part_number:
+          type: integer
+          minimum: 1
+        etag:
+          type: string
+          minLength: 1
+    CompleteUploadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        parts:
+          type: array
+          minItems: 2
+          maxItems: 10000
+          items:
+            $ref: "#/components/schemas/CompletedPart"
+    PostAttachment:
+      type: object
+      additionalProperties: false
+      required: [asset_id, position, asset]
+      description: |
+        One ordered media attachment owned by a Post. position is the
+        zero-based creator ordering; the embedded asset carries the current
+        upload/processing state so drafts may persist while media is still
+        preparing. An Asset may appear in several retained Posts of the same
+        Brand Profile without becoming a shared library entry.
+      properties:
+        asset_id:
+          type: string
+          format: uuid
+        position:
+          type: integer
+          minimum: 0
+        asset:
+          $ref: "#/components/schemas/Asset"
+    PostTarget:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          platform_account_id,
+          title_override,
+          description_override,
+          hashtags,
+          provider_options,
+          attachment_ids,
+        ]
+      description: |
+        Saved per-Channel settings for one Platform account on this Post.
+        attachment_ids selects and orders this Channel's attachment subset:
+        null inherits the Post's ordered attachments, [] publishes text only,
+        and a list overrides both membership and order. Targets may exist
+        before any Distribution; readiness is enforced only when the target
+        is scheduled.
+      properties:
+        platform_account_id:
+          type: string
+          format: uuid
+        title_override:
+          type: [string, "null"]
+          maxLength: 200
+        description_override:
+          type: [string, "null"]
+          maxLength: 5000
+        hashtags:
+          type: array
+          maxItems: 30
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[^#\\s]+$"
+        provider_options:
+          oneOf:
+            - $ref: "#/components/schemas/ProviderPublishOptions"
+            - type: "null"
+        attachment_ids:
+          type: [array, "null"]
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+    Post:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          org_id,
+          brand_profile_id,
+          title,
+          default_text,
+          status,
+          revision,
+          attachments,
+          targets,
+          distributions,
+          created_at,
+          updated_at,
+        ]
+      description: |
+        Durable composition and publication intent. One Post owns its
+        default content, ordered attachments, and saved per-Channel target
+        settings; distributions carries each Channel's independent outcome.
+        status is a lifecycle marker (draft until first scheduling intent,
+        active once distribution starts) and never a global success flag —
+        delivery state lives per Distribution. Deletion is a soft delete;
+        deleted Posts are not returned.
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: |
+            Brand Profile that owns this Post; identical to the owning Brand
+            Profile of every attachment Asset, target account, and
+            Distribution of this Post.
+        title:
+          type: string
+          maxLength: 200
+          description: Optional label; defaults to an empty string.
+        default_text:
+          type: string
+          maxLength: 10000
+          description: |
+            Post-level caption/body. Empty string with attachments is a
+            media-only Post; a Post with neither text nor attachments is not
+            persistable.
+        status:
+          $ref: "#/components/schemas/PostStatus"
+        revision:
+          type: integer
+          minimum: 0
+          description: |
+            Monotone save counter recorded into each Provider attempt
+            snapshot so later edits cannot mutate claimed or published work.
+        attachments:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/PostAttachment"
+        targets:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/PostTarget"
+        distributions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Distribution"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PostListResponse:
+      type: object
+      additionalProperties: false
+      required: [posts, has_more, limit, offset]
+      properties:
+        posts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Post"
+        has_more:
+          type: boolean
+        limit:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+    PostTargetInput:
+      type: object
+      additionalProperties: false
+      required: [platform_account_id]
+      description: |
+        Per-Channel settings to persist for one Platform account.
+        attachment_ids: null or omitted inherits the Post's ordered
+        attachments, [] publishes text only, and a list overrides membership
+        and order for this target. Each account appears at most once.
+      properties:
+        platform_account_id:
+          type: string
+          format: uuid
+        title_override:
+          type: [string, "null"]
+          maxLength: 200
+        description_override:
+          type: [string, "null"]
+          maxLength: 5000
+        hashtags:
+          type: array
+          maxItems: 30
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[^#\\s]+$"
+        provider_options:
+          oneOf:
+            - $ref: "#/components/schemas/ProviderPublishOptions"
+            - type: "null"
+        attachment_ids:
+          type: [array, "null"]
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+    CreatePostRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id]
+      description: |
+        Creates one nonempty authoritative draft Post. attachment_ids is the
+        ordered attachment set; the array order becomes the attachment
+        positions and each Asset may appear once. References may name Assets
+        still uploading or processing inside a live upload session of the
+        same Brand Profile; readiness is required only at schedulePost.
+      anyOf:
+        - required: [default_text]
+          properties:
+            default_text:
+              type: string
+              minLength: 1
+        - required: [attachment_ids]
+          properties:
+            attachment_ids:
+              type: array
+              minItems: 1
+      properties:
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Active Brand Profile that will own the Post.
+        title:
+          type: string
+          maxLength: 200
+        default_text:
+          type: string
+          maxLength: 10000
+        attachment_ids:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        targets:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/PostTargetInput"
+    UpdatePostRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 2
+      required: [brand_profile_id]
+      description: |
+        Patch-style save of the same Post. Omitted fields stay unchanged;
+        attachment_ids replaces the whole ordered set and targets replaces
+        the saved target set. The request must name the Post's owning Brand
+        Profile (mismatch is a 422 validation error) and cannot leave the
+        Post without text or attachments; claims to Assets already claimed
+        for deletion are rejected.
+      properties:
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: |
+            The Post's owning Brand Profile; required as mutation scope
+            proof and must equal the stored value.
+        title:
+          type: string
+          maxLength: 200
+        default_text:
+          type: string
+          maxLength: 10000
+        attachment_ids:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        targets:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/PostTargetInput"
+    DeletePostRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id]
+      properties:
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Selected Brand Profile; must own the addressed Post.
+    SchedulePostRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id, scheduled_at]
+      description: |
+        Schedules or immediately publishes the Post to its target Channels.
+        scheduled_at null means publish now; a timestamp schedules every
+        affected target. When targets is present it replaces the saved
+        target set and defines the pending-Distribution diff; when absent
+        the saved Post targets are used. At least one effective target is
+        required, and every affected target must pass Platform capability
+        and attachment-readiness validation before any Distribution is
+        accepted.
+      properties:
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: |
+            The Post's owning Brand Profile; required as mutation scope
+            proof and must equal the stored value.
+        scheduled_at:
+          type: [string, "null"]
+          format: date-time
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/PostTargetInput"
+    SignedUrlResponse:
+      type: object
+      additionalProperties: false
+      required: [url, expires_at]
+      properties:
+        url:
+          type: string
+          format: uri
+        expires_at:
+          type: string
+          format: date-time
+    Distribution:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - org_id
+        - brand_profile_id
+        - post_id
+        - platform_account_id
+        - platform
+        - status
+        - scheduled_at
+        - published_at
+        - platform_post_id
+        - platform_url
+        - title_override
+        - description_override
+        - hashtags
+        - attempt_count
+        - last_attempt_at
+        - next_attempt_at
+        - failure
+        - publication
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: |
+            Brand Profile that owns this Distribution; identical to the owning
+            Brand Profile of its Post and Platform account.
+        org_id:
+          type: string
+          format: uuid
+        post_id:
+          type: string
+          format: uuid
+          description: |
+            Post this Distribution publishes to its Platform account. One
+            Post/account pair carries one live or historical Distribution
+            row; attempts and retries reuse it.
+        platform_account_id:
+          type: [string, "null"]
+          format: uuid
+        platform:
+          $ref: "#/components/schemas/Platform"
+        status:
+          $ref: "#/components/schemas/DistributionStatus"
+        scheduled_at:
+          type: [string, "null"]
+          format: date-time
+        published_at:
+          type: [string, "null"]
+          format: date-time
+        platform_post_id:
+          type: [string, "null"]
+        platform_url:
+          type: [string, "null"]
+          format: uri
+        publication:
+          oneOf:
+            - $ref: "#/components/schemas/DistributionPublication"
+            - type: "null"
+          description: |
+            Frozen composition of the newest claimed publish attempt, or null
+            while no Provider attempt has claimed this Distribution. Once an
+            attempt claims work this is the immutable content it published —
+            resolved caption, settings, and ordered media identities — so later
+            Post or target edits never rewrite what a Channel shows as its
+            published content. Channels without a claim read their pending
+            content from the Post and target instead.
+        title_override:
+          type: [string, "null"]
+          maxLength: 200
+        description_override:
+          type: [string, "null"]
+          maxLength: 5000
+        hashtags:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[^#\\s]+$"
+        attempt_count:
+          type: integer
+          minimum: 0
+        last_attempt_at:
+          type: [string, "null"]
+          format: date-time
+        next_attempt_at:
+          type: [string, "null"]
+          format: date-time
+        failure:
+          oneOf:
+            - $ref: "#/components/schemas/FailureSummary"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DistributionPublicationMedia:
+      type: object
+      additionalProperties: false
+      required:
+        - asset_id
+        - position
+        - asset_type
+        - content_type
+        - file_size
+        - width
+        - height
+        - duration_sec
+      properties:
+        asset_id:
+          type: string
+          format: uuid
+          description: |
+            Asset the attempt attached in this position; the identity stays
+            stable after the Post detaches it, so published media remains
+            addressable through the scoped Asset endpoints while it exists.
+        position:
+          type: integer
+          minimum: 0
+          description: Attachment position the publication delivered.
+        asset_type:
+          $ref: "#/components/schemas/AssetType"
+        content_type:
+          type: [string, "null"]
+          description: |
+            MIME type of the rendition handed to the Provider, or the
+            attachment's declared type when no object could be frozen.
+        file_size:
+          type: [integer, "null"]
+          minimum: 0
+        width:
+          type: [integer, "null"]
+          minimum: 0
+        height:
+          type: [integer, "null"]
+          minimum: 0
+        duration_sec:
+          type: [number, "null"]
+          minimum: 0
+    DistributionPublication:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+        - text
+        - hashtags
+        - provider_options
+        - media
+      description: |
+        Immutable resolved composition one Provider publish attempt froze at
+        claim time. title and text are the caption the Channel was asked to
+        publish after applying its overrides; media is the exact ordered set
+        of media identities delivered, each carrying only descriptive facts —
+        never storage keys or signed capabilities. An attachment whose
+        rendition was not ready at claim keeps its position with null media
+        facts instead of silently dropping out of the published order.
+      properties:
+        title:
+          type: string
+          description: Frozen caption title; empty when the attempt had none.
+        text:
+          type: string
+          description: Frozen caption body; empty for media-only publications.
+        hashtags:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[^#\\s]+$"
+        provider_options:
+          oneOf:
+            - $ref: "#/components/schemas/ProviderPublishOptions"
+            - type: "null"
+          description: Frozen per-Provider settings the attempt was claimed with.
+        media:
+          type: array
+          description: Frozen media identities in delivered order.
+          items:
+            $ref: "#/components/schemas/DistributionPublicationMedia"
+    DistributionListResponse:
+      type: object
+      additionalProperties: false
+      required: [distributions, has_more, limit, offset]
+      properties:
+        distributions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Distribution"
+        has_more:
+          type: boolean
+        limit:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+    TikTokPrivacyLevel:
+      type: string
+      enum:
+        - PUBLIC_TO_EVERYONE
+        - MUTUAL_FOLLOW_FRIENDS
+        - FOLLOWER_OF_CREATOR
+        - SELF_ONLY
+    TikTokPublishOptions:
+      type: object
+      additionalProperties: false
+      required:
+        - privacy_level
+        - allow_comment
+        - allow_duet
+        - allow_stitch
+        - brand_content
+        - brand_organic
+        - is_ai_generated
+        - music_usage_confirmed
+      properties:
+        privacy_level:
+          $ref: "#/components/schemas/TikTokPrivacyLevel"
+        allow_comment:
+          type: boolean
+        allow_duet:
+          type: boolean
+        allow_stitch:
+          type: boolean
+        brand_content:
+          type: boolean
+        brand_organic:
+          type: boolean
+        is_ai_generated:
+          type: boolean
+        music_usage_confirmed:
+          type: boolean
+          const: true
+    YouTubePrivacyStatus:
+      type: string
+      enum:
+        - public
+        - unlisted
+        - private
+    YouTubePublishOptions:
+      type: object
+      additionalProperties: false
+      required:
+        - made_for_kids
+      properties:
+        made_for_kids:
+          type: boolean
+        privacy_status:
+          $ref: "#/components/schemas/YouTubePrivacyStatus"
+    ProviderPublishOptions:
+      type: object
+      additionalProperties: false
+      properties:
+        tiktok:
+          $ref: "#/components/schemas/TikTokPublishOptions"
+        youtube:
+          $ref: "#/components/schemas/YouTubePublishOptions"
+    UpdateDistributionRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        scheduled_at:
+          type: string
+          format: date-time
+        title_override:
+          type: [string, "null"]
+          maxLength: 200
+        description_override:
+          type: [string, "null"]
+          maxLength: 5000
+        hashtags:
+          type: array
+          maxItems: 30
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[^#\\s]+$"
+    CalendarEvent:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          post_id,
+          brand_profile_id,
+          post_title,
+          platform,
+          platform_account_id,
+          status,
+          scheduled_at,
+          published_at,
+          updated_at,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Brand Profile that owns the underlying Distribution.
+        post_id:
+          type: string
+          format: uuid
+          description: |
+            Post this Distribution publishes; the event belongs to that
+            Post's calendar grouping rather than any single attachment.
+        post_title:
+          type: string
+        platform:
+          $ref: "#/components/schemas/Platform"
+        platform_account_id:
+          type: [string, "null"]
+          format: uuid
+        status:
+          $ref: "#/components/schemas/DistributionStatus"
+        scheduled_at:
+          type: [string, "null"]
+          format: date-time
+        published_at:
+          type: [string, "null"]
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CalendarResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/CalendarEvent"
+    MetricTotals:
+      type: object
+      additionalProperties: false
+      required: [views, likes, comments, shares, watch_time_sec, reach, impressions, post_count]
+      properties:
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        watch_time_sec:
+          type: integer
+          minimum: 0
+        reach:
+          type: integer
+          minimum: 0
+        impressions:
+          type: integer
+          minimum: 0
+        post_count:
+          type: integer
+          minimum: 0
+    AnalyticsRange:
+      type: object
+      additionalProperties: false
+      required: [start, end]
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    PlatformMetrics:
+      type: object
+      additionalProperties: false
+      required:
+        [platform, views, likes, comments, shares, watch_time_sec, reach, impressions, post_count]
+      properties:
+        platform:
+          $ref: "#/components/schemas/Platform"
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        watch_time_sec:
+          type: integer
+          minimum: 0
+        reach:
+          type: integer
+          minimum: 0
+        impressions:
+          type: integer
+          minimum: 0
+        post_count:
+          type: integer
+          minimum: 0
+    AnalyticsSummary:
+      type: object
+      additionalProperties: false
+      required: [range, totals, by_platform, last_synced_at, partial, unsupported_platforms]
+      properties:
+        range:
+          $ref: "#/components/schemas/AnalyticsRange"
+        totals:
+          $ref: "#/components/schemas/MetricTotals"
+        by_platform:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformMetrics"
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+        partial:
+          type: boolean
+        unsupported_platforms:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Platform"
+    AnalyticsSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          distribution_id,
+          post_id,
+          views,
+          likes,
+          comments,
+          shares,
+          watch_time_sec,
+          reach,
+          impressions,
+          snapshot_at,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        distribution_id:
+          type: string
+          format: uuid
+        post_id:
+          type: string
+          format: uuid
+          description: |
+            Post that owns the measured Distribution; identical to
+            distributions.post_id for that outcome.
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        watch_time_sec:
+          type: integer
+          minimum: 0
+        reach:
+          type: integer
+          minimum: 0
+        impressions:
+          type: integer
+          minimum: 0
+        snapshot_at:
+          type: string
+          format: date-time
+    AnalyticsSnapshotsResponse:
+      type: object
+      additionalProperties: false
+      required: [snapshots]
+      properties:
+        snapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsSnapshot"
+    InboxComment:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          distribution_id,
+          post_id,
+          brand_profile_id,
+          platform,
+          platform_comment_id,
+          author_name,
+          author_avatar,
+          body,
+          reply_text,
+          reply_status,
+          failure,
+          commented_at,
+          synced_at,
+          updated_at,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        distribution_id:
+          type: string
+          format: uuid
+        post_id:
+          type: string
+          format: uuid
+          description: |
+            Post that owns the Comment's Distribution; identical to
+            distributions.post_id for that outcome.
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: |
+            Brand Profile that owns the Comment through its Distribution;
+            replies must be sent under this profile.
+        platform:
+          $ref: "#/components/schemas/Platform"
+        platform_comment_id:
+          type: string
+        author_name:
+          type: [string, "null"]
+        author_avatar:
+          type: [string, "null"]
+          format: uri
+        body:
+          type: string
+        reply_text:
+          type: [string, "null"]
+        reply_status:
+          $ref: "#/components/schemas/ReplyStatus"
+        failure:
+          oneOf:
+            - $ref: "#/components/schemas/FailureSummary"
+            - type: "null"
+        commented_at:
+          type: string
+          format: date-time
+        synced_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    InboxResponse:
+      type: object
+      additionalProperties: false
+      required: [comments, has_more, limit, offset]
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/InboxComment"
+        has_more:
+          type: boolean
+        limit:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+    ReplyToCommentRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id, text]
+      properties:
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: |
+            Active Brand Profile the reply is sent under; must equal the Brand
+            Profile that owns the Comment's Distribution.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 5000
+    PlanLimits:
+      type: object
+      additionalProperties: false
+      required: [max_uploads, max_distributions, max_platforms, max_storage_bytes]
+      properties:
+        max_uploads:
+          type: [integer, "null"]
+          minimum: 0
+        max_distributions:
+          type: [integer, "null"]
+          minimum: 0
+        max_platforms:
+          type: [integer, "null"]
+          minimum: 0
+        max_storage_bytes:
+          type: [integer, "null"]
+          minimum: 0
+        analytics_enabled:
+          type: boolean
+          default: true
+        inbox_reply_enabled:
+          type: boolean
+          default: true
+    UsageRecord:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          org_id,
+          period_start,
+          period_end,
+          uploads,
+          distributions,
+          api_calls,
+          storage_bytes,
+          updated_at,
+        ]
+      properties:
+        org_id:
+          type: string
+          format: uuid
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        uploads:
+          type: integer
+          minimum: 0
+        distributions:
+          type: integer
+          minimum: 0
+        api_calls:
+          type: integer
+          minimum: 0
+        storage_bytes:
+          type: integer
+          minimum: 0
+        updated_at:
+          type: string
+          format: date-time
+    BillingPlanResponse:
+      type: object
+      additionalProperties: false
+      required: [plan, billing_status, limits, renews_at, cancel_at]
+      properties:
+        plan:
+          type: string
+        billing_status:
+          $ref: "#/components/schemas/BillingStatus"
+        limits:
+          $ref: "#/components/schemas/PlanLimits"
+        renews_at:
+          type: [string, "null"]
+          format: date-time
+        cancel_at:
+          type: [string, "null"]
+          format: date-time
+    BillingSummary:
+      type: object
+      additionalProperties: false
+      required: [plan, billing_status, usage, limits, renews_at, cancel_at, upgrade_required]
+      properties:
+        plan:
+          type: string
+        billing_status:
+          $ref: "#/components/schemas/BillingStatus"
+        usage:
+          $ref: "#/components/schemas/UsageRecord"
+        limits:
+          $ref: "#/components/schemas/PlanLimits"
+        renews_at:
+          type: [string, "null"]
+          format: date-time
+        cancel_at:
+          type: [string, "null"]
+          format: date-time
+        upgrade_required:
+          type: boolean
+    CreateCheckoutSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [plan, success_url, cancel_url]
+      properties:
+        plan:
+          type: string
+          minLength: 1
+        success_url:
+          type: string
+          format: uri
+        cancel_url:
+          type: string
+          format: uri
+    CreatePortalSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [return_url]
+      properties:
+        return_url:
+          type: string
+          format: uri

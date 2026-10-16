@@ -1,0 +1,88 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+.envrc.local
+.direnv/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler/
+.dev-tunnel/
+.release/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node/Frontend
+node_modules/
+.turbo/
+.astro/
+.vitest/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+build/
+dist/
+.bin/
+coverage/
+playwright-report/
+test-results/
+# Frontend app outputs and local files
+frontend/app/lighthouse-results/
+frontend/app/.lighthouseci/
+frontend/app/**/*.pem
+frontend/app/**/.env*
+!frontend/app/**/.env.example
+frontend/app/**/*.tsbuildinfo
+artifacts/*.cdx.json
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# OS
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+workers/automation/processor/.smoke-tmp.*/
+
+# Local code knowledge index
+.codegraph/
+
+# Docker
+.dockerignore
+!workers/automation/processor/.dockerignore
+docker-compose.override.yml
+
+# Worktrees
+.worktrees/
+
+# Antigravitycli
+.antigravitycli/
+
+# Local secret notes; never commit.
+temppassword

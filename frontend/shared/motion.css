@@ -1,0 +1,315 @@
+/* Preserve animationend/final fills used by Radix while removing spatial motion. */
+html[data-low-motion],
+html[data-low-motion]::before,
+html[data-low-motion]::after,
+html[data-low-motion] *,
+html[data-low-motion] *::before,
+html[data-low-motion] *::after {
+  animation-delay: 0ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-delay: 0ms !important;
+  transition-duration: 0ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0ms !important;
+  }
+}
+
+/* A palette commit is one paint, never a stagger of component color transitions. */
+html.theme-changing,
+html.theme-changing::before,
+html.theme-changing::after,
+html.theme-changing *,
+html.theme-changing *::before,
+html.theme-changing *::after {
+  transition-delay: 0ms !important;
+  transition-duration: 0ms !important;
+}
+
+/*
+ * The live SVG mask has visible, connected ink-drop lobes and finer ripples.
+ * Its contour morphs with travel, retraces on reversal and follows document
+ * scrolling without a texture filter, image decoding or opacity feather.
+ */
+.theme-ink-layer {
+  mask-image: var(--theme-ink-mask);
+  mask-mode: alpha;
+  mask-repeat: no-repeat;
+}
+
+/* Snapshot artwork must not run a second entrance or swallow live input. */
+.theme-ink-layer,
+.theme-ink-layer *,
+.theme-ink-layer *::before,
+.theme-ink-layer *::after {
+  pointer-events: none !important;
+  animation: none !important;
+  transition: none !important;
+}
+/* Every BrandMark surface resolves its accent diamond from the same token;
+   sizing stays surface-owned (`public.css` defaults, Tailwind utilities). */
+[data-brand-mark] [data-brand-accent] {
+  fill: var(--accent);
+}
+
+/* Shared static React atoms stay responsive to root preferences without hydration. */
+[data-preference-icon] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+[data-preference-icon] > svg {
+  width: 1em;
+  height: 1em;
+}
+[data-preference-icon="theme"] > [data-preference-glyph="moon"],
+[data-preference-icon="motion"] > [data-preference-glyph="pause"],
+:root:is(.dark, [data-theme="dark"]) [data-preference-icon="theme"] > [data-preference-glyph="sun"],
+html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="play"] {
+  display: none;
+}
+:root:is(.dark, [data-theme="dark"])
+  [data-preference-icon="theme"]
+  > [data-preference-glyph="moon"],
+html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="pause"] {
+  display: block;
+}
+
+/* The masked copy uses its target glyph without changing the live source control. */
+:root [data-theme-ink-layer="dark"] [data-preference-icon="theme"] > [data-preference-glyph="sun"],
+:root
+  [data-theme-ink-layer="light"]
+  [data-preference-icon="theme"]
+  > [data-preference-glyph="moon"] {
+  display: none;
+}
+:root [data-theme-ink-layer="dark"] [data-preference-icon="theme"] > [data-preference-glyph="moon"],
+:root
+  [data-theme-ink-layer="light"]
+  [data-preference-icon="theme"]
+  > [data-preference-glyph="sun"] {
+  display: block;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-preference-icon="motion"] > [data-preference-glyph="play"] {
+    display: none;
+  }
+  [data-preference-icon="motion"] > [data-preference-glyph="pause"] {
+    display: block;
+  }
+}
+
+/*
+ * Shared motion vocabulary — plain CSS only (no Tailwind directives) so the
+ * Astro landing bundle consumes the same rules as the app.
+ *
+ * `--ease-enter` is mirrored as `effectEasing` in `effects.ts` because WAAPI
+ * timing strings cannot resolve CSS variables; keep both values in sync.
+ * Keyframes are referenced by app utilities (`animate-dialog-*`), app
+ * component rules (`.stream-caret`), and inline `style`
+ * animations; `effects.ts` supplies their imperative WAAPI twins.
+ */
+:root {
+  /* Emphatic entrance settle — long ease-out, used by entrances and dialog ascents. */
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Damped overshoot settle for pop surfaces. */
+  --ease-pop: cubic-bezier(0.23, 1, 0.32, 1);
+  /* Accelerating exit for dismissed surfaces. */
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer-text {
+  from {
+    background-position: 150% center;
+  }
+  to {
+    background-position: -50% center;
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes pixel-on {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes records-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@keyframes dialog-popup-from-bottom {
+  0% {
+    opacity: 0;
+    translate: var(--dialog-rest-x, -50%) var(--dialog-start-y, calc(50vh + 40px));
+  }
+  100% {
+    opacity: 1;
+    translate: var(--dialog-rest-x, -50%) var(--dialog-rest-y, -50%);
+  }
+}
+
+@keyframes dialog-popout-to-bottom {
+  0% {
+    opacity: 1;
+    translate: var(--dialog-rest-x, -50%) var(--dialog-rest-y, -50%);
+  }
+  100% {
+    opacity: 0;
+    translate: var(--dialog-rest-x, -50%) var(--dialog-start-y, calc(50vh + 40px));
+  }
+}
+
+/* SideDialog enters from and exits to the right edge; geometry stays anchored. */
+@keyframes dialog-slide-in-right {
+  0% {
+    translate: 100% 0;
+  }
+  100% {
+    translate: 0 0;
+  }
+}
+
+@keyframes dialog-slide-out-right {
+  0% {
+    translate: 0 0;
+  }
+  100% {
+    translate: 100% 0;
+  }
+}
+
+/* Standalone icon geometry for Astro; Tailwind utilities can still override it in the app. */
+@layer components {
+  [data-animated-icon] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: visible;
+    vertical-align: middle;
+  }
+
+  [data-animated-icon] > svg {
+    display: block;
+    overflow: visible;
+  }
+}
+
+/*
+ * Shared sidebar glide highlight (`sidebar-glide-highlight.tsx`). Static
+ * paint and layer roles hang off data hooks so both consumers render
+ * identical flat, borderless chrome; the component only feeds CSS custom properties —
+ * committed geometry (--glide-top/left/width/height/radius), clip insets
+ * (--glide-clip-*), and per-frame motion values
+ * (--glide-x/y/scale-x/scale-y/opacity/scroll-x/y) — so transforms and
+ * clipping stay composited and no layout property interpolates per frame.
+ */
+[data-glide-highlight] {
+  position: absolute;
+  top: var(--glide-top, 0);
+  left: var(--glide-left, 0);
+  width: var(--glide-width, 0);
+  height: var(--glide-height, 0);
+  border: 0;
+  border-radius: var(--glide-radius, 7px);
+  background-color: var(--hover);
+  box-shadow: none;
+  transform-origin: 0 0;
+  transform: translate3d(calc(var(--glide-x, 0) * 1px), calc(var(--glide-y, 0) * 1px), 0)
+    scaleX(var(--glide-scale-x, 1)) scaleY(var(--glide-scale-y, 1));
+  opacity: var(--glide-opacity, 0);
+  pointer-events: none;
+  will-change: transform, opacity;
+  z-index: 0;
+}
+
+/* Non-scrolling containers clip the whole travelling overlay to the nested
+   scroll viewport's visible rect — never the header or footer. */
+[data-glide-clip] {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  clip-path: inset(
+    var(--glide-clip-top, 0) var(--glide-clip-right, 0) var(--glide-clip-bottom, 0)
+      var(--glide-clip-left, 0)
+  );
+  pointer-events: none;
+}
+
+/* Counter-translates the pill layer by the live scroll offset so the pill
+   tracks its row while the clip wrapper holds still. */
+[data-glide-scroll] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform: translate3d(
+    calc(var(--glide-scroll-x, 0) * 1px),
+    calc(var(--glide-scroll-y, 0) * 1px),
+    0
+  );
+}

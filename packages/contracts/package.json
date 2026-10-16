@@ -1,0 +1,54 @@
+{
+  "name": "@meltiply/contracts",
+  "version": "1.0.0-target.0",
+  "private": true,
+  "files": [
+    "dist",
+    "examples",
+    "openapi.yaml",
+    "src",
+    "test-support"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client.ts",
+      "default": "./src/client.ts"
+    },
+    "./schema": {
+      "types": "./src/generated/schema.ts",
+      "default": "./src/generated/schema.ts"
+    },
+    "./openapi.yaml": "./openapi.yaml",
+    "./examples/operations.yaml": "./examples/operations.yaml",
+    "./test-support": "./test-support/validation.ts"
+  },
+  "scripts": {
+    "generate": "openapi-typescript --redocly ../../redocly.yaml",
+    "readiness:check": "node scripts/endpoint-readiness.mjs --check",
+    "readiness:generate": "node scripts/endpoint-readiness.mjs --write",
+    "test": "vp test run --dir test",
+    "test:examples": "vp test run test/examples.test.ts",
+    "test:readiness": "node --test scripts/endpoint-readiness.test.mjs",
+    "type-check": "tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "12.1.0",
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "yaml": "2.9.0"
+  }
+}

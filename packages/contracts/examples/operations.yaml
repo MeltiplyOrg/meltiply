@@ -1,0 +1,1198 @@
+fixtures:
+  authentication_error: &authentication_error
+    error:
+      code: authentication_required
+      message: Authentication is required.
+      request_id: request-example-401
+      retryable: false
+      details: []
+  invalid_request_error: &invalid_request_error
+    error:
+      code: invalid_request
+      message: The request is invalid.
+      request_id: request-example-400
+      retryable: false
+      details:
+        - field: request
+          code: invalid_value
+          message: The request value is invalid.
+  dependency_error: &dependency_error
+    error:
+      code: dependency_unavailable
+      message: A required dependency is temporarily unavailable.
+      request_id: request-example-503
+      retryable: true
+      details: []
+  not_found_error: &not_found_error
+    error:
+      code: not_found
+      message: The resource was not found.
+      request_id: request-example-404
+      retryable: false
+      details: []
+  invalid_state_error: &invalid_state_error
+    error:
+      code: invalid_state
+      message: The resource is not in a valid state for this operation.
+      request_id: request-example-409
+      retryable: false
+      details: []
+  forbidden_error: &forbidden_error
+    error:
+      code: forbidden
+      message: The active identity lacks permission for this operation.
+      request_id: request-example-403
+      retryable: false
+      details: []
+  rate_limited_error: &rate_limited_error
+    error:
+      code: rate_limited
+      message: Too many authentication attempts. Please retry shortly.
+      request_id: request-example-429
+      retryable: true
+      details: []
+  auth_error: &auth_error
+    code: INVALID_EMAIL_OR_PASSWORD
+    message: Invalid email or password.
+  auth_user: &auth_user
+    id: ba_user_alpha_01
+    email: alpha-admin@example.test
+    emailVerified: true
+    name: Alpha Admin
+    image: null
+    createdAt: 2026-01-01T00:00:00Z
+    updatedAt: 2026-01-01T00:00:00Z
+  auth_session: &auth_session
+    id: ba_session_alpha_01
+    userId: ba_user_alpha_01
+    token: ba_token_alpha_01
+    expiresAt: 2026-01-08T00:00:00Z
+    ipAddress: 203.0.113.10
+    userAgent: Mozilla/5.0 (X11; Linux x86_64)
+    createdAt: 2026-01-01T00:00:00Z
+    updatedAt: 2026-01-01T00:00:00Z
+  bearer_authorization: &bearer_authorization
+    Authorization: Bearer eyJhbGciOiJFZERTQSIsImtpZCI6ImJhLWp3dC1rZXktMDEiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiJiYV91c2VyX2FscGhhXzAxIiwiZW1haWwiOiJhbHBoYS1hZG1pbkBleGFtcGxlLnRlc3QiLCJhdWQiOiJtZWx0aXBseS1hcGkiLCJleHAiOjE3NjczMTI3MDB9.c2lnbmF0dXJlLWV4YW1wbGUtYmEtc2lnLTAx
+  session_cookie: &session_cookie
+    Cookie: better-auth.session_token=ba_token_alpha_01
+  workspace: &workspace
+    id: 00000000-0000-4000-8000-000000000001
+    name: Alpha
+    slug: org-alpha
+    plan: pro
+    is_personal: false
+    role: admin
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  workspace_member: &workspace_member
+    user_id: 00000000-0000-4000-8000-000000000012
+    email: beta-member@example.test
+    display_name: Beta Member
+    avatar_url: null
+    role: member
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  workspace_invitation: &workspace_invitation
+    id: 00000000-0000-4000-8000-000000000601
+    org_id: 00000000-0000-4000-8000-000000000001
+    email: beta-member@example.test
+    role: member
+    status: pending
+    expires_at: 2026-01-08T00:00:00Z
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  brand_profile: &brand_profile
+    id: 00000000-0000-4000-8000-000000000111
+    org_id: 00000000-0000-4000-8000-000000000001
+    name: Alpha Brand
+    description: Editorial tools for independent publishers.
+    color: "#b91c1c"
+    deleted_at: null
+    purge_at: null
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  validation_error: &validation_error
+    error:
+      code: validation_error
+      message: The request is invalid.
+      request_id: request-example-422
+      retryable: false
+      details:
+        - field: title
+          code: required
+          message: A title is required.
+  capability: &capability
+    platform: tiktok
+    connect_available: true
+    asset_types: [image, video]
+    publish: true
+    analytics: true
+    comments: true
+    reply: true
+    max_caption_length: 2200
+    max_hashtags: 30
+    max_media_count: 35
+    min_media_count: 1
+    multi_asset_types: [image]
+    max_file_size: 524288000
+    max_video_duration_sec: 600
+    accepted_mime_types: [image/jpeg, image/png, video/mp4]
+    notes: []
+  user: &user
+    id: 00000000-0000-4000-8000-000000000011
+    email: alpha-admin@example.test
+    display_name: Alpha Admin
+    avatar_url: null
+    active_organization:
+      id: 00000000-0000-4000-8000-000000000001
+      name: Alpha
+      slug: org-alpha
+      role: admin
+      plan: pro
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  account: &account
+    id: 00000000-0000-4000-8000-000000000201
+    org_id: 00000000-0000-4000-8000-000000000001
+    brand_profile_id: 00000000-0000-4000-8000-000000000111
+    platform: tiktok
+    platform_user_id: tiktok-alpha
+    display_name: Alpha on TikTok
+    username: null
+    avatar_url: null
+    connection_status: connected
+    token_expires_at: 2026-02-01T00:00:00Z
+    rate_limit_budget: null
+    last_synced_at: 2026-01-01T00:00:00Z
+    scopes: [user.info.basic, video.publish]
+    capabilities: *capability
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  oauth_selection_account_primary: &oauth_selection_account_primary
+    id: page_1001
+    display_name: Acme Main Facebook Page
+    username: acme.main
+    avatar_url: https://cdn.example.test/avatars/page_1001.png
+  oauth_selection_account_secondary: &oauth_selection_account_secondary
+    id: page_1002
+    display_name: Acme Community Page
+    username: null
+    avatar_url: null
+  oauth_selection: &oauth_selection
+    id: select_session_alpha_1234567890
+    platform: facebook
+    brand_profile_id: 00000000-0000-4000-8000-000000000111
+    expires_at: 2026-01-01T00:10:00Z
+    accounts:
+      - *oauth_selection_account_primary
+      - *oauth_selection_account_secondary
+  oauth_selection_confirm_request: &oauth_selection_confirm_request
+    account_id: page_1001
+  tiktok_requirements: &tiktok_requirements
+    platform: tiktok
+    creator:
+      display_name: Alpha on TikTok
+      username: alpha.creator
+      avatar_url: https://cdn.example.test/tiktok-alpha.jpg
+    privacy_levels: [PUBLIC_TO_EVERYONE, SELF_ONLY]
+    comment_allowed: true
+    duet_allowed: false
+    stitch_allowed: true
+    max_video_duration_sec: 300
+  asset: &asset
+    id: 00000000-0000-4000-8000-000000000101
+    org_id: 00000000-0000-4000-8000-000000000001
+    brand_profile_id: 00000000-0000-4000-8000-000000000111
+    uploaded_by: 00000000-0000-4000-8000-000000000011
+    asset_type: image
+    title: Launch image
+    status: ready
+    file_size: 262144
+    mime_type: image/png
+    width: 1080
+    height: 1080
+    duration_sec: null
+    thumbnail_url: null
+    download_url: null
+    failure: null
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  upload_asset: &upload_asset
+    id: 00000000-0000-4000-8000-000000000102
+    org_id: 00000000-0000-4000-8000-000000000001
+    brand_profile_id: 00000000-0000-4000-8000-000000000111
+    uploaded_by: 00000000-0000-4000-8000-000000000011
+    asset_type: video
+    title: Launch video
+    status: pending_upload
+    file_size: null
+    mime_type: null
+    width: null
+    height: null
+    duration_sec: null
+    thumbnail_url: null
+    download_url: null
+    failure: null
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  upload_session: &upload_session
+    id: 00000000-0000-4000-8000-000000000501
+    asset_id: 00000000-0000-4000-8000-000000000102
+    strategy: single
+    status: created
+    expires_at: 2026-01-01T00:15:00Z
+    content_type: video/mp4
+    file_size: 1048576
+    single_upload:
+      url: https://account.r2.cloudflarestorage.com/meltiply-assets-staging/00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000102/launch.mp4
+      method: PUT
+      headers:
+        Content-Type: video/mp4
+        Content-Length: "1048576"
+      expires_at: 2026-01-01T00:15:00Z
+    multipart: null
+  distribution: &distribution
+    id: 00000000-0000-4000-8000-000000000301
+    org_id: 00000000-0000-4000-8000-000000000001
+    brand_profile_id: 00000000-0000-4000-8000-000000000111
+    post_id: 00000000-0000-4000-8000-000000000701
+    platform_account_id: 00000000-0000-4000-8000-000000000201
+    platform: tiktok
+    status: queued
+    scheduled_at: null
+    published_at: null
+    platform_post_id: null
+    platform_url: null
+    publication: null
+    title_override: null
+    description_override: null
+    hashtags: [launch]
+    attempt_count: 0
+    last_attempt_at: null
+    next_attempt_at: null
+    failure: null
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  post_target: &post_target
+    platform_account_id: 00000000-0000-4000-8000-000000000201
+    title_override: null
+    description_override: null
+    hashtags: [launch]
+    provider_options: null
+    attachment_ids: null
+  post: &post
+    id: 00000000-0000-4000-8000-000000000701
+    org_id: 00000000-0000-4000-8000-000000000001
+    brand_profile_id: 00000000-0000-4000-8000-000000000111
+    title: Launch note
+    default_text: Hello world
+    status: draft
+    revision: 1
+    attachments:
+      - asset_id: 00000000-0000-4000-8000-000000000101
+        position: 0
+        asset: *asset
+    targets: [*post_target]
+    distributions: [*distribution]
+    created_at: 2026-01-01T00:00:00Z
+    updated_at: 2026-01-01T00:00:00Z
+  comment: &comment
+    id: 00000000-0000-4000-8000-000000000401
+    distribution_id: 00000000-0000-4000-8000-000000000301
+    post_id: 00000000-0000-4000-8000-000000000701
+    brand_profile_id: 00000000-0000-4000-8000-000000000111
+    platform: tiktok
+    platform_comment_id: comment-alpha-1
+    author_name: Viewer
+    author_avatar: null
+    body: Great launch!
+    reply_text: null
+    reply_status: not_replied
+    failure: null
+    commented_at: 2026-01-01T01:00:00Z
+    synced_at: 2026-01-01T01:01:00Z
+    updated_at: 2026-01-01T01:01:00Z
+  limits: &limits
+    max_uploads: 100
+    max_distributions: 1000
+    max_platforms: 5
+    max_storage_bytes: 107374182400
+    analytics_enabled: true
+    inbox_reply_enabled: true
+  usage: &usage
+    org_id: 00000000-0000-4000-8000-000000000001
+    period_start: 2026-01-01T00:00:00Z
+    period_end: 2026-02-01T00:00:00Z
+    uploads: 1
+    distributions: 1
+    api_calls: 10
+    storage_bytes: 1048576
+    updated_at: 2026-01-01T01:00:00Z
+
+operations:
+  getHealth:
+    success:
+      status: 200
+      body:
+        status: ok
+        version: 1.0.0-target.0
+        environment: staging
+    errors: []
+  getReadiness:
+    success:
+      status: 200
+      body:
+        status: ready
+        components:
+          - name: database
+            status: ready
+    errors:
+      - status: 503
+        body:
+          status: unavailable
+          components:
+            - name: DB_SYSTEM
+              status: unavailable
+  signInWithEmail:
+    request:
+      email: alpha-admin@example.test
+      password: meltiply-dummy-secret-not-real
+    success:
+      status: 200
+      headers:
+        Set-Cookie: better-auth.session_token=ba_token_alpha_01; Path=/; HttpOnly; SameSite=Lax
+      body:
+        redirect: false
+        token: ba_token_alpha_01
+        url: null
+        user: *auth_user
+    errors:
+      - status: 401
+        body: *auth_error
+      - status: 429
+        body: *rate_limited_error
+  signUpWithEmail:
+    request:
+      name: Alpha Admin
+      email: alpha-admin@example.test
+      password: meltiply-dummy-secret-not-real
+    success:
+      status: 200
+      headers:
+        Set-Cookie: better-auth.session_token=ba_token_alpha_01; Path=/; HttpOnly; SameSite=Lax
+      body:
+        token: ba_token_alpha_01
+        user: *auth_user
+    errors:
+      - status: 400
+        body: *auth_error
+      - status: 429
+        body: *rate_limited_error
+  signOut:
+    headers: *session_cookie
+    request: {}
+    success:
+      status: 200
+      headers:
+        Set-Cookie: better-auth.session_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0
+      body:
+        success: true
+    errors:
+      - status: 401
+        body: *auth_error
+  getAuthSession:
+    headers: *session_cookie
+    success:
+      status: 200
+      headers:
+        set-auth-jwt: eyJhbGciOiJFZERTQSIsImtpZCI6ImJhLWp3dC1rZXktMDEiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiJiYV91c2VyX2FscGhhXzAxIiwiZW1haWwiOiJhbHBoYS1hZG1pbkBleGFtcGxlLnRlc3QiLCJhdWQiOiJtZWx0aXBseS1hcGkiLCJleHAiOjE3NjczMTI3MDB9.c2lnbmF0dXJlLWV4YW1wbGUtYmEtc2lnLTAx
+      body:
+        session: *auth_session
+        user: *auth_user
+    errors:
+      - status: 429
+        body: *rate_limited_error
+  requestPasswordReset:
+    request:
+      email: alpha-admin@example.test
+      redirectTo: https://staging.meltiply.com/reset-password
+    success:
+      status: 200
+      body:
+        status: true
+    errors:
+      - status: 400
+        body: *auth_error
+      - status: 429
+        body: *rate_limited_error
+  resetPassword:
+    request:
+      newPassword: new-horse-battery-staple
+      token: reset_token_alpha_01
+    success:
+      status: 200
+      body:
+        status: true
+    errors:
+      - status: 400
+        body: *auth_error
+      - status: 429
+        body: *rate_limited_error
+  verifyEmail:
+    success:
+      status: 200
+      body:
+        status: true
+        user: *auth_user
+    errors:
+      - status: 401
+        body: *auth_error
+      - status: 429
+        body: *rate_limited_error
+  changePassword:
+    headers: *session_cookie
+    request:
+      currentPassword: meltiply-dummy-secret-not-real
+      newPassword: new-horse-battery-staple
+      revokeOtherSessions: true
+    success:
+      status: 200
+      headers:
+        Set-Cookie: better-auth.session_token=ba_token_alpha_02; Path=/; HttpOnly; SameSite=Lax
+      body:
+        token: ba_token_alpha_02
+        user: *auth_user
+    errors:
+      - status: 400
+        body: *auth_error
+      - status: 401
+        body: *auth_error
+      - status: 429
+        body: *rate_limited_error
+  handleBillingWebhook:
+    request:
+      type: subscription.updated
+      data:
+        customer:
+          external_id: 00000000-0000-4000-8000-000000000001
+          metadata:
+            meltiply_organization_id: 00000000-0000-4000-8000-000000000001
+        current_period_end: 2026-08-21T12:00:00.000Z
+        product:
+          id: 11111111-1111-4111-8111-111111111111
+        status: active
+    headers:
+      webhook-id: msg_billing_event_alpha
+      webhook-timestamp: "1767312000"
+      webhook-signature: v1,c2lnbmF0dXJlLWV4YW1wbGU=
+    success:
+      status: 204
+    errors:
+      - status: 401
+        body: *authentication_error
+  getCurrentUser:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *user
+    errors:
+      - status: 401
+        body: *authentication_error
+  createWorkspace:
+    headers: *bearer_authorization
+    request:
+      name: Alpha
+      slug: org-alpha
+    success:
+      status: 201
+      body: *workspace
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 409
+        body: *invalid_state_error
+      - status: 422
+        body: *validation_error
+  updateWorkspace:
+    headers: *bearer_authorization
+    request:
+      name: Alpha Studio
+    success:
+      status: 200
+      body:
+        <<: *workspace
+        name: Alpha Studio
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 422
+        body: *validation_error
+  createWorkspaceInvitation:
+    headers: *bearer_authorization
+    request:
+      email: beta-member@example.test
+      role: member
+    success:
+      status: 201
+      body: *workspace_invitation
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error
+      - status: 422
+        body: *validation_error
+  revokeWorkspaceInvitation:
+    headers: *bearer_authorization
+    success:
+      status: 204
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  acceptWorkspaceInvitation:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        workspace: *workspace
+        member: *workspace_member
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  updateWorkspaceMember:
+    headers: *bearer_authorization
+    request:
+      role: admin
+    success:
+      status: 200
+      body:
+        <<: *workspace_member
+        role: admin
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  removeWorkspaceMember:
+    headers: *bearer_authorization
+    success:
+      status: 204
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  listBrandProfiles:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        profiles: [*brand_profile]
+    errors:
+      - status: 401
+        body: *authentication_error
+  createBrandProfile:
+    headers: *bearer_authorization
+    request:
+      name: Alpha Brand
+      color: "#b91c1c"
+    success:
+      status: 201
+      body: *brand_profile
+    errors:
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error
+      - status: 422
+        body: *validation_error
+  listDeletedBrandProfiles:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        profiles:
+          - <<: *brand_profile
+            deleted_at: 2026-01-02T00:00:00Z
+            purge_at: 2026-01-09T00:00:00Z
+    errors:
+      - status: 403
+        body: *forbidden_error
+  getBrandProfile:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *brand_profile
+    errors:
+      - status: 404
+        body: *not_found_error
+  updateBrandProfile:
+    headers: *bearer_authorization
+    request:
+      name: Alpha Studio Brand
+      color: "#1d4ed8"
+    success:
+      status: 200
+      body:
+        <<: *brand_profile
+        name: Alpha Studio Brand
+        color: "#1d4ed8"
+    errors:
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+      - status: 422
+        body: *validation_error
+  deleteBrandProfile:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        <<: *brand_profile
+        deleted_at: 2026-01-02T00:00:00Z
+        purge_at: 2026-01-09T00:00:00Z
+    errors:
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  restoreBrandProfile:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *brand_profile
+    errors:
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  listPlatformCapabilities:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        capabilities:
+          - *capability
+          - <<: *capability
+            platform: youtube
+            asset_types: [video]
+            max_media_count: 1
+            min_media_count: 1
+            multi_asset_types: []
+          - <<: *capability
+            platform: instagram
+            asset_types: [image, video]
+            max_media_count: 10
+            min_media_count: 1
+            multi_asset_types: [image, video]
+          - <<: *capability
+            platform: facebook
+            asset_types: [video]
+            max_media_count: 1
+            min_media_count: 1
+            multi_asset_types: []
+          - <<: *capability
+            platform: threads
+            asset_types: [image, video]
+            max_media_count: 20
+            min_media_count: 0
+            multi_asset_types: [image, video]
+    errors:
+      - status: 401
+        body: *authentication_error
+  listPlatformAccounts:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        accounts: [*account]
+    errors:
+      - status: 401
+        body: *authentication_error
+  getPlatformPublishingRequirements:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *tiktok_requirements
+    errors:
+      - status: 404
+        body: *not_found_error
+  startPlatformOAuth:
+    headers: *bearer_authorization
+    success:
+      status: 307
+      headers:
+        Location: https://provider.example.test/oauth/authorize
+    errors:
+      - status: 422
+        body: *validation_error
+  completePlatformOAuth:
+    success:
+      status: 302
+      headers:
+        Location: http://localhost:3000/channels?oauth=connected&provider=tiktok
+    errors:
+      - status: 400
+        body: *invalid_request_error
+  getOAuthSelection:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *oauth_selection
+    errors:
+      - status: 404
+        body: *not_found_error
+      - status: 401
+        body: *authentication_error
+  confirmOAuthSelection:
+    headers: *bearer_authorization
+    request: *oauth_selection_confirm_request
+    success:
+      status: 204
+    errors:
+      - status: 400
+        body: *invalid_request_error
+      - status: 404
+        body: *not_found_error
+  cancelOAuthSelection:
+    headers: *bearer_authorization
+    success:
+      status: 204
+    errors:
+      - status: 404
+        body: *not_found_error
+      - status: 401
+        body: *authentication_error
+  disconnectPlatformAccount:
+    headers: *bearer_authorization
+    success:
+      status: 204
+    errors:
+      - status: 404
+        body: *not_found_error
+  listPosts:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        posts: [*post]
+        has_more: false
+        limit: 20
+        offset: 0
+    errors:
+      - status: 401
+        body: *authentication_error
+  createPost:
+    headers: *bearer_authorization
+    request:
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+      title: Launch note
+      default_text: Hello world
+      attachment_ids: [00000000-0000-4000-8000-000000000101]
+      targets:
+        - platform_account_id: 00000000-0000-4000-8000-000000000201
+          hashtags: [launch]
+          attachment_ids: null
+    success:
+      status: 201
+      body: *post
+    errors:
+      - status: 422
+        body: *validation_error
+  getPost:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *post
+    errors:
+      - status: 404
+        body: *not_found_error
+  updatePost:
+    headers: *bearer_authorization
+    request:
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+      default_text: Hello world, updated
+    success:
+      status: 200
+      body:
+        <<: *post
+        default_text: Hello world, updated
+        revision: 2
+    errors:
+      - status: 422
+        body: *validation_error
+  deletePost:
+    headers: *bearer_authorization
+    request:
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+    success:
+      status: 200
+      body: *post
+    errors:
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  schedulePost:
+    headers: *bearer_authorization
+    request:
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+      scheduled_at: 2026-01-02T00:00:00Z
+      targets:
+        - platform_account_id: 00000000-0000-4000-8000-000000000201
+          hashtags: [launch]
+          attachment_ids: null
+    success:
+      status: 200
+      body:
+        <<: *post
+        status: active
+        revision: 3
+        distributions:
+          - <<: *distribution
+            status: scheduled
+            scheduled_at: 2026-01-02T00:00:00Z
+    errors:
+      - status: 422
+        body: *validation_error
+  createUploadSession:
+    headers: *bearer_authorization
+    request:
+      asset_type: video
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+      filename: launch.mp4
+      content_type: video/mp4
+      file_size: 1048576
+      title: Launch video
+    success:
+      status: 201
+      body:
+        asset: *upload_asset
+        upload_session: *upload_session
+    errors:
+      - status: 422
+        body: *validation_error
+  getUploadSession:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        asset: *upload_asset
+        upload_session: *upload_session
+        uploaded_parts: []
+    errors:
+      - status: 404
+        body: *not_found_error
+  abortUploadSession:
+    headers: *bearer_authorization
+    success:
+      status: 204
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  createUploadPartUrls:
+    headers: *bearer_authorization
+    request:
+      part_numbers: [1, 2]
+    success:
+      status: 200
+      body:
+        parts:
+          - url: https://account.r2.cloudflarestorage.com/meltiply-assets-staging/00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000102/launch.mp4?partNumber=1&uploadId=upload-example-000000000501
+            method: PUT
+            headers:
+              Content-Type: video/mp4
+            expires_at: 2026-01-01T00:15:00Z
+            part_number: 1
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  completeUploadSession:
+    headers: *bearer_authorization
+    request: {}
+    success:
+      status: 202
+      body:
+        <<: *upload_asset
+        status: processing
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  getAsset:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *asset
+    errors:
+      - status: 404
+        body: *not_found_error
+  getAssetDownloadUrl:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        url: https://account.r2.cloudflarestorage.com/meltiply-assets-staging/00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000102/launch.mp4
+        expires_at: 2026-01-01T00:15:00Z
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  getAssetPreviewUrl:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        url: https://account.r2.cloudflarestorage.com/meltiply-assets-staging/00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000102/launch.mp4
+        expires_at: 2026-01-01T00:15:00Z
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  listDistributions:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        distributions: [*distribution]
+        has_more: false
+        limit: 20
+        offset: 0
+    errors:
+      - status: 401
+        body: *authentication_error
+  getDistribution:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        <<: *distribution
+        status: published
+        scheduled_at: 2026-01-01T00:00:00Z
+        published_at: 2026-01-01T00:00:00Z
+        platform_post_id: tt-9100000000000000001
+        platform_url: https://www.tiktok.com/@meltiply/video/9100000000000000001
+        attempt_count: 1
+        last_attempt_at: 2026-01-01T00:00:00Z
+        publication:
+          title: Launch note
+          text: Hello world
+          hashtags: [launch]
+          provider_options: null
+          media:
+            - asset_id: 00000000-0000-4000-8000-000000000101
+              position: 0
+              asset_type: video
+              content_type: video/mp4
+              file_size: 1048576
+              width: 1080
+              height: 1920
+              duration_sec: 12.5
+    errors:
+      - status: 404
+        body: *not_found_error
+  updateScheduledDistribution:
+    headers: *bearer_authorization
+    request:
+      scheduled_at: 2026-01-02T00:00:00Z
+    success:
+      status: 200
+      body:
+        <<: *distribution
+        status: scheduled
+        scheduled_at: 2026-01-02T00:00:00Z
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  cancelDistribution:
+    headers: *bearer_authorization
+    success:
+      status: 204
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  retryDistribution:
+    headers: *bearer_authorization
+    success:
+      status: 202
+      body: *distribution
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  listCalendarEvents:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        events:
+          - id: 00000000-0000-4000-8000-000000000301
+            post_id: 00000000-0000-4000-8000-000000000701
+            brand_profile_id: 00000000-0000-4000-8000-000000000111
+            post_title: Launch note
+            platform: tiktok
+            platform_account_id: 00000000-0000-4000-8000-000000000201
+            status: queued
+            scheduled_at: null
+            published_at: null
+            updated_at: 2026-01-01T00:00:00Z
+    errors:
+      - status: 400
+        body: *invalid_request_error
+  getAnalyticsSummary:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        range:
+          start: 2026-01-01T00:00:00Z
+          end: 2026-01-31T23:59:59Z
+        totals: &metric_totals
+          views: 100
+          likes: 10
+          comments: 1
+          shares: 2
+          watch_time_sec: 300
+          reach: 90
+          impressions: 120
+          post_count: 1
+        by_platform:
+          - <<: *metric_totals
+            platform: tiktok
+        last_synced_at: 2026-01-01T01:00:00Z
+        partial: false
+        unsupported_platforms: []
+    errors:
+      - status: 400
+        body: *invalid_request_error
+  getDistributionAnalytics:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        snapshots:
+          - id: 00000000-0000-4000-8000-000000000801
+            distribution_id: 00000000-0000-4000-8000-000000000301
+            post_id: 00000000-0000-4000-8000-000000000701
+            views: 100
+            likes: 10
+            comments: 1
+            shares: 2
+            watch_time_sec: 300
+            reach: 90
+            impressions: 120
+            snapshot_at: 2026-01-01T01:00:00Z
+    errors:
+      - status: 404
+        body: *not_found_error
+  listInboxComments:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        comments: [*comment]
+        has_more: false
+        limit: 20
+        offset: 0
+    errors:
+      - status: 401
+        body: *authentication_error
+  replyToComment:
+    headers: *bearer_authorization
+    request:
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+      text: Thanks for the feedback!
+    success:
+      status: 202
+      body:
+        <<: *comment
+        reply_text: Thanks for the feedback!
+        reply_status: queued
+    errors:
+      - status: 422
+        body: *validation_error
+  getBillingPlan:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        plan: pro
+        billing_status: active
+        limits: *limits
+        renews_at: 2026-02-01T00:00:00Z
+        cancel_at: null
+    errors:
+      - status: 401
+        body: *authentication_error
+  getBillingUsage:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        plan: pro
+        billing_status: active
+        usage: *usage
+        limits: *limits
+        renews_at: 2026-02-01T00:00:00Z
+        cancel_at: null
+        upgrade_required: false
+    errors:
+      - status: 401
+        body: *authentication_error
+  createCheckoutSession:
+    headers: *bearer_authorization
+    request:
+      plan: creator
+      success_url: http://localhost:3000/billing?checkout=success
+      cancel_url: http://localhost:3000/billing?checkout=cancel
+    success:
+      status: 201
+      body:
+        url: https://billing.example.test/checkout/session-alpha
+        expires_at: 2026-01-01T00:15:00Z
+    errors:
+      - status: 422
+        body: *validation_error
+      - status: 403
+        body: *forbidden_error
+  createBillingPortalSession:
+    headers: *bearer_authorization
+    request:
+      return_url: http://localhost:3000/billing
+    success:
+      status: 201
+      body:
+        url: https://billing.example.test/portal/session-alpha
+        expires_at: 2026-01-01T00:15:00Z
+    errors:
+      - status: 422
+        body: *validation_error
+      - status: 403
+        body: *forbidden_error

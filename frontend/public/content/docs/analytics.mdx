@@ -1,0 +1,34 @@
+---
+title: Analytics
+description: Analytics availability and preserved backend metrics capabilities in Meltiply.
+section: Publishing
+order: 7
+---
+
+Meltiply does not provide a dedicated `/analytics` screen or sidebar Analytics navigation item. Visiting `/analytics` redirects to the posts hub on the [Publishing](/docs/publishing) screen.
+
+All mock preview panels — including illustrative Link Clicks, Net Growth cards, and AI Insights — have been removed from the application.
+
+## Current availability
+
+The app does not expose engagement metrics. Permanent empty metric columns and
+tiles have been removed from the Posts list, grid, and calendar day detail.
+Those views show publishing outcomes, dates, captions, and attachments instead.
+
+To review Likes, Comments, Shares, Saves, Clicks, Views, Impressions, or Reach,
+use the native platform's reporting tools. Publishing status in Meltiply is not
+an engagement measurement.
+
+Restoring metrics requires a real frontend data path, defined aggregation and
+freshness semantics, loading/error/empty states, and end-to-end verification.
+
+## Backend analytics capabilities
+
+Backend provider synchronization services and the API endpoints `/api/v1/analytics` and `/api/v1/analytics/{distribution_id}` retain aggregate and per-distribution platform metrics for supported channels.
+
+An interactive front-of-house analytics reporting dashboard and aggregate charts are not exposed in the web interface.
+
+## Related
+
+- [Publishing](/docs/publishing) — review post statuses, table columns, and calendar entries.
+- [Channels](/docs/channels) — connect and verify social platform accounts.

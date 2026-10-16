@@ -1,0 +1,54 @@
+diff --git a/dist/index.js b/dist/index.js
+index 7c65ec3711599964699c9c8b121b72213f4e427a..b0bba00a203406e145472d29610a42a6181806ee
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -2494,23 +2494,34 @@ function exportRoute(module, file, name) {
+ 		} : null;
+ 	}
+ }
+-function resolveBinding(file, name, deps) {
+-	const visiting = /* @__PURE__ */ new Set();
+-	let fallback = null;
+-	while (!visiting.has(file)) {
+-		deps.add(file);
+-		const module = moduleOf(file);
+-		if (!module) return fallback;
+-		if (module.stars.length) return exportsOf(file, visiting, deps).get(name) ?? fallback;
+-		visiting.add(file);
++/**
++ * Resolve only the requested export, preserving explicit-export precedence and
++ * first-matching star re-exports. Track consulted modules for cache invalidation;
++ * cycles return null so the caller's existing unresolved-binding fallback applies.
++ * Avoid enumerating unrelated barrel exports on every JSX component lookup.
++ */
++function resolveBinding(file, name, deps, visiting = /* @__PURE__ */ new Set()) {
++	if (visiting.has(file)) return null;
++	deps.add(file);
++	const module = moduleOf(file);
++	if (!module) return null;
++	visiting.add(file);
++	try {
+ 		const route = exportRoute(module, file, name);
+-		if (!route) return fallback;
+-		if (!route.follow) return route.binding;
+-		fallback = route.binding;
+-		file = route.binding.file;
+-		name = route.binding.name;
++		if (route) {
++			if (!route.follow) return route.binding;
++			return resolveBinding(route.binding.file, route.binding.name, deps, visiting) ?? route.binding;
++		}
++		if (name !== "default") for (const spec of module.stars) {
++			const target = resolveFrom(file, spec);
++			if (!target) continue;
++			const binding = resolveBinding(target, name, deps, visiting);
++			if (binding) return binding;
++		}
++		return null;
++	} finally {
++		visiting.delete(file);
+ 	}
+-	return fallback;
+ }
+ function definingExportOf(spec, name, fromFile, deps) {
+ 	const target = resolveFrom(fromFile, spec);

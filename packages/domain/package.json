@@ -1,0 +1,27 @@
+{
+  "name": "@meltiply/domain",
+  "version": "1.0.0-target.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./mail-content": {
+      "types": "./src/mail-content.d.mts",
+      "default": "./src/mail-content.mjs"
+    }
+  },
+  "scripts": {
+    "test": "vp test run",
+    "type-check": "tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "@meltiply/contracts": "workspace:*",
+    "effect": "4.0.0-rc.115"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  }
+}

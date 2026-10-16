@@ -1,0 +1,19 @@
+apis:
+  meltiply@v1:
+    root: ./packages/contracts/openapi.yaml
+    x-openapi-ts:
+      output: ./packages/contracts/src/generated/schema.ts
+
+extends:
+  - recommended-strict
+
+rules:
+  no-server-example.com: off
+  operation-2xx-response: off
+  operation-4xx-response: off
+  operation-description: off
+  operation-summary: error
+  operation-operationId: error
+  operation-operationId-unique: error
+  no-ambiguous-paths: error
+  no-unresolved-refs: error

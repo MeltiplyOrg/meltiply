@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en" class="h-full antialiased">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Distribution workspace for Meltiply" />
+    <script>
+      var root = document.documentElement;
+      var consentValue = null;
+      try {
+        var consentEntry = document.cookie
+          .split(";")
+          .find((item) => item.trim().startsWith("meltiply-consent="));
+        consentValue = consentEntry
+          ? JSON.parse(decodeURIComponent(consentEntry.trim().slice("meltiply-consent=".length)))
+          : null;
+      } catch (error) {
+        // A blocked or malformed consent cookie denies optional purposes.
+      }
+      var decided =
+        consentValue &&
+        consentValue.v === 1 &&
+        typeof consentValue.expires === "number" &&
+        Number.isFinite(consentValue.expires) &&
+        consentValue.expires > Date.now() &&
+        typeof consentValue.functional === "boolean" &&
+        typeof consentValue.analytics === "boolean" &&
+        typeof consentValue.marketing === "boolean";
+      var functional = decided && consentValue.functional === true;
+      root.toggleAttribute("data-cookie-decided", Boolean(decided));
+      root.toggleAttribute("data-cookie-functional", Boolean(functional));
+
+      var params = new URLSearchParams(window.location.search);
+      var transferredTheme = params.get("meltiply-theme");
+      if (
+        transferredTheme !== "light" &&
+        transferredTheme !== "dark" &&
+        transferredTheme !== "system"
+      ) {
+        transferredTheme = null;
+      }
+      if (params.has("meltiply-theme")) {
+        params.delete("meltiply-theme");
+        var query = params.toString();
+        try {
+          window.history.replaceState(
+            null,
+            "",
+            window.location.pathname + (query ? "?" + query : "") + window.location.hash,
+          );
+        } catch (error) {
+          // The unused transfer parameter is harmless if history cannot be changed.
+        }
+      }
+
+      var storedTheme = transferredTheme;
+      if (functional) {
+        // Resolve intent before optional persistence: blocked writes must not
+        // discard a transferred choice or a valid shared cookie preference.
+        if (storedTheme === null) {
+          try {
+            var themeEntry = document.cookie
+              .split(";")
+              .find((item) => item.trim().startsWith("meltiply-theme="));
+            var cookieTheme = themeEntry
+              ? decodeURIComponent(themeEntry.trim().slice("meltiply-theme=".length))
+              : null;
+            storedTheme =
+              cookieTheme === "light" || cookieTheme === "dark" || cookieTheme === "system"
+                ? cookieTheme
+                : window.localStorage.getItem("meltiply.theme");
+          } catch (error) {
+            // Unavailable preference reads leave the OS palette authoritative.
+          }
+        }
+        if (storedTheme === "light" || storedTheme === "dark" || storedTheme === "system") {
+          try {
+            window.localStorage.setItem("meltiply.theme", storedTheme);
+          } catch (error) {
+            // Recovery storage is optional; retain the resolved current-page choice.
+          }
+          try {
+            var themeDomain =
+              location.hostname === "meltiply.com" || location.hostname.endsWith(".meltiply.com")
+                ? "; Domain=meltiply.com"
+                : "";
+            var themeSecure = location.protocol === "https:" ? "; Secure" : "";
+            document.cookie =
+              "meltiply-theme=" +
+              storedTheme +
+              "; Path=/; Max-Age=31536000; SameSite=Lax" +
+              themeSecure +
+              themeDomain;
+          } catch (error) {
+            // A denied cookie write must not undo the choice or the local write.
+          }
+        }
+      }
+
+      var prefersDark = false;
+      var reduceMotion = false;
+      try {
+        prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      } catch (error) {
+        // Unsupported media queries use the light palette and normal motion.
+      }
+      root.classList.toggle(
+        "dark",
+        storedTheme === "dark" || (storedTheme !== "light" && prefersDark),
+      );
+      root.style.colorScheme = root.classList.contains("dark") ? "dark" : "light";
+      if (storedTheme === "light" || storedTheme === "dark" || storedTheme === "system") {
+        root.setAttribute("data-theme-preference", storedTheme);
+      }
+      var lowMotion = false;
+      if (functional) {
+        try {
+          lowMotion = window.localStorage.getItem("meltiply.low-motion") === "on";
+        } catch (error) {
+          // Manual preference storage can be blocked; the OS preference still applies.
+        }
+      }
+      root.toggleAttribute("data-low-motion", lowMotion || reduceMotion);
+    </script>
+    <link rel="stylesheet" href="/src/app/globals.css" />
+    <title>Meltiply</title>
+  </head>
+  <body class="flex min-h-full flex-col">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

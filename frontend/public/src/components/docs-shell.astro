@@ -1,0 +1,52 @@
+---
+import { Docs } from "./docs";
+import type { Root } from "fumadocs-core/page-tree";
+import type { AstroProviderProps } from "fumadocs-core/framework/astro";
+import type { DocsPageProps } from "fumadocs-ui/layouts/docs/page";
+
+/**
+ * Renders the trusted, build-time MDX slot into an explicit page-content prop.
+ * Astro updates persisted islands' props but retains their original slots;
+ * passing HTML lets the article change while the React navigation shell lives
+ * across routes. Only the gated public docs collection supplies this content.
+ * The home link stays same-origin; `appUrl` pins the separate app to its
+ * configured preview origin.
+ */
+interface Props {
+  tree: Root;
+  pathname: string;
+  params: AstroProviderProps["params"];
+  page?: DocsPageProps;
+}
+
+const content = await Astro.slots.render("default");
+const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
+---
+
+<Docs
+  {...Astro.props}
+  content={content}
+  appUrl={appUrl}
+  client:load
+  transition:persist="meltiply-docs-shell"
+/>
+
+<script>
+  import { initializeReadingRail } from "./docs-reading-rail";
+  import { initializeHeadingCopying } from "./docs-heading-copy";
+
+  initializeHeadingCopying();
+
+  /**
+   * Paints the server-rendered rail independently of the React island bundle.
+   * Hydration later takes over its observers without hiding or resetting it;
+   * the head bootstrap supplies the initial manual/OS low-motion preference.
+   */
+  const rail = document.querySelector<HTMLElement>(".docs-reading-rail");
+  if (rail)
+    initializeReadingRail(
+      rail,
+      document.documentElement.hasAttribute("data-low-motion"),
+      true,
+    );
+</script>

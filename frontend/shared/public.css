@@ -1,0 +1,159 @@
+/*
+ * Shared public-site primitives. Marketing surfaces (landing and docs) layer
+ * these skip-link, header, brand, and control rules on top of `tokens.css` and
+ * `motion.css`; page-specific layout and responsive overrides stay in each
+ * site's stylesheet. `--public-header-height` names the desktop header height
+ * so sticky page chrome can offset itself without re-measuring.
+ */
+:root {
+  --public-header-height: 88px;
+}
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  padding: 12px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  z-index: 100;
+  transform: translateY(-150%);
+}
+.skip-link:focus {
+  transform: none;
+}
+.site-header {
+  height: var(--public-header-height);
+  width: min(1200px, calc(100% - 80px));
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  position: relative;
+  z-index: 10;
+  border-bottom: 1px solid var(--line-strong);
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 25px;
+  font-weight: 650;
+  letter-spacing: -1px;
+}
+.site-header .brand {
+  color: var(--charcoal);
+  transition: color 180ms ease;
+}
+.site-header .brand:hover {
+  color: var(--ink);
+}
+[data-brand-mark] {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  color: var(--ink);
+}
+/* `:where` keeps the small modifier at base `[data-brand-mark]` specificity so
+ * downstream media-query overrides still win by source order, matching the
+ * class cascade this replaced. */
+[data-brand-mark]:where([data-small]) {
+  width: 25px;
+  height: 25px;
+}
+.desktop-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.desktop-nav a {
+  padding: 9px 14px;
+  border-radius: 9999px;
+}
+.desktop-nav a:hover,
+.icon-button:hover {
+  background: var(--hover);
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px;
+  min-height: 48px;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  white-space: nowrap;
+  transition:
+    background 180ms ease,
+    transform 180ms ease;
+}
+.button:active {
+  transform: scale(0.98);
+}
+.button svg {
+  width: 16px;
+  height: 16px;
+}
+.button-dark {
+  color: var(--primary-foreground);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.button-dark:hover {
+  background: color-mix(in srgb, var(--ink) 85%, var(--surface));
+}
+.button-light {
+  background: var(--surface);
+}
+.button-light:hover {
+  background: var(--hover);
+}
+.button-small {
+  min-height: 36px;
+  padding-inline: 14px;
+  font-size: 13px;
+}
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: transparent;
+  color: var(--ink-2);
+  border: 0;
+  border-radius: var(--radius-control);
+}
+.icon-button svg {
+  width: 17px;
+  height: 17px;
+}
+/* One motion vocabulary for shared public controls; sites extend the selector
+ * list for their own surfaces. Palette swaps suppress these transitions
+ * through theme-transition.css; `--ease-enter` resolves from motion.css. */
+[data-brand-mark],
+.desktop-nav a,
+.icon-button,
+.button > svg {
+  transition:
+    transform 220ms var(--ease-enter),
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
+}
+.brand:hover [data-brand-mark] {
+  transform: translateY(-1px);
+}
+.button:hover > svg {
+  transform: translateX(3px);
+}

@@ -1,0 +1,118 @@
+// Module-level verifier/origin caches for the API Worker (AUD-037).
+//
+// The runtime hands every request a fresh bindings object, so caching keyed
+// on `env` never hits. These caches live at module scope (isolate lifetime)
+// and are keyed on the configuration strings that actually change the
+// verifier behavior — identical config returns the same instance across
+// requests, and a different config (tests, mixed bindings) rebuilds safely.
+import {
+  createCloudflareAccessTokenVerifier,
+  createRemoteJwtVerifier,
+  type AccessTokenVerifier,
+  type JwtVerifier,
+} from "@meltiply/auth";
+
+import type { ApiWorkerEnv } from "./env";
+
+let accessVerifier:
+  | { audience: string; teamDomain: string; value: AccessTokenVerifier }
+  | undefined;
+
+let allowedOrigins: { raw: string; values: ReadonlySet<string> } | undefined;
+
+let jwtVerifier: { origin: string; value: JwtVerifier } | undefined;
+
+/**
+ * Splits a comma-separated configuration string into a trimmed, non-empty list of tokens.
+ *
+ * @param value - Raw comma-separated configuration string.
+ * @returns Array of trimmed tokens, or undefined if the input is empty or undefined.
+ */
+function split(value: string | undefined): string[] | undefined {
+  const parts = value
+    ?.split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts && parts.length > 0 ? parts : undefined;
+}
+
+/**
+ * Returns the cached set of approved CORS origins parsed from the environment.
+ *
+ * Parses `env.ALLOWED_ORIGINS` once per unique configuration string and reuses the
+ * resulting `ReadonlySet` across requests in the same isolate.
+ *
+ * @param env - Worker environment bindings containing `ALLOWED_ORIGINS`.
+ * @returns ReadonlySet of approved origin strings.
+ */
+export function allowedOriginsFor(env: ApiWorkerEnv): ReadonlySet<string> {
+  const raw = env.ALLOWED_ORIGINS ?? "";
+  if (allowedOrigins && allowedOrigins.raw === raw) {
+    return allowedOrigins.values;
+  }
+  const values = new Set(split(raw) ?? []);
+  allowedOrigins = { raw, values };
+  return values;
+}
+
+/**
+ * Returns a cached Cloudflare Access token verifier keyed by team domain and audience.
+ *
+ * Reuses the JWKS verifier across requests in the same isolate, preventing redundant
+ * certificate fetches. Reconstructs the verifier if teamDomain or audience change.
+ *
+ * @param env - Worker environment bindings containing Access verifier configuration.
+ * @returns Configured `AccessTokenVerifier` capable of verifying Cloudflare Access JWTs.
+ * @throws {Error} If `ACCESS_TEAM_DOMAIN` or `ACCESS_POLICY_AUD` is missing.
+ */
+export function accessVerifierFor(env: ApiWorkerEnv): AccessTokenVerifier {
+  const teamDomain = env.ACCESS_TEAM_DOMAIN;
+  const audience = env.ACCESS_POLICY_AUD;
+  if (!teamDomain || !audience) {
+    throw new Error("Access verifier configuration is unavailable");
+  }
+  if (
+    accessVerifier &&
+    accessVerifier.teamDomain === teamDomain &&
+    accessVerifier.audience === audience
+  ) {
+    return accessVerifier.value;
+  }
+  const verifier = createCloudflareAccessTokenVerifier({
+    audience,
+    teamDomain,
+  });
+  accessVerifier = { audience, teamDomain, value: verifier };
+  return verifier;
+}
+
+/**
+ * Returns a cached Better Auth JWT verifier keyed by the configured auth origin.
+ *
+ * The Better Auth JWT plugin signs tenant access tokens with `iss`/`aud` pinned
+ * to the normalized baseURL origin, so the verifier derives that origin from
+ * `BETTER_AUTH_URL` (falling back to `PUBLIC_API_URL`) and resolves signing keys
+ * from the plugin-managed `${origin}/api/auth/jwks` endpoint. The remote JWKS
+ * verifier is reused across requests in the same isolate and rebuilt only when
+ * the configured origin changes.
+ *
+ * @param env - Worker environment bindings containing Better Auth URL configuration.
+ * @returns Configured `JwtVerifier` validating signature, issuer, audience, and identity claims.
+ * @throws {Error} If neither `BETTER_AUTH_URL` nor `PUBLIC_API_URL` is configured.
+ */
+export function jwtVerifierFor(env: ApiWorkerEnv): JwtVerifier {
+  const configured = env.BETTER_AUTH_URL?.trim() || env.PUBLIC_API_URL?.trim();
+  if (!configured) {
+    throw new Error("Better Auth JWT verifier configuration is unavailable");
+  }
+  const origin = new URL(configured).origin;
+  if (jwtVerifier && jwtVerifier.origin === origin) {
+    return jwtVerifier.value;
+  }
+  const verifier = createRemoteJwtVerifier(
+    { audience: origin, issuer: origin },
+    new URL(`${origin}/api/auth/jwks`),
+  );
+  jwtVerifier = { origin, value: verifier };
+  return verifier;
+}

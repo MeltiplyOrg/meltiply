@@ -1,0 +1,137 @@
+name: meltiply-cloudflare
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_DB: meltiply
+      POSTGRES_PASSWORD: meltiply-admin-local
+      POSTGRES_USER: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d meltiply"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:${MELTIPLY_CLOUDFLARE_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - meltiply-cloudflare-postgres:/var/lib/postgresql
+      - ./packages/database/migrations:/migrations:ro
+      - ./scripts/cloudflare-local/postgres:/local:ro
+      - ./scripts/cloudflare-local/postgres/docker-entrypoint.sh:/docker-entrypoint-initdb.d/000-meltiply.sh:ro
+
+  # Local-dev observability: Grafana UI + Tempo traces + Loki logs.
+  # Opt in with `make cloudflare-observability-start`; normal Compose/DB
+  # commands should not start or pull the telemetry services.
+  # Workers export OTLP/HTTP spans to Tempo on host port 4318 when
+  # ENVIRONMENT is local/test. Staging/production leave export as a no-op.
+  tempo:
+    profiles: [observability]
+    image: grafana/tempo:3.0.3
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./scripts/cloudflare-local/observability/tempo.yaml:/etc/tempo.yaml:ro
+      - meltiply-cloudflare-tempo:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3200/ready >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  loki:
+    profiles: [observability]
+    image: grafana/loki:3.7.6
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./scripts/cloudflare-local/observability/loki.yaml:/etc/loki/loki.yaml:ro
+      - meltiply-cloudflare-loki:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3100/ready >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  grafana:
+    image: grafana/grafana:13.2.0
+    profiles: [observability]
+    depends_on:
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+      prometheus:
+        condition: service_started
+    environment:
+      # Dashboards remain immediately viewable locally; sign-in is available for admin actions.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/json/meltiply-traces.json
+      GF_USERS_DEFAULT_THEME: dark
+      GF_SERVER_HTTP_PORT: "3000"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor traceQLStreaming correlations
+    volumes:
+      - ./scripts/cloudflare-local/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - meltiply-cloudflare-grafana:/var/lib/grafana
+    ports:
+      # 3001 avoids the local frontend Vite port (3000).
+      - "127.0.0.1:3001:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  # Receives the completed Playwright frontend health snapshot before Prometheus scrapes it.
+  pushgateway:
+    profiles: [observability]
+    image: prom/pushgateway:v1.11.3
+    ports:
+      - "127.0.0.1:9091:9091"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9091/-/ready >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  # Receives k6 experimental-prometheus-rw metrics for the local load dashboard.
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.14.0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+      - --enable-feature=native-histograms
+    volumes:
+      - ./scripts/cloudflare-local/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - meltiply-cloudflare-prometheus:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/ready >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  meltiply-cloudflare-postgres:
+  meltiply-cloudflare-tempo:
+  meltiply-cloudflare-loki:
+  meltiply-cloudflare-grafana:
+  meltiply-cloudflare-prometheus:

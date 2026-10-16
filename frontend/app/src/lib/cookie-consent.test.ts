@@ -1,0 +1,111 @@
+// @vitest-environment jsdom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  consentCookieName,
+  hasCookieConsent,
+  readCookieConsent,
+  readFunctionalStorage,
+  subscribeCookieConsent,
+  writeCookieConsent,
+  writeFunctionalStorage,
+} from "@meltiply/ui/cookie-consent";
+
+/** Each case starts without a consent record or optional preferences; auth fixtures never enter this isolated store. */
+beforeEach(() => {
+  document.cookie = `${consentCookieName}=; Path=/; Max-Age=0`;
+  document.cookie = "meltiply-theme=; Path=/; Max-Age=0";
+  window.localStorage.clear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  document.cookie = `${consentCookieName}=; Path=/; Max-Age=0`;
+  document.cookie = "meltiply-theme=; Path=/; Max-Age=0";
+  window.localStorage.clear();
+});
+
+describe("optional cookie and storage consent", () => {
+  it("does not read or write optional preference values before a choice", () => {
+    window.localStorage.setItem("meltiply.theme", "dark");
+    const get = vi.spyOn(Storage.prototype, "getItem");
+    const set = vi.spyOn(Storage.prototype, "setItem");
+    expect(readFunctionalStorage("meltiply.theme")).toBeNull();
+    writeFunctionalStorage("meltiply.language", "es");
+    expect(get).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
+    expect(hasCookieConsent("analytics")).toBe(false);
+    expect(hasCookieConsent("marketing")).toBe(false);
+  });
+
+  it("allows only accepted purposes and remembers an explicit rejection", () => {
+    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    writeFunctionalStorage("meltiply.theme", "dark");
+    expect(readFunctionalStorage("meltiply.theme")).toBe("dark");
+    expect(hasCookieConsent("analytics")).toBe(false);
+    expect(hasCookieConsent("marketing")).toBe(false);
+    writeCookieConsent({ functional: false, analytics: true, marketing: false });
+    expect(readFunctionalStorage("meltiply.theme")).toBeNull();
+    expect(hasCookieConsent("analytics")).toBe(true);
+    expect(hasCookieConsent("marketing")).toBe(false);
+    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    expect(readCookieConsent()).toEqual({ functional: false, analytics: false, marketing: false });
+  });
+
+  it("withdrawal removes optional recovery and theme records without deleting unrelated or essential data", () => {
+    writeCookieConsent({ functional: true, analytics: true, marketing: true });
+    for (const key of [
+      "meltiply.theme",
+      "meltiply.language",
+      "meltiply.composer.v1.brand",
+      "meltiply.upload.v1.file",
+      "meltiply.upload.create.v1.file",
+    ])
+      writeFunctionalStorage(key, "saved");
+    window.localStorage.setItem("essential-operation", "keep");
+    document.cookie = "meltiply-theme=dark; Path=/";
+    document.cookie = "session-fixture=keep; Path=/";
+    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    expect(Object.keys(window.localStorage)).toEqual(["essential-operation"]);
+    expect(document.cookie).not.toContain("meltiply-theme=");
+    expect(document.cookie).toContain("session-fixture=keep");
+    expect(document.cookie).toContain(`${consentCookieName}=`);
+    document.cookie = "session-fixture=; Path=/; Max-Age=0";
+  });
+
+  it("treats expired, invalid-version, and malformed records as no consent", () => {
+    for (const value of [
+      "not-json",
+      JSON.stringify({
+        v: 2,
+        functional: true,
+        analytics: true,
+        marketing: true,
+        expires: Date.now() + 10000,
+      }),
+      JSON.stringify({
+        v: 1,
+        functional: true,
+        analytics: true,
+        marketing: true,
+        expires: Date.now() - 1,
+      }),
+    ]) {
+      document.cookie = `${consentCookieName}=${encodeURIComponent(value)}; Path=/`;
+      expect(readCookieConsent()).toBeNull();
+      expect(hasCookieConsent("functional")).toBe(false);
+    }
+  });
+
+  it("observes sibling-site withdrawal on focus and clears this origin's optional data", () => {
+    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    writeFunctionalStorage("meltiply.theme", "dark");
+    const changed = vi.fn();
+    const stop = subscribeCookieConsent(changed);
+    document.cookie = `${consentCookieName}=${encodeURIComponent(JSON.stringify({ v: 1, functional: false, analytics: false, marketing: false, expires: Date.now() + 10000 }))}; Path=/`;
+    window.dispatchEvent(new Event("focus"));
+    expect(changed).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem("meltiply.theme")).toBeNull();
+    stop();
+  });
+});

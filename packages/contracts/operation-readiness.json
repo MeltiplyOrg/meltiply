@@ -1,0 +1,258 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "1.0.0-target.0",
+  "operations": {
+    "getHealth": {
+      "state": "specified",
+      "evidenceAndGate": "Workerd route and OpenAPI conformance tests pass; isolated preview conformance is still required."
+    },
+    "getReadiness": {
+      "state": "specified",
+      "evidenceAndGate": "Binding-aware Worker route exists; isolated preview dependency evidence is still required."
+    },
+    "signInWithEmail": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker handler, cookie transport, and conformance evidence remain."
+    },
+    "signUpWithEmail": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker handler, cookie transport, and conformance evidence remain."
+    },
+    "signOut": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker handler, cookie transport, and conformance evidence remain."
+    },
+    "getAuthSession": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker handler, cookie transport, and conformance evidence remain."
+    },
+    "requestPasswordReset": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker handler, Cloudflare Email Sending staging delivery, and conformance evidence remain."
+    },
+    "resetPassword": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker handler and conformance evidence remain."
+    },
+    "verifyEmail": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker handler, Cloudflare Email Sending staging delivery, and conformance evidence remain."
+    },
+    "changePassword": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker handler and conformance evidence remain."
+    },
+    "handleBillingWebhook": {
+      "state": "specified",
+      "evidenceAndGate": "Polar Standard Webhooks signature verification, product-derived subscription normalization, durable event dedupe, and real Worker tests pass; sandbox staging smoke remains."
+    },
+    "getCurrentUser": {
+      "state": "specified",
+      "evidenceAndGate": "Worker/RLS implementation and local tests exist; preview conformance remains."
+    },
+    "createWorkspace": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker route, membership transaction, and conformance evidence remain."
+    },
+    "updateWorkspace": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker route, admin role check, and conformance evidence remain."
+    },
+    "createWorkspaceInvitation": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker route, Cloudflare Email Sending staging delivery, and conformance evidence remain."
+    },
+    "revokeWorkspaceInvitation": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker route, admin role check, and conformance evidence remain."
+    },
+    "acceptWorkspaceInvitation": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker route, atomic membership transaction, and conformance evidence remain."
+    },
+    "updateWorkspaceMember": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker route, admin role check, and conformance evidence remain."
+    },
+    "removeWorkspaceMember": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker route, admin/self check, and conformance evidence remain."
+    },
+    "listBrandProfiles": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Brand Profile cutover; Worker route, membership check, and conformance evidence remain."
+    },
+    "createBrandProfile": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Brand Profile cutover; Worker route, admin role check, normalized-name uniqueness, and conformance evidence remain."
+    },
+    "listDeletedBrandProfiles": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Brand Profile cutover; Worker route, admin role check, and conformance evidence remain."
+    },
+    "getBrandProfile": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Brand Profile cutover; Worker route, membership check, and conformance evidence remain."
+    },
+    "updateBrandProfile": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Brand Profile cutover; Worker route, admin role check, normalized-name uniqueness, and conformance evidence remain."
+    },
+    "deleteBrandProfile": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Brand Profile cutover; Worker route, admin role check, durable soft-delete effects, and conformance evidence remain."
+    },
+    "restoreBrandProfile": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the Brand Profile cutover; Worker route, admin role check, retention-window guard, and conformance evidence remain."
+    },
+    "listPlatformCapabilities": {
+      "state": "specified",
+      "evidenceAndGate": "Worker returns all five fail-closed capability rows; preview conformance remains."
+    },
+    "listPlatformAccounts": {
+      "state": "specified",
+      "evidenceAndGate": "Worker tenant/RLS integration passes; preview conformance remains."
+    },
+    "getPlatformPublishingRequirements": {
+      "state": "specified",
+      "evidenceAndGate": "RLS-first credential access, normalized TikTok requirements, Worker conformance, and cross-tenant PostgreSQL tests pass; live provider and preview remain."
+    },
+    "startPlatformOAuth": {
+      "state": "specified",
+      "evidenceAndGate": "PKCE, exact callback, user/org/provider state binding, and frontend relay tests pass; no provider is accepted yet."
+    },
+    "completePlatformOAuth": {
+      "state": "specified",
+      "evidenceAndGate": "Consume-once exchange, encrypted upsert, and explicit outcome tests pass; live provider acceptance remains."
+    },
+    "disconnectPlatformAccount": {
+      "state": "specified",
+      "evidenceAndGate": "Idempotency, tenant isolation, best-effort adapter revoke, and future-work cancellation pass locally; preview remains."
+    },
+    "listPosts": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the post-owned media cutover; Worker route, RLS scoping, and conformance evidence remain."
+    },
+    "createPost": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the post-owned media cutover; Worker route, nonempty-draft rule, and conformance evidence remain."
+    },
+    "getPost": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the post-owned media cutover; Worker route, ordered attachment/target projection, and conformance evidence remain."
+    },
+    "updatePost": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the post-owned media cutover; Worker save transaction, attach guard, and conformance evidence remain."
+    },
+    "deletePost": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the post-owned media cutover; Worker soft-delete, reference release, and conformance evidence remain."
+    },
+    "schedulePost": {
+      "state": "specified",
+      "evidenceAndGate": "Contract specified in the post-owned media cutover; Worker target validation, pending-only upsert, and conformance evidence remain."
+    },
+    "createUploadSession": {
+      "state": "specified",
+      "evidenceAndGate": "Worker/R2 binding implementation, quota transaction, policy tests, and integration coverage pass; real R2 remains."
+    },
+    "getUploadSession": {
+      "state": "specified",
+      "evidenceAndGate": "Worker refresh/detail implementation and integration coverage pass; real R2 remains."
+    },
+    "abortUploadSession": {
+      "state": "specified",
+      "evidenceAndGate": "Worker abort/release implementation and integration coverage pass; real R2 cleanup remains."
+    },
+    "createUploadPartUrls": {
+      "state": "specified",
+      "evidenceAndGate": "Worker bounded part signing and multipart integration coverage pass; real R2 remains."
+    },
+    "completeUploadSession": {
+      "state": "specified",
+      "evidenceAndGate": "Worker authoritative completion and metadata mismatch coverage pass; real R2 remains."
+    },
+    "getAsset": {
+      "state": "specified",
+      "evidenceAndGate": "Worker/RLS implementation and integration tests pass; protected preview smoke remains."
+    },
+    "getAssetDownloadUrl": {
+      "state": "specified",
+      "evidenceAndGate": "Worker short-lived signed download and safe response overrides are checked in; real R2 remains."
+    },
+    "getAssetPreviewUrl": {
+      "state": "specified",
+      "evidenceAndGate": "Worker short-lived inline URL is limited to validated ready media; real-R2 browser rendering remains."
+    },
+    "listDistributions": {
+      "state": "specified",
+      "evidenceAndGate": "Worker tenant/RLS list implementation and local tests pass; protected preview smoke remains."
+    },
+    "getDistribution": {
+      "state": "specified",
+      "evidenceAndGate": "Worker tenant/RLS implementation and local tests pass; preview remains."
+    },
+    "updateScheduledDistribution": {
+      "state": "specified",
+      "evidenceAndGate": "Worker scheduled-only reschedule/idempotency implementation passes local tests; preview remains."
+    },
+    "cancelDistribution": {
+      "state": "specified",
+      "evidenceAndGate": "Worker cancellation/requested-cancel outbox implementation passes local tests; provider preview remains."
+    },
+    "retryDistribution": {
+      "state": "specified",
+      "evidenceAndGate": "Worker retry guard/outbox plus provider lookup and audited safe-failure resolution pass locally; protected preview remains."
+    },
+    "listCalendarEvents": {
+      "state": "specified",
+      "evidenceAndGate": "Worker RFC3339/range/RLS tests and frontend consumer tests pass; preview conformance remains."
+    },
+    "getAnalyticsSummary": {
+      "state": "specified",
+      "evidenceAndGate": "Worker aggregate/RLS tests and partial semantics pass; preview measurement remains."
+    },
+    "getDistributionAnalytics": {
+      "state": "specified",
+      "evidenceAndGate": "Worker bounds/order/RLS tests pass; preview measurement remains."
+    },
+    "listInboxComments": {
+      "state": "specified",
+      "evidenceAndGate": "Worker filter/pagination/RLS/reconciliation tests pass; preview remains."
+    },
+    "replyToComment": {
+      "state": "specified",
+      "evidenceAndGate": "Worker commits idempotent acceptance; bounded reply Workflow, provider ledger, and ambiguity lookup pass locally; live proof remains."
+    },
+    "getBillingPlan": {
+      "state": "specified",
+      "evidenceAndGate": "Worker durable read and frontend state pass; preview remains."
+    },
+    "getBillingUsage": {
+      "state": "specified",
+      "evidenceAndGate": "Worker durable read and frontend state pass; Phase 5 reconciliation remains."
+    },
+    "createCheckoutSession": {
+      "state": "specified",
+      "evidenceAndGate": "Worker strict URL boundary and built-in billing adapter exist; configured test-mode staging evidence remains."
+    },
+    "createBillingPortalSession": {
+      "state": "specified",
+      "evidenceAndGate": "Worker strict URL boundary and built-in billing adapter exist; configured test-mode staging evidence remains."
+    },
+    "getOAuthSelection": {
+      "state": "specified",
+      "evidenceAndGate": "Worker pending selection retrieval with owner scoping and sanitized public accounts passes local tests; preview remains."
+    },
+    "confirmOAuthSelection": {
+      "state": "specified",
+      "evidenceAndGate": "Worker single-account selection confirmation with idempotency and quota enforcement passes local tests; preview remains."
+    },
+    "cancelOAuthSelection": {
+      "state": "specified",
+      "evidenceAndGate": "Worker idempotent selection cancellation and ticket discard pass local tests; preview remains."
+    }
+  }
+}

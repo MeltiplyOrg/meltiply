@@ -1,0 +1,12 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "meltiply-public",
+  "compatibility_date": "2026-10-07",
+  // One static-assets Worker owns landing, guides, legal pages and search.
+  // Never use a SPA fallback: unknown public paths must return a real 404.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+  },
+  "routes": [{ "pattern": "meltiply.com", "custom_domain": true }],
+}

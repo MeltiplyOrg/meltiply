@@ -1,0 +1,11 @@
+# Environment loading remains owned by Make, direnv, Vite, and Wrangler.
+env = false
+
+[install]
+# Preserve workspace dependency isolation instead of exposing undeclared packages.
+linker = "isolated"
+
+[run]
+# Keep Node-based tooling on Node and retain the existing POSIX shell semantics.
+bun = false
+shell = "system"

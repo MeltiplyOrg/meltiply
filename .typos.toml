@@ -1,0 +1,18 @@
+[files]
+extend-exclude = [".claude", "**/worker-configuration.d.ts", "frontend/app/src/lib/i18n.tsx"]
+
+[default]
+# Fumadocs owns the `nd-*` DOM ID prefix; preserve exact quoted selectors and lookups.
+extend-ignore-re = ['"(?:#)?nd-[a-z-]*"']
+
+[default.extend-words]
+GetDel = "GetDel"
+Meltiply = "Meltiply"
+presign = "presign"
+ratelimit = "ratelimit"
+RTO = "RTO"
+ba = "ba"
+fpr = "fpr"
+publicaly = "publicaly"
+trak = "trak"
+unparseable = "unparseable"

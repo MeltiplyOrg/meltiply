@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "endpoint": {
+    "min_cu": null,
+    "max_cu": null,
+    "autosuspend_delay_seconds": null
+  },
+  "recent_month": {
+    "month": null,
+    "wall_clock_hours": null,
+    "billed_compute_cu_hours": null
+  },
+  "unmeasured": [
+    "endpoint.autosuspend_delay_seconds",
+    "endpoint.max_cu",
+    "endpoint.min_cu",
+    "recent_month.billed_compute_cu_hours",
+    "recent_month.month",
+    "recent_month.wall_clock_hours"
+  ],
+  "retrieval": {
+    "api_base_url": "https://console.neon.tech/api/v2",
+    "api_key_env": "NEON_API_KEY",
+    "project_id_env": "MELTIPLY_NEON_PROJECT_ID",
+    "branch_id_env": "MELTIPLY_NEON_BRANCH_ID",
+    "endpoint_settings_command": "curl -s -H \"Authorization: Bearer $NEON_API_KEY\" \"https://console.neon.tech/api/v2/projects/$MELTIPLY_NEON_PROJECT_ID/branches/$MELTIPLY_NEON_BRANCH_ID/endpoints\"",
+    "endpoint_settings_fields": "endpoints[].autoscaling_limit_min_cu, endpoints[].autoscaling_limit_max_cu, endpoints[].suspend_timeout_seconds",
+    "consumption_command": "curl -s -H \"Authorization: Bearer $NEON_API_KEY\" \"https://console.neon.tech/api/v2/consumption_history/v2/projects?project_ids=$MELTIPLY_NEON_PROJECT_ID&metrics=compute_unit_seconds&granularity=monthly&from=$FROM&to=$TO\"",
+    "consumption_fields": "periods[].consumption[].compute_unit_seconds divided by 3600 gives billed CU-hours"
+  }
+}

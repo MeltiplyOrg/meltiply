@@ -1,0 +1,191 @@
+[data-cookie-controls] {
+  font-family: var(--font-sans, system-ui, sans-serif);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+[data-cookie-body] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* Cap the consent panel below the viewport so a short screen scrolls the
+     body instead of pushing options or actions out of reach. The 104px
+     reserve covers the Sileo header (40px), toast padding (14+16px), and the
+     fixed viewport inset (16px top + bottom). */
+  max-height: calc(100vh - 104px);
+  max-height: calc(100dvh - 104px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+[data-cookie-copy],
+[data-cookie-status-copy] {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+[data-cookie-policy-link] {
+  color: var(--accent-ink);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+[data-cookie-policy-link]:hover {
+  color: var(--accent);
+}
+
+[data-cookie-categories] {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+[data-cookie-legend] {
+  padding: 0;
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+[data-cookie-option] {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: var(--radius-control, 8px);
+  border: 1px solid var(--line);
+  background: var(--inset);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+[data-cookie-option]:hover {
+  border-color: var(--line-strong);
+  background: var(--hover);
+}
+
+[data-cookie-option][data-checked] {
+  border-color: color-mix(in oklch, var(--accent) 42%, var(--line));
+  background: var(--accent-tint);
+}
+
+[data-cookie-option] input {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+[data-cookie-option] > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+[data-cookie-option] strong {
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+[data-cookie-option] span span {
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+[data-cookie-actions] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+[data-cookie-btn] {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: var(--radius-control, 8px);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    transform 150ms ease-out;
+}
+
+[data-cookie-btn]:active {
+  transform: scale(0.96);
+}
+
+[data-cookie-btn="primary"] {
+  background: var(--ink);
+  color: var(--surface);
+  border: 1px solid transparent;
+}
+
+[data-cookie-btn="primary"]:hover {
+  opacity: 0.92;
+}
+
+[data-cookie-btn="secondary"] {
+  background: var(--inset);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+}
+
+[data-cookie-btn="secondary"]:hover {
+  background: var(--hover);
+}
+
+[data-cookie-btn="manage"] {
+  grid-column: 1 / -1;
+  background: transparent;
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+}
+
+[data-cookie-btn="manage"]:hover {
+  background: var(--inset);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+[data-cookie-controls] button:focus-visible,
+[data-cookie-controls] a:focus-visible,
+[data-cookie-controls] input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+[data-sileo-toast][role="status"],
+[data-sileo-toast][role="status"] [data-sileo-content] {
+  pointer-events: none;
+}
+
+:root[data-cookie-decided] [data-cookie-first-visit] {
+  display: none;
+}

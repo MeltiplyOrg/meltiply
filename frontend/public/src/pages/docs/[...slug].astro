@@ -1,0 +1,83 @@
+---
+import { render, type CollectionEntry } from "astro:content";
+import DocsShell from "@/components/docs-shell.astro";
+import defaultMdxComponents from "fumadocs-ui/mdx";
+import "@/styles/docs.css";
+import { getPageTree, source } from "@/lib/source";
+import { getMarkdownPath } from "@/lib/markdown";
+import Layout from "@/components/layout.astro";
+import type { TOCItemType } from "fumadocs-core/toc";
+import { docsHeadingComponents } from "@/components/docs-heading";
+
+interface Props {
+  page: CollectionEntry<"docs">;
+  markdownPath: string;
+}
+
+/**
+ * Prerenders every public guide under `/docs`, including `/docs/` for the
+ * index. Metadata, TOC and agent discovery links come from the same collection;
+ * the Markdown alternate is generated alongside HTML without a runtime API.
+ */
+export async function getStaticPaths() {
+  return source.getPages().map((page) => ({
+    params: {
+      slug: page.slugs.length > 0 ? page.slugs.join("/") : undefined,
+    },
+    props: {
+      page: page.data._raw,
+      markdownPath: getMarkdownPath(page.url),
+    },
+  }));
+}
+
+const { page, markdownPath } = Astro.props;
+const { Content, headings } = await render(page);
+const toc: TOCItemType[] = headings.map((heading) => ({
+  depth: heading.depth,
+  title: heading.text,
+  url: "#" + heading.slug,
+}));
+---
+
+<Layout
+  title={`${page.data.title} — Meltiply docs`}
+  description={page.data.description}
+  markdownPath={markdownPath}
+>
+  <DocsShell
+    tree={getPageTree()}
+    pathname={Astro.url.pathname}
+    params={Astro.params}
+    page={{ toc }}
+  >
+    <h1 class="docs-title font-semibold text-3xl">{page.data.title}</h1>
+    <p class="docs-description text-lg text-fd-muted-foreground mb-8">
+      {page.data.description}
+    </p>
+    <div class="docs-prose prose flex-1">
+      <Content
+        components={{ ...defaultMdxComponents, ...docsHeadingComponents }}
+      />
+    </div>
+    <footer class="docs-agent-metadata">
+      AI agents: use{" "}
+      <a
+        href="/llms.txt"
+        class="underline underline-offset-4"
+        data-astro-reload
+      >
+        llms.txt
+      </a>{" "}
+      for the guide index, or read{" "}
+      <a
+        href={markdownPath}
+        class="underline underline-offset-4"
+        data-astro-reload
+      >
+        this page as Markdown
+      </a>
+      .
+    </footer>
+  </DocsShell>
+</Layout>

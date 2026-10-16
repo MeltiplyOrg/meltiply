@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "profile_version": "2026-08-24-prelaunch-known-lower-bound",
+  "projection_on": "2026-08-24",
+  "currency": "USD",
+  "scenarios": [1, 3, 10],
+  "sources": {
+    "cloudflare_workers": {
+      "retrieved_on": "2026-08-15",
+      "url": "https://developers.cloudflare.com/workers/platform/pricing/"
+    },
+    "cloudflare_hyperdrive": {
+      "retrieved_on": "2026-08-15",
+      "url": "https://developers.cloudflare.com/hyperdrive/platform/pricing/"
+    },
+    "cloudflare_queues": {
+      "retrieved_on": "2026-08-15",
+      "url": "https://developers.cloudflare.com/queues/platform/pricing/"
+    },
+    "cloudflare_workflows": {
+      "retrieved_on": "2026-08-15",
+      "url": "https://developers.cloudflare.com/workflows/reference/pricing/"
+    },
+    "cloudflare_durable_objects": {
+      "retrieved_on": "2026-08-15",
+      "url": "https://developers.cloudflare.com/durable-objects/platform/pricing/"
+    },
+    "cloudflare_r2": {
+      "retrieved_on": "2026-08-15",
+      "url": "https://developers.cloudflare.com/r2/pricing/"
+    },
+    "cloudflare_images": {
+      "retrieved_on": "2026-08-15",
+      "url": "https://developers.cloudflare.com/images/pricing/"
+    },
+    "cloudflare_stream": {
+      "retrieved_on": "2026-08-15",
+      "url": "https://developers.cloudflare.com/stream/pricing/"
+    },
+    "neon": {
+      "retrieved_on": "2026-08-15",
+      "url": "https://neon.com/pricing"
+    }
+  },
+  "monthly_base_costs": [
+    {
+      "id": "cloudflare.workers_paid_plan",
+      "source": "cloudflare_workers",
+      "usd": 5
+    }
+  ],
+  "non_billable_services": [
+    {
+      "id": "cloudflare.hyperdrive.paid_plan",
+      "source": "cloudflare_hyperdrive",
+      "statement": "No additional Paid-plan charge; database usage remains Neon usage."
+    }
+  ],
+  "tariffs": [
+    {
+      "id": "workers.requests",
+      "usage": "workers_and_workflows_requests",
+      "source": "cloudflare_workers",
+      "included": 10000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 0.3,
+      "rounding": "continuous"
+    },
+    {
+      "id": "workers.cpu",
+      "usage": "workers_and_workflows_cpu_ms",
+      "source": "cloudflare_workers",
+      "included": 30000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 0.02,
+      "rounding": "continuous"
+    },
+    {
+      "id": "workers.logs",
+      "usage": "workers_log_events",
+      "source": "cloudflare_workers",
+      "included": 20000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 0.6,
+      "rounding": "continuous"
+    },
+    {
+      "id": "workers.trace_logpush",
+      "usage": "workers_trace_logpush_requests",
+      "source": "cloudflare_workers",
+      "included": 10000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 0.05,
+      "rounding": "continuous"
+    },
+    {
+      "id": "queues.operations",
+      "usage": "queue_operations",
+      "source": "cloudflare_queues",
+      "included": 1000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 0.4,
+      "rounding": "continuous"
+    },
+    {
+      "id": "workflows.steps",
+      "usage": "workflow_steps",
+      "source": "cloudflare_workflows",
+      "effective_on": "2026-08-10",
+      "included": 500000,
+      "billing_unit": 100000,
+      "usd_per_unit": 0.8,
+      "rounding": "continuous"
+    },
+    {
+      "id": "workflows.storage",
+      "usage": "workflow_storage_gb_month",
+      "source": "cloudflare_workflows",
+      "effective_on": "2026-08-10",
+      "included": 1,
+      "billing_unit": 1,
+      "usd_per_unit": 0.2,
+      "rounding": "continuous"
+    },
+    {
+      "id": "durable_objects.requests",
+      "usage": "durable_object_requests",
+      "source": "cloudflare_durable_objects",
+      "included": 1000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 0.15,
+      "rounding": "ceil_billable"
+    },
+    {
+      "id": "durable_objects.duration",
+      "usage": "durable_object_duration_gb_seconds",
+      "source": "cloudflare_durable_objects",
+      "included": 400000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 12.5,
+      "rounding": "ceil_billable"
+    },
+    {
+      "id": "durable_objects.rows_read",
+      "usage": "durable_object_rows_read",
+      "source": "cloudflare_durable_objects",
+      "included": 25000000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 0.001,
+      "rounding": "continuous"
+    },
+    {
+      "id": "durable_objects.rows_written",
+      "usage": "durable_object_rows_written",
+      "source": "cloudflare_durable_objects",
+      "included": 50000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 1,
+      "rounding": "continuous"
+    },
+    {
+      "id": "durable_objects.storage",
+      "usage": "durable_object_storage_gb_month",
+      "source": "cloudflare_durable_objects",
+      "included": 5,
+      "billing_unit": 1,
+      "usd_per_unit": 0.2,
+      "rounding": "continuous"
+    },
+    {
+      "id": "r2.storage",
+      "usage": "r2_standard_storage_gb_month",
+      "source": "cloudflare_r2",
+      "included": 10,
+      "billing_unit": 1,
+      "usd_per_unit": 0.015,
+      "rounding": "ceil_usage"
+    },
+    {
+      "id": "r2.class_a",
+      "usage": "r2_class_a_operations",
+      "source": "cloudflare_r2",
+      "included": 1000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 4.5,
+      "rounding": "ceil_usage"
+    },
+    {
+      "id": "r2.class_b",
+      "usage": "r2_class_b_operations",
+      "source": "cloudflare_r2",
+      "included": 10000000,
+      "billing_unit": 1000000,
+      "usd_per_unit": 0.36,
+      "rounding": "ceil_usage"
+    },
+    {
+      "id": "images.transformations",
+      "usage": "images_transformations",
+      "source": "cloudflare_images",
+      "included": 5000,
+      "billing_unit": 1000,
+      "usd_per_unit": 0.5,
+      "rounding": "continuous"
+    },
+    {
+      "id": "images.hosted_storage",
+      "usage": "images_hosted_stored",
+      "source": "cloudflare_images",
+      "included": 0,
+      "billing_unit": 100000,
+      "usd_per_unit": 5,
+      "rounding": "continuous"
+    },
+    {
+      "id": "images.hosted_delivery",
+      "usage": "images_hosted_delivered",
+      "source": "cloudflare_images",
+      "included": 0,
+      "billing_unit": 100000,
+      "usd_per_unit": 1,
+      "rounding": "continuous"
+    },
+    {
+      "id": "stream.storage",
+      "usage": "stream_stored_minutes",
+      "source": "cloudflare_stream",
+      "included": 0,
+      "billing_unit": 1000,
+      "usd_per_unit": 5,
+      "rounding": "continuous"
+    },
+    {
+      "id": "stream.delivery",
+      "usage": "stream_delivered_minutes",
+      "source": "cloudflare_stream",
+      "included": 0,
+      "billing_unit": 1000,
+      "usd_per_unit": 1,
+      "rounding": "continuous"
+    },
+    {
+      "id": "neon.compute",
+      "usage": "neon_compute_cu_hours",
+      "source": "neon",
+      "included": 0,
+      "billing_unit": 1,
+      "usd_per_unit": 0.106,
+      "rounding": "continuous"
+    },
+    {
+      "id": "neon.storage",
+      "usage": "neon_storage_gb_month",
+      "source": "neon",
+      "included": 0,
+      "billing_unit": 1,
+      "usd_per_unit": 0.35,
+      "rounding": "continuous"
+    },
+    {
+      "id": "neon.history",
+      "usage": "neon_history_gb_month",
+      "source": "neon",
+      "included": 0,
+      "billing_unit": 1,
+      "usd_per_unit": 0.2,
+      "rounding": "continuous"
+    },
+    {
+      "id": "neon.extra_branches",
+      "usage": "neon_extra_branch_hours",
+      "source": "neon",
+      "included": 0,
+      "billing_unit": 1,
+      "usd_per_unit": 0.002,
+      "rounding": "continuous"
+    },
+    {
+      "id": "neon.egress",
+      "usage": "neon_public_egress_gb",
+      "source": "neon",
+      "included": 500,
+      "billing_unit": 1,
+      "usd_per_unit": 0.1,
+      "rounding": "continuous"
+    }
+  ],
+  "usage_1x": {
+    "workers_and_workflows_requests": 0,
+    "workers_and_workflows_cpu_ms": 0,
+    "workers_log_events": 0,
+    "workers_trace_logpush_requests": 0,
+    "queue_operations": 0,
+    "workflow_steps": 0,
+    "workflow_storage_gb_month": 0,
+    "durable_object_requests": 0,
+    "durable_object_duration_gb_seconds": 0,
+    "durable_object_rows_read": 0,
+    "durable_object_rows_written": 0,
+    "durable_object_storage_gb_month": 0,
+    "r2_standard_storage_gb_month": 0,
+    "r2_class_a_operations": 0,
+    "r2_class_b_operations": 0,
+    "images_transformations": 0,
+    "images_hosted_stored": 0,
+    "images_hosted_delivered": 0,
+    "stream_stored_minutes": 0,
+    "stream_delivered_minutes": 0,
+    "neon_compute_cu_hours": null,
+    "neon_storage_gb_month": 0,
+    "neon_history_gb_month": 0,
+    "neon_extra_branch_hours": 0,
+    "neon_public_egress_gb": 0
+  },
+  "business_units_1x": {
+    "api_requests": 0,
+    "uploaded_gb": 0,
+    "assets_processed": 0,
+    "distribution_attempts": 0,
+    "successful_publishes": 0,
+    "sync_runs": 0,
+    "active_organizations": 0
+  },
+  "observed_metrics_1x": {
+    "hyperdrive_queries": 0,
+    "provider_calls": 0,
+    "workflow_invocations": 0
+  },
+  "external_costs": {
+    "billing_provider": {
+      "fixed_usd": 0,
+      "variable_usd_1x": 0
+    },
+    "ci_previews": {
+      "fixed_usd": 0,
+      "variable_usd_1x": 0
+    },
+    "observability_export": {
+      "fixed_usd": 0,
+      "variable_usd_1x": 0
+    },
+    "provider_apis": {
+      "fixed_usd": 0,
+      "variable_usd_1x": 0
+    }
+  },
+  "expected_unknown_inputs": ["usage_1x.neon_compute_cu_hours"]
+}

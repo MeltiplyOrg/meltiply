@@ -1,0 +1,62 @@
+# GitLeaks secret detection configuration for Meltiply
+# https://github.com/gitleaks/gitleaks#configuration
+
+title = "Meltiply gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Globally allowed patterns and paths"
+
+paths = [
+  # Test fixtures and golden files
+  '''(/|^)testdata/''',
+  '''\.snap$''',
+  # Lockfiles contain integrity hashes that can trigger false positives
+  '''bun\.lock$''',
+]
+
+# Allow specific hex-like patterns commonly found in tests
+regexes = [
+  '''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''', # UUID
+  '''^[0-9a-f]{64}$''', # SHA-256 hash
+  # Exact public fixtures used by Worker examples and encryption tests.
+  '''whsec_dGVzdC10ZXN0LXRlc3QtdGVzdC10ZXN0LQ==''',
+  '''0123456789abcdef0123456789abcdef''',
+  '''abcdef0123456789abcdef0123456789''',
+  # Canonical placeholder used for all dummy/test secrets and credentials.
+  '''meltiply-dummy-secret-not-real.*''',
+  # Historical, non-secret test/runbook placeholders retained in prior commits.
+  '''neon-api-key-with-at-least-20-characters''',
+  '''INC-(200-published|310-no-effect)''',
+  # Svix documentation example webhook secret used as a test fixture in the
+  # legacy (removed) Go auth handler; retained in commit history.
+  '''whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw''',
+]
+
+# Extend only the affected default rules; each exception requires both the
+# exact source path and the proven non-secret value, never an entire file.
+[[rules]]
+id = "curl-auth-header"
+[[rules.allowlists]]
+description = "Upstream Argo documentation uses the literal YOUR_API_TOKEN placeholder"
+condition = "AND"
+paths = ['''^\.agents/skills/cloudflare/references/argo-smart-routing/api\.md$''']
+regexes = ['''^YOUR_API_TOKEN$''']
+
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "SQL DDL column r2_thumbnail is misread as the preceding r2_key value"
+condition = "AND"
+paths = ['''^packages/database/migrations/001_baseline_schema\.sql$''']
+regexes = ['''^r2_thumbnail$''']
+
+[[rules]]
+id = "jwt"
+[[rules.allowlists]]
+description = "Exact reserved-domain fixture: signature decodes to signature-example-ba-sig-01, not an EdDSA signature"
+condition = "AND"
+paths = ['''^packages/contracts/examples/operations\.yaml$''']
+regexes = ['''^eyJhbGciOiJFZERTQSIsImtpZCI6ImJhLWp3dC1rZXktMDEiLCJ0eXAiOiJKV1QifQ\.eyJzdWIiOiJiYV91c2VyX2FscGhhXzAxIiwiZW1haWwiOiJhbHBoYS1hZG1pbkBleGFtcGxlLnRlc3QiLCJhdWQiOiJtZWx0aXBseS1hcGkiLCJleHAiOjE3NjczMTI3MDB9\.c2lnbmF0dXJlLWV4YW1wbGUtYmEtc2lnLTAx$''']

@@ -1,0 +1,74 @@
+name: Public CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    # Run this workflow only for publicly accessible repositories.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      WRANGLER_SEND_METRICS: "false"
+      MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable
+      MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+    steps:
+      - name: Check out public source and history without retaining credentials
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.18.0"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install checksum-verified quality tools
+        run: |
+          ./scripts/ci/install-quality-tool.sh gitleaks
+          ./scripts/ci/install-quality-tool.sh typos
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Scan the public Git history for secrets
+        run: ./scripts/ci/gitleaks-check.sh --all-history
+
+      - name: Install locked workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Start isolated local PostgreSQL
+        run: ./scripts/cloudflare-local/compose.sh up -d postgres
+
+      - name: Check spelling
+        run: typos --config .typos.toml
+
+      - name: Check generated Worker bindings
+        run: |
+          bun run workers:types
+          git diff --exit-code -- workers/api/worker-configuration.d.ts workers/automation/worker-configuration.d.ts workers/state/worker-configuration.d.ts
+
+      - name: Run existing application and repository quality gate
+        run: bun run cloudflare:check
+
+      - name: Reject uncommitted generated contract changes
+        run: git diff --exit-code -- packages/contracts
+
+      - name: Stop isolated local PostgreSQL
+        if: always()
+        run: ./scripts/cloudflare-local/database.sh stop

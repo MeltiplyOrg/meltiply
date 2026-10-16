@@ -1,0 +1,67 @@
+---
+title: Media
+description: Upload, attach, preview, and manage images and videos directly in the Meltiply composer — including upload progress, ordering, and channel overrides.
+section: Publishing
+order: 5
+---
+
+Media in Meltiply is composer-owned: there is no standalone Media Library route in the application navigation. Images and videos are uploaded, managed, and attached directly inside the post composer on [Posts](/docs/publishing).
+
+## Before you upload
+
+Media uploads belong to the **Brand Profile** active in the composer.
+
+- If "All Brand Profiles" is active, select a specific Brand Profile before composing or uploading media.
+- Uploaded attachments are scoped to that Brand Profile and can never leak across brand scopes.
+- New to Brand Profiles? See [Workspaces & Brand Profiles](/docs/workspaces).
+
+## Uploading media in the composer
+
+To add media to a post:
+
+1. Go to **Posts** and select **Create post** (or edit an existing draft).
+2. Ensure an active Brand Profile is selected and select one or more destination channels.
+3. Select **Add Media** to open your device file picker, or **drag and drop** images or videos onto the attachments area.
+
+You can attach multiple media items. Each file displays as a card in the **Attached Media** grid.
+
+### Upload lifecycle and stages
+
+Each attachment row tracks its live status:
+
+- **Preparing** — initializing the upload session.
+- **Uploading** — transferring bytes to storage, with a live percentage progress bar.
+- **Paused** — upload paused by the user.
+- **Offline** — connection interrupted; the transfer resumes automatically once reconnected.
+- **Processing** — bytes transferred; the server is verifying the asset and preparing previews.
+- **Ready** — asset verified and ready to be scheduled or published.
+- **Failed** — upload or processing failed; an actionable message describes the failure.
+- **Cancelled** — upload stopped by the user.
+
+### Attachment controls
+
+Hover or focus any attachment card in the composer to access controls:
+
+- **Reorder** — move an attachment earlier or later to set the exact delivery order.
+- **Replace** — swap an attachment with a new file while keeping its position and per-channel assignments intact.
+- **Pause / Resume** — halt and restart in-flight uploads.
+- **Retry** — retry a failed upload using the local file.
+- **Remove** — remove an attachment from the post. Removing an in-flight upload cancels the transfer server-side so unused storage is reclaimed.
+
+## Per-channel attachment customization
+
+By default, selected destination channels inherit all attachments added to the post. When channels have different media requirements:
+
+1. Switch to a destination channel's tab in the composer.
+2. Toggle individual attachments on or off for that channel, or select **Use all post attachments** to restore inheritance.
+3. The composer validates media constraints against platform capabilities (for example, video duration, format restrictions, or maximum attachment limits).
+
+## Browser recovery
+
+The composer keeps an in-progress copy of your draft text, attachments, and per-channel overrides in your browser, namespaced to your workspace and active Brand Profile. If you navigate away or refresh, your composition restores automatically. The local copy is cleared when the post is successfully scheduled or published.
+
+## Related guides
+
+- [Publishing](/docs/publishing) — compose, schedule, and ship posts
+- [Channels](/docs/channels) — connect social channels and inspect capabilities
+- [Troubleshooting](/docs/troubleshooting) — fixes for upload and publishing errors

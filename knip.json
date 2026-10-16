@@ -1,0 +1,39 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/cloudflare-local/r2-gateway.mjs",
+        "scripts/cloudflare-local/docker-listener-host.mjs",
+        "scripts/cloudflare-local/postgres-endpoint.mjs",
+        "lint/boundaries-plugin.d.mts",
+        "lint/astro-ui-contract.d.mts",
+        "scripts/cloudflare-local/worker-types.mjs"
+      ]
+    },
+    "frontend/app": {
+      "entry": ["src/app/globals.css"]
+    },
+    "workers/api": {
+      "entry": ["test-support/index.ts"],
+      "vitest": {
+        "config": ["vitest*.config.ts"]
+      }
+    },
+    "workers/automation": {
+      "entry": [
+        "test-support/index.ts",
+        "processor/engine/server.mjs",
+        "processor/smoke/check.mjs",
+        "processor/smoke/fixtures-server.mjs",
+        "processor/smoke/measure.mjs"
+      ],
+      "vitest": {
+        "config": ["vitest*.config.ts"]
+      }
+    }
+  },
+  "ignore": [".agents/**", "scripts/cloudflare-local/k6/**"],
+  "ignoreDependencies": ["cloudflare", "typescript-language-server", "wrangler"],
+  "ignoreBinaries": ["tailscale", "tofu", "typos"]
+}

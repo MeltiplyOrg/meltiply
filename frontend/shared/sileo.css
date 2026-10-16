@@ -1,0 +1,483 @@
+/* -------------------------------- Variables ------------------------------- */
+
+:root {
+  --sileo-spring-easing: linear(
+    0,
+    0.002 0.6%,
+    0.007 1.2%,
+    0.015 1.8%,
+    0.026 2.4%,
+    0.041 3.1%,
+    0.06 3.8%,
+    0.108 5.3%,
+    0.157 6.6%,
+    0.214 8%,
+    0.467 13.7%,
+    0.577 16.3%,
+    0.631 17.7%,
+    0.682 19.1%,
+    0.73 20.5%,
+    0.771 21.8%,
+    0.808 23.1%,
+    0.844 24.5%,
+    0.874 25.8%,
+    0.903 27.2%,
+    0.928 28.6%,
+    0.952 30.1%,
+    0.972 31.6%,
+    0.988 33.1%,
+    1.01 35.7%,
+    1.025 38.5%,
+    1.034 41.6%,
+    1.038 45%,
+    1.035 50.1%,
+    1.012 64.2%,
+    1.003 73%,
+    0.999 83.7%,
+    1
+  );
+
+  --sileo-duration: 600ms;
+  --sileo-height: 40px;
+  --sileo-width: 360px;
+
+  --sileo-fill: var(--surface);
+  --sileo-border: var(--line-strong);
+  --sileo-shadow-sm: oklch(0 0 0 / 0.05);
+  --sileo-shadow-lg: oklch(0 0 0 / 0.12);
+
+  --sileo-state-success: var(--green);
+  --sileo-state-success-tint: var(--green-tint);
+  --sileo-state-loading: var(--ink-2);
+  --sileo-state-loading-tint: var(--inset);
+  --sileo-state-error: var(--red);
+  --sileo-state-error-tint: var(--red-tint);
+  --sileo-state-warning: var(--orange);
+  --sileo-state-warning-tint: var(--orange-tint);
+  --sileo-state-info: var(--accent-ink);
+  --sileo-state-info-tint: var(--accent-tint);
+  --sileo-state-action: var(--accent-ink);
+  --sileo-state-action-tint: var(--accent-tint);
+}
+
+:root:is(.dark, [data-theme="dark"]) {
+  --sileo-border: oklch(1 0 0 / 0.15);
+  --sileo-shadow-sm: oklch(0 0 0 / 0.28);
+  --sileo-shadow-lg: oklch(0 0 0 / 0.44);
+}
+
+/* ---------------------------------- Toast --------------------------------- */
+
+[data-sileo-toast] {
+  position: relative;
+  pointer-events: auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  width: min(var(--sileo-width), calc(100vw - 24px));
+  height: var(--sileo-height);
+  font-family: var(--font-sans, system-ui, sans-serif);
+  color: var(--ink);
+  text-align: left;
+  opacity: 0;
+  transform: translateZ(0) scale(0.96);
+  transform-origin: center;
+  contain: layout style;
+  overflow: visible;
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-sileo-toast][data-dismissible="true"] {
+  cursor: pointer;
+  touch-action: none;
+}
+
+[data-sileo-toast][data-state="loading"] {
+  cursor: default;
+}
+
+[data-sileo-toast][data-ready="true"] {
+  opacity: 1;
+  transform: translateZ(0) scale(1);
+  transition:
+    transform calc(var(--sileo-duration) * 0.66) var(--sileo-spring-easing),
+    opacity calc(var(--sileo-duration) * 0.66) var(--sileo-spring-easing),
+    margin-bottom calc(var(--sileo-duration) * 0.66) var(--sileo-spring-easing),
+    margin-top calc(var(--sileo-duration) * 0.66) var(--sileo-spring-easing),
+    height var(--sileo-duration) var(--sileo-spring-easing);
+}
+
+[data-sileo-viewport][data-position^="top"] [data-sileo-toast]:not([data-ready="true"]) {
+  transform: translateY(-6px) scale(0.96);
+}
+
+[data-sileo-viewport][data-position^="bottom"] [data-sileo-toast]:not([data-ready="true"]) {
+  transform: translateY(6px) scale(0.96);
+}
+
+[data-sileo-toast][data-ready="true"][data-exiting="true"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-sileo-viewport][data-position^="top"]
+  [data-sileo-toast][data-ready="true"][data-exiting="true"] {
+  transform: translateY(-6px) scale(0.96);
+}
+
+[data-sileo-viewport][data-position^="bottom"]
+  [data-sileo-toast][data-ready="true"][data-exiting="true"] {
+  transform: translateY(6px) scale(0.96);
+}
+
+/* ------------------------------- SVG Canvas ------------------------------- */
+
+[data-sileo-canvas] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  transform: translateZ(0);
+  contain: layout style;
+  overflow: visible;
+  filter: drop-shadow(0 0.5px 0 var(--sileo-border)) drop-shadow(0 -0.5px 0 var(--sileo-border))
+    drop-shadow(0.5px 0 0 var(--sileo-border)) drop-shadow(-0.5px 0 0 var(--sileo-border))
+    drop-shadow(0 2px 6px var(--sileo-shadow-sm)) drop-shadow(0 12px 28px var(--sileo-shadow-lg));
+}
+
+[data-sileo-canvas][data-edge="top"] {
+  bottom: 0;
+  transform: scaleY(-1) translateZ(0);
+}
+
+[data-sileo-canvas][data-edge="bottom"] {
+  top: 0;
+}
+
+[data-sileo-svg] {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+/* --------------------------------- Header --------------------------------- */
+
+[data-sileo-header] {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  height: var(--sileo-height);
+  box-sizing: border-box;
+  overflow: hidden;
+  left: 0;
+  pointer-events: none;
+}
+
+[data-sileo-toast][data-ready="true"] [data-sileo-header] {
+  transition:
+    transform var(--sileo-duration) var(--sileo-spring-easing),
+    left var(--sileo-duration) var(--sileo-spring-easing),
+    width var(--sileo-duration) var(--sileo-spring-easing);
+}
+
+[data-sileo-header][data-edge="top"] {
+  bottom: 0;
+}
+
+[data-sileo-header][data-edge="bottom"] {
+  top: 0;
+}
+
+[data-sileo-header-stack] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+}
+
+[data-sileo-header-inner] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  opacity: 1;
+  filter: blur(0px);
+  transform: translateZ(0);
+}
+
+[data-sileo-header-inner][data-layer="current"] {
+  position: relative;
+  z-index: 1;
+  animation: sileo-header-enter var(--sileo-duration) var(--sileo-spring-easing) both;
+}
+
+[data-sileo-header-inner][data-layer="current"]:not(:only-child),
+[data-sileo-header-inner][data-exiting="true"] {
+  will-change: opacity, filter;
+}
+
+[data-sileo-header-inner][data-layer="prev"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+[data-sileo-header-inner][data-exiting="true"] {
+  animation: sileo-header-exit calc(var(--sileo-duration) * 0.7) ease forwards;
+}
+
+/* ---------------------------------- Badge --------------------------------- */
+
+[data-sileo-badge] {
+  display: flex;
+  height: 24px;
+  width: 24px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  color: var(--sileo-tone, var(--ink));
+  background-color: var(--sileo-tone-bg, var(--inset));
+}
+
+/* ---------------------------------- Title --------------------------------- */
+
+[data-sileo-title] {
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  padding-right: 4px;
+}
+
+/* ------------------------------ State Colors ------------------------------ */
+
+:is([data-sileo-badge], [data-sileo-button])[data-state="success"] {
+  --sileo-tone: var(--sileo-state-success);
+  --sileo-tone-bg: var(--sileo-state-success-tint);
+}
+
+:is([data-sileo-badge], [data-sileo-button])[data-state="loading"] {
+  --sileo-tone: var(--sileo-state-loading);
+  --sileo-tone-bg: var(--sileo-state-loading-tint);
+}
+
+:is([data-sileo-badge], [data-sileo-button])[data-state="error"] {
+  --sileo-tone: var(--sileo-state-error);
+  --sileo-tone-bg: var(--sileo-state-error-tint);
+}
+
+:is([data-sileo-badge], [data-sileo-button])[data-state="warning"] {
+  --sileo-tone: var(--sileo-state-warning);
+  --sileo-tone-bg: var(--sileo-state-warning-tint);
+}
+
+:is([data-sileo-badge], [data-sileo-button])[data-state="info"],
+:is([data-sileo-badge], [data-sileo-button])[data-state="action"] {
+  --sileo-tone: var(--sileo-state-info);
+  --sileo-tone-bg: var(--sileo-state-info-tint);
+}
+
+/* --------------------------------- Content -------------------------------- */
+
+[data-sileo-content] {
+  position: absolute;
+  left: 0;
+  z-index: 10;
+  width: 100%;
+  max-height: calc(100% - var(--sileo-height));
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* Keep hidden content measurable before reopening; skipping its layout would
+   reuse the outgoing body's height and make the next expansion jump. */
+[data-sileo-content]:not([data-visible="true"]) {
+  visibility: hidden;
+}
+
+[data-sileo-toast][data-ready="true"] [data-sileo-content] {
+  transition: opacity calc(var(--sileo-duration) * 0.08) ease calc(var(--sileo-duration) * 0.04);
+}
+
+[data-sileo-content][data-edge="top"] {
+  top: 0;
+}
+
+[data-sileo-content][data-edge="bottom"] {
+  top: var(--sileo-height);
+}
+
+[data-sileo-content][data-visible="true"] {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+[data-sileo-toast][data-ready="true"] [data-sileo-content][data-visible="true"] {
+  transition: opacity calc(var(--sileo-duration) * 0.6) ease calc(var(--sileo-duration) * 0.3);
+}
+
+[data-sileo-description] {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  padding: 14px 16px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  contain: layout style;
+}
+
+/* --------------------------------- Button --------------------------------- */
+
+[data-sileo-button] {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  margin-top: 10px;
+  border-radius: var(--radius-chip, 6px);
+  border: 1px solid color-mix(in oklch, var(--sileo-tone, var(--ink)) 22%, transparent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--sileo-tone, var(--ink));
+  background-color: var(--sileo-tone-bg, var(--inset));
+  transition:
+    background-color 150ms ease,
+    transform 150ms ease-out;
+}
+
+[data-sileo-button]:hover {
+  background-color: color-mix(in oklch, var(--sileo-tone, var(--ink)) 20%, transparent);
+}
+
+[data-sileo-button]:active {
+  transform: scale(0.96);
+}
+
+[data-sileo-button]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* -------------------------------- Animations ------------------------------ */
+
+[data-sileo-icon="spin"] {
+  animation: sileo-spin 1s linear infinite;
+}
+
+@keyframes sileo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes sileo-header-enter {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0px);
+  }
+}
+
+@keyframes sileo-header-exit {
+  from {
+    opacity: 1;
+    filter: blur(0px);
+  }
+  to {
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+/* -------------------------------- Viewports ------------------------------- */
+
+[data-sileo-viewport] {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  pointer-events: none;
+  max-width: calc(100vw - 16px);
+  contain: layout style;
+}
+
+[data-sileo-viewport][data-position^="top"] [data-sileo-toast]:not([data-ready="true"]) {
+  margin-bottom: calc(-1 * (var(--sileo-height) + 12px));
+}
+
+[data-sileo-viewport][data-position^="bottom"] [data-sileo-toast]:not([data-ready="true"]) {
+  margin-top: calc(-1 * (var(--sileo-height) + 12px));
+}
+
+[data-sileo-viewport][data-position^="top"] {
+  top: 0;
+  flex-direction: column-reverse;
+}
+
+[data-sileo-viewport][data-position^="bottom"] {
+  bottom: 0;
+  flex-direction: column;
+}
+
+[data-sileo-viewport][data-position$="left"] {
+  left: 0;
+  align-items: flex-start;
+}
+
+[data-sileo-viewport][data-position$="right"] {
+  right: 0;
+  align-items: flex-end;
+}
+
+[data-sileo-viewport][data-position$="center"] {
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-low-motion]) [data-sileo-toast][data-ready="true"]:hover,
+  html:not([data-low-motion]) [data-sileo-toast][data-ready="true"][data-exiting="true"] {
+    will-change: transform, opacity, height;
+  }
+}
+
+html[data-low-motion] [data-sileo-viewport],
+html[data-low-motion] [data-sileo-viewport] *,
+html[data-low-motion] [data-sileo-viewport] *::before,
+html[data-low-motion] [data-sileo-viewport] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sileo-viewport],
+  [data-sileo-viewport] *,
+  [data-sileo-viewport] *::before,
+  [data-sileo-viewport] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,43 @@
+---
+import BrandMark from "@meltiply/ui/public/brand-mark";
+import { CookieNotice } from "@meltiply/ui/cookie-notice";
+import Icon from "./Icon.astro";
+interface Props {
+  signInUrl: string;
+}
+
+// Landing footer keeps marketing content local while legal links and the shared
+// consent notice target the documentation on this same origin.
+const { signInUrl } = Astro.props;
+---
+
+<footer class="site-footer container">
+  <div>
+    <a class="brand" href="#" aria-label="Meltiply home">
+      <BrandMark small />
+      <span>meltiply</span>
+    </a>
+    <p>Less juggling. More creating.</p>
+  </div>
+  <nav aria-label="Footer navigation">
+    <a href="#product">Product</a>
+    <a href="#features">Why Meltiply</a>
+    <a href="/docs/">
+      Docs
+    </a>
+    <a href="/docs/terms">
+      Terms
+    </a>
+    <a href="/docs/privacy">
+      Privacy
+    </a>
+    <a href="/docs/cookies">
+      Cookies
+    </a>
+    <a href={signInUrl}>
+      Log in <Icon name="arrow" />
+    </a>
+  </nav>
+  <CookieNotice client:load policyUrl="/docs/cookies" />
+  <span class="copyright">© {new Date().getFullYear()} Meltiply</span>
+</footer>

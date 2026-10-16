@@ -1,0 +1,52 @@
+---
+import { ArrowRight, Check, ChevronRight, Clock, Layers, LayoutGrid, Menu } from "lucide-react";
+
+interface Props {
+  name: keyof typeof interfaceIcons | keyof typeof brandPaths;
+  class?: string;
+}
+// Product glyphs use the same Lucide components as the app and Fumadocs.
+// Provider marks are brand artwork, not alternate interface glyphs.
+const interfaceIcons = {
+  arrow: ArrowRight,
+  chevron: ChevronRight,
+  grid: LayoutGrid,
+  check: Check,
+  layers: Layers,
+  clock: Clock,
+  menu: Menu,
+} as const;
+const brandPaths = {
+  instagram:
+    "M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Zm9 9a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm1-5h.01",
+  facebook: "M14 21v-8h3l.5-4H14V7c0-1 .5-2 2-2h2V2h-3c-4 0-5 3-5 5v2H7v4h3v8",
+  threads:
+    "M17 8c-1-5-12-6-13 2-2 11 13 15 16 5 2-6-8-9-11-4-3 5 7 7 8 1 1-5-2-6-5-6",
+  tiktok: "M14 3v12a5 5 0 1 1-5-5m5-7c0 4 3 6 6 6",
+  youtube:
+    "M21 8c0-2-1-3-3-3H6C4 5 3 6 3 8v8c0 2 1 3 3 3h12c2 0 3-1 3-3V8ZM10 9l5 3-5 3V9Z",
+} as const;
+const { name, class: className } = Astro.props;
+const Glyph = Object.hasOwn(interfaceIcons, name)
+  ? interfaceIcons[name as keyof typeof interfaceIcons]
+  : undefined;
+---
+
+{Glyph ? (
+  <Glyph className={className} size={20} strokeWidth={2} aria-hidden="true" />
+) : (
+<svg
+  class={className}
+  width="20"
+  height="20"
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="1.6"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+>
+  <path d={brandPaths[name as keyof typeof brandPaths]}></path>
+</svg>
+)}

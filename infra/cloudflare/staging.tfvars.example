@@ -1,0 +1,29 @@
+# Non-secret example shape only. Copy outside the repository or generate it in
+# protected CI. IDs are opaque identifiers, not credentials.
+account_id  = "00000000000000000000000000000000"
+zone_id     = "00000000000000000000000000000000"
+environment = "staging"
+
+api_hostname          = "api.staging.meltiply.com"
+api_worker_name       = "meltiply-api"
+automation_worker_name = "meltiply-automation"
+assets_bucket_name    = "meltiply-assets-staging"
+
+# Safe bootstrap defaults. Attach consumers only after the Automation Worker
+# exists, attach domains only after the API Worker exists, and resume Queue
+# delivery only after rollout checks pass.
+attach_queue_consumers    = false
+attach_api_custom_domains = false
+queue_delivery_paused     = true
+
+frontend_origins = [
+  "https://staging.meltiply.com",
+]
+
+authenticated_hyperdrive_config_id = "00000000000000000000000000000000"
+system_hyperdrive_config_id        = "11111111111111111111111111111111"
+
+enable_operator_access = false
+operator_hostname      = "ops.staging.meltiply.com"
+access_team_domain     = "https://example.cloudflareaccess.com"
+operator_email_domains = ["example.com"]

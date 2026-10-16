@@ -1,0 +1,23 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "meltiply-api-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-18",
+  "compatibility_flags": ["nodejs_compat"],
+  // Simulated Email Sending binding for @cloudflare/vitest-plugin; tests exercise the
+  // mail module through injected doubles, so this stays local-only.
+  "send_email": [
+    {
+      "name": "MAIL",
+      "allowed_sender_addresses": ["no-reply@meltiply.test"],
+    },
+  ],
+  "vars": {
+    "ALLOWED_ORIGINS": "http://localhost:3000",
+    "ENVIRONMENT": "local",
+    "FRONTEND_URL": "http://localhost:3000",
+    "MAIL_FROM_ADDRESS": "no-reply@meltiply.test",
+    "MAIL_FROM_NAME": "Meltiply Test",
+    "VERSION": "1.0.0-target.0",
+  },
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Meltiply pull request input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "sections", "agent"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 72,
+      "pattern": "^\\S(?:[^\\r\\n]*\\S)?$"
+    },
+    "sections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "evidence", "mergeDanger", "qa"],
+      "properties": {
+        "summary": { "type": "string" },
+        "evidence": { "type": "string" },
+        "mergeDanger": { "type": "string" },
+        "qa": { "type": "string" }
+      }
+    },
+    "diagrams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["section", "source"],
+        "properties": {
+          "section": {
+            "enum": ["summary", "evidence", "mergeDanger", "qa"]
+          },
+          "source": { "type": "string", "minLength": 1, "maxLength": 5000 }
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "version", "model", "readAgents"],
+      "properties": {
+        "tool": { "type": "string", "pattern": "^[^\\s<>`*_]+$" },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9][^\\s<>`*_]*$"
+        },
+        "model": {
+          "type": "string",
+          "pattern": "^[^\\s<>`*_](?:[^\\r\\n<>`*_]*[^\\s<>`*_])?$"
+        },
+        "readAgents": { "const": true }
+      }
+    }
+  }
+}

@@ -1,0 +1,86 @@
+---
+import {
+  consentCookieName,
+  functionalStorageKeys,
+  functionalStoragePrefixes,
+} from "./cookie-consent";
+---
+
+<script
+  define:vars={{
+    consentCookieName,
+    functionalStorageKeys,
+    functionalStoragePrefixes,
+  }}
+>
+  // Resolve only the essential consent record before any preference bootstrap.
+  // Invalid/expired consent never authorizes optional reads or writes; old
+  // optional records on this origin are removed without touching auth storage.
+  var consent = null;
+  try {
+    var consentEntry = document.cookie.split(";").find(function (item) {
+      return item.trim().indexOf(consentCookieName + "=") === 0;
+    });
+    if (consentEntry) {
+      var parsedConsent = JSON.parse(
+        decodeURIComponent(
+          consentEntry.trim().slice(consentCookieName.length + 1),
+        ),
+      );
+      if (
+        parsedConsent &&
+        parsedConsent.v === 1 &&
+        typeof parsedConsent.expires === "number" &&
+        Number.isFinite(parsedConsent.expires) &&
+        parsedConsent.expires > Date.now() &&
+        typeof parsedConsent.functional === "boolean" &&
+        typeof parsedConsent.analytics === "boolean" &&
+        typeof parsedConsent.marketing === "boolean"
+      )
+        consent = parsedConsent;
+    }
+  } catch (error) {
+    // Blocked or malformed cookies mean optional purposes are off.
+  }
+  window.meltiplyCookieConsent = consent;
+  document.documentElement.toggleAttribute(
+    "data-cookie-functional",
+    consent !== null && consent.functional === true,
+  );
+  document.documentElement.toggleAttribute(
+    "data-cookie-decided",
+    consent !== null,
+  );
+  if (consent === null || !consent.functional) {
+    try {
+      for (
+        var storageIndex = localStorage.length - 1;
+        storageIndex >= 0;
+        storageIndex -= 1
+      ) {
+        var storageKey = localStorage.key(storageIndex);
+        if (
+          storageKey !== null &&
+          (functionalStorageKeys.indexOf(storageKey) !== -1 ||
+            functionalStoragePrefixes.some(function (prefix) {
+              return storageKey.indexOf(prefix) === 0;
+            }))
+        )
+          localStorage.removeItem(storageKey);
+      }
+    } catch (error) {
+      // Gated readers ignore inaccessible optional records.
+    }
+    try {
+      document.cookie = "meltiply-theme=; Path=/; Max-Age=0; SameSite=Lax";
+      if (
+        location.hostname === "meltiply.com" ||
+        location.hostname.endsWith(".meltiply.com")
+      )
+        document.cookie =
+          "meltiply-theme=; Domain=meltiply.com; Path=/; Max-Age=0; SameSite=Lax; Secure";
+    } catch (error) {
+      // Preference readers also require consent, so an undeletable cookie is ignored.
+    }
+  }
+</script>

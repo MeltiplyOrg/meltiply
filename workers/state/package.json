@@ -1,0 +1,25 @@
+{
+  "name": "@meltiply/state-worker",
+  "version": "1.0.0-target.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "dev": "wrangler dev",
+    "test": "vp test run",
+    "type-check": "tsc --project tsconfig.json",
+    "types": "wrangler types worker-configuration.d.ts --env-interface WranglerEnv"
+  },
+  "dependencies": {
+    "@meltiply/contracts": "workspace:*",
+    "effect": "4.0.0-rc.115"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

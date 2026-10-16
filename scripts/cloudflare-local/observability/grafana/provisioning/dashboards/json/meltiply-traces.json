@@ -1,0 +1,404 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "compass",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Tempo Explore",
+      "type": "link",
+      "url": "/explore?schemaVersion=1&panes=%7B%22t1%22%3A%7B%22datasource%22%3A%22tempo%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22tempo%22%7D%2C%22queryType%22%3A%22traceqlSearch%22%2C%22limit%22%3A30%2C%22tableType%22%3A%22traces%22%2C%22filters%22%3A%5B%7B%22id%22%3A%22service-name%22%2C%22operator%22%3A%22%3D%22%2C%22scope%22%3A%22resource%22%2C%22tag%22%3A%22service.name%22%2C%22value%22%3A%5B%22${service}%22%5D%2C%22valueType%22%3A%22string%22%7D%5D%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22${__from:date:iso}%22%2C%22to%22%3A%22${__to:date:iso}%22%7D%7D%7D&orgId=1"
+    },
+    {
+      "asDropdown": false,
+      "icon": "gf-logs",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Loki Explore",
+      "type": "link",
+      "url": "/explore?schemaVersion=1&panes=%7B%22l1%22%3A%7B%22datasource%22%3A%22loki%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22%7Bjob%3D%5C%22meltiply-worker%5C%22%2Cservice%3D%5C%22${service}%5C%22%7D%22%2C%22queryType%22%3A%22range%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22${__from:date:iso}%22%2C%22to%22%3A%22${__to:date:iso}%22%7D%7D%7D&orgId=1"
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "Controls",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "HTTP requests observed from real Worker structured logs, split by the bounded HTTP method and route.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "normal" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 80 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "editorMode": "code",
+          "expr": "sum by (context_method, context_route) (count_over_time({job=\"meltiply-worker\", service=~\"$service\"} | json | context_event=\"http_request\" | context_route=~\"$route\" [$__auto]))",
+          "legendFormat": "{{context_method}} {{context_route}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP requests / interval by route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "Non-2xx/3xx outcomes from real access logs, split by route and response status.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "normal" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 1 },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "editorMode": "code",
+          "expr": "sum by (context_route, context_outcome) (count_over_time({job=\"meltiply-worker\", service=~\"$service\"} | json | context_event=\"http_request\" | context_route=~\"$route\" | context_outcome >= 400 [$__auto]))",
+          "legendFormat": "{{context_outcome}} {{context_route}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP errors / interval by route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "p50 / p95 latency from real Worker access logs, split by bounded HTTP route (latency_ms).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 1 },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "editorMode": "code",
+          "expr": "quantile_over_time(0.50, {job=\"meltiply-worker\", service=~\"$service\"} | json | context_event=\"http_request\" | context_route=~\"$route\" | unwrap context_latency_ms [$__auto]) by (context_route)",
+          "legendFormat": "p50 {{context_route}}",
+          "queryType": "range",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "editorMode": "code",
+          "expr": "quantile_over_time(0.95, {job=\"meltiply-worker\", service=~\"$service\"} | json | context_event=\"http_request\" | context_route=~\"$route\" | unwrap context_latency_ms [$__auto]) by (context_route)",
+          "legendFormat": "p95 {{context_route}}",
+          "queryType": "range",
+          "refId": "B"
+        }
+      ],
+      "title": "HTTP latency p50 / p95 by route",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 },
+      "id": 101,
+      "panels": [],
+      "title": "Live logs",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "Live structured Worker logs. Filter with the top variables. Click a trace_id derived field to jump to Tempo.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 9 },
+      "id": 4,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "editorMode": "code",
+          "expr": "{job=\"meltiply-worker\", service=~\"$service\"} | json | context_route=~\"$route\" | line_format \"{{.level}} {{.service}} {{.message}} outcome={{.context_outcome}} route={{.context_route}} latency_ms={{.context_latency_ms}} request_id={{.request_id}} trace_id={{.trace_id}} {{.context_error_code}} {{.error_name}} {{.error_message}} {{.error_cause_message}}\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Worker structured logs",
+      "type": "logs"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
+      "id": 102,
+      "panels": [],
+      "title": "Trace detail",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "Paste a Trace ID from Tempo Explore (or a log line) into the Trace ID variable, then open the Tempo link or inspect matching logs here.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "id": 5,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Ascending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "editorMode": "code",
+          "expr": "{job=\"meltiply-worker\"} | json | trace_id=`$traceId`",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Logs for Trace ID",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "datasource", "uid": "grafana" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "id": 6,
+      "options": {
+        "code": {
+          "language": "markdown",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "### Trace control\n\n1. Open **Tempo Explore** (top link) filtered by `$service`.\n2. Click a **Trace ID** → waterfall of real API/Automation flow steps.\n3. Copy the Trace ID into the **Trace ID** variable above to filter logs.\n4. Or click the derived **TraceID** field on any log line.\n\n**Structured log fields**\n- Correlation: `trace_id`, `request_id`, `user_id`, and `service` at the top level.\n- Event details: `context`; Loki `| json` extracts `context_event`, `context_route`, `context_outcome`, and `context_latency_ms`.\n- Exceptions: `error.name`, sanitized `error.message`, `error.stack`, and bounded `error.cause` chains.\n\n**Real path only**\n- Spans: `exportOtlpSpan` from API/Automation flow recorders → Tempo `:4318`\n- Logs: `@meltiply/observability` `log()` → one JSON console line + identical Loki line `:3100` (local/test)\n- No seed/demo data. Empty panels mean no Worker traffic in range.\n\n| Endpoint | Port |\n| --- | --- |\n| Grafana | 3001 |\n| Tempo OTLP | 4318 |\n| Tempo query | 3200 |\n| Loki | 3100 |\n",
+        "mode": "markdown"
+      },
+      "title": "How to drive this board",
+      "type": "text"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["meltiply", "local", "observability"],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": ["All"], "value": [".*"] },
+        "datasource": { "type": "loki", "uid": "loki" },
+        "definition": "label_values({job=\"meltiply-worker\"}, service)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Service",
+        "multi": true,
+        "name": "service",
+        "options": [],
+        "query": "label_values({job=\"meltiply-worker\"}, service)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "hide": 0,
+        "label": "Route regex",
+        "name": "route",
+        "options": [
+          { "selected": true, "text": ".*", "value": ".*" },
+          { "selected": false, "text": "/api/v1/.*", "value": "/api/v1/.*" },
+          {
+            "selected": false,
+            "text": "/api/v1/health",
+            "value": "/api/v1/health"
+          },
+          {
+            "selected": false,
+            "text": "/api/v1/ready",
+            "value": "/api/v1/ready"
+          },
+          {
+            "selected": false,
+            "text": "/api/v1/users/me",
+            "value": "/api/v1/users/me"
+          }
+        ],
+        "query": ".*,/api/v1/.*,/api/v1/health,/api/v1/ready,/api/v1/users/me",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "current": { "selected": false, "text": "", "value": "" },
+        "hide": 0,
+        "label": "Trace ID",
+        "name": "traceId",
+        "options": [],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"]
+  },
+  "timezone": "browser",
+  "title": "Meltiply Local Traces",
+  "uid": "meltiply-local-traces",
+  "version": 7
+}

@@ -1,0 +1,224 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "meltiply-automation-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "limits": {
+    "cpu_ms": 300000,
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+    },
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "VERSION": "1.0.0-target.0",
+  },
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "meltiply-assets-local",
+      // The Automation Worker binds the same bucket as the API Worker, so the
+      // processor's own signed GET/PUT URLs resolve against the same objects
+      // the API signed. The runtime verifies each SigV4 request; no bucket
+      // credential ever reaches the container.
+      "local_dev": {
+        "experimental_s3_credentials": {
+          "accessKeyId": "local-r2-access-key",
+          "secretAccessKey": "local-r2-secret-key",
+        },
+      },
+    },
+  ],
+  "hyperdrive": [
+    {
+      "binding": "DB_SYSTEM",
+      "id": "00000000000000000000000000000002",
+      "localConnectionString": "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    },
+  ],
+
+  // Mirrors the deployed container binding so `wrangler dev` runs the same
+  // Durable Object + Container path the Asset processor uses in staging. The
+  // engine image is linux/amd64 only, so `wrangler dev` needs a local Docker
+  // daemon (and amd64 emulation on non-amd64 hosts); see
+  // scripts/cloudflare-local/container-runtime.sh.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MEDIA_PROCESSOR",
+        "class_name": "MediaProcessorContainer",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MediaProcessorContainer"],
+    },
+  ],
+  "containers": [
+    {
+      "name": "meltiply-media-processor",
+      "class_name": "MediaProcessorContainer",
+      "image": "./processor/Dockerfile",
+      "image_build_context": "./processor",
+      "instance_type": "standard-3",
+      "max_instances": 4,
+      "scheduling_policy": "default",
+    },
+  ],
+  "triggers": {
+    "crons": ["0 * * * *"],
+  },
+  "workflows": [
+    {
+      "name": "meltiply-reply-local",
+      "binding": "REPLY_WORKFLOW",
+      "class_name": "ReplyWorkflow",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "ANALYTICS_QUEUE",
+        "queue": "meltiply-analytics-local",
+      },
+      {
+        "binding": "ASSET_PROCESSING_QUEUE",
+        "queue": "meltiply-asset-processing-local",
+      },
+      {
+        "binding": "CHANNEL_REVOCATION_QUEUE",
+        "queue": "meltiply-channel-revocation-local",
+      },
+      {
+        "binding": "COMMENTS_QUEUE",
+        "queue": "meltiply-comments-local",
+      },
+      {
+        "binding": "FACEBOOK_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-facebook-local",
+      },
+      {
+        "binding": "INSTAGRAM_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-instagram-local",
+      },
+      {
+        "binding": "THREADS_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-threads-local",
+      },
+      {
+        "binding": "TIKTOK_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-tiktok-local",
+      },
+      {
+        "binding": "YOUTUBE_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-youtube-local",
+      },
+      {
+        "binding": "REPLIES_QUEUE",
+        "queue": "meltiply-replies-local",
+      },
+      {
+        "binding": "TOKEN_REFRESH_QUEUE",
+        "queue": "meltiply-token-refresh-local",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "meltiply-analytics-local",
+        "dead_letter_queue": "meltiply-analytics-local-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+      },
+      {
+        "queue": "meltiply-channel-revocation-local",
+        "dead_letter_queue": "meltiply-channel-revocation-local-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+      },
+      {
+        "queue": "meltiply-comments-local",
+        "dead_letter_queue": "meltiply-comments-local-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+      },
+      {
+        "queue": "meltiply-asset-processing-local",
+        "dead_letter_queue": "meltiply-asset-processing-local-dlq",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+      },
+      {
+        "queue": "meltiply-publish-facebook-local",
+        "dead_letter_queue": "meltiply-publish-facebook-local-dlq",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "max_concurrency": 1,
+      },
+      {
+        "queue": "meltiply-publish-instagram-local",
+        "dead_letter_queue": "meltiply-publish-instagram-local-dlq",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "max_concurrency": 1,
+      },
+      {
+        "queue": "meltiply-publish-threads-local",
+        "dead_letter_queue": "meltiply-publish-threads-local-dlq",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "max_concurrency": 1,
+      },
+      {
+        "queue": "meltiply-publish-tiktok-local",
+        "dead_letter_queue": "meltiply-publish-tiktok-local-dlq",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "max_concurrency": 1,
+      },
+      {
+        "queue": "meltiply-publish-youtube-local",
+        "dead_letter_queue": "meltiply-publish-youtube-local-dlq",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "max_concurrency": 1,
+      },
+      {
+        "queue": "meltiply-replies-local",
+        "dead_letter_queue": "meltiply-replies-local-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+      },
+      {
+        "queue": "meltiply-token-refresh-local",
+        "dead_letter_queue": "meltiply-token-refresh-local-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+      },
+    ],
+  },
+}

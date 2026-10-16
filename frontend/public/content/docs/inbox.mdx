@@ -1,0 +1,35 @@
+---
+title: Comment inbox
+description: Audience comments status, platform reply management, and backend comment sync in Meltiply.
+section: Publishing
+order: 8
+---
+
+Meltiply does not provide an interactive `/inbox` screen or sidebar Inbox navigation item. Visiting `/inbox` redirects to the posts hub on the [Publishing](/docs/publishing) screen.
+
+Audience comments and discussions cannot be reviewed or answered from within the current web interface.
+
+## Managing post engagement
+
+To review and respond to comments on published content, manage engagement directly on each connected platform (such as YouTube, TikTok, Instagram, Facebook, or Threads).
+
+To open a published post on its native platform:
+
+1. Open the post details dialog from the List, Grid, or Calendar view on the [Publishing](/docs/publishing) screen.
+2. Under the published channel, select the external post link to navigate directly to the live post on the platform.
+
+## Backend comment and reply capabilities
+
+Backend worker pipelines retain comment synchronization and outbox reply infrastructure:
+
+- **Comment sync** — background services sync audience comments from connected platform accounts.
+- **Reply lifecycle** — backend outbox automation supports reply delivery states including Queued, Processing, Replied, Failed, and Needs reconciliation.
+- **Plan enforcement** — workspace plans support the `inbox_reply_enabled` flag and backend reply quotas.
+
+An interactive comment inbox and reply composer are not exposed in the frontend application.
+
+## Related
+
+- [Publishing](/docs/publishing) — check publication status and open per-channel live post links.
+- [Channels](/docs/channels) — connect and verify social platform accounts.
+- [Billing & plans](/docs/billing) — workspace plans, usage limits, and backend billing status.

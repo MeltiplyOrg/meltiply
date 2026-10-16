@@ -1,0 +1,65 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "meltiply-frontend",
+  "main": "src/worker.ts",
+  "workers_dev": false,
+  "preview_urls": false,
+  "compatibility_date": "2026-07-18",
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api", "/api/*", "/health", "/__frontend-telemetry"],
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "VERSION": "1.0.0-target.0",
+    // Local-only fallback origin for /api/* proxying; must match the Wrangler
+    // dev API port (WRANGLER_DEV_PORT, default 8787). Deployed environments
+    // route through the API service binding below and never read this var.
+    "API_ORIGIN": "http://127.0.0.1:8787",
+  },
+  "env": {
+    "staging": {
+      "name": "meltiply-frontend-staging",
+      "workers_dev": true,
+      "services": [
+        {
+          "binding": "API",
+          "service": "meltiply-api",
+        },
+      ],
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "VERSION": "1.0.0-target.0",
+      },
+    },
+    "production": {
+      "name": "meltiply-frontend",
+      "services": [
+        {
+          "binding": "API",
+          "service": "meltiply-api",
+        },
+      ],
+      "vars": {
+        "ENVIRONMENT": "production",
+        "VERSION": "1.0.0-target.0",
+      },
+    },
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+    },
+  },
+}

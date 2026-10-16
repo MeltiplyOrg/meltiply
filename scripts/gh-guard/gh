@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# PATH-shadow GitHub CLI guard. PR creation accepts --body-json <file>|- only;
+# the Node CLI validates schema, diagrams, formatting, and spelling, then sends
+# the generated title/body to real gh. Other commands pass through unchanged.
+# This is a client-side paved road, not a tamper-proof server-side policy.
+
+set -euo pipefail
+
+guard_dir="$(cd "$(dirname "$0")" && pwd)"
+
+# Locate the next executable gh on PATH, excluding this shadow directory.
+# Empty PATH entries mean the current directory. A missing real binary returns
+# failure; MELTIPLY_REAL_GH can select it explicitly for installed environments.
+find_real_gh() {
+	local candidate resolved dir
+	local IFS=:
+	for dir in $PATH; do
+		[ -n "$dir" ] || dir=.
+		candidate="$dir/gh"
+		[ -x "$candidate" ] || continue
+		resolved="$(cd "$dir" 2>/dev/null && pwd)/gh" || continue
+		[ "$resolved" != "$guard_dir/gh" ] || continue
+		printf '%s\n' "$candidate"
+		return 0
+	done
+	return 1
+}
+
+real_gh="${MELTIPLY_REAL_GH:-}"
+if [ -z "$real_gh" ]; then
+	real_gh="$(find_real_gh || true)"
+fi
+if [ -z "$real_gh" ] || [ ! -x "$real_gh" ]; then
+	printf 'gh-guard: cannot find the real gh binary; install gh or set MELTIPLY_REAL_GH.\n' >&2
+	exit 127
+fi
+
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "create" ]; then
+	exec node "$guard_dir/pr.mjs" create "$real_gh" "${@:3}"
+fi
+exec "$real_gh" "$@"

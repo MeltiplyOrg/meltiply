@@ -1,0 +1,323 @@
+import type { AccessClaims } from "@meltiply/auth";
+
+import type { ResolvedActor } from "./actor-resolution";
+import { RFC4122_UUID_PATTERN } from "./crypto";
+import { mailSenderConfiguration } from "./mail";
+
+import type { OAuthStateCoordinatorStub } from "@meltiply/contracts";
+
+/** RPC contract of the OAuthStateCoordinator Durable Object (meltiply-state). */
+export interface OAuthStateStub extends Rpc.DurableObjectBranded, OAuthStateCoordinatorStub {}
+
+/** RPC contract of the Automation Worker entrypoint (meltiply-automation). */
+export interface AutomationRelayStub {
+  relayOutbox(): Promise<{
+    claimed: number;
+    dead: number;
+    failed: number;
+    published: number;
+  }>;
+  requestCommentsSync(organizationId: string, distributionId: string | null): Promise<number>;
+}
+
+export interface ApiWorkerEnv {
+  ACCESS_POLICY_AUD?: string;
+  ACCESS_TEAM_DOMAIN?: string;
+  ALLOWED_ORIGINS: string;
+  ASSETS?: R2Bucket;
+  AUTOMATION?: AutomationRelayStub;
+  BETTER_AUTH_SECRET?: string;
+  BETTER_AUTH_URL?: string;
+  BILLING_WEBHOOK_SECRET?: string;
+  DB_AUTHENTICATED?: Hyperdrive;
+  DB_SYSTEM?: Hyperdrive;
+  ENVIRONMENT: "local" | "preview" | "staging" | "test";
+  FACEBOOK_CLIENT_ID?: string;
+  FACEBOOK_CLIENT_SECRET?: string;
+  FACEBOOK_LIVE_ACCEPTED?: string;
+  FRONTEND_URL?: string;
+  LOG_SAMPLE_RATE?: string;
+  MAIL?: SendEmail;
+  MAIL_FROM_ADDRESS?: string;
+  MAIL_FROM_NAME?: string;
+  INSTAGRAM_CLIENT_ID?: string;
+  INSTAGRAM_CLIENT_SECRET?: string;
+  INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED?: string;
+  INSTAGRAM_LIVE_ACCEPTED?: string;
+  OAUTH_STATE?: DurableObjectNamespace<OAuthStateStub>;
+  OPERATOR_HOSTNAME?: string;
+  POLAR_ACCESS_TOKEN?: string;
+  POLAR_AGENCY_PRODUCT_ID?: string;
+  POLAR_CREATOR_PRODUCT_ID?: string;
+  POLAR_ENV?: string;
+  PUBLIC_API_URL?: string;
+  R2_ACCESS_KEY_ID?: string;
+  R2_ACCOUNT_ID?: string;
+  R2_BUCKET_NAME?: string;
+  R2_SECRET_ACCESS_KEY?: string;
+  /**
+   * Trusted S3-compatible R2 origin. Origin-only (no path); set only to point signed
+   * URLs at a local signed S3 route fronting the same ASSETS bucket. Plain HTTP is
+   * accepted only for loopback hosts or when `ENVIRONMENT` is `local`/`test`.
+   */
+  R2_ENDPOINT?: string;
+  /**
+   * Path prefix prepended to `/<bucket>/<key>` in signed URLs, for origins that serve
+   * the bucket under a route (a local runtime serves it at `/cdn-cgi/local/r2/s3`).
+   * Ignored unless `R2_ENDPOINT` is set.
+   */
+  R2_ENDPOINT_PATH_PREFIX?: string;
+  TOKEN_ENCRYPTION_KEY?: string;
+  TIKTOK_CLIENT_KEY?: string;
+  TIKTOK_CLIENT_SECRET?: string;
+  TIKTOK_LIVE_ACCEPTED?: string;
+  TIKTOK_MEDIA_URL_PREFIX?: string;
+  THREADS_CLIENT_ID?: string;
+  THREADS_CLIENT_SECRET?: string;
+  THREADS_ENGAGEMENT_LIVE_ACCEPTED?: string;
+  THREADS_LIVE_ACCEPTED?: string;
+  VERSION: string;
+  YOUTUBE_LIVE_ACCEPTED?: string;
+  YOUTUBE_SHORTS_CLIENT_ID?: string;
+  YOUTUBE_SHORTS_CLIENT_SECRET?: string;
+}
+
+export interface BindingStatus {
+  name: string;
+  status: "ready" | "unavailable";
+}
+
+const requiredBindings: (keyof ApiWorkerEnv)[] = [
+  "DB_SYSTEM",
+  "DB_AUTHENTICATED",
+  "ASSETS",
+  "FRONTEND_URL",
+  "OAUTH_STATE",
+  "PUBLIC_API_URL",
+  "R2_ACCESS_KEY_ID",
+  "R2_ACCOUNT_ID",
+  "R2_BUCKET_NAME",
+  "R2_SECRET_ACCESS_KEY",
+  "TOKEN_ENCRYPTION_KEY",
+];
+
+// Polar product IDs and access token are validated semantically by
+// `polarBillingConfiguration` (format, UUID shape, distinctness), so they are
+// deliberately absent from the presence-only readiness list — a missing or
+// malformed Polar binding surfaces as the dedicated "Polar billing requires"
+// configuration error instead of a bare missing-binding name.
+const stagingBillingBindings: (keyof ApiWorkerEnv)[] = ["BILLING_WEBHOOK_SECRET"];
+const stagingAutomationBindings: (keyof ApiWorkerEnv)[] = ["AUTOMATION"];
+
+const stagingAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET"];
+
+// Mail readiness mirrors `polarBillingConfiguration`: `MAIL` is only ready when
+// the Email Sending binding exposes a callable `send`, and `MAIL_FROM_ADDRESS`
+// only when `mailSenderConfiguration` can normalize a valid sender (bare email
+// plus optional display name, no header injection). Presence alone must not
+// report ready — an unusable binding or malformed sender fails closed.
+const stagingMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
+
+export interface PolarBillingConfiguration {
+  accessToken: string;
+  agencyProductId: string;
+  apiBase: string;
+  creatorProductId: string;
+}
+
+const safePolarToken = /^polar_(?:oat|pat)_[A-Za-z0-9_-]{8,}$/;
+const safeWebhookSecret = /^[^\u0000-\u0020\u007f]{16,512}$/;
+
+/**
+ * Asserts whether a value conforms to a valid Polar product UUID format.
+ *
+ * @param value - String value to check against RFC 4122 UUID pattern.
+ * @returns True if value is a valid UUID, false otherwise.
+ */
+export function isPolarProductId(value: string): boolean {
+  return RFC4122_UUID_PATTERN.test(value);
+}
+
+/**
+ * Validates and normalizes Polar billing environment configuration.
+ *
+ * Checks access token format, creator and agency product ID UUIDs, distinct product IDs,
+ * and determines the target Polar API origin (`api.polar.sh` vs `sandbox-api.polar.sh`).
+ *
+ * @param env - Worker environment bindings.
+ * @returns Normalized `PolarBillingConfiguration` object, or undefined if incomplete/invalid.
+ */
+export function polarBillingConfiguration(
+  env: ApiWorkerEnv,
+): PolarBillingConfiguration | undefined {
+  const accessToken = env.POLAR_ACCESS_TOKEN?.trim();
+  const creatorProductId = env.POLAR_CREATOR_PRODUCT_ID?.trim();
+  const agencyProductId = env.POLAR_AGENCY_PRODUCT_ID?.trim();
+  const environment = env.POLAR_ENV?.trim() || "sandbox";
+  if (
+    !accessToken ||
+    !creatorProductId ||
+    !agencyProductId ||
+    !safePolarToken.test(accessToken) ||
+    !isPolarProductId(creatorProductId) ||
+    !isPolarProductId(agencyProductId) ||
+    creatorProductId === agencyProductId ||
+    !["sandbox", "production"].includes(environment)
+  ) {
+    return undefined;
+  }
+  return {
+    accessToken,
+    agencyProductId,
+    apiBase: environment === "production" ? "https://api.polar.sh" : "https://sandbox-api.polar.sh",
+    creatorProductId,
+  };
+}
+
+/**
+ * Reports readiness status for required and environment-specific Worker bindings.
+ *
+ * Evaluates core bindings for all environments, plus auth, mail delivery, Polar
+ * billing, and Automation RPC bindings when running in staging. Used by the
+ * `/api/v1/ready` probe.
+ *
+ * @param env - Worker environment bindings.
+ * @returns Array of `BindingStatus` entries with name and "ready" | "unavailable" status.
+ */
+export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
+  const bindings =
+    env.ENVIRONMENT === "staging"
+      ? [
+          ...requiredBindings,
+          ...stagingAuthBindings,
+          ...stagingMailBindings,
+          ...stagingBillingBindings,
+          ...stagingAutomationBindings,
+        ]
+      : requiredBindings;
+  return bindings.map((name) => {
+    // `MAIL` is only ready when the Email Sending binding exposes a callable
+    // `send`; `MAIL_FROM_ADDRESS` only when `mailSenderConfiguration` can
+    // normalize a valid sender. Presence alone must not report ready — an
+    // unusable binding or malformed sender fails closed. No send occurs: this
+    // is a local capability check, not a DNS/deliverability probe.
+    const ready =
+      name === "MAIL"
+        ? typeof env.MAIL?.send === "function"
+        : name === "MAIL_FROM_ADDRESS"
+          ? mailSenderConfiguration(env) !== undefined
+          : Boolean(env[name]);
+    return { name, status: ready ? "ready" : "unavailable" };
+  });
+}
+
+/**
+ * Validates mandatory production and staging Worker bindings, credentials, and provider configurations.
+ *
+ * Ensures all required environment variables, Hyperdrive databases, R2 storage, a usable
+ * Email Sending binding with a valid sender, Polar billing secrets, and live-accepted
+ * provider credentials (Meta, TikTok, YouTube) are fully configured in staging.
+ *
+ * The mail checks run before the presence list so a malformed sender or
+ * unusable binding reports a precise cause instead of a bare missing name.
+ *
+ * @param env - Worker environment bindings to validate.
+ * @throws {Error} If any required binding is missing or provider credential configuration is inconsistent.
+ */
+export function validateProductionBindings(env: ApiWorkerEnv): void {
+  if (env.ENVIRONMENT !== "staging") return;
+  if (typeof env.MAIL?.send !== "function") {
+    throw new Error("MAIL must be an Email Sending binding exposing a callable send method");
+  }
+  if (!mailSenderConfiguration(env)) {
+    throw new Error("MAIL_FROM_ADDRESS/MAIL_FROM_NAME must configure a valid sender");
+  }
+  const missing = bindingStatuses(env)
+    .filter((binding) => binding.status === "unavailable")
+    .map((binding) => binding.name);
+  if (missing.length > 0) {
+    throw new Error(`missing required Worker bindings: ${missing.join(", ")}`);
+  }
+  if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.trim().length < 32) {
+    throw new Error("BETTER_AUTH_SECRET must be at least 32 characters in staging");
+  }
+  if (!polarBillingConfiguration(env)) {
+    throw new Error(
+      "Polar billing requires a valid access token and distinct creator/agency product IDs",
+    );
+  }
+  if (!env.BILLING_WEBHOOK_SECRET || !safeWebhookSecret.test(env.BILLING_WEBHOOK_SECRET.trim())) {
+    throw new Error("BILLING_WEBHOOK_SECRET must be a valid billing webhook endpoint secret");
+  }
+  const facebookAccepted = env.FACEBOOK_LIVE_ACCEPTED?.trim() ?? "false";
+  const instagramAccepted = env.INSTAGRAM_LIVE_ACCEPTED?.trim() ?? "false";
+  const instagramEngagementAccepted = env.INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED?.trim() ?? "false";
+  const threadsAccepted = env.THREADS_LIVE_ACCEPTED?.trim() ?? "false";
+  const engagementAccepted = env.THREADS_ENGAGEMENT_LIVE_ACCEPTED?.trim() ?? "false";
+  const tiktokAccepted = env.TIKTOK_LIVE_ACCEPTED?.trim() ?? "false";
+  const youtubeAccepted = env.YOUTUBE_LIVE_ACCEPTED?.trim() ?? "false";
+  if (!["true", "false", ""].includes(facebookAccepted)) {
+    throw new Error("FACEBOOK_LIVE_ACCEPTED must be true or false");
+  }
+  if (!["true", "false", ""].includes(instagramAccepted)) {
+    throw new Error("INSTAGRAM_LIVE_ACCEPTED must be true or false");
+  }
+  if (!["true", "false", ""].includes(instagramEngagementAccepted)) {
+    throw new Error("INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED must be true or false");
+  }
+  if (instagramEngagementAccepted === "true" && instagramAccepted !== "true") {
+    throw new Error("INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED requires INSTAGRAM_LIVE_ACCEPTED=true");
+  }
+  if (!["true", "false", ""].includes(threadsAccepted)) {
+    throw new Error("THREADS_LIVE_ACCEPTED must be true or false");
+  }
+  if (!["true", "false", ""].includes(engagementAccepted)) {
+    throw new Error("THREADS_ENGAGEMENT_LIVE_ACCEPTED must be true or false");
+  }
+  if (engagementAccepted === "true" && threadsAccepted !== "true") {
+    throw new Error("THREADS_ENGAGEMENT_LIVE_ACCEPTED requires THREADS_LIVE_ACCEPTED=true");
+  }
+  if (!["true", "false", ""].includes(tiktokAccepted)) {
+    throw new Error("TIKTOK_LIVE_ACCEPTED must be true or false");
+  }
+  if (!["true", "false", ""].includes(youtubeAccepted)) {
+    throw new Error("YOUTUBE_LIVE_ACCEPTED must be true or false");
+  }
+  if (facebookAccepted === "true" && (!env.FACEBOOK_CLIENT_ID || !env.FACEBOOK_CLIENT_SECRET)) {
+    throw new Error("accepted Facebook provider requires client ID and client secret bindings");
+  }
+  if (instagramAccepted === "true" && (!env.INSTAGRAM_CLIENT_ID || !env.INSTAGRAM_CLIENT_SECRET)) {
+    throw new Error("accepted Instagram provider requires client ID and client secret bindings");
+  }
+  if (threadsAccepted === "true" && (!env.THREADS_CLIENT_ID || !env.THREADS_CLIENT_SECRET)) {
+    throw new Error("accepted Threads provider requires client ID and client secret bindings");
+  }
+  if (
+    tiktokAccepted === "true" &&
+    (!env.TIKTOK_CLIENT_KEY || !env.TIKTOK_CLIENT_SECRET || !env.TIKTOK_MEDIA_URL_PREFIX)
+  ) {
+    throw new Error(
+      "accepted TikTok provider requires client key, client secret, and verified media URL prefix bindings",
+    );
+  }
+  if (
+    youtubeAccepted === "true" &&
+    (!env.YOUTUBE_SHORTS_CLIENT_ID || !env.YOUTUBE_SHORTS_CLIENT_SECRET)
+  ) {
+    throw new Error("accepted YouTube provider requires client ID and client secret bindings");
+  }
+}
+
+/**
+ * Hono environment type that binds the Worker's env and request-scoped
+ * variables. Shared across route modules and the validation layer.
+ */
+export type ApiWorkerEnvironment = {
+  Bindings: ApiWorkerEnv;
+  Variables: {
+    actor: ResolvedActor;
+    operator: AccessClaims;
+    requestId: string;
+    traceId: string;
+  };
+};

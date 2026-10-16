@@ -1,0 +1,1025 @@
+---
+import "../styles/global.css";
+import "@meltiply/ui/motion.css";
+import Icon from "../components/Icon.astro";
+import AnimatedIcon from "../components/AnimatedIcon";
+import BrandMark from "@meltiply/ui/public/brand-mark";
+import SiteFooter from "../components/SiteFooter.astro";
+import Layout from "../components/layout.astro";
+import { LandingPreferences } from "../components/docs-preferences";
+import { HomeSearch } from "../components/search";
+import "../styles/docs.css";
+const appUrl = new URL(
+  process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com",
+);
+const docsUrl = "/docs/";
+const signInUrl = new URL("/sign-in", appUrl);
+const signUpUrl = new URL("/sign-up", appUrl);
+const title = "Meltiply — Your social content. Finally, in sync.";
+const description =
+  "One calm workspace to plan, schedule, and publish your social content. Bring your channels and your content together with Meltiply.";
+const platforms = [
+  "instagram",
+  "facebook",
+  "threads",
+  "tiktok",
+  "youtube",
+] as const;
+const platformNames = ["Instagram", "Facebook", "Threads", "TikTok", "YouTube"];
+const demoChannels = [
+  {
+    platform: "instagram",
+    handle: "@studionorth",
+    profile: "Studio North",
+    swatch: "var(--accent)",
+    status: "Connected",
+  },
+  {
+    platform: "facebook",
+    handle: "Studio North",
+    profile: "Studio North",
+    swatch: "var(--accent)",
+    status: "Connected",
+  },
+  {
+    platform: "threads",
+    handle: "@north.films",
+    profile: "North Films",
+    swatch: "var(--green)",
+    status: "Connected",
+  },
+  {
+    platform: "youtube",
+    handle: "Studio North",
+    profile: "Studio North",
+    swatch: "var(--accent)",
+    status: "Connected",
+  },
+  {
+    platform: "tiktok",
+    handle: "@north.films",
+    profile: "North Films",
+    swatch: "var(--green)",
+    status: "Expiring",
+  },
+] as const;
+const posts = [
+  {
+    day: 0,
+    time: "09:00",
+    title: "A little room to grow.",
+    art: "plant",
+    platform: "instagram",
+    profile: "Studio North",
+    status: "Published",
+  },
+  {
+    day: 1,
+    time: "12:30",
+    title: "Made for the everyday.",
+    art: "objects",
+    platform: "facebook",
+    profile: "Studio North",
+    status: "Scheduled",
+  },
+  {
+    day: 2,
+    time: "10:00",
+    title: "Good things take shape.",
+    art: "type",
+    platform: "threads",
+    profile: "North Films",
+    status: "Scheduled",
+  },
+  {
+    day: 3,
+    time: "16:00",
+    title: "Behind the small details.",
+    art: "arch",
+    platform: "tiktok",
+    profile: "North Films",
+    status: "Draft",
+  },
+  {
+    day: 4,
+    time: "09:30",
+    title: "A fresh perspective.",
+    art: "plant",
+    platform: "youtube",
+    profile: "Studio North",
+    status: "Scheduled",
+  },
+] as const;
+---
+
+<Layout title={title} description={description}>
+    <a class="skip-link" href="#main">
+      Skip to content
+    </a>
+    <header class="site-header">
+      <a class="brand" href="#" aria-label="Meltiply home">
+        <BrandMark />
+        <span>meltiply</span>
+      </a>
+       <nav class="desktop-nav" aria-label="Main navigation">
+         <a href="#product">Product</a>
+         <a href="#features">Why Meltiply</a>
+         <a href="#workflow">How it works</a>
+       </nav>
+      <div class="header-actions">
+
+        <HomeSearch client:load />
+        <LandingPreferences client:load />
+        <a class="button button-dark button-small" href={signInUrl}>
+          Get started <Icon name="arrow" />
+        </a>
+        <button
+          class="icon-button menu-toggle"
+          aria-label="Open navigation"
+          aria-expanded="false"
+          aria-controls="mobile-nav"
+        >
+          <Icon name="menu" />
+        </button>
+      </div>
+      <nav
+        id="mobile-nav"
+        class="mobile-nav"
+        aria-label="Mobile navigation"
+        hidden
+      >
+         <a href="#product">Product</a>
+         <a href="#features">Why Meltiply</a>
+         <a href="#workflow">How it works</a>
+         <a href={signInUrl}>Log in</a>
+      </nav>
+    </header>
+
+    <nav class="landing-rail" aria-label="Page sections">
+      <span class="landing-rail-track" aria-hidden="true">
+        <span class="landing-rail-fill"></span>
+      </span>
+      <ul class="landing-rail-list">
+        <li><a href="#product" data-rail-item><span class="rail-label">Product</span></a></li>
+        <li><a href="#features" data-rail-item><span class="rail-label">Why Meltiply</span></a></li>
+        <li><a href="#workflow" data-rail-item><span class="rail-label">How it works</span></a></li>
+      </ul>
+    </nav>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <h1 id="hero-title">
+          Your social content.
+          <br />
+          <span>Finally, in sync.</span>
+        </h1>
+        <p class="hero-description">
+          One workspace for every idea, post, and platform.
+          <br class="desktop-break" /> Plan your content. Set your schedule. Get
+          back to creating.
+        </p>
+        <div class="hero-actions">
+          <a class="button button-dark" href={signUpUrl}>
+            Create your workspace <Icon name="arrow" />
+          </a>
+          <a class="button button-light" href="#product">
+            Explore the product <Icon name="arrow" />
+          </a>
+        </div>
+        <p class="hero-note">
+          Built for creators. Made for every brand you run.
+        </p>
+        <div class="hero-feature-pills" aria-label="Explore Meltiply features">
+          <a class="feature-pill" href="#product">
+            Plan &amp; publish
+            <span class="feature-pill-icon">
+              <AnimatedIcon name="calendar" client:idle />
+            </span>
+            <Icon name="chevron" />
+          </a>
+          <a class="feature-pill" href="#product">
+            Connect your channels
+            <span class="feature-pill-icon">
+              <AnimatedIcon name="share" client:idle />
+            </span>
+            <Icon name="chevron" />
+          </a>
+          <a class="feature-pill" href="#features">
+            Organize your brands
+            <span class="feature-pill-icon">
+              <AnimatedIcon name="layers" client:idle />
+            </span>
+            <Icon name="chevron" />
+          </a>
+        </div>
+      </section>
+
+      <section
+        id="product"
+        class="product-section container"
+        aria-labelledby="product-title"
+      >
+        <h2 id="product-title" class="sr-only">
+          Explore the Meltiply workspace
+        </h2>
+        <div class="preview-topline">
+          <span>Your next week. Already taking shape.</span>
+          <span class="demo-label">Interactive demo · sample content</span>
+        </div>
+        <div class="product-window">
+          <aside class="preview-sidebar" aria-label="Demo workspace">
+            <div class="workspace-brand">
+              <BrandMark small />
+              <strong>Studio North</strong>
+            </div>
+            <span class="sidebar-caption">WORKSPACE</span>
+            <div
+              class="preview-tabs"
+              role="tablist"
+              aria-label="Product preview"
+            >
+              <button
+                id="tab-posts"
+                class="preview-tab"
+                role="tab"
+                aria-label="Posts"
+                aria-selected="true"
+                aria-controls="panel-posts"
+              >
+                <AnimatedIcon name="pen" client:idle />
+                <span>Posts</span>
+                <span class="sidebar-count">5</span>
+              </button>
+              <button
+                id="tab-channels"
+                class="preview-tab"
+                role="tab"
+                aria-label="Channels"
+                aria-selected="false"
+                aria-controls="panel-channels"
+                tabindex="-1"
+              >
+                <AnimatedIcon name="share" client:idle />
+                <span>Channels</span>
+                <span class="sidebar-count">5</span>
+              </button>
+            </div>
+            <div class="sidebar-channels">
+              <span class="sidebar-caption">YOUR CHANNELS</span>
+              {platforms.slice(0, 3).map((platform, index) => (
+                <div class="sidebar-channel">
+                  <>
+                    <Icon name={platform} />
+                    <span>{platformNames[index]}</span>
+                    <span class="connected-dot" title="Demo connection" />
+                  </>
+                </div>
+              ))}
+            </div>
+            <div class="sidebar-bottom">
+              <span class="studio-avatar avatar-person">JD</span>
+              <span>
+                Jamie Davis<small>Demo account</small>
+              </span>
+            </div>
+          </aside>
+          <div class="preview-main">
+            <div
+              id="panel-posts"
+              class="preview-panel"
+              role="tabpanel"
+              aria-labelledby="tab-posts"
+              tabindex="0"
+            >
+              <div class="preview-heading">
+                <div>
+                  <span class="breadcrumb">
+                    Studio North <span>/</span> Publishing
+                  </span>
+                  <h3>Your content, under control.</h3>
+                </div>
+                <a class="button button-dark compose-button" href={signUpUrl}>
+                  <AnimatedIcon name="plus" client:idle />
+                  Create a post
+                </a>
+              </div>
+              <div
+                class="publishing-summary"
+                aria-label="Demo publishing summary"
+              >
+                <div>
+                  <span class="summary-dot"></span>
+                  <strong>3</strong>
+                  <span>Scheduled</span>
+                </div>
+                <div>
+                  <span class="summary-dot summary-published"></span>
+                  <strong>1</strong>
+                  <span>Published</span>
+                </div>
+                <div>
+                  <span class="summary-dot summary-draft"></span>
+                  <strong>1</strong>
+                  <span>Draft</span>
+                </div>
+                <span class="summary-period">October 5–11, 2026</span>
+              </div>
+              <div class="publishing-body">
+                <div
+                  class="post-list-scroll"
+                  role="region"
+                  aria-label="Demo posts"
+                  tabindex="0"
+                >
+                  <table class="post-list">
+                    <thead>
+                      <tr>
+                        <th scope="col">Post</th>
+                        <th scope="col">Channel</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Publish date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {posts.map((post) => (
+                        <tr>
+                          <td>
+                            <span
+                              class:list={[
+                                "post-thumb",
+                                `post-thumb-${post.art}`,
+                              ]}
+                              aria-hidden="true"
+                            >
+                              <Icon
+                                name={post.art === "type" ? "layers" : "grid"}
+                              />
+                            </span>
+                            <span class="post-description">
+                              <strong>{post.title}</strong>
+                              <small>
+                                {post.profile} ·{" "}
+                                {post.platform === "tiktok" ||
+                                post.platform === "youtube"
+                                  ? "Video"
+                                  : "Post"}
+                              </small>
+                            </span>
+                          </td>
+                          <td>
+                            <span class="post-channel">
+                              <Icon name={post.platform} />
+                              <span>
+                                {
+                                  platformNames[
+                                    platforms.indexOf(post.platform)
+                                  ]
+                                }
+                              </span>
+                            </span>
+                          </td>
+                          <td>
+                            <span
+                              class:list={[
+                                "status",
+                                {
+                                  "status-published":
+                                    post.status === "Published",
+                                  "status-draft": post.status === "Draft",
+                                },
+                              ]}
+                            >
+                              <span />
+                              {post.status}
+                            </span>
+                          </td>
+                          <td>
+                            <time
+                              datetime={`2026-10-${String(post.day + 5).padStart(2, "0")}T${post.time}`}
+                            >
+                              Oct {post.day + 5}
+                              <small>{post.time}</small>
+                            </time>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <aside class="delivery-note">
+                  <span class="delivery-icon">
+                    <Icon name="check" />
+                  </span>
+                  <h4>A plan that keeps moving.</h4>
+                  <p>
+                    Your scheduled posts, lined up for delivery. Your next idea,
+                    ready when you are.
+                  </p>
+                  <div class="delivery-step">
+                    <Icon name="check" />
+                    <span>Content prepared</span>
+                  </div>
+                  <div class="delivery-step">
+                    <Icon name="check" />
+                    <span>Channels selected</span>
+                  </div>
+                  <div class="delivery-step">
+                    <Icon name="clock" />
+                    <span>Waiting for publish time</span>
+                  </div>
+                  <span class="demo-label">Illustrative workflow</span>
+                </aside>
+              </div>
+              <div class="preview-footer">
+                <span>
+                  <Icon name="check" /> All demo changes saved
+                </span>
+                <span>5 posts · 5 channels · one workspace</span>
+              </div>
+            </div>
+            <div
+              id="panel-channels"
+              class="preview-panel"
+              role="tabpanel"
+              aria-labelledby="tab-channels"
+              tabindex="0"
+              hidden
+            >
+              <div class="preview-heading">
+                <div>
+                  <span class="breadcrumb">
+                    Studio North <span>/</span> Channels
+                  </span>
+                  <h3>Every account, one board.</h3>
+                </div>
+                <a class="button button-dark compose-button" href={signUpUrl}>
+                  <AnimatedIcon name="plus" client:idle />
+                  Add account
+                </a>
+              </div>
+              <div class="publishing-body">
+                <div
+                  class="post-list-scroll"
+                  role="region"
+                  aria-label="Demo channels"
+                  tabindex="0"
+                >
+                  <table class="post-list">
+                    <thead>
+                      <tr>
+                        <th scope="col">Account</th>
+                        <th scope="col">Brand Profile</th>
+                        <th scope="col">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {demoChannels.map((channel) => (
+                        <tr>
+                          <td>
+                            <span class="post-channel">
+                              <Icon name={channel.platform} />
+                            </span>
+                            <span class="post-description">
+                              <strong>
+                                {
+                                  platformNames[
+                                    platforms.indexOf(channel.platform)
+                                  ]
+                                }
+                              </strong>
+                              <small>{channel.handle}</small>
+                            </span>
+                          </td>
+                          <td>
+                            <span class="post-channel">
+                              <span
+                                class="profile-dot"
+                                style={`--profile-color: ${channel.swatch}`}
+                              />
+                              <span>{channel.profile}</span>
+                            </span>
+                          </td>
+                          <td>
+                            <span
+                              class:list={[
+                                "status",
+                                {
+                                  "status-connected":
+                                    channel.status === "Connected",
+                                  "status-expiring":
+                                    channel.status === "Expiring",
+                                },
+                              ]}
+                            >
+                              <span />
+                              {channel.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <aside class="delivery-note">
+                  <span class="delivery-icon">
+                    <Icon name="check" />
+                  </span>
+                  <h4>Connect once. Publish everywhere.</h4>
+                  <p>
+                    Each social account authorizes Meltiply directly and joins a
+                    Brand Profile, so every post knows exactly where it goes.
+                  </p>
+                  <div class="delivery-step">
+                    <Icon name="check" />
+                    <span>Account authorized</span>
+                  </div>
+                  <div class="delivery-step">
+                    <Icon name="check" />
+                    <span>Brand Profile assigned</span>
+                  </div>
+                  <div class="delivery-step">
+                    <Icon name="clock" />
+                    <span>Ready for your next post</span>
+                  </div>
+                  <span class="demo-label">Illustrative workflow</span>
+                </aside>
+              </div>
+              <div class="preview-footer">
+                <span>
+                  <Icon name="check" /> Sample accounts, not live connections
+                </span>
+                <span>5 channels · 2 Brand Profiles</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="preview-caption">
+          <span class="caption-line"></span>One workspace. A whole lot of
+          possibility.<span class="caption-line"></span>
+        </div>
+      </section>
+
+      <section class="platforms container" aria-labelledby="platforms-title">
+        <p id="platforms-title">
+          All your favorite channels. Finally on the same page.
+        </p>
+        <div class="platform-list">
+          {platforms.map((platform, index) => (
+            <div>
+              <>
+                <Icon name={platform} />
+                <span>{platformNames[index]}</span>
+              </>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section
+        id="features"
+        class="features-section container"
+        aria-labelledby="features-title"
+      >
+        <div class="section-heading">
+          <h2 id="features-title">
+            Less managing.
+            <br />
+            More making.
+          </h2>
+          <p>
+            Your ideas deserve more than a folder of drafts.
+            <br class="desktop-break" /> Give them a clear path from first
+            thought to published post.
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card feature-calendar">
+            <div class="feature-copy">
+              <span class="feature-icon">
+                <AnimatedIcon
+                  name="calendar"
+                  control=".feature-card"
+                  client:visible
+                />
+              </span>
+              <h3>A plan you can actually see.</h3>
+              <p>
+                Turn scattered ideas into a clear content calendar. Keep every
+                channel moving in the same direction.
+              </p>
+            </div>
+            <div class="mini-calendar" aria-hidden="true">
+              <div>
+                <span>YOUR CONTENT, IN SYNC</span>
+                <AnimatedIcon
+                  name="calendar"
+                  control=".feature-card"
+                  client:visible
+                />
+              </div>
+              <div class="mini-days">
+                {["M", "T", "W", "T", "F"].map((day, index) => (
+                  <div>
+                    <small>{day}</small>
+                    <span class:list={["mini-post", `mini-post-${index}`]} />
+                    {index % 2 === 0 && (
+                      <span class="mini-post mini-post-secondary" />
+                    )}
+                  </div>
+                ))}
+              </div>
+              <span class="floating-label">
+                <Icon name="check" /> A good week, lined up.
+              </span>
+            </div>
+          </article>
+          <article class="feature-card">
+            <div class="feature-copy">
+              <span class="feature-icon">
+                <AnimatedIcon
+                  name="image"
+                  control=".feature-card"
+                  client:visible
+                />
+              </span>
+              <h3>Create once. Make it yours.</h3>
+              <p>
+                Upload your media right in the composer and tailor your message
+                to each channel. Less copy-paste. More consistency.
+              </p>
+            </div>
+            <div class="channel-visual" aria-hidden="true">
+              <div class="central-asset art-objects">
+                <span class="art-shape"></span>
+              </div>
+              <div class="channel-orbit">
+                {platforms.slice(0, 4).map((platform) => (
+                  <span>
+                    <Icon name={platform} />
+                  </span>
+                ))}
+              </div>
+              <span class="visual-caption">One idea. Many possibilities.</span>
+            </div>
+          </article>
+          <article class="feature-card">
+            <div class="feature-copy">
+              <span class="feature-icon">
+                <AnimatedIcon
+                  name="clock"
+                  control=".feature-card"
+                  client:visible
+                />
+              </span>
+              <h3>Your time, back in your hands.</h3>
+              <p>
+                Pick a date and time for each post and Meltiply handles the
+                delivery. Stay present without always being online.
+              </p>
+            </div>
+            <div class="queue-visual" aria-hidden="true">
+              <div>
+                <span class="queue-icon">
+                  <Icon name="instagram" />
+                </span>
+                <span>
+                  A moment of inspiration<small>Today at 09:00</small>
+                </span>
+                <span class="status status-published">
+                  <Icon name="check" /> Published
+                </span>
+              </div>
+              <div>
+                <span class="queue-icon">
+                  <Icon name="threads" />
+                </span>
+                <span>
+                  A thought worth sharing<small>Tomorrow at 10:00</small>
+                </span>
+                <span class="status">Scheduled</span>
+              </div>
+              <span class="visual-caption">
+                <span class="connected-dot"></span> Choose when each post
+                publishes.
+              </span>
+            </div>
+          </article>
+          <article class="feature-card">
+            <div class="feature-copy">
+              <span class="feature-icon">
+                <AnimatedIcon
+                  name="layers"
+                  control=".feature-card"
+                  client:visible
+                />
+              </span>
+              <h3>A place for every brand.</h3>
+              <p>
+                Brand Profiles keep each brand’s channels, media, and posts
+                neatly separated — so nothing ever reaches the wrong audience.
+              </p>
+            </div>
+            <div class="profile-visual" aria-hidden="true">
+              <div>
+                <span
+                  class="profile-swatch"
+                  style="--profile-color: var(--accent)"
+                ></span>
+                <span>
+                  Studio North<small>Everyday posts</small>
+                </span>
+                <span class="status">
+                  <span /> 3 channels
+                </span>
+              </div>
+              <div>
+                <span
+                  class="profile-swatch"
+                  style="--profile-color: var(--green)"
+                ></span>
+                <span>
+                  North Films<small>Video channels</small>
+                </span>
+                <span class="status">
+                  <span /> 2 channels
+                </span>
+              </div>
+              <span class="visual-caption">
+                One workspace. Clearly separated brands.
+              </span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section
+        id="workflow"
+        class="workflow-section container"
+        aria-labelledby="workflow-title"
+      >
+        <div class="section-heading">
+          <h2 id="workflow-title">
+            From “what if”
+            <br />
+            to out in the world.
+          </h2>
+        </div>
+        <div class="workflow-grid">
+          <article>
+            <span class="step-number">01</span>
+            <h3>Bring it all together.</h3>
+            <p>
+              Connect your channels and give your content a place to call home.
+            </p>
+          </article>
+          <article>
+            <span class="step-number">02</span>
+            <h3>Make a little room to plan.</h3>
+            <p>
+              Shape your ideas, tailor your posts, and build a schedule that
+              works for you.
+            </p>
+          </article>
+          <article>
+            <span class="step-number">03</span>
+            <h3>Let your work go further.</h3>
+            <p>
+              Publish across platforms, watch every delivery land, and keep the
+              good ideas coming.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="cta-section container" aria-labelledby="cta-title">
+        <BrandMark />
+        <h2 id="cta-title">
+          Make room for
+          <br />
+          your next great idea.
+        </h2>
+        <p>Bring your channels and your content together.</p>
+        <a class="button button-dark" href={signUpUrl}>
+          Create your workspace <Icon name="arrow" />
+        </a>
+      </section>
+    </main>
+    <SiteFooter signInUrl={signInUrl.href} />
+
+    <script>
+      import {
+        initializeMotion,
+        animatePanel,
+        animateDisclosure,
+      } from "../scripts/motion";
+
+      /**
+       * Rebinds landing interactions after each Astro navigation. Detached
+       * observers and document listeners are released before the next swap;
+       * demo tabs and mobile disclosure retain their keyboard contracts.
+       */
+      function initializeLanding() {
+        if (!document.querySelector(".hero")) return;
+        const cleanupMotion = initializeMotion();
+        const lifetime = new AbortController();
+        document.addEventListener("astro:before-swap", () => {
+          cleanupMotion();
+          lifetime.abort();
+        }, { once: true });
+        const menuButton =
+          document.querySelector<HTMLButtonElement>(".menu-toggle");
+        const mobileNav = document.querySelector<HTMLElement>("#mobile-nav");
+        // Keep disclosure state and visibility aligned; closing by Escape returns trigger focus.
+        function closeMenu(returnFocus = false) {
+          if (!mobileNav || !menuButton) return;
+          mobileNav.hidden = true;
+          menuButton.setAttribute("aria-expanded", "false");
+          menuButton.setAttribute("aria-label", "Open navigation");
+          if (returnFocus) menuButton.focus();
+        }
+        // Native disclosure keeps links accessible immediately; its entrance
+        // respects low motion and closing never delays Escape or focus restoration.
+        menuButton?.addEventListener("click", () => {
+          if (!mobileNav || !menuButton) return;
+          const open = mobileNav.hidden;
+          mobileNav.hidden = !open;
+          menuButton.setAttribute("aria-expanded", String(open));
+          menuButton.setAttribute(
+            "aria-label",
+            open ? "Close navigation" : "Open navigation",
+          );
+          if (open) animateDisclosure(mobileNav);
+        });
+        mobileNav?.addEventListener("click", (event) => {
+          if (event.target instanceof Element && event.target.closest("a"))
+            closeMenu();
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && mobileNav && !mobileNav.hidden)
+            closeMenu(true);
+        }, { signal: lifetime.signal });
+        const tabs = Array.from(
+          document.querySelectorAll<HTMLButtonElement>(".preview-tab"),
+        );
+        // Switch demo panels without remounting controls; reselecting is a no-op.
+        // Preserve roving focus and morph height only when effective motion permits it.
+        function selectTab(tab: HTMLButtonElement) {
+          if (tab.getAttribute("aria-selected") === "true") return;
+          const previewHeight =
+            document.querySelector<HTMLElement>(".preview-main")?.offsetHeight;
+          for (const item of tabs) {
+            const selected = item === tab;
+            item.setAttribute("aria-selected", String(selected));
+            item.tabIndex = selected ? 0 : -1;
+            const panel = document.getElementById(
+              item.getAttribute("aria-controls") || "",
+            );
+            if (panel) panel.hidden = !selected;
+          }
+          const selectedPanel = document.getElementById(
+            tab.getAttribute("aria-controls") || "",
+          );
+          if (selectedPanel) animatePanel(selectedPanel, previewHeight);
+        }
+        // Implement roving focus with horizontal/vertical arrows and Home/End for this tablist.
+        tabs.forEach((tab, index) => {
+          tab.addEventListener("click", () => selectTab(tab));
+          tab.addEventListener("keydown", (event) => {
+            let next = index;
+            if (event.key === "ArrowDown" || event.key === "ArrowRight")
+              next = (index + 1) % tabs.length;
+            else if (event.key === "ArrowUp" || event.key === "ArrowLeft")
+              next = (index - 1 + tabs.length) % tabs.length;
+            else if (event.key === "Home") next = 0;
+            else if (event.key === "End") next = tabs.length - 1;
+            else return;
+            event.preventDefault();
+            const nextTab = tabs[next];
+            if (nextTab) {
+              selectTab(nextTab);
+              nextTab.focus();
+            }
+          });
+        });
+      }
+      /**
+       * Spreads the header's logo and Get started action toward opposite screen
+       * edges as the page scrolls, mirroring cuelume's header but in reverse:
+       * the chrome stays put while the elements drift outward. A smoothed 0–1
+       * progress drives both the transforms and the scrolled state.
+       */
+      function bindHeaderScroll() {
+        const header = document.querySelector<HTMLElement>(".site-header");
+        if (!header) return;
+        const distance = 240;
+        const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+        let target = 0;
+        let current = 0;
+        let lastTime = 0;
+        let rafId = 0;
+        const smooth = 12;
+        const threshold = 0.001;
+        const smoothstep = (value: number) =>
+          value * value * (3 - 2 * value);
+        const setTarget = () => {
+          const raw = Math.min(1, Math.max(0, window.scrollY / distance));
+          target = reducedMotion.matches ? Math.round(raw) : raw;
+          if (!rafId) {
+            lastTime = performance.now();
+            rafId = requestAnimationFrame(tick);
+          }
+        };
+        const tick = (now: number) => {
+          const dt = Math.min((now - lastTime) / 1000, 0.05);
+          lastTime = now;
+          current += (target - current) * (1 - Math.exp(-dt * smooth));
+          if (Math.abs(target - current) < threshold) {
+            current = target;
+            rafId = 0;
+          } else {
+            rafId = requestAnimationFrame(tick);
+          }
+          header.style.setProperty("--header-p", smoothstep(current).toFixed(4));
+          header.toggleAttribute("data-scrolled", current > 0.5);
+        };
+        setTarget();
+        window.addEventListener("scroll", setTarget, { passive: true });
+        header.style.setProperty("--header-p", "0");
+        setTarget();
+        document.addEventListener(
+          "astro:before-swap",
+          () => {
+            window.removeEventListener("scroll", setTarget);
+            cancelAnimationFrame(rafId);
+          },
+          { once: true },
+        );
+      }
+      /**
+       * Shows a section-linked rail on the right edge once the hero has scrolled
+       * away. The rail reuses the header's in-page anchors for navigation and
+       * fills a vertical progress track with overall page scroll position.
+       */
+      function bindLandingRail() {
+        const rail = document.querySelector<HTMLElement>(".landing-rail");
+        if (!rail) return;
+        const fill = rail.querySelector<HTMLElement>(".landing-rail-fill");
+        const items = Array.from(
+          rail.querySelectorAll<HTMLAnchorElement>("[data-rail-item]"),
+        );
+        const sections = items
+          .map((item) => {
+            const url = new URL(item.href, window.location.origin);
+            if (!url.hash) return null;
+            const target = document.getElementById(
+              decodeURIComponent(url.hash.slice(1)),
+            );
+            return target ? { item, target } : null;
+          })
+          .filter(
+            (entry): entry is { item: HTMLAnchorElement; target: HTMLElement } =>
+              entry !== null,
+          );
+        let frame = 0;
+        const update = () => {
+          frame = 0;
+          const maxScroll = Math.max(
+            1,
+            document.documentElement.scrollHeight - window.innerHeight,
+          );
+          const progress = Math.min(
+            1,
+            Math.max(0, window.scrollY / maxScroll),
+          );
+          if (fill) fill.style.height = `${(progress * 100).toFixed(2)}%`;
+          rail.classList.toggle("is-visible", window.scrollY > 120);
+          const probe = window.scrollY + window.innerHeight * 0.3;
+          let activeId: string | null = null;
+          for (const { target } of sections) {
+            if (target.offsetTop <= probe) activeId = target.id;
+            else break;
+          }
+          for (const { item, target } of sections) {
+            item.toggleAttribute("data-active", target.id === activeId);
+          }
+        };
+        const schedule = () => {
+          if (frame) return;
+          frame = requestAnimationFrame(update);
+        };
+        const cleanup = () => {
+          window.removeEventListener("scroll", schedule);
+          window.removeEventListener("resize", schedule);
+          cancelAnimationFrame(frame);
+        };
+        update();
+        window.addEventListener("scroll", schedule, { passive: true });
+        window.addEventListener("resize", schedule);
+        document.addEventListener("astro:before-swap", cleanup, { once: true });
+      }
+
+      document.addEventListener("astro:page-load", bindHeaderScroll);
+      document.addEventListener("astro:page-load", bindLandingRail);
+      document.addEventListener("astro:page-load", initializeLanding);
+    </script>
+</Layout>

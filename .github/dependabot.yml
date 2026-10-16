@@ -1,0 +1,38 @@
+version: 2
+
+multi-ecosystem-groups:
+  weekly-dependencies:
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Etc/UTC"
+    labels:
+      - dependencies
+
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    patterns:
+      - "*"
+    multi-ecosystem-group: weekly-dependencies
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    patterns:
+      - "*"
+    multi-ecosystem-group: weekly-dependencies
+
+  - package-ecosystem: docker-compose
+    directory: "/"
+    patterns:
+      - "*"
+    multi-ecosystem-group: weekly-dependencies
+
+  - package-ecosystem: terraform
+    directories:
+      - "/infra/cloudflare"
+      - "/infra/cloudflare/modules/*"
+    patterns:
+      - "*"
+    multi-ecosystem-group: weekly-dependencies

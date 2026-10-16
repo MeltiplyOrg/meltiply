@@ -1,0 +1,20 @@
+---
+/**
+ * Public-site Astro wrapper over the shared React BrandMark. Astro renders
+ * the React component to static HTML (no `client:*` directive), so the exact
+ * shared polygon geometry ships as markup without an island or hydration cost
+ * on marketing and docs pages. `class` is Astro's attribute convention;
+ * forward it as `className`. Sizing is surface-owned (`public.css` 34px/25px
+ * defaults or Tailwind utilities); the accent diamond resolves via
+ * `motion.css`'s `[data-brand-accent]` fill.
+ */
+import { BrandMark as SharedBrandMark } from "@meltiply/ui/brand-mark";
+
+interface Props {
+  small?: boolean;
+  class?: string;
+}
+const { small = false, class: className } = Astro.props;
+---
+
+<SharedBrandMark small={small} className={className} />

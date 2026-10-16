@@ -1,0 +1,125 @@
+Meltiply — Selected third-party notices
+
+This file provides copyright and license notices for selected third-party
+components that are distributed with or bundled into the Meltiply
+documentation site. It is not a complete software bill of materials and does
+not list every dependency.
+
+
+======================================================================
+Fumadocs
+======================================================================
+
+The documentation site is built on the Fumadocs framework
+(fumadocs-ui / fumadocs-core, MIT License). Because Fumadocs code is bundled
+into the distributed site, its license text is reproduced here.
+
+Upstream: https://github.com/fuma-nama/fumadocs
+License:  MIT — https://opensource.org/licenses/MIT
+
+MIT License
+
+Copyright (c) 2023 Fuma
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+======================================================================
+Blue Oak Model License 1.0.0 components
+======================================================================
+
+The following components are licensed under the Blue Oak Model License,
+Version 1.0.0:
+
+  - common-ancestor-path 2.0.0 (author: Isaac Z. Schlueter)
+  - sax 1.6.1 (author: Isaac Z. Schlueter)
+  - lru-cache 11.5.2 (author: Isaac Z. Schlueter)
+
+License URL: https://blueoakcouncil.org/license/1.0.0
+
+Blue Oak Model License
+
+Version 1.0.0
+
+Purpose
+
+This license gives everyone as much permission to work with
+this software as possible, while protecting contributors
+from liability.
+
+Acceptance
+
+In order to receive this license, you must agree to its
+rules.  The rules of this license are both obligations
+under that agreement and conditions to your license.
+You must not do anything with this software that triggers
+a rule that you cannot or will not follow.
+
+Copyright
+
+Each contributor licenses you to do everything with this
+software that would otherwise infringe that contributor's
+copyright in it.
+
+Notices
+
+You must ensure that everyone who gets a copy of
+any part of this software from you, with or without
+changes, also gets the text of this license or a link to
+<https://blueoakcouncil.org/license/1.0.0>.
+
+Excuse
+
+If anyone notifies you in writing that you have not
+complied with the Notices requirement, you can keep your
+license by taking all practical steps to comply within 30
+days after the notice.  If you do not do so, your license
+ends immediately.
+
+Patent
+
+Each contributor licenses you to do everything with this
+software that would otherwise infringe any patent claims
+they can license or become able to license.
+
+Reliability
+
+No contributor can revoke this license.
+
+No Liability
+
+As far as the law allows, this software comes as is,
+without any warranty or condition, and no contributor
+will be liable to anyone for any damages related to this
+software or this license, under any kind of legal claim.
+
+
+======================================================================
+mdn-data
+======================================================================
+
+The following component versions are dedicated to the public domain under
+CC0 1.0 Universal (author: Mozilla Developer Network):
+
+  - mdn-data 2.27.1
+  - mdn-data 2.0.28
+
+License:     CC0 1.0 Universal
+Legal code:  https://creativecommons.org/publicdomain/zero/1.0/legalcode
+Human-readable summary: https://creativecommons.org/publicdomain/zero/1.0/

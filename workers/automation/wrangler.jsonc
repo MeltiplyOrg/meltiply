@@ -1,0 +1,146 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "meltiply-automation",
+  "workers_dev": false,
+  "preview_urls": false,
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "limits": {
+    "cpu_ms": 300000,
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+    },
+  },
+  "vars": {
+    "ENVIRONMENT": "staging",
+    "LOG_SAMPLE_RATE": "0.1",
+    "FACEBOOK_LIVE_ACCEPTED": "false",
+    "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED": "false",
+    "INSTAGRAM_LIVE_ACCEPTED": "false",
+    "PUBLIC_API_URL": "https://api.staging.meltiply.com",
+    "TIKTOK_LIVE_ACCEPTED": "false",
+    "THREADS_ENGAGEMENT_LIVE_ACCEPTED": "false",
+    "THREADS_LIVE_ACCEPTED": "false",
+    "YOUTUBE_LIVE_ACCEPTED": "false",
+    "VERSION": "1.0.0-target.0",
+    "R2_ENDPOINT": "",
+    "R2_ENDPOINT_PATH_PREFIX": "",
+  },
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "meltiply-assets-staging",
+      "preview_bucket_name": "meltiply-assets-preview",
+    },
+  ],
+  // Placeholders are substituted by scripts/release; direct wrangler
+  // deploy/dev will not connect.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MEDIA_PROCESSOR",
+        "class_name": "MediaProcessorContainer",
+      },
+    ],
+  },
+  // The processor engine is a linux/amd64 image; instance_type is bounded so
+  // queue concurrency cannot scale media compute without limit.
+  "containers": [
+    {
+      "name": "meltiply-media-processor",
+      "class_name": "MediaProcessorContainer",
+      "image": "./processor/Dockerfile",
+      "image_build_context": "./processor",
+      "instance_type": "standard-3",
+      "max_instances": 4,
+      "scheduling_policy": "default",
+    },
+  ],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MediaProcessorContainer"],
+    },
+  ],
+  "hyperdrive": [
+    {
+      "binding": "DB_SYSTEM",
+      "id": "replace-with-system-hyperdrive-id",
+    },
+  ],
+  "triggers": {
+    "crons": ["0 * * * *", "0 0 * * *"],
+  },
+  "workflows": [
+    {
+      "name": "meltiply-reply-staging",
+      "binding": "REPLY_WORKFLOW",
+      "class_name": "ReplyWorkflow",
+    },
+  ],
+  // Queue consumers are OpenTofu-owned: infra/cloudflare/modules/queues
+  // attaches this Worker to every queue (max_retries/retry_delay/DLQ live in
+  // Terraform). `wrangler dev` therefore cannot route queue messages locally;
+  // the drift gate (scripts/ci/wrangler-drift.test.mjs) pins producer/consumer
+  // parity between this file and Terraform.
+  "queues": {
+    "producers": [
+      {
+        "binding": "ANALYTICS_QUEUE",
+        "queue": "meltiply-analytics-staging",
+      },
+      {
+        "binding": "ASSET_PROCESSING_QUEUE",
+        "queue": "meltiply-asset-processing-staging",
+      },
+      {
+        "binding": "CHANNEL_REVOCATION_QUEUE",
+        "queue": "meltiply-channel-revocation-staging",
+      },
+      {
+        "binding": "COMMENTS_QUEUE",
+        "queue": "meltiply-comments-staging",
+      },
+      {
+        "binding": "FACEBOOK_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-facebook-staging",
+      },
+      {
+        "binding": "INSTAGRAM_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-instagram-staging",
+      },
+      {
+        "binding": "THREADS_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-threads-staging",
+      },
+      {
+        "binding": "TIKTOK_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-tiktok-staging",
+      },
+      {
+        "binding": "YOUTUBE_PUBLISH_QUEUE",
+        "queue": "meltiply-publish-youtube-staging",
+      },
+      {
+        "binding": "REPLIES_QUEUE",
+        "queue": "meltiply-replies-staging",
+      },
+      {
+        "binding": "TOKEN_REFRESH_QUEUE",
+        "queue": "meltiply-token-refresh-staging",
+      },
+    ],
+  },
+}

@@ -1,0 +1,135 @@
+---
+title: Channels
+description: Connect social accounts to Meltiply, keep connections healthy, reconnect expired authorizations, and safely disconnect channels.
+section: Workspace
+order: 4
+---
+
+The **Channels** board is where you connect social accounts and keep those connections healthy. Each card leads with the channel avatar, name, and available username, alongside its provider, status, Brand Profile, and permissions.
+
+## Before you connect
+
+Connecting a channel requires a **Brand Profile** — every connection belongs to exactly one profile. If your workspace has no profiles yet, the **Add account** button stays disabled:
+
+- **Admins** see a prompt to create a Brand Profile first (use **Create Brand Profile** in the header — see [Workspaces & Brand Profiles](/docs/workspaces)).
+- **Members** see a prompt to ask a workspace admin.
+
+## Connect an account
+
+1. Select **Add account** in the Channels header.
+2. Choose the **Brand Profile** that will own the connection.
+3. Find your platform — scroll inside the Social Channels list or use the search field to filter it.
+4. Select **Connect**. You're redirected to the platform to sign in and approve Meltiply's access.
+5. After approving, you're returned to the Channels board. For **Facebook**, choose a Page in **Select Facebook Page**, then select **Connect Page**; nothing is connected automatically, even when only one Page is eligible. Other platforms return their connection result directly. An account appears only after it is saved successfully.
+
+To connect a second account on the same platform under the same profile — for example, two TikTok accounts for one brand — select **Add Another** on that platform's row.
+
+Facebook lists Pages for which you have content-creation access and have granted the required publishing permissions. The chooser expires after ten minutes. **Cancel**, the close button, or Escape discards an unconfirmed selection without adding an account.
+
+If the chooser reports a connection limit, disconnect an existing account or upgrade the verified plan, then retry the same chosen Page while the selection is valid. Expired selections require starting **Connect** again.
+
+Already-linked accounts appear by their saved account name, or provider account ID
+when no name is available. A green tick marks a healthy connection; accounts that
+need attention show their connection status instead. If new connections are
+unavailable, these identities replace the disabled **Unavailable** button.
+
+You can also open the connect dialog directly at `/channels?tab=add`.
+
+### Available platforms
+
+You can connect accounts on:
+
+- **TikTok** — short-form videos with custom sound and caption settings
+- **YouTube** — long-form videos and Shorts
+- **Instagram** — feed posts, Reels, and carousels
+- **Facebook** — Pages with content-creation access
+- **Threads** — text threads, single photos, and link posts
+
+### If connecting fails
+
+If you cancel the platform's permission prompt or the authorization can't be completed, no account is added — start the connection again from **Add account**. If it keeps failing, see [Troubleshooting](/docs/troubleshooting).
+
+Facebook requires you to choose one eligible Page, rather than authorizing exactly
+one Page. When Facebook omits the user token's lifetime from its exchange
+response, Meltiply inspects the token to obtain its actual expiry. A valid token
+with an inspected expiry of zero has no time-based expiry; Meltiply stores no
+expiry date rather than treating it as 1970 or assuming a new 60-day lifetime.
+Such tokens can still lose access through revocation or Facebook's data-access
+rules. Invalid, expired, or unverifiable tokens are rejected.
+
+Unrecognized connection-result codes are ignored rather than shown as success or
+interrupting the Channels board.
+
+## Read the board
+
+Each channel table row shows:
+
+- **Circular avatar and title** — a missing avatar uses initials; the provider logo sits at the avatar's bottom-right corner.
+- **Username and provider ID** — shown when available, each with its own copy button. IDs never substitute for missing handles.
+- **Connection indicator** — a green tick for a healthy connection or an orange warning when attention is needed. Hover or focus it for the status and reason; select a warning to access **Re-authenticate**.
+- **Channel settings pencil** — opens a dialog with the owning Brand Profile, granted permissions, publishing support, and **Disconnect**. Backend analytics, comments, and reply capabilities are not advertised as available app workflows.
+
+The directory uses a single table view, with Brand Profile ownership alongside
+channel identity, health, and settings.
+
+Select channel checkboxes, or the table-header checkbox for all visible filtered
+channels. The bottom selection pill shows the total, **Deselect**, and **Disconnect**.
+Confirm the selected batch before disconnecting; successful channels leave the
+selection and failures remain selected for retry. Selection survives search/filter
+changes, but changing the Workspace or Brand Profile clears it.
+
+### Connection statuses
+
+| Status             | Meaning                                                      |
+| ------------------ | ------------------------------------------------------------ |
+| Connected          | Working normally; shown with a green tick                    |
+| Expiring           | Authorization will expire soon — reconnect before it does    |
+| Expired            | Authorization lapsed — re-authenticate to restore publishing |
+| Reconnect required | Authorize the connection again before it can publish         |
+| Revoked            | Access was withdrawn — reconnect to use it again             |
+
+Every non-connected status uses an orange warning icon; the tooltip names the specific status.
+
+### Filter the board
+
+The toolbar lets you narrow the card list by:
+
+- **Search** — matches platform name, account name, and Brand Profile name
+- **Platform** — show only selected platforms
+- **Brand Profile** — show one profile's channels, or **All Brand Profiles**
+- **Connection status** — for example, show everything needing reconnection
+
+Select **Reset** to clear all active filters. When filters hide every account, a **Clear filters** action restores the full list.
+
+## Reconnect a channel
+
+When a connection shows **Expiring**, **Expired**, **Reconnect required**, or **Revoked**:
+
+1. In the channel row, select the warning icon, then **Re-authenticate**.
+2. You're redirected to the platform to approve access again.
+3. For Facebook, select the same Page to renew that channel, then select **Connect Page**. The row returns to **Connected** after the renewed connection is saved.
+
+Re-authentication keeps the channel's existing Brand Profile — nothing needs to be reconfigured.
+
+## Disconnect a channel
+
+Disconnecting removes Meltiply's link to the account.
+
+1. In the channel row, select the **Channel settings** pencil, then **Disconnect**. Settings are available in **All Brand Profiles** as well as filtered views.
+2. Confirm in the **Disconnect** dialog.
+
+The confirmation warns that **scheduled and queued posts for that channel stop publishing**. Nothing is deleted — you can reconnect the account at any time through **Add account**. To remove it from the platform's side too, revoke Meltiply's access in that platform's own app settings.
+
+## Manage Brand Profiles from Channels
+
+Admins can manage profiles directly from Channels:
+
+- **Create Brand Profile** in the header — after saving, the connect dialog opens so you can link a channel immediately
+- **Edit profile** — select the pencil icon inside the Brand Profile filter
+- **Delete profile** — inside the profile editor; deleting permanently removes the profile's channels, assets, and posts (see [Workspaces & Brand Profiles](/docs/workspaces))
+
+## Related guides
+
+- [Workspaces & Brand Profiles](/docs/workspaces) — the profiles your channels belong to
+- [Publishing](/docs/publishing) — use connected channels to post
+- [Troubleshooting](/docs/troubleshooting) — connection errors and fixes

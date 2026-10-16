@@ -1,0 +1,92 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "meltiply-api",
+  "main": "src/index.ts",
+  "workers_dev": false,
+  "preview_urls": false,
+  "compatibility_date": "2026-07-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "limits": {
+    "cpu_ms": 30000,
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+    },
+  },
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "meltiply-assets-staging",
+      "preview_bucket_name": "meltiply-assets-preview",
+    },
+  ],
+  // Placeholders are substituted by scripts/release; direct wrangler
+  // deploy/dev will not connect.
+  "hyperdrive": [
+    {
+      "binding": "DB_AUTHENTICATED",
+      "id": "replace-with-authenticated-hyperdrive-id",
+    },
+    {
+      "binding": "DB_SYSTEM",
+      "id": "replace-with-system-hyperdrive-id",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "OAUTH_STATE",
+        "class_name": "OAuthStateCoordinator",
+        "script_name": "meltiply-state",
+      },
+    ],
+  },
+  "services": [
+    {
+      "binding": "AUTOMATION",
+      "service": "meltiply-automation",
+    },
+  ],
+  // Native Email Sending binding. `allowed_sender_addresses` must render to the
+  // same address as `MAIL_FROM_ADDRESS` below (scripts/release injects the
+  // reviewed `mail_from_address` into both) so the binding can only submit mail
+  // as the configured Meltiply sender identity.
+  "send_email": [
+    {
+      "name": "MAIL",
+      "allowed_sender_addresses": ["replace-with-mail-from-address"],
+    },
+  ],
+  "vars": {
+    "ACCESS_POLICY_AUD": "replace-with-operator-access-aud",
+    "ACCESS_TEAM_DOMAIN": "https://replace-with-team.cloudflareaccess.com",
+    "ALLOWED_ORIGINS": "https://staging.meltiply.com",
+    "ENVIRONMENT": "staging",
+    "MAIL_FROM_ADDRESS": "replace-with-mail-from-address",
+    "MAIL_FROM_NAME": "Meltiply",
+    "POLAR_ENV": "production",
+    "FACEBOOK_LIVE_ACCEPTED": "false",
+    "FRONTEND_URL": "https://staging.meltiply.com",
+    "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED": "false",
+    "INSTAGRAM_LIVE_ACCEPTED": "false",
+    "OPERATOR_HOSTNAME": "ops.staging.meltiply.com",
+    "PUBLIC_API_URL": "https://api.staging.meltiply.com",
+    "R2_ENDPOINT": "",
+    "R2_ENDPOINT_PATH_PREFIX": "",
+    "TIKTOK_LIVE_ACCEPTED": "false",
+    "THREADS_ENGAGEMENT_LIVE_ACCEPTED": "false",
+    "THREADS_LIVE_ACCEPTED": "false",
+    "YOUTUBE_LIVE_ACCEPTED": "false",
+    "VERSION": "1.0.0-target.0",
+  },
+}

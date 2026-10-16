@@ -1,0 +1,204 @@
+/*
+ * Design tokens for Meltiply — shared by the app (frontend/app) and the
+ * public site (frontend/public). The source monochrome OKLCH ramp is the
+ * single source of truth; the app's shadcn aliases below resolve through it so
+ * ported and legacy-free components share one palette.
+ *
+ * This file is framework-neutral plain CSS: it must not contain Tailwind
+ * directives (`@theme`, `@custom-variant`, `@apply`, `@utility`) so the Astro
+ * landing bundle can import it without a Tailwind runtime. The app maps these
+ * variables onto utility names through `@theme inline` in globals.css.
+ *
+ * Dark theme serves both host conventions: the app toggles `.dark` on the
+ * root element, while the landing sets `data-theme="dark"` on `:root`. Keep
+ * the dark block after `:root`: `:root[data-theme="dark"]` wins by
+ * specificity, but plain `.dark` has equal specificity and relies on source
+ * order.
+ */
+
+/* One palette, two themes — the source monochrome OKLCH ramp. */
+:root {
+  color-scheme: light;
+  /* Match the body canvas before it mounts, including cross-site navigation. */
+  background-color: var(--stripe-bg);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-heading:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono:
+    ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+
+  /* Source surfaces */
+  --page: oklch(0.985 0.001 286.376);
+  --canvas: oklch(0.961 0.002 247.84);
+  --surface: oklch(1 0 0);
+  --inset: oklch(0.979 0.002 247.839);
+  --hover: oklch(0.97 0.002 247.839);
+  --hover-2: oklch(0.933 0.003 247.86);
+  --field: oklch(0.961 0.001 286.375);
+
+  /* Source ink ramp */
+  --ink: oklch(0.247 0.006 258.361);
+  --ink-2: oklch(0.506 0.01 264.477);
+  --ink-3: oklch(0.695 0.009 264.505);
+  /* Less-black variant (cuelume-style charcoal) for low-emphasis titles */
+  --charcoal: #343433;
+
+  /* Source boundaries */
+  --line: oklch(0.946 0.003 264.542);
+  --line-strong: oklch(0.912 0.005 258.326);
+  --line-soft: oklch(0.966 0.002 264.542);
+  --grid-line: color-mix(in srgb, var(--line) 78%, transparent);
+
+  /* Source texture */
+  --stripe: oklch(0.405 0 0 / 0.075);
+  --stripe-bg: oklch(0.97 0 0);
+
+  /* Source brand + semantics */
+  --accent: oklch(0.626 0.205 254.947);
+  --accent-ink: oklch(0.556 0.187 255.617);
+  --accent-tint: oklch(0.96 0.019 252.878);
+  --green: oklch(0.603 0.155 150.883);
+  --green-tint: oklch(0.958 0.017 159.118);
+  --orange: oklch(0.689 0.179 49.902);
+  --orange-tint: oklch(0.964 0.021 67.581);
+  --red: oklch(0.621 0.192 23.042);
+  --red-tint: oklch(0.956 0.017 17.462);
+  --overlay: oklch(0 0 0);
+  --ink-inverse: oklch(1 0 0);
+
+  /* Provider colors are identity marks, not product-state colors. */
+  --platform-facebook: #1877f2;
+  --platform-instagram: #e4405f;
+  --platform-tiktok: #000000;
+  --platform-youtube: #ff0000;
+  --platform-linkedin: #0a66c2;
+
+  /* Source tooltips */
+  --tooltip-bg: oklch(0.272 0.008 264.435);
+  --tooltip-fg: oklch(0.976 0.002 247.839);
+  --tooltip-muted: oklch(0.731 0.008 260.731);
+  --tooltip-border: oklch(0.356 0.007 264.474);
+
+  /* Source elevation */
+  --shadow-hairline: 0 0 0 1px var(--line);
+  --shadow-btn: 0 0 0 1px var(--line-strong), 0 1px 2px oklch(0 0 0 / 0.04);
+  --shadow-card:
+    0 0 0 1px var(--line), 0 1px 3px oklch(0 0 0 / 0.04), 0 1px 2px oklch(0 0 0 / 0.02);
+  --shadow-raised: 0 0 0 1px var(--line), 0 4px 12px oklch(0 0 0 / 0.06);
+  --shadow-overlay: 0 0 0 1px var(--line), 0 12px 32px oklch(0 0 0 / 0.12);
+  --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.08);
+
+  /* Source radii */
+  --radius-chip: 6px;
+  --radius-control: 8px;
+  --radius-card: 10px;
+  --radius-window: 14px;
+
+  /* shadcn aliases resolved through the source ramp (source semantics). */
+  --background: var(--page);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--surface);
+  --secondary: var(--canvas);
+  --secondary-foreground: var(--ink);
+  --muted: var(--inset);
+  --muted-foreground: var(--ink-2);
+  --accent-foreground: var(--surface);
+  --destructive: var(--red);
+  --destructive-foreground: oklch(0.985 0.001 286.376);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--accent);
+}
+
+:root[data-theme="dark"],
+.dark {
+  color-scheme: dark;
+
+  /* Source surfaces */
+  --page: oklch(0.209 0.004 264.477);
+  --canvas: oklch(0.231 0.004 264.487);
+  --surface: oklch(0.26 0.006 271.191);
+  --inset: oklch(0.243 0.004 264.492);
+  --hover: oklch(0.289 0.006 271.22);
+  --hover-2: oklch(0.318 0.007 274.747);
+  --field: oklch(0.293 0.006 271.223);
+
+  /* Source ink ramp */
+  --ink: oklch(0.964 0.002 247.839);
+  --ink-2: oklch(0.731 0.008 260.731);
+  --ink-3: oklch(0.541 0.01 264.484);
+  /* Less-black (less-white in dark mode) variant for low-emphasis titles */
+  --charcoal: oklch(0.731 0.008 260.731);
+
+  /* Source boundaries */
+  --line: oklch(0.308 0.006 258.354);
+  --line-strong: oklch(0.356 0.007 264.474);
+  --line-soft: oklch(0.278 0.006 258.354);
+  --grid-line: color-mix(in srgb, var(--line) 78%, transparent);
+
+  /* Source texture */
+  --stripe: oklch(1 0 0 / 0.055);
+  --stripe-bg: oklch(0.226 0.004 264.485);
+
+  /* Source brand + semantics */
+  --accent: oklch(0.68 0.173 253.301);
+  --accent-ink: oklch(0.788 0.113 248.33);
+  --accent-tint: oklch(0.68 0.173 253.301 / 0.16);
+  --green: oklch(0.705 0.154 153.814);
+  --green-tint: oklch(0.705 0.154 153.814 / 0.14);
+  --orange: oklch(0.746 0.156 55.642);
+  --orange-tint: oklch(0.746 0.156 55.642 / 0.14);
+  --red: oklch(0.666 0.18 21.433);
+  --red-tint: oklch(0.666 0.18 21.433 / 0.14);
+  --overlay: oklch(0 0 0);
+  --ink-inverse: oklch(1 0 0);
+
+  /* Provider colors retain their recognized external brand marks in dark mode. */
+  --platform-facebook: #1877f2;
+  --platform-instagram: #e4405f;
+  --platform-tiktok: #000000;
+  --platform-youtube: #ff0000;
+  --platform-linkedin: #0a66c2;
+
+  /* Source tooltips */
+  --tooltip-bg: oklch(0.182 0.004 264.459);
+  --tooltip-fg: oklch(0.964 0.002 247.839);
+  --tooltip-muted: oklch(0.731 0.008 260.731);
+  --tooltip-border: oklch(0.308 0.006 258.354);
+
+  /* Source elevation */
+  --shadow-hairline: 0 0 0 1px var(--line);
+  --shadow-btn: 0 0 0 1px oklch(1 0 0 / 0.1), 0 1px 2px oklch(0 0 0 / 0.3);
+  --shadow-card:
+    0 0 0 1px oklch(1 0 0 / 0.11), 0 1px 2px oklch(0 0 0 / 0.2), 0 2px 6px oklch(0 0 0 / 0.2);
+  --shadow-raised: 0 0 0 1px oklch(1 0 0 / 0.13), 0 2px 10px oklch(0 0 0 / 0.22);
+  --shadow-overlay: 0 0 0 1px oklch(1 0 0 / 0.15), 0 8px 28px oklch(0 0 0 / 0.34);
+  --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.4);
+
+  /* shadcn aliases resolved through the source ramp (source semantics). */
+  --background: var(--page);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--page);
+  --secondary: var(--canvas);
+  --secondary-foreground: var(--ink);
+  --muted: var(--inset);
+  --muted-foreground: var(--ink-2);
+  --accent-foreground: var(--page);
+  --destructive: var(--red);
+  --destructive-foreground: oklch(0.209 0.004 264.477);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--accent);
+}

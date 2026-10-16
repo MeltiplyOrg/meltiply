@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "description": "Status and JSON content-type cases shared by the Worker contract conformance suite.",
+  "cases": [
+    {
+      "name": "health success",
+      "method": "GET",
+      "path": "/api/v1/health",
+      "expected_status": 200,
+      "expected_content_type": "application/json",
+      "json_subset": { "status": "ok" }
+    },
+    {
+      "name": "current user requires authorization",
+      "method": "GET",
+      "path": "/api/v1/users/me",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "workspace creation requires authorization",
+      "method": "POST",
+      "path": "/api/v1/workspaces",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "auth session is publicly readable",
+      "method": "GET",
+      "path": "/api/auth/get-session",
+      "expected_status": 200,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "platform accounts require authorization",
+      "method": "GET",
+      "path": "/api/v1/platforms",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "brand profiles require authorization",
+      "method": "GET",
+      "path": "/api/v1/brand-profiles",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "deleted brand profiles require authorization",
+      "method": "GET",
+      "path": "/api/v1/brand-profiles/deleted",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "post list requires authorization",
+      "method": "GET",
+      "path": "/api/v1/posts",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "distribution list requires authorization",
+      "method": "GET",
+      "path": "/api/v1/distributions",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "analytics summary requires authorization",
+      "method": "GET",
+      "path": "/api/v1/analytics?start=2026-01-01T00%3A00%3A00Z&end=2026-01-31T00%3A00%3A00Z",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "calendar requires authorization",
+      "method": "GET",
+      "path": "/api/v1/calendar?start=2026-01-01T00%3A00%3A00Z&end=2026-01-31T00%3A00%3A00Z",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "billing plan requires authorization",
+      "method": "GET",
+      "path": "/api/v1/billing/plan",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "billing usage requires authorization",
+      "method": "GET",
+      "path": "/api/v1/billing/usage",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    },
+    {
+      "name": "inbox requires authorization",
+      "method": "GET",
+      "path": "/api/v1/inbox",
+      "expected_status": 401,
+      "expected_content_type": "application/json"
+    }
+  ]
+}

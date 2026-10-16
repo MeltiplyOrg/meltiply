@@ -1,0 +1,89 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "meltiply-api-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "limits": {
+    "cpu_ms": 30000,
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+    },
+  },
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "meltiply-assets-local",
+      // Publishes the bucket on the local runtime's built-in S3-compatible
+      // endpoint so presigned upload/preview/processor URLs issued in
+      // development reach this same bucket instead of the account endpoint no
+      // local host can resolve. The credentials are the local placeholders from
+      // .env.example; the runtime verifies every SigV4 request itself.
+      "local_dev": {
+        "experimental_s3_credentials": {
+          "accessKeyId": "local-r2-access-key",
+          "secretAccessKey": "local-r2-secret-key",
+        },
+      },
+    },
+  ],
+  "hyperdrive": [
+    {
+      "binding": "DB_AUTHENTICATED",
+      "id": "00000000000000000000000000000001",
+      "localConnectionString": "postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    },
+    {
+      "binding": "DB_SYSTEM",
+      "id": "00000000000000000000000000000002",
+      "localConnectionString": "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "OAUTH_STATE",
+        "class_name": "OAuthStateCoordinator",
+        "script_name": "meltiply-state",
+      },
+    ],
+  },
+  // Simulated Email Sending binding: without `"remote": true` Wrangler handles
+  // sends locally, so development never delivers real messages. Remote sends
+  // remain an explicit, separate opt-in.
+  "send_email": [
+    {
+      "name": "MAIL",
+      "allowed_sender_addresses": ["no-reply@meltiply.local"],
+    },
+  ],
+  // The eager Outbox relay dials the Automation Worker over this binding, the
+  // same way the deployed API does. Without it a local "publish now" write
+  // stays in the outbox until the hourly cron, so local publication only
+  // appears to work.
+  "services": [
+    {
+      "binding": "AUTOMATION",
+      "service": "meltiply-automation-local",
+    },
+  ],
+  "vars": {
+    "ALLOWED_ORIGINS": "http://localhost:3000",
+    "ENVIRONMENT": "local",
+    "FRONTEND_URL": "http://localhost:3000",
+    "MAIL_FROM_ADDRESS": "no-reply@meltiply.local",
+    "MAIL_FROM_NAME": "Meltiply Local",
+    "VERSION": "1.0.0-target.0",
+  },
+}

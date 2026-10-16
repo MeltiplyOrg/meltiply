@@ -76,9 +76,17 @@ There are exactly two dialog types. Pick by size and purpose; never add a third.
 
 | Type                  | Import                                                       | Use for                                                                                                       |
 | --------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Centered              | `CenterDialog*` from `@meltiply/ui/center-dialog`            | Compact forms and short focused tasks, shown in the middle of the screen with a bottom-up pop-up              |
+| Centered              | `CenterDialog*` from `@meltiply/ui/center-dialog`            | Compact forms and short focused tasks, shown in the middle of the screen                                      |
 | Centered confirmation | `CenterAlertDialog*` from `@meltiply/ui/center-alert-dialog` | Destructive or irreversible confirmations; same placement and motion, cannot be dismissed by clicking outside |
 | Side                  | `SideDialog` from `@meltiply/ui/side-dialog`                 | Large inspection panels that slide in from the right edge, such as Post details                               |
+
+Centered dialogs own their motion: the first of a sequence pops up from the bottom
+edge and the last one to leave pops out to it, while a handoff between two centered
+dialogs morphs one opaque box from the currently visible size into the next in
+place. Only the contents crossfade and slide sideways; covered forms remain
+mounted, and cancelling a confirmation morphs back without losing input.
+The backdrop stays steady across handoffs. Callers get that handoff for free — do not add entrance or exit
+animations, and do not read or write `data-dialog-motion` from feature code.
 
 ## Agent workflow
 

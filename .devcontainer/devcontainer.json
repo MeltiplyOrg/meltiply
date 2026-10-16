@@ -6,7 +6,7 @@
   "remoteUser": "dev",
   "updateRemoteUserUID": true,
   "containerEnv": {
-    "MELTIPLY_DEV_TUNNEL": "0",
+    "MELTIPLY_DEV_TUNNEL": "1",
     "BUN_INSTALL_CACHE_DIR": "/home/dev/.bun/install/cache",
     "MELTIPLY_DEVCONTAINER": "1",
     "COMPOSE_PROJECT_NAME": "meltiply-${devcontainerId}",

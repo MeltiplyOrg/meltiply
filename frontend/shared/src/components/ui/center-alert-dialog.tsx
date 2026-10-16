@@ -2,11 +2,14 @@ import * as React from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { cn } from "@meltiply/ui/utils";
 import { buttonVariants } from "./button";
+import { useCenterDialogMorph } from "./center-dialog-motion";
 
 /**
  * Confirmation variant of the centered dialog type, for explicit
  * destructive/irreversible acknowledgement. Same placement and motion as
- * `CenterDialog`, but outside clicks cannot dismiss it. Alias for Radix AlertDialog Root.
+ * `CenterDialog`, including the morph a confirmation takes when it opens from or
+ * hands back to a centered dialog behind it, but outside clicks cannot dismiss
+ * it. Alias for Radix AlertDialog Root.
  */
 export const CenterAlertDialog = AlertDialogPrimitive.Root;
 const AlertDialogPortal = AlertDialogPrimitive.Portal;
@@ -20,6 +23,7 @@ const AlertDialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Overlay
     ref={ref}
+    data-dialog-backdrop=""
     className={cn(
       "fixed inset-0 z-50 bg-overlay/80 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className,
@@ -30,26 +34,35 @@ const AlertDialogOverlay = React.forwardRef<
 AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 
 /**
- * Centered confirmation modal using the same bottom-up entrance and bottom-down
- * exit as CenterDialogContent. Traps focus and blocks outside dismissal so destructive
- * actions require an explicit answer; shared CSS respects low-motion preferences.
+ * Centered confirmation modal. It shares `CenterDialog`'s morph: opening from a
+ * centered dialog, or handing its box back to one, resizes the surface in place
+ * with the content sliding sideways, and a confirmation opened on its own pops
+ * up and pops out from the bottom edge. Traps focus and blocks outside dismissal
+ * so destructive actions require an explicit answer; shared CSS respects
+ * low-motion preferences.
  */
 export const CenterAlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <AlertDialogPortal>
-    <AlertDialogOverlay />
-    <AlertDialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-window border border-line bg-surface p-6 shadow-overlay dialog-bottom-popup data-[state=open]:animate-dialog-popup-bottom data-[state=closed]:animate-dialog-popout-bottom",
-        className,
-      )}
-      {...props}
-    />
-  </AlertDialogPortal>
-));
+>(({ className, children, ...props }, ref) => {
+  const boxRef = useCenterDialogMorph(ref);
+  return (
+    <AlertDialogPortal>
+      <AlertDialogOverlay />
+      <AlertDialogPrimitive.Content
+        ref={boxRef}
+        className={cn(
+          "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md content-start -translate-x-1/2 -translate-y-1/2 gap-4 overflow-x-clip rounded-window border border-line bg-surface p-6 shadow-overlay dialog-bottom-popup",
+          className,
+        )}
+        data-dialog-surface=""
+        {...props}
+      >
+        {children}
+      </AlertDialogPrimitive.Content>
+    </AlertDialogPortal>
+  );
+});
 CenterAlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName;
 
 /**

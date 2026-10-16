@@ -140,10 +140,11 @@ visible, with their geometry reserved before JavaScript runs.
   across routes. Consistency is more valuable than novelty.
 - Prefer existing primitives and composed patterns over one-off route-specific
   widgets.
-- **Modal motion:** centered dialogs and confirmations use a bottom-up entrance and
-  downward exit with fixed horizontal position; the side dialog slides in from and
-  out to the right edge. Preserve each surface's resting geometry, and honor the
-  shared low-motion preference.
+- **Modal motion:** centered dialogs and confirmations pop up from the bottom edge and
+  pop out to it; when one hands off to another centered dialog, the box morphs between
+  the two sizes in place while the contents slide sideways, so the pair reads as one
+  surface reshaping. The side dialog slides in from and out to the right edge.
+  Preserve each surface's resting geometry, and honor the shared low-motion preference.
 - **Action feedback:** use the shared Sileo notification store (`@meltiply/ui/toast`,
   rendered by `@meltiply/ui/sileo`). All transient notifications appear bottom-right and expand upward.
   Pair an outcome headline with meaningful expandable detail: the affected object,

@@ -154,7 +154,11 @@ const upload = await api(
 const grant = upload.upload_session.single_upload;
 assert.ok(grant, "Small images must receive a single-part upload capability");
 const put = await fetch(grant.url, { method: grant.method, headers: grant.headers, body: png });
-assert.ok(put.ok, `Signed R2 upload failed: ${put.status}`);
+const storageFailure = put.ok ? "" : await put.text();
+assert.ok(
+  put.ok,
+  `Signed R2 upload failed: ${put.status}; code=${storageFailure.match(/<Code>([^<]+)<[/]Code>/)?.[1] ?? "unknown"}; canonicalHost=${storageFailure.match(/host:([^\n<]+)/)?.[1] ?? "unknown"}; expectedHost=${new URL(grant.url).host}`,
+);
 // Signature tampering must not permit an object overwrite.
 const invalidGrant = new URL(grant.url);
 invalidGrant.searchParams.set("X-Amz-Signature", "0".repeat(64));

@@ -313,6 +313,8 @@ function listener(isPublic) {
           headers.set(name, Array.isArray(value) ? value.join(", ") : value);
       }
       headers.set("cf-connecting-ip", incoming.socket.remoteAddress || "unknown");
+      // The internal runtime transport must not replace SigV4's signed public authority.
+      headers.set("host", url.host);
       const controller = new AbortController();
       incoming.on("aborted", () => controller.abort());
       outgoing.on("close", () => {

@@ -49,6 +49,10 @@ jobs:
           bun run setup --skip-dependencies --skip-image-pull
           bun run test:integration
           timeout --signal=TERM --kill-after=30s 180s bun run local:smoke
+          mkdir -p artifacts/performance
+          setsid ./scripts/cloudflare-local/dev-backend.sh >artifacts/performance/k6-backend.log 2>&1 &
+          backend_pid=$!
+          trap 'kill -TERM -- "-$backend_pid" 2>/dev/null || true' EXIT
           bun run local:k6:ci
       - name: Validate frontend and install Chromium
         if: inputs.lane == 'frontend-full'

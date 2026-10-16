@@ -2,7 +2,7 @@ name: Cleanup contract generation
 on:
   push:
     branches: [chore/public-community-cleanup]
-    paths: [.github/workflows/cleanup-codegen.yml]
+    paths: [.github/workflows/cleanup-codegen.yml, packages/contracts/openapi.yaml]
 permissions:
   contents: read
 jobs:

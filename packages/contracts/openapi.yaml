@@ -2155,12 +2155,6 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
-    InternalError:
-      description: Unexpected internal failure.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
     UpstreamError:
       description: Required synchronous upstream failed.
       content:

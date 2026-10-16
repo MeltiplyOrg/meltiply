@@ -57,10 +57,12 @@ export type CenterDialogContentProps = React.ComponentPropsWithoutRef<
 >;
 
 /**
- * Centered modal with the shared bottom-up entrance (300ms) and bottom-down exit
- * (200ms). Radix retains content through exit, traps focus, and restores it on close.
- * Low-motion preferences collapse these transitions through the shared motion CSS.
- * Callers may customize layout, but cannot select a different animation variant.
+ * Centered modal with a morph entrance/exit (scale + opacity at the resting center
+ * point) instead of a bottom travel, so dialogs transitioning into one another do
+ * not pop out and pop back in as separate surfaces. Radix retains content through
+ * exit, traps focus, and restores it on close. Low-motion preferences collapse these
+ * transitions through the shared motion CSS. Callers may customize layout, but cannot
+ * select a different animation variant.
  */
 export const CenterDialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
@@ -72,7 +74,7 @@ export const CenterDialogContent = React.forwardRef<
       ref={ref}
       className={cn(
         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border border-border bg-background p-6 shadow-lg sm:rounded-lg",
-        "dialog-bottom-popup data-[state=open]:animate-dialog-popup-bottom data-[state=closed]:animate-dialog-popout-bottom",
+        "dialog-bottom-popup data-[state=open]:animate-dialog-morph-in data-[state=closed]:animate-dialog-morph-out",
         className,
       )}
       {...props}

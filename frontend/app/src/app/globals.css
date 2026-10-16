@@ -164,6 +164,14 @@
   animation: dialog-popout-to-bottom 200ms var(--ease-exit) forwards;
 }
 
+@utility animate-dialog-morph-in {
+  animation: dialog-morph-in 220ms var(--ease-enter) forwards;
+}
+
+@utility animate-dialog-morph-out {
+  animation: dialog-morph-out 160ms var(--ease-exit) forwards;
+}
+
 @utility animate-dialog-slide-in-right {
   animation: dialog-slide-in-right 300ms var(--ease-enter) forwards;
 }

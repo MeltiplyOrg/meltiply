@@ -43,7 +43,7 @@ export const CenterAlertDialogContent = React.forwardRef<
     <AlertDialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-window border border-line bg-surface p-6 shadow-overlay dialog-bottom-popup data-[state=open]:animate-dialog-popup-bottom data-[state=closed]:animate-dialog-popout-bottom",
+        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-window border border-line bg-surface p-6 shadow-overlay dialog-bottom-popup data-[state=open]:animate-dialog-morph-in data-[state=closed]:animate-dialog-morph-out",
         className,
       )}
       {...props}

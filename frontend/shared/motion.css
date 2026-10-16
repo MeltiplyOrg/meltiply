@@ -222,6 +222,31 @@ html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="
   }
 }
 
+/* Centered modals morph at their resting center point instead of travelling to
+ * and from the bottom edge, so one dialog can hand off to another without the
+ * outgoing pop-out / incoming pop-in reading as two separate surfaces. */
+@keyframes dialog-morph-in {
+  0% {
+    opacity: 0;
+    scale: 0.94;
+  }
+  100% {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes dialog-morph-out {
+  0% {
+    opacity: 1;
+    scale: 1;
+  }
+  100% {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+
 /* SideDialog enters from and exits to the right edge; geometry stays anchored. */
 @keyframes dialog-slide-in-right {
   0% {

@@ -28,6 +28,15 @@ Development stays on loopback by default. Set `MELTIPLY_DEV_TUNNEL=1 make dev` o
 
 Seeded local accounts: `alpha@meltiply.local` (populated workspace) and `beta@meltiply.local` (near-empty workspace); both use `MeltiplyLocal1!`. These credentials are for local development only.
 
+## Deployment targets
+
+Keep the [managed Cloudflare deployment](infra/cloudflare/README.md), or run the
+production-built application and Workers on your own host with
+[one Docker Compose file](docs/self-hosting.md). The self-hosted stack includes
+PostgreSQL, persistent workerd bindings, durable queues, SMTP delivery, native
+media processing, and optional TLS. Its GitHub Actions workflow builds and verifies
+three GHCR release images; it does not require remote Cloudflare Workers.
+
 ## Common commands
 
 | Task                             | Command               |

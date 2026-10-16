@@ -15,8 +15,8 @@ const commandSchema = z.discriminatedUnion("action", [
       limit: z.number().int().min(1).max(1000).default(100),
     })
     .strict(),
-  z.object({ action: z.literal("probe-write"), id: z.uuid() }).strict(),
-  z.object({ action: z.literal("probe-read"), id: z.uuid() }).strict(),
+  z.object({ action: z.literal("probe-write"), id: z.uuid(), organizationId: z.uuid() }).strict(),
+  z.object({ action: z.literal("probe-read"), id: z.uuid(), organizationId: z.uuid() }).strict(),
 ]);
 
 /**

@@ -49,6 +49,20 @@ DevBox motion scenarios use a separate loopback development server on the
 adjacent port. Production tests never enable DevBox controls. The topology lane
 owns a separate backend process for load checks after the smoke process exits.
 
+## Self-hosted release images
+
+The [self-hosted image workflow](../.github/workflows/selfhost.yml) builds the
+production workerd runtime, migration image, and native media processor serially
+on GitHub-hosted runners. It starts the complete Compose deployment and exercises
+email verification, authenticated database access, signed storage, queue delivery,
+media processing, and persistence across an abrupt restart. Publication is gated
+on these scenarios and the existing `cloudflare:check` gate.
+
+Push and PR builds do not publish packages. Published releases and explicitly
+requested manual runs can publish verified images to GHCR with package-scoped
+`GITHUB_TOKEN` permissions. See [self-hosting](self-hosting.md#published-images-and-ci)
+for tags, configuration, and deployment.
+
 ## Caching
 
 [Workspace installation](../.github/actions/install-workspace/action.yml) caches

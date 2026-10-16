@@ -190,12 +190,12 @@ console.log(
 );
 
 const probeId = randomUUID();
-assert.equal(admin("probe-write", probeId).prepared, true);
+assert.equal(admin("probe-write", probeId, identity.active_organization.id).prepared, true);
 // SIGKILL, not graceful shutdown: queued delays and workflow/OAuth state must
 // survive an unexpected runtime loss. Restart the shared-network processor too.
 compose("kill", "-s", "SIGKILL", "runtime", "processor");
 compose("up", "-d", "--no-build", "--wait", "--wait-timeout", "120", "runtime", "processor");
-assert.deepEqual(admin("probe-read", probeId), {
+assert.deepEqual(admin("probe-read", probeId, identity.active_organization.id), {
   storage: "recovered",
   oauth: "single-use",
   queue: "recovered",

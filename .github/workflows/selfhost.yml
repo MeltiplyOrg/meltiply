@@ -128,7 +128,7 @@ jobs:
         run: |
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls up -d --no-deps gateway
-          curl --retry 10 --retry-connrefused --retry-delay 1 --insecure --fail --silent https://localhost/health
+          curl --retry 10 --retry-connrefused --retry-delay 1 --insecure --fail --silent https://localhost/api/v1/ready
           curl --resolve public.localhost:443:127.0.0.1 --insecure --fail --silent https://public.localhost/ --output /dev/null
       - uses: ./.github/actions/install-workspace
       - name: Check the complete existing Cloudflare deployment target
@@ -136,7 +136,8 @@ jobs:
           npm ci --prefix scripts/selfhost --ignore-scripts
           bun run setup --skip-dependencies --skip-image-pull
           bun run cloudflare:check
-          bunx --no-install vp fmt scripts/selfhost compose.selfhost.yml .github/workflows/selfhost.yml knip.json --check
+          bun run docs:links
+          bunx --no-install vp fmt scripts/selfhost compose.selfhost.yml .github/workflows/selfhost.yml knip.json README.md docs/self-hosting.md docs/public-ci.md --check
       - name: Publish only verified images
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish)
         env:

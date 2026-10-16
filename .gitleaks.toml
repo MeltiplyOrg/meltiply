@@ -59,4 +59,6 @@ id = "jwt"
 description = "Exact reserved-domain fixture: signature decodes to signature-example-ba-sig-01, not an EdDSA signature"
 condition = "AND"
 paths = ['''^packages/contracts/examples/operations\.yaml$''']
-regexes = ['''^eyJhbGciOiJFZERTQSIsImtpZCI6ImJhLWp3dC1rZXktMDEiLCJ0eXAiOiJKV1QifQ\.eyJzdWIiOiJiYV91c2VyX2FscGhhXzAxIiwiZW1haWwiOiJhbHBoYS1hZG1pbkBleGFtcGxlLnRlc3QiLCJhdWQiOiJtZWx0aXBseS1hcGkiLCJleHAiOjE3NjczMTI3MDB9\.c2lnbmF0dXJlLWV4YW1wbGUtYmEtc2lnLTAx$''']
+regexes = [
+  '''^eyJhbGciOiJFZERTQSIsImtpZCI6ImJhLWp3dC1rZXktMDEiLCJ0eXAiOiJKV1QifQ\.eyJzdWIiOiJiYV91c2VyX2FscGhhXzAxIiwiZW1haWwiOiJhbHBoYS1hZG1pbkBleGFtcGxlLnRlc3QiLCJhdWQiOiJtZWx0aXBseS1hcGkiLCJleHAiOjE3NjczMTI3MDB9\.c2lnbmF0dXJlLWV4YW1wbGUtYmEtc2lnLTAx$''',
+]

@@ -117,7 +117,8 @@ html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="
  *
  * `--ease-enter` is mirrored as `effectEasing` in `effects.ts` because WAAPI
  * timing strings cannot resolve CSS variables; keep both values in sync.
- * Keyframes are referenced by app utilities (`animate-dialog-*`), app
+ * Keyframes are referenced by the centered-dialog surface rules below and by
+ * app utilities (`animate-dialog-slide-*`), app
  * component rules (`.stream-caret`), and inline `style`
  * animations; `effects.ts` supplies their imperative WAAPI twins.
  */
@@ -222,29 +223,120 @@ html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="
   }
 }
 
-/* Centered modals morph at their resting center point instead of travelling to
- * and from the bottom edge, so one dialog can hand off to another without the
- * outgoing pop-out / incoming pop-in reading as two separate surfaces. */
-@keyframes dialog-morph-in {
-  0% {
-    opacity: 0;
-    scale: 0.94;
+/*
+ * One opaque live shell resizes; only its contents crossfade. Layout constraints
+ * are suspended inside the size track, then restored without a second entrance.
+ * Covered dialogs keep their live controls and Radix focus ownership.
+ */
+@keyframes dialog-morph-size {
+  from {
+    width: var(--dialog-morph-from-width);
+    max-width: none;
+    max-height: none;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    height: var(--dialog-morph-from-height);
   }
-  100% {
-    opacity: 1;
-    scale: 1;
+  to {
+    width: var(--dialog-morph-to-width);
+    max-width: none;
+    max-height: none;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    height: var(--dialog-morph-to-height);
   }
 }
 
-@keyframes dialog-morph-out {
-  0% {
-    opacity: 1;
-    scale: 1;
-  }
-  100% {
+@keyframes dialog-morph-retain {
+  from {
     opacity: 0;
-    scale: 0.96;
   }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Contents slide one step in the direction of travel: the arriving dialog's
+ * rows come in from the right as the departing ones leave to the left. */
+@keyframes dialog-content-slide-in {
+  from {
+    opacity: 0;
+    translate: 24px 0;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes dialog-content-slide-out {
+  from {
+    translate: 0 0;
+    opacity: 1;
+  }
+  to {
+    translate: -24px 0;
+    opacity: 0;
+  }
+}
+
+/* A centered dialog is the first of its sequence or the last to leave it
+ * unless a measured track says otherwise, so it pops up from and out to the
+ * bottom edge. The morph rules are the more specific of the two. */
+[data-dialog-surface][data-state="open"] {
+  animation: dialog-popup-from-bottom 300ms var(--ease-enter) forwards;
+}
+
+/* Radix retains the final dismissal until its bottom exit finishes. */
+[data-dialog-surface][data-state="closed"] {
+  animation: dialog-popout-to-bottom 200ms var(--ease-exit) forwards;
+}
+
+[data-dialog-surface][data-state="open"][data-dialog-motion="morph-in"] {
+  animation: dialog-morph-size 260ms var(--ease-enter) backwards;
+}
+
+[data-dialog-surface][data-state="open"][data-dialog-motion="settled"] {
+  animation: none;
+}
+
+[data-dialog-surface][data-state="closed"][data-dialog-motion="morph-out"] {
+  animation: dialog-morph-retain 260ms linear forwards;
+}
+
+[data-dialog-surface][data-dialog-motion="morph-in"] > :not([data-dialog-snapshot]) {
+  animation: dialog-content-slide-in 260ms var(--ease-enter) backwards;
+}
+
+[data-dialog-snapshot] {
+  position: absolute !important;
+  inset: 0 auto auto 0 !important;
+  translate: none !important;
+  transform: none !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+  animation: dialog-content-slide-out 260ms var(--ease-enter) forwards !important;
+}
+
+[data-dialog-snapshot] * {
+  animation: none !important;
+  transition: none !important;
+}
+
+[data-dialog-covered] {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+[data-dialog-backdrop][data-dialog-handoff] {
+  animation: none;
 }
 
 /* SideDialog enters from and exits to the right edge; geometry stays anchored. */

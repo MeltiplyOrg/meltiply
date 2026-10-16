@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Remove `/billing/webhook`, `/billing/plan`, `/billing/usage`,
+  `/billing/checkout-sessions`, and `/billing/portal-sessions`, plus their
+  payment requests, responses, status, and paid-plan schemas. Remove `plan`
+  from `OrganizationSummary` and `Workspace`. Clients must use the community
+  resource policy rather than subscription or checkout APIs.
+
 - Add explicit OAuth account selection endpoints for multi-account providers:
   `GET /oauth-selections/{selection_id}` (`getOAuthSelection`),
   `POST /oauth-selections/{selection_id}/confirm` (`confirmOAuthSelection`),
@@ -30,8 +36,6 @@
 - Add `GET /assets/{asset_id}/preview-url` so validated ready media can be
   rendered from a short-lived private URL without weakening the existing
   attachment-only download response.
-- Add explicit `403` responses for checkout and portal session commands, which
-  require an active organization administrator.
 - Add the Post-owned media composition surface: `GET /posts`, `POST /posts`,
   `GET /posts/{post_id}`, `PATCH /posts/{post_id}`, `DELETE /posts/{post_id}`,
   and `POST /posts/{post_id}/schedule` (`listPosts`, `createPost`, `getPost`,

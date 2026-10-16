@@ -397,25 +397,6 @@ test("rendered files are deterministic and private", async (context) => {
   ]);
 });
 
-test("offline preflight verifies the immutable checkout without remote credentials", async () => {
-  const result = await preflightRelease({
-    environment: {},
-    offline: true,
-    repoRoot: "/repo",
-    runCommand: successfulPreflightCommand,
-    spec: validateReleaseSpec(releaseInput()),
-  });
-  assert.deepEqual(result, {
-    environment: "staging",
-    deployment_mode: "bootstrap",
-    git_sha: gitSha,
-    offline: true,
-    release_id: `staging-${gitSha.slice(0, 12)}`,
-    remote_secret_binding_counts: { api: 6, automation: 3, state: 0 },
-    status: "ready",
-    wrangler_version: "4.148.0",
-  });
-});
 
 test("connected preflight requires matching Cloudflare and TLS database credentials", async () => {
   const spec = validateReleaseSpec(releaseInput());

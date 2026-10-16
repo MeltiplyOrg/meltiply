@@ -11,7 +11,7 @@ import {
   ProviderRegistry,
 } from "@meltiply/providers";
 import type { EffectTransactionClient, Queryable } from "@meltiply/database";
-import { analyticsTerminalAgeSeconds, mediaUploadMaximum } from "@meltiply/domain";
+import { analyticsTerminalAgeSeconds, COMMUNITY_LIMITS, mediaUploadMaximum } from "@meltiply/domain";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { createApiApp } from "../../api/src/app";
@@ -68,7 +68,10 @@ const seededAlphaProfileId = "a0000000-0000-4000-8000-000000000001";
 const seededAlphaAssetId = "40000000-0000-4000-8000-000000000001";
 const seededYouTubeAccountId = "50000000-0000-4000-8000-000000000001";
 const currentUsagePeriod = new Date().toISOString().slice(0, 7);
-let organizationBefore: { billing_status: string; plan: string } | undefined;
+const storageLimit = COMMUNITY_LIMITS.max_storage_bytes;
+if (storageLimit === null) {
+  throw new Error("Storage boundary scenarios require a bounded community storage limit.");
+}
 let currentUsageBefore:
   | {
       api_calls: string;
@@ -1310,10 +1313,6 @@ function youtubeSyncRegistry(
 describeIntegration("Automation jobs with PostgreSQL", () => {
   beforeAll(async () => {
     await runSystemTransaction(env, async (client) => {
-      const organization = await client.query<{
-        billing_status: string;
-        plan: string;
-      }>("SELECT plan, billing_status FROM organizations WHERE id = $1", [organizationId]);
       const usage = await client.query<{
         api_calls: string;
         distributions: string;
@@ -1326,14 +1325,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
          WHERE org_id = $1 AND period = $2`,
         [organizationId, currentUsagePeriod],
       );
-      organizationBefore = organization.rows[0];
       currentUsageBefore = usage.rows[0];
-      await client.query(
-        `UPDATE organizations
-         SET plan = 'creator', billing_status = 'active', updated_at = now()
-         WHERE id = $1`,
-        [organizationId],
-      );
     });
   });
 
@@ -1432,14 +1424,6 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
              reconnect_notified_at = NULL, updated_at = now()
          WHERE id = '50000000-0000-4000-8000-000000000001'`,
       );
-      if (organizationBefore) {
-        await client.query(
-          `UPDATE organizations
-           SET plan = $2, billing_status = $3, updated_at = now()
-           WHERE id = $1`,
-          [organizationId, organizationBefore.plan, organizationBefore.billing_status],
-        );
-      }
     });
     await systemPoolFor(env).end();
   });
@@ -2271,7 +2255,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     // workspace's charge, so nothing remains for a second reservation. A retry
     // that demanded fresh headroom for a key it already holds would be refused
     // here, which is exactly what this case pins.
-    const creatorCeiling = 25 * 1024 * 1024 * 1024;
+    const storageCeiling = storageLimit;
     try {
       const { body } = await stagedUploadFixture({
         assetId,
@@ -2315,7 +2299,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       // the protected-copy reservation consumes, filling the workspace to its
       // ceiling alongside the checkpoint's full reservation.
       const chargedSoFar = await chargedObjectBytes(organizationId);
-      const holderBytes = creatorCeiling - body.byteLength - Number(chargedSoFar);
+      const holderBytes = storageCeiling - body.byteLength - Number(chargedSoFar);
       await runSystemTransaction(env, async (client) => {
         await client.query(
           `INSERT INTO assets
@@ -2375,7 +2359,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       // is gone.
       expect(inventory.find((row) => row.status === "writing")).toBeUndefined();
       expect(await chargedObjectBytes(organizationId)).toBe(
-        BigInt(creatorCeiling) + BigInt(2 * produced.byteLength) - BigInt(imageReservationCeiling),
+        BigInt(storageCeiling) + BigInt(2 * produced.byteLength) - BigInt(imageReservationCeiling),
       );
       await expect(processingState(assetId, eventId)).resolves.toMatchObject({
         event_outcome: "succeeded",
@@ -2895,7 +2879,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const harness = objectStoreHarness();
     const processor = mediaProcessorNamespace(harness);
     try {
-      // Pre-charge the workspace to its creator-tier ceiling so the
+      // Pre-charge the workspace to its community storage ceiling so the
       // reservation math finds zero headroom; this holder asset is deleted in
       // the finally block so later specs keep full capacity.
       await runSystemTransaction(env, async (client) => {
@@ -2911,13 +2895,14 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           `INSERT INTO asset_objects
              (org_id, asset_id, brand_profile_id, kind, r2_key, bytes,
               content_type, status)
-           VALUES ($1, $2, $3, 'original', $4, 26843545600, 'image/png',
+           VALUES ($1, $2, $3, 'original', $4, $5, 'image/png',
                    'ready')`,
           [
             organizationId,
             holderAssetId,
             seededAlphaProfileId,
             `${organizationId}/${holderAssetId}/original`,
+            storageLimit,
           ],
         );
       });
@@ -3060,8 +3045,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const processor = mediaProcessorNamespace(harness);
     const body = png(320, 240);
     const sourceBytes = body.byteLength;
-    // creator-tier ceiling, the plan `beforeAll` pins for this workspace.
-    const ceiling = 25 * 1024 * 1024 * 1024;
+    const ceiling = storageLimit;
     // Charged rows from the seed and earlier fixture assets accumulate until
     // the suite's teardown, so the holder is sized against the measured charge
     // rather than a constant.
@@ -3170,7 +3154,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     const processor = mediaProcessorNamespace(harness);
     const body = png(320, 240);
     const sourceBytes = body.byteLength;
-    const ceiling = 25 * 1024 * 1024 * 1024;
+    const ceiling = storageLimit;
     // The seed and earlier fixture assets keep their charged rows until
     // teardown, so the holder is sized against the measured charge rather
     // than a constant.
@@ -3282,7 +3266,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       // 44-byte rendition body `engineRenditionBytes` builds.
       const outputBytes = 44;
       const chargedSoFar = await chargedObjectBytes(organizationId);
-      const ceiling = 25n * 1024n * 1024n * 1024n;
+      const ceiling = BigInt(storageLimit);
       // Headroom ends at exactly two copies of the real output plus the source
       // copy and the staging reservation the source consumed: enough for the
       // promotion path when reservations settle to real bytes, nowhere near
@@ -3357,7 +3341,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       });
       const outputBytes = 44;
       const chargedSoFar = await chargedObjectBytes(organizationId);
-      const ceiling = 25n * 1024n * 1024n * 1024n;
+      const ceiling = BigInt(storageLimit);
       // One byte short of the guarantee: the staging reservation covers the
       // source copy and the output reservation, but the destination needs
       // 2 * output — one real byte more than is free.
@@ -3542,7 +3526,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       // reservation because a stale create-only grant could still write to
       // that ceiling.
       const chargedSoFar = await chargedObjectBytes(organizationId);
-      const ceiling = 25n * 1024n * 1024n * 1024n;
+      const ceiling = BigInt(storageLimit);
       const holderBytes =
         Number(ceiling - chargedSoFar) -
         body.byteLength -

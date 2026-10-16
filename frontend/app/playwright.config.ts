@@ -125,7 +125,7 @@ export default defineConfig({
         {
           // Browser snapshots and Lighthouse must exercise the same production
           // assets; development-only launchers are not part of that surface.
-          command: `bun run --cwd frontend/app build:production && bun run --cwd frontend/app --no-install vite preview --host 127.0.0.1 --port ${frontendPort} --strictPort`,
+          command: `bun run --cwd frontend/app build:production && bun run --cwd frontend/app --no-install vp preview --host 127.0.0.1 --port ${frontendPort} --strictPort`,
           cwd: repositoryRoot,
           env: {
             ...process.env,

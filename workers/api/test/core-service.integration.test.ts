@@ -30,7 +30,6 @@ import { createAssetApiService } from "../src/asset-service";
 import { createCoreApiService } from "../src/core-service";
 import { createPostApiService } from "../src/post-service";
 import type { PostApiService, PostTargetInput } from "../src/post-types";
-import type { IdempotentResult } from "../src/core-types";
 import type { components } from "@meltiply/contracts/schema";
 import {
   authenticatedPoolFor,
@@ -45,7 +44,6 @@ import { saveOAuthConnectionEffect } from "../src/oauth-connection";
 import { revokeOAuthConnectionEffect } from "../src/oauth-revoke";
 import { getPublicationRequirementsEffect } from "../src/publication-requirements";
 import { createOperatorReconciliationService } from "../src/operator-reconciliation";
-import { lockOrganizationEffect } from "../src/organization-lock";
 import { tokenCipherFor } from "../src/token-credentials";
 import { isoPeriodKey } from "../src/time";
 

@@ -76,6 +76,7 @@
     "release:secrets": "node scripts/release/release.mjs secrets",
     "release:smoke": "node scripts/release/release.mjs smoke",
     "release:manifest": "node scripts/release/release.mjs manifest",
+    "release:migrate": "node scripts/release/release.mjs migrate",
     "release:test": "node --test scripts/release/*.test.mjs",
     "staging:r2:check": "node scripts/staging/r2-acceptance.mjs",
     "staging:r2:run": "node scripts/staging/r2-acceptance.mjs --apply",

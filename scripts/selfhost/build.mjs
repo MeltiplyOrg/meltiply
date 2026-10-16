@@ -33,12 +33,13 @@ for (const [name, entry] of Object.entries({
   automation: "scripts/selfhost/automation.ts",
   state: "workers/state/src/index.ts",
   bindings: "scripts/selfhost/bindings.ts",
+  diagnostics: "scripts/selfhost/diagnostics.ts",
   frontend: "frontend/app/src/worker.ts",
 })) {
   const sourcePath =
     name === "frontend"
       ? "frontend/app/wrangler.jsonc"
-      : `workers/${name === "bindings" ? "automation" : name}/wrangler.jsonc`;
+      : `workers/${["bindings", "diagnostics"].includes(name) ? "automation" : name}/wrangler.jsonc`;
   const source = parseJsonc(await readFile(resolve(root, sourcePath), "utf8"));
   metadata[name] = {
     entry: `${basename(entry, ".ts")}.js`,

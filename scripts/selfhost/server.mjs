@@ -240,6 +240,20 @@ const runtime = new Miniflare(
       },
       { ...worker("bindings"), bindings: {}, serviceBindings: { HOST: host } },
       {
+        ...worker("diagnostics"),
+        r2Buckets: storage,
+        durableObjects: {
+          OAUTH_STATE: { className: "OAuthStateCoordinator", scriptName: "state", useSQLite: true },
+        },
+        workflows: {
+          REPLY_WORKFLOW: {
+            name: "meltiply-reply-selfhost",
+            className: "ReplyWorkflow",
+            scriptName: "automation",
+          },
+        },
+      },
+      {
         name: "public",
         modules: true,
         script: "export default { fetch(request, env) { return env.ASSETS.fetch(request); } };",

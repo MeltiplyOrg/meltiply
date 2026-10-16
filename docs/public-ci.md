@@ -16,12 +16,22 @@ installs Node 24.18.0 and Bun 1.4.2, and runs:
   integration tests, local-tooling regression suites, dependency-license/SBOM
   checks, costs, and documentation checks.
 - A check that contract generation left no tracked contract changes.
+- Frontend coverage enforcement using `bun run --cwd frontend/app test --coverage`.
+- Release and staging harness regression tests, without deploying services.
+- `bun run iac:check`: signed-release OpenTofu installation, formatting, backend-free
+  initialization with a read-only provider lockfile, validation, infrastructure
+  tests, policy checks, cost checks, and infrastructure-tooling regression tests.
 
 The database is a disposable local Docker PostgreSQL instance with fixture-only
 credentials. Cleanup runs even after a failed check. The job token has read-only
 repository access; no deployment credentials are supplied. Run contribution checks
 on ephemeral GitHub-hosted runners, not self-hosted runners or
 `pull_request_target` jobs that execute contributor code.
+
+The gate runs on every push and pull request without path filters or repository
+visibility conditions. Infrastructure checks receive no deployment token or
+remote-plan variables. Browser journeys, load tests, and live deployments are
+separate operational checks, not silently implied by a passing `quality` job.
 
 ## Quality tools
 

@@ -1,4 +1,4 @@
-name: Public CI
+name: CI
 
 on:
   push:
@@ -9,15 +9,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: public-ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   quality:
-    # Run this workflow only for publicly accessible repositories.
-    if: github.event.repository.private == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       CI: "true"
       WRANGLER_SEND_METRICS: "false"
@@ -65,6 +63,17 @@ jobs:
 
       - name: Run existing application and repository quality gate
         run: bun run cloudflare:check
+
+      - name: Enforce frontend test coverage
+        run: bun run --cwd frontend/app test --coverage
+
+      - name: Run release and staging harness tests
+        run: |
+          bun run release:test
+          bun run test:staging
+
+      - name: Validate infrastructure, policy, and costs without deployment credentials
+        run: bun run iac:check
 
       - name: Reject uncommitted generated contract changes
         run: git diff --exit-code -- packages/contracts

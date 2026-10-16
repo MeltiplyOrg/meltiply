@@ -5,8 +5,8 @@ import type { EffectTransactionClient } from "@meltiply/database";
 /**
  * Acquires a transaction-scoped exclusive lock on an organization using an Effect transaction client.
  *
- * Provides Hyperdrive-safe mutation serialization (for plan updates, quota increments, and billing
- * sessions) by taking a row lock on `organization_locks` instead of connection-bound advisory locks.
+ * Serializes quota-sensitive mutations safely through Hyperdrive by taking a row
+ * lock on `organization_locks` instead of connection-bound advisory locks.
  *
  * @param client - Active EffectTransactionClient.
  * @param organizationId - UUID of the organization to lock.

@@ -101,9 +101,9 @@ export async function readJsonFile(filePath, name, maximumBytes = 64 * 1024) {
 }
 
 /**
- * Validates a CircleCI approval metadata record against release invariants.
- * Enforces schema version 1, valid UUIDs for workflow and approver, successful status,
- * correct staging approval job naming pattern, and exact Git SHA parity with the release spec.
+ * Validates an operator review record against release invariants.
+ * Enforces schema version 1, a release-session UUID, a bounded operator label,
+ * successful review, a valid phase name, and exact Git SHA parity with the release.
  *
  * @param {unknown} input - Raw parsed JSON approval metadata
  * @param {object} spec - Release specification object
@@ -126,7 +126,7 @@ export function validateApprovalMetadata(input, spec) {
   const job = plainObject(approval.approval_job, "approval metadata approval_job");
   exactKeys(job, approvalJobKeys, "approval metadata approval_job");
   matchedString(job.id, uuidPattern, "approval metadata approval_job.id");
-  matchedString(job.approved_by, uuidPattern, "approval metadata approval_job.approved_by");
+  matchedString(job.approved_by, /^[A-Za-z0-9][A-Za-z0-9@._+ -]{0,127}$/, "approval operator");
   if (job.status !== "success") {
     throw new TypeError("approval metadata approval_job.status must be success");
   }
@@ -136,7 +136,7 @@ export function validateApprovalMetadata(input, spec) {
 
   return {
     approval_job: {
-      approved_by: job.approved_by.toLowerCase(),
+      approved_by: job.approved_by,
       id: job.id.toLowerCase(),
       name: job.name,
       status: "success",
@@ -149,9 +149,8 @@ export function validateApprovalMetadata(input, spec) {
 }
 
 /**
- * Loads, validates, and consolidates multiple CircleCI approval metadata files.
- * Confirms that all expected approval jobs are present, distinct, associated with the same
- * workflow, and bound to the expected plan digest.
+ * Loads operator review files, requiring distinct phases in one release session
+ * and the expected reviewed plan digest for each phase.
  *
  * @param {object} params - Loading options
  * @param {Set<string>} params.expectedNames - Set of required approval job names
@@ -222,7 +221,7 @@ export async function loadApprovalMetadata({
     throw new TypeError(`approval metadata is missing required jobs: ${missing.join(", ")}`);
   }
   if (workflows.size !== 1) {
-    throw new TypeError("approval metadata must belong to one CircleCI workflow");
+    throw new TypeError("approval metadata must belong to one release session");
   }
   return approvals.sort((left, right) =>
     left.approval_job.name.localeCompare(right.approval_job.name),
@@ -286,8 +285,9 @@ export async function verifyReleaseCheckout({ repoRoot, runCommand, spec }) {
 }
 
 /**
- * Comprehensive preflight mutation gate: checks clean Git checkout at exact commit SHA,
- * asserts mutating intent and confirmation string, and loads all required CircleCI approvals.
+ * Checks a clean checkout at the release SHA, explicit mutation intent, and
+ * phase-scoped operator review records. This is an accident-prevention gate;
+ * filesystem access and deployment credentials, not these JSON files, authorize the operator.
  *
  * @param {object} params - Authorization parameters
  * @param {boolean} params.apply - Apply flag

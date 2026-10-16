@@ -90,8 +90,6 @@ const exactRuntimeKeys = new Set([
   "facebook_client_id",
   "instagram_client_id",
   "r2_account_id",
-  "polar_agency_product_id",
-  "polar_creator_product_id",
   "threads_client_id",
   "tiktok_client_key",
   "tiktok_media_url_prefix",
@@ -282,7 +280,7 @@ export function containsCredentialMaterial(serialized) {
  * Validates a non-secret staging release specification document against structural and security invariants.
  * Enforces schema version 1, staging environment, valid deployment mode ('bootstrap' or 'update'),
  * 40-character Git SHA, derived release ID ('staging-<12-char-sha>'), origin-only HTTPS URLs,
- * distinct Polar product IDs, the shared sender address/name policy with a
+ * the shared sender address/name policy with a
  * dotted sender domain required for staging, a staging DNS suffix, Neon scope,
  * and ISO 8601 restore point expiry. Rejects secrets, private keys, and connection strings.
  * @param {unknown} input - Raw release specification object
@@ -367,16 +365,6 @@ export function validateReleaseSpec(input) {
     facebook_client_id: optionalString(runtime.facebook_client_id, "runtime.facebook_client_id"),
     instagram_client_id: optionalString(runtime.instagram_client_id, "runtime.instagram_client_id"),
     r2_account_id: requiredString(runtime.r2_account_id, "runtime.r2_account_id", /^[0-9a-f]{32}$/),
-    polar_agency_product_id: requiredString(
-      runtime.polar_agency_product_id,
-      "runtime.polar_agency_product_id",
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    ),
-    polar_creator_product_id: requiredString(
-      runtime.polar_creator_product_id,
-      "runtime.polar_creator_product_id",
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    ),
     threads_client_id: optionalString(runtime.threads_client_id, "runtime.threads_client_id"),
     tiktok_client_key: optionalString(runtime.tiktok_client_key, "runtime.tiktok_client_key"),
     tiktok_media_url_prefix:
@@ -388,9 +376,6 @@ export function validateReleaseSpec(input) {
       "runtime.youtube_shorts_client_id",
     ),
   };
-  if (validatedRuntime.polar_agency_product_id === validatedRuntime.polar_creator_product_id) {
-    throw new TypeError("Polar creator and agency product IDs must be distinct");
-  }
   for (const [provider, fields] of Object.entries(providerVariables)) {
     if (acceptance[provider] && !validatedRuntime[fields.clientField]) {
       throw new TypeError(`${fields.clientField} is required when ${provider} is accepted`);
@@ -600,7 +585,6 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   const api = structuredClone(sourceConfigs.api);
   const commonVars = {
     ENVIRONMENT: "staging",
-    POLAR_ENV: "production",
     PUBLIC_API_URL: spec.api_base_url,
     R2_BUCKET_NAME: iac.assets_bucket,
     VERSION: spec.git_sha,
@@ -631,8 +615,6 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
     FRONTEND_URL: spec.frontend_url,
     MAIL_FROM_ADDRESS: spec.runtime.mail_from_address,
     ...(spec.runtime.mail_from_name ? { MAIL_FROM_NAME: spec.runtime.mail_from_name } : {}),
-    POLAR_AGENCY_PRODUCT_ID: spec.runtime.polar_agency_product_id,
-    POLAR_CREATOR_PRODUCT_ID: spec.runtime.polar_creator_product_id,
     ...(iac.access_aud
       ? {
           ACCESS_POLICY_AUD: iac.access_aud,
@@ -876,7 +858,7 @@ export function validateDatabaseEnvironment(environment) {
 
 /**
  * Computes the remote secret names each Worker requires for a release: common storage/encryption
- * keys, the Better Auth session secret and billing/Polar credentials for the API Worker, and
+ * keys, the Better Auth session secret for the API Worker, and
  * provider-specific credentials enabled in provider acceptance. Mail delivery uses the native
  * send_email binding, so no delivery credential is required.
  *
@@ -885,7 +867,7 @@ export function validateDatabaseEnvironment(environment) {
  */
 function requiredRemoteSecrets(spec) {
   const common = ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "TOKEN_ENCRYPTION_KEY"];
-  const api = [...common, "BETTER_AUTH_SECRET", "BILLING_WEBHOOK_SECRET", "POLAR_ACCESS_TOKEN"];
+  const api = [...common, "BETTER_AUTH_SECRET"];
   const automation = [...common];
   for (const [provider, fields] of Object.entries(providerVariables)) {
     if (spec.provider_acceptance[provider]) {

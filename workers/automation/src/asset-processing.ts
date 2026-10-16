@@ -56,7 +56,7 @@ import {
   ASSET_UPLOAD_POLICY,
   assetOrphanGraceSeconds,
   type DatabaseError,
-  limitsForBillingState,
+  COMMUNITY_LIMITS,
   mediaUploadMaximum,
 } from "@meltiply/domain";
 import { readyObjectKey, type ObjectStore } from "@meltiply/storage";
@@ -462,7 +462,7 @@ const chargedCapacitySql = `SELECT
 /**
  * Workspace capacity measured while the organization row is locked.
  *
- * `ceiling` is `null` for an unlimited plan, which is why the caller compares
+ * `ceiling` may be `null` for an unbounded resource policy, so the caller compares
  * against `charged` rather than pre-computing headroom: an unlimited workspace
  * must still refuse a reservation of zero bytes.
  */
@@ -479,15 +479,14 @@ interface CapacityWindow {
  * Holding `FOR UPDATE` across the charge sum and the caller's insert is what
  * makes a reservation exclusive: concurrent processing runs and concurrent
  * upload sessions serialize here, so neither can observe headroom the other is
- * about to consume. Reading the plan from the same locked row also means a
- * downgrade mid-attempt is seen by the reservation that depends on it.
+ * about to consume. The locked owner must still exist before capacity is granted.
  *
  * @param client - Transaction client, already scoped to the system role.
  * @param organizationId - Organization whose capacity is being measured.
  * @returns The charged total and the ceiling, or a terminal failure when the
  *   workspace no longer exists.
  * @throws {TerminalJobError} When the organization row is gone, or when the
- *   locked plan or charge read fails; a failed read cannot be treated as
+ *   owner or charge read fails; a failed read cannot be treated as
  *   headroom, so it must stop the attempt rather than grant capacity.
  */
 function lockCapacityWindow(
@@ -502,17 +501,12 @@ function lockCapacityWindow(
         code: "capacity_read_failed",
         message: "This workspace's storage usage could not be confirmed. Try again.",
       });
-    yield* client
-      .query(`SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, [organizationId])
+    const organization = yield* client
+      .query<{ id: string }>(`SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, [
+        organizationId,
+      ])
       .pipe(Effect.mapError(capacityReadFailed));
-    const billing = yield* client
-      .query<{
-        billing_status: string;
-        plan: string;
-      }>(`SELECT plan, billing_status FROM organizations WHERE id = $1`, [organizationId])
-      .pipe(Effect.mapError(capacityReadFailed));
-    const organization = billing.rows[0];
-    if (!organization) {
+    if (!organization.rows[0]) {
       return yield* Effect.fail(
         new TerminalJobError({
           code: "organization_missing",
@@ -528,8 +522,7 @@ function lockCapacityWindow(
       .pipe(Effect.mapError(capacityReadFailed));
     const row = charged.rows[0];
     return {
-      ceiling: limitsForBillingState(organization.plan, organization.billing_status)
-        .max_storage_bytes,
+      ceiling: COMMUNITY_LIMITS.max_storage_bytes,
       charged: bytesOf(row?.resident_bytes) + bytesOf(row?.reserved_bytes),
     } satisfies CapacityWindow;
   });
@@ -756,7 +749,7 @@ function reserveProtectedCopy(
             new TerminalJobError({
               code: "storage_limit_reached",
               message:
-                "Optimizing this file needs storage space that is not available. Remove other media or upgrade the plan.",
+                "Optimizing this file needs storage space that is not available. Remove other media and try again.",
             }),
           );
         }
@@ -1227,7 +1220,7 @@ function reserveOutputs(
           new TerminalJobError({
             code: "storage_limit_reached",
             message:
-              "Optimizing this file needs storage space that is not available. Remove other media or upgrade the plan.",
+              "Optimizing this file needs storage space that is not available. Remove other media and try again.",
           }),
         );
       }

@@ -140,7 +140,7 @@ else
 fi
 
 # cloudflared is what publishes the dev stack, so its absence is a note rather
-# than a prerequisite failure: `make dev` still serves local/Tailscale origins.
+# than a prerequisite failure: `make dev` serves local origins by default.
 if command -v cloudflared >/dev/null 2>&1; then
   if "$repo_root/scripts/cloudflare-local/dev-tunnel.sh" named-possible; then
     ok "cloudflared available; a named tunnel on your domain is also possible"

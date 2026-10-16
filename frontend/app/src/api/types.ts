@@ -6,11 +6,6 @@ export interface UserProfile {
   avatarUrl?: string | null;
   orgId: string;
   role?: string;
-  totalChannels?: number;
-  tier?: string;
-  admin?: boolean;
-  isLifetime?: boolean;
-  streakSince?: string | null;
 }
 /**
  * Source-shaped channel row consumed by the frontend views. `brandProfileId`

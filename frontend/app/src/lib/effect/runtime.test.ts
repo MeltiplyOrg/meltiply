@@ -12,7 +12,6 @@ const mockProfile: UserProfile = {
   active_organization: {
     id: "org_alpha",
     name: "Alpha Corp",
-    plan: "pro",
     role: "admin",
     slug: "alpha-corp",
   },

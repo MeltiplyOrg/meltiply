@@ -29,7 +29,7 @@ import type { Queryable } from "@meltiply/database";
 import {
   ASSET_UPLOAD_POLICY,
   InvalidRequestError,
-  limitsForPlan,
+  COMMUNITY_LIMITS,
   mediaUploadMaximum,
   NotFoundError,
   StorageUnavailableError,
@@ -59,7 +59,6 @@ import type { OutboxMessage } from "../../automation/src/messages";
 
 type Schemas = components["schemas"];
 type Post = Schemas["Post"];
-type UsageResponse = Schemas["BillingSummary"];
 
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
 if (!connectionString) {
@@ -83,7 +82,7 @@ const seededUserId = "10000000-0000-4000-8000-000000000001";
  * measuring against a cap that does not exist.
  */
 const storageCap = (() => {
-  const cap = limitsForPlan("free").max_storage_bytes;
+  const cap = COMMUNITY_LIMITS.max_storage_bytes;
   if (cap === null || !Number.isFinite(cap) || cap <= 0) {
     throw new Error("the free plan must define a finite storage cap for the quota boundary cases");
   }
@@ -712,7 +711,6 @@ function createStudio(options: { name: string; suffix: string }): Studio {
           id: organizationId,
           isPersonal: false,
           name: options.name,
-          plan: "free",
           slug,
         },
       }),
@@ -733,8 +731,8 @@ function createStudio(options: { name: string; suffix: string }): Studio {
 async function provisionStudio(studio: Studio, accountPlatform?: string): Promise<void> {
   await systemTransaction(async (client) => {
     await client.query(
-      `INSERT INTO organizations (id, name, slug, plan, billing_status)
-       VALUES ($1, $2, $3, 'free', 'active')`,
+      `INSERT INTO organizations (id, name, slug)
+       VALUES ($1, $2, $3)`,
       [studio.organizationId, studio.name, studio.slug],
     );
     await client.query("INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'admin')", [
@@ -882,11 +880,16 @@ function attachmentIdsOf(body: unknown): string[] {
   return assetIds;
 }
 
-/** Public usage counters and limits as a creator's billing view would read them. */
-async function publicUsage(studio: Studio): Promise<UsageResponse> {
-  const response = await api(studio, "/api/v1/billing/usage");
-  expect(response.status).toBe(200);
-  return response.body as UsageResponse;
+/** Reads the durable monthly storage counter; missing rows represent zero usage. */
+async function recordedUsage(studio: Studio): Promise<number> {
+  return systemTransaction(async (client) => {
+    const result = await client.query<{ storage_bytes: string }>(
+      `SELECT storage_bytes::text AS storage_bytes FROM usage_records
+       WHERE org_id = $1 AND period = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')`,
+      [studio.organizationId],
+    );
+    return Number(result.rows[0]?.storage_bytes ?? 0);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1596,13 +1599,12 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     // exactly, what remains is what the creator can still store.
     await resetStudio(lifecycleStudio, storageCap - 3 * probeBytes - imageCeilingBytes);
 
-    const usageBefore = await publicUsage(lifecycleStudio);
+    const usageBefore = await recordedUsage(lifecycleStudio);
     const ready = await uploadReadyImage(lifecycleStudio, "Draft attachment");
 
-    // Finalization is a real accounting transition the billing view can see: the
-    // verified bytes are counted for the period they landed in.
-    const usageAfterUpload = await publicUsage(lifecycleStudio);
-    expect(usageAfterUpload.usage.storage_bytes).toBe(usageBefore.usage.storage_bytes + probeBytes);
+    // Finalization counts verified bytes in the month they landed.
+    const usageAfterUpload = await recordedUsage(lifecycleStudio);
+    expect(usageAfterUpload).toBe(usageBefore + probeBytes);
 
     expect(await deliverProcessing(lifecycleStudio, ready.assetId)).toBe("processed");
     expect((await assetState(ready.assetId)).status).toBe("ready");
@@ -2268,7 +2270,7 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     // The reconciler first describes the period by its resident inventory.
     await makeUsageReconciliationDue(lifecycleStudio.organizationId);
     await runMaintenance();
-    expect((await publicUsage(lifecycleStudio)).usage.storage_bytes).toBe(storageCap - probeBytes);
+    expect(await recordedUsage(lifecycleStudio)).toBe(storageCap - probeBytes);
 
     // Then model the rollover: the new period starts with nothing recorded while
     // the very same bytes are still stored.
@@ -2279,7 +2281,7 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
         [lifecycleStudio.organizationId],
       );
     });
-    expect((await publicUsage(lifecycleStudio)).usage.storage_bytes).toBe(0);
+    expect(await recordedUsage(lifecycleStudio)).toBe(0);
 
     // A workspace that just rolled over must not look empty: an upload the reset
     // counter would happily accept is still refused.
@@ -2290,12 +2292,11 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     expect(refused.status).toBe(422);
     expect(errorOf(refused.body).code).toBe("quota_exceeded");
 
-    // Reconciliation puts the resident bytes back into the period counter, so the
-    // rollover hides nothing from the creator's own usage view.
+    // Reconciliation repairs the materialized counter without allowing the
+    // monthly rollover to hide resident bytes from quota enforcement.
     await makeUsageReconciliationDue(lifecycleStudio.organizationId);
     await runMaintenance();
-    const afterRollover = await publicUsage(lifecycleStudio);
-    expect(afterRollover.usage.storage_bytes).toBe(storageCap - probeBytes);
-    expect(afterRollover.limits.max_storage_bytes).toBe(storageCap);
+    const afterRollover = await recordedUsage(lifecycleStudio);
+    expect(afterRollover).toBe(storageCap - probeBytes);
   });
 });

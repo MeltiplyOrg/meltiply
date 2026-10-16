@@ -42,7 +42,6 @@ const kinds = new Set(["app", "public"]);
  * `<branch>-dev.<domain>` form and cannot be wildcard-backed.
  */
 const styles = new Set(["wildcard", "flat"]);
-const defaultDomain = "meltiply.com";
 /** Label every dev hostname hangs under, so one wildcard covers them all. */
 const defaultDevLabel = "";
 /** Namespace prefix for per-branch tunnel names. */
@@ -229,7 +228,7 @@ function currentBranch() {
 function parseArguments(argv) {
   const options = {
     branch: currentBranch(),
-    domain: process.env.MELTIPLY_TUNNEL_DOMAIN?.trim() || defaultDomain,
+    domain: process.env.MELTIPLY_TUNNEL_DOMAIN?.trim() || "",
     devLabel: process.env.MELTIPLY_TUNNEL_DEV_LABEL?.trim() || defaultDevLabel,
     kind: "app",
     style: process.env.MELTIPLY_TUNNEL_HOST_STYLE?.trim() || "wildcard",
@@ -275,6 +274,9 @@ if (process.argv[1] === import.meta.filename) {
       throw new Error(
         "could not determine the branch; set MELTIPLY_TUNNEL_BRANCH or pass --branch",
       );
+    }
+    if (!options.tunnelName && !options.domain) {
+      throw new Error("Set MELTIPLY_TUNNEL_DOMAIN or --domain to a domain you own.");
     }
     // coverageHostnames returns every service hostname in per-branch mode and a
     // single wildcard in shared mode; --kind selects one of them.

@@ -1,0 +1,100 @@
+name: Extended checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: Additional hosted validation
+        required: true
+        type: choice
+        options:
+          - frontend-full
+          - cloudflare-integration
+          - cloudflare-extended
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extended-${{ inputs.lane }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  WRANGLER_SEND_METRICS: "false"
+  MELTIPLY_DEV_TUNNEL: "0"
+
+jobs:
+  check:
+    name: ${{ inputs.lane }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Validate release, infrastructure, and dependency policies
+        if: inputs.lane == 'cloudflare-extended'
+        run: |
+          bun run release:test
+          bun run test:staging
+          bun run test:supply-chain
+          bun run security:supply-chain
+          bun run iac:check
+      - name: Exercise Worker-native local topology and load
+        if: inputs.lane == 'cloudflare-integration'
+        run: |
+          bun run setup --skip-dependencies --skip-image-pull
+          bun run test:integration
+          timeout --signal=TERM --kill-after=30s 180s bun run local:smoke
+          mkdir -p artifacts/performance
+          setsid ./scripts/cloudflare-local/dev-backend.sh >artifacts/performance/k6-backend.log 2>&1 &
+          backend_pid=$!
+          trap 'kill -TERM -- "-$backend_pid" 2>/dev/null || true' EXIT
+          bun run local:k6:ci
+      - name: Validate frontend and install Chromium
+        if: inputs.lane == 'frontend-full'
+        working-directory: frontend/app
+        run: |
+          bun run format-check
+          bun run type-check
+          bun run cf-typegen:check
+          bun run lint
+          bun run audit
+          bun run test --coverage
+          bun run --cwd ../.. setup --skip-dependencies --skip-image-pull
+          bun run --no-install playwright install --with-deps chromium
+      - name: Exercise real browser journeys
+        if: inputs.lane == 'frontend-full'
+        working-directory: frontend/app
+        run: bun run test:e2e --trace on
+      - name: Check production performance without rebuilding
+        if: inputs.lane == 'frontend-full'
+        working-directory: frontend/app
+        run: |
+          setsid bun run --no-install vp preview --host 127.0.0.1 --port 3000 --strictPort >/tmp/meltiply-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill -TERM -- "-$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/posts >/dev/null; then break; fi
+            kill -0 "$preview_pid"
+            sleep 1
+          done
+          ../../scripts/ci/lighthouse.sh http://127.0.0.1:3000/posts ../../artifacts/performance/lighthouse.json
+          bun run --cwd ../public check
+      - name: Stop owned local services
+        if: always() && inputs.lane != 'cloudflare-extended'
+        run: ./scripts/cloudflare-local/teardown.sh
+      - name: Preserve diagnostic and policy evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: extended-${{ inputs.lane }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            artifacts/
+            frontend/app/playwright-report/
+            frontend/app/test-results/

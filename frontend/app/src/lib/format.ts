@@ -1,6 +1,6 @@
 /**
  * Converts a byte count into a human-readable size string with appropriate binary unit (B, KB, MB, GB).
- * Used for asset file sizes, upload progress displays, and billing storage limits.
+ * Used for asset file sizes and upload progress displays.
  *
  * @param bytes Non-negative integer representing the size in bytes.
  * @returns Formatted size string (e.g. `512 B`, `12.4 KB`, `45.2 MB`, `1.25 GB`).

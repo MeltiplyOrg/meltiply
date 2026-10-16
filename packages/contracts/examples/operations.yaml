@@ -79,7 +79,6 @@ fixtures:
     id: 00000000-0000-4000-8000-000000000001
     name: Alpha
     slug: org-alpha
-    plan: pro
     is_personal: false
     role: admin
     created_at: 2026-01-01T00:00:00Z
@@ -148,7 +147,6 @@ fixtures:
       name: Alpha
       slug: org-alpha
       role: admin
-      plan: pro
     created_at: 2026-01-01T00:00:00Z
     updated_at: 2026-01-01T00:00:00Z
   account: &account
@@ -312,22 +310,6 @@ fixtures:
     commented_at: 2026-01-01T01:00:00Z
     synced_at: 2026-01-01T01:01:00Z
     updated_at: 2026-01-01T01:01:00Z
-  limits: &limits
-    max_uploads: 100
-    max_distributions: 1000
-    max_platforms: 5
-    max_storage_bytes: 107374182400
-    analytics_enabled: true
-    inbox_reply_enabled: true
-  usage: &usage
-    org_id: 00000000-0000-4000-8000-000000000001
-    period_start: 2026-01-01T00:00:00Z
-    period_end: 2026-02-01T00:00:00Z
-    uploads: 1
-    distributions: 1
-    api_calls: 10
-    storage_bytes: 1048576
-    updated_at: 2026-01-01T01:00:00Z
 
 operations:
   getHealth:
@@ -469,27 +451,6 @@ operations:
         body: *auth_error
       - status: 429
         body: *rate_limited_error
-  handleBillingWebhook:
-    request:
-      type: subscription.updated
-      data:
-        customer:
-          external_id: 00000000-0000-4000-8000-000000000001
-          metadata:
-            meltiply_organization_id: 00000000-0000-4000-8000-000000000001
-        current_period_end: 2026-08-21T12:00:00.000Z
-        product:
-          id: 11111111-1111-4111-8111-111111111111
-        status: active
-    headers:
-      webhook-id: msg_billing_event_alpha
-      webhook-timestamp: "1767312000"
-      webhook-signature: v1,c2lnbmF0dXJlLWV4YW1wbGU=
-    success:
-      status: 204
-    errors:
-      - status: 401
-        body: *authentication_error
   getCurrentUser:
     headers: *bearer_authorization
     success:
@@ -1138,61 +1099,3 @@ operations:
     errors:
       - status: 422
         body: *validation_error
-  getBillingPlan:
-    headers: *bearer_authorization
-    success:
-      status: 200
-      body:
-        plan: pro
-        billing_status: active
-        limits: *limits
-        renews_at: 2026-02-01T00:00:00Z
-        cancel_at: null
-    errors:
-      - status: 401
-        body: *authentication_error
-  getBillingUsage:
-    headers: *bearer_authorization
-    success:
-      status: 200
-      body:
-        plan: pro
-        billing_status: active
-        usage: *usage
-        limits: *limits
-        renews_at: 2026-02-01T00:00:00Z
-        cancel_at: null
-        upgrade_required: false
-    errors:
-      - status: 401
-        body: *authentication_error
-  createCheckoutSession:
-    headers: *bearer_authorization
-    request:
-      plan: creator
-      success_url: http://localhost:3000/billing?checkout=success
-      cancel_url: http://localhost:3000/billing?checkout=cancel
-    success:
-      status: 201
-      body:
-        url: https://billing.example.test/checkout/session-alpha
-        expires_at: 2026-01-01T00:15:00Z
-    errors:
-      - status: 422
-        body: *validation_error
-      - status: 403
-        body: *forbidden_error
-  createBillingPortalSession:
-    headers: *bearer_authorization
-    request:
-      return_url: http://localhost:3000/billing
-    success:
-      status: 201
-      body:
-        url: https://billing.example.test/portal/session-alpha
-        expires_at: 2026-01-01T00:15:00Z
-    errors:
-      - status: 422
-        body: *validation_error
-      - status: 403
-        body: *forbidden_error

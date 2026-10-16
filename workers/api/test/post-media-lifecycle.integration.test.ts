@@ -29,7 +29,7 @@ import {
 } from "@meltiply/storage";
 import { Effect } from "effect";
 import { createHash } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { createApiApp } from "../src/app";
 import { createAssetApiService } from "../src/asset-service";
@@ -496,7 +496,6 @@ const app = createApiApp({
       id: organizationId,
       isPersonal: false,
       name: "Lifecycle Studio",
-      plan: "creator",
       slug,
     },
   }),
@@ -1702,7 +1701,9 @@ async function processedVideoAsset(options: { filename: string; title: string })
 }
 
 describeIntegration("post-owned media retention with PostgreSQL", () => {
-  beforeAll(async () => {
+  // Each lifecycle scenario owns fresh rows and quota headroom; prior uploads
+  // must not consume the next scenario's monthly allowance or reservations.
+  beforeEach(async () => {
     engine.calls.length = 0;
     engine.failure = null;
     harness.deleteFailures.clear();
@@ -2967,6 +2968,8 @@ describeIntegration("post-owned media retention with PostgreSQL", () => {
       attachmentIds: [abandoned.assetId],
       defaultText: "Draft whose multipart upload was abandoned",
     });
+    // Keep the release delta observable independently of any earlier scenario.
+    await setRecordedUsage(67_108_864);
     const usageBefore = await recordedUsageBytes();
 
     // Time control: the session's own deadline is the only clock the abort

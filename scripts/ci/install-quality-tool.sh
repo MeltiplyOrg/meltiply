@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs one pinned Linux quality tool for CircleCI or GitHub-hosted runners.
+# Installs one pinned Linux quality tool for GitHub-hosted runners.
 # Release digests are pinned here, not fetched alongside an unverified archive.
 set -euo pipefail
 

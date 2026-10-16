@@ -78,7 +78,7 @@ write_config() {
       # Only meaningful for the single shared tunnel: a wildcard record and a
       # wildcard rule both need a one-to-one target, which a per-branch tunnel
       # cannot have.
-      printf '  - hostname: %s\n' "$(quote "*.${MELTIPLY_TUNNEL_DEV_LABEL:-dev}.${MELTIPLY_TUNNEL_DOMAIN:-meltiply.com}")"
+      printf '  - hostname: %s\n' "$(quote "*.${MELTIPLY_TUNNEL_DEV_LABEL:-dev}.${MELTIPLY_TUNNEL_DOMAIN:?Set MELTIPLY_TUNNEL_DOMAIN to a domain you own}")"
     else
       printf '  - hostname: %s\n' "$(quote "$app_hostname")"
     fi

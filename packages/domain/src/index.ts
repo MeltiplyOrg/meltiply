@@ -13,13 +13,11 @@ export type PlatformCapability = components["schemas"]["PlatformCapability"];
 export type Platform = components["schemas"]["Platform"];
 export type AssetStatus = components["schemas"]["AssetStatus"];
 export type AssetType = components["schemas"]["AssetType"];
-export type BillingStatus = components["schemas"]["BillingStatus"];
 export type DistributionStatus = components["schemas"]["DistributionStatus"];
 export type Post = components["schemas"]["Post"];
 export type PostStatus = components["schemas"]["PostStatus"];
 export type PostAttachment = components["schemas"]["PostAttachment"];
 export type PostTarget = components["schemas"]["PostTarget"];
-export type PlanLimits = components["schemas"]["PlanLimits"];
 export type ReplyStatus = components["schemas"]["ReplyStatus"];
 
 /**
@@ -129,62 +127,25 @@ export const ASSET_UPLOAD_POLICY = {
   signedUrlTtlSeconds: 15 * 60,
 } as const;
 
-export const PLAN_LIMITS: Readonly<Record<string, PlanLimits>> = {
-  agency: {
-    analytics_enabled: true,
-    inbox_reply_enabled: true,
-    max_distributions: 2_500,
-    max_platforms: 5,
-    max_storage_bytes: 100 * 1024 * 1024 * 1024,
-    max_uploads: 500,
-  },
-  creator: {
-    analytics_enabled: true,
-    inbox_reply_enabled: true,
-    max_distributions: 500,
-    max_platforms: 5,
-    max_storage_bytes: 25 * 1024 * 1024 * 1024,
-    max_uploads: 100,
-  },
-  free: {
-    analytics_enabled: true,
-    inbox_reply_enabled: true,
-    max_distributions: 30,
-    max_platforms: 2,
-    max_storage_bytes: 1024 * 1024 * 1024,
-    max_uploads: 10,
-  },
-};
-
-/**
- * Resolves operational and storage limits for a given subscription plan tier.
- * Returns a shallow copy of PLAN_LIMITS for the named plan, falling back to 'free' limits
- * if the plan tier is unrecognized.
- *
- * @param plan - Subscription plan identifier (e.g., "free", "creator", "agency").
- * @returns Copy of PlanLimits defining upload, distribution, platform, and storage bounds.
- */
-export function limitsForPlan(plan: string): PlanLimits {
-  // Plan limits are scalar values; a shallow copy preserves caller isolation
-  // without invoking the considerably heavier structured-clone machinery.
-  return { ...(PLAN_LIMITS[plan] ?? PLAN_LIMITS.free!) };
+/** Resource ceilings enforced atomically for each community Workspace. */
+export interface CommunityLimits {
+  readonly max_distributions: number | null;
+  readonly max_platforms: number | null;
+  readonly max_storage_bytes: number | null;
+  readonly max_uploads: number | null;
 }
 
 /**
- * Derives effective plan limits based on the organization's current billing subscription status.
- * Organizations in 'active' or 'trialing' state receive the paid plan limits;
- * past_due, cancelled, or unpaid states are downgraded to free tier limits.
- *
- * @param plan - Configured plan tier name.
- * @param billingStatus - Current billing state (active, trialing, past_due, cancelled, etc.).
- * @returns Effective PlanLimits enforced for the organization.
+ * Community resource policy, independent of payment or subscription state.
+ * Monthly uploads/distributions and resident storage remain bounded; readers
+ * share one frozen scalar record rather than allocating per request.
  */
-export function limitsForBillingState(
-  plan: string,
-  billingStatus: BillingStatus | string,
-): PlanLimits {
-  return limitsForPlan(billingStatus === "active" || billingStatus === "trialing" ? plan : "free");
-}
+export const COMMUNITY_LIMITS: CommunityLimits = Object.freeze({
+  max_distributions: 30,
+  max_platforms: 2,
+  max_storage_bytes: 1024 * 1024 * 1024,
+  max_uploads: 10,
+});
 
 /**
  * Normalize database and runtime timestamps to the API's canonical ISO form.

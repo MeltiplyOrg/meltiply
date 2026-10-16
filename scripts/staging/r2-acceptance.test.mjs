@@ -40,7 +40,6 @@ afterEach(async () => {
 function environment(overrides = {}) {
   return {
     MELTIPLY_STAGING_ACCEPTANCE_ORG_ID: acceptanceOrganizationId,
-    MELTIPLY_STAGING_ACCEPTANCE_PLAN: "agency",
     MELTIPLY_STAGING_ACCEPTANCE_USER_ID: acceptanceUserId,
     MELTIPLY_STAGING_BEARER_TOKEN: bearerToken,
     ...overrides,
@@ -74,8 +73,6 @@ function releaseInput(overrides = {}) {
       mail_from_address: "auth@staging.example.com",
       mail_from_name: "Meltiply",
       r2_account_id: accountId,
-      polar_agency_product_id: "22222222-2222-4222-8222-222222222222",
-      polar_creator_product_id: "11111111-1111-4111-8111-111111111111",
     },
     schema_version: 1,
     ...overrides,
@@ -231,9 +228,6 @@ function acceptanceFetch({
   let apiRequestNumber = 0;
   let r2RequestNumber = 0;
   let sessionNumber = 0;
-  let uploads = 20;
-  const baselineStorageBytes = 1_024;
-  let storageBytes = baselineStorageBytes;
 
   const signed = (path, contentType, partNumber) => ({
     expires_at: "2999-01-01T00:00:00.000Z",
@@ -266,7 +260,6 @@ function acceptanceFetch({
             active_organization: {
               id: acceptanceOrganizationId,
               name: "R2 Acceptance",
-              plan: "agency",
               role: "admin",
               slug: "r2-acceptance",
             },
@@ -276,35 +269,6 @@ function acceptanceFetch({
             email: "r2-acceptance@example.invalid",
             id: acceptanceUserId,
             updated_at: "2026-07-22T00:00:00.000Z",
-          },
-          200,
-          requestId,
-        );
-      }
-      if (method === "GET" && path === "/billing/usage") {
-        return jsonResponse(
-          {
-            billing_status: "active",
-            cancel_at: null,
-            limits: {
-              max_distributions: 2_500,
-              max_platforms: 5,
-              max_storage_bytes: 100 * 1024 * 1024 * 1024,
-              max_uploads: 500,
-            },
-            plan: "agency",
-            renews_at: null,
-            upgrade_required: false,
-            usage: {
-              api_calls: 0,
-              distributions: 0,
-              org_id: acceptanceOrganizationId,
-              period_end: "2026-08-01T00:00:00.000Z",
-              period_start: "2026-07-01T00:00:00.000Z",
-              storage_bytes: storageBytes,
-              updated_at: "2026-07-22T00:00:00.000Z",
-              uploads,
-            },
           },
           200,
           requestId,
@@ -408,8 +372,6 @@ function acceptanceFetch({
         asset.status = "processing";
         asset.processingPolls = 0;
         session.status = "completed";
-        uploads += 1;
-        storageBytes += session.fileSize;
         return jsonResponse({ id: session.assetId, status: "processing" }, 202, requestId);
       }
 
@@ -441,12 +403,8 @@ function acceptanceFetch({
         if (asset.status === "deleting") {
           asset.deletePolls += 1;
           if (!stuckDeletion && asset.deletePolls >= 2) {
-            const session = [...sessions.values()].find((entry) => entry.assetId === asset.id);
             asset.deleted = true;
             objects.delete(asset.id);
-            if (session?.status === "completed") {
-              storageBytes -= session.fileSize;
-            }
             return new Response(null, {
               headers: { "X-Request-ID": requestId },
               status: 404,
@@ -763,19 +721,6 @@ it("runs the credential-gated lifecycle and emits redacted mode-0600 evidence", 
   assert.equal(result.result, "passed");
   assert.equal(result.schemaVersion, 1);
   assert.equal(result.probe_id, identifier(999));
-  assert.deepEqual(result.operationIds, [
-    "abortUploadSession",
-    "completeUploadSession",
-    "createUploadPartUrls",
-    "createUploadSession",
-    "deleteAsset",
-    "getAsset",
-    "getAssetDownloadUrl",
-    "getBillingUsage",
-    "getCurrentUser",
-    "getHealth",
-    "getUploadSession",
-  ]);
   assert.deepEqual(result.attemptedOperationIds, result.operationIds);
   assert.deepEqual(
     result.cases.map((entry) => entry.name),
@@ -790,15 +735,6 @@ it("runs the credential-gated lifecycle and emits redacted mode-0600 evidence", 
   assert.equal(harness.objects.size, 0);
   assert.ok(sleeps.length >= 5);
   assert.ok(sleeps.every((milliseconds) => milliseconds === 1_000));
-  assert.deepEqual(result.usage, {
-    after_storage_bytes: 1_024,
-    after_uploads: 22,
-    before_storage_bytes: 1_024,
-    before_uploads: 20,
-    monthly_upload_delta: 2,
-    period_start: "2026-07-01T00:00:00.000Z",
-    remaining_uploads: 478,
-  });
   assert.ok(result.api_request_ids.every((value) => /^api-\d+$/.test(value)));
   assert.ok(result.r2_request_ids.every((value) => /^r2-\d+$/.test(value)));
 
@@ -878,28 +814,24 @@ it("checks the staging health SHA before creating upload sessions", async () => 
   assert.deepEqual(evidence.operationIds, ["getHealth"]);
 });
 
-it("requires the configured paid acceptance identity before mutation", async () => {
+it("requires the configured acceptance identity before mutation", async () => {
   const directory = await mkdtemp(join(tmpdir(), "meltiply-r2-identity-"));
   temporaryDirectories.push(directory);
   const options = acceptanceOptions(directory);
   const harness = acceptanceFetch();
   const { dependencies } = lifecycleDependencies(harness, 992, {
-    environment: environment({ MELTIPLY_STAGING_ACCEPTANCE_PLAN: "creator" }),
+    environment: environment({ MELTIPLY_STAGING_ACCEPTANCE_ORG_ID: identifier(999) }),
   });
 
   await assert.rejects(
     runR2Acceptance(options, dependencies),
-    /not the dedicated paid staging acceptance identity/,
+    /not the dedicated staging acceptance identity/,
   );
 
   assert.equal(harness.assets.size, 0);
   const evidence = JSON.parse(await readFile(options.outputPath, "utf8"));
   assert.equal(evidence.status, "failed");
-  assert.deepEqual(evidence.attemptedOperationIds, [
-    "getBillingUsage",
-    "getCurrentUser",
-    "getHealth",
-  ]);
+  assert.deepEqual(evidence.attemptedOperationIds, ["getCurrentUser", "getHealth"]);
 });
 
 it("polls cleanup and writes failed evidence when verification fails", async () => {

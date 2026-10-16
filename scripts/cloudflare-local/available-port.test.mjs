@@ -52,40 +52,20 @@ test("skips ports reserved by services that start later", async () => {
   await close(selectedServer);
 });
 
-test("prefers the online Tailscale FQDN outside CircleCI", async () => {
-  const status = JSON.stringify({
-    BackendState: "Running",
-    Self: {
-      DNSName: "oracle-worker-1.tailc861a9.ts.net.",
-      HostName: "oracle-worker-1",
-      Online: true,
-    },
+test("uses only an explicitly configured network hostname", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [developmentHostPath], {
+    env: { ...process.env, MELTIPLY_DEV_HOST: "workstation.example.test" },
   });
-  const { stdout } = await execFileAsync(process.execPath, [developmentHostPath, status], {
-    env: { ...process.env, CI: "true", CIRCLECI: "false" },
-  });
-
-  assert.equal(stdout, "oracle-worker-1.tailc861a9.ts.net");
+  assert.equal(stdout, "workstation.example.test");
 });
 
-test("uses loopback in CircleCI even when Tailscale is online", async () => {
-  const status = JSON.stringify({
-    BackendState: "Running",
-    Self: { DNSName: "oracle-worker-1.tailc861a9.ts.net.", Online: true },
-  });
-  const { stdout } = await execFileAsync(process.execPath, [developmentHostPath, status], {
-    env: { ...process.env, CIRCLECI: "true" },
-  });
-
-  assert.equal(stdout, "127.0.0.1");
-});
-
-test("uses loopback when Tailscale is unavailable", async () => {
-  const { stdout } = await execFileAsync(process.execPath, [developmentHostPath, "{}"], {
-    env: { ...process.env, CIRCLECI: "false" },
-  });
-
-  assert.equal(stdout, "127.0.0.1");
+test("rejects URL-shaped development hosts", async () => {
+  await assert.rejects(
+    execFileAsync(process.execPath, [developmentHostPath], {
+      env: { ...process.env, MELTIPLY_DEV_HOST: "https://example.test/path" },
+    }),
+    /MELTIPLY_DEV_HOST must be a hostname, not a URL/,
+  );
 });
 
 test("rejects an invalid preferred port", async () => {

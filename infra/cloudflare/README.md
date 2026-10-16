@@ -53,7 +53,7 @@ a least-privilege token, and a release record.
 
 ### Secrets and permissions
 
-Database passwords, Provider credentials, auth/billing secrets, and encryption
+Database passwords, Provider credentials, authentication secrets, and encryption
 keys stay outside HCL and state. `bun run hyperdrive:bootstrap` creates or rotates
 the two configurations through the API; only their non-secret IDs enter OpenTofu
 and Worker bindings. Ambiguous names fail closed; a partial failure returns the
@@ -77,6 +77,81 @@ Use the [release scripts](../../scripts/release/) for orchestration and evidence
 `release:manifest` validates the evidence set and writes a redacted manifest.
 Record plan digests, resource outputs, Worker versions, migration checksums,
 schedule-set evidence, and OpenAPI provenance.
+
+### Operator-run deployment
+
+No CI service or CI account is required to deploy. Use a trusted workstation
+with the pinned Node/Bun/OpenTofu tools, Cloudflare deployment credentials, and
+protected backend/tfvars files. Populate
+[`release-input.example.json`](../../scripts/release/release-input.example.json)
+for your own account, domains, database, and exact checked-out commit. Keep the
+checkout clean and use a new ignored release directory for each release.
+
+Plans and review receipts are local operator records, not authenticated approvals
+or signatures. Filesystem permissions and deployment credentials are the trust
+boundary. Never download or apply plans produced by untrusted contributor code.
+
+For the initial paused foundation:
+
+```bash
+export MELTIPLY_RELEASE_INPUT=/protected/release.json
+export MELTIPLY_RELEASE_SHA="$(git rev-parse HEAD)"
+export MELTIPLY_RELEASE_DIR="$PWD/.release/initial-deployment"
+export MELTIPLY_TF_BACKEND_CONFIG=/protected/backend.hcl
+
+bun run release:preflight:offline
+./scripts/infra/staging-transition.sh plan foundation /protected/foundation.tfvars
+.bin/tofu -chdir=infra/cloudflare show "$MELTIPLY_RELEASE_DIR/foundation.tfplan"
+# Review the actual plan and policy summary before confirming their exact bytes.
+digest="$(cat "$MELTIPLY_RELEASE_DIR/foundation-plan.sha256")"
+bun run release:approve foundation "$MELTIPLY_RELEASE_INPUT" \
+  "$MELTIPLY_RELEASE_DIR/foundation.tfplan" "$USER" \
+  "approve $MELTIPLY_RELEASE_SHA $digest"
+MELTIPLY_RELEASE_CONFIRM="apply foundation $MELTIPLY_RELEASE_SHA $digest" \
+  ./scripts/infra/staging-transition.sh apply foundation
+export MELTIPLY_RELEASE_IAC_OUTPUTS="$MELTIPLY_RELEASE_DIR/iac-outputs.json"
+bun run release:render
+```
+
+The apply checks the checkout, saved-plan digest, and explicit phase/commit/digest
+confirmation before invoking OpenTofu, then removes the sensitive raw plan and
+plan JSON. Create the review receipt **before** applying. Never reuse a release
+directory for a different commit or release ID.
+
+Continue in this order, following each command's `--help` for phase/step arguments:
+
+| Order | Transition                                                                                                                                 |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | `release:restore-point`, then `release:migrate --phase bootstrap` for a new deployment or `--phase expand` for a compatible update.        |
+| 2     | Deploy State, inject protected secrets, then deploy Automation without triggers.                                                           |
+| 3     | Plan/review/apply `paused-consumers`; refresh rendered configs from its outputs.                                                           |
+| 4     | Deploy API and inject its secrets; verify candidate identity with `release:smoke`.                                                         |
+| 5     | Plan/review `domain`, create its `release:approve traffic` receipt before applying, then verify live identity.                             |
+| 6     | For updates, use the traffic receipt with `release:deploy --phase api-rollout` at 5%, 25%, 50%, and 100%, smoking each stage.              |
+| 7     | Plan/review `unpause`, create `release:approve queue-resume`, apply it, then enable the exact canonical Cron schedule with `release:cron`. |
+| 8     | Finish live smoke and `release:manifest`; do not run destructive schema contraction during rollout.                                        |
+
+Every release CLI command that applies or deploys a change requires `--apply`,
+the exact `--confirm "release staging <git-sha>"`, `--plan-digest`, and the
+appropriate `--approval-metadata "$MELTIPLY_RELEASE_DIR/approval-<scope>.json"`.
+These requirements do not apply to the foundation apply performed by
+`staging-transition.sh`. The scopes are `foundation`, `traffic`, and
+`queue-resume`; each receipt binds one reviewed plan to the same release session.
+Never bypass missing restore-point, migration, identity, traffic, Queue, or Cron
+evidence.
+
+An update first plans/reviews/applies `pause`, verifies Queue delivery is paused,
+and removes/verifies Automation schedules before changing Worker versions.
+Retain the previous versions and restore-point evidence until acceptance is complete.
+
+The R2 acceptance probe (`staging:r2:check` / `staging:r2:run`) requires a
+dedicated staging user and workspace, configured through
+`MELTIPLY_STAGING_ACCEPTANCE_USER_ID`, `MELTIPLY_STAGING_ACCEPTANCE_ORG_ID`, and
+`MELTIPLY_STAGING_BEARER_TOKEN`. It verifies those identities before mutation;
+no subscription or payment configuration is needed. Keep sufficient upload and
+storage headroom for the probe. The API enforces community quotas, and admission
+failures produce failed evidence and run resource cleanup. The probe verifies
+object lifecycle cleanup, not a billing usage endpoint.
 
 API smoke is not async acceptance. There is no synthetic canary Queue: approved
 real staging messages and durable outcomes are still required for async acceptance.

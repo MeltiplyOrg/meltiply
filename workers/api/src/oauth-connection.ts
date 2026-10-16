@@ -1,4 +1,4 @@
-import { DatabaseError, limitsForBillingState } from "@meltiply/domain";
+import { COMMUNITY_LIMITS, DatabaseError } from "@meltiply/domain";
 import type { Platform } from "@meltiply/domain";
 import type { OAuthConnection } from "@meltiply/providers";
 import { Effect } from "effect";
@@ -38,7 +38,7 @@ function expiresAt(value: string | undefined): Date | null {
  * Encrypts provider access and refresh tokens using AES-GCM envelope encryption, verifies the
  * Brand Profile pinned in durable OAuth state is still active in the recorded workspace, locks the
  * organization to prevent concurrent limit oversubscription, enforces platform account limits
- * based on the organization's plan, and atomically upserts the connection record.
+ * from the community resource policy, and atomically upserts the connection record.
  * Effect transactions retain locking, quota checks and the upsert in one scope.
  * Only encryption crosses Promise boundaries; validation is narrowed before writes.
  * The external (platform, platform_user_id) identity is globally unique: a reconnect to the same
@@ -107,11 +107,9 @@ export function saveOAuthConnectionEffect(
     yield* withSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {
         const organization = yield* client.query<{
-          billing_status: string;
           id: string;
-          plan: string;
         }>(
-          `SELECT id, plan, billing_status
+          `SELECT id
          FROM organizations
          WHERE id::text = $1`,
           [owner.organizationId],
@@ -149,11 +147,9 @@ export function saveOAuthConnectionEffect(
         }
         yield* lockOrganizationEffect(client, organizationRow.id);
         const lockedOrganization = yield* client.query<{
-          billing_status: string;
           id: string;
-          plan: string;
         }>(
-          `SELECT id, plan, billing_status
+          `SELECT id
        FROM organizations WHERE id = $1 FOR UPDATE`,
           [organizationRow.id],
         );
@@ -196,10 +192,7 @@ export function saveOAuthConnectionEffect(
           );
         }
         if (!existingRow) {
-          const limit = limitsForBillingState(
-            organizationRow.plan,
-            organizationRow.billing_status,
-          ).max_platforms;
+          const limit = COMMUNITY_LIMITS.max_platforms;
           if (limit !== null) {
             const count = yield* client.query<{ count: string }>(
               "SELECT COUNT(*)::text AS count FROM platform_accounts WHERE org_id = $1",
@@ -211,7 +204,7 @@ export function saveOAuthConnectionEffect(
                 new CoreApiError(
                   403,
                   "quota_exceeded",
-                  `The platform connection limit is reached (${current}/${limit}). Disconnect an account or upgrade the verified plan.`,
+                  `The platform connection limit is reached (${current}/${limit}). Disconnect an account before connecting another.`,
                 ),
               );
             }

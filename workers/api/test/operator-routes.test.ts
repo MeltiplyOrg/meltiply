@@ -10,7 +10,6 @@ import type { OperatorReconciliationService } from "../src/operator-resolution";
 vi.mock("../src/database", () => ({}));
 
 const distributionId = "93000000-0000-4000-8000-000000000020";
-const billingOperationId = "95000000-0000-4000-8000-000000000020";
 const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   ENVIRONMENT: "test",
@@ -44,10 +43,7 @@ function operatorApp(
 /**
  * Builds an operator reconciliation service mock whose methods return Effects.
  *
- * The route boundary executes each method's Effect once via runRouteEffect, so
- * test doubles must produce Effect programs rather than Promises; the default
- * `resolveBillingOperation` answers a fixed no-effect result while callers
- * inject their own `resolveDistribution` program.
+ * The route boundary executes the injected distribution resolution Effect once.
  *
  * @param resolveDistribution - Effect-returning distribution resolution mock.
  * @returns OperatorReconciliationService test double.
@@ -63,15 +59,6 @@ function service(
   ),
 ): OperatorReconciliationService {
   return {
-    resolveBillingOperation: vi.fn(() =>
-      Effect.succeed({
-        auditId: "94000000-0000-4000-8000-000000000002",
-        billingOperationId,
-        replayed: false,
-        resolution: "no_effect" as const,
-        status: "failed" as const,
-      }),
-    ),
     resolveDistribution,
   };
 }
@@ -92,32 +79,6 @@ function request(
         "Cf-Access-Jwt-Assertion": "signed-access-token",
         "Content-Type": "application/json",
         "Idempotency-Key": "operator-resolution-20",
-        ...patch.headers,
-      },
-      method: "POST",
-    },
-    env,
-  );
-}
-
-function billingRequest(
-  app: ReturnType<typeof createApiApp>,
-  patch: { body?: unknown; headers?: Record<string, string> } = {},
-) {
-  return app.request(
-    `https://ops.example.test/operator/v1/billing-operations/${billingOperationId}/reconciliation`,
-    {
-      body: JSON.stringify(
-        patch.body ?? {
-          confirm: `resolve ${billingOperationId} as no_effect`,
-          reason: "INC-300 provider confirmed no usable billing session",
-          resolution: "no_effect",
-        },
-      ),
-      headers: {
-        "Cf-Access-Jwt-Assertion": "signed-access-token",
-        "Content-Type": "application/json",
-        "Idempotency-Key": "operator-billing-resolution-20",
         ...patch.headers,
       },
       method: "POST",
@@ -214,66 +175,5 @@ describe("Access-protected operator reconciliation route", () => {
     expect(unsafeUrl.status).toBe(400);
     expect(mismatchedEvidence.status).toBe(400);
     expect(resolveDistribution).not.toHaveBeenCalled();
-  });
-
-  it("invokes a strict billing no-effect resolution", async () => {
-    const resolveBillingOperation = vi.fn(() =>
-      Effect.succeed({
-        auditId: "94000000-0000-4000-8000-000000000002",
-        billingOperationId,
-        replayed: true,
-        resolution: "no_effect" as const,
-        status: "failed" as const,
-      }),
-    );
-    const dependencies = service();
-    dependencies.resolveBillingOperation = resolveBillingOperation;
-    const { app } = operatorApp(dependencies);
-    const response = await billingRequest(app);
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Idempotency-Replayed")).toBe("true");
-    expect(resolveBillingOperation).toHaveBeenCalledWith(
-      env,
-      { email: "operator@example.test", subject: "access-user-1" },
-      billingOperationId,
-      {
-        providerSessionExpiresAt: null,
-        reason: "INC-300 provider confirmed no usable billing session",
-        resolution: "no_effect",
-      },
-      "operator-billing-resolution-20",
-      expect.any(String),
-    );
-    await expect(response.json()).resolves.toEqual({
-      audit_id: "94000000-0000-4000-8000-000000000002",
-      billing_operation_id: billingOperationId,
-      resolution: "no_effect",
-      status: "failed",
-    });
-  });
-
-  it("requires past expiry evidence only for an expired billing session", async () => {
-    const dependencies = service();
-    const { app } = operatorApp(dependencies);
-    const missingExpiry = await billingRequest(app, {
-      body: {
-        confirm: `resolve ${billingOperationId} as session_expired`,
-        reason: "INC-301 provider confirmed the billing session expired",
-        resolution: "session_expired",
-      },
-    });
-    const noEffectWithExpiry = await billingRequest(app, {
-      body: {
-        confirm: `resolve ${billingOperationId} as no_effect`,
-        provider_session_expires_at: "2026-07-19T00:00:00.000Z",
-        reason: "INC-302 provider confirmed no usable billing session",
-        resolution: "no_effect",
-      },
-    });
-
-    expect(missingExpiry.status).toBe(400);
-    expect(noEffectWithExpiry.status).toBe(400);
-    expect(dependencies.resolveBillingOperation).not.toHaveBeenCalled();
   });
 });

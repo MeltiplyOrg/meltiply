@@ -49,12 +49,6 @@ describe("React Query helpers", () => {
         end: "2026-01-02",
         start: "2026-01-01",
       }),
-      queryKeys.analytics({
-        brand_profile_id: "profile-1",
-        end: "2026-01-02",
-        start: "2026-01-01",
-      }),
-      queryKeys.inbox({ brand_profile_id: "profile-1" }),
     ];
     for (const queryKey of resourceKeys) {
       queryClient.setQueryData(queryKey, []);

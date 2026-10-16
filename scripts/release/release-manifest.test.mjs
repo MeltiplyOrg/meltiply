@@ -53,8 +53,6 @@ function releaseInput(overrides = {}) {
     runtime: {
       mail_from_address: "auth@staging.meltiply.com",
       r2_account_id: "3".repeat(32),
-      polar_agency_product_id: "22222222-2222-4222-8222-222222222222",
-      polar_creator_product_id: "11111111-1111-4111-8111-111111111111",
     },
     ...overrides,
   };
@@ -111,7 +109,7 @@ function iacOutput(overrides = {}) {
   };
 }
 
-// Builds a normalized CircleCI approval record bound to a plan digest.
+// Builds an operator review record bound to a plan digest.
 function approval(name, planDigest, index = "88888888") {
   return {
     approval_job: {
@@ -312,8 +310,6 @@ function updateEvidenceSet(spec) {
       based_on_version_id: candidateVersionId,
       secret_names: [
         "BETTER_AUTH_SECRET",
-        "BILLING_WEBHOOK_SECRET",
-        "POLAR_ACCESS_TOKEN",
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",
         "TOKEN_ENCRYPTION_KEY",
@@ -761,8 +757,6 @@ function bootstrapEvidenceSet(spec) {
       based_on_version_id: candidateVersionId,
       secret_names: [
         "BETTER_AUTH_SECRET",
-        "BILLING_WEBHOOK_SECRET",
-        "POLAR_ACCESS_TOKEN",
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",
         "TOKEN_ENCRYPTION_KEY",

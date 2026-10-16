@@ -200,21 +200,16 @@ test("stdin secret bundles require exact worker-specific names without recording
     api: {
       ...common,
       BETTER_AUTH_SECRET: "better-auth-secret",
-      BILLING_WEBHOOK_SECRET: "billing-secret",
-      POLAR_ACCESS_TOKEN: "polar-access-token",
     },
     automation: common,
   });
   const result = validateSecretBundle(source, spec, "api");
   assert.deepEqual(result.names, [
     "BETTER_AUTH_SECRET",
-    "BILLING_WEBHOOK_SECRET",
-    "POLAR_ACCESS_TOKEN",
     "R2_ACCESS_KEY_ID",
     "R2_SECRET_ACCESS_KEY",
     "TOKEN_ENCRYPTION_KEY",
   ]);
-  assert.equal(result.values.POLAR_ACCESS_TOKEN, "polar-access-token");
   assert.throws(
     () =>
       validateSecretBundle(
@@ -311,7 +306,7 @@ test("Automation update uploads code, creates a stdin secret version, and activa
     }
     if (wrangler.join(" ").startsWith("versions secret bulk")) {
       assert.equal(typeof options.stdin, "string");
-      assert.doesNotMatch(options.stdin, /BETTER_AUTH_SECRET|BILLING_WEBHOOK_SECRET/);
+      assert.doesNotMatch(options.stdin, /BETTER_AUTH_SECRET/);
       versions.unshift({ id: secretVersion, tag: secretTag });
       return {
         code: 0,
@@ -357,8 +352,6 @@ test("Automation update uploads code, creates a stdin secret version, and activa
       api: {
         ...common,
         BETTER_AUTH_SECRET: "better-auth-secret",
-        BILLING_WEBHOOK_SECRET: "billing-secret",
-        POLAR_ACCESS_TOKEN: "polar-access-token",
       },
       automation: common,
     }),

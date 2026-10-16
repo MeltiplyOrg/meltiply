@@ -174,7 +174,7 @@ test("approval loading enforces expected job and reviewed plan", async (context)
       ]),
       spec,
     }),
-    /one CircleCI workflow/,
+    /one release session/,
   );
 });
 

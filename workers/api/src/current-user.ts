@@ -16,7 +16,6 @@ interface CurrentUserRow extends Record<string, unknown> {
   id: string;
   organization_id: string;
   organization_name: string;
-  organization_plan: string;
   organization_slug: string;
   role: string;
   updated_at: Date | string;
@@ -53,7 +52,6 @@ export async function loadCurrentUser(
              o.id AS organization_id,
              o.name AS organization_name,
              o.slug AS organization_slug,
-             o.plan AS organization_plan,
              om.role
            FROM users u
            JOIN org_members om ON om.user_id = u.id
@@ -71,7 +69,6 @@ export async function loadCurrentUser(
               active_organization: {
                 id: row.organization_id,
                 name: row.organization_name,
-                plan: row.organization_plan,
                 role: row.role,
                 slug: row.organization_slug,
               },

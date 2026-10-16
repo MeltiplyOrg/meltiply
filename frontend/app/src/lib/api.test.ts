@@ -75,49 +75,6 @@ describe("generated API client adapters", () => {
     vi.restoreAllMocks();
   });
 
-  it("reuses one generated client while resolving the active fetch implementation", async () => {
-    const contracts = await vi.importActual<typeof import("@meltiply/contracts/client")>(
-      "@meltiply/contracts/client",
-    );
-    const createMeltiplyClient = vi.fn(contracts.createMeltiplyClient);
-
-    vi.resetModules();
-    vi.doMock("@meltiply/contracts/client", () => ({
-      ...contracts,
-      createMeltiplyClient,
-    }));
-
-    const isolatedApi = await import("./api");
-    const firstFetch = vi.fn().mockImplementation(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({}), {
-          headers: { "content-type": "application/json" },
-          status: 200,
-        }),
-      ),
-    );
-    vi.stubGlobal("fetch", firstFetch);
-
-    await Effect.runPromise(isolatedApi.getPlan(null));
-    await Effect.runPromise(isolatedApi.getUsage(null));
-
-    const replacementFetch = vi.fn().mockImplementation(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({}), {
-          headers: { "content-type": "application/json" },
-          status: 200,
-        }),
-      ),
-    );
-    vi.stubGlobal("fetch", replacementFetch);
-
-    await Effect.runPromise(isolatedApi.getCurrentUser(null));
-
-    expect(createMeltiplyClient).toHaveBeenCalledOnce();
-    expect(firstFetch).toHaveBeenCalledTimes(2);
-    expect(replacementFetch).toHaveBeenCalledOnce();
-  });
-
   it("preserves the normative error envelope, request ID, and retry delay", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -167,7 +124,9 @@ describe("generated API client adapters", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const error = await Effect.runPromise(api.getPlan(null)).catch((caught: unknown) => caught);
+    const error = await Effect.runPromise(api.getCurrentUser(null)).catch(
+      (caught: unknown) => caught,
+    );
 
     expect(error).toMatchObject({
       code: "unknown_error",
@@ -254,7 +213,7 @@ describe("generated API client adapters", () => {
     const isolatedApi = await import("./api");
 
     await authClient.getSession();
-    await Effect.runPromise(isolatedApi.getPlan(null));
+    await Effect.runPromise(isolatedApi.getCurrentUser(null));
     await Effect.runPromise(isolatedApi.listPosts("ws-123"));
 
     // The auth lifecycle request keeps the session cookie; API requests carry

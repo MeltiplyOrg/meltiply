@@ -4,14 +4,13 @@
 # this invocation owns, preventing a live frontend from waiting on a dead
 # backend.
 #
-# A Cloudflare Quick Tunnel is published next to the app and public-site servers so
-# the stack is reachable from any network. The tunnel origin becomes the
-# canonical frontend origin for the whole run. That is only coherent because the
+# An optional Cloudflare Quick Tunnel makes the stack reachable from any network.
+# When enabled, the tunnel origin becomes the canonical frontend origin for the
+# whole run. That is only coherent because the
 # app Worker already proxies `/api/*` to the API Worker (service binding when
 # deployed, API_ORIGIN locally), so a single public hostname serves the SPA and
 # the API on one origin: no CORS, and the Better Auth session cookie stays a
-# first-party cookie. Set MELTIPLY_DEV_TUNNEL=0 to boot on local/Tailscale
-# origins only.
+# first-party cookie. Set MELTIPLY_DEV_TUNNEL=1 to opt into public origins.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -62,13 +61,10 @@ claim_stack() {
 # with alternate ports or container tunnel transport; exports the resulting
 # values to all children, preserving explicit tunnel settings over root .env.
 load_stack_environment() {
-  # Sourcing the root .env below re-exports every key it declares, so an
-  # explicit setting from the caller must be captured first and restored after.
-  # Without this, `MELTIPLY_DEV_TUNNEL=0 make dev` would be silently undone by
-  # the MELTIPLY_DEV_TUNNEL=1 placeholder that setup.sh writes into .env.
+  # Preserve explicit caller settings over checkout-local .env defaults.
   local -a caller_overrides=()
   local name
-  for name in MELTIPLY_DEV_TUNNEL MELTIPLY_DEV_TUNNEL_MODE \
+  for name in MELTIPLY_DEV_HOST MELTIPLY_DEV_TUNNEL MELTIPLY_DEV_TUNNEL_MODE \
     MELTIPLY_CLOUDFLARED_BIN CLOUDFLARED_BIN TUNNEL_TRANSPORT_PROTOCOL \
     MELTIPLY_TUNNEL_NAME MELTIPLY_TUNNEL_NAME_PREFIX MELTIPLY_TUNNEL_SHARED \
     MELTIPLY_TUNNEL_DOMAIN MELTIPLY_TUNNEL_DEV_LABEL \
@@ -90,7 +86,7 @@ load_stack_environment() {
   local dev_host
   dev_host="$(node "$repo_root/scripts/cloudflare-local/development-host.mjs")"
   local bind_host="127.0.0.1"
-  [[ "$dev_host" == "127.0.0.1" ]] || bind_host="0.0.0.0"
+  [[ "$dev_host" == "127.0.0.1" || "$dev_host" == "localhost" ]] || bind_host="0.0.0.0"
 
   export WRANGLER_DEV_IP="${WRANGLER_DEV_IP:-$bind_host}"
   export FRONTEND_DEV_HOST="${FRONTEND_DEV_HOST:-$bind_host}"
@@ -112,7 +108,7 @@ load_stack_environment() {
   local_public_origin="$PUBLIC_SITE_URL"
   # Read after the .env source so the summary agrees with the hostnames
   # tunnel-hostname.mjs derives, which read the environment at call time.
-  DEV_TUNNEL_DOMAIN="${MELTIPLY_TUNNEL_DOMAIN:-meltiply.com}"
+  DEV_TUNNEL_DOMAIN="${MELTIPLY_TUNNEL_DOMAIN:-}"
 }
 
 # Starts one Quick Tunnel in its own session and waits for the hostname
@@ -242,8 +238,8 @@ probe_tunnel() {
 # which must fail the run rather than silently handing back a local-only stack
 # the caller believes is public.
 start_tunnel() {
-  if [[ "${MELTIPLY_DEV_TUNNEL:-1}" == "0" ]]; then
-    printf 'Dev tunnel disabled (MELTIPLY_DEV_TUNNEL=0).\n'
+  if [[ "${MELTIPLY_DEV_TUNNEL:-0}" == "0" ]]; then
+    printf 'Dev tunnel disabled (set MELTIPLY_DEV_TUNNEL=1 to publish public origins).\n'
     tunnel_mode="disabled"
     return 0
   fi

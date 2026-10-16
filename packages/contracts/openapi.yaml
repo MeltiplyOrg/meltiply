@@ -64,8 +64,6 @@ tags:
     description: Aggregate and per-distribution metrics.
   - name: Inbox
     description: Synchronized comments and replies.
-  - name: Billing
-    description: Plan, usage, checkout, portal, and webhooks.
 paths:
   /health:
     get:
@@ -413,44 +411,6 @@ paths:
           $ref: "#/components/responses/AuthError"
         "429":
           $ref: "#/components/responses/RateLimited"
-  /billing/webhook:
-    post:
-      tags: [Billing]
-      operationId: handleBillingWebhook
-      security: []
-      summary: Receive a signed Polar Standard Webhooks event
-      parameters:
-        - in: header
-          name: webhook-id
-          required: true
-          schema:
-            type: string
-        - in: header
-          name: webhook-timestamp
-          required: true
-          schema:
-            type: string
-        - in: header
-          name: webhook-signature
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
-      responses:
-        "204":
-          description: Verified event was applied, deduplicated, or deliberately ignored.
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
   /users/me:
     parameters:
       - $ref: "#/components/parameters/XWorkspaceId"
@@ -1895,102 +1855,6 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/Unprocessable"
-  /billing/plan:
-    parameters:
-      - $ref: "#/components/parameters/XWorkspaceId"
-    get:
-      tags: [Billing]
-      operationId: getBillingPlan
-      summary: Get plan, status, limits, and renewal state
-      responses:
-        "200":
-          description: Current plan.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BillingPlanResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-  /billing/usage:
-    parameters:
-      - $ref: "#/components/parameters/XWorkspaceId"
-    get:
-      tags: [Billing]
-      operationId: getBillingUsage
-      summary: Get reconciled current-period usage
-      responses:
-        "200":
-          description: Current usage, plan, and limits.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BillingSummary"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-  /billing/checkout-sessions:
-    parameters:
-      - $ref: "#/components/parameters/XWorkspaceId"
-    post:
-      tags: [Billing]
-      operationId: createCheckoutSession
-      summary: Create a short-lived billing checkout URL
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateCheckoutSessionRequest"
-      responses:
-        "201":
-          description: Checkout URL.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SignedUrlResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/Unprocessable"
-  /billing/portal-sessions:
-    parameters:
-      - $ref: "#/components/parameters/XWorkspaceId"
-    post:
-      tags: [Billing]
-      operationId: createBillingPortalSession
-      summary: Create a short-lived billing portal URL
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreatePortalSessionRequest"
-      responses:
-        "201":
-          description: Portal URL.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SignedUrlResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/Unprocessable"
 components:
   securitySchemes:
     bearerAuth:
@@ -2291,12 +2155,6 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
-    InternalError:
-      description: Unexpected internal failure.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
     UpstreamError:
       description: Required synchronous upstream failed.
       content:
@@ -2343,9 +2201,6 @@ components:
     ConnectionStatus:
       type: string
       enum: [connected, expiring, expired, revoked, reconnect_required]
-    BillingStatus:
-      type: string
-      enum: [free, trialing, active, past_due, cancelled]
     ErrorDetail:
       type: object
       additionalProperties: false
@@ -2633,7 +2488,7 @@ components:
     OrganizationSummary:
       type: object
       additionalProperties: false
-      required: [id, name, slug, role, plan]
+      required: [id, name, slug, role]
       properties:
         id:
           type: string
@@ -2643,8 +2498,6 @@ components:
         slug:
           type: string
         role:
-          type: string
-        plan:
           type: string
     UserProfile:
       type: object
@@ -2676,7 +2529,7 @@ components:
     Workspace:
       type: object
       additionalProperties: false
-      required: [id, name, slug, plan, is_personal, role, created_at, updated_at]
+      required: [id, name, slug, is_personal, role, created_at, updated_at]
       properties:
         id:
           type: string
@@ -2684,8 +2537,6 @@ components:
         name:
           type: string
         slug:
-          type: string
-        plan:
           type: string
         is_personal:
           type: boolean
@@ -4507,125 +4358,3 @@ components:
           type: string
           minLength: 1
           maxLength: 5000
-    PlanLimits:
-      type: object
-      additionalProperties: false
-      required: [max_uploads, max_distributions, max_platforms, max_storage_bytes]
-      properties:
-        max_uploads:
-          type: [integer, "null"]
-          minimum: 0
-        max_distributions:
-          type: [integer, "null"]
-          minimum: 0
-        max_platforms:
-          type: [integer, "null"]
-          minimum: 0
-        max_storage_bytes:
-          type: [integer, "null"]
-          minimum: 0
-        analytics_enabled:
-          type: boolean
-          default: true
-        inbox_reply_enabled:
-          type: boolean
-          default: true
-    UsageRecord:
-      type: object
-      additionalProperties: false
-      required:
-        [
-          org_id,
-          period_start,
-          period_end,
-          uploads,
-          distributions,
-          api_calls,
-          storage_bytes,
-          updated_at,
-        ]
-      properties:
-        org_id:
-          type: string
-          format: uuid
-        period_start:
-          type: string
-          format: date-time
-        period_end:
-          type: string
-          format: date-time
-        uploads:
-          type: integer
-          minimum: 0
-        distributions:
-          type: integer
-          minimum: 0
-        api_calls:
-          type: integer
-          minimum: 0
-        storage_bytes:
-          type: integer
-          minimum: 0
-        updated_at:
-          type: string
-          format: date-time
-    BillingPlanResponse:
-      type: object
-      additionalProperties: false
-      required: [plan, billing_status, limits, renews_at, cancel_at]
-      properties:
-        plan:
-          type: string
-        billing_status:
-          $ref: "#/components/schemas/BillingStatus"
-        limits:
-          $ref: "#/components/schemas/PlanLimits"
-        renews_at:
-          type: [string, "null"]
-          format: date-time
-        cancel_at:
-          type: [string, "null"]
-          format: date-time
-    BillingSummary:
-      type: object
-      additionalProperties: false
-      required: [plan, billing_status, usage, limits, renews_at, cancel_at, upgrade_required]
-      properties:
-        plan:
-          type: string
-        billing_status:
-          $ref: "#/components/schemas/BillingStatus"
-        usage:
-          $ref: "#/components/schemas/UsageRecord"
-        limits:
-          $ref: "#/components/schemas/PlanLimits"
-        renews_at:
-          type: [string, "null"]
-          format: date-time
-        cancel_at:
-          type: [string, "null"]
-          format: date-time
-        upgrade_required:
-          type: boolean
-    CreateCheckoutSessionRequest:
-      type: object
-      additionalProperties: false
-      required: [plan, success_url, cancel_url]
-      properties:
-        plan:
-          type: string
-          minLength: 1
-        success_url:
-          type: string
-          format: uri
-        cancel_url:
-          type: string
-          format: uri
-    CreatePortalSessionRequest:
-      type: object
-      additionalProperties: false
-      required: [return_url]
-      properties:
-        return_url:
-          type: string
-          format: uri

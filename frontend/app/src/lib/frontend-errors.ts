@@ -10,7 +10,6 @@ const publicMessages: Record<string, string> = {
 
 const genericErrorMessage = "An error has occurred.";
 const genericErrorCodes: Record<string, true> = {
-  billing_unavailable: true,
   dependency_unavailable: true,
   provider_unavailable: true,
 };
@@ -68,9 +67,6 @@ export function apiErrorCode(error: unknown): string | undefined {
  * while mapping known business codes (conflict, quota_exceeded, rate_limited) and auth
  * statuses (401/403, 404) to specific localized guidance.
  *
- * `billing_unavailable` stays masked even though it is a known deployment state: the
- * generic copy is the deliberate posture for infrastructure codes. Callers that must
- * distinguish it should branch on {@link apiErrorCode} and supply their own copy.
  *
  * @param error The thrown error or API response error.
  * @param language User interface language for translation; defaults to "en".

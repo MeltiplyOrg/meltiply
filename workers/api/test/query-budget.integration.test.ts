@@ -61,7 +61,6 @@ const queryBudgetActor: ResolvedActor = {
     id: queryBudgetClaims.organizationId,
     isPersonal: false,
     name: "Query Budget Studio",
-    plan: "agency",
     slug: "query-budget-studio",
   },
 };
@@ -86,6 +85,7 @@ interface RouteCase {
   maxStatements: number;
   minRows: number;
   name: string;
+  prepare?: () => Promise<void>;
   run: () => Promise<RouteResult>;
 }
 
@@ -309,6 +309,29 @@ describeIntegration("core API PostgreSQL query budgets", () => {
     { length: 42 },
     (_, index) => `c1000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
   );
+
+  /**
+   * Gives each mutation sample independent monthly headroom outside measurement.
+   * Removes only uncompleted upload fixtures from previous samples; seeded read
+   * rows and real quota admission remain intact throughout the benchmark.
+   */
+  async function prepareMutationSample(): Promise<void> {
+    await Effect.runPromise(
+      withSystemTransactionEffect(env, (client) =>
+        Effect.gen(function* () {
+          yield* client.query(
+            "DELETE FROM assets WHERE org_id = $1 AND title LIKE 'Query budget upload %'",
+            [queryBudgetClaims.organizationId],
+          );
+          yield* client.query(
+            `UPDATE usage_records SET uploads = 0, distributions = 0
+             WHERE org_id = $1 AND period = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')`,
+            [queryBudgetClaims.organizationId],
+          );
+        }),
+      ),
+    );
+  }
 
   beforeAll(async () => {
     await deleteFixture();
@@ -773,6 +796,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
         maxStatements: 15,
         minRows: 20,
         name: "post schedule create",
+        prepare: prepareMutationSample,
         run: async () => {
           const sample = batchCreateSample;
           batchCreateSample += 1;
@@ -800,6 +824,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
         maxStatements: 14,
         minRows: 20,
         name: "scheduled post schedule create",
+        prepare: prepareMutationSample,
         run: async () => {
           const sample = scheduledBatchCreateSample;
           scheduledBatchCreateSample += 1;
@@ -828,6 +853,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
         maxStatements: 12,
         minRows: 1,
         name: "upload session create",
+        prepare: prepareMutationSample,
         run: async () => {
           const sample = uploadSample;
           uploadSample += 1;
@@ -915,32 +941,14 @@ describeIntegration("core API PostgreSQL query budgets", () => {
           return { body, rows: body.comments.length };
         },
       },
-      {
-        maxRows: 100,
-        maxStatements: 3,
-        minRows: 1,
-        name: "billing plan",
-        run: async () => {
-          const body = await Effect.runPromise(coreService.billingPlan(env, queryBudgetClaims));
-          return { body, rows: 1 };
-        },
-      },
-      {
-        maxRows: 100,
-        maxStatements: 3,
-        minRows: 1,
-        name: "billing usage",
-        run: async () => {
-          const body = await Effect.runPromise(coreService.billingUsage(env, queryBudgetClaims));
-          return { body, rows: 1 };
-        },
-      },
     ];
 
     for (const route of routes) {
+      await route.prepare?.();
       await route.run();
       const measurements: Measurement[] = [];
       for (let sample = 0; sample < samplesPerRoute; sample += 1) {
+        await route.prepare?.();
         measurements.push(await measure(route.run));
       }
 

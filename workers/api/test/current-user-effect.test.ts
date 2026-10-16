@@ -38,7 +38,6 @@ const actor: ResolvedActor = {
     id: "20000000-0000-4000-8000-000000000001",
     isPersonal: false,
     name: "Alpha",
-    plan: "pro",
     slug: "alpha",
   },
 };
@@ -47,7 +46,6 @@ const mockProfile: UserProfile = {
   active_organization: {
     id: "20000000-0000-4000-8000-000000000001",
     name: "Alpha",
-    plan: "pro",
     role: "admin",
     slug: "alpha",
   },

@@ -10,9 +10,7 @@ import {
   type ProviderRegistry,
 } from "@meltiply/providers";
 import {
-  limitsForBillingState,
   rateLimitBudgetFreshSeconds,
-  type BillingStatus,
   type DatabaseError,
   type Platform,
   type PlatformCapability,
@@ -79,14 +77,12 @@ interface DistributionRow extends Record<string, unknown> {
   access_token: string | null;
   attachment_ids: string[] | null;
   brand_profile_id: string;
-  billing_status: BillingStatus;
   connection_status: string | null;
   description_override: string | null;
   hashtags: string[] | null;
   id: string;
   media: DistributionMediaEntry[];
   org_id: string;
-  plan: string;
   platform: Platform;
   platform_account_id: string | null;
   platform_post_id: string | null;
@@ -104,24 +100,6 @@ interface DistributionRow extends Record<string, unknown> {
   attempt_count: number;
   title_override: string | null;
   token_expires_at: Date | string | null;
-}
-
-/**
- * Evaluates whether an organization's plan and billing status entitle it to publish.
- *
- * Free plans are always entitled. Paid plans require active or trialing billing status
- * unless the plan defines no maximum distribution cap.
- *
- * @param plan - Subscription plan identifier (e.g. 'free', 'pro').
- * @param billingStatus - Current billing lifecycle state.
- * @returns True if distribution publication is permitted, false if blocked.
- */
-function queuedPublishEntitled(plan: string, billingStatus: BillingStatus): boolean {
-  if (plan === "free") return true;
-  const limits = limitsForBillingState(plan, billingStatus);
-  return (
-    billingStatus === "active" || billingStatus === "trialing" || limits.max_distributions === null
-  );
 }
 
 /**
@@ -531,7 +509,7 @@ function frozenSnapshotFor(
 /**
  * Claims a distributed job lease and prepares a distribution record for execution.
  *
- * Acquires a lease in `async_job_events`, checks billing entitlement and cached rate limit budgets,
+ * Acquires a lease in `async_job_events`, checks cached rate limit budgets,
  * validates that every selected attachment identity remains attached before freezing publish snapshots,
  * inserts or updates provider operations intent, and locks the distribution row.
  * Publish triggers on `processing` rows are skipped rather than re-executed — a prior
@@ -596,8 +574,7 @@ function prepare(
                 composition.media,
                 account.access_token, account.refresh_token,
                 account.connection_status,
-                account.token_expires_at, account.platform_user_id,
-                organization.billing_status, organization.plan
+                account.token_expires_at, account.platform_user_id
          FROM distributions AS distribution
          JOIN posts AS post ON post.id = distribution.post_id
          JOIN organizations AS organization
@@ -702,23 +679,6 @@ function prepare(
           distribution.status !== "needs_reconciliation")
       ) {
         yield* finishJobLease(client, eventKey(message), "skipped");
-        return { outcome: "skipped" };
-      }
-      if (
-        operationType === "publish" &&
-        (distribution.status === "queued" || dueScheduledPublish) &&
-        !queuedPublishEntitled(distribution.plan, distribution.billing_status)
-      ) {
-        yield* client.query(
-          `UPDATE distributions
-         SET status = 'failed', failure_code = 'billing_entitlement_required',
-             failure_retryable = false,
-             error_message = 'Publishing was stopped because the organization is not entitled to its paid plan.',
-             updated_at = now()
-         WHERE id = $1 AND status IN ('queued', 'scheduled')`,
-          [distribution.id],
-        );
-        yield* finishJobLease(client, eventKey(message), "succeeded");
         return { outcome: "skipped" };
       }
       // An exhausted or nearly exhausted cached budget skips creating a

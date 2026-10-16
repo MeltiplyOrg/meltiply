@@ -22,25 +22,26 @@ verify_phase() {
   esac
 }
 
-verify_pipeline_sha() {
-  [[ "${CIRCLE_SHA1:-}" =~ ^[0-9a-f]{40}$ ]] ||
-    fail "CIRCLE_SHA1 must contain exactly 40 lowercase hex characters"
+# Binds plans and applies to one explicitly selected release commit.
+verify_release_sha() {
+  [[ "${MELTIPLY_RELEASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "MELTIPLY_RELEASE_SHA must contain exactly 40 lowercase hex characters"
 
   local checkout_sha
   checkout_sha="$(git -C "$repository_root" rev-parse HEAD)"
-  [[ "$checkout_sha" == "$CIRCLE_SHA1" ]] ||
-    fail "checked-out commit does not match CIRCLE_SHA1"
+  [[ "$checkout_sha" == "$MELTIPLY_RELEASE_SHA" ]] ||
+    fail "checked-out commit does not match MELTIPLY_RELEASE_SHA"
 
   local reviewed_sha_file="$release_dir/reviewed-sha"
   if [[ ! -e "$reviewed_sha_file" ]]; then
     [[ "$action" == "plan" ]] || fail "reviewed-sha is missing"
-    printf '%s\n' "$CIRCLE_SHA1" >"$reviewed_sha_file"
+    printf '%s\n' "$MELTIPLY_RELEASE_SHA" >"$reviewed_sha_file"
   fi
 
   [[ "$(wc -c <"$reviewed_sha_file")" -eq 41 ]] ||
     fail "reviewed-sha has an invalid length"
-  [[ "$(<"$reviewed_sha_file")" == "$CIRCLE_SHA1" ]] ||
-    fail "reviewed-sha does not match CIRCLE_SHA1"
+  [[ "$(<"$reviewed_sha_file")" == "$MELTIPLY_RELEASE_SHA" ]] ||
+    fail "reviewed-sha does not match MELTIPLY_RELEASE_SHA"
 }
 
 initialize_backend() {
@@ -91,6 +92,8 @@ apply_transition() {
   actual_digest="$(sha256sum "$plan_file" | awk '{print $1}')"
   [[ "$actual_digest" == "$expected_digest" ]] ||
     fail "$phase saved plan digest does not match approval evidence"
+  [[ "${MELTIPLY_RELEASE_CONFIRM:-}" == "apply $phase $MELTIPLY_RELEASE_SHA $expected_digest" ]] ||
+    fail "MELTIPLY_RELEASE_CONFIRM must identify the phase, release commit, and reviewed plan digest"
 
   "$tofu_bin" -chdir="$iac_dir" apply \
     -input=false -lock-timeout=5m -auto-approve "$plan_file"
@@ -105,7 +108,7 @@ apply_transition() {
 
   # The redacted summary and digest are sufficient durable evidence. The raw
   # plan and full plan JSON are deleted immediately after their one approved
-  # application and are never eligible for CircleCI artifact publication.
+  # application and are never eligible for artifact publication.
   rm -f -- "$plan_file" "$release_dir/$phase-plan.json"
 }
 
@@ -115,7 +118,7 @@ phase="$2"
 verify_phase "$phase"
 umask 077
 mkdir -p "$release_dir"
-verify_pipeline_sha
+verify_release_sha
 initialize_backend
 
 case "$action" in

@@ -26,7 +26,6 @@ import type { BrandProfileApiService } from "./brand-profile-service";
 import type { AssetApiService } from "./asset-types";
 import type { PostApiService, PostTargetInput } from "./post-types";
 import type { StorageService } from "./effect/services/storage";
-import type { BillingSessionProvider } from "./billing-service";
 import { scheduleInboxCommentSync } from "./inbox-comment-sync";
 import type { ApiWorkerEnv, ApiWorkerEnvironment, OAuthStateStub } from "./env";
 import { tokenCipherFor } from "./token-credentials";
@@ -57,7 +56,6 @@ import {
   postTextField,
   postTitleField,
   POST_STATUS_VALUES,
-  rawBody,
   REPLY_STATUS_VALUES,
   stringArrayField,
   stringField,
@@ -78,12 +76,6 @@ export interface CoreRouteDependencies {
   brandProfileService?: BrandProfileApiService;
   coreService?: CoreApiService;
   postService?: PostApiService;
-  handleBillingWebhook?: (
-    env: ApiWorkerEnv,
-    rawBody: string,
-    headers: Headers,
-  ) => Effect.Effect<{ ignored: boolean; replayed: boolean }, CoreApiError>;
-  billingProvider?: BillingSessionProvider;
   providerRegistry?: ProviderRegistry;
   publicationRequirements?: PublicationRequirementsReader;
   revokeOAuthConnection?: OAuthConnectionRevoker;
@@ -762,7 +754,7 @@ function oauthExchangeOutcome(failure: unknown): string {
  *
  * Registers REST endpoints for platform accounts, OAuth connect flows, publication requirements,
  * Posts and their per-Channel publication outcomes, content calendar, analytics, audience comment
- * inbox, asset upload sessions and per-Asset reads, and Polar billing. Assets are reachable only
+ * inbox, asset upload sessions and per-Asset reads. Assets are reachable only
  * through Post attachments and the scoped upload/preview/download helpers, and publication targets
  * are created only by scheduling a Post.
  * Throwing request validators run through the typed bridge before application calls,
@@ -795,7 +787,7 @@ export function registerCoreRoutes(
       return dependencies.coreService;
     }
     servicePromise ??= import("./core-service").then((module) =>
-      module.createCoreApiService(registry().capabilities(), dependencies.billingProvider),
+      module.createCoreApiService(registry().capabilities()),
     );
     return servicePromise;
   };
@@ -1034,44 +1026,6 @@ export function registerCoreRoutes(
           ),
         ),
       ));
-
-  app.post("/api/v1/billing/webhook", (c) =>
-    runRouteEffect(
-      c,
-      Effect.gen(function* () {
-        const body = yield* fromPromise(() =>
-          rawBody(
-            c.req.raw,
-            "payload_too_large",
-            "The billing webhook payload exceeds the one-megabyte limit.",
-          ),
-        );
-        const result = yield* Effect.flatMap(
-          Effect.tryPromise({
-            catch: (cause) =>
-              cause instanceof CoreApiError
-                ? cause
-                : new DatabaseError({
-                    cause,
-                    message: "The billing webhook could not be processed.",
-                  }),
-            try: () => import("./billing-webhook"),
-          }),
-          (module) =>
-            dependencies.handleBillingWebhook
-              ? dependencies.handleBillingWebhook(c.env, body, c.req.raw.headers)
-              : module.handleBillingWebhook(c.env, body, c.req.raw.headers),
-        );
-        return new Response(null, {
-          headers: {
-            ...idempotencyHeaders(result.replayed),
-            "X-Request-ID": requestId(c),
-          },
-          status: 204,
-        });
-      }),
-    ),
-  );
 
   // Verified-domain provider media: a public surface authenticated by the URL's HMAC
   // bearer credential rather than a user session (the auth middleware exempts this
@@ -2465,83 +2419,6 @@ export function registerCoreRoutes(
           requestId(c),
         );
         return jsonResponse(result.value, 202, requestId(c), {
-          ...idempotencyHeaders(result.replayed),
-        });
-      }),
-    ),
-  );
-
-  app.get("/api/v1/billing/plan", (c) =>
-    runRouteEffect(
-      c,
-      Effect.gen(function* () {
-        const core = yield* fromPromise(service);
-        const plan = yield* core.billingPlan(c.env, c.get("actor").claims);
-        return jsonResponse(plan, 200, requestId(c));
-      }),
-    ),
-  );
-
-  app.get("/api/v1/billing/usage", (c) =>
-    runRouteEffect(
-      c,
-      Effect.gen(function* () {
-        const core = yield* fromPromise(service);
-        const usage = yield* core.billingUsage(c.env, c.get("actor").claims);
-        return jsonResponse(usage, 200, requestId(c));
-      }),
-    ),
-  );
-
-  app.post("/api/v1/billing/checkout-sessions", (c) =>
-    runRouteEffect(
-      c,
-      Effect.gen(function* () {
-        const body = yield* fromPromise(() => jsonBody(c));
-        yield* fromPromise(() => onlyKeys(body, ["plan", "success_url", "cancel_url"]));
-        const plan = yield* fromPromise(() => stringField(body, "plan").trim());
-        if (!plan || plan.length > 100) {
-          return yield* Effect.fail(
-            new CoreApiError(422, "validation_error", "plan must be a non-empty short string."),
-          );
-        }
-        const cancelUrl = yield* fromPromise(() => stringField(body, "cancel_url"));
-        const successUrl = yield* fromPromise(() => stringField(body, "success_url"));
-        const key = yield* fromPromise(() => idempotencyKey(c));
-        const core = yield* fromPromise(service);
-        const result = yield* core.createCheckoutSession(
-          c.env,
-          c.get("actor").claims,
-          {
-            cancelUrl,
-            plan,
-            successUrl,
-          },
-          key,
-        );
-        return jsonResponse(result.value, 201, requestId(c), {
-          ...idempotencyHeaders(result.replayed),
-        });
-      }),
-    ),
-  );
-
-  app.post("/api/v1/billing/portal-sessions", (c) =>
-    runRouteEffect(
-      c,
-      Effect.gen(function* () {
-        const body = yield* fromPromise(() => jsonBody(c));
-        yield* fromPromise(() => onlyKeys(body, ["return_url"]));
-        const returnUrl = yield* fromPromise(() => stringField(body, "return_url"));
-        const key = yield* fromPromise(() => idempotencyKey(c));
-        const core = yield* fromPromise(service);
-        const result = yield* core.createPortalSession(
-          c.env,
-          c.get("actor").claims,
-          { returnUrl },
-          key,
-        );
-        return jsonResponse(result.value, 201, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
       }),

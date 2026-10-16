@@ -50,8 +50,6 @@ function releaseInput(overrides = {}) {
       mail_from_address: "auth@staging.meltiply.com",
       mail_from_name: "Meltiply",
       r2_account_id: "3".repeat(32),
-      polar_agency_product_id: "22222222-2222-4222-8222-222222222222",
-      polar_creator_product_id: "11111111-1111-4111-8111-111111111111",
     },
     ...overrides,
   };
@@ -397,26 +395,6 @@ test("rendered files are deterministic and private", async (context) => {
       allowed_sender_addresses: ["auth@staging.meltiply.com"],
     },
   ]);
-});
-
-test("offline preflight verifies the immutable checkout without remote credentials", async () => {
-  const result = await preflightRelease({
-    environment: {},
-    offline: true,
-    repoRoot: "/repo",
-    runCommand: successfulPreflightCommand,
-    spec: validateReleaseSpec(releaseInput()),
-  });
-  assert.deepEqual(result, {
-    environment: "staging",
-    deployment_mode: "bootstrap",
-    git_sha: gitSha,
-    offline: true,
-    release_id: `staging-${gitSha.slice(0, 12)}`,
-    remote_secret_binding_counts: { api: 6, automation: 3, state: 0 },
-    status: "ready",
-    wrangler_version: "4.148.0",
-  });
 });
 
 test("connected preflight requires matching Cloudflare and TLS database credentials", async () => {

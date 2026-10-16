@@ -65,7 +65,7 @@ esac
     tofuLog,
     env: {
       ...process.env,
-      CIRCLE_SHA1: checkoutSha.trim(),
+      MELTIPLY_RELEASE_SHA: checkoutSha.trim(),
       FAKE_PLAN_JSON: planJson,
       FAKE_TOFU_LOG: tofuLog,
       MELTIPLY_RELEASE_DIR: releaseDir,
@@ -98,7 +98,10 @@ test("plans, verifies, applies, records outputs, and removes raw plan data", asy
 
   await execFileAsync(transitionScript, ["apply", "foundation"], {
     cwd: repositoryRoot,
-    env: setup.env,
+    env: {
+      ...setup.env,
+      MELTIPLY_RELEASE_CONFIRM: `apply foundation ${setup.env.MELTIPLY_RELEASE_SHA} ${(await readFile(join(setup.releaseDir, "foundation-plan.sha256"), "utf8")).trim()}`,
+    },
   });
   const outputs = JSON.parse(await readFile(join(setup.releaseDir, "iac-outputs.json"), "utf8"));
   assert.equal(outputs.release_resources.value.environment, "staging");
@@ -125,13 +128,29 @@ test("rejects plan tampering before OpenTofu apply", async () => {
   assert.doesNotMatch(await readFile(setup.tofuLog, "utf8"), / apply /);
 });
 
-test("rejects a checkout that does not exactly match the pipeline SHA", async () => {
+test("rejects a checkout that does not exactly match the release commit", async () => {
   const setup = await fixture();
   await assert.rejects(
     execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
       cwd: repositoryRoot,
-      env: { ...setup.env, CIRCLE_SHA1: "0".repeat(40) },
+      env: { ...setup.env, MELTIPLY_RELEASE_SHA: "0".repeat(40) },
     }),
-    /checked-out commit does not match CIRCLE_SHA1/,
+    /checked-out commit does not match/,
   );
+});
+
+test("requires explicit reviewed-plan confirmation before applying infrastructure", async () => {
+  const setup = await fixture();
+  await execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
+    cwd: repositoryRoot,
+    env: setup.env,
+  });
+  await assert.rejects(
+    execFileAsync(transitionScript, ["apply", "foundation"], {
+      cwd: repositoryRoot,
+      env: { ...setup.env, MELTIPLY_RELEASE_CONFIRM: "" },
+    }),
+    /MELTIPLY_RELEASE_CONFIRM/,
+  );
+  assert.doesNotMatch(await readFile(setup.tofuLog, "utf8"), / apply /);
 });

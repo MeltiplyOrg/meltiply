@@ -22,11 +22,9 @@ const sha256Pattern = /^[0-9a-f]{64}$/;
 const gitShaPattern = /^[0-9a-f]{40}$/;
 
 // Environment variables whose values must never appear in published evidence.
-// Mirrors redactError's secret set plus the CircleCI token and the raw release
-// secret bundle variable.
+// Mirrors redactError's secret set plus the raw release secret bundle variable.
 const secretEnvironmentNames = [
   "CLOUDFLARE_API_TOKEN",
-  "CIRCLE_TOKEN",
   "MELTIPLY_AUTHENTICATED_DATABASE_URL",
   "MELTIPLY_RELEASE_SECRETS_JSON",
   "MELTIPLY_SYSTEM_DATABASE_URL",
@@ -696,7 +694,7 @@ async function openapiContract(repoRoot) {
  * Classifies every file in the release directory as publishable evidence,
  * private scratch, or an illegal artifact; validates each allowlisted JSON
  * record against its contract (release binding, approval hold, plan digest,
- * cross-file version identity); binds all three CircleCI approval holds to
+ * cross-file version identity); binds all three operator reviews to
  * their per-phase plan digests; scans for credential material; and atomically
  * writes a deterministic redacted `release-manifest.json`.
  *

@@ -21,8 +21,6 @@ describe("userFacingErrorMessage", () => {
     { code: "dependency_unavailable", status: 503 },
     { code: "provider_unavailable", status: 502 },
     { code: "provider_unavailable", status: 404 },
-    { code: "billing_unavailable", status: 500 },
-    { code: "billing_unavailable", status: 503 },
     { code: "rate_limited", status: 503 },
     { status: 503 },
     { status: 599 },
@@ -41,7 +39,9 @@ describe("userFacingErrorMessage", () => {
 
 describe("apiErrorCode", () => {
   it("exposes the code so a surface can branch on a masked infrastructure state", () => {
-    expect(apiErrorCode({ code: "billing_unavailable", status: 503 })).toBe("billing_unavailable");
+    expect(apiErrorCode({ code: "provider_unavailable", status: 503 })).toBe(
+      "provider_unavailable",
+    );
   });
 
   it("returns undefined when no code is present", () => {
@@ -49,6 +49,6 @@ describe("apiErrorCode", () => {
     expect(apiErrorCode({ status: 503 })).toBeUndefined();
     expect(apiErrorCode({ code: 42 })).toBeUndefined();
     expect(apiErrorCode(null)).toBeUndefined();
-    expect(apiErrorCode(["billing_unavailable"])).toBeUndefined();
+    expect(apiErrorCode(["provider_unavailable"])).toBeUndefined();
   });
 });

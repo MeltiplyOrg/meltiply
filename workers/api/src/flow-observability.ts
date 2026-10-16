@@ -75,7 +75,7 @@ interface FlowEdgeDefinition {
   from: string;
   to: string;
   label: string;
-  /** Contexts this edge is part of, e.g. "publish", "billing", "auth". */
+  /** Contexts this edge is part of, e.g. "publish", "assets", "auth". */
   flows: string[];
 }
 
@@ -99,7 +99,6 @@ const FLOW_NODES: FlowNodeDefinition[] = [
   { key: "r2", label: "R2 Storage", kind: "storage" },
   { key: "cache", label: "Edge / KV cache", kind: "storage" },
   { key: "providers", label: "Social providers", kind: "provider" },
-  { key: "polar", label: "Polar billing", kind: "provider" },
 ];
 
 const FLOW_EDGES: FlowEdgeDefinition[] = [
@@ -152,13 +151,6 @@ const FLOW_EDGES: FlowEdgeDefinition[] = [
     to: "providers",
     label: "provider API call",
     flows: ["publish", "analytics"],
-  },
-  { from: "api", to: "polar", label: "checkout / portal", flows: ["billing"] },
-  {
-    from: "edge",
-    to: "polar",
-    label: "webhook (Standard Webhooks)",
-    flows: ["billing"],
   },
 ];
 

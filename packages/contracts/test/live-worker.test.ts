@@ -40,22 +40,6 @@ const cases: LiveCase[] = [
     path: "/api/auth/get-session",
     status: 200,
   },
-  {
-    body: JSON.stringify({
-      data: { product: { id: "11111111-1111-4111-8111-111111111111" } },
-      type: "subscription.updated",
-    }),
-    headers: {
-      "Content-Type": "application/json",
-      "webhook-id": "msg_invalid_billing",
-      "webhook-signature": "v1,invalid",
-      "webhook-timestamp": "1",
-    },
-    method: "POST",
-    operationId: "handleBillingWebhook",
-    path: "/api/v1/billing/webhook",
-    status: 401,
-  },
 ];
 
 describeLive("live local API Worker OpenAPI conformance", () => {

@@ -56,7 +56,6 @@ chmod +x \
 
 cat >"$fixture/.env.example" <<'EOF'
 API_BASE_URL=http://localhost:8787
-BILLING_WEBHOOK_SECRET=whsec_local_polar_billing_webhook_secret
 EOF
 
 assert_logged() {
@@ -123,24 +122,6 @@ if [[ -s "$COMMAND_LOG" ]]; then
   exit 1
 fi
 
-# Existing empty Polar placeholder must be filled so live webhook smoke gets 401.
-printf 'API_BASE_URL=http://localhost:8787\nBILLING_WEBHOOK_SECRET=\n' >"$fixture/.env"
-(
-  cd "$fixture"
-  "$repo_root/scripts/cloudflare-local/setup.sh" \
-    --skip-dependencies \
-    --skip-image-pull
-) >/dev/null
-grep -Fq 'BILLING_WEBHOOK_SECRET=whsec_local_polar_billing_webhook_secret' "$fixture/.env"
-# Non-empty secrets must not be overwritten.
-printf 'API_BASE_URL=http://localhost:8787\nBILLING_WEBHOOK_SECRET=whsec_keep_me\n' >"$fixture/.env"
-(
-  cd "$fixture"
-  "$repo_root/scripts/cloudflare-local/setup.sh" \
-    --skip-dependencies \
-    --skip-image-pull
-) >/dev/null
-grep -Fq 'BILLING_WEBHOOK_SECRET=whsec_keep_me' "$fixture/.env"
 
 # A cold PostgreSQL volume briefly becomes ready during image initialization,
 # then restarts before the final server. Migration must wait through that gap.

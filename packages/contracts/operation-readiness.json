@@ -42,10 +42,6 @@
       "state": "specified",
       "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker handler and conformance evidence remain."
     },
-    "handleBillingWebhook": {
-      "state": "specified",
-      "evidenceAndGate": "Polar Standard Webhooks signature verification, product-derived subscription normalization, durable event dedupe, and real Worker tests pass; sandbox staging smoke remains."
-    },
     "getCurrentUser": {
       "state": "specified",
       "evidenceAndGate": "Worker/RLS implementation and local tests exist; preview conformance remains."
@@ -225,22 +221,6 @@
     "replyToComment": {
       "state": "specified",
       "evidenceAndGate": "Worker commits idempotent acceptance; bounded reply Workflow, provider ledger, and ambiguity lookup pass locally; live proof remains."
-    },
-    "getBillingPlan": {
-      "state": "specified",
-      "evidenceAndGate": "Worker durable read and frontend state pass; preview remains."
-    },
-    "getBillingUsage": {
-      "state": "specified",
-      "evidenceAndGate": "Worker durable read and frontend state pass; Phase 5 reconciliation remains."
-    },
-    "createCheckoutSession": {
-      "state": "specified",
-      "evidenceAndGate": "Worker strict URL boundary and built-in billing adapter exist; configured test-mode staging evidence remains."
-    },
-    "createBillingPortalSession": {
-      "state": "specified",
-      "evidenceAndGate": "Worker strict URL boundary and built-in billing adapter exist; configured test-mode staging evidence remains."
     },
     "getOAuthSelection": {
       "state": "specified",

@@ -541,12 +541,7 @@ export function SidebarNav({
     : WORKSPACE_NAV_ITEMS;
 
   const activeWorkspaceName = workspaceName ?? "Meltiply Workspace";
-  // Display the current tier or role as identity metadata, not a billing action.
-  const workspaceSubtitle = user?.tier
-    ? `${user.tier.charAt(0).toUpperCase() + user.tier.slice(1)} ${t("Plan")}`
-    : user?.role === "admin"
-      ? t("Workspace Admin")
-      : t("Workspace");
+  const workspaceSubtitle = user?.role === "admin" ? t("Workspace Admin") : t("Workspace");
 
   return (
     <aside

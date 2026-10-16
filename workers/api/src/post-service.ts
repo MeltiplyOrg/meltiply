@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
-import { isoDateTime, type BillingStatus, type DatabaseError } from "@meltiply/domain";
+import { isoDateTime, type DatabaseError } from "@meltiply/domain";
 import {
   composeCaption,
   ProviderRegistry,
@@ -103,10 +103,8 @@ interface TargetRow extends Record<string, unknown> {
 
 interface AccountRow extends Record<string, unknown> {
   account_brand_profile_id: string | null;
-  billing_status: BillingStatus;
   connection_status: string | null;
   id: string;
-  plan: string;
   platform: Platform | null;
   revoked_at: Date | string | null;
   token_expires_at: Date | string | null;
@@ -787,9 +785,7 @@ function loadAccountsEffect(
               account.platform,
               account.connection_status,
               account.revoked_at,
-              account.token_expires_at,
-              organization.plan,
-              organization.billing_status
+              account.token_expires_at
          FROM platform_accounts AS account
          JOIN organizations AS organization
            ON organization.id = account.org_id
@@ -1711,10 +1707,6 @@ export function createPostApiService(
             ]);
             const pending: PendingTargetRow[] = [];
             const created: ResolvedTargetRow[] = [];
-            // New rows are charged against the workspace plan and billing
-            // status; every resolved account belongs to the active workspace,
-            // so the first created Channel's account carries those facts.
-            let chargeable: AccountRow | undefined;
             for (const entry of actionable) {
               const account = accounts.get(entry.target.platformAccountId);
               const platform = yield* validateTargetScheduleEffect(
@@ -1732,20 +1724,13 @@ export function createPostApiService(
                 target: entry.target,
               };
               if (entry.distributionId === null) {
-                chargeable ??= account;
                 created.push(row);
               } else {
                 pending.push({ ...row, distributionId: entry.distributionId });
               }
             }
             if (created.length > 0) {
-              yield* usageGuardEffect(
-                client,
-                organizationId,
-                chargeable!.plan,
-                chargeable!.billing_status,
-                created.length,
-              );
+              yield* usageGuardEffect(client, organizationId, created.length);
             }
             const scheduled =
               input.scheduledAt !== null && input.scheduledAt.getTime() > now.getTime();

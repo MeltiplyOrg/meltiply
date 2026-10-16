@@ -428,8 +428,8 @@ async function waitForOperations({ environment, fetchImpl, operations, pause, pr
  *
  * Validates that restore-point evidence conforms strictly to schema version 1,
  * matches the release specification (git SHA, release ID, plan digest, Neon project/branch),
- * verifies matching CircleCI approval metadata records (plain JSON validated for matching job
- * names, pipeline SHA, and plan digest; not cryptographic signatures), confirms snapshot lifetime
+ * verifies phase-scoped operator review records (plain JSON matching commit and
+ * plan digest, not authenticated identities), confirms snapshot lifetime
  * invariants, checks the composite SHA-256 snapshot digest, and verifies endpoint hostname digest parity.
  *
  * @param {unknown} evidence - Raw restore-point evidence object to validate
@@ -539,7 +539,7 @@ function validateRestorePointEvidence(evidence, { approvals, environment, planDi
  *    as delivered and replay or discard any partially-processed queue messages.
  *
  * @param {object} options - Restore point creation options
- * @param {object} options.approvals - Verified CircleCI approval records (validated plain JSON metadata matching expected approval job name, pipeline SHA, and plan digest; not cryptographic signatures)
+ * @param {object} options.approvals - Operator reviews bound to the release commit, phase, and plan digest.
  * @param {Record<string, string | undefined>} options.environment - Runtime environment with credentials
  * @param {typeof fetch} [options.fetchImpl=fetch] - HTTP client implementation
  * @param {() => number} [options.now] - Epoch millisecond timestamp provider
@@ -681,7 +681,7 @@ export async function createRestorePoint({
  * the database snapshot has at least the minimum required lifetime remaining (default 7 days).
  *
  * @param {object} options - Restore point requirement options
- * @param {object} options.approvals - Verified CircleCI approval records (validated plain JSON metadata; not cryptographic signatures)
+ * @param {object} options.approvals - Validated operator review records, not identity authentication.
  * @param {Record<string, string | undefined>} options.environment - Runtime environment
  * @param {number} [options.minimumRemainingMs=604800000] - Minimum remaining milliseconds before expiry (7 days)
  * @param {() => number} [options.now] - Current time provider

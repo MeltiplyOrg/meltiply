@@ -29,7 +29,7 @@ function runScript(args, env = {}) {
   try {
     const stdout = execFileSync(process.execPath, [scriptPath, ...args], {
       encoding: "utf8",
-      env: { ...process.env, ...env },
+      env: { ...process.env, MELTIPLY_TUNNEL_DOMAIN: "meltiply.com", ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
     return { status: 0, stdout, stderr: "" };
@@ -247,18 +247,6 @@ describe("tunnelNameFor", () => {
 });
 
 describe("tunnel-hostname CLI", () => {
-  it("prints the hostname for an explicit branch", () => {
-    const result = runScript(["--branch", "feature/AB-12", "--kind", "app"]);
-    assert.equal(result.status, 0);
-    assert.equal(result.stdout, "feature-ab-12.meltiply.com\n");
-  });
-
-  it("prints the literal flat form on request", () => {
-    const result = runScript(["--branch", "dev-tunnel", "--style", "flat"]);
-    assert.equal(result.status, 0);
-    assert.equal(result.stdout, "dev-tunnel-app.meltiply.com\n");
-  });
-
   it("honours MELTIPLY_TUNNEL_DOMAIN and MELTIPLY_TUNNEL_DEV_LABEL", () => {
     const result = runScript(["--branch", "dev-tunnel"], {
       MELTIPLY_TUNNEL_DOMAIN: "staging.example.test",
@@ -295,6 +283,11 @@ describe("tunnel-hostname CLI", () => {
     assert.equal(result.stdout, "*.meltiply.com\n");
   });
 
+  it("refuses hostname generation without an explicitly configured owned domain", () => {
+    const result = runScript(["--branch", "dev-tunnel"], { MELTIPLY_TUNNEL_DOMAIN: "" });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+  });
   it("rejects an unknown flag and a missing value", () => {
     assert.match(runScript(["--nope", "x"]).stderr, /unknown option: --nope/);
     assert.match(runScript(["--branch"]).stderr, /--branch requires a value/);

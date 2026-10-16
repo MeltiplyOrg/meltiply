@@ -28,7 +28,9 @@ Keep strict types, zero-warning lint, and dead-code checks. Fix introduced findi
 directly rather than weakening rules or baselines. Report exact commands and
 outcomes; failures, timeouts, and environment errors mean verification is blocked.
 
-Run one resource-intensive check at a time and prefix shell commands with `rtk`.
+Run one resource-intensive check at a time. Use GitHub-hosted runners for builds,
+tests, container smoke runs, and required verification unless local execution is
+explicitly requested.
 Stop heavy operations on OOM, timeout, or system slowdown. Work inline; delegate
 only when the user requests it or an applicable skill explicitly requires it.
 

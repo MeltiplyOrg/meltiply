@@ -128,7 +128,21 @@ jobs:
           bunx --no-install vp fmt .github/workflows/ci.yml .github/actions/install-workspace/action.yml docs/public-ci.md --check
           git diff --exit-code -- packages/contracts
           bun run test:ci-routing
-          bun run test:ci-gate
+      - name: Local tooling, release, and supply-chain contracts
+        run: |
+          bun run test:local-setup
+          bun run test:available-port
+          bun run test:wrangler-env
+          bun run test:teardown
+          bun run test:dev
+          bun run test:quick-tunnel
+          bun run test:tunnel-hostname
+          bun run test:doctor
+          bun run test:k6-runner
+          bun run release:test
+          bun run test:supply-chain
+          bun run security:supply-chain
+          bun run cost:check
       - name: PostgreSQL integration tests
         env:
           MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable

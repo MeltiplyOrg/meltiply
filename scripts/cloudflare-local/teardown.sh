@@ -6,8 +6,8 @@
 # file's `name:` otherwise): sibling devcontainer projects and daemon-global
 # resources are never touched.
 #
-# FD budget: never wrap each docker call in `sg docker` (CircleCI BASH_ENV
-# multiplies shells/FDs → EMFILE on /dev/null). Prefer plain `docker`. If the
+# FD budget: never wrap each docker call in `sg docker`; repeated shells can
+# exhaust file descriptors. Prefer plain `docker`. If the
 # process lacks the docker group, re-exec this script once under `sg docker`.
 set -euo pipefail
 

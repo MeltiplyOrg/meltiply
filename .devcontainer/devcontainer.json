@@ -1,90 +1,30 @@
 {
   "name": "meltiply",
-  // The image bakes in docker-outside-of-docker: its devcontainer.metadata
-  // mounts the host's docker socket at /var/run/docker-host.sock, and its
-  // entrypoint gid-matches or socat-proxies it to /var/run/docker.sock for dev.
-  // No features, so the CLI derives no per-workspace image — `up` is a pull
-  // plus `docker run`. The DinD fallback only runs when the socket is absent.
-  "image": "ghcr.io/tmih06/herdr-devcontainer-vibecode-essential:latest",
-  // Match daemon-host paths so Compose and docker run bind mounts resolve.
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
   "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
   "workspaceFolder": "${localWorkspaceFolder}",
-  "remoteUser": "dev",
-  // Tool binaries come from the image: Node 24.18.0, Bun, Docker, gh, rtk,
-  // omp, codebase-memory-mcp, gitleaks, typos, oasdiff, lazydocker, btop,
-  // lazygitrs, direnv, cloudflared and OpenTofu. Nothing binary is mounted.
-  // oh-my-bash (prompt) and ble.sh (autosuggestions) are baked in too.
-  // Share the host's live omp state, including agent.db and its SQLite sidecars.
-  // Credentials and OAuth refreshes are visible in both directions; sessions,
-  // configuration, and caches are shared too. No export or seeding step.
-  // C.utf8 is the only UTF-8 locale the base image ships; without LANG, ble.sh
-  // warns and falls back to byte-oriented editing. USER/LOGNAME are unset by
-  // default in this image, which triggers ble.sh's "insane environment"
-  // warning — pin them to the remote user.
+  "remoteUser": "node",
+  "updateRemoteUserUID": true,
   "containerEnv": {
-    "MELTIPLY_DEV_TUNNEL": "1",
-    "TUNNEL_TRANSPORT_PROTOCOL": "http2",
-    "LANG": "C.utf8",
-    "USER": "dev",
-    "LOGNAME": "dev",
-    "GH_CONFIG_DIR": "/home/dev/.config/gh",
-    "OASDIFF_BIN": "/usr/local/bin/oasdiff",
-    // One persistent package download cache; node_modules stays checkout-local.
-    "BUN_INSTALL_CACHE_DIR": "/home/dev/.bun/install/cache",
-    "DOCKER_HOST": "unix:///var/run/docker.sock",
-    // Compose data and networks are private; only Docker's image/cache store is shared.
+    "MELTIPLY_DEV_TUNNEL": "0",
+    "BUN_INSTALL_CACHE_DIR": "/home/node/.bun/install/cache",
     "MELTIPLY_DEVCONTAINER": "1",
     "COMPOSE_PROJECT_NAME": "meltiply-${devcontainerId}",
     "MELTIPLY_DEVCONTAINER_WORKSPACE": "${localWorkspaceFolder}",
     "MELTIPLY_DEVCONTAINER_CONFIG": "/opt/meltiply-devcontainer",
-    "MELTIPLY_DEVCONTAINER_HOST_CONFIG": "${localWorkspaceFolder}/.devcontainer",
-    // cloudflared is first on PATH; pin it so scripts that spawn it do not
-    // depend on shell lookup order.
-    "MELTIPLY_CLOUDFLARED_BIN": "/usr/local/bin/cloudflared"
+    "MELTIPLY_DEVCONTAINER_HOST_CONFIG": "${localWorkspaceFolder}/.devcontainer"
   },
-  // Aligns the container user with the host uid: the credential mounts below
-  // are owner-only (0700 directories, 0600 files) that a uid-1000 `dev` could
-  // not read. Effective with the devcontainer CLI; a plain `docker run` keeps
-  // uid 1000 and the mounts are unreadable.
-  "updateRemoteUserUID": true,
-  // Keep this network namespace private. The Compose overlay joins local
-  // services to it, preserving localhost endpoints without shared host ports.
-  // Socket access is host-admin access; use only for trusted development.
   "runArgs": [
     "--network=bridge",
     "--label=meltiply.devcontainer.project=meltiply-${devcontainerId}"
   ],
-  // Ensure bind-mount sources exist before the CLI reads them; see
-  // initialize.sh.
-  "initializeCommand": ["bash", "${localWorkspaceFolder}/.devcontainer/initialize.sh"],
-  // Runs as remoteUser after UID alignment, not as root during the image build.
-  // Keep absolute host ~/.local/bin MCP commands pointing at image tools without
-  // rewriting the shared config or mounting the host's tool binaries.
-  // gh auth setup-git wires the credential helper only; the next command also
-  // derives git commit identity (name + GitHub noreply) per user from the
-  // mounted gh login, since nothing else sets it in this image.
-
-  "postCreateCommand": [
-    "bash",
-    "-lc",
-    "sudo chown \"$(id -u):$(id -g)\" \"$BUN_INSTALL_CACHE_DIR\" && gh auth setup-git && gh api user --jq '\"git config --global user.name \" + (if (.name // \"\" | length) > 0 then .name else .login end | @sh), \"git config --global user.email \" + ((.id|tostring) + \"+\" + .login + \"@users.noreply.github.com\" | @sh)' | sh && sudo chown dev:dev /home/dev/.config && sudo mkdir -p \"${localEnv:HOME}/.local\" && if [ ! -e \"${localEnv:HOME}/.local/bin\" ]; then sudo ln -s /usr/local/bin \"${localEnv:HOME}/.local/bin\"; fi"
-  ],
-  // Keep the local Cloudflare proxy's packet marks out of reverse-path validation
-  // on WSL/VPN kernels. The watcher changes only the pinned sidecar namespace.
-  "postStartCommand": ["bash", "/opt/meltiply-devcontainer/container-network.sh", "start"],
-  // Live credentials/configuration: omp and Wrangler are shared read-write so
-  // logins and OAuth token refreshes persist in both directions; restart omp
-  // or rerun wrangler to pick up changes without an export or container rebuild.
-  // GitHub login and WakaTime configuration are shared read-only.
-  // Extensions use the container's tools; install any tool absent from the image.
-  // Requires a Linux (or WSL2) docker host: owner-only file perms and SQLite
-  // WAL locking would not hold through a Docker Desktop file-share layer.
+  "postCreateCommand": "sudo mkdir -p /home/node/.bun/install/cache && sudo chown -R node:node /home/node/.bun",
   "mounts": [
-    "source=meltiply-bun-cache,target=/home/dev/.bun/install/cache,type=volume",
-    "source=${localWorkspaceFolder}/.devcontainer,target=/opt/meltiply-devcontainer,type=bind,readonly",
-    "source=${localEnv:HOME}/.omp,target=/home/dev/.omp,type=bind",
-    "source=${localEnv:HOME}/.config/gh,target=/home/dev/.config/gh,type=bind,readonly",
-    "source=${localEnv:HOME}/.config/.wrangler,target=/home/dev/.config/.wrangler,type=bind",
-    "source=${localEnv:HOME}/.wakatime.cfg,target=/home/dev/.wakatime.cfg,type=bind,readonly"
+    "source=meltiply-bun-cache,target=/home/node/.bun/install/cache,type=volume",
+    "source=${localWorkspaceFolder}/.devcontainer,target=/opt/meltiply-devcontainer,type=bind,readonly"
   ]
 }

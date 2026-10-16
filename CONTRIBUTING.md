@@ -19,17 +19,8 @@ development-tool restrictions and binary/native redistribution obligations.
 
 ## Setup
 
-The [devcontainer](.devcontainer/devcontainer.json) is recommended. For host-native
-development, install the Node version in [`.node-version`](.node-version), Bun from
-[`package.json`](package.json), Docker Compose, and Make.
-
-```bash
-git clone https://github.com/MeltiplyOrg/meltiply.git
-cd meltiply
-make setup
-make doctor
-MELTIPLY_DEV_TUNNEL=0 make dev
-```
+Follow [Get started](README.md#get-started) for the supported runtime versions
+and initial setup commands.
 
 `make install` additionally checks host prerequisites, installs the pinned Bun if
 needed, and installs Chromium. `make setup` installs workspace dependencies,
@@ -37,16 +28,25 @@ creates the ignored root `.env`, applies migrations, and seeds local fixtures.
 Keep credentials out of commits; configure overrides in that root `.env`, using
 [`.env.example`](.env.example) for supported settings.
 
-`make dev` starts the database, Workers, app, public site, and development tunnels.
-The command above disables tunnels for local-only work. Use URLs printed by the
-launcher; callback and webhook URLs must match the chosen origin. For app-only
-iteration against an existing backend, use `make frontend-boot`.
+`make dev` starts the database, Workers, app, and public site on loopback.
+Public tunnels require `MELTIPLY_DEV_TUNNEL=1 make dev`. Use the printed URLs;
+callback and webhook URLs must match the chosen origin. For app-only iteration
+against an existing backend, use `make frontend-boot`.
 
 Each devcontainer uses its own Compose project/network and `node_modules`, sharing
 only the Bun download cache and Docker image cache. Use
 [`compose.sh`](scripts/cloudflare-local/compose.sh), not a direct baseline Compose
 invocation, so database and telemetry operations stay in the correct checkout.
 Do not install concurrently into the same checkout.
+
+The devcontainer builds from the official Node image with Docker and GitHub CLI
+features. It mounts no host credentials, AI-agent state, or editor telemetry
+configuration. Authenticate inside the container only when needed (`gh auth login`
+or `bunx wrangler login`); configure Git identity explicitly. Tunnels and AI tools
+are optional, not startup requirements. Docker socket access grants host-admin
+capabilities: open only trusted checkouts. The optional
+`.devcontainer/container-network.sh start` repair needs privileged Docker access;
+use it only for the workerd reverse-path filtering problem described in that file.
 
 ## Commands and testing
 

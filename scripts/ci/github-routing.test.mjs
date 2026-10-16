@@ -7,7 +7,7 @@ import { test } from "node:test";
 
 const root = resolve(import.meta.dirname, "../..");
 const script = resolve(root, "scripts/ci/github-routing.mjs");
-const mapping = readFileSync(resolve(root, ".circleci/config.yml"));
+const mapping = readFileSync(resolve(root, "scripts/ci/github-paths.json"));
 
 /** Creates an isolated Git history with real routing rules; cleanup never touches the checkout. */
 function fixture(t) {
@@ -17,8 +17,8 @@ function fixture(t) {
   git("init", "-q", "-b", "master");
   git("config", "user.name", "Routing fixture");
   git("config", "user.email", "fixture@example.invalid");
-  mkdirSync(resolve(dir, ".circleci"));
-  writeFileSync(resolve(dir, ".circleci/config.yml"), mapping);
+  mkdirSync(resolve(dir, "scripts/ci"), { recursive: true });
+  writeFileSync(resolve(dir, "scripts/ci/github-paths.json"), mapping);
   git("add", ".");
   git("commit", "-qm", "initial");
   const initial = git("rev-parse", "HEAD");
@@ -29,7 +29,10 @@ function fixture(t) {
     initial,
     commit(path) {
       mkdirSync(resolve(dir, path, ".."), { recursive: true });
-      writeFileSync(resolve(dir, path), "fixture\n");
+      writeFileSync(
+        resolve(dir, path),
+        path === "scripts/ci/github-paths.json" ? `${mapping}\n` : "fixture\n",
+      );
       git("add", ".");
       git("commit", "-qm", "change");
       return git("rev-parse", "HEAD");
@@ -68,6 +71,8 @@ test("default-branch pushes select only affected application lanes", (t) => {
     ["bun.lock", "frontend=true\ncloudflare=true\n"],
     [".github/workflows/example.yml", "frontend=true\ncloudflare=true\n"],
     ["scripts/ci/github-routing.mjs", "frontend=true\ncloudflare=true\n"],
+    ["scripts/ci/github-paths.json", "frontend=true\ncloudflare=true\n"],
+    [".devcontainer/devcontainer.json", "frontend=true\ncloudflare=true\n"],
   ]) {
     const head = repo.commit(path);
     assert.equal(repo.route(push(before)), expected, path);

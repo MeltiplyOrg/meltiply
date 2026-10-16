@@ -3,8 +3,7 @@ import {
   type DatabaseError,
   StorageUnavailableError,
   type PlatformCapability,
-  limitsForBillingState,
-  limitsForPlan,
+  COMMUNITY_LIMITS,
 } from "@meltiply/domain";
 import {
   classifyProviderFailure,
@@ -28,11 +27,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { resolveActor, type ResolvedActor } from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
 import { createAssetApiService } from "../src/asset-service";
-import type { BillingSessionProvider } from "../src/billing-service";
 import { createCoreApiService } from "../src/core-service";
 import { createPostApiService } from "../src/post-service";
 import type { PostApiService, PostTargetInput } from "../src/post-types";
-import type { IdempotentResult } from "../src/core-types";
 import type { components } from "@meltiply/contracts/schema";
 import {
   authenticatedPoolFor,
@@ -47,7 +44,6 @@ import { saveOAuthConnectionEffect } from "../src/oauth-connection";
 import { revokeOAuthConnectionEffect } from "../src/oauth-revoke";
 import { getPublicationRequirementsEffect } from "../src/publication-requirements";
 import { createOperatorReconciliationService } from "../src/operator-reconciliation";
-import { lockOrganizationEffect } from "../src/organization-lock";
 import { tokenCipherFor } from "../src/token-credentials";
 import { isoPeriodKey } from "../src/time";
 
@@ -373,7 +369,6 @@ const alphaActor: ResolvedActor = {
     id: alpha.organizationId,
     isPersonal: false,
     name: "Alpha Studio",
-    plan: "creator",
     slug: "alpha-studio",
   },
 };
@@ -389,8 +384,8 @@ const alphaIdentity: JwtIdentity = {
 
 const service = createCoreApiService();
 /**
- * The `usage_records.period` key the distribution and billing gates charge.
- * `usageGuardEffect` and `billingUsage` both derive the key from `new Date()`,
+ * The `usage_records.period` key distribution acceptance charges.
+ * `usageGuardEffect` derives the key from `new Date()`,
  * so they read the real calendar month — the same row `seed.sql` writes. A
  * fixture that seeded a publication counter under any other key would leave
  * the gate reading an untouched counter and admitting work the workspace has
@@ -770,13 +765,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
            '93000000-0000-4000-8000-000000000020',
            '93000000-0000-4000-8000-000000000021',
            '93000000-0000-4000-8000-000000000022'
-         )`,
-        );
-        yield* client.query(
-          `DELETE FROM billing_operations
-         WHERE idempotency_id IN (
-           SELECT id FROM idempotency_keys
-           WHERE idempotency_key LIKE 'integration-%'
          )`,
         );
         yield* client.query(
@@ -1928,671 +1916,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  it("maps current durable billing data without claiming management support", async () => {
-    const plan = await Effect.runPromise(service.billingPlan(env, alpha));
-    // `billingPlan` projects the whole durable billing record, not a subset:
-    // plan identity, subscription state, its renewal/cancellation dates, and
-    // the allowances the current billing state actually grants.
-    expect(plan).toMatchObject({
-      billing_status: "free",
-      cancel_at: null,
-      limits: {
-        max_distributions: 30,
-        max_platforms: 2,
-        max_storage_bytes: 1024 * 1024 * 1024,
-        max_uploads: 10,
-      },
-      plan: "creator",
-      renews_at: null,
-    });
-
-    // `billingUsage` adds the period-scoped counters, the workspace and period
-    // they belong to, and the upgrade flag; the seeded row is the durable fact
-    // this read exists to prove.
-    const usage = await Effect.runPromise(service.billingUsage(env, alpha));
-    expect(usage).toMatchObject({
-      billing_status: "free",
-      cancel_at: null,
-      limits: {
-        max_distributions: 30,
-        max_platforms: 2,
-        max_storage_bytes: 1024 * 1024 * 1024,
-        max_uploads: 10,
-      },
-      plan: "creator",
-      renews_at: null,
-      upgrade_required: false,
-      usage: {
-        api_calls: 12,
-        distributions: 1,
-        org_id: alpha.organizationId,
-        period_end: expect.any(String),
-        period_start: expect.any(String),
-        storage_bytes: 4096,
-        uploads: 1,
-        updated_at: expect.any(String),
-      },
-    });
-
-    const freeQuotaKey = "integration-billing-free-distribution-quota";
-    const freeQuotaPeriod = currentUsagePeriod;
-    const freeQuotaState = await systemTransaction(env, (client) =>
-      client.query<{ distributions: number | string }>(
-        `SELECT distributions
-         FROM usage_records
-         WHERE org_id = '20000000-0000-4000-8000-000000000001'
-           AND period = $1`,
-        [freeQuotaPeriod],
-      ),
-    );
-    expect(freeQuotaState.rows).toHaveLength(1);
-    const freeQuotaBefore = Number(freeQuotaState.rows[0]?.distributions ?? 0);
-    let draftPostId: string | undefined;
-    try {
-      await systemTransaction(env, (client) =>
-        client.query(
-          `UPDATE usage_records
-           SET distributions = 30, updated_at = now()
-           WHERE org_id = '20000000-0000-4000-8000-000000000001'
-             AND period = $1`,
-          [freeQuotaPeriod],
-        ),
-      );
-      const posts = postServiceWith("youtube");
-      const draft = await createAlphaPost(
-        posts,
-        {
-          attachmentIds: [alphaAssetId],
-          defaultText: "Over the free allowance",
-        },
-        "integration-billing-free-draft",
-      );
-      draftPostId = draft.value.id;
-      await expect(
-        scheduleAlphaPost(
-          posts,
-          draft.value.id,
-          [{ platformAccountId: alphaYoutubeAccountId }],
-          null,
-          freeQuotaKey,
-        ),
-      ).rejects.toMatchObject({
-        code: "quota_exceeded",
-        message: "The distribution quota for this plan has been reached.",
-        status: 403,
-      });
-      const freeQuotaAfter = await systemTransaction(env, (client) =>
-        client.query<{
-          distributions: number | string;
-          idempotency_count: number | string;
-        }>(
-          `SELECT
-             usage.distributions,
-             (
-               SELECT COUNT(*)::int
-               FROM idempotency_keys
-               WHERE idempotency_key = $2
-             ) AS idempotency_count
-           FROM usage_records AS usage
-           WHERE usage.org_id = '20000000-0000-4000-8000-000000000001'
-             AND usage.period = $1`,
-          [freeQuotaPeriod, freeQuotaKey],
-        ),
-      );
-      expect(freeQuotaAfter.rows[0]).toEqual({
-        distributions: 30,
-        idempotency_count: 0,
-      });
-    } finally {
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* client.query(
-            `UPDATE usage_records
-           SET distributions = $2, updated_at = now()
-           WHERE org_id = '20000000-0000-4000-8000-000000000001'
-             AND period = $1`,
-            [freeQuotaPeriod, freeQuotaBefore],
-          );
-          yield* client.query(
-            "DELETE FROM idempotency_keys WHERE idempotency_key = ANY($1::text[])",
-            [[freeQuotaKey, "integration-billing-free-draft"]],
-          );
-          if (draftPostId !== undefined) {
-            yield* client.query("DELETE FROM posts WHERE id = $1", [draftPostId]);
-          }
-        }),
-      );
-    }
-
-    await expect(Effect.runPromise(service.billingPlan(env, beta))).resolves.toMatchObject({
-      billing_status: "free",
-      plan: "free",
-    });
-    await expect(Effect.runPromise(service.billingUsage(env, beta))).resolves.toMatchObject({
-      billing_status: "free",
-      plan: "free",
-      usage: {
-        api_calls: 3,
-        distributions: 0,
-        storage_bytes: 0,
-        uploads: 1,
-      },
-    });
-  });
-
-  it("links one billing customer and recovers a lost session response idempotently", async () => {
-    const checkoutOperations: string[] = [];
-    const customerOperations: string[] = [];
-    let loseFirstCheckoutResponse = true;
-    const checkoutSession = {
-      expires_at: new Date(Date.now() + 10 * 60 * 1_000).toISOString(),
-      url: "https://billing.example/checkout/session-alpha?token=ephemeral",
-    };
-    const provider = {
-      ensureCustomer: vi.fn(async ({ operationId }) => {
-        customerOperations.push(operationId);
-        return { providerCustomerId: "customer-alpha" };
-      }),
-      createCheckoutSession: vi.fn(async ({ operationId }) => {
-        checkoutOperations.push(operationId);
-        if (loseFirstCheckoutResponse) {
-          loseFirstCheckoutResponse = false;
-          throw new Error("provider response was lost after creation");
-        }
-        return checkoutSession;
-      }),
-      createPortalSession: vi.fn(async () => ({
-        expires_at: new Date(Date.now() + 10 * 60 * 1_000).toISOString(),
-        url: "https://billing.example/portal/session-alpha?token=ephemeral",
-      })),
-    } satisfies BillingSessionProvider;
-    const billing = createCoreApiService(new ProviderRegistry().capabilities(), provider);
-    const input = {
-      cancelUrl: "http://localhost:3000/billing?checkout=cancel",
-      plan: "agency",
-      successUrl: "http://localhost:3000/billing?checkout=success",
-    };
-
-    try {
-      await expect(
-        Effect.runPromise(
-          billing.createCheckoutSession(env, alpha, input, "integration-billing-session-recovery"),
-        ),
-      ).rejects.toMatchObject({
-        code: "billing_reconciliation_required",
-        status: 503,
-      });
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          const result = yield* client.query<{
-            attempt_count: number;
-            provider_customer_id: string;
-            response_status: number | null;
-            status: string;
-          }>(
-            `SELECT bo.attempt_count, bo.provider_customer_id, bo.status,
-                  ik.response_status
-           FROM billing_operations bo
-           JOIN idempotency_keys ik ON ik.id = bo.idempotency_id
-           WHERE ik.idempotency_key = 'integration-billing-session-recovery'`,
-          );
-          expect(result.rows[0]).toEqual({
-            attempt_count: 1,
-            provider_customer_id: "customer-alpha",
-            response_status: null,
-            status: "needs_reconciliation",
-          });
-          yield* client.query(
-            `UPDATE billing_operations
-           SET status = 'started', lease_expires_at = now() + INTERVAL '2 minutes'
-           WHERE idempotency_id = (
-             SELECT id FROM idempotency_keys
-             WHERE idempotency_key = 'integration-billing-session-recovery'
-           )`,
-          );
-        }),
-      );
-      await expect(
-        Effect.runPromise(
-          billing.createCheckoutSession(env, alpha, input, "integration-billing-session-recovery"),
-        ),
-      ).rejects.toMatchObject({ code: "idempotency_in_progress", status: 409 });
-      expect(checkoutOperations).toHaveLength(1);
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* client.query(
-            `UPDATE billing_operations
-           SET lease_expires_at = now() - INTERVAL '1 second'
-           WHERE idempotency_id = (
-             SELECT id FROM idempotency_keys
-             WHERE idempotency_key = 'integration-billing-session-recovery'
-           )`,
-          );
-        }),
-      );
-      const recovered = await Effect.runPromise(
-        billing.createCheckoutSession(env, alpha, input, "integration-billing-session-recovery"),
-      );
-      expect(recovered).toEqual({ replayed: false, value: checkoutSession });
-      await expect(
-        Effect.runPromise(
-          billing.createCheckoutSession(env, alpha, input, "integration-billing-session-recovery"),
-        ),
-      ).resolves.toEqual({ replayed: true, value: checkoutSession });
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* client.query(
-            `UPDATE idempotency_keys
-           SET response_body = jsonb_set(
-             response_body,
-             '{expires_at}',
-             to_jsonb('2020-01-01T00:00:00.000Z'::text)
-           )
-           WHERE idempotency_key = 'integration-billing-session-recovery'`,
-          );
-        }),
-      );
-      await expect(
-        Effect.runPromise(
-          billing.createCheckoutSession(env, alpha, input, "integration-billing-session-recovery"),
-        ),
-      ).rejects.toMatchObject({ code: "billing_session_expired", status: 409 });
-      await expect(
-        Effect.runPromise(
-          billing.createPortalSession(
-            env,
-            alpha,
-            { returnUrl: "http://localhost:3000/billing" },
-            "integration-billing-portal",
-          ),
-        ),
-      ).resolves.toMatchObject({ replayed: false });
-
-      expect(new Set(customerOperations)).toEqual(
-        new Set(["billing-customer:20000000-0000-4000-8000-000000000001"]),
-      );
-      expect(customerOperations).toHaveLength(1);
-      expect(new Set(checkoutOperations).size).toBe(1);
-      expect(checkoutOperations).toHaveLength(2);
-      expect(provider.createPortalSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          organizationId: "20000000-0000-4000-8000-000000000001",
-          providerCustomerId: "customer-alpha",
-        }),
-      );
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          const result = yield* client.query<{
-            attempt_count: number;
-            billing_customer_id: string;
-            completed: boolean;
-            status: string;
-          }>(
-            `SELECT o.billing_customer_id, bo.status, bo.attempt_count,
-                  bo.completed_at IS NOT NULL AS completed
-           FROM organizations o
-           JOIN billing_operations bo ON bo.org_id = o.id
-           JOIN idempotency_keys ik ON ik.id = bo.idempotency_id
-           WHERE o.id = '20000000-0000-4000-8000-000000000001'
-             AND ik.idempotency_key = 'integration-billing-session-recovery'`,
-          );
-          expect(result.rows[0]).toEqual({
-            attempt_count: 2,
-            billing_customer_id: "customer-alpha",
-            completed: true,
-            status: "succeeded",
-          });
-        }),
-      );
-    } finally {
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* client.query(
-            `DELETE FROM billing_operations
-           WHERE idempotency_id IN (
-             SELECT id FROM idempotency_keys
-             WHERE idempotency_key IN (
-               'integration-billing-session-recovery',
-               'integration-billing-portal'
-             )
-           )`,
-          );
-          yield* client.query(
-            `DELETE FROM idempotency_keys
-           WHERE idempotency_key IN (
-             'integration-billing-session-recovery',
-             'integration-billing-portal'
-           )`,
-          );
-          yield* client.query(
-            `UPDATE organizations SET billing_customer_id = NULL
-           WHERE id = '20000000-0000-4000-8000-000000000001'`,
-          );
-        }),
-      );
-    }
-  });
-
-  it("bounds automatic billing retries before requiring operator review", async () => {
-    const createCheckoutSession = vi.fn(async () => {
-      throw new Error("ambiguous provider timeout");
-    });
-    const provider = {
-      ensureCustomer: vi.fn(async () => ({
-        providerCustomerId: "customer-bounded-retry",
-      })),
-      createCheckoutSession,
-      createPortalSession: vi.fn(async () => ({
-        expires_at: new Date(Date.now() + 10 * 60 * 1_000).toISOString(),
-        url: "https://billing.example/portal/bounded-retry",
-      })),
-    } satisfies BillingSessionProvider;
-    const billing = createCoreApiService(new ProviderRegistry().capabilities(), provider);
-    const key = "integration-billing-attempt-bound";
-    const input = {
-      cancelUrl: "http://localhost:3000/billing?checkout=cancel",
-      plan: "agency",
-      successUrl: "http://localhost:3000/billing?checkout=success",
-    };
-
-    try {
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        await expect(
-          Effect.runPromise(billing.createCheckoutSession(env, alpha, input, key)),
-        ).rejects.toMatchObject({
-          code: "billing_reconciliation_required",
-          status: 503,
-        });
-      }
-      expect(provider.ensureCustomer).toHaveBeenCalledTimes(1);
-      expect(createCheckoutSession).toHaveBeenCalledTimes(3);
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          const result = yield* client.query<{
-            attempt_count: number;
-            response_status: number | null;
-            status: string;
-          }>(
-            `SELECT bo.attempt_count, bo.status, ik.response_status
-           FROM billing_operations bo
-           JOIN idempotency_keys ik ON ik.id = bo.idempotency_id
-           WHERE ik.idempotency_key = $1`,
-            [key],
-          );
-          expect(result.rows[0]).toEqual({
-            attempt_count: 3,
-            response_status: null,
-            status: "needs_reconciliation",
-          });
-        }),
-      );
-    } finally {
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* client.query(
-            `DELETE FROM billing_operations
-           WHERE idempotency_id IN (
-             SELECT id FROM idempotency_keys WHERE idempotency_key = $1
-           )`,
-            [key],
-          );
-          yield* client.query("DELETE FROM idempotency_keys WHERE idempotency_key = $1", [key]);
-          yield* client.query(
-            `UPDATE organizations SET billing_customer_id = NULL
-           WHERE id = '20000000-0000-4000-8000-000000000001'`,
-          );
-        }),
-      );
-    }
-  });
-
-  it("resolves ambiguous billing intents through an idempotent operator audit", async () => {
-    let providerMode: "fail" | "succeed" = "fail";
-    const createCheckoutSession = vi.fn(async ({ operationId }) => {
-      if (providerMode === "fail") {
-        throw new Error(`ambiguous provider timeout for ${operationId}`);
-      }
-      return {
-        expires_at: new Date(Date.now() + 10 * 60 * 1_000).toISOString(),
-        url: "https://billing.example/checkout/operator-recovery",
-      };
-    });
-    const provider = {
-      ensureCustomer: vi.fn(async () => ({
-        providerCustomerId: "customer-operator-recovery",
-      })),
-      createCheckoutSession,
-      createPortalSession: vi.fn(async () => ({
-        expires_at: new Date(Date.now() + 10 * 60 * 1_000).toISOString(),
-        url: "https://billing.example/portal/operator-recovery",
-      })),
-    } satisfies BillingSessionProvider;
-    const billing = createCoreApiService(new ProviderRegistry().capabilities(), provider);
-    const operator = createOperatorReconciliationService();
-    const actor = {
-      email: "billing-operator@example.test",
-      subject: "access-billing-operator-1",
-    };
-    const input = {
-      cancelUrl: "http://localhost:3000/billing?checkout=cancel",
-      plan: "agency",
-      successUrl: "http://localhost:3000/billing?checkout=success",
-    };
-    const noEffectKey = "integration-billing-operator-no-effect";
-    const recoveredKey = "integration-billing-operator-new-intent";
-    const expiredKey = "integration-billing-operator-expired";
-    const billingOperationIds: string[] = [];
-
-    try {
-      await expect(
-        Effect.runPromise(billing.createCheckoutSession(env, alpha, input, noEffectKey)),
-      ).rejects.toMatchObject({
-        code: "billing_reconciliation_required",
-        status: 503,
-      });
-      const noEffectOperationId = await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          const result = yield* client.query<{ id: string }>(
-            `SELECT bo.id
-             FROM billing_operations bo
-             JOIN idempotency_keys ik ON ik.id = bo.idempotency_id
-             WHERE ik.idempotency_key = $1`,
-            [noEffectKey],
-          );
-          return result.rows[0]!.id;
-        }),
-      );
-      billingOperationIds.push(noEffectOperationId);
-      const noEffectInput = {
-        providerSessionExpiresAt: null,
-        reason: "INC-310 provider confirmed no usable checkout session",
-        resolution: "no_effect" as const,
-      };
-      const resolved = await Effect.runPromise(
-        operator.resolveBillingOperation(
-          env,
-          actor,
-          noEffectOperationId,
-          noEffectInput,
-          "integration-operator-billing-no-effect",
-          "request-operator-billing-no-effect",
-        ),
-      );
-      await expect(
-        Effect.runPromise(
-          operator.resolveBillingOperation(
-            env,
-            actor,
-            noEffectOperationId,
-            noEffectInput,
-            "integration-operator-billing-no-effect",
-            "request-operator-billing-no-effect-replay",
-          ),
-        ),
-      ).resolves.toEqual({ ...resolved, replayed: true });
-      await expect(
-        Effect.runPromise(
-          operator.resolveBillingOperation(
-            env,
-            actor,
-            noEffectOperationId,
-            { ...noEffectInput, reason: "INC-311 conflicting evidence" },
-            "integration-operator-billing-no-effect",
-            "request-operator-billing-no-effect-conflict",
-          ),
-        ),
-      ).rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
-      await expect(
-        Effect.runPromise(billing.createCheckoutSession(env, alpha, input, noEffectKey)),
-      ).rejects.toMatchObject({
-        code: "billing_operation_no_effect",
-        status: 409,
-      });
-      expect(createCheckoutSession).toHaveBeenCalledTimes(1);
-
-      providerMode = "succeed";
-      await expect(
-        Effect.runPromise(billing.createCheckoutSession(env, alpha, input, recoveredKey)),
-      ).resolves.toMatchObject({ replayed: false });
-      expect(provider.ensureCustomer).toHaveBeenCalledTimes(1);
-
-      providerMode = "fail";
-      await expect(
-        Effect.runPromise(billing.createCheckoutSession(env, alpha, input, expiredKey)),
-      ).rejects.toMatchObject({
-        code: "billing_reconciliation_required",
-        status: 503,
-      });
-      const expiredOperationId = await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          const result = yield* client.query<{ id: string }>(
-            `UPDATE billing_operations bo
-             SET created_at = now() - INTERVAL '2 hours'
-             FROM idempotency_keys ik
-             WHERE ik.id = bo.idempotency_id
-               AND ik.idempotency_key = $1
-             RETURNING bo.id`,
-            [expiredKey],
-          );
-          return result.rows[0]!.id;
-        }),
-      );
-      billingOperationIds.push(expiredOperationId);
-      const expiredAt = new Date(Date.now() - 30 * 60 * 1_000).toISOString();
-      await Effect.runPromise(
-        operator.resolveBillingOperation(
-          env,
-          actor,
-          expiredOperationId,
-          {
-            providerSessionExpiresAt: expiredAt,
-            reason: "INC-312 provider confirmed the checkout session expired",
-            resolution: "session_expired",
-          },
-          "integration-operator-billing-expired",
-          "request-operator-billing-expired",
-        ),
-      );
-      await expect(
-        Effect.runPromise(billing.createCheckoutSession(env, alpha, input, expiredKey)),
-      ).rejects.toMatchObject({ code: "billing_session_expired", status: 409 });
-
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          const operations = yield* client.query<{
-            id: string;
-            provider_session_expires_at: Date | null;
-            response_code: string;
-            response_status: number;
-            status: string;
-          }>(
-            `SELECT bo.id, bo.status, bo.provider_session_expires_at,
-                  ik.response_status,
-                  ik.response_body->>'code' AS response_code
-           FROM billing_operations bo
-           JOIN idempotency_keys ik ON ik.id = bo.idempotency_id
-           WHERE bo.id = ANY($1::uuid[])
-           ORDER BY bo.id`,
-            [billingOperationIds],
-          );
-          expect(operations.rows).toHaveLength(2);
-          expect(operations.rows).toEqual(
-            expect.arrayContaining([
-              {
-                id: noEffectOperationId,
-                provider_session_expires_at: null,
-                response_code: "billing_operation_no_effect",
-                response_status: 409,
-                status: "failed",
-              },
-              {
-                id: expiredOperationId,
-                provider_session_expires_at: new Date(expiredAt),
-                response_code: "billing_session_expired",
-                response_status: 409,
-                status: "succeeded",
-              },
-            ]),
-          );
-          const audits = yield* client.query<{
-            action: string;
-            actor_subject: string;
-            resolution: string;
-            target_type: string;
-          }>(
-            `SELECT action, actor_subject, target_type,
-                  after_state->>'resolution' AS resolution
-           FROM operator_actions
-           WHERE target_id = ANY($1::uuid[])
-           ORDER BY target_id`,
-            [billingOperationIds],
-          );
-          expect(audits.rows).toHaveLength(2);
-          expect(audits.rows).toEqual(
-            expect.arrayContaining([
-              {
-                action: "resolve_billing_reconciliation",
-                actor_subject: "access-billing-operator-1",
-                resolution: "no_effect",
-                target_type: "billing_operation",
-              },
-              {
-                action: "resolve_billing_reconciliation",
-                actor_subject: "access-billing-operator-1",
-                resolution: "session_expired",
-                target_type: "billing_operation",
-              },
-            ]),
-          );
-        }),
-      );
-    } finally {
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* client.query("DELETE FROM operator_actions WHERE target_id = ANY($1::uuid[])", [
-            billingOperationIds,
-          ]);
-          yield* client.query(
-            `DELETE FROM billing_operations
-           WHERE idempotency_id IN (
-             SELECT id FROM idempotency_keys
-             WHERE idempotency_key = ANY($1::text[])
-           )`,
-            [[noEffectKey, recoveredKey, expiredKey]],
-          );
-          yield* client.query(
-            "DELETE FROM idempotency_keys WHERE idempotency_key = ANY($1::text[])",
-            [[noEffectKey, recoveredKey, expiredKey]],
-          );
-          yield* client.query(
-            `UPDATE organizations SET billing_customer_id = NULL
-           WHERE id = '20000000-0000-4000-8000-000000000001'`,
-          );
-        }),
-      );
-    }
-  });
-
   // Second Alpha Asset used by multi-attachment composition scenarios. It is a
   // verified image with its own ready original object, so a Post attaching both
   // Assets can be scheduled once processing has produced publishable media.
@@ -3105,25 +2428,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   it("schedules many Channels once with atomic usage and outbox state", async () => {
     const posts = postServiceWith("youtube");
     const period = currentUsagePeriod;
-    const organizationBefore = await systemTransaction(env, (client) =>
-      client.query<{ billing_status: string; plan: string }>(
-        `SELECT billing_status, plan
-         FROM organizations
-         WHERE id = '20000000-0000-4000-8000-000000000001'`,
-      ),
-    );
     const usageBefore = await currentUsageCount();
-    // Scheduling charges the allowance the upgraded subscription actually
-    // grants, so the quota scenarios below exhaust that allowance instead of a
-    // counter value the plan could never refuse.
-    const distributionAllowance = limitsForBillingState("creator", "active").max_distributions ?? 0;
-    await systemTransaction(env, (client) =>
-      client.query(
-        `UPDATE organizations
-         SET plan = 'creator', billing_status = 'active', updated_at = now()
-         WHERE id = '20000000-0000-4000-8000-000000000001'`,
-      ),
-    );
+    // Exhaust the shared community allowance to prove quota refusal is atomic.
+    const distributionAllowance = COMMUNITY_LIMITS.max_distributions ?? 0;
     const draft = await createAlphaPost(
       posts,
       { attachmentIds: [alphaAssetId], defaultText: "Many Channels" },
@@ -3131,7 +2438,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
     const postId = draft.value.id;
     const idempotencyKey = "integration-post-multi-schedule";
-    const inactiveKey = "integration-post-multi-schedule-inactive";
     const invalidKey = "integration-post-multi-schedule-invalid";
     const duplicateKey = "integration-post-multi-schedule-duplicate";
     const quotaKey = "integration-post-multi-schedule-quota";
@@ -3265,7 +2571,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         ),
       ).rejects.toMatchObject({
         code: "quota_exceeded",
-        message: "The distribution quota for this plan has been reached.",
         status: 403,
       });
       const quotaState = await systemTransaction(env, (client) =>
@@ -3282,52 +2587,12 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         distributions: String(distributionAllowance),
         idempotency_count: 0,
       });
-
-      // An inactive subscription collapses onto the free allowance, so a counter
-      // still at the creator allowance is refused on the same rule, leaving the
-      // counter and the reservation exactly as they were.
-      await systemTransaction(env, (client) =>
-        client.query(
-          `UPDATE organizations
-           SET billing_status = 'free', updated_at = now()
-           WHERE id = '20000000-0000-4000-8000-000000000001'`,
-        ),
-      );
-      await restoreUsageCount(distributionAllowance);
-      await expect(
-        scheduleAlphaPost(
-          posts,
-          postId,
-          [{ platformAccountId: alphaThirdAccountId }],
-          null,
-          inactiveKey,
-        ),
-      ).rejects.toMatchObject({
-        code: "quota_exceeded",
-        status: 403,
-      });
     } finally {
       await purgeIntegrationPosts(
         [postId],
-        [
-          "integration-post-multi-draft",
-          idempotencyKey,
-          inactiveKey,
-          invalidKey,
-          duplicateKey,
-          quotaKey,
-        ],
+        ["integration-post-multi-draft", idempotencyKey, invalidKey, duplicateKey, quotaKey],
       );
       await restoreUsageCount(usageBefore);
-      const row = organizationBefore.rows[0]!;
-      await systemTransaction(env, (client) =>
-        client.query(
-          `UPDATE organizations
-           SET plan = $1, billing_status = $2, updated_at = now()
-           WHERE id = '20000000-0000-4000-8000-000000000001'`,
-          [row.plan, row.billing_status],
-        ),
-      );
     }
   });
 
@@ -5106,18 +4371,13 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       Effect.gen(function* () {
         const result = yield* client.query<{
           distributions: string;
-          plan: string;
         }>(
-          `SELECT organization.plan,
-                 COALESCE(usage.distributions, 0)::text AS distributions
+          `SELECT COALESCE(usage.distributions, 0)::text AS distributions
            FROM organizations AS organization
            LEFT JOIN usage_records AS usage
              ON usage.org_id = organization.id AND usage.period = $1
            WHERE organization.id = '20000000-0000-4000-8000-000000000001'`,
           [period],
-        );
-        yield* client.query(
-          "UPDATE organizations SET plan = 'free', updated_at = now() WHERE id = '20000000-0000-4000-8000-000000000001'",
         );
         // The period is bound as an untyped placeholder inside the INSERT's
         // SELECT list, where no column comparison supplies its type, so the
@@ -5196,12 +4456,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
-          yield* client.query(
-            `UPDATE organizations
-           SET plan = $1, updated_at = now()
-           WHERE id = '20000000-0000-4000-8000-000000000001'`,
-            [initial.plan],
-          );
           // The counter was pinned at the last free slot to force contention;
           // leaving it saturated would charge phantom usage against every later
           // schedule on this workspace's seeded 30-distribution allowance.
@@ -5218,131 +4472,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   // A plan change racing an in-flight schedule is serialized behind it, so the
   // admitted command sees one consistent entitlement decision.
-  it("serializes an in-flight schedule with mid-period plan changes", async () => {
-    const posts = postServiceWith("youtube");
-    const period = currentUsagePeriod;
-    const initial = await systemTransaction(env, (client) =>
-      Effect.gen(function* () {
-        const result = yield* client.query<{
-          billing_status: string;
-          distributions: string;
-          id: string;
-          plan: string;
-        }>(
-          `SELECT organization.id, organization.plan, organization.billing_status,
-                 COALESCE(usage.distributions, 0)::text AS distributions
-           FROM organizations AS organization
-           LEFT JOIN usage_records AS usage
-             ON usage.org_id = organization.id AND usage.period = $2
-           WHERE organization.id = $1`,
-          [alpha.organizationId, period],
-        );
-        yield* client.query(
-          `UPDATE organizations
-           SET plan = 'free', billing_status = 'active', updated_at = now()
-           WHERE id = $1`,
-          [alpha.organizationId],
-        );
-        yield* client.query(
-          `INSERT INTO usage_records (org_id, period, distributions)
-           VALUES ($1, $2, 30)
-           ON CONFLICT (org_id, period) DO UPDATE
-           SET distributions = 30, updated_at = now()`,
-          [result.rows[0]!.id, period],
-        );
-        return result.rows[0]!;
-      }),
-    );
-    const draft = await createAlphaPost(
-      posts,
-      { attachmentIds: [alphaAssetId], defaultText: "Plan change race" },
-      "integration-post-plan-change-draft",
-    );
-    let pending: Promise<IdempotentResult<components["schemas"]["Post"]>> | undefined;
-    let observedWaitingCommand = false;
-
-    try {
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* lockOrganizationEffect(client, initial.id);
-          pending = scheduleAlphaPost(
-            posts,
-            draft.value.id,
-            [{ platformAccountId: alphaYoutubeAccountId }],
-            null,
-            "integration-plan-change-accepted",
-          );
-          for (let attempt = 0; attempt < 100; attempt += 1) {
-            const waiting = yield* client.query<{ waiting: boolean }>(
-              `SELECT EXISTS (
-                 SELECT 1 FROM pg_locks
-                 WHERE locktype = 'transactionid' AND granted = false
-               ) AS waiting`,
-            );
-            if (waiting.rows[0]?.waiting) {
-              observedWaitingCommand = true;
-              break;
-            }
-            yield* Effect.sleep("10 millis");
-          }
-          yield* client.query(
-            "UPDATE organizations SET plan = 'creator', updated_at = now() WHERE id = $1",
-            [initial.id],
-          );
-        }),
-      );
-      if (!pending) throw new Error("plan-change command did not start");
-      const accepted = await pending;
-      expect(observedWaitingCommand).toBe(true);
-      expect(accepted.value.distributions[0]).toMatchObject({
-        status: "queued",
-      });
-
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* lockOrganizationEffect(client, initial.id);
-          yield* client.query(
-            "UPDATE organizations SET plan = 'free', updated_at = now() WHERE id = $1",
-            [initial.id],
-          );
-        }),
-      );
-      await expect(
-        scheduleAlphaPost(
-          posts,
-          draft.value.id,
-          [{ platformAccountId: alphaSecondAccountId }],
-          null,
-          "integration-plan-change-denied",
-        ),
-      ).rejects.toMatchObject({ code: "quota_exceeded", status: 403 });
-    } finally {
-      await purgeIntegrationPosts(
-        [draft.value.id],
-        [
-          "integration-post-plan-change-draft",
-          "integration-plan-change-accepted",
-          "integration-plan-change-denied",
-        ],
-      );
-      await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* client.query(
-            `UPDATE organizations
-           SET plan = $2, billing_status = $3, updated_at = now()
-           WHERE id = $1`,
-            [initial.id, initial.plan, initial.billing_status],
-          );
-          yield* client.query(
-            `UPDATE usage_records
-           SET distributions = $3, updated_at = now()
-           WHERE org_id = $1 AND period = $2`,
-            [initial.id, period, initial.distributions],
-          );
-        }),
-      );
-    }
-  });
 
   // Creator text is stored verbatim and parameterized, so SQL-shaped and
   // markup-shaped content is inert text that survives reloads, stays invisible
@@ -5680,12 +4809,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const initial = await systemTransaction(env, (client) =>
       Effect.gen(function* () {
         const result = yield* client.query<{
-          plan: string;
           storage_bytes: string;
           uploads: string;
         }>(
-          `SELECT organization.plan,
-                COALESCE(usage.uploads, 0)::text AS uploads,
+          `SELECT COALESCE(usage.uploads, 0)::text AS uploads,
                 COALESCE(usage.storage_bytes, 0)::text AS storage_bytes
          FROM organizations AS organization
          LEFT JOIN usage_records AS usage
@@ -5732,10 +4859,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const setUsage = (uploads: number, storageBytes: number) =>
       systemTransaction(env, (client) =>
         Effect.gen(function* () {
-          yield* client.query(
-            "UPDATE organizations SET plan = 'free', updated_at = now() WHERE id = $1",
-            [alpha.organizationId],
-          );
           yield* client.query(
             `INSERT INTO usage_records (org_id, period, uploads, storage_bytes)
            SELECT id, $2, $3, $4
@@ -5814,7 +4937,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       // free allowance: the winner fills the last slot and the loser is refused.
       const beforeUploads = await quotaState();
       const uploadBaseline =
-        (limitsForPlan("free").max_uploads ?? 0) - Number(beforeUploads.reservation_count) - 1;
+        (COMMUNITY_LIMITS.max_uploads ?? 0) - Number(beforeUploads.reservation_count) - 1;
       expect(uploadBaseline).toBeGreaterThanOrEqual(0);
       await setUsage(uploadBaseline, 0);
       await runRace(
@@ -5838,7 +4961,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       // for exactly this race's own 1 KiB upload, so the winner fills the last
       // slot and the loser is refused.
       const beforeStorage = await quotaState();
-      const storageAllowance = limitsForPlan("free").max_storage_bytes ?? 0;
+      const storageAllowance = COMMUNITY_LIMITS.max_storage_bytes ?? 0;
       const storagePadding =
         storageAllowance -
         Number(beforeStorage.resident_bytes) -
@@ -5909,10 +5032,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           yield* client.query(
-            "UPDATE organizations SET plan = $2, updated_at = now() WHERE id = $1",
-            [alpha.organizationId, initial.plan],
-          );
-          yield* client.query(
             `UPDATE usage_records AS usage
            SET uploads = $3, storage_bytes = $4, updated_at = now()
            FROM organizations AS organization
@@ -5930,12 +5049,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const initial = await systemTransaction(env, (client) =>
       Effect.gen(function* () {
         const result = yield* client.query<{
-          plan: string;
           storage_bytes: string;
           uploads: string;
         }>(
-          `SELECT organization.plan,
-                COALESCE(usage.uploads, 0)::text AS uploads,
+          `SELECT COALESCE(usage.uploads, 0)::text AS uploads,
                 COALESCE(usage.storage_bytes, 0)::text AS storage_bytes
          FROM organizations AS organization
          LEFT JOIN usage_records AS usage
@@ -5970,10 +5087,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await cleanup();
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
-          yield* client.query(
-            "UPDATE organizations SET plan = 'free', updated_at = now() WHERE id = $1",
-            [alpha.organizationId],
-          );
           yield* client.query(
             `INSERT INTO usage_records (org_id, period, uploads, storage_bytes)
            SELECT id, $2, 9, 0
@@ -6078,10 +5191,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           yield* client.query(
-            "UPDATE organizations SET plan = $2, updated_at = now() WHERE id = $1",
-            [alpha.organizationId, initial.plan],
-          );
-          yield* client.query(
             `UPDATE usage_records AS usage
            SET uploads = $3, storage_bytes = $4, updated_at = now()
            FROM organizations AS organization
@@ -6100,12 +5209,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const initial = await systemTransaction(env, (client) =>
       Effect.gen(function* () {
         const result = yield* client.query<{
-          plan: string;
           storage_bytes: string;
           uploads: string;
         }>(
-          `SELECT organization.plan,
-                COALESCE(usage.uploads, 0)::text AS uploads,
+          `SELECT COALESCE(usage.uploads, 0)::text AS uploads,
                 COALESCE(usage.storage_bytes, 0)::text AS storage_bytes
          FROM organizations AS organization
          LEFT JOIN usage_records AS usage
@@ -6143,10 +5250,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await cleanup();
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
-          yield* client.query(
-            "UPDATE organizations SET plan = 'free', updated_at = now() WHERE id = $1",
-            [alpha.organizationId],
-          );
           yield* client.query(
             `INSERT INTO usage_records (org_id, period, uploads, storage_bytes)
            SELECT id, $2, 9, 0
@@ -6232,10 +5335,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           yield* client.query(
-            "UPDATE organizations SET plan = $2, updated_at = now() WHERE id = $1",
-            [alpha.organizationId, initial.plan],
-          );
-          yield* client.query(
             `UPDATE usage_records AS usage
            SET uploads = $3, storage_bytes = $4, updated_at = now()
            FROM organizations AS organization
@@ -6254,12 +5353,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const initial = await systemTransaction(env, (client) =>
       Effect.gen(function* () {
         const result = yield* client.query<{
-          plan: string;
           storage_bytes: string;
           uploads: string;
         }>(
-          `SELECT organization.plan,
-                COALESCE(usage.uploads, 0)::text AS uploads,
+          `SELECT COALESCE(usage.uploads, 0)::text AS uploads,
                 COALESCE(usage.storage_bytes, 0)::text AS storage_bytes
          FROM organizations AS organization
          LEFT JOIN usage_records AS usage
@@ -6293,10 +5390,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await cleanup();
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
-          yield* client.query(
-            "UPDATE organizations SET plan = 'free', updated_at = now() WHERE id = $1",
-            [alpha.organizationId],
-          );
           yield* client.query(
             `INSERT INTO usage_records (org_id, period, uploads, storage_bytes)
            SELECT id, $2, 9, 0
@@ -6404,10 +5497,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await cleanup();
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
-          yield* client.query(
-            "UPDATE organizations SET plan = $2, updated_at = now() WHERE id = $1",
-            [alpha.organizationId, initial.plan],
-          );
           yield* client.query(
             `UPDATE usage_records AS usage
            SET uploads = $3, storage_bytes = $4, updated_at = now()
@@ -7279,50 +6368,21 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   });
 
   it("serializes platform quota acceptance while allowing an existing reconnect", async () => {
-    const initial = await systemTransaction(env, (client) =>
-      Effect.gen(function* () {
-        const result = yield* client.query<{
-          account_count: string;
-          billing_status: string;
-          plan: string;
-        }>(
-          `SELECT organization.plan, organization.billing_status,
-                COUNT(account.id)::text AS account_count
-         FROM organizations AS organization
-         LEFT JOIN platform_accounts AS account ON account.org_id = organization.id
-         WHERE organization.id = $1
-         GROUP BY organization.id`,
-          [alpha.organizationId],
-        );
-        // `limitsForBillingState` collapses an inactive subscription onto the
-        // free allowances, and the free Channel allowance (2) is already
-        // exceeded by the seeded Channel plus the three composition fixtures.
-        // The agency tier with an active subscription is the narrowest plan
-        // whose allowance can sit exactly one above that baseline, which is the
-        // boundary this scenario is about.
-        yield* client.query(
-          "UPDATE organizations SET plan = 'agency', billing_status = 'active', updated_at = now() WHERE id = $1",
-          [alpha.organizationId],
-        );
-        return result.rows[0]!;
-      }),
+    const allowance = COMMUNITY_LIMITS.max_platforms;
+    if (allowance === null) throw new Error("This boundary scenario requires a bounded quota.");
+    const baselineIds = Array.from(
+      { length: allowance - 1 },
+      (_, index) => `integration-quota-baseline-${index}`,
     );
-    // The quota rule counts connected Channels in the workspace, so the
-    // scenario is only meaningful when the baseline is exactly one below the
-    // allowance the active plan grants: one concurrent connection is admitted
-    // and the loser is refused without reserving anything.
-    const baselineCount = Number(initial.account_count);
-    const allowance = limitsForPlan("agency").max_platforms ?? 0;
-    expect(baselineCount).toBe(allowance - 1);
-
+    const accountIds = ["integration-quota-a", "integration-quota-b"];
     const connection = (id: string) =>
       saveOAuthConnection(
         env,
         "threads",
         {
-          brandProfileId: alphaBrandProfileId,
-          organizationId: alpha.organizationId,
-          userId: alpha.userId,
+          brandProfileId: betaBrandProfileId,
+          organizationId: beta.organizationId,
+          userId: beta.userId,
         },
         {
           accessToken: `access-${id}`,
@@ -7330,85 +6390,44 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           scopes: ["threads_basic"],
         },
       );
-    const accountIds = ["integration-quota-a", "integration-quota-b"];
-
     try {
+      for (const id of baselineIds) await connection(id);
       const results = await Promise.allSettled(accountIds.map(connection));
       expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
       const rejected = results.find(
         (result): result is PromiseRejectedResult => result.status === "rejected",
       );
-      expect(rejected?.reason).toMatchObject({
-        code: "quota_exceeded",
-        status: 403,
-      });
-
-      const acceptedIndex = results.findIndex((result) => result.status === "fulfilled");
-      const acceptedId = accountIds[acceptedIndex]!;
+      expect(rejected?.reason).toMatchObject({ code: "quota_exceeded", status: 403 });
+      const acceptedId = accountIds[results.findIndex((result) => result.status === "fulfilled")]!;
       await expect(connection(acceptedId)).resolves.toBeUndefined();
-
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           const result = yield* client.query<{ count: string }>(
-            `SELECT COUNT(*)::text AS count
-           FROM platform_accounts AS account
-           JOIN organizations AS organization ON organization.id = account.org_id
-           WHERE organization.id = $1`,
-            [alpha.organizationId],
+            "SELECT COUNT(*)::text AS count FROM platform_accounts WHERE org_id = $1",
+            [beta.organizationId],
           );
-          expect(result.rows[0]?.count).toBe(String(baselineCount + 1));
+          expect(result.rows[0]?.count).toBe(String(allowance));
         }),
       );
     } finally {
       await systemTransaction(env, (client) =>
-        Effect.gen(function* () {
-          yield* client.query(
-            "DELETE FROM platform_accounts WHERE platform_user_id LIKE 'integration-quota-%'",
-          );
-          yield* client.query(
-            `UPDATE organizations
-             SET plan = $2, billing_status = $3, updated_at = now()
-             WHERE id = $1`,
-            [alpha.organizationId, initial.plan, initial.billing_status],
-          );
-        }),
+        client.query(
+          "DELETE FROM platform_accounts WHERE org_id = $1 AND platform_user_id = ANY($2::text[])",
+          [beta.organizationId, [...baselineIds, ...accountIds]],
+        ),
       );
     }
   });
 
   it("upserts OAuth connections with encrypted tokens and restores account health", async () => {
-    // Connecting a Channel the workspace does not have yet is quota-bound: the
-    // seeded subscription is inactive, so its allowances collapse onto the free
-    // tier, whose Channel allowance the seeded Channel plus the three
-    // composition fixtures already exhaust. An active subscription is what this
-    // scenario needs; the seeded state is restored below.
-    const subscription = await systemTransaction(env, (client) =>
-      Effect.gen(function* () {
-        const current = yield* client.query<{
-          billing_status: string;
-          plan: string;
-        }>(
-          `SELECT plan, billing_status
-           FROM organizations WHERE id = $1`,
-          [alpha.organizationId],
-        );
-        yield* client.query(
-          `UPDATE organizations
-           SET plan = 'creator', billing_status = 'active', updated_at = now()
-           WHERE id = $1`,
-          [alpha.organizationId],
-        );
-        return current.rows[0]!;
-      }),
-    );
     try {
       await saveOAuthConnection(
         env,
         "threads",
         {
-          brandProfileId: alphaBrandProfileId,
-          organizationId: alpha.organizationId,
-          userId: alpha.userId,
+          brandProfileId: betaBrandProfileId,
+          organizationId: beta.organizationId,
+          userId: beta.userId,
         },
         {
           accessToken: "integration-access-token",
@@ -7467,14 +6486,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         status: 409,
       });
     } finally {
-      await systemTransaction(env, (client) =>
-        client.query(
-          `UPDATE organizations
-           SET plan = $2, billing_status = $3, updated_at = now()
-           WHERE id = $1`,
-          [alpha.organizationId, subscription.plan, subscription.billing_status],
-        ),
-      );
       await systemTransaction(env, (client) =>
         client.query(
           "DELETE FROM platform_accounts WHERE platform_user_id = 'integration-oauth-user'",

@@ -21,7 +21,7 @@ services:
       - ./scripts/cloudflare-local/postgres/docker-entrypoint.sh:/docker-entrypoint-initdb.d/000-meltiply.sh:ro
 
   # Local-dev observability: Grafana UI + Tempo traces + Loki logs.
-  # Opt in with `make cloudflare-observability-start`; normal Compose/DB
+  # Opt in with `./scripts/cloudflare-local/compose.sh --profile observability up -d`; normal Compose/DB
   # commands should not start or pull the telemetry services.
   # Workers export OTLP/HTTP spans to Tempo on host port 4318 when
   # ENVIRONMENT is local/test. Staging/production leave export as a no-op.

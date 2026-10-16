@@ -7,7 +7,7 @@
 #                  missing or mismatched), Docker + Compose (check only), curl
 #   2. Setup       delegates to setup.sh: workspace deps, OpenTofu, .env files,
 #                  compose image pull, PostgreSQL start + migrations
-#   3. Workspaces  per-member node_modules check, Playwright Chromium runtime
+#   3. Browser     Playwright Chromium runtime
 #   4. Verify      doctor.sh; a degraded live stack (exit 2) is expected because
 #                  `make install` does not start the dev servers
 set -euo pipefail
@@ -70,21 +70,6 @@ CI=true ./scripts/cloudflare-local/setup.sh
 # --- e2e browser runtime ------------------------------------------------------
 
 (cd frontend/app && bun run --no-install playwright install chromium)
-
-# --- workspace dependencies ---------------------------------------------------
-
-# The root `bun install` in setup.sh already installs every workspace member,
-# but a fresh checkout can skip it via --skip-dependencies or a partial run.
-# Verify each member's node_modules explicitly so `make install` alone is
-# sufficient; bun resolves the workspace root and installs only what is missing.
-# The glob list mirrors the `workspaces` field in package.json.
-for member_dir in frontend/* packages/* workers/*; do
-  case "$member_dir" in */node_modules) continue ;; esac
-  if [[ -d "$member_dir" && ! -d "$member_dir/node_modules" ]]; then
-    printf '[install] Installing %s dependencies\n' "$member_dir"
-    (cd "$member_dir" && bun install)
-  fi
-done
 
 # --- verify -------------------------------------------------------------------
 

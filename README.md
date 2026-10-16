@@ -30,16 +30,16 @@ Seeded local accounts: `alpha@meltiply.local` (populated workspace) and `beta@me
 
 ## Common commands
 
-| Task                             | Command                 |
-| -------------------------------- | ----------------------- |
-| List available tasks             | `make help`             |
-| Diagnose local setup             | `make doctor`           |
-| Start the local stack            | `make dev`              |
-| Run local Worker smoke checks    | `make cloudflare-smoke` |
-| Run the main validation workflow | `make check`            |
-| Build the public site and docs   | `make public-build`     |
+| Task                             | Command               |
+| -------------------------------- | --------------------- |
+| List available tasks             | `make help`           |
+| Diagnose local setup             | `make doctor`         |
+| Start the local stack            | `make dev`            |
+| Run local Worker smoke checks    | `bun run local:smoke` |
+| Run the main validation workflow | `make check`          |
+| Build the public site and docs   | `make public-build`   |
 
-Use `make cloudflare-teardown` only when the local database and volumes can be discarded. The complete command inventory and change-scoped checks are documented in [`Makefile`](Makefile) and [`AGENTS.md`](AGENTS.md).
+Use `bun run local:teardown` only when the local database and volumes can be discarded. `make help` lists daily workflows; `bun run` lists package checks and operational commands. Change-scoped verification is defined once in [`AGENTS.md`](AGENTS.md).
 
 ## Architecture
 

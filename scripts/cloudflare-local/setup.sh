@@ -103,5 +103,5 @@ else
 fi
 ./scripts/cloudflare-local/database.sh seed
 
-printf '\nCloudflare-target setup is ready. Run `make cloudflare-dev`.\n'
+printf '\nCloudflare-target setup is ready. Run `bun run dev:backend`.\n'
 printf 'Seed sign-in: alpha@meltiply.local / MeltiplyLocal1! (creator workspace)\n'

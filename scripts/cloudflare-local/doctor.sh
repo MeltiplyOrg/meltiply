@@ -217,10 +217,10 @@ if "${compose[@]}" ps --status running postgres 2>/dev/null | grep -q postgres; 
     ok "PostgreSQL target accepting queries on :${postgres_port}"
   else
     warn "PostgreSQL container running but not accepting queries"
-    hint "run \`make cloudflare-db-start\` to (re)migrate and verify"
+    hint "run \`bun run db:start\` to (re)migrate and verify"
   fi
 else
-  note "PostgreSQL container stopped; run \`make cloudflare-db-start\`"
+  note "PostgreSQL container stopped; run \`bun run db:start\`"
 fi
 
 # API Worker health/readiness on the configured port(s)
@@ -284,7 +284,7 @@ fi
 if [[ "$frontend_status" == '200' && "$api_ok" == '0' ]]; then
   warn "frontend is serving but no API Worker is reachable: views will show"
   warn "'Meltiply could not refresh this view / could not reach the API'"
-  hint "start it with \`make cloudflare-dev\` (backend only) or restart \`make dev\`"
+  hint "start it with \`bun run dev:backend\` (backend only) or restart \`make dev\`"
 fi
 
 # --- layer 4: diagnostics -----------------------------------------------------
@@ -298,7 +298,7 @@ if [[ -n "$latest_wrangler_log" ]] && tail -c 65536 "$latest_wrangler_log" | gre
   log_stamp="$(basename "$latest_wrangler_log" | sed -E 's/wrangler-([0-9-]+_[0-9-]+)_.*/\1/')"
   warn "most recent wrangler session (${log_stamp}) ended with 'Network connection lost'"
   hint "the API Worker crashed instead of exiting cleanly; see ${latest_wrangler_log}"
-  hint "restart with \`make cloudflare-dev\` or \`make dev\`"
+  hint "restart with \`bun run dev:backend\` or \`make dev\`"
 fi
 
 # Orphaned workerd: a runtime whose ancestor chain contains neither wrangler
@@ -324,7 +324,7 @@ if pgrep -f "$repo_root/.*workerd" >/dev/null 2>&1; then
 fi
 if [[ -n "$orphan_runtime" ]]; then
   warn "orphaned workerd runtime(s) without a live wrangler/vite parent: $(printf '%s' "$orphan_runtime" | sed 's/ *$//')"
-  hint "free them with \`make cloudflare-teardown\`"
+  hint "free them with \`bun run local:teardown\`"
 else
   ok "no orphaned workerd runtimes for this checkout"
 fi
@@ -342,7 +342,7 @@ fi
 if [[ -d "$repo_root/.wrangler/state" ]]; then
   ok "local wrangler state present (.wrangler/state)"
 else
-  note "no local wrangler state yet; first \`make cloudflare-dev\` will create it"
+  note "no local wrangler state yet; first \`bun run dev:backend\` will create it"
 fi
 
 # --- summary ------------------------------------------------------------------

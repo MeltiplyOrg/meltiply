@@ -61,6 +61,6 @@ No native image or binary redistribution package was built or certified in this 
 
 The repository owner confirmed control of the rights to original Meltiply code and branding, including necessary employer/contractor permissions, and permission to publish under SUL. This is an owner attestation, not an independently verified legal opinion. Third-party material remains under its original terms.
 
-Continue retaining third-party notices and obtaining the required rights for new contributions. An incoming SUL contribution is not automatically a grant to relicense it under other terms; obtain any necessary separate written rights. See [contribution licensing](../CONTRIBUTING.md#licensing-and-contribution-rights).
+Continue retaining third-party notices and obtaining the required rights for new contributions. An incoming SUL contribution is not automatically a grant to relicense it under other terms; obtain any necessary separate written rights. See [contribution licensing](../CONTRIBUTING.md#licensing).
 
 Source publication does not certify binary/image releases or codec patents. Apply the artifact-specific requirements above when distributing those artifacts.

@@ -179,7 +179,7 @@
       "gridPos": { "h": 7, "w": 24, "x": 0, "y": 16 },
       "id": 5,
       "options": {
-        "content": "### k6 → Prometheus → Grafana\n\n```bash\n# API workers must already be up (make cloudflare-dev)\nmake cloudflare-k6\n# CI profile\nmake cloudflare-k6-ci\n```\n\nMetrics arrive via Prometheus remote-write (`:9090`). Empty panels mean no k6 run in range.\nThreshold failures fail the k6 process (and CI).\n",
+        "content": "### k6 → Prometheus → Grafana\n\n```bash\n# API workers must already be up (bun run dev:backend)\nbun run local:k6\n# CI profile\nbun run local:k6:ci\n```\n\nMetrics arrive via Prometheus remote-write (`:9090`). Empty panels mean no k6 run in range.\nThreshold failures fail the k6 process (and CI).\n",
         "mode": "markdown"
       },
       "title": "How to run",

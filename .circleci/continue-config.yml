@@ -341,7 +341,6 @@ jobs:
             git diff --exit-code -- packages/contracts
             bun run test:ci-routing
             bun run test:ci-gate
-            bun run test:pr-gate
       - run:
           name: Run PostgreSQL-backed integration suites
           # Step-level environment has the highest precedence, so protected
@@ -595,7 +594,7 @@ jobs:
             api_base_url="http://127.0.0.1:${backend_port}"
             # smoke.sh stops workers on exit, so boot again for k6.
             setsid env WRANGLER_DEV_PORT="$backend_port" WRANGLER_DEV_PUBLIC_API_URL="$api_base_url" \
-              make cloudflare-dev >>"$k6_log" 2>&1 &
+              bun run dev:backend >>"$k6_log" 2>&1 &
             backend_pid=$!
             cleanup_k6() {
               # Never fail the step on cleanup races; silence "No such process".

@@ -1,0 +1,161 @@
+{
+  "source": "https://thesvg.org",
+  "repository": "https://github.com/glincker/thesvg",
+  "version": "thesvg@3.4.0",
+  "note": "Licenses are upstream declarations, not independent rights-holder clearance. Brand trademarks remain with their owners. SVG files are copied without changes.",
+  "assets": [
+    {
+      "file": "bluesky.svg",
+      "platform": "Bluesky",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/bluesky/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://bsky.social/about/blog/press-faq",
+      "sha256": "3725a15b74fc14d493ab680ccd87ebf1025e7f02c486b7cc75db644427d856ab"
+    },
+    {
+      "file": "discord.svg",
+      "platform": "Discord",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/discord/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://discord.com/branding",
+      "sha256": "6634cc2f915db66df7a5237cac0c1b98016289e86a2bb4b7bf6408ec2b95265c"
+    },
+    {
+      "file": "facebook.svg",
+      "platform": "Facebook",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/facebook/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://about.meta.com/brand/resources/facebook/logo",
+      "sha256": "003fc3e7814ddcd270e030014f120f4cb8bef38be40022ebca913cafb7617a76"
+    },
+    {
+      "file": "instagram.svg",
+      "platform": "Instagram",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/instagram/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://about.instagram.com/brand",
+      "sha256": "821d3a84a192e97a1744a140afd871e8a81d8f7b81fdc33cbf54e74f09ee6143"
+    },
+    {
+      "file": "linkedin.svg",
+      "platform": "LinkedIn",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/linkedin/default.svg",
+      "license": "MIT",
+      "brandGuidelines": "https://brand.linkedin.com/",
+      "sha256": "ac8c9e0426de08e1f0ae7ca0d4f7551c89a011071c6dfe2ff926fa6b7dfd0942"
+    },
+    {
+      "file": "mastodon.svg",
+      "platform": "Mastodon",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/mastodon/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://joinmastodon.org/branding",
+      "sha256": "d4e4fe356db1471c671d6260670e4d4d35ca38523d0c076d29d643442bd80302"
+    },
+    {
+      "file": "medium.svg",
+      "platform": "Medium",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/medium/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://medium.design/logos-and-brand-guidelines-f1a01a733592",
+      "sha256": "76a16fe5ac94ac700d290e7562553f24d5c16ec197873b07165c3781475ea42b"
+    },
+    {
+      "file": "pinterest.svg",
+      "platform": "Pinterest",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/pinterest/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://business.pinterest.com/en/brand-guidelines",
+      "sha256": "0127681e08c89a5ea15ffced075255430384ffd6738ea5d1f842fe28592a2467"
+    },
+    {
+      "file": "reddit.svg",
+      "platform": "Reddit",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/reddit/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://redditinc.com/brand",
+      "sha256": "7703616008edfdb085a01da78e0ad96cbafedd3d2f1a2907394b74ca00d82b14"
+    },
+    {
+      "file": "telegram.svg",
+      "platform": "Telegram",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/telegram/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://web.telegram.org/",
+      "sha256": "05f6898c0c087f84c8bcf65e93721bde65abe34093045d4e9ecddbb8dc9f6a18"
+    },
+    {
+      "file": "threads-light.svg",
+      "platform": "Threads",
+      "variant": "light",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/threads/light.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://about.meta.com/brand/resources/instagram/threads",
+      "sha256": "6ffd63eec1001eead4aa083a4089ce396bd5ffc1a36a51c1f875cea863fb895f"
+    },
+    {
+      "file": "threads-dark.svg",
+      "platform": "Threads",
+      "variant": "dark",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/threads/dark.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://about.meta.com/brand/resources/instagram/threads",
+      "sha256": "6a43ac094c81a49dedfd1a6289cf53692baaf1fa92001ac3c9ba9f530bece2a6"
+    },
+    {
+      "file": "tiktok-light.svg",
+      "platform": "TikTok",
+      "variant": "light",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/tiktok/light.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://www.tiktok.com",
+      "sha256": "d07d73c12868843cd864b4885bf67f460460328e440fd88e70533899d37e31f8"
+    },
+    {
+      "file": "tiktok-dark.svg",
+      "platform": "TikTok",
+      "variant": "dark",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/tiktok/dark.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://www.tiktok.com",
+      "sha256": "3e014b901b0de29d50e0b15c99fc563a21a8e538f2271fef8c9e404d3926d07b"
+    },
+    {
+      "file": "wordpress.svg",
+      "platform": "WordPress",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/wordpress/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://wordpress.org/about/logos/",
+      "sha256": "2f6afab5e812f045486103d57111a590aa0683ed130ccaf67d9dabd129c663a0"
+    },
+    {
+      "file": "x.svg",
+      "platform": "X",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/x/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://about.x.com/en/who-we-are/brand-toolkit",
+      "sha256": "07099f0e2eea46fe8cef6a2422dee63e1aa98c3cab07f3edf9a0b333314f758b"
+    },
+    {
+      "file": "youtube.svg",
+      "platform": "YouTube",
+      "variant": "default",
+      "source": "https://raw.githubusercontent.com/glincker/thesvg/thesvg@3.4.0/public/icons/youtube/default.svg",
+      "license": "CC0-1.0",
+      "brandGuidelines": "https://brand.youtube",
+      "sha256": "419a6bc647bab83c249709bed0ae67c8f44ce42d8dda1be202ab5a3cdb187372"
+    }
+  ]
+}

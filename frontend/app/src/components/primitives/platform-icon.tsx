@@ -9,62 +9,65 @@ export interface PlatformIconProps {
   className?: string;
 }
 
-const platformIdentifiers = [
-  ["threads", "TH"],
-  ["pinterest", "PI"],
-  ["reddit", "RE"],
-  ["telegram", "TG"],
-  ["bluesky", "BS"],
-  ["mastodon", "MA"],
-  ["discord", "DI"],
-  ["medium", "ME"],
-  ["wordpress", "WP"],
-  ["facebook", "FB"],
-  ["instagram", "IG"],
-  ["tiktok", "TT"],
-  ["youtube", "YT"],
-  ["twitter", "X"],
-  ["x", "X"],
-  ["linkedin", "LI"],
+const platformIcons = [
+  ["threads", "threads"],
+  ["pinterest", "pinterest"],
+  ["reddit", "reddit"],
+  ["telegram", "telegram"],
+  ["bluesky", "bluesky"],
+  ["mastodon", "mastodon"],
+  ["discord", "discord"],
+  ["medium", "medium"],
+  ["wordpress", "wordpress"],
+  ["facebook", "facebook"],
+  ["instagram", "instagram"],
+  ["tiktok", "tiktok"],
+  ["youtube", "youtube"],
+  ["twitter", "x"],
+  ["x", "x"],
+  ["linkedin", "linkedin"],
 ] as const;
 
 /**
- * Identifies platforms with original, neutral letter badges rather than copied
- * brand marks. Case-insensitive containment preserves legacy provider suffixes
- * and the Twitter alias; unknown providers retain the generic sharing glyph.
- * Decorative, static SVGs inherit theme ink and scale with the supplied size.
+ * Identifies providers with local, unmodified theSVG brand assets; case-insensitive
+ * containment preserves legacy suffixes and Twitter → X. Unknown providers use
+ * the sharing glyph. Decorative marks inherit caller sizing without adding focus
+ * or motion. CSS follows the app's explicit theme, including theme-transition
+ * snapshots: Threads/TikTok select supplied variants; black X/Medium invert on dark.
  */
 export const PlatformIcon = React.memo(function PlatformIcon({
   provider,
   className = "size-4",
 }: PlatformIconProps) {
   const normalizedProvider = provider.toLowerCase();
-  const identifier = platformIdentifiers.find(([matcher]) => normalizedProvider.includes(matcher));
-  if (!identifier) return <Share2 aria-hidden="true" className={cn(className, "text-ink-3")} />;
+  const icon = platformIcons.find(([matcher]) => normalizedProvider.includes(matcher));
+  if (!icon) return <Share2 aria-hidden="true" className={cn(className, "text-ink-3")} />;
 
+  const slug = icon[1];
+  const themed = slug === "threads" || slug === "tiktok";
   return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none">
-      <rect
-        x="1.5"
-        y="1.5"
-        width="21"
-        height="21"
-        rx="4.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
+    <span
+      aria-hidden="true"
+      className={cn("inline-flex shrink-0 items-center justify-center", className)}
+    >
+      <img
+        src={`/icons/platforms/${slug}${themed ? "-light" : ""}.svg`}
+        alt=""
+        draggable={false}
+        className={cn(
+          "size-full object-contain",
+          themed && "dark:hidden",
+          (slug === "x" || slug === "medium") && "dark:invert",
+        )}
       />
-      <text
-        x="12"
-        y="12.5"
-        dominantBaseline="middle"
-        textAnchor="middle"
-        fill="currentColor"
-        fontFamily="system-ui, sans-serif"
-        fontSize="9"
-        fontWeight="650"
-      >
-        {identifier[1]}
-      </text>
-    </svg>
+      {themed && (
+        <img
+          src={`/icons/platforms/${slug}-dark.svg`}
+          alt=""
+          draggable={false}
+          className="hidden size-full object-contain dark:block"
+        />
+      )}
+    </span>
   );
 });

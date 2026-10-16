@@ -43,6 +43,12 @@ release/staging/IaC checks. These run on GitHub-hosted machines without deployme
 secrets; a passing automatic `ci-gate` does not imply the manual lanes ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
+`frontend-full` provisions local signing/storage configuration before browser
+journeys. User-facing journeys and screenshots use the production build; the
+DevBox motion scenarios use a separate loopback development server on the
+adjacent port. Production tests never enable DevBox controls. The topology lane
+owns a separate backend process for load checks after the smoke process exits.
+
 ## Caching
 
 [Workspace installation](../.github/actions/install-workspace/action.yml) caches

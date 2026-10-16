@@ -9,6 +9,10 @@ const stagingBaseUrl = process.env.STAGING_E2E_BASE_URL?.trim();
 const stagingStorageState = process.env.STAGING_E2E_STORAGE_STATE?.trim();
 const localApiOrigin = process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://127.0.0.1:8787";
 const reuseExistingServers = process.env.MELTIPLY_E2E_REUSE_SERVERS === "1";
+// DevBox-only motion controls are tested on a separate development surface;
+// production journeys and screenshots must never enable development chrome.
+const devboxPort = Number(frontendPort) === 65_535 ? 65_534 : Number(frontendPort) + 1;
+const devboxOrigin = `http://127.0.0.1:${devboxPort}`;
 // Opt-in acceptance mode boots the controlled-Provider acceptance Workers instead of
 // the production local entries. Controlled journeys (publication and channel-scoped
 // composer scenarios) need the controlled Provider on the far side of the Provider
@@ -40,9 +44,18 @@ const controlledComposerPatterns = [
 const localProjects = [
   {
     name: "chromium",
-    testIgnore: ["**/staging-smoke.spec.ts", "**/posts-publication.spec.ts"],
+    testIgnore: [
+      "**/staging-smoke.spec.ts",
+      "**/posts-publication.spec.ts",
+      "**/theme-transition.spec.ts",
+    ],
     grepInvert: controlledComposerPatterns,
     use: { ...devices["Desktop Chrome"] },
+  },
+  {
+    name: "devbox",
+    testMatch: "**/theme-transition.spec.ts",
+    use: { ...devices["Desktop Chrome"], baseURL: devboxOrigin },
   },
 ];
 const acceptanceProjects = [
@@ -111,7 +124,9 @@ export default defineConfig({
           cwd: repositoryRoot,
           env: {
             ...process.env,
-            WRANGLER_DEV_ALLOWED_ORIGINS: frontendOrigin,
+            WRANGLER_DEV_ALLOWED_ORIGINS: acceptanceMode
+              ? frontendOrigin
+              : `${frontendOrigin},${devboxOrigin}`,
             WRANGLER_DEV_FRONTEND_URL: frontendOrigin,
             WRANGLER_DEV_PUBLIC_API_URL: localApiOrigin,
           },
@@ -136,5 +151,21 @@ export default defineConfig({
           timeout: 120_000,
           url: `${frontendOrigin}/`,
         },
+        ...(!acceptanceMode
+          ? [
+              {
+                command: `bun run --cwd frontend/app dev --host 127.0.0.1 --port ${devboxPort} --strictPort`,
+                cwd: repositoryRoot,
+                env: {
+                  ...process.env,
+                  API_BASE_URL: localApiOrigin,
+                  FRONTEND_URL: devboxOrigin,
+                },
+                reuseExistingServer: reuseExistingServers,
+                timeout: 120_000,
+                url: `${devboxOrigin}/`,
+              },
+            ]
+          : []),
       ],
 });

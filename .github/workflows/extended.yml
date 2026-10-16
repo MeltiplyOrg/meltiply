@@ -64,6 +64,7 @@ jobs:
           bun run lint
           bun run audit
           bun run test --coverage
+          bun run --cwd ../.. setup --skip-dependencies --skip-image-pull
           bun run --no-install playwright install --with-deps chromium
       - name: Exercise real browser journeys
         if: inputs.lane == 'frontend-full'

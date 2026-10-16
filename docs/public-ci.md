@@ -1,37 +1,57 @@
 # CI checks
 
 [The GitHub Actions workflow](../.github/workflows/ci.yml) runs on pushes, pull
-requests, and manual dispatch using a standard `ubuntu-24.04` runner. Actions use
-version tags, not commit-hash references.
+requests, and manual dispatch using ephemeral `ubuntu-24.04` hosted runners.
+Actions use version tags, not commit-hash references.
 
 ## Quality gate
 
-The job checks out all repository history without persisting Git credentials,
-installs Node 24.18.0 and Bun 1.4.2, and runs:
+Automatic checks run in separate jobs:
 
-- A redacted Gitleaks scan of all fetched Git refs, including removed files.
-- The spelling check and generated Worker-binding drift check.
-- `bun run cloudflare:check`: contracts, strict lint, dead-code and format gates,
-  both frontends, shared-package/Worker types, tests and builds, PostgreSQL-backed
-  integration tests, local-tooling regression suites, dependency-license/SBOM
-  checks, costs, and documentation checks.
-- A check that contract generation left no tracked contract changes.
-- Frontend coverage enforcement using `bun run --cwd frontend/app test --coverage`.
-- Release and staging harness regression tests, without deploying services.
-- `bun run iac:check`: signed-release OpenTofu installation, formatting, backend-free
-  initialization with a read-only provider lockfile, validation, infrastructure
-  tests, policy checks, cost checks, and infrastructure-tooling regression tests.
+| Job | Checks |
+| --- | --- |
+| `changes` | Select frontend/backend lanes from changed paths. |
+| `baseline` | Full-history secret scan, documentation checks, and routing regression tests; always runs. |
+| `frontend-fast` | App formatting, types, bindings, lint, coverage, production build, and public-site checks. |
+| `cloudflare-fast` | Spelling, contracts, Worker bindings, package/Worker types, tests and builds, strict lint, dead code, formatting, drift/routing regressions, and PostgreSQL integration tests. |
+| `ci-gate` | Require baseline and every selected lane to succeed; reject failures, cancellations, and unexpectedly skipped jobs. |
 
-The database is a disposable local Docker PostgreSQL instance with fixture-only
-credentials. Cleanup runs even after a failed check. The job token has read-only
-repository access; no deployment credentials are supplied. Run contribution checks
-on ephemeral GitHub-hosted runners, not self-hosted runners or
-`pull_request_target` jobs that execute contributor code.
+The application lanes run independently after routing. Documentation-only changes
+run baseline and the final gate without installing application dependencies.
+[The router](../scripts/ci/github-routing.mjs) reuses the fast-lane mapping in the
+retained [CI routing configuration](../.circleci/config.yml). Workflow and router
+changes additionally select both application lanes.
 
-The gate runs on every push and pull request without path filters or repository
-visibility conditions. Infrastructure checks receive no deployment token or
-remote-plan variables. Browser journeys, load tests, and live deployments are
-separate operational checks, not silently implied by a passing `quality` job.
+Default-branch pushes compare the previous commit with the new HEAD. Feature
+branches and pull requests compare against their base merge point, retaining
+earlier unmerged changes. Renames and deletions count. Manual runs and unavailable
+ancestry conservatively select both lanes.
+
+The jobs use Node 24.18.0 and Bun 1.4.2. The database is a disposable local Docker
+PostgreSQL instance with fixture-only credentials; cleanup runs after failures.
+Tokens have read-only repository access, checkouts retain no credentials, and no
+deployment secrets are supplied. Do not execute contributor code through
+`pull_request_target` or persistent self-hosted runners.
+
+Extended release/staging harnesses, SBOM/IaC, browser/Lighthouse journeys, load
+tests, and live deployments are not automatic push checks. A passing `ci-gate`
+does not imply those operational checks ran.
+
+## Caching
+
+[Workspace installation](../.github/actions/install-workspace/action.yml) caches
+Bun's download store, keyed by runner OS/architecture, Bun version, lockfile,
+workspace configuration, and dependency patches. A compatible download-cache
+fallback avoids re-downloading unchanged packages; installation always uses
+`--frozen-lockfile`. Installed `node_modules` is not cached.
+
+The backend lane persists Vite's content-addressed task store. Keys include the
+runtime, dependency fingerprint, commit, run ID, and attempt; dependency-matched
+restore prefixes allow later runs to reuse earlier task results without freezing
+the cache at the first commit. Only type-check/build tasks use task caching;
+tests, integration tests, secret scans, and repository checks execute every time.
+No PostgreSQL state or credentials are cached. GitHub scopes PR caches separately
+from the default branch; cache size and retention remain subject to GitHub limits.
 
 ## Quality tools
 
@@ -52,7 +72,8 @@ different credentials in those same files must still fail.
 GitHub's standard hosted-runner execution is
 [free for public repositories](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 Larger runners are not free; artifact/cache storage has separate limits. This
-workflow uses neither larger runners nor artifact/cache upload actions.
+workflow uses standard runners and download/build caches, not artifact uploads.
 
-Configure branch protection to require `quality` after its first successful run.
-Local configuration validation does not prove that a hosted job passed.
+Configure branch protection to require `ci-gate` after its first successful run.
+Do not require the conditional lane statuses: deliberately unselected jobs skip.
+Only a completed hosted run proves the gate passed.

@@ -7,14 +7,12 @@ import { withSystemTransactionEffect } from "./database";
 import { hashIdempotencyRequestEffect } from "./idempotency";
 import { lockOrganizationEffect } from "./organization-lock";
 import type {
-  OperatorBillingResolution,
-  OperatorBillingResolutionInput,
   OperatorDistributionResolution,
   OperatorReconciliationService,
   OperatorResolutionInput,
 } from "./operator-resolution";
 
-type OperatorAction = "resolve_billing_reconciliation" | "resolve_distribution_reconciliation";
+type OperatorAction = "resolve_distribution_reconciliation";
 
 interface OperatorAuditReplay extends Record<string, unknown> {
   action: OperatorAction;
@@ -35,49 +33,6 @@ interface DistributionResolutionState extends Record<string, unknown> {
   status: string;
 }
 
-interface BillingResolutionState extends Record<string, unknown> {
-  attempt_count: number;
-  created_at: Date | string;
-  id: string;
-  idempotency_id: string;
-  last_error_code: string | null;
-  lease_expires_at: Date | string | null;
-  operation: string;
-  operation_id: string;
-  provider_customer_id: string | null;
-  provider_session_expires_at: Date | string | null;
-  response_status: number | null;
-  status: string;
-}
-
-/**
- * Normalizes a date or string value to an ISO 8601 string for audit logging.
- *
- * @param value - Date, ISO string, or null.
- * @returns Formatted ISO 8601 string, or `null`.
- */
-function auditDate(value: Date | string | null): string | null {
-  return value === null ? null : new Date(value).toISOString();
-}
-
-/**
- * Extracts a normalized before/after audit snapshot from a `BillingResolutionState` row.
- *
- * @param row - Billing resolution database row.
- * @returns Serialized audit representation of billing state.
- */
-function billingAuditState(row: BillingResolutionState) {
-  return {
-    attempt_count: row.attempt_count,
-    last_error_code: row.last_error_code,
-    lease_expires_at: auditDate(row.lease_expires_at),
-    operation: row.operation,
-    operation_id: row.operation_id,
-    provider_customer_id: row.provider_customer_id,
-    provider_session_expires_at: auditDate(row.provider_session_expires_at),
-    status: row.status,
-  };
-}
 
 /**
  * Extracts a normalized before/after audit snapshot from a `DistributionResolutionState` row.
@@ -112,19 +67,6 @@ function distributionRequestHashValue(
   return JSON.stringify({ distributionId, ...input });
 }
 
-/**
- * Serializes billing resolution parameters into a canonical JSON string for idempotency hashing.
- *
- * @param billingOperationId - Target billing operation UUID.
- * @param input - Operator billing resolution input parameters.
- * @returns Serialized JSON string.
- */
-function billingRequestHashValue(
-  billingOperationId: string,
-  input: OperatorBillingResolutionInput,
-): string {
-  return JSON.stringify({ billingOperationId, ...input });
-}
 
 /**
  * Locks an operator action idempotency key and checks for a completed replay in `operator_actions`.
@@ -186,204 +128,13 @@ function lockAndFindReplay(
 /**
  * Factory creating the default `OperatorReconciliationService` implementation.
  *
- * Provides administrative reconciliation operations for unblocking stuck billing sessions and distributions
- * with strict idempotency, row locking, and immutable audit trailing.
+ * Reconciles ambiguous distributions with strict idempotency, row locking,
+ * and immutable audit evidence.
  *
  * @returns An initialized `OperatorReconciliationService` instance.
  */
 export function createOperatorReconciliationService(): OperatorReconciliationService {
   return {
-    /**
-     * Resolves a stuck or indeterminate billing operation requiring manual intervention.
-     *
-     * Locks the organization and billing operation row, verifies it is in `needs_reconciliation`,
-     * updates its status to `failed` or `succeeded`, closes the associated idempotency key with a 409
-     * error prompting client retry with a new key, and writes an audit record in `operator_actions`.
-     *
-     * @param env - Worker environment bindings.
-     * @param actor - Authenticated operator access claims (subject and email).
-     * @param billingOperationId - UUID of the target billing operation.
-     * @param input - Validated resolution input (`no_effect` or `session_expired` with evidence).
-     * @param idempotencyKey - Operator client idempotency key.
-     * @param requestId - HTTP request trace identifier.
-     * @returns Resolution summary with audit ID, status, and replay flag.
-     * @throws {CoreApiError} 404 `billing_operation_not_found` if operation does not exist.
-     * @throws {CoreApiError} 409 `billing_operation_not_reconcilable` if not in `needs_reconciliation`.
-     */
-    resolveBillingOperation(env, actor, billingOperationId, input, idempotencyKey, requestId) {
-      return Effect.gen(function* () {
-        const requestHash = yield* hashIdempotencyRequestEffect(
-          billingRequestHashValue(billingOperationId, input),
-        );
-        return yield* withSystemTransactionEffect(env, (client) =>
-          Effect.gen(function* () {
-            const prior = yield* lockAndFindReplay(
-              client,
-              actor.subject,
-              idempotencyKey,
-              requestHash,
-              "resolve_billing_reconciliation",
-            );
-            if (prior) {
-              return {
-                auditId: prior.id,
-                billingOperationId: prior.target_id,
-                replayed: true,
-                resolution: prior.after_state.resolution as OperatorBillingResolution,
-                status: prior.after_state.status as "failed" | "succeeded",
-              };
-            }
-
-            const owner = yield* client.query<{ org_id: string }>(
-              "SELECT org_id FROM billing_operations WHERE id = $1",
-              [billingOperationId],
-            );
-            if (!owner.rows[0]) {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  404,
-                  "billing_operation_not_found",
-                  "The billing operation was not found.",
-                ),
-              );
-            }
-            yield* lockOrganizationEffect(client, owner.rows[0].org_id);
-
-            const selected = yield* client.query<BillingResolutionState>(
-              `SELECT bo.id, bo.idempotency_id, bo.operation, bo.operation_id,
-                      bo.status, bo.provider_customer_id,
-                      bo.provider_session_expires_at, bo.attempt_count,
-                      bo.lease_expires_at, bo.last_error_code, bo.created_at,
-                      ik.response_status
-               FROM billing_operations bo
-               JOIN idempotency_keys ik ON ik.id = bo.idempotency_id
-               WHERE bo.id = $1
-               FOR UPDATE OF bo, ik`,
-              [billingOperationId],
-            );
-            const current = selected.rows[0];
-            if (!current) {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  404,
-                  "billing_operation_not_found",
-                  "The billing operation was not found.",
-                ),
-              );
-            }
-            if (current.status !== "needs_reconciliation" || current.response_status !== null) {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  409,
-                  "billing_operation_not_reconcilable",
-                  "The billing operation does not require operator reconciliation.",
-                ),
-              );
-            }
-            if (input.resolution === "session_expired") {
-              const expiresAt = new Date(input.providerSessionExpiresAt!);
-              if (
-                !current.provider_customer_id ||
-                expiresAt.getTime() <= new Date(current.created_at).getTime()
-              ) {
-                return yield* Effect.fail(
-                  new CoreApiError(
-                    409,
-                    "billing_session_evidence_required",
-                    "Customer evidence and a plausible expired session are required.",
-                  ),
-                );
-              }
-            }
-
-            const beforeState = billingAuditState(current);
-            const status: "failed" | "succeeded" =
-              input.resolution === "no_effect" ? "failed" : "succeeded";
-            const error =
-              input.resolution === "no_effect"
-                ? {
-                    code: "billing_operation_no_effect",
-                    message:
-                      "The prior billing operation created no usable session; use a new Idempotency-Key.",
-                  }
-                : {
-                    code: "billing_session_expired",
-                    message: "The prior billing session has expired; use a new Idempotency-Key.",
-                  };
-            const updated = yield* client.query<BillingResolutionState>(
-              `UPDATE billing_operations
-               SET status = $2,
-                   provider_session_expires_at = $3,
-                   lease_expires_at = NULL,
-                   last_error_code = $4,
-                   completed_at = now(),
-                   updated_at = now()
-               WHERE id = $1
-               RETURNING id, idempotency_id, operation, operation_id, status,
-                         provider_customer_id, provider_session_expires_at,
-                         attempt_count, lease_expires_at, last_error_code,
-                         created_at, NULL::int AS response_status`,
-              [
-                billingOperationId,
-                status,
-                input.providerSessionExpiresAt,
-                input.resolution === "no_effect"
-                  ? "operator_confirmed_no_effect"
-                  : "operator_confirmed_session_expired",
-              ],
-            );
-            const completed = yield* client.query(
-              `UPDATE idempotency_keys
-               SET response_status = 409, response_body = $2
-               WHERE id = $1 AND response_status IS NULL`,
-              [current.idempotency_id, error],
-            );
-            if (completed.rowCount !== 1) {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  409,
-                  "billing_operation_not_reconcilable",
-                  "The billing operation no longer requires reconciliation.",
-                ),
-              );
-            }
-            const afterState = {
-              ...billingAuditState(updated.rows[0]!),
-              resolution: input.resolution,
-            };
-            const audit = yield* client.query<{ id: string }>(
-              `INSERT INTO operator_actions
-                 (action, actor_subject, actor_email, idempotency_key,
-                  request_hash, request_id, reason, target_type, target_id,
-                  before_state, after_state)
-               VALUES (
-                 'resolve_billing_reconciliation', $1, $2, $3, $4, $5, $6,
-                 'billing_operation', $7, $8, $9
-               )
-               RETURNING id`,
-              [
-                actor.subject,
-                actor.email,
-                idempotencyKey,
-                requestHash,
-                requestId,
-                input.reason,
-                billingOperationId,
-                beforeState,
-                afterState,
-              ],
-            );
-            return {
-              auditId: audit.rows[0]!.id,
-              billingOperationId,
-              replayed: false,
-              resolution: input.resolution,
-              status,
-            };
-          }),
-        );
-      });
-    },
 
     /**
      * Resolves an ambiguous or failed distribution requiring manual operator reconciliation.

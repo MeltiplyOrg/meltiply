@@ -38,7 +38,6 @@ const actor: ResolvedActor = {
     id: "20000000-0000-4000-8000-000000000001",
     isPersonal: false,
     name: "Alpha",
-    plan: "pro",
     slug: "alpha",
   },
 };

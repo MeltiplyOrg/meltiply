@@ -47,7 +47,6 @@ function effectClient(options: {
     id: string;
     is_personal: boolean;
     name: string;
-    plan: string;
     role: string;
     slug: string;
   } | null;
@@ -99,7 +98,6 @@ const personalWorkspace = {
   id: workspaceId,
   is_personal: true,
   name: "Alpha's workspace",
-  plan: "free",
   role: "admin",
   slug: "personal-alpha",
 };
@@ -182,7 +180,6 @@ describe("resolveActor", () => {
         id: workspaceId,
         isPersonal: true,
         name: "Alpha's workspace",
-        plan: "free",
         slug: "personal-alpha",
       },
     });
@@ -193,7 +190,6 @@ describe("resolveActor", () => {
       id: teamWorkspaceId,
       is_personal: false,
       name: "Team",
-      plan: "pro",
       role: "member",
       slug: "team",
     };

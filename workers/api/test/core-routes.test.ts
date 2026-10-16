@@ -57,7 +57,6 @@ const actor: ResolvedActor = {
     id: session.organizationId,
     isPersonal: false,
     name: "Alpha",
-    plan: "pro",
     slug: "alpha",
   },
 };
@@ -119,12 +118,8 @@ function service(overrides: Partial<CoreApiService> = {}): CoreApiService {
   const notImplemented = () => Effect.die(new Error("unexpected service call"));
   return {
     activeOrganization: notImplemented,
-    billingPlan: notImplemented,
-    billingUsage: notImplemented,
     calendar: notImplemented,
     cancelDistribution: notImplemented,
-    createCheckoutSession: notImplemented,
-    createPortalSession: notImplemented,
     disconnectPlatform: notImplemented,
     distributionAnalytics: notImplemented,
     getDistribution: notImplemented,
@@ -485,20 +480,6 @@ describe("core API routes", () => {
       body: { brand_profile_id: brandProfileId, text: "Thanks!" },
       method: "POST",
       path: "/api/v1/inbox/00000000-0000-4000-8000-000000000301/reply",
-    },
-    {
-      body: {
-        cancel_url: "https://app.example/billing",
-        plan: "starter",
-        success_url: "https://app.example/billing/success",
-      },
-      method: "POST",
-      path: "/api/v1/billing/checkout-sessions",
-    },
-    {
-      body: { return_url: "https://app.example/billing" },
-      method: "POST",
-      path: "/api/v1/billing/portal-sessions",
     },
     {
       method: "DELETE",
@@ -2623,53 +2604,9 @@ describe("core API routes", () => {
     );
   });
 
-  it("bounds billing webhook payloads by encoded bytes before signature handling", async () => {
-    const webhook = vi.fn(() => Effect.succeed({ ignored: false, replayed: false }));
-    const app = createApiApp({ handleBillingWebhook: webhook });
-    const response = await app.request(
-      "/api/v1/billing/webhook",
-      {
-        body: "🧾".repeat(300_000),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      },
-      env,
-    );
+  ;
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "payload_too_large" },
-    });
-    expect(webhook).not.toHaveBeenCalled();
-  });
-
-  it("bounds chunked webhook payloads without trusting Content-Length", async () => {
-    const webhook = vi.fn(() => Effect.succeed({ ignored: false, replayed: false }));
-    const chunk = new TextEncoder().encode("x".repeat(600_000));
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(chunk);
-        controller.enqueue(chunk);
-        controller.close();
-      },
-    });
-    const app = createApiApp({ handleBillingWebhook: webhook });
-    const response = await app.request(
-      "/api/v1/billing/webhook",
-      {
-        body,
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      },
-      env,
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "payload_too_large" },
-    });
-    expect(webhook).not.toHaveBeenCalled();
-  });
+  ;
   it("rejects oversized mutation JSON with a non-retryable payload error", async () => {
     const createPost = vi.fn(() => Effect.die(new Error("unexpected call")));
     const app = authenticatedApp(service(), {

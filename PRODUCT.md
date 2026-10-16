@@ -45,8 +45,8 @@ implementation detail.
 
 - Retained creator workflows: Post composition with composer-owned attachments,
   Platform account connection, Brand Profile organization, and scheduled and
-  monitored publication. Backend analytics, comments, and billing capabilities
-  do not imply available creator-facing app surfaces.
+  monitored publication. Backend analytics and comment APIs do not imply
+  available creator-facing app surfaces. Community resource quotas do not imply subscriptions.
 - Provider-specific logic stays inside `packages/providers` behind the shared
   provider interface; generic pipelines never branch on provider identity.
 - All SQL is parameterized; schema migrations live in
@@ -215,7 +215,7 @@ visible, with their geometry reserved before JavaScript runs.
 
 - Make state and the next safe action obvious.
 - Preserve user intent across recoverable failures.
-- Never claim provider or billing success before durable confirmation.
+- Never claim provider success before durable confirmation.
 - Keep dense operational information calm, readable, and support-friendly.
 - Pull complexity below the interface; expose it progressively when context makes
   it useful.

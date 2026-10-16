@@ -67,13 +67,11 @@ function workerIacPhase(spec, worker) {
 }
 
 /**
- * Authorizes a mutating release step against CircleCI approval metadata and Git state.
+ * Gates release mutations on checkout identity, explicit intent, and operator review.
  *
- * Invokes the release mutation guard to verify a clean Git checkout at the exact release SHA,
- * mutating intent (--apply, --confirm), and loads required CircleCI approval metadata files.
- * Approvals are plain JSON records validated for matching approval job names, pipeline SHA,
- * plan digest, and single-workflow provenance — not cryptographic signatures. Trust derives
- * from the CI environment producing the metadata, not from artifact signing.
+ * Review records bind the phase, commit, plan digest, and release session.
+ * They record human intent, not authenticated identities or signatures; local
+ * filesystem permissions and deployment credentials remain the trust boundary.
  *
  * @param {object} options - Parsed release CLI options
  * @param {object} dependencies - Injected CLI execution dependencies

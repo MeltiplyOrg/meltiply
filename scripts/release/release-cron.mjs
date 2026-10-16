@@ -347,7 +347,7 @@ async function assertActivationEvidence(outDir, spec) {
  * Records an atomic evidence artifact upon completion.
  *
  * @param {object} params - Transition parameters
- * @param {Array<object>} params.approvals - Verified CircleCI approval records (validated plain JSON metadata matching expected approval job name, pipeline SHA, and plan digest; not cryptographic signatures)
+ * @param {Array<object>} params.approvals - Operator reviews bound to the release commit, phase, and plan digest; not identity authentication.
  * @param {Record<string, string | undefined>} params.environment - Process environment variables
  * @param {typeof fetch} [params.fetchImpl=fetch] - HTTP fetch implementation
  * @param {string} params.outDir - Output directory for release artifacts and evidence

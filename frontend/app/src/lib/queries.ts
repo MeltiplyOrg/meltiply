@@ -19,14 +19,11 @@ import {
 import { useMutationKeyTracker } from "./mutation-idempotency";
 import { pollingInterval } from "./query-defaults";
 import type {
-  AnalyticsQueryParams,
   CalendarQueryParams,
   CreateBrandProfileInput,
   CreatePostInput,
-  DistributionAnalyticsParams,
   DistributionQueryParams,
   OAuthSelectionConfirmRequest,
-  InboxQueryParams,
   Platform,
   PlatformQueryParams,
   PostQueryParams,
@@ -107,17 +104,6 @@ export const queryKeys = {
     params === undefined
       ? (["calendar"] as const)
       : (["calendar", normalizeParams(params)] as const),
-  analytics: (params?: AnalyticsQueryParams) =>
-    params === undefined
-      ? (["analytics"] as const)
-      : (["analytics", "summary", normalizeParams(params)] as const),
-  distributionAnalytics: (distributionId: string, params?: DistributionAnalyticsParams) =>
-    params === undefined
-      ? (["analytics", distributionId] as const)
-      : (["analytics", distributionId, normalizeParams(params)] as const),
-  inbox: (params?: InboxQueryParams) =>
-    params === undefined ? (["inbox"] as const) : (["inbox", normalizeParams(params)] as const),
-  plan: () => ["billing", "plan"] as const,
 };
 
 /**
@@ -161,8 +147,6 @@ function brandProfileResourceInvalidations(): QueryKey[] {
     queryKeys.platforms(),
     queryKeys.distributions(),
     queryKeys.calendar(),
-    queryKeys.analytics(),
-    queryKeys.inbox(),
   ];
 }
 
@@ -203,7 +187,6 @@ export const mutationInvalidations = {
     queryKeys.deletedBrandProfiles(),
     ...brandProfileResourceInvalidations(),
   ],
-  replyToComment: () => [queryKeys.inbox()],
 } satisfies Record<string, (...args: string[]) => QueryKey[]>;
 
 /**
@@ -232,8 +215,8 @@ export async function invalidateQueryKeys(queryClient: QueryClient, keys: QueryK
  * @param operation API call receiving the resolved idempotency key, which it
  *   must forward as `{ idempotencyKey }` so server-side retries deduplicate.
  * @param invalidate Maps mutation variables to the query keys invalidated
- *   after success. Omit for mutations with no dependent cache (billing
- *   session redirects); the tracker still clears.
+ *   after success. Omit when no cached resource depends on the mutation;
+ *   the tracker still clears.
  * @returns TanStack mutation result for the operation's variables and data.
  */
 function useIdempotentMutation<TVariables, TData>(

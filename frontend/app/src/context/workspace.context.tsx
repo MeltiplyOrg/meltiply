@@ -54,8 +54,7 @@ export interface WorkspaceContextValue {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 /**
- * Maps the contract `UserProfile` into the source frontend's `UserProfile` shape
- * (`name`, `orgId`, `tier`) so ported components keep their original field access.
+ * Maps the contract identity into the frontend's display shape (`name`, `orgId`).
  * Carries the API's account avatar through unchanged; the view owns image-loading
  * fallback, without deriving external image requests from the user's email.
  *
@@ -70,7 +69,6 @@ function toSourceUser(profile: ContractUserProfile): UserProfile {
     avatarUrl: profile.avatar_url,
     orgId: profile.active_organization.id,
     role: profile.active_organization.role,
-    tier: profile.active_organization.plan,
   };
 }
 

@@ -50,8 +50,6 @@ function releaseInput(overrides = {}) {
       mail_from_address: "auth@staging.meltiply.com",
       mail_from_name: "Meltiply",
       r2_account_id: "3".repeat(32),
-      polar_agency_product_id: "22222222-2222-4222-8222-222222222222",
-      polar_creator_product_id: "11111111-1111-4111-8111-111111111111",
     },
     ...overrides,
   };

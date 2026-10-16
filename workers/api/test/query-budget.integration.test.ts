@@ -61,7 +61,6 @@ const queryBudgetActor: ResolvedActor = {
     id: queryBudgetClaims.organizationId,
     isPersonal: false,
     name: "Query Budget Studio",
-    plan: "agency",
     slug: "query-budget-studio",
   },
 };
@@ -913,26 +912,6 @@ describeIntegration("core API PostgreSQL query budgets", () => {
           expect(body.has_more).toBe(true);
           expect(body).not.toHaveProperty("total");
           return { body, rows: body.comments.length };
-        },
-      },
-      {
-        maxRows: 100,
-        maxStatements: 3,
-        minRows: 1,
-        name: "billing plan",
-        run: async () => {
-          const body = await Effect.runPromise(coreService.billingPlan(env, queryBudgetClaims));
-          return { body, rows: 1 };
-        },
-      },
-      {
-        maxRows: 100,
-        maxStatements: 3,
-        minRows: 1,
-        name: "billing usage",
-        run: async () => {
-          const body = await Effect.runPromise(coreService.billingUsage(env, queryBudgetClaims));
-          return { body, rows: 1 };
         },
       },
     ];

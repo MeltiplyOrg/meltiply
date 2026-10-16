@@ -5,9 +5,8 @@ import type { ProviderPublishOptions } from "@meltiply/providers";
 import {
   type DatabaseError,
   isoDateTime,
-  limitsForBillingState,
+  COMMUNITY_LIMITS,
   maximumDelayedDeliverySeconds,
-  type BillingStatus,
 } from "@meltiply/domain";
 
 import {
@@ -385,20 +384,16 @@ function requireActiveDistributionProfileEffect(
  *
  * @param client - Active Effect PostgreSQL transaction client.
  * @param organizationId - Tenant organization UUID.
- * @param plan - Organization subscription plan name.
- * @param billingStatus - Current billing status.
  * @param increment - Number of newly created distributions.
  * @returns Effect resolving to void or failing with CoreApiError or DatabaseError.
  */
 export function usageGuardEffect(
   client: EffectTransactionClient,
   organizationId: string,
-  plan: string,
-  billingStatus: BillingStatus,
   increment: number,
 ): Effect.Effect<void, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    const limits = limitsForBillingState(plan, billingStatus);
+    const limits = COMMUNITY_LIMITS;
     const period = new Date().toISOString().slice(0, 7);
     const usage = yield* client.query<{ distributions: number | string }>(
       `WITH candidate AS (
@@ -420,7 +415,7 @@ export function usageGuardEffect(
         new CoreApiError(
           403,
           "quota_exceeded",
-          "The distribution quota for this plan has been reached.",
+          "The monthly distribution quota has been reached.",
         ),
       );
     }

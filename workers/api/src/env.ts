@@ -1,7 +1,6 @@
 import type { AccessClaims } from "@meltiply/auth";
 
 import type { ResolvedActor } from "./actor-resolution";
-import { RFC4122_UUID_PATTERN } from "./crypto";
 import { mailSenderConfiguration } from "./mail";
 
 import type { OAuthStateCoordinatorStub } from "@meltiply/contracts";
@@ -28,7 +27,6 @@ export interface ApiWorkerEnv {
   AUTOMATION?: AutomationRelayStub;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
-  BILLING_WEBHOOK_SECRET?: string;
   DB_AUTHENTICATED?: Hyperdrive;
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: "local" | "preview" | "staging" | "test";
@@ -46,10 +44,6 @@ export interface ApiWorkerEnv {
   INSTAGRAM_LIVE_ACCEPTED?: string;
   OAUTH_STATE?: DurableObjectNamespace<OAuthStateStub>;
   OPERATOR_HOSTNAME?: string;
-  POLAR_ACCESS_TOKEN?: string;
-  POLAR_AGENCY_PRODUCT_ID?: string;
-  POLAR_CREATOR_PRODUCT_ID?: string;
-  POLAR_ENV?: string;
   PUBLIC_API_URL?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_ACCOUNT_ID?: string;
@@ -101,85 +95,19 @@ const requiredBindings: (keyof ApiWorkerEnv)[] = [
   "TOKEN_ENCRYPTION_KEY",
 ];
 
-// Polar product IDs and access token are validated semantically by
-// `polarBillingConfiguration` (format, UUID shape, distinctness), so they are
-// deliberately absent from the presence-only readiness list — a missing or
-// malformed Polar binding surfaces as the dedicated "Polar billing requires"
-// configuration error instead of a bare missing-binding name.
-const stagingBillingBindings: (keyof ApiWorkerEnv)[] = ["BILLING_WEBHOOK_SECRET"];
 const stagingAutomationBindings: (keyof ApiWorkerEnv)[] = ["AUTOMATION"];
 
 const stagingAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET"];
 
-// Mail readiness mirrors `polarBillingConfiguration`: `MAIL` is only ready when
-// the Email Sending binding exposes a callable `send`, and `MAIL_FROM_ADDRESS`
-// only when `mailSenderConfiguration` can normalize a valid sender (bare email
-// plus optional display name, no header injection). Presence alone must not
-// report ready — an unusable binding or malformed sender fails closed.
+// Check mail capability and normalized sender configuration, not mere presence.
 const stagingMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
 
-export interface PolarBillingConfiguration {
-  accessToken: string;
-  agencyProductId: string;
-  apiBase: string;
-  creatorProductId: string;
-}
-
-const safePolarToken = /^polar_(?:oat|pat)_[A-Za-z0-9_-]{8,}$/;
-const safeWebhookSecret = /^[^\u0000-\u0020\u007f]{16,512}$/;
-
-/**
- * Asserts whether a value conforms to a valid Polar product UUID format.
- *
- * @param value - String value to check against RFC 4122 UUID pattern.
- * @returns True if value is a valid UUID, false otherwise.
- */
-export function isPolarProductId(value: string): boolean {
-  return RFC4122_UUID_PATTERN.test(value);
-}
-
-/**
- * Validates and normalizes Polar billing environment configuration.
- *
- * Checks access token format, creator and agency product ID UUIDs, distinct product IDs,
- * and determines the target Polar API origin (`api.polar.sh` vs `sandbox-api.polar.sh`).
- *
- * @param env - Worker environment bindings.
- * @returns Normalized `PolarBillingConfiguration` object, or undefined if incomplete/invalid.
- */
-export function polarBillingConfiguration(
-  env: ApiWorkerEnv,
-): PolarBillingConfiguration | undefined {
-  const accessToken = env.POLAR_ACCESS_TOKEN?.trim();
-  const creatorProductId = env.POLAR_CREATOR_PRODUCT_ID?.trim();
-  const agencyProductId = env.POLAR_AGENCY_PRODUCT_ID?.trim();
-  const environment = env.POLAR_ENV?.trim() || "sandbox";
-  if (
-    !accessToken ||
-    !creatorProductId ||
-    !agencyProductId ||
-    !safePolarToken.test(accessToken) ||
-    !isPolarProductId(creatorProductId) ||
-    !isPolarProductId(agencyProductId) ||
-    creatorProductId === agencyProductId ||
-    !["sandbox", "production"].includes(environment)
-  ) {
-    return undefined;
-  }
-  return {
-    accessToken,
-    agencyProductId,
-    apiBase: environment === "production" ? "https://api.polar.sh" : "https://sandbox-api.polar.sh",
-    creatorProductId,
-  };
-}
 
 /**
  * Reports readiness status for required and environment-specific Worker bindings.
  *
- * Evaluates core bindings for all environments, plus auth, mail delivery, Polar
- * billing, and Automation RPC bindings when running in staging. Used by the
- * `/api/v1/ready` probe.
+ * Evaluates core bindings for all environments, plus auth, mail delivery, and
+ * Automation RPC bindings in staging. Used by the `/api/v1/ready` probe.
  *
  * @param env - Worker environment bindings.
  * @returns Array of `BindingStatus` entries with name and "ready" | "unavailable" status.
@@ -191,7 +119,6 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
           ...requiredBindings,
           ...stagingAuthBindings,
           ...stagingMailBindings,
-          ...stagingBillingBindings,
           ...stagingAutomationBindings,
         ]
       : requiredBindings;
@@ -215,8 +142,8 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
  * Validates mandatory production and staging Worker bindings, credentials, and provider configurations.
  *
  * Ensures all required environment variables, Hyperdrive databases, R2 storage, a usable
- * Email Sending binding with a valid sender, Polar billing secrets, and live-accepted
- * provider credentials (Meta, TikTok, YouTube) are fully configured in staging.
+ * Email Sending binding with a valid sender and live-accepted provider
+ * credentials (Meta, TikTok, YouTube) are fully configured in staging.
  *
  * The mail checks run before the presence list so a malformed sender or
  * unusable binding reports a precise cause instead of a bare missing name.
@@ -240,14 +167,6 @@ export function validateProductionBindings(env: ApiWorkerEnv): void {
   }
   if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.trim().length < 32) {
     throw new Error("BETTER_AUTH_SECRET must be at least 32 characters in staging");
-  }
-  if (!polarBillingConfiguration(env)) {
-    throw new Error(
-      "Polar billing requires a valid access token and distinct creator/agency product IDs",
-    );
-  }
-  if (!env.BILLING_WEBHOOK_SECRET || !safeWebhookSecret.test(env.BILLING_WEBHOOK_SECRET.trim())) {
-    throw new Error("BILLING_WEBHOOK_SECRET must be a valid billing webhook endpoint secret");
   }
   const facebookAccepted = env.FACEBOOK_LIVE_ACCEPTED?.trim() ?? "false";
   const instagramAccepted = env.INSTAGRAM_LIVE_ACCEPTED?.trim() ?? "false";

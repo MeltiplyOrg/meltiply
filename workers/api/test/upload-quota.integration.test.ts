@@ -29,7 +29,7 @@ import type { Queryable } from "@meltiply/database";
 import {
   ASSET_UPLOAD_POLICY,
   InvalidRequestError,
-  limitsForPlan,
+  COMMUNITY_LIMITS,
   mediaUploadMaximum,
   NotFoundError,
   StorageUnavailableError,
@@ -83,7 +83,7 @@ const seededUserId = "10000000-0000-4000-8000-000000000001";
  * measuring against a cap that does not exist.
  */
 const storageCap = (() => {
-  const cap = limitsForPlan("free").max_storage_bytes;
+  const cap = COMMUNITY_LIMITS.max_storage_bytes;
   if (cap === null || !Number.isFinite(cap) || cap <= 0) {
     throw new Error("the free plan must define a finite storage cap for the quota boundary cases");
   }
@@ -712,7 +712,6 @@ function createStudio(options: { name: string; suffix: string }): Studio {
           id: organizationId,
           isPersonal: false,
           name: options.name,
-          plan: "free",
           slug,
         },
       }),
@@ -733,8 +732,8 @@ function createStudio(options: { name: string; suffix: string }): Studio {
 async function provisionStudio(studio: Studio, accountPlatform?: string): Promise<void> {
   await systemTransaction(async (client) => {
     await client.query(
-      `INSERT INTO organizations (id, name, slug, plan, billing_status)
-       VALUES ($1, $2, $3, 'free', 'active')`,
+      `INSERT INTO organizations (id, name, slug)
+       VALUES ($1, $2, $3)`,
       [studio.organizationId, studio.name, studio.slug],
     );
     await client.query("INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'admin')", [

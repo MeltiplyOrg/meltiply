@@ -1,0 +1,38 @@
+{
+  "frontend": [
+    "^\\.github/",
+    "^\\.devcontainer/",
+    "^\\.node-version$",
+    "^Makefile$",
+    "^frontend/",
+    "^package\\.json$",
+    "^patches/",
+    "^lint/",
+    "^bun\\.lock$",
+    "^bunfig\\.toml$",
+    "^scripts/ci/",
+    "^tsconfig\\.base\\.json$",
+    "^vite\\.config\\.ts$"
+  ],
+  "cloudflare": [
+    "^\\.github/",
+    "^\\.devcontainer/",
+    "^\\.node-version$",
+    "^\\.typos\\.toml$",
+    "^Makefile$",
+    "^docker-compose\\.cloudflare\\.yml$",
+    "^infra/",
+    "^knip\\.json$",
+    "^package\\.json$",
+    "^patches/",
+    "^lint/",
+    "^packages/",
+    "^bun\\.lock$",
+    "^bunfig\\.toml$",
+    "^redocly\\.yaml$",
+    "^scripts/",
+    "^tsconfig\\.base\\.json$",
+    "^vite\\.config\\.ts$",
+    "^workers/"
+  ]
+}

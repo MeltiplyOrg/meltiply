@@ -46,7 +46,6 @@ const alpha: ResolvedActor = {
     id: "20000000-0000-4000-8000-000000000001",
     isPersonal: false,
     name: "Alpha Studio",
-    plan: "creator",
     slug: "alpha-studio",
   },
 };
@@ -65,7 +64,6 @@ const beta: ResolvedActor = {
     id: "20000000-0000-4000-8000-000000000002",
     isPersonal: false,
     name: "Beta Studio",
-    plan: "free",
     slug: "beta-studio",
   },
 };

@@ -227,23 +227,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/billing/webhook": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Receive a signed Polar Standard Webhooks event */
-        post: operations["handleBillingWebhook"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/users/me": {
         parameters: {
             query?: never;
@@ -1414,114 +1397,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/billing/plan": {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
-                 */
-                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get plan, status, limits, and renewal state */
-        get: operations["getBillingPlan"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/billing/usage": {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
-                 */
-                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get reconciled current-period usage */
-        get: operations["getBillingUsage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/billing/checkout-sessions": {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
-                 */
-                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create a short-lived billing checkout URL */
-        post: operations["createCheckoutSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/billing/portal-sessions": {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
-                 */
-                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create a short-lived billing portal URL */
-        post: operations["createBillingPortalSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1540,8 +1415,6 @@ export interface components {
         ReplyStatus: "not_replied" | "queued" | "processing" | "replied" | "failed" | "needs_reconciliation";
         /** @enum {string} */
         ConnectionStatus: "connected" | "expiring" | "expired" | "revoked" | "reconnect_required";
-        /** @enum {string} */
-        BillingStatus: "free" | "trialing" | "active" | "past_due" | "cancelled";
         ErrorDetail: {
             field?: string | null;
             code: string;
@@ -1688,7 +1561,6 @@ export interface components {
             name: string;
             slug: string;
             role: string;
-            plan: string;
         };
         UserProfile: {
             /** Format: uuid */
@@ -1711,7 +1583,6 @@ export interface components {
             id: string;
             name: string;
             slug: string;
-            plan: string;
             /**
              * @description True for the auto-provisioned personal workspace; personal
              *     workspaces cannot be renamed, invite members, or change roles.
@@ -2533,61 +2404,6 @@ export interface components {
             brand_profile_id: string;
             text: string;
         };
-        PlanLimits: {
-            max_uploads: number | null;
-            max_distributions: number | null;
-            max_platforms: number | null;
-            max_storage_bytes: number | null;
-            /** @default true */
-            analytics_enabled: boolean;
-            /** @default true */
-            inbox_reply_enabled: boolean;
-        };
-        UsageRecord: {
-            /** Format: uuid */
-            org_id: string;
-            /** Format: date-time */
-            period_start: string;
-            /** Format: date-time */
-            period_end: string;
-            uploads: number;
-            distributions: number;
-            api_calls: number;
-            storage_bytes: number;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        BillingPlanResponse: {
-            plan: string;
-            billing_status: components["schemas"]["BillingStatus"];
-            limits: components["schemas"]["PlanLimits"];
-            /** Format: date-time */
-            renews_at: string | null;
-            /** Format: date-time */
-            cancel_at: string | null;
-        };
-        BillingSummary: {
-            plan: string;
-            billing_status: components["schemas"]["BillingStatus"];
-            usage: components["schemas"]["UsageRecord"];
-            limits: components["schemas"]["PlanLimits"];
-            /** Format: date-time */
-            renews_at: string | null;
-            /** Format: date-time */
-            cancel_at: string | null;
-            upgrade_required: boolean;
-        };
-        CreateCheckoutSessionRequest: {
-            plan: string;
-            /** Format: uri */
-            success_url: string;
-            /** Format: uri */
-            cancel_url: string;
-        };
-        CreatePortalSessionRequest: {
-            /** Format: uri */
-            return_url: string;
-        };
     };
     responses: {
         /** @description Malformed request. */
@@ -2678,15 +2494,6 @@ export interface components {
         RateLimited: {
             headers: {
                 "Retry-After": components["headers"]["RetryAfter"];
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["ErrorEnvelope"];
-            };
-        };
-        /** @description Unexpected internal failure. */
-        InternalError: {
-            headers: {
                 [name: string]: unknown;
             };
             content: {
@@ -3063,37 +2870,6 @@ export interface operations {
             400: components["responses"]["AuthError"];
             401: components["responses"]["AuthError"];
             429: components["responses"]["RateLimited"];
-        };
-    };
-    handleBillingWebhook: {
-        parameters: {
-            query?: never;
-            header: {
-                "webhook-id": string;
-                "webhook-timestamp": string;
-                "webhook-signature": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Verified event was applied, deduplicated, or deliberately ignored. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            500: components["responses"]["InternalError"];
         };
     };
     getCurrentUser: {
@@ -4958,148 +4734,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["Unprocessable"];
-        };
-    };
-    getBillingPlan: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
-                 */
-                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current plan. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BillingPlanResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    getBillingUsage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
-                 */
-                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current usage, plan, and limits. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BillingSummary"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    createCheckoutSession: {
-        parameters: {
-            query?: never;
-            header: {
-                /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
-                 */
-                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateCheckoutSessionRequest"];
-            };
-        };
-        responses: {
-            /** @description Checkout URL. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignedUrlResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["Unprocessable"];
-        };
-    };
-    createBillingPortalSession: {
-        parameters: {
-            query?: never;
-            header: {
-                /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
-                 */
-                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePortalSessionRequest"];
-            };
-        };
-        responses: {
-            /** @description Portal URL. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignedUrlResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
         };

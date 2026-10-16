@@ -55,7 +55,6 @@ interface WorkspaceBody {
   id: string;
   is_personal: boolean;
   name: string;
-  plan: string;
   role: WorkspaceRole;
   slug: string;
   updated_at: string;
@@ -89,7 +88,6 @@ interface OrganizationRow extends Record<string, unknown> {
   id: string;
   name: string;
   personal_user_id: string | null;
-  plan: string;
   slug: string;
   updated_at: Date | string;
 }
@@ -160,7 +158,6 @@ function workspaceBody(row: OrganizationRow, role: WorkspaceRole): WorkspaceBody
     id: row.id,
     is_personal: row.personal_user_id !== null,
     name: row.name,
-    plan: row.plan,
     role,
     slug: row.slug,
     updated_at: isoTimestamp(row.updated_at),
@@ -290,7 +287,7 @@ function requireMembership(
 > {
   return client
     .query<OrganizationRow & { member_role: string }>(
-      `SELECT o.id, o.name, o.slug, o.plan, o.personal_user_id,
+      `SELECT o.id, o.name, o.slug, o.personal_user_id,
               o.created_at, o.updated_at, om.role AS member_role
        FROM organizations o
        JOIN org_members om ON om.org_id = o.id AND om.user_id = $2
@@ -532,7 +529,7 @@ export function registerWorkspaceLifecycleRoutes(
                 `INSERT INTO organizations (name, slug)
                  VALUES ($1, $2)
                  ON CONFLICT (slug) DO NOTHING
-                 RETURNING id, name, slug, plan, personal_user_id, created_at, updated_at`,
+                 RETURNING id, name, slug, personal_user_id, created_at, updated_at`,
                 [name, slug],
               );
               const organization = inserted.rows[0];
@@ -636,7 +633,7 @@ export function registerWorkspaceLifecycleRoutes(
                      slug = COALESCE($3, slug),
                      updated_at = now()
                  WHERE id = $1
-                 RETURNING id, name, slug, plan, personal_user_id, created_at, updated_at`,
+                 RETURNING id, name, slug, personal_user_id, created_at, updated_at`,
                 [workspaceId, nextName ?? null, nextSlug ?? null],
               );
               const row = updated.rows[0];
@@ -964,7 +961,7 @@ export function registerWorkspaceLifecycleRoutes(
               [row.org_id, actor.userId],
             );
             const organization = yield* client.query<OrganizationRow>(
-              `SELECT id, name, slug, plan, personal_user_id, created_at, updated_at
+              `SELECT id, name, slug, personal_user_id, created_at, updated_at
                FROM organizations WHERE id = $1`,
               [row.org_id],
             );

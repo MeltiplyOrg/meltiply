@@ -20,7 +20,6 @@ import { createApiApp } from "../src/app";
 import type { AssetApiService } from "../src/asset-types";
 import type { BrandProfileApiService } from "../src/brand-profile-service";
 import type { PostApiService } from "../src/post-types";
-import { createBillingMethods, type BillingSessionProvider } from "../src/billing-service";
 import { CoreApiError, type CoreApiService } from "../src/core-types";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "../src/env";
 interface ExampleResponse {
@@ -75,11 +74,6 @@ const parityManifest = JSON.parse(
 const cases: ConformanceCase[] = [
   { method: "GET", operationId: "getHealth", path: "/api/v1/health" },
   { method: "GET", operationId: "getReadiness", path: "/api/v1/ready" },
-  {
-    method: "POST",
-    operationId: "handleBillingWebhook",
-    path: "/api/v1/billing/webhook",
-  },
   {
     method: "POST",
     operationId: "signInWithEmail",
@@ -340,26 +334,6 @@ const cases: ConformanceCase[] = [
     operationId: "replyToComment",
     path: "/api/v1/inbox/00000000-0000-4000-8000-000000000401/reply",
   },
-  {
-    method: "GET",
-    operationId: "getBillingPlan",
-    path: "/api/v1/billing/plan",
-  },
-  {
-    method: "GET",
-    operationId: "getBillingUsage",
-    path: "/api/v1/billing/usage",
-  },
-  {
-    method: "POST",
-    operationId: "createCheckoutSession",
-    path: "/api/v1/billing/checkout-sessions",
-  },
-  {
-    method: "POST",
-    operationId: "createBillingPortalSession",
-    path: "/api/v1/billing/portal-sessions",
-  },
 ];
 
 function body<T>(operationId: string): T {
@@ -368,24 +342,12 @@ function body<T>(operationId: string): T {
 
 const coreService = {
   activeOrganization: () => Effect.succeed("20000000-0000-4000-8000-000000000001"),
-  billingPlan: () => Effect.succeed(body("getBillingPlan")),
-  billingUsage: () => Effect.succeed(body("getBillingUsage")),
   calendar: () => Effect.succeed(body<{ events: unknown[] }>("listCalendarEvents").events),
   cancelDistribution: () =>
     Effect.succeed({
       replayed: false,
       status: 204 as const,
       value: body("getDistribution"),
-    }),
-  createCheckoutSession: () =>
-    Effect.succeed({
-      replayed: false,
-      value: body("createCheckoutSession"),
-    }),
-  createPortalSession: () =>
-    Effect.succeed({
-      replayed: false,
-      value: body("createBillingPortalSession"),
     }),
   disconnectPlatform: () => Effect.succeed({ replayed: false, value: undefined }),
   distributionAnalytics: () =>
@@ -573,7 +535,6 @@ const readyBinding = {};
 const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   ASSETS: readyBinding,
-  BILLING_WEBHOOK_SECRET: "whsec_contract_billing_secret",
   DB_AUTHENTICATED: readyBinding,
   DB_SYSTEM: readyBinding,
   ENVIRONMENT: "test",
@@ -584,10 +545,6 @@ const env = {
   R2_ACCOUNT_ID: "test-account",
   R2_BUCKET_NAME: "test-assets",
   R2_SECRET_ACCESS_KEY: "test-secret-key",
-  POLAR_AGENCY_PRODUCT_ID: "22222222-2222-4222-8222-222222222222",
-  POLAR_CREATOR_PRODUCT_ID: "11111111-1111-4111-8111-111111111111",
-  POLAR_ACCESS_TOKEN: "polar_oat_testtoken12345",
-  POLAR_ENV: "sandbox",
   TOKEN_ENCRYPTION_KEY: conformanceTestKey,
   VERSION: "1.0.0-target.0",
 } as unknown as ApiWorkerEnv;
@@ -606,7 +563,6 @@ const actorFixture = {
     id: "00000000-0000-4000-8000-000000000001",
     isPersonal: false,
     name: "Alpha",
-    plan: "pro",
     slug: "org-alpha",
   },
 };
@@ -757,7 +713,6 @@ const app = createApiApp({
   betterAuth: () => betterAuthStub,
   brandProfileService,
   coreService,
-  handleBillingWebhook: () => Effect.succeed({ ignored: false, replayed: false }),
   loadCurrentUser: async () => body("getCurrentUser"),
   providerRegistry,
   publicationRequirements: () =>
@@ -840,8 +795,6 @@ function errorApp(status: number) {
     betterAuth: () => betterAuthStub,
     brandProfileService: throwingBrandProfiles,
     coreService: throwingCore,
-    handleBillingWebhook: () =>
-      Effect.fail(new CoreApiError(status, code, "The contract error fixture was requested.")),
     loadCurrentUser: async () => body("getCurrentUser"),
     providerRegistry: new ProviderRegistry(),
     publicationRequirements: effectFailure,
@@ -862,12 +815,6 @@ const errorPathOverrides: Record<string, string> = {
     "/api/v1/calendar?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",
   startPlatformOAuth: "/api/v1/platforms/tiktok/connect",
 };
-const publicErrorOperations = new Set(["handleBillingWebhook"]);
-const protectedErrorOperations = new Set(
-  cases
-    .filter(({ operationId }) => !publicErrorOperations.has(operationId))
-    .map(({ operationId }) => operationId),
-);
 
 describe("API Worker OpenAPI conformance", () => {
   beforeEach(() => {
@@ -937,11 +884,7 @@ describe("API Worker OpenAPI conformance", () => {
         const headers: Record<string, string> = {
           "Idempotency-Key": `worker-error-${testCase.operationId}-${errorIndex}`,
         };
-        if (
-          errorExample.status !== 401 ||
-          publicErrorOperations.has(testCase.operationId) ||
-          !protectedErrorOperations.has(testCase.operationId)
-        ) {
+        if (errorExample.status !== 401) {
           headers.Authorization = bearerAuthorization;
         }
         let requestBody: string | undefined;
@@ -995,241 +938,6 @@ describe("runtime contract cases", () => {
   }
 });
 
-describe("billing management authorization", () => {
-  it("rejects organization members before provider access", async () => {
-    const ensureCustomer = vi.fn(async () => ({
-      providerCustomerId: "customer-alpha",
-    }));
-    const createCheckoutSession = vi.fn(async () => ({
-      expires_at: "2026-07-19T01:00:00.000Z",
-      url: "https://billing.example/checkout",
-    }));
-    const createPortalSession = vi.fn(async () => ({
-      expires_at: "2026-07-19T01:00:00.000Z",
-      url: "https://billing.example/portal",
-    }));
-    const methods = createBillingMethods({
-      createCheckoutSession,
-      createPortalSession,
-      ensureCustomer,
-    });
-    const member = {
-      organizationId: "00000000-0000-4000-8000-000000000001",
-      organizationRole: "member",
-      subject: "ba_user_alpha_01",
-      userId: "00000000-0000-4000-8000-000000000012",
-    };
+;
 
-    await expect(
-      Effect.runPromise(
-        methods.createCheckoutSession(
-          env,
-          member,
-          {
-            cancelUrl: "http://localhost:3000/billing?checkout=cancel",
-            plan: "creator",
-            successUrl: "http://localhost:3000/billing?checkout=success",
-          },
-          "member-checkout",
-        ),
-      ),
-    ).rejects.toMatchObject({ code: "forbidden", status: 403 });
-    await expect(
-      Effect.runPromise(
-        methods.createPortalSession(
-          env,
-          member,
-          { returnUrl: "http://localhost:3000/billing" },
-          "member-portal",
-        ),
-      ),
-    ).rejects.toMatchObject({ code: "forbidden", status: 403 });
-    expect(createCheckoutSession).not.toHaveBeenCalled();
-    expect(createPortalSession).not.toHaveBeenCalled();
-    expect(ensureCustomer).not.toHaveBeenCalled();
-  });
-});
-
-describe("billing route error mapping regressions", () => {
-  const mockBillingProvider: BillingSessionProvider = {
-    checkoutPlan: vi.fn(({ plan }) => ({
-      providerPlanId: `provider-${plan}`,
-    })),
-    createCheckoutSession: vi.fn(async () => ({
-      expires_at: "2026-07-22T12:30:00.000Z",
-      url: "https://sandbox.polar.sh/checkout/test",
-    })),
-    createPortalSession: vi.fn(async () => ({
-      expires_at: "2026-07-22T12:05:00.000Z",
-      url: "https://sandbox.polar.sh/portal/test",
-    })),
-    ensureCustomer: vi.fn(async () => ({ providerCustomerId: "cust_123" })),
-  };
-
-  function billingApp(
-    role: "admin" | "member" = "admin",
-    provider: BillingSessionProvider = mockBillingProvider,
-  ) {
-    const methods = createBillingMethods(provider);
-    return createApiApp({
-      assetService,
-      betterAuth: () => betterAuthStub,
-      coreService: {
-        ...coreService,
-        ...methods,
-      },
-      providerRegistry,
-      resolveActor: async () => ({
-        ...actorFixture,
-        claims: { ...actorFixture.claims, organizationRole: role },
-        role,
-      }),
-      verifyJwtToken: async () => jwtIdentity,
-    });
-  }
-
-  it("rejects checkout session initiation for non-admin members with 403 forbidden", async () => {
-    const app = billingApp("member");
-    const response = await app.request(
-      "/api/v1/billing/checkout-sessions",
-      {
-        body: JSON.stringify({
-          cancel_url: "http://localhost:3000/cancel",
-          plan: "creator",
-          success_url: "http://localhost:3000/success",
-        }),
-        headers: {
-          Authorization: bearerAuthorization,
-          "Content-Type": "application/json",
-          "Idempotency-Key": "checkout-member-1",
-        },
-        method: "POST",
-      },
-      env,
-    );
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "forbidden",
-        message: "Billing management requires an organization administrator.",
-      },
-    });
-  });
-
-  it("rejects portal session initiation for non-admin members with 403 forbidden", async () => {
-    const app = billingApp("member");
-    const response = await app.request(
-      "/api/v1/billing/portal-sessions",
-      {
-        body: JSON.stringify({
-          return_url: "http://localhost:3000/billing",
-        }),
-        headers: {
-          Authorization: bearerAuthorization,
-          "Content-Type": "application/json",
-          "Idempotency-Key": "portal-member-1",
-        },
-        method: "POST",
-      },
-      env,
-    );
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "forbidden",
-        message: "Billing management requires an organization administrator.",
-      },
-    });
-  });
-
-  it("returns 422 validation_error for malformed redirect protocol on checkout", async () => {
-    const app = billingApp("admin");
-    const response = await app.request(
-      "/api/v1/billing/checkout-sessions",
-      {
-        body: JSON.stringify({
-          cancel_url: "ftp://localhost:3000/cancel",
-          plan: "creator",
-          success_url: "http://localhost:3000/success",
-        }),
-        headers: {
-          Authorization: bearerAuthorization,
-          "Content-Type": "application/json",
-          "Idempotency-Key": "checkout-bad-url-1",
-        },
-        method: "POST",
-      },
-      env,
-    );
-
-    expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "validation_error",
-      },
-    });
-  });
-
-  it("returns 422 redirect_not_allowed for unapproved redirect origin on checkout", async () => {
-    const app = billingApp("admin");
-    const response = await app.request(
-      "/api/v1/billing/checkout-sessions",
-      {
-        body: JSON.stringify({
-          cancel_url: "https://evil.example.com/cancel",
-          plan: "creator",
-          success_url: "http://localhost:3000/success",
-        }),
-        headers: {
-          Authorization: bearerAuthorization,
-          "Content-Type": "application/json",
-          "Idempotency-Key": "checkout-bad-origin-1",
-        },
-        method: "POST",
-      },
-      env,
-    );
-
-    expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "redirect_not_allowed",
-      },
-    });
-  });
-
-  it("returns 503 billing_unavailable when billing provider returns invalid plan identifier", async () => {
-    const badProvider: BillingSessionProvider = {
-      ...mockBillingProvider,
-      checkoutPlan: () => ({ providerPlanId: "   " }),
-    };
-    const app = billingApp("admin", badProvider);
-    const response = await app.request(
-      "/api/v1/billing/checkout-sessions",
-      {
-        body: JSON.stringify({
-          cancel_url: "http://localhost:3000/cancel",
-          plan: "creator",
-          success_url: "http://localhost:3000/success",
-        }),
-        headers: {
-          Authorization: bearerAuthorization,
-          "Content-Type": "application/json",
-          "Idempotency-Key": "checkout-bad-plan-1",
-        },
-        method: "POST",
-      },
-      env,
-    );
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "billing_unavailable",
-        message: "The billing provider returned invalid plan evidence.",
-      },
-    });
-  });
-});
+;

@@ -33,7 +33,7 @@ configure_local_wrangler_network() {
   dev_host="$(node "$repo_root/scripts/cloudflare-local/development-host.mjs")"
 
   local bind_host="127.0.0.1"
-  [[ "$dev_host" == "127.0.0.1" ]] || bind_host="0.0.0.0"
+  [[ "$dev_host" == "127.0.0.1" || "$dev_host" == "localhost" ]] || bind_host="0.0.0.0"
   local frontend_origin="${FRONTEND_URL:-http://${dev_host}:${frontend_port}}"
   local api_origin="${PUBLIC_API_URL:-http://${dev_host}:${api_port}}"
 

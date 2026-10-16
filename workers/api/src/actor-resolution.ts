@@ -28,7 +28,6 @@ export interface ResolvedActor {
     id: string;
     isPersonal: boolean;
     name: string;
-    plan: string;
     slug: string;
   };
 }
@@ -44,7 +43,6 @@ interface WorkspaceRow extends Record<string, unknown> {
   id: string;
   is_personal: boolean;
   name: string;
-  plan: string;
   role: string;
   slug: string;
 }
@@ -209,13 +207,13 @@ function resolveWorkspace(
   return client
     .query<WorkspaceRow>(
       requestedWorkspaceId
-        ? `SELECT o.id, o.name, o.slug, o.plan, om.role,
+        ? `SELECT o.id, o.name, o.slug, om.role,
                   (o.personal_user_id IS NOT NULL) AS is_personal
            FROM org_members om
            JOIN organizations o ON o.id = om.org_id
            WHERE om.user_id = $1 AND o.id = $2
            LIMIT 1`
-        : `SELECT o.id, o.name, o.slug, o.plan, om.role,
+        : `SELECT o.id, o.name, o.slug, om.role,
                   (o.personal_user_id IS NOT NULL) AS is_personal
            FROM org_members om
            JOIN organizations o ON o.id = om.org_id
@@ -291,7 +289,6 @@ export async function resolveActor(
             id: workspace.id,
             isPersonal: workspace.is_personal,
             name: workspace.name,
-            plan: workspace.plan,
             slug: workspace.slug,
           },
         } satisfies ResolvedActor;

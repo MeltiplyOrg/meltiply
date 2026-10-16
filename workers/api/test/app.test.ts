@@ -40,7 +40,6 @@ const stagingEnv = {
   ASSETS: {} as R2Bucket,
   AUTOMATION: {} as AutomationRelayStub,
   BETTER_AUTH_SECRET: "staging-auth-secret-32-chars-minimum",
-  BILLING_WEBHOOK_SECRET: "whsec_billing_webhook_secret",
   DB_AUTHENTICATED: {} as Hyperdrive,
   DB_SYSTEM: {} as Hyperdrive,
   ENVIRONMENT: "staging",
@@ -54,10 +53,6 @@ const stagingEnv = {
   R2_ACCOUNT_ID: "r2-account",
   R2_BUCKET_NAME: "assets",
   R2_SECRET_ACCESS_KEY: "r2-secret",
-  POLAR_AGENCY_PRODUCT_ID: "22222222-2222-4222-8222-222222222222",
-  POLAR_CREATOR_PRODUCT_ID: "11111111-1111-4111-8111-111111111111",
-  POLAR_ACCESS_TOKEN: "polar_oat_testtoken12345",
-  POLAR_ENV: "production",
   TOKEN_ENCRYPTION_KEY: "token-key",
   VERSION: "test",
 } satisfies ApiWorkerEnv;
@@ -76,7 +71,6 @@ const actor: ResolvedActor = {
     id: "00000000-0000-4000-8000-000000000001",
     isPersonal: false,
     name: "Alpha",
-    plan: "pro",
     slug: "alpha",
   },
 };
@@ -101,7 +95,6 @@ const userProfile: UserProfile = {
   active_organization: {
     id: actor.workspace.id,
     name: "Alpha",
-    plan: "pro",
     role: "admin",
     slug: "alpha",
   },
@@ -426,39 +419,7 @@ describe("API Worker foundation", () => {
     expect(JSON.stringify(error.mock.calls)).not.toContain("private-database-value");
   });
 
-  it("requires complete, distinct Polar billing configuration in staging", () => {
-    expect(() =>
-      validateProductionBindings({
-        ...stagingEnv,
-        BILLING_WEBHOOK_SECRET: undefined,
-      }),
-    ).toThrow("BILLING_WEBHOOK_SECRET");
-    expect(() =>
-      validateProductionBindings({
-        ...stagingEnv,
-        POLAR_ACCESS_TOKEN: undefined,
-      }),
-    ).toThrow("Polar billing requires");
-    expect(() =>
-      validateProductionBindings({
-        ...stagingEnv,
-        POLAR_AGENCY_PRODUCT_ID: stagingEnv.POLAR_CREATOR_PRODUCT_ID,
-      }),
-    ).toThrow("Polar billing requires");
-    expect(() =>
-      validateProductionBindings({
-        ...stagingEnv,
-        POLAR_ACCESS_TOKEN: "not-a-polar-token",
-      }),
-    ).toThrow("Polar billing requires");
-    expect(() =>
-      validateProductionBindings({
-        ...stagingEnv,
-        BILLING_WEBHOOK_SECRET: "short-secret",
-      }),
-    ).toThrow("BILLING_WEBHOOK_SECRET must be");
-    expect(() => validateProductionBindings(stagingEnv)).not.toThrow();
-  });
+  ;
 
   it("fails readiness when required bindings are absent", async () => {
     const response = await exports.default.fetch("http://example.test/api/v1/ready");

@@ -34,7 +34,6 @@ const alphaActor: ResolvedActor = {
     id: "20000000-0000-4000-8000-000000000001",
     isPersonal: false,
     name: "Alpha",
-    plan: "pro",
     slug: "alpha",
   },
 };
@@ -53,7 +52,6 @@ const personalActor: ResolvedActor = {
     id: "20000000-0000-4000-8000-000000000011",
     isPersonal: true,
     name: "Personal workspace",
-    plan: "free",
     slug: "personal-workspace",
   },
 };
@@ -63,7 +61,6 @@ function userProfileFor(actor: ResolvedActor) {
     active_organization: {
       id: actor.workspace.id,
       name: actor.workspace.name,
-      plan: actor.workspace.plan,
       role: actor.role,
       slug: actor.workspace.slug,
     },

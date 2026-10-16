@@ -24,21 +24,6 @@ interface OperatorResolutionResult {
   status: OperatorDistributionResolution;
 }
 
-export type OperatorBillingResolution = "no_effect" | "session_expired";
-
-export interface OperatorBillingResolutionInput {
-  providerSessionExpiresAt: string | null;
-  reason: string;
-  resolution: OperatorBillingResolution;
-}
-
-interface OperatorBillingResolutionResult {
-  auditId: string;
-  billingOperationId: string;
-  replayed: boolean;
-  resolution: OperatorBillingResolution;
-  status: "failed" | "succeeded";
-}
 
 /**
  * Operator reconciliation contract: each method returns an Effect program the
@@ -46,14 +31,6 @@ interface OperatorBillingResolutionResult {
  * work and typed CoreApiError/DatabaseError failures on the Effect channel.
  */
 export interface OperatorReconciliationService {
-  resolveBillingOperation(
-    env: ApiWorkerEnv,
-    actor: AccessClaims,
-    billingOperationId: string,
-    input: OperatorBillingResolutionInput,
-    idempotencyKey: string,
-    requestId: string,
-  ): Effect.Effect<OperatorBillingResolutionResult, CoreApiError | DatabaseError>;
   resolveDistribution(
     env: ApiWorkerEnv,
     actor: AccessClaims,
@@ -96,88 +73,6 @@ function reason(value: unknown): string {
   return normalized;
 }
 
-/**
- * Parses and validates an operator resolution payload for a billing operation.
- *
- * Enforces field allowlisting, exact confirmation phrasing (`"resolve <id> as <resolution>"`),
- * and validates that `session_expired` resolutions include a valid past RFC 3339 timestamp.
- *
- * @param billingOperationId - UUID of the target billing operation.
- * @param value - Raw request body payload.
- * @returns Validated `OperatorBillingResolutionInput` object.
- * @throws {CoreApiError} 400 `invalid_operator_resolution` if fields, types, or timestamps are invalid.
- * @throws {CoreApiError} 400 `operator_confirmation_required` if the exact confirmation string is mismatched.
- */
-export function parseOperatorBillingResolution(
-  billingOperationId: string,
-  value: unknown,
-): OperatorBillingResolutionInput {
-  if (!uuid.test(billingOperationId) || !record(value)) {
-    throw new CoreApiError(
-      400,
-      "invalid_operator_resolution",
-      "A valid billing operation and JSON resolution are required.",
-    );
-  }
-  const allowed = new Set(["confirm", "provider_session_expires_at", "reason", "resolution"]);
-  if (Object.keys(value).some((key) => !allowed.has(key))) {
-    throw new CoreApiError(
-      400,
-      "invalid_operator_resolution",
-      "The resolution contains an unsupported field.",
-    );
-  }
-  const resolution = value.resolution;
-  if (resolution !== "no_effect" && resolution !== "session_expired") {
-    throw new CoreApiError(
-      400,
-      "invalid_operator_resolution",
-      "resolution must be no_effect or session_expired.",
-    );
-  }
-  if (value.confirm !== `resolve ${billingOperationId} as ${resolution}`) {
-    throw new CoreApiError(
-      400,
-      "operator_confirmation_required",
-      "The exact billing operation resolution confirmation is required.",
-    );
-  }
-  let providerSessionExpiresAt: string | null = null;
-  if (resolution === "session_expired") {
-    if (
-      typeof value.provider_session_expires_at !== "string" ||
-      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
-        value.provider_session_expires_at,
-      )
-    ) {
-      throw new CoreApiError(
-        400,
-        "invalid_operator_resolution",
-        "provider_session_expires_at must be a past RFC3339 timestamp.",
-      );
-    }
-    const expiresAt = new Date(value.provider_session_expires_at);
-    if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() > Date.now()) {
-      throw new CoreApiError(
-        400,
-        "invalid_operator_resolution",
-        "provider_session_expires_at must be a past RFC3339 timestamp.",
-      );
-    }
-    providerSessionExpiresAt = expiresAt.toISOString();
-  } else if (value.provider_session_expires_at !== undefined) {
-    throw new CoreApiError(
-      400,
-      "invalid_operator_resolution",
-      "Only session_expired accepts provider session expiry evidence.",
-    );
-  }
-  return {
-    providerSessionExpiresAt,
-    reason: reason(value.reason),
-    resolution,
-  };
-}
 
 /**
  * Validates that an optional provider URL is a bounded, canonical HTTPS URL without credentials or query fragments.

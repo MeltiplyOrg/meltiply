@@ -76,12 +76,12 @@ description and owns its Posts, Assets, Platform accounts, Distributions,
 analytics, and Inbox activity. A Workspace can contain multiple Brand Profiles.
 
 **Usage record**:
-A durable measurement of Workspace consumption used for entitlement and billing.
+A durable measurement of Workspace consumption used to enforce resource limits.
 _Avoid_: metric, quota row, counter
 
-**Entitlement**:
-What a Workspace's current billing state permits it to do.
-_Avoid_: plan limits, quota, allowance, permissions
+**Workspace quota**:
+A limit on the uploads, publication distributions, connected Channels, or storage a Workspace may consume, measured over the applicable usage period or current occupancy. It is separate from a User's authorization to act in that Workspace.
+_Avoid_: paid plan, subscription tier, entitlement, permission
 
 **Operator**:
 A Meltiply staff member acting on a Workspace through the operator surface, whose

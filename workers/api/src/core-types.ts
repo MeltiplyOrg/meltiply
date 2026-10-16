@@ -5,13 +5,10 @@ import type { components } from "@meltiply/contracts/schema";
 
 import type { ApiWorkerEnv } from "./env";
 import type { DistributionFilters, DistributionPatch } from "./distribution-service";
-import type { BillingPortalInput, BillingSessionInput } from "./billing-service";
 
 type Schemas = components["schemas"];
 type AnalyticsSnapshot = Schemas["AnalyticsSnapshot"];
 type AnalyticsSummary = Schemas["AnalyticsSummary"];
-type BillingPlan = Schemas["BillingPlanResponse"];
-type BillingSummary = Schemas["BillingSummary"];
 type CalendarEvent = Schemas["CalendarEvent"];
 type InboxComment = Schemas["InboxComment"];
 type InboxResponse = Schemas["InboxResponse"];
@@ -88,26 +85,6 @@ export interface CoreApiService {
     env: ApiWorkerEnv,
     session: SessionClaims,
   ): Effect.Effect<string, CoreServiceError>;
-  billingPlan(
-    env: ApiWorkerEnv,
-    session: SessionClaims,
-  ): Effect.Effect<BillingPlan, CoreServiceError>;
-  billingUsage(
-    env: ApiWorkerEnv,
-    session: SessionClaims,
-  ): Effect.Effect<BillingSummary, CoreServiceError>;
-  createCheckoutSession(
-    env: ApiWorkerEnv,
-    session: SessionClaims,
-    input: BillingSessionInput,
-    idempotencyKey: string,
-  ): Effect.Effect<IdempotentResult<Schemas["SignedUrlResponse"]>, CoreServiceError>;
-  createPortalSession(
-    env: ApiWorkerEnv,
-    session: SessionClaims,
-    input: BillingPortalInput,
-    idempotencyKey: string,
-  ): Effect.Effect<IdempotentResult<Schemas["SignedUrlResponse"]>, CoreServiceError>;
   calendar(
     env: ApiWorkerEnv,
     session: SessionClaims,

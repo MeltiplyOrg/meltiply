@@ -1,0 +1,44 @@
+name: Cleanup verification
+on:
+  push:
+    branches: [chore/public-community-cleanup]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Format changed source and documentation
+        run: |
+          git diff --name-only --diff-filter=ACM origin/master...HEAD -z | xargs -0 -r bunx --no-install vp fmt
+          git diff --name-only --diff-filter=ACM origin/master...HEAD -z | tar --null -T - -czf /tmp/formatted-files.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formatted-files
+          path: /tmp/formatted-files.tar.gz
+      - name: Check types and contracts
+        run: |
+          bun run contract:check
+          bun run --cwd frontend/app type-check
+          bunx vp run --filter './packages/*' --filter './workers/*' --concurrency-limit 1 type-check
+      - name: Check cleanup behavior
+        run: |
+          bun run test:ci-routing
+          bun run release:test
+          bun run test:infra-policy
+          bun run test:local-setup
+          bun run test:available-port
+          bun run test:wrangler-env
+          bun run test:dev
+          bun run test:tunnel-hostname
+          bun run docs:links
+      - name: Build and smoke portable devcontainer tools
+        run: |
+          npx --yes @devcontainers/cli up --workspace-folder "$PWD"
+          npx --yes @devcontainers/cli exec --workspace-folder "$PWD" bash -lc 'node --version && bun --version && git --version && docker version && gh --version && test "$(id -un)" = node && test "${MELTIPLY_DEV_TUNNEL}" = 0'

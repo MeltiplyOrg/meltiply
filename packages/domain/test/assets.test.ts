@@ -4,8 +4,6 @@ import {
   ASSET_UPLOAD_POLICY,
   type AssetPolicyError,
   isoDateTime,
-  limitsForBillingState,
-  limitsForPlan,
   uploadLayout,
   validateUpload,
 } from "../src";
@@ -137,19 +135,4 @@ describe("asset upload policy", () => {
     }
   });
 
-  it("returns isolated plan limits and a safe free fallback", () => {
-    const creator = limitsForPlan("creator");
-    creator.max_uploads = 0;
-
-    expect(limitsForPlan("creator").max_uploads).toBe(100);
-    expect(limitsForPlan("unknown")).toEqual(limitsForPlan("free"));
-  });
-
-  it("grants paid limits only from active or trialing billing truth", () => {
-    expect(limitsForBillingState("agency", "active")).toEqual(limitsForPlan("agency"));
-    expect(limitsForBillingState("creator", "trialing")).toEqual(limitsForPlan("creator"));
-    expect(limitsForBillingState("agency", "past_due")).toEqual(limitsForPlan("free"));
-    expect(limitsForBillingState("agency", "cancelled")).toEqual(limitsForPlan("free"));
-    expect(limitsForBillingState("creator", "free")).toEqual(limitsForPlan("free"));
-  });
 });

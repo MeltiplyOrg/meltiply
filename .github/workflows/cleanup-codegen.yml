@@ -43,4 +43,7 @@ jobs:
           REACT_PATCH: ${{ inputs.patch }}
         run: |
           printf '%s' "$REACT_PATCH" | base64 --decode | git apply
+          npm exec --yes --package react-doctor@latest -- react-doctor --version > /tmp/react-doctor-version
+          npx react-doctor@latest --verbose --scope changed
+          git apply --reverse < <(printf '%s' "$REACT_PATCH" | base64 --decode)
           npx react-doctor@latest --verbose --scope changed

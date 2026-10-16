@@ -3,9 +3,6 @@ import type { components } from "@meltiply/contracts/schema";
 import { Effect } from "effect";
 
 import type {
-  AnalyticsQueryParams,
-  AnalyticsSnapshotsResponse,
-  AnalyticsSummary,
   Asset,
   BrandProfile,
   BrandProfileListResponse,
@@ -13,22 +10,15 @@ import type {
   CalendarResponse,
   CompleteUploadInput,
   CreateBrandProfileInput,
-  CreateCheckoutSessionInput,
-  CreatePortalSessionInput,
   CreatePostInput,
   CreateUploadPartsInput,
   CreateUploadPartsResponse,
   CreateUploadSessionInput,
   Distribution,
-  DistributionAnalyticsParams,
   DistributionListResponse,
   DistributionQueryParams,
-  InboxComment,
-  InboxQueryParams,
-  InboxResponse,
   OAuthSelection,
   OAuthSelectionConfirmRequest,
-  PlanResponse,
   Platform,
   PlatformAccountsResponse,
   PlatformCapabilitiesResponse,
@@ -37,7 +27,6 @@ import type {
   PostListResponse,
   PostQueryParams,
   PublishingRequirements,
-  ReplyToCommentInput,
   SchedulePostInput,
   SignedUrlResponse,
   UpdateBrandProfileInput,
@@ -45,7 +34,6 @@ import type {
   UpdatePostInput,
   UploadSessionDetailResponse,
   UploadSessionResponse,
-  UsageResponse,
   UserProfile,
 } from "@/types";
 import { applyAuthJwt } from "./auth-token";
@@ -1187,195 +1175,4 @@ export function getCalendar(
   );
 }
 
-/**
- * Fetches aggregated performance analytics (views, posts, likes, comments, shares) across platforms.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param params Query range parameters (start, end).
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the aggregated analytics summary.
- */
-export function getAnalytics(
-  workspaceId: string | null,
-  params: AnalyticsQueryParams,
-  options?: ApiRequestOptions,
-) {
-  return unwrap<AnalyticsSummary>(
-    (signal) =>
-      client().GET("/analytics", {
-        headers: workspaceHeaders(workspaceId),
-        params: { query: params },
-        signal,
-      }),
-    options?.signal,
-  );
-}
 
-/**
- * Fetches historical metrics time-series snapshots for a single distribution post.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param distributionId Unique distribution identifier.
- * @param params Query parameters (limit, cursor).
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the list of point-in-time metric snapshots.
- */
-export function getDistributionAnalytics(
-  workspaceId: string | null,
-  distributionId: string,
-  params?: DistributionAnalyticsParams,
-  options?: ApiRequestOptions,
-) {
-  return unwrap<AnalyticsSnapshotsResponse>(
-    (signal) =>
-      client().GET("/analytics/{distribution_id}", {
-        headers: workspaceHeaders(workspaceId),
-        params: {
-          path: { distribution_id: distributionId },
-          query: params,
-        },
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
- * Fetches audience comments and mention items across connected platforms.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param params Query parameters (unreplied filter, platform, pagination).
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the inbox comments list response.
- */
-export function getInbox(
-  workspaceId: string | null,
-  params?: InboxQueryParams,
-  options?: ApiRequestOptions,
-) {
-  return unwrap<InboxResponse>(
-    (signal) =>
-      client().GET("/inbox", {
-        headers: workspaceHeaders(workspaceId),
-        params: { query: params },
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
- * Submits a creator reply to an audience comment on a connected platform.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param commentId Unique inbox comment identifier.
- * @param input Reply text payload.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the enqueued inbox comment record with updated reply status.
- */
-export function replyToComment(
-  workspaceId: string | null,
-  commentId: string,
-  input: ReplyToCommentInput,
-  options?: ApiRequestOptions,
-) {
-  return unwrap<InboxComment>(
-    (signal) =>
-      client().POST("/inbox/{comment_id}/reply", {
-        body: input,
-        headers: workspaceHeaders(workspaceId),
-        params: {
-          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
-          path: { comment_id: commentId },
-        },
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
- * Fetches current resource usage metrics and quota limits for the active billing period.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the organization usage response.
- */
-export function getUsage(workspaceId: string | null, options?: ApiRequestOptions) {
-  return unwrap<UsageResponse>(
-    (signal) =>
-      client().GET("/billing/usage", {
-        headers: workspaceHeaders(workspaceId),
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
- * Fetches subscription plan tier, status, renewal dates, and feature limits.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the verified billing plan response.
- */
-export function getPlan(workspaceId: string | null, options?: ApiRequestOptions) {
-  return unwrap<PlanResponse>(
-    (signal) =>
-      client().GET("/billing/plan", {
-        headers: workspaceHeaders(workspaceId),
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
- * Creates a Stripe Checkout session to upgrade or change subscription plans.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param input Target plan and return redirect URLs.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the signed checkout URL response.
- */
-export function createCheckoutSession(
-  workspaceId: string | null,
-  input: CreateCheckoutSessionInput,
-  options?: ApiRequestOptions,
-) {
-  return unwrap<SignedUrlResponse>(
-    (signal) =>
-      client().POST("/billing/checkout-sessions", {
-        body: input,
-        headers: workspaceHeaders(workspaceId),
-        params: { header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) } },
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
- * Creates a Stripe Customer Portal session for managing payment methods and invoices.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param input Return redirect URL.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the signed portal URL response.
- */
-export function createBillingPortalSession(
-  workspaceId: string | null,
-  input: CreatePortalSessionInput,
-  options?: ApiRequestOptions,
-) {
-  return unwrap<SignedUrlResponse>(
-    (signal) =>
-      client().POST("/billing/portal-sessions", {
-        body: input,
-        headers: workspaceHeaders(workspaceId),
-        params: { header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) } },
-        signal,
-      }),
-    options?.signal,
-  );
-}

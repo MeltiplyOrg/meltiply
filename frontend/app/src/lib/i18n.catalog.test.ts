@@ -46,8 +46,6 @@ const intentionalJsxValues: Record<string, true> = {
 // expressions are reviewed here so a new dynamic callsite cannot bypass the catalog guard.
 const allowedDynamicTranslationExpressions: Record<string, true> = {
   actionError: true,
-  'action === "checkout" ? "Opening checkout…" : "Change plan"': true,
-  'action === "portal" ? "Opening portal…" : "Manage billing"': true,
   'account.capabilities.notes[0] ?? "Provider actions are currently unavailable."': true,
   "asset.asset_type": true,
   "card.description": true,
@@ -75,8 +73,6 @@ const allowedDynamicTranslationExpressions: Record<string, true> = {
   metric: true,
   oauthMessage: true,
   "oauthOutcomes[outcome]": true,
-  'planData.limits.analytics_enabled ? "Included" : "Unavailable"': true,
-  'planData.limits.inbox_reply_enabled ? "Included" : "Unavailable"': true,
   "privacyLabels[level]": true,
   "publicMessages[code]": true,
   "rangeLabel[option]": true,

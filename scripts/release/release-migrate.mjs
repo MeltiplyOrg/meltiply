@@ -204,7 +204,7 @@ async function defaultClientFactory(connectionString) {
  * migrations in discrete transactions, validates final ledger parity, and writes atomic evidence.
  *
  * @param {object} params - Migration parameters
- * @param {Array<object>} params.approvals - Verified CircleCI approval records
+ * @param {Array<object>} params.approvals - Validated operator review records
  * @param {(url: string) => Promise<object>} [params.clientFactory] - PostgreSQL client factory
  * @param {Record<string, string | undefined>} params.environment - Process environment variables
  * @param {() => number} [params.now] - Current timestamp generator

@@ -9,7 +9,7 @@ import {
   type DatabaseError,
   type DomainError,
   isoDateTime,
-  limitsForBillingState,
+  COMMUNITY_LIMITS,
   uploadLayout,
   validateUpload,
 } from "@meltiply/domain";
@@ -75,9 +75,7 @@ interface UploadSessionRow extends Record<string, unknown> {
 interface OrganizationUsageRow extends Record<string, unknown> {
   active_reservation_bytes: number | string;
   active_reservations: number | string;
-  billing_status: Schemas["BillingStatus"];
   id: string;
-  plan: string;
   storage_bytes: number | string;
   uploads: number | string;
   user_id: string;
@@ -467,7 +465,7 @@ function recordStagingWriteDeadlineEffect(
  * once by its own bytes and never picks up a second charge.
  *
  * @param client - Active PostgreSQL EffectTransactionClient scoped to the tenant.
- * @param periodKey - ISO billing period string (e.g. `2026-03`), used for the period-scoped upload counter.
+ * @param periodKey - ISO usage month (e.g. `2026-03`), used for the period-scoped upload counter.
  * @param currentInstant - Reference timestamp for expiry comparison (defaults to now).
  * @returns Effect resolving to aggregated organization usage, or failing with AccessDenied/DatabaseError.
  */
@@ -574,8 +572,6 @@ function organizationUsageEffect(
     const result = yield* client.query<OrganizationUsageRow>(
       `SELECT
          o.id,
-         o.plan,
-         o.billing_status,
          public.auth_active_user_id() AS user_id,
          COALESCE(u.uploads, 0) AS uploads,
          COALESCE(resident.resident_bytes, 0) AS storage_bytes,
@@ -1315,7 +1311,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                   };
                 }
                 yield* requireActiveBrandProfileEffect(client, usage.id, input.brand_profile_id);
-                const limits = limitsForBillingState(usage.plan, usage.billing_status);
+                const limits = COMMUNITY_LIMITS;
                 if (
                   limits.max_uploads !== null &&
                   Number(usage.uploads) + Number(usage.active_reservations) >= limits.max_uploads
@@ -1324,7 +1320,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                     new CoreApiError(
                       422,
                       "quota_exceeded",
-                      "The current plan upload limit has been reached.",
+                      "The monthly upload limit has been reached.",
                     ),
                   );
                 }
@@ -1339,7 +1335,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                     new CoreApiError(
                       422,
                       "quota_exceeded",
-                      "The current plan storage limit would be exceeded.",
+                      "The workspace storage limit would be exceeded.",
                     ),
                   );
                 }

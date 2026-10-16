@@ -1,0 +1,39 @@
+---
+title: Resource limits
+description: Community workspace quotas for uploads, publishing, connected accounts, and storage.
+section: Workspace
+order: 9
+---
+
+Meltiply enforces one community resource policy. There are no subscription tiers,
+payment-provider integrations, checkout sessions, or customer billing portals.
+
+## Workspace quotas
+
+| Resource | Limit |
+| --- | --- |
+| Accepted upload sessions | 10 per usage month |
+| Per-channel publication distributions | 30 per usage month |
+| Connected platform accounts | 2 concurrently |
+| Resident media and reserved storage | 1 GiB |
+
+Storage includes originals, variants, temporary copies, and in-flight processing
+reservations, not just completed uploads. Cleanup releases bytes only after they
+can be safely removed. Reconnecting an existing account does not consume another
+connection slot.
+
+## Reaching a limit
+
+The API checks quotas transactionally when accepting uploads, scheduling Posts,
+connecting accounts, and reserving processing storage. Concurrent requests cannot
+bypass those checks. Disconnect an unused account or remove unneeded media where
+appropriate; monthly counters and storage occupancy are separate limits.
+
+The app has no usage dashboard or approaching-quota banners. A failed operation
+shows an actionable quota error rather than an upgrade or payment prompt.
+
+## Related
+
+- [Channels](/docs/channels) — connect and manage platform accounts.
+- [Publishing](/docs/publishing) — compose and schedule Posts.
+- [Media](/docs/media) — uploads, processing, and storage.

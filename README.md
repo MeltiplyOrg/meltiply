@@ -19,12 +19,12 @@ The devcontainer is the recommended setup. For manual setup, use the Node.js ver
 ```bash
 make setup
 make doctor
-MELTIPLY_DEV_TUNNEL=0 make dev
+make dev
 ```
 
 `make setup` installs dependencies, creates the ignored root `.env` from [`.env.example`](.env.example), starts PostgreSQL, applies migrations, and seeds local fixtures. Open the URLs printed by `make dev`.
 
-`make dev` uses public Cloudflare Quick Tunnels by default. The command above disables tunnels for local-only development. For OAuth or webhook callbacks that need a public URL, see the tunnel settings in [`.env.example`](.env.example).
+Development stays on loopback by default. Set `MELTIPLY_DEV_TUNNEL=1 make dev` only when OAuth or webhook callbacks need a public URL. Tunnel settings and an explicit network-host override are documented in [`.env.example`](.env.example).
 
 Seeded local accounts: `alpha@meltiply.local` (populated workspace) and `beta@meltiply.local` (near-empty workspace); both use `MeltiplyLocal1!`. These credentials are for local development only.
 

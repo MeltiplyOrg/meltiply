@@ -226,26 +226,4 @@ export type CalendarQueryParams = NonNullable<
   operations["listCalendarEvents"]["parameters"]["query"]
 >;
 
-export type AnalyticsSummary = components["schemas"]["AnalyticsSummary"];
-export type AnalyticsSnapshot = components["schemas"]["AnalyticsSnapshot"];
-export type AnalyticsSnapshotsResponse = components["schemas"]["AnalyticsSnapshotsResponse"];
-export type AnalyticsQueryParams = NonNullable<
-  operations["getAnalyticsSummary"]["parameters"]["query"]
->;
-export type DistributionAnalyticsParams = NonNullable<
-  operations["getDistributionAnalytics"]["parameters"]["query"]
->;
-
-export type InboxComment = components["schemas"]["InboxComment"];
-export type InboxResponse = components["schemas"]["InboxResponse"];
-export type ReplyStatus = components["schemas"]["ReplyStatus"];
-export type InboxQueryParams = NonNullable<operations["listInboxComments"]["parameters"]["query"]>;
-export type ReplyToCommentInput = components["schemas"]["ReplyToCommentRequest"];
-
-export type PlanLimits = components["schemas"]["PlanLimits"];
-export type UsageRecord = components["schemas"]["UsageRecord"];
-export type UsageResponse = components["schemas"]["BillingSummary"];
-export type PlanResponse = components["schemas"]["BillingPlanResponse"];
 export type SignedUrlResponse = components["schemas"]["SignedUrlResponse"];
-export type CreateCheckoutSessionInput = components["schemas"]["CreateCheckoutSessionRequest"];
-export type CreatePortalSessionInput = components["schemas"]["CreatePortalSessionRequest"];

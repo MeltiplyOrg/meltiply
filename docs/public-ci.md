@@ -15,15 +15,15 @@ Automatic checks run in separate jobs:
   build, and public-site checks.
 - `cloudflare-fast`: spelling, contracts, Worker bindings, package/Worker types,
   tests and builds, strict lint, dead code, formatting, drift/routing regressions,
-  and PostgreSQL integration tests.
+  local-tooling and release regressions, supply-chain/SBOM policy, costs, and PostgreSQL integration tests.
 - `ci-gate`: require baseline and every selected lane to succeed; reject
   failures, cancellations, and unexpectedly skipped jobs.
 
 The application lanes run independently after routing. Documentation-only changes
 run baseline and the final gate without installing application dependencies.
-[The router](../scripts/ci/github-routing.mjs) reuses the fast-lane mapping in the
-retained [CI routing configuration](../.circleci/config.yml). Workflow and router
-changes additionally select both application lanes.
+[The router](../scripts/ci/github-routing.mjs) reads the public CI-owned
+[path rules](../scripts/ci/github-paths.json). Workflow, routing, and development
+container changes select both application lanes.
 
 Default-branch pushes compare the previous commit with the new HEAD. Feature
 branches and pull requests compare against their base merge point, retaining
@@ -36,9 +36,12 @@ Tokens have read-only repository access, checkouts retain no credentials, and no
 deployment secrets are supplied. Do not execute contributor code through
 `pull_request_target` or persistent self-hosted runners.
 
-Extended release/staging harnesses, SBOM/IaC, browser/Lighthouse journeys, load
-tests, and live deployments are not automatic push checks. A passing `ci-gate`
-does not imply those operational checks ran.
+The [extended workflow](../.github/workflows/extended.yml) preserves manually
+selected `frontend-full`, `cloudflare-integration`, and `cloudflare-extended`
+lanes for real browser/Lighthouse journeys, live-local topology/load, and
+release/staging/IaC checks. These run on GitHub-hosted machines without deployment
+secrets; a passing automatic `ci-gate` does not imply the manual lanes ran.
+Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
 ## Caching
 
@@ -74,8 +77,8 @@ different credentials in those same files must still fail.
 
 GitHub's standard hosted-runner execution is
 [free for public repositories](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
-Larger runners are not free; artifact/cache storage has separate limits. This
-workflow uses standard runners and download/build caches, not artifact uploads.
+Larger runners are not free; artifact/cache storage has separate limits. These
+workflows use standard runners. Extended lanes retain diagnostic artifacts for seven days.
 
 Configure branch protection to require `ci-gate` after its first successful run.
 Do not require the conditional lane statuses: deliberately unselected jobs skip.

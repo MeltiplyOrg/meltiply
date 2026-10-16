@@ -22,7 +22,7 @@ install: ## Check host tools, prepare the stack, and install the browser runtime
 doctor: ## Diagnose tools, environment, and live services
 	@./$(CLOUDFLARE_LOCAL_DIR)/doctor.sh
 
-dev: ## Start PostgreSQL, Workers, app, site, and development tunnels
+dev: ## Start PostgreSQL, Workers, app, and site; public tunnels are opt-in
 	@BUN="$(BUN)" ./$(CLOUDFLARE_LOCAL_DIR)/dev.sh
 
 test: ## Run workspace unit tests
@@ -40,7 +40,7 @@ frontend-boot: ## Start the app using the root environment and strict local port
 	@set -a; [ ! -f .env ] || . ./.env; set +a; \
 		frontend_port="$${MELTIPLY_FRONTEND_PORT:-$${FRONTEND_DEV_PORT:-3000}}"; \
 		dev_host="$$(node ./$(CLOUDFLARE_LOCAL_DIR)/development-host.mjs)"; \
-		bind_host="127.0.0.1"; [ "$$dev_host" = "127.0.0.1" ] || bind_host="0.0.0.0"; \
+		bind_host="127.0.0.1"; [ "$$dev_host" = "127.0.0.1" ] || [ "$$dev_host" = "localhost" ] || bind_host="0.0.0.0"; \
 		export FRONTEND_DEV_HOST="$${FRONTEND_DEV_HOST:-$$bind_host}"; \
 		export FRONTEND_URL="$${FRONTEND_URL:-http://$$dev_host:$$frontend_port}"; \
 		printf 'Frontend using %s\n' "$$FRONTEND_URL"; \
@@ -50,7 +50,7 @@ public-boot: ## Start the public site and docs using the root environment
 	@set -a; [ ! -f .env ] || . ./.env; set +a; \
 		public_port="$${PUBLIC_SITE_DEV_PORT:-4321}"; \
 		dev_host="$$(node ./$(CLOUDFLARE_LOCAL_DIR)/development-host.mjs)"; \
-		bind_host="127.0.0.1"; [ "$$dev_host" = "127.0.0.1" ] || bind_host="0.0.0.0"; \
+		bind_host="127.0.0.1"; [ "$$dev_host" = "127.0.0.1" ] || [ "$$dev_host" = "localhost" ] || bind_host="0.0.0.0"; \
 		export FRONTEND_DEV_HOST="$${FRONTEND_DEV_HOST:-$$bind_host}"; \
 		export PUBLIC_SITE_URL="$${PUBLIC_SITE_URL:-http://$$dev_host:$$public_port}"; \
 		printf 'Public site using %s (docs at /docs/)\n' "$$PUBLIC_SITE_URL"; \

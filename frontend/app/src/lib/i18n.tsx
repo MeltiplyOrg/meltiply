@@ -122,14 +122,9 @@ const spanishTranslations: Record<string, string> = {
   "Available to connect": "Disponibles para conectar",
   Back: "Atrás",
   "Before you continue": "Antes de continuar",
-  Billing: "Facturación",
-  "Billing action failed.": "La acción de facturación falló.",
-  "Billing details could not be loaded": "No se pudieron cargar los datos de facturación",
   "Branded content": "Contenido de marca",
-  "Built for teams": "Creado para equipos",
   Calendar: "Calendario",
   Cancel: "Cancelar",
-  "Change plan": "Cambiar de plan",
   "Channel health": "Estado de los canales",
   "Choose a new date and time": "Elige una nueva fecha y hora",
   "Choose a privacy setting": "Elige una opción de privacidad",
@@ -154,7 +149,6 @@ const spanishTranslations: Record<string, string> = {
   "Commercial content": "Contenido comercial",
   "Confirm that you have permission to use the music in this post.":
     "Confirma que tienes permiso para usar la música de esta publicación.",
-  "Confirming your billing update": "Confirmando la actualización de facturación",
   Connect: "Conectar",
   "Connect a platform": "Conectar una plataforma",
   "Connect a platform →": "Conectar una plataforma →",
@@ -263,7 +257,6 @@ const spanishTranslations: Record<string, string> = {
     "Cargando la configuración actual de TikTok de este creador…",
   "Main navigation": "Navegación principal",
   "Make the next publishing action obvious.": "Haz evidente la siguiente acción de publicación.",
-  "Manage billing": "Gestionar facturación",
   "Manage OAuth connections for publishing destinations.":
     "Gestiona las conexiones OAuth de los destinos de publicación.",
   "Manage your profile, security, and workspace preferences.":
@@ -311,14 +304,9 @@ const spanishTranslations: Record<string, string> = {
   "No unreplied comments.": "No hay comentarios sin responder.",
   "Not synced yet": "Todavía no sincronizada",
   of: "de",
-  "One source of truth for creators and publishing teams.":
-    "Una única fuente de verdad para creadores y equipos de publicación.",
   "Only you": "Solo tú",
   "Open published post": "Abrir publicación",
   "Open settings": "Abrir configuración",
-  "Opening checkout…": "Abriendo pago…",
-  "Opening portal…": "Abriendo portal…",
-  "Optional context for your team": "Contexto opcional para tu equipo",
   "Optional description": "Descripción opcional",
   Organization: "Organización",
   "Organization access": "Acceso a la organización",
@@ -327,8 +315,6 @@ const spanishTranslations: Record<string, string> = {
   Pause: "Pausar",
   "Performance by platform": "Rendimiento por plataforma",
   "Performance by platform table": "Tabla de rendimiento por plataforma",
-  Plan: "Plan",
-  "Plan & usage": "Plan y uso",
   Platform: "Plataforma",
   "Personal workspace": "Espacio de trabajo personal",
   "Open navigation": "Abrir la navegación",
@@ -458,8 +444,6 @@ const spanishTranslations: Record<string, string> = {
   "This confirmation is required before Meltiply can send the post to TikTok.":
     "Esta confirmación es obligatoria antes de que Meltiply pueda enviar la publicación a TikTok.",
   "This connection is temporarily unavailable.": "Esta conexión no está disponible temporalmente.",
-  "This file is larger than your plan allows.":
-    "Este archivo supera el tamaño permitido por tu plan.",
   "This is the organization identity and access level enforced by the Meltiply API.":
     "Esta es la identidad de la organización y el nivel de acceso que aplica la API de Meltiply.",
   "This post promotes another brand or a third party.":
@@ -569,7 +553,6 @@ const spanishTranslations: Record<string, string> = {
   "No distribution activity in this range yet.":
     "Todavía no hay actividad de distribución en este intervalo.",
   "No distributions yet.": "Todavía no hay distribuciones.",
-  "Plan usage": "Uso del plan",
   "Platform reach": "Alcance por plataforma",
   Range: "Intervalo",
   "Recent distributions": "Distribuciones recientes",
@@ -594,8 +577,6 @@ const spanishTranslations: Record<string, string> = {
   "Your browser cannot play this video. Use the secure download action instead.":
     "Tu navegador no puede reproducir este vídeo. Usa la descarga segura.",
   "Your product, front and center": "Tu producto, en primer plano",
-  "Your publishing workspace now has a shared shell for assets, uploads, calendars, analytics, inbox replies, platforms, billing, and settings.":
-    "Tu espacio de publicación reúne recursos, cargas, calendarios, analíticas, respuestas, plataformas, facturación y configuración.",
   "Your session expired": "Tu sesión ha caducado",
   "Your session no longer has access to this workspace.":
     "Tu sesión ya no tiene acceso a este espacio de trabajo.",
@@ -610,14 +591,9 @@ const spanishTranslations: Record<string, string> = {
     "{name}: los títulos alternativos no pueden superar los 200 caracteres.",
   "{name}: use no more than {limit} hashtags.": "{name}: usa como máximo {limit} hashtags.",
   "A calmer operating system for publishing.": "Un sistema operativo más tranquilo para publicar.",
-  "A plan change is required": "Es necesario cambiar de plan",
   "An error has occurred.": "Se ha producido un error.",
-  "Billing is not available on this workspace yet. Contact your workspace owner to finish setting it up.":
-    "La facturación aún no está disponible en este espacio de trabajo. Contacta con la persona propietaria para terminar de configurarlo.",
   "Accepted and waiting for a publisher worker.":
     "Aceptado y a la espera de un proceso de publicación.",
-  "Access changes only after the signed billing webhook updates this organization. This page will continue to show the current verified plan until then.":
-    "El acceso solo cambia cuando el webhook firmado de facturación actualiza esta organización. Hasta entonces, esta página seguirá mostrando el plan verificado actual.",
   "AI-generated photo posting is not available yet.":
     "La publicación de fotos generadas por IA todavía no está disponible.",
   "Analytics {metric} time series": "Serie temporal de {metric} de analíticas",
@@ -710,8 +686,6 @@ const spanishTranslations: Record<string, string> = {
     "La divulgación de IA todavía no está disponible para las fotos de TikTok.",
   "Assets, schedules, accounts, and replies share one workspace.":
     "Los recursos, las programaciones, las cuentas y las respuestas comparten un espacio de trabajo.",
-  "Billing is temporarily unavailable. Try again shortly.":
-    "La facturación no está disponible temporalmente. Inténtalo de nuevo en breve.",
   "Changes are paused until your connection returns.":
     "Los cambios están pausados hasta que vuelva tu conexión.",
   "Choose a supported image or video file.": "Elige un archivo de imagen o vídeo compatible.",
@@ -957,9 +931,6 @@ const spanishTranslations: Record<string, string> = {
   "Integration connections are not yet available":
     "Las conexiones de integración aún no están disponibles",
   "Integrations & Third-Party Plugs": "Integraciones y complementos de terceros",
-  "Invite Teammate": "Invitar a compañero de equipo",
-  "Invite teammates to collaborate on drafting, scheduling, and approving posts.":
-    "Invita a compañeros de equipo a colaborar en la redacción, programación y aprobación de publicaciones.",
   "Jump to...": "Saltar a...",
   "Keep post": "Conservar publicación",
   "Last synced {time}": "Última sincronización {time}",
@@ -973,11 +944,8 @@ const spanishTranslations: Record<string, string> = {
   "Made for kids?": "¿Creado para niños?",
   "Manage API keys and developer access credentials.":
     "Administra claves de API y credenciales de acceso para desarrolladores.",
-  "Manage Profiles & Teams": "Administrar perfiles y equipos",
   "Manage delivery channels for publication outcomes and approval alerts.":
     "Administra los canales de entrega para los resultados de publicación y las alertas de aprobación.",
-  "Manage workspace preferences, brand profiles, team permissions, and automation defaults.":
-    "Administra preferencias del espacio de trabajo, perfiles de marca, permisos de equipo y valores predeterminados de automatización.",
   "Manage your drafts, scheduled posts, and publications in one place":
     "Administra tus borradores, publicaciones programadas y publicaciones en un solo lugar",
   "Max 3 posts/day per channel to prevent fatigue":
@@ -1146,10 +1114,6 @@ const spanishTranslations: Record<string, string> = {
     "Etiquetas (separadas por comas, máx. 500 caracteres combinados)",
   "Target Destinations (": "Destinos seleccionados (",
   "Targeting {count} channel(s)": "Destinado a {count} canal(es)",
-  "Team Members": "Miembros del equipo",
-  "Team Members & Access": "Miembros del equipo y acceso",
-  "Team invitations and role management are not yet available.":
-    "Las invitaciones al equipo y la gestión de roles aún no están disponibles.",
   "Test reel with non-followers first": "Probar reel con no seguidores primero",
   "Text Background Preset (text-only posts, max 130 chars)":
     "Fondo predefinido de texto (solo publicaciones de texto, máx. 130 caracteres)",
@@ -1172,7 +1136,6 @@ const spanishTranslations: Record<string, string> = {
   "Unique viewers across platforms": "Espectadores únicos en todas las plataformas",
   Unlisted: "No listado",
   "Untitled post": "Publicación sin título",
-  "Upgrade to {plan}": "Actualizar a {plan}",
   "Upload failed": "Error al subir",
   Uploading: "Subiendo",
   "Uses standard text and attached media.": "Usa texto estándar y medios adjuntos.",
@@ -1351,21 +1314,17 @@ const statusTranslations: Record<Language, Record<string, string>> = {
     active: "Active",
     admin: "Admin",
     connected: "Connected",
-    creator: "Creator",
     expired: "Expired",
     expiring: "Expiring",
     follower_of_creator: "Followers",
-    free: "Free",
     member: "Member",
     mutual_follow_friends: "Friends who follow each other",
     not_replied: "Not replied",
     owner: "Owner",
-    past_due: "Past due",
     public_to_everyone: "Everyone",
     reconnect_required: "Reconnect required",
     revoked: "Revoked",
     self_only: "Only you",
-    trialing: "Trialing",
   },
   es: {
     awaiting_provider: "Esperando al proveedor",
@@ -1388,21 +1347,17 @@ const statusTranslations: Record<Language, Record<string, string>> = {
     active: "Activo",
     admin: "Administrador",
     connected: "Conectada",
-    creator: "Creador",
     expired: "Caducada",
     expiring: "Próxima a caducar",
     follower_of_creator: "Seguidores",
-    free: "Gratis",
     member: "Miembro",
     mutual_follow_friends: "Amigos que se siguen mutuamente",
     not_replied: "Sin responder",
     owner: "Propietario",
-    past_due: "Pago atrasado",
     public_to_everyone: "Todos",
     reconnect_required: "Requiere reconexión",
     revoked: "Revocada",
     self_only: "Solo tú",
-    trialing: "En periodo de prueba",
   },
 };
 

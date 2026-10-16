@@ -1,13 +1,7 @@
 import { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
-import {
-  AccessDenied,
-  type DatabaseError,
-  isoDateTime,
-  limitsForBillingState,
-  rateLimitBudgetFreshSeconds,
-} from "@meltiply/domain";
+import { isoDateTime, rateLimitBudgetFreshSeconds } from "@meltiply/domain";
 import { ProviderRegistry } from "@meltiply/providers";
 
 import {
@@ -24,15 +18,11 @@ import {
   reserveIdempotencyEffect,
 } from "./idempotency";
 import { lockOrganizationEffect } from "./organization-lock";
-import { isoPeriodKey } from "./time";
-import { createPolarBillingProviderFromEnvironment } from "./polar-billing";
 import { createDistributionMethods } from "./distribution-service";
-import { createBillingMethods, type BillingSessionProvider } from "./billing-service";
 
 type Schemas = components["schemas"];
 type AnalyticsSnapshot = Schemas["AnalyticsSnapshot"];
 type InboxComment = Schemas["InboxComment"];
-type PlanLimits = Schemas["PlanLimits"];
 type Platform = Schemas["Platform"];
 type PlatformAccount = Schemas["PlatformAccount"];
 type PlatformCapability = Schemas["PlatformCapability"];
@@ -133,25 +123,11 @@ interface InboxRow extends Record<string, unknown> {
   updated_at: Date | string;
 }
 
-interface BillingRow extends Record<string, unknown> {
-  api_calls: number | string | null;
-  billing_status: Schemas["BillingStatus"];
-  cancel_at: Date | string | null;
-  distributions: number | string | null;
-  org_id: string;
-  plan: string;
-  renews_at: Date | string | null;
-  storage_bytes: number | string | null;
-  updated_at: Date | string | null;
-  uploads: number | string | null;
-}
 
 interface ReplyTargetRow extends InboxRow {
   account_connection_status: Schemas["ConnectionStatus"] | null;
   account_revoked_at: Date | string | null;
   account_token_expires_at: Date | string | null;
-  billing_status: Schemas["BillingStatus"];
-  plan: string;
 }
 
 const platforms: readonly Platform[] = ["tiktok", "youtube", "instagram", "facebook", "threads"];
@@ -373,61 +349,24 @@ function mapInboxComment(row: InboxRow): InboxComment {
   };
 }
 
-/**
- * Computes the UTC start date, end date, and month period key for a given timestamp.
- *
- * Used to aggregate monthly usage records and evaluate plan quotas.
- *
- * @param now - Reference timestamp.
- * @returns Object containing UTC start date, end date, and period key string (e.g. `2026-03`).
- */
-function period(now: Date): { end: Date; key: string; start: Date } {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  return { end, key: isoPeriodKey(start), start };
-}
-
-/**
- * Checks whether current organization usage metrics exceed any configured plan limits.
- *
- * Evaluates uploads, distributions, and storage byte consumption against active plan limits.
- *
- * @param row - Organization billing record containing aggregated usage counts.
- * @param limits - Enforced quota limits for the organization's plan and billing status.
- * @returns `true` if any finite quota limit is breached; otherwise `false`.
- */
-function usageExceeds(row: BillingRow, limits: PlanLimits): boolean {
-  return (
-    (limits.max_uploads !== null && number(row.uploads) >= limits.max_uploads) ||
-    (limits.max_distributions !== null && number(row.distributions) >= limits.max_distributions) ||
-    (limits.max_storage_bytes !== null && number(row.storage_bytes) >= limits.max_storage_bytes)
-  );
-}
 
 /**
  * Factory creating the unified core API service instance for Meltiply.
  *
- * Combines distribution management, Polar billing operations, social platform account
- * management, content calendar queries, cross-platform analytics aggregation, and inbox comments.
+ * Combines distribution management, social platform account management,
+ * content calendar queries, cross-platform analytics aggregation, and inbox comments.
  *
  * @param configuredCapabilities - Optional platform capability list (defaults to `ProviderRegistry`).
- * @param billingProvider - Optional external billing session provider override.
  * @returns Configured `CoreApiService` instance implementing all core business operations via Effect.
  */
 export function createCoreApiService(
   configuredCapabilities = new ProviderRegistry().capabilities(),
-  billingProvider?: BillingSessionProvider,
 ): CoreApiService {
   const capabilities = capabilityMap(configuredCapabilities);
   const distributionMethods = createDistributionMethods();
-  const billingMethods = createBillingMethods(
-    billingProvider,
-    createPolarBillingProviderFromEnvironment,
-  );
 
   return {
     ...distributionMethods,
-    ...billingMethods,
     /**
      * Lists supported social media platforms and their respective feature capabilities.
      *
@@ -879,7 +818,6 @@ export function createCoreApiService(
      * @throws {CoreApiError} 404 `not_found` if comment does not exist or belongs to another profile.
      * @throws {CoreApiError} 404 `brand_profile_not_found` if the profile is missing or foreign.
      * @throws {CoreApiError} 409 `brand_profile_deleted` if the profile is soft-deleted.
-     * @throws {CoreApiError} 403 `entitlement_required` if plan disallows replies.
      * @throws {CoreApiError} 422 `unsupported_capability` if the platform cannot reply to comments.
      * @throws {CoreApiError} 409 `platform_reconnect_required` if account is disconnected/expired.
      */
@@ -918,7 +856,6 @@ export function createCoreApiService(
                  c.reply_status, c.reply_error, c.reply_attempted_at,
                  c.commented_at, c.synced_at, c.updated_at,
                  d.brand_profile_id, d.post_id,
-                 o.plan, o.billing_status,
                  pa.connection_status AS account_connection_status,
                  pa.revoked_at AS account_revoked_at,
                  pa.token_expires_at AS account_token_expires_at
@@ -945,15 +882,6 @@ export function createCoreApiService(
                   422,
                   "unsupported_capability",
                   `${row.platform} comment replies are not available.`,
-                ),
-              );
-            }
-            if (!limitsForBillingState(row.plan, row.billing_status).inbox_reply_enabled) {
-              return yield* Effect.fail(
-                new CoreApiError(
-                  403,
-                  "entitlement_required",
-                  "The current plan does not include inbox replies.",
                 ),
               );
             }
@@ -1042,104 +970,6 @@ export function createCoreApiService(
       });
     },
 
-    /**
-     * Retrieves the current organization billing plan, renewal status, and entitlement limits via Effect.
-     *
-     * Reads organization subscription state and computes static limits from plan definition.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @returns Effect resolving to current billing plan details and limits.
-     */
-    billingPlan(env, session) {
-      return Effect.gen(function* () {
-        const row = yield* billingRowEffect(env, session);
-        return {
-          billing_status: row.billing_status,
-          cancel_at: optionalDateTime(row.cancel_at),
-          limits: limitsForBillingState(row.plan, row.billing_status),
-          plan: row.plan,
-          renews_at: optionalDateTime(row.renews_at),
-        };
-      });
-    },
-
-    /**
-     * Retrieves the current billing period's usage counters alongside plan quota limits via Effect.
-     *
-     * Queries monthly usage records, checks if any quota is exceeded, and flags whether
-     * an upgrade is required.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @returns Effect resolving to current usage breakdown and upgrade requirement flag.
-     */
-    billingUsage(env, session) {
-      return Effect.gen(function* () {
-        const currentPeriod = period(new Date());
-        const row = yield* billingRowEffect(env, session, currentPeriod);
-        const limits = limitsForBillingState(row.plan, row.billing_status);
-        return {
-          billing_status: row.billing_status,
-          cancel_at: optionalDateTime(row.cancel_at),
-          limits,
-          plan: row.plan,
-          renews_at: optionalDateTime(row.renews_at),
-          upgrade_required: usageExceeds(row, limits),
-          usage: {
-            api_calls: number(row.api_calls),
-            distributions: number(row.distributions),
-            org_id: row.org_id,
-            period_end: currentPeriod.end.toISOString(),
-            period_start: currentPeriod.start.toISOString(),
-            storage_bytes: number(row.storage_bytes),
-            updated_at: row.updated_at
-              ? isoDateTime(row.updated_at)
-              : currentPeriod.start.toISOString(),
-            uploads: number(row.uploads),
-          },
-        };
-      });
-    },
   };
 }
 
-/**
- * Retrieves the organization billing record and current period usage within a tenant transaction via Effect.
- *
- * Joins `organizations` with `usage_records` for the specified monthly billing period.
- *
- * @param env - Worker environment bindings.
- * @param session - Authenticated user session claims.
- * @param currentPeriod - Monthly period descriptors (start, end, period key).
- * @returns Effect resolving to database billing and usage record.
- * @throws {AccessDenied} If the authenticated user is not an active organization member.
- */
-function billingRowEffect(
-  env: ApiWorkerEnv,
-  session: SessionClaims,
-  currentPeriod: ReturnType<typeof period> = period(new Date()),
-): Effect.Effect<BillingRow, AccessDenied | DatabaseError> {
-  return withTenantTransactionEffect(env, session, (client) =>
-    Effect.gen(function* () {
-      const result = yield* client.query<BillingRow>(
-        `SELECT
-           o.id AS org_id, o.plan, o.billing_status, o.renews_at, o.cancel_at,
-           u.uploads, u.distributions, u.api_calls, u.storage_bytes, u.updated_at
-         FROM organizations o
-         LEFT JOIN usage_records u
-           ON u.org_id = o.id AND u.period = $1
-         WHERE o.id = public.auth_active_org_id()
-         LIMIT 1`,
-        [currentPeriod.key],
-      );
-      const row = result.rows[0];
-      if (!row) {
-        return yield* Effect.fail(
-          new AccessDenied("The authenticated identity is not an active organization member."),
-        );
-      }
-      return row;
-    }),
-  );
-}

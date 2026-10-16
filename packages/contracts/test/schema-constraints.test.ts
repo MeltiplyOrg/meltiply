@@ -12,9 +12,6 @@ interface JsonSchema {
   type?: string | string[];
 }
 
-const providerWebhookOperations: Record<string, true> = {
-  handleBillingWebhook: true,
-};
 
 function findUnconstrainedObjects(
   schema: JsonSchema,
@@ -65,7 +62,7 @@ describe("frontend-consumed schemas", async () => {
     for (const [operationId, operation] of operations) {
       const requestSchema: JsonSchema | undefined =
         operation.requestBody?.content?.["application/json"]?.schema;
-      if (requestSchema && !providerWebhookOperations[operationId]) {
+      if (requestSchema) {
         findUnconstrainedObjects(requestSchema, `${operationId}.request`, failures, visited);
       }
 

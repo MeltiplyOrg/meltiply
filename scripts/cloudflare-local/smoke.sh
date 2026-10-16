@@ -15,7 +15,7 @@ cleanup() {
   set +e
   if [[ -n "$backend_pid" ]]; then
     # setsid owns the complete Worker process group. Never wait indefinitely:
-    # a stuck workerd otherwise prevents CircleCI cancellation/cleanup.
+    # a stuck workerd otherwise prevents runner cancellation and cleanup.
     kill -TERM -- "-$backend_pid" >/dev/null 2>&1 || kill -TERM "$backend_pid" >/dev/null 2>&1 || true
     for _ in $(seq 1 10); do
       kill -0 "$backend_pid" >/dev/null 2>&1 || break
@@ -93,16 +93,6 @@ webhook_signature_status="$(
     --data '{"type":"user.created","data":{"id":"invalid"}}' \
     "$api_base_url/api/v1/auth/webhook"
 )"
-billing_webhook_signature_status="$(
-  curl --silent --max-time 10 --output /dev/null --write-out '%{http_code}' \
-    --request POST \
-    --header 'Content-Type: application/json' \
-    --header 'webhook-id: msg_local_invalid_billing' \
-    --header "webhook-timestamp: $(date +%s)" \
-    --header 'webhook-signature: v1,invalid' \
-    --data '{"type":"subscription.updated","data":{"product":{"id":"11111111-1111-4111-8111-111111111111"}}}' \
-    "$api_base_url/api/v1/billing/webhook"
-)"
 
 node -e '
   const health = JSON.parse(process.argv[1]);
@@ -115,7 +105,6 @@ printf 'smoke: probes passed\n' >&2
 [[ "$unauthorized_status" == "401" ]]
 [[ "$cors_status" == "204" ]]
 [[ "$webhook_signature_status" == "401" ]]
-[[ "$billing_webhook_signature_status" == "401" ]]
 printf 'smoke: contract prerequisites passed\n' >&2
 
 timeout --signal=TERM --kill-after=20s 90s \

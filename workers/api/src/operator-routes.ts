@@ -5,7 +5,6 @@ import { CoreApiError } from "./core-types";
 import type { ApiWorkerEnvironment } from "./env";
 import {
   type OperatorReconciliationService,
-  parseOperatorBillingResolution,
   parseOperatorResolution,
 } from "./operator-resolution";
 import { idempotencyHeaders } from "./idempotent-response";
@@ -93,9 +92,6 @@ function lazyOperatorReconciliationService(): OperatorReconciliationService {
     });
 
   return {
-    resolveBillingOperation(...arguments_) {
-      return Effect.flatMap(load(), (service) => service.resolveBillingOperation(...arguments_));
-    },
     resolveDistribution(...arguments_) {
       return Effect.flatMap(load(), (service) => service.resolveDistribution(...arguments_));
     },
@@ -106,7 +102,6 @@ function lazyOperatorReconciliationService(): OperatorReconciliationService {
  * Registers operator administrative reconciliation HTTP endpoints onto the Hono application router.
  *
  * Mounts:
- * - `POST /operator/v1/billing-operations/:id/reconciliation`: Reconciles stuck billing operations.
  * - `POST /operator/v1/distributions/:id/reconciliation`: Reconciles ambiguous distributions.
  *
  * **Client authentication**: Operator routes are protected by Cloudflare Access. Callers
@@ -139,36 +134,6 @@ export function registerOperatorRoutes(
 ): void {
   const service = dependencies.operatorReconciliationService ?? lazyOperatorReconciliationService();
 
-  app.post("/operator/v1/billing-operations/:id/reconciliation", (c) =>
-    runRouteEffect(
-      c,
-      Effect.gen(function* () {
-        const billingOperationId = c.req.param("id");
-        const input = yield* fromPromise(async () =>
-          parseOperatorBillingResolution(billingOperationId, await jsonBody(c)),
-        );
-        const result = yield* service.resolveBillingOperation(
-          c.env,
-          c.get("operator"),
-          billingOperationId,
-          input,
-          yield* fromPromise(() => idempotencyKey(c)),
-          c.get("requestId"),
-        );
-        return jsonResponse(
-          {
-            audit_id: result.auditId,
-            billing_operation_id: result.billingOperationId,
-            resolution: result.resolution,
-            status: result.status,
-          },
-          200,
-          c.get("requestId"),
-          idempotencyHeaders(result.replayed),
-        );
-      }),
-    ),
-  );
 
   app.post("/operator/v1/distributions/:id/reconciliation", (c) =>
     runRouteEffect(

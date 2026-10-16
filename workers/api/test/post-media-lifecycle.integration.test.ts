@@ -496,7 +496,6 @@ const app = createApiApp({
       id: organizationId,
       isPersonal: false,
       name: "Lifecycle Studio",
-      plan: "creator",
       slug,
     },
   }),

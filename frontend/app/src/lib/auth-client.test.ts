@@ -88,7 +88,7 @@ describe("Better Auth JWT lifecycle", () => {
     const { api, authClient } = await importClients();
 
     const session = await authClient.getSession();
-    await Effect.runPromise(api.getPlan(null));
+    await Effect.runPromise(api.getCurrentUser(null));
 
     expect(session?.user.email).toBe("user@example.com");
     // The lifecycle request keeps the HttpOnly session cookie; only the JWT
@@ -110,9 +110,9 @@ describe("Better Auth JWT lifecycle", () => {
     const { api, authClient } = await importClients();
 
     await authClient.getSession();
-    await Effect.runPromise(api.getPlan(null));
+    await Effect.runPromise(api.getCurrentUser(null));
     await authClient.getSession();
-    await Effect.runPromise(api.getUsage(null));
+    await Effect.runPromise(api.getCurrentUser(null));
 
     expect(headerAt(fetchMock, 1, "Authorization")).toBe(`Bearer ${firstJwt}`);
     expect(headerAt(fetchMock, 3, "Authorization")).toBe(`Bearer ${refreshedJwt}`);
@@ -130,13 +130,13 @@ describe("Better Auth JWT lifecycle", () => {
     const { api, authClient } = await importClients();
 
     await authClient.getSession();
-    await Effect.runPromise(api.getPlan(null));
+    await Effect.runPromise(api.getCurrentUser(null));
     expect(headerAt(fetchMock, 1, "Authorization")).toBe(`Bearer ${firstJwt}`);
 
     // Sign-out may surface the server failure, but the local credential must be
     // dropped either way so no stale JWT is forwarded afterwards.
     await authClient.signOut().catch(() => undefined);
-    await Effect.runPromise(api.getPlan(null));
+    await Effect.runPromise(api.getCurrentUser(null));
 
     expect(headerAt(fetchMock, 3, "Authorization")).toBeNull();
     expect(credentialsAt(fetchMock, 3)).toBe("omit");
@@ -153,11 +153,11 @@ describe("Better Auth JWT lifecycle", () => {
     const { api, authClient } = await importClients();
 
     await authClient.getSession();
-    await Effect.runPromise(api.getPlan(null));
+    await Effect.runPromise(api.getCurrentUser(null));
     expect(headerAt(fetchMock, 1, "Authorization")).toBe(`Bearer ${firstJwt}`);
 
     await authClient.signOut().catch(() => undefined);
-    await Effect.runPromise(api.getPlan(null));
+    await Effect.runPromise(api.getCurrentUser(null));
 
     expect(headerAt(fetchMock, 3, "Authorization")).toBeNull();
     expect(credentialsAt(fetchMock, 3)).toBe("omit");
@@ -179,9 +179,9 @@ describe("Better Auth JWT lifecycle", () => {
     const { api, authClient } = await importClients();
 
     await authClient.getSession();
-    await Effect.runPromise(api.getPlan(null));
+    await Effect.runPromise(api.getCurrentUser(null));
     await authClient.signOut().catch(() => undefined);
-    await Effect.runPromise(api.getPlan(null));
+    await Effect.runPromise(api.getCurrentUser(null));
 
     // A live bearer credential proves the token existed in module state while
     // Web Storage stayed untouched; the second request shows it was dropped.

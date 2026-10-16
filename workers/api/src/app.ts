@@ -434,7 +434,6 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     const publicPath =
       c.req.path === "/api/v1/health" ||
       c.req.path === "/api/v1/ready" ||
-      c.req.path === "/api/v1/billing/webhook" ||
       // Provider-media URLs carry their own HMAC bearer credential; the route
       // verifies it before touching R2, so no user session is required.
       c.req.path.startsWith(providerMediaRoutePrefix) ||

@@ -327,8 +327,8 @@ cloudflared_tunnel_exists() {
     ' "$name"
 }
 
-# Creates this branch's tunnel and its DNS records, idempotently. `make dev`
-# calls this, so a new branch works with no manual step.
+# Creates an explicitly configured domain's branch tunnel and DNS records,
+# idempotently. Requires MELTIPLY_TUNNEL_DOMAIN; `make dev` calls this only in named mode.
 #
 # Per-branch tunnels are reached by explicit records: a wildcard CNAME has a
 # single target, so it can only ever point at one tunnel and would capture every
@@ -388,7 +388,7 @@ LOGIN
     printf 'resolve. `tunnel route dns` only writes records for zones in the\n' >&2
     printf 'Cloudflare account that cert.pem was issued for.\n' >&2
     printf '  Re-run `cloudflared tunnel login` in the account that owns %s.\n' \
-      "${MELTIPLY_TUNNEL_DOMAIN:-meltiply.com}" >&2
+      "${MELTIPLY_TUNNEL_DOMAIN:?Set MELTIPLY_TUNNEL_DOMAIN to a domain you own}" >&2
     return 1
   fi
 
@@ -404,7 +404,7 @@ LOGIN
     printf '  on a retry, nothing is wrong. If it never resolves, tunnel route\n' >&2
     printf '  dns wrote the record to a Cloudflare account other than the one\n' >&2
     printf '  serving %s. Re-run `cloudflared tunnel login` in the right\n' \
-      "${MELTIPLY_TUNNEL_DOMAIN:-meltiply.com}" >&2
+      "${MELTIPLY_TUNNEL_DOMAIN:?Set MELTIPLY_TUNNEL_DOMAIN to a domain you own}" >&2
     printf '  account, or use the default Quick Tunnel instead.\n' >&2
     return 1
   fi

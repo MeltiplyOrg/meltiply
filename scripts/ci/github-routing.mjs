@@ -6,28 +6,27 @@ function git(...args) {
   return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-/** Reads the retained canonical fast-lane mapping, rejecting unsupported rules. */
+/** Loads public CI path rules; invalid or incomplete lane configuration fails the routing job. */
 function routingRules() {
-  const lines = readFileSync(".circleci/config.yml", "utf8").split("\n");
-  const start = lines.findIndex((line) => line.trim() === "mapping: |");
-  if (start === -1) throw new Error("Missing fast-lane path mapping");
-  const indent = lines[start].search(/\S/);
-  const rules = [];
-  for (const line of lines.slice(start + 1)) {
-    if (!line.trim()) continue;
-    if (line.search(/\S/) <= indent) break;
-    const [pattern, parameter, value, ...extra] = line.trim().split(/\s+/);
-    if (
-      extra.length ||
-      value !== "true" ||
-      !["run-frontend", "run-cloudflare"].includes(parameter)
-    ) {
-      throw new Error(`Unsupported routing rule: ${line.trim()}`);
-    }
-    rules.push({ pattern: new RegExp(pattern), lane: parameter.slice(4) });
+  const mapping = JSON.parse(readFileSync("scripts/ci/github-paths.json", "utf8"));
+  if (
+    !mapping ||
+    typeof mapping !== "object" ||
+    Array.isArray(mapping) ||
+    Object.keys(mapping).sort().join(",") !== "cloudflare,frontend"
+  ) {
+    throw new Error("Expected frontend and cloudflare path rules");
   }
-  if (!rules.length) throw new Error("Empty fast-lane path mapping");
-  return rules;
+  return Object.entries(mapping).flatMap(([lane, patterns]) => {
+    if (
+      !Array.isArray(patterns) ||
+      !patterns.length ||
+      patterns.some((pattern) => typeof pattern !== "string" || !pattern.startsWith("^"))
+    ) {
+      throw new Error(`Invalid ${lane} path rules`);
+    }
+    return patterns.map((pattern) => ({ pattern: new RegExp(pattern), lane }));
+  });
 }
 
 /** Resolves PR/branch merge bases or the default-branch push range; missing history runs both lanes. */
@@ -62,11 +61,6 @@ const rules = routingRules();
 const lanes = new Set(paths === null ? ["frontend", "cloudflare"] : []);
 for (const path of paths ?? []) {
   for (const rule of rules) if (rule.pattern.test(path)) lanes.add(rule.lane);
-  // Workflow/runtime changes must exercise both consumers, including this router.
-  if (path.startsWith(".github/") || /^scripts\/ci\/github-routing(?:\.test)?\.mjs$/.test(path)) {
-    lanes.add("frontend");
-    lanes.add("cloudflare");
-  }
 }
 const output = `frontend=${lanes.has("frontend")}\ncloudflare=${lanes.has("cloudflare")}\n`;
 appendFileSync(process.env.GITHUB_OUTPUT, output);

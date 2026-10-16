@@ -65,9 +65,7 @@ describe("OAuth connection token refresh arming", () => {
           return Effect.succeed({
             rows: [
               {
-                billing_status: "active",
                 id: owner.organizationId,
-                plan: "pro",
               },
             ],
             rowCount: 1,

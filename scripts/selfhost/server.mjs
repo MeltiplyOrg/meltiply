@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
+import { randomBytes } from "node:crypto";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import nodemailer from "nodemailer";
 import { z } from "zod";
@@ -177,6 +178,7 @@ function worker(name) {
         : { ENVIRONMENT: bindings.ENVIRONMENT, VERSION: bindings.VERSION },
   };
 }
+const proxySecret = randomBytes(32).toString("hex");
 const runtime = new Miniflare(
   convertV4MiniflareOptions({
     host: "127.0.0.1",
@@ -186,6 +188,7 @@ const runtime = new Miniflare(
     telemetry: { enabled: false },
     resourcePersistencePath: resolve(config.SELFHOST_DATA, "resources"),
     unsafeLocalExplorer: false,
+    unsafeProxySharedSecret: proxySecret,
     workers: [
       {
         ...worker("frontend"),
@@ -299,6 +302,7 @@ function listener(isPublic) {
       for (const [name, value] of Object.entries(incoming.headers)) {
         if (
           value !== undefined &&
+          !name.startsWith("mf-") &&
           ![
             "host",
             "connection",
@@ -315,6 +319,9 @@ function listener(isPublic) {
       headers.set("cf-connecting-ip", incoming.socket.remoteAddress || "unknown");
       // The internal runtime transport must not replace SigV4's signed public authority.
       headers.set("host", url.host);
+      if (!isPublic && url.pathname.startsWith("/cdn-cgi/local/r2/s3/")) {
+        headers.set("MF-Proxy-Shared-Secret", proxySecret);
+      }
       const controller = new AbortController();
       incoming.on("aborted", () => controller.abort());
       outgoing.on("close", () => {

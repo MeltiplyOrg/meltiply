@@ -88,9 +88,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
       - name: Check CI file formatting
-        run: |
-          bunx --no-install vp fmt scripts/ci/github-routing.mjs scripts/ci/github-routing.test.mjs .github/workflows/ci.yml .github/actions/install-workspace/action.yml docs/public-ci.md
-          git diff --exit-code
+        run: bunx --no-install vp fmt scripts/ci/github-routing.mjs scripts/ci/github-routing.test.mjs .github/workflows/ci.yml .github/actions/install-workspace/action.yml docs/public-ci.md --check
       - name: Start isolated PostgreSQL
         run: ./scripts/cloudflare-local/compose.sh up -d postgres
       - name: Check spelling

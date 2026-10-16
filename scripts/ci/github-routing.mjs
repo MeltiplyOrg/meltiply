@@ -17,7 +17,11 @@ function routingRules() {
     if (!line.trim()) continue;
     if (line.search(/\S/) <= indent) break;
     const [pattern, parameter, value, ...extra] = line.trim().split(/\s+/);
-    if (extra.length || value !== "true" || !["run-frontend", "run-cloudflare"].includes(parameter)) {
+    if (
+      extra.length ||
+      value !== "true" ||
+      !["run-frontend", "run-cloudflare"].includes(parameter)
+    ) {
       throw new Error(`Unsupported routing rule: ${line.trim()}`);
     }
     rules.push({ pattern: new RegExp(pattern), lane: parameter.slice(4) });
@@ -44,7 +48,9 @@ function changedPaths(event) {
     // Report both sides of renames, including deletions, without whitespace splitting.
     return execFileSync("git", ["diff", "--name-only", "--no-renames", "-z", base, head], {
       encoding: "utf8",
-    }).split("\0").filter(Boolean);
+    })
+      .split("\0")
+      .filter(Boolean);
   } catch {
     return null;
   }
@@ -64,5 +70,9 @@ for (const path of paths ?? []) {
 }
 const output = `frontend=${lanes.has("frontend")}\ncloudflare=${lanes.has("cloudflare")}\n`;
 appendFileSync(process.env.GITHUB_OUTPUT, output);
-console.log(paths === null ? "Unavailable diff or manual run: checking both lanes." : `Routing ${paths.length} changed paths.`);
+console.log(
+  paths === null
+    ? "Unavailable diff or manual run: checking both lanes."
+    : `Routing ${paths.length} changed paths.`,
+);
 console.log(output);

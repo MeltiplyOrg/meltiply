@@ -86,7 +86,10 @@ test("feature pushes and PRs retain all changes since their merge base", (t) => 
     "frontend=true\ncloudflare=false\n",
   );
   assert.equal(
-    repo.route({ pull_request: { base: { sha: repo.initial }, head: { sha: head } } }, "pull_request"),
+    repo.route(
+      { pull_request: { base: { sha: repo.initial }, head: { sha: head } } },
+      "pull_request",
+    ),
     "frontend=true\ncloudflare=false\n",
   );
 });

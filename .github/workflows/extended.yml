@@ -1,9 +1,6 @@
 name: Extended checks
 
 on:
-  push:
-    branches: [chore/public-community-cleanup]
-    paths: [.github/workflows/extended.yml]
   workflow_dispatch:
     inputs:
       lane:
@@ -29,10 +26,7 @@ env:
 
 jobs:
   check:
-    strategy:
-      max-parallel: 1
-      matrix:
-        lane: ${{ fromJSON(inputs.lane && format('["{0}"]', inputs.lane) || '["frontend-full","cloudflare-integration","cloudflare-extended"]') }}
+    name: ${{ inputs.lane }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -42,7 +36,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
       - name: Validate release, infrastructure, and dependency policies
-        if: matrix.lane == 'cloudflare-extended'
+        if: inputs.lane == 'cloudflare-extended'
         run: |
           bun run release:test
           bun run test:staging
@@ -50,14 +44,14 @@ jobs:
           bun run security:supply-chain
           bun run iac:check
       - name: Exercise Worker-native local topology and load
-        if: matrix.lane == 'cloudflare-integration'
+        if: inputs.lane == 'cloudflare-integration'
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run test:integration
           timeout --signal=TERM --kill-after=30s 180s bun run local:smoke
           bun run local:k6:ci
       - name: Validate frontend and install Chromium
-        if: matrix.lane == 'frontend-full'
+        if: inputs.lane == 'frontend-full'
         working-directory: frontend/app
         run: |
           bun run format-check
@@ -68,11 +62,11 @@ jobs:
           bun run test --coverage
           bun run --no-install playwright install --with-deps chromium
       - name: Exercise real browser journeys
-        if: matrix.lane == 'frontend-full'
+        if: inputs.lane == 'frontend-full'
         working-directory: frontend/app
         run: bun run test:e2e --trace on
       - name: Check production performance without rebuilding
-        if: matrix.lane == 'frontend-full'
+        if: inputs.lane == 'frontend-full'
         working-directory: frontend/app
         run: |
           setsid bun run --no-install vp preview --host 127.0.0.1 --port 3000 --strictPort >/tmp/meltiply-preview.log 2>&1 &
@@ -86,13 +80,13 @@ jobs:
           ../../scripts/ci/lighthouse.sh http://127.0.0.1:3000/posts ../../artifacts/performance/lighthouse.json
           bun run --cwd ../public check
       - name: Stop owned local services
-        if: always() && matrix.lane != 'cloudflare-extended'
+        if: always() && inputs.lane != 'cloudflare-extended'
         run: ./scripts/cloudflare-local/teardown.sh
       - name: Preserve diagnostic and policy evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: extended-${{ matrix.lane }}
+          name: extended-${{ inputs.lane }}
           if-no-files-found: ignore
           retention-days: 7
           path: |

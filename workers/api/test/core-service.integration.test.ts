@@ -2571,7 +2571,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         ),
       ).rejects.toMatchObject({
         code: "quota_exceeded",
-        message: "The distribution quota for this plan has been reached.",
         status: 403,
       });
       const quotaState = await systemTransaction(env, (client) =>

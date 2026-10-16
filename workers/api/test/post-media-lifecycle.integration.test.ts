@@ -29,7 +29,7 @@ import {
 } from "@meltiply/storage";
 import { Effect } from "effect";
 import { createHash } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { createApiApp } from "../src/app";
 import { createAssetApiService } from "../src/asset-service";
@@ -1701,7 +1701,9 @@ async function processedVideoAsset(options: { filename: string; title: string })
 }
 
 describeIntegration("post-owned media retention with PostgreSQL", () => {
-  beforeAll(async () => {
+  // Each lifecycle scenario owns fresh rows and quota headroom; prior uploads
+  // must not consume the next scenario's monthly allowance or reservations.
+  beforeEach(async () => {
     engine.calls.length = 0;
     engine.failure = null;
     harness.deleteFailures.clear();

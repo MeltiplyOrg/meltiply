@@ -1,17 +1,13 @@
 {
   "name": "meltiply",
-  "build": { "dockerfile": "Dockerfile" },
-  "features": {
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {}
-  },
+  "image": "ghcr.io/tmih06/herdr-devcontainer-vibecode-essential:latest",
   "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
   "workspaceFolder": "${localWorkspaceFolder}",
-  "remoteUser": "node",
+  "remoteUser": "dev",
   "updateRemoteUserUID": true,
   "containerEnv": {
     "MELTIPLY_DEV_TUNNEL": "0",
-    "BUN_INSTALL_CACHE_DIR": "/home/node/.bun/install/cache",
+    "BUN_INSTALL_CACHE_DIR": "/home/dev/.bun/install/cache",
     "MELTIPLY_DEVCONTAINER": "1",
     "COMPOSE_PROJECT_NAME": "meltiply-${devcontainerId}",
     "MELTIPLY_DEVCONTAINER_WORKSPACE": "${localWorkspaceFolder}",
@@ -22,9 +18,9 @@
     "--network=bridge",
     "--label=meltiply.devcontainer.project=meltiply-${devcontainerId}"
   ],
-  "postCreateCommand": "sudo mkdir -p /home/node/.bun/install/cache && sudo chown -R node:node /home/node/.bun",
+  "postCreateCommand": "sudo mkdir -p /home/dev/.bun/install/cache && sudo chown -R dev:dev /home/dev/.bun",
   "mounts": [
-    "source=meltiply-bun-cache,target=/home/node/.bun/install/cache,type=volume",
+    "source=meltiply-bun-cache,target=/home/dev/.bun/install/cache,type=volume",
     "source=${localWorkspaceFolder}/.devcontainer,target=/opt/meltiply-devcontainer,type=bind,readonly"
   ]
 }

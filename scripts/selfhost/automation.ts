@@ -84,6 +84,48 @@ type Delivery = {
 
 /** Keeps the canonical automation handler and exposes private RPC for durable host delivery and schedules. */
 export default class SelfhostAutomation extends AutomationEntrypoint {
+  /** Accepts host-only dispatch over fetch so Miniflare's synchronous RPC discovery cannot block its Node event loop. */
+  async fetch(request: Request) {
+    if (request.method !== "POST") return new Response(null, { status: 404 });
+    const payload: unknown = await request.json();
+    const command = z
+      .discriminatedUnion("action", [
+        z.object({
+          action: z.literal("deliver"),
+          queue: z.string(),
+          rows: z
+            .array(
+              z.object({
+                id: z.string(),
+                body: z.unknown(),
+                content_type: z.string(),
+                created: z.number(),
+                attempts: z.number(),
+              }),
+            )
+            .max(100),
+          metrics: z.object({
+            backlogCount: z.number(),
+            backlogBytes: z.number(),
+            oldestMessageTimestamp: z.string().optional(),
+          }),
+        }),
+        z.object({ action: z.literal("schedule"), cron: z.string(), scheduledTime: z.number() }),
+      ])
+      .parse(payload);
+    if (command.action === "schedule")
+      return Response.json(await this.runScheduled(command.cron, command.scheduledTime));
+    const { oldestMessageTimestamp, ...metrics } = command.metrics;
+    return Response.json(
+      await this.deliver(command.queue, command.rows, {
+        ...metrics,
+        ...(oldestMessageTimestamp
+          ? { oldestMessageTimestamp: new Date(oldestMessageTimestamp) }
+          : {}),
+      }),
+    );
+  }
+
   /** Runs the real queue handler, collecting per-message decisions for the durable broker's transaction. */
   async deliver(queue: string, rows: Delivery[], metrics: MessageBatchMetrics) {
     console.log("[DEBUG-selfhost-queue]", "begin", queue);

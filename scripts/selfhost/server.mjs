@@ -269,9 +269,16 @@ async function dispatch() {
       console.log("[DEBUG-selfhost-dispatch]", name, "begin", rows.length);
       let result;
       try {
-        if (name.startsWith("schedule-")) {
-          result = await automation.runScheduled(rows[0].body.cron, rows[0].body.scheduledTime);
-        } else result = await automation.deliver(name, rows, jobs.metrics(name));
+        const command = name.startsWith("schedule-")
+          ? { action: "schedule", ...rows[0].body }
+          : { action: "deliver", queue: name, rows, metrics: jobs.metrics(name) };
+        const response = await automation.fetch("http://automation/internal", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(command),
+        });
+        if (!response.ok) throw new Error("Internal dispatch failed");
+        result = await response.json();
       } catch {
         console.error(JSON.stringify({ event: "selfhost_dispatch_failed", queue: name }));
         result = { outcome: "exception" };

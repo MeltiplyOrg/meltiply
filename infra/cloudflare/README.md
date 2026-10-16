@@ -142,6 +142,15 @@ An update first plans/reviews/applies `pause`, verifies Queue delivery is paused
 and removes/verifies Automation schedules before changing Worker versions.
 Retain the previous versions and restore-point evidence until acceptance is complete.
 
+The R2 acceptance probe (`staging:r2:check` / `staging:r2:run`) requires a
+dedicated staging user and workspace, configured through
+`MELTIPLY_STAGING_ACCEPTANCE_USER_ID`, `MELTIPLY_STAGING_ACCEPTANCE_ORG_ID`, and
+`MELTIPLY_STAGING_BEARER_TOKEN`. It verifies those identities before mutation;
+no subscription or payment configuration is needed. Keep sufficient upload and
+storage headroom for the probe. The API enforces community quotas, and admission
+failures produce failed evidence and run resource cleanup. The probe verifies
+object lifecycle cleanup, not a billing usage endpoint.
+
 API smoke is not async acceptance. There is no synthetic canary Queue: approved
 real staging messages and durable outcomes are still required for async acceptance.
 Worker rollback changes routing/code, not PostgreSQL, R2, Queue, Workflow, or

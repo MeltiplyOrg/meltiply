@@ -30,8 +30,6 @@ const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,200}$/;
 const OPERATION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,99}$/;
 const EVIDENCE_FILENAME_PATTERN = /^[a-z0-9][a-z0-9.-]*\.json$/;
 const MAXIMUM_API_RESPONSE_BYTES = 1024 * 1024;
-const ACCEPTANCE_PLANS = new Set(["agency", "creator"]);
-const ACTIVE_BILLING_STATUSES = new Set(["active", "trialing"]);
 const OPTION_NAMES = new Set([
   "--confirm",
   "--iac-outputs",
@@ -1326,21 +1324,6 @@ async function oversizedCase(apiRequest, options) {
 }
 
 /**
- * Asserts that a value represents a non-negative safe integer for billing usage or limit counters.
- *
- * @param {unknown} value - Candidate metric value
- * @param {string} name - Field name for error reporting
- * @returns {number} Validated non-negative integer
- * @throws {Error} If value is not a safe integer or is negative
- */
-function boundedUsageInteger(value, name) {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`${name} must be a non-negative safe integer`);
-  }
-  return value;
-}
-
-/**
  * Verifies that the staging API health endpoint responds with expected environment and Git SHA.
  *
  * @param {Function} apiRequest - Authenticated API request client
@@ -1361,18 +1344,17 @@ async function verifyStagingTarget(apiRequest, options) {
 }
 
 /**
- * Validates that the bearer token corresponds to the dedicated, paid staging acceptance identity.
- *
- * Verifies user ID, organization ID, active paid plan (agency/creator), active billing status,
- * and asserts that the organization possesses at least 2 upload credits and adequate storage quota.
+ * Verifies the explicitly configured staging user and active workspace before mutation.
+ * Both identifiers must be UUIDs and match the authenticated `/users/me` response.
+ * Upload admission remains authoritative at the API; quota failures enter the same
+ * cleanup/evidence path as other probe failures, without a removed billing endpoint.
  *
  * @param {Function} apiRequest - Authenticated API request client
- * @param {object} options - Probe options with multipartBytes
  * @param {Record<string, string | undefined>} environment - Process environment
- * @returns {Promise<{ identity: object, usage: object }>} Validated identity and baseline usage records
- * @throws {Error} If identity is not the dedicated paid probe or lacks sufficient quota
+ * @returns {Promise<{ organization_id: string, user_id: string }>} Verified identity
+ * @throws {Error} If configuration or the authenticated identity does not match
  */
-async function verifyAcceptanceIdentity(apiRequest, options, environment) {
+async function verifyAcceptanceIdentity(apiRequest, environment) {
   const expectedUserId = requiredString(
     environment.MELTIPLY_STAGING_ACCEPTANCE_USER_ID,
     "MELTIPLY_STAGING_ACCEPTANCE_USER_ID",
@@ -1381,110 +1363,17 @@ async function verifyAcceptanceIdentity(apiRequest, options, environment) {
     environment.MELTIPLY_STAGING_ACCEPTANCE_ORG_ID,
     "MELTIPLY_STAGING_ACCEPTANCE_ORG_ID",
   );
-  const expectedPlan = requiredString(
-    environment.MELTIPLY_STAGING_ACCEPTANCE_PLAN,
-    "MELTIPLY_STAGING_ACCEPTANCE_PLAN",
-  );
   if (!UUID_PATTERN.test(expectedUserId) || !UUID_PATTERN.test(expectedOrganizationId)) {
     throw new Error("staging acceptance identity IDs must be UUIDs");
   }
-  if (!ACCEPTANCE_PLANS.has(expectedPlan)) {
-    throw new Error("MELTIPLY_STAGING_ACCEPTANCE_PLAN must be agency or creator");
-  }
-
-  const [currentUser, billing] = await Promise.all([
-    apiRequest("getCurrentUser", "GET", "/users/me"),
-    apiRequest("getBillingUsage", "GET", "/billing/usage"),
-  ]);
-  const organization = currentUser.value?.active_organization;
+  const currentUser = await apiRequest("getCurrentUser", "GET", "/users/me");
   if (
     currentUser.value?.id !== expectedUserId ||
-    organization?.id !== expectedOrganizationId ||
-    organization?.plan !== expectedPlan ||
-    billing.value?.usage?.org_id !== expectedOrganizationId ||
-    billing.value?.plan !== expectedPlan ||
-    !ACTIVE_BILLING_STATUSES.has(billing.value?.billing_status)
+    currentUser.value?.active_organization?.id !== expectedOrganizationId
   ) {
-    throw new Error("the bearer token is not the dedicated paid staging acceptance identity");
+    throw new Error("the bearer token is not the dedicated staging acceptance identity");
   }
-
-  const uploads = boundedUsageInteger(billing.value.usage.uploads, "billing usage uploads");
-  const storageBytes = boundedUsageInteger(
-    billing.value.usage.storage_bytes,
-    "billing usage storage_bytes",
-  );
-  const maxUploads = boundedUsageInteger(
-    billing.value.limits?.max_uploads,
-    "billing limit max_uploads",
-  );
-  const maxStorageBytes = boundedUsageInteger(
-    billing.value.limits?.max_storage_bytes,
-    "billing limit max_storage_bytes",
-  );
-  if (maxUploads - uploads < 2) {
-    throw new Error("the staging acceptance identity needs at least two upload credits");
-  }
-  if (maxStorageBytes - storageBytes < options.multipartBytes) {
-    throw new Error("the staging acceptance identity lacks storage quota for the probe");
-  }
-  return {
-    identity: {
-      billing_status: billing.value.billing_status,
-      organization_id: expectedOrganizationId,
-      plan: expectedPlan,
-      user_id: expectedUserId,
-    },
-    usage: {
-      max_storage_bytes: maxStorageBytes,
-      max_uploads: maxUploads,
-      period_start: billing.value.usage.period_start,
-      storage_bytes: storageBytes,
-      uploads,
-    },
-  };
-}
-
-/**
- * Verifies that probe execution resulted in exactly +2 upload count increment and zero retained storage.
- *
- * Asserts that single and multipart uploads were recorded in billing metrics, but their subsequent
- * deletions successfully freed all consumed storage bytes.
- *
- * @param {Function} apiRequest - Authenticated API request client
- * @param {object} before - Baseline billing usage metrics
- * @param {object} identity - Expected organization identity
- * @returns {Promise<object>} Usage effect reconciliation summary
- * @throws {Error} If billing delta does not reflect exactly two uploads and zero net storage retention
- */
-async function verifyUsageEffect(apiRequest, before, identity) {
-  const response = await apiRequest("getBillingUsage", "GET", "/billing/usage");
-  const after = response.value;
-  const uploads = boundedUsageInteger(after?.usage?.uploads, "billing usage uploads");
-  const storageBytes = boundedUsageInteger(
-    after?.usage?.storage_bytes,
-    "billing usage storage_bytes",
-  );
-  if (
-    after?.usage?.org_id !== identity.organization_id ||
-    after?.plan !== identity.plan ||
-    after?.billing_status !== identity.billing_status ||
-    after?.usage?.period_start !== before.period_start ||
-    uploads !== before.uploads + 2 ||
-    storageBytes !== before.storage_bytes
-  ) {
-    throw new Error(
-      "staging billing usage did not record exactly two uploads and zero retained storage",
-    );
-  }
-  return {
-    after_storage_bytes: storageBytes,
-    after_uploads: uploads,
-    before_storage_bytes: before.storage_bytes,
-    before_uploads: before.uploads,
-    monthly_upload_delta: 2,
-    period_start: before.period_start,
-    remaining_uploads: before.max_uploads - uploads,
-  };
+  return { organization_id: expectedOrganizationId, user_id: expectedUserId };
 }
 
 /**
@@ -1629,7 +1518,6 @@ export async function runR2Acceptance(options, injected = {}) {
   let checkoutVerified = false;
   let health;
   let identity;
-  let usageBefore;
   try {
     await verifyReleaseCheckout({
       repoRoot: dependencies.repoRoot,
@@ -1639,13 +1527,7 @@ export async function runR2Acceptance(options, injected = {}) {
     checkoutVerified = true;
     apiRequest = makeApiClient(runOptions, dependencies, apiRequestIds, operations);
     health = await verifyStagingTarget(apiRequest, runOptions);
-    const acceptance = await verifyAcceptanceIdentity(
-      apiRequest,
-      runOptions,
-      dependencies.environment,
-    );
-    identity = acceptance.identity;
-    usageBefore = acceptance.usage;
+    identity = await verifyAcceptanceIdentity(apiRequest, dependencies.environment);
     cases.push(
       await singleUploadCase(apiRequest, runOptions, dependencies, r2RequestIds, resources),
     );
@@ -1656,7 +1538,6 @@ export async function runR2Acceptance(options, injected = {}) {
       await multipartAbortCase(apiRequest, runOptions, dependencies, r2RequestIds, resources),
     );
     cases.push(await oversizedCase(apiRequest, runOptions));
-    const usage = await verifyUsageEffect(apiRequest, usageBefore, identity);
     if (resources.length > 0) {
       throw new Error("staging R2 acceptance left resources pending cleanup");
     }
@@ -1673,7 +1554,6 @@ export async function runR2Acceptance(options, injected = {}) {
       r2_request_ids: sorted(r2RequestIds),
       result: "passed",
       status: "passed",
-      usage,
     };
     await writeAttemptEvidence(runOptions, evidence);
     return evidence;

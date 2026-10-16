@@ -149,8 +149,8 @@ configs:
   ingress:
     content: |
       {$$SELFHOST_APP_DOMAIN} {
-        reverse_proxy runtime:8080
+      	reverse_proxy runtime:8080
       }
       {$$SELFHOST_PUBLIC_DOMAIN} {
-        reverse_proxy runtime:8081
+      	reverse_proxy runtime:8081
       }

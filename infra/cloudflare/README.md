@@ -131,12 +131,14 @@ Continue in this order, following each command's `--help` for phase/step argumen
 | 7     | Plan/review `unpause`, create `release:approve queue-resume`, apply it, then enable the exact canonical Cron schedule with `release:cron`. |
 | 8     | Finish live smoke and `release:manifest`; do not run destructive schema contraction during rollout.                                        |
 
-Every mutating release command still needs `--apply`, the exact
-`--confirm "release staging <git-sha>"`, `--plan-digest`, and the appropriate
-`--approval-metadata "$MELTIPLY_RELEASE_DIR/approval-<scope>.json"`.
-The scopes are `foundation`, `traffic`, and `queue-resume`; each receipt binds
-one reviewed plan to the same release session. Never bypass missing restore-point,
-migration, identity, traffic, Queue, or Cron evidence.
+Every release CLI command that applies or deploys a change requires `--apply`,
+the exact `--confirm "release staging <git-sha>"`, `--plan-digest`, and the
+appropriate `--approval-metadata "$MELTIPLY_RELEASE_DIR/approval-<scope>.json"`.
+These requirements do not apply to the foundation apply performed by
+`staging-transition.sh`. The scopes are `foundation`, `traffic`, and
+`queue-resume`; each receipt binds one reviewed plan to the same release session.
+Never bypass missing restore-point, migration, identity, traffic, Queue, or Cron
+evidence.
 
 An update first plans/reviews/applies `pause`, verifies Queue delivery is paused,
 and removes/verifies Automation schedules before changing Worker versions.

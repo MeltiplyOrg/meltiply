@@ -33,7 +33,7 @@ for (const [name, entry] of Object.entries({
   automation: "scripts/selfhost/automation.ts",
   state: "workers/state/src/index.ts",
   bindings: "scripts/selfhost/bindings.ts",
-  frontend: "scripts/selfhost/frontend.ts",
+  frontend: "frontend/app/src/worker.ts",
 })) {
   const sourcePath =
     name === "frontend"

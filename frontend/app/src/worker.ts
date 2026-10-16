@@ -1,4 +1,4 @@
-import { createRequestId, createTraceId, log } from "@meltiply/observability";
+import { createRequestId, createTraceId, errorDiagnostic, log } from "@meltiply/observability";
 
 interface Env {
   API?: { fetch(request: Request): Promise<Response> };
@@ -313,7 +313,8 @@ export default {
     if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
       try {
         return await proxyApiRequest(request, env, url);
-      } catch {
+      } catch (cause) {
+        console.error("[DEBUG-selfhost-proxy]", JSON.stringify(errorDiagnostic(cause)));
         const requestId = createRequestId();
         const traceId = createTraceId();
         log("error", telemetryContext(env, requestId, traceId), {

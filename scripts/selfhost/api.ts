@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createApiApp } from "../../workers/api/src/app";
 import { validateProductionBindings, type ApiWorkerEnv } from "../../workers/api/src/env";
+import { errorDiagnostic } from "../../packages/observability/src/index";
 
 type SelfhostEnv = ApiWorkerEnv & { SELFHOST_OPERATOR_SECRET: string };
 const claimsSchema = z.object({
@@ -61,8 +62,13 @@ const app = createApiApp({
 
 export default {
   /** Retains production binding validation and the canonical API app, changing only operator token verification. */
-  fetch(request: Request, env: SelfhostEnv, ctx: ExecutionContext) {
-    validateProductionBindings(env);
-    return app.fetch(request, env, ctx);
+  async fetch(request: Request, env: SelfhostEnv, ctx: ExecutionContext) {
+    try {
+      validateProductionBindings(env);
+      return await app.fetch(request, env, ctx);
+    } catch (cause) {
+      console.error("[DEBUG-selfhost-api]", JSON.stringify(errorDiagnostic(cause)));
+      throw cause;
+    }
   },
 };

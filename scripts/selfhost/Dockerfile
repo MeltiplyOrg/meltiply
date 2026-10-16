@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 ENV NODE_ENV=production SELFHOST_DATA=/data
 COPY scripts/selfhost/package.json scripts/selfhost/package-lock.json ./scripts/selfhost/
-RUN npm ci --prefix scripts/selfhost --omit=dev && npm cache clean --force
+RUN npm ci --prefix scripts/selfhost --omit=dev && npm audit --prefix scripts/selfhost --omit=dev --audit-level=high && npm cache clean --force
 COPY --from=build /source/dist/selfhost ./dist/selfhost
 COPY scripts/selfhost/server.mjs scripts/selfhost/control.mjs scripts/selfhost/admin.mjs scripts/selfhost/jobs.mjs scripts/selfhost/configure.mjs ./scripts/selfhost/
 COPY LICENSE* THIRD_PARTY_NOTICES.md ./

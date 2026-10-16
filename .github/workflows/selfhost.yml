@@ -76,13 +76,13 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24.18.0"
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4.4.1
       - name: Select lowercase image namespace and private smoke configuration
         run: |
           echo "SELFHOST_IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
           node scripts/selfhost/configure.mjs --ci
       - name: Build production application and Workers
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           file: scripts/selfhost/Dockerfile
@@ -95,7 +95,7 @@ jobs:
           cache-from: type=gha,scope=selfhost-runtime
           cache-to: type=gha,mode=max,scope=selfhost-runtime
       - name: Build migration image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           file: scripts/selfhost/Dockerfile
@@ -106,7 +106,7 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
       - name: Build native processor image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7.4.0
         with:
           context: workers/automation/processor
           load: true

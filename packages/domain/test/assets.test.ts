@@ -111,7 +111,12 @@ describe("asset upload policy", () => {
     "rejects invalid upload and multipart sizes %s before reserving capacity",
     (fileSize) => {
       expect(() =>
-        validateUpload({ assetType: "image", contentType: "image/jpeg", fileSize, filename: "a.jpg" }),
+        validateUpload({
+          assetType: "image",
+          contentType: "image/jpeg",
+          fileSize,
+          filename: "a.jpg",
+        }),
       ).toThrow(expect.objectContaining({ code: "validation_error" }));
       expect(() => uploadLayout(fileSize)).toThrow(
         expect.objectContaining({ code: "validation_error" }),

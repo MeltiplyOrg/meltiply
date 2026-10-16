@@ -397,7 +397,6 @@ test("rendered files are deterministic and private", async (context) => {
   ]);
 });
 
-
 test("connected preflight requires matching Cloudflare and TLS database credentials", async () => {
   const spec = validateReleaseSpec(releaseInput());
   await assert.rejects(

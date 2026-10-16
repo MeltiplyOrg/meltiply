@@ -5,6 +5,9 @@ on:
     paths:
       - "scripts/selfhost/**"
       - "scripts/ci/supply-chain.mjs"
+      - "scripts/ci/allowed-licenses.json"
+      - "scripts/lib/**"
+      - "scripts/cloudflare-local/postgres/migrate.sh"
       - "compose.selfhost.yml"
       - ".dockerignore"
       - ".github/workflows/selfhost.yml"
@@ -13,10 +16,17 @@ on:
       - "frontend/**"
       - "bun.lock"
       - "package.json"
+      - "bunfig.toml"
+      - "tsconfig.base.json"
+      - "vite.config.ts"
+      - ".github/actions/install-workspace/**"
   push:
     paths:
       - "scripts/selfhost/**"
       - "scripts/ci/supply-chain.mjs"
+      - "scripts/ci/allowed-licenses.json"
+      - "scripts/lib/**"
+      - "scripts/cloudflare-local/postgres/migrate.sh"
       - "compose.selfhost.yml"
       - ".dockerignore"
       - ".github/workflows/selfhost.yml"
@@ -25,6 +35,10 @@ on:
       - "frontend/**"
       - "bun.lock"
       - "package.json"
+      - "bunfig.toml"
+      - "tsconfig.base.json"
+      - "vite.config.ts"
+      - ".github/actions/install-workspace/**"
   release:
     types: [published]
   workflow_dispatch:
@@ -75,6 +89,9 @@ jobs:
           target: runtime
           load: true
           tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-runtime:ci
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=selfhost-runtime
           cache-to: type=gha,mode=max,scope=selfhost-runtime
       - name: Build migration image
@@ -85,12 +102,18 @@ jobs:
           target: database
           load: true
           tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-database:ci
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
       - name: Build native processor image
         uses: docker/build-push-action@v6
         with:
           context: workers/automation/processor
           load: true
           tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-processor:ci
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=selfhost-processor
           cache-to: type=gha,mode=max,scope=selfhost-processor
       - name: Validate durable broker behavior
@@ -101,6 +124,12 @@ jobs:
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification up -d --no-build --wait --wait-timeout 240
       - name: Exercise built application, email, storage, jobs, workflows, and restart recovery
         run: node scripts/selfhost/smoke.mjs
+      - name: Validate and exercise optional TLS ingress
+        run: |
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls up -d --no-deps gateway
+          curl --retry 10 --retry-connrefused --retry-delay 1 --insecure --fail --silent https://localhost/health
+          curl --resolve public.localhost:443:127.0.0.1 --insecure --fail --silent https://public.localhost/ --output /dev/null
       - uses: ./.github/actions/install-workspace
       - name: Check the complete existing Cloudflare deployment target
         run: |
@@ -135,7 +164,7 @@ jobs:
         if: always()
         run: |
           mkdir -p artifacts/selfhost
-          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification logs --no-color > artifacts/selfhost/compose.log 2>&1 || true
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification --profile tls logs --no-color > artifacts/selfhost/compose.log 2>&1 || true
       - uses: actions/upload-artifact@v7.0.2
         if: failure()
         with:
@@ -144,4 +173,4 @@ jobs:
           retention-days: 7
       - name: Stop owned deployment
         if: always()
-        run: docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification down --volumes --remove-orphans
+        run: docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification --profile tls down --volumes --remove-orphans

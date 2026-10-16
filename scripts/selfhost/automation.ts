@@ -47,6 +47,7 @@ export class MediaProcessorContainer extends DurableObject<{ PROCESSOR_JOB_TOKEN
     if (invalid)
       return { ok: false, error: { code: "invalid_request", message: invalid, retryable: false } };
     try {
+      console.log("[DEBUG-selfhost-processor]", "begin");
       const response = await fetch("http://127.0.0.1:8082/process", {
         method: "POST",
         headers: {
@@ -56,6 +57,7 @@ export class MediaProcessorContainer extends DurableObject<{ PROCESSOR_JOB_TOKEN
         body: JSON.stringify(job),
         signal: AbortSignal.timeout(PROCESSOR_CONTAINER_TIMEOUT_MS),
       });
+      console.log("[DEBUG-selfhost-processor]", "response", response.status);
       const payload: unknown = await response.json();
       if (!response.ok) return { ok: false, error: failureSchema.parse(payload).error };
       return { ok: true, result: successSchema.parse(payload) };
@@ -84,6 +86,7 @@ type Delivery = {
 export default class SelfhostAutomation extends AutomationEntrypoint {
   /** Runs the real queue handler, collecting per-message decisions for the durable broker's transaction. */
   async deliver(queue: string, rows: Delivery[], metrics: MessageBatchMetrics) {
+    console.log("[DEBUG-selfhost-queue]", "begin", queue);
     const explicitAcks: string[] = [];
     const retryMessages: { msgId: string; delaySeconds?: number }[] = [];
     let retryBatch: { retry: boolean; delaySeconds?: number } = { retry: false };
@@ -124,6 +127,7 @@ export default class SelfhostAutomation extends AutomationEntrypoint {
           if (!ackAll) retryBatch = { retry: true, ...options };
         },
       });
+      console.log("[DEBUG-selfhost-queue]", "end", queue);
     } catch {
       outcome = "exception";
     }

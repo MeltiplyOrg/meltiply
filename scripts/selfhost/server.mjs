@@ -266,6 +266,7 @@ async function dispatch() {
       if (stopping) break;
       const rows = jobs.claim(name);
       if (!rows.length) continue;
+      console.log("[DEBUG-selfhost-dispatch]", name, "begin", rows.length);
       let result;
       try {
         if (name.startsWith("schedule-")) {
@@ -275,6 +276,7 @@ async function dispatch() {
         console.error(JSON.stringify({ event: "selfhost_dispatch_failed", queue: name }));
         result = { outcome: "exception" };
       }
+      console.log("[DEBUG-selfhost-dispatch]", name, "end", result.outcome);
       jobs.settle(name, rows, result);
     }
     await delay(250);
@@ -332,12 +334,16 @@ function listener(isPublic) {
         init.body = Readable.toWeb(incoming);
         init.duplex = "half";
       }
+      if (url.pathname.startsWith("/api/v1/assets/"))
+        console.log("[DEBUG-selfhost-assets]", "begin", incoming.method);
       const response =
         url.pathname.startsWith("/cdn-cgi/local/r2/s3/") && !isPublic
           ? await runtime.dispatchFetch(url.href, init)
           : await (
               isPublic ? publicSite : url.pathname.startsWith("/operator/") ? api : frontend
             ).fetch(new Request(url, init));
+      if (url.pathname.startsWith("/api/v1/assets/"))
+        console.log("[DEBUG-selfhost-assets]", "end", response.status);
       const responseHeaders = Object.fromEntries(response.headers);
       const cookies = response.headers.getSetCookie();
       if (cookies.length) responseHeaders["set-cookie"] = cookies;

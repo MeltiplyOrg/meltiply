@@ -1,0 +1,144 @@
+name: meltiply-selfhost
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: meltiply
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SELFHOST_DB_PASSWORD:?Configure .env.selfhost first}
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d meltiply]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  migrate:
+    image: ${SELFHOST_IMAGE_PREFIX:-ghcr.io/meltiplyorg/meltiply}-database:${SELFHOST_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: scripts/selfhost/Dockerfile
+      target: database
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPASSWORD: ${SELFHOST_DB_PASSWORD:?Configure .env.selfhost first}
+      POSTGRES_DB: meltiply
+      POSTGRES_USER: postgres
+      SELFHOST_DB_SYSTEM_PASSWORD: ${SELFHOST_DB_SYSTEM_PASSWORD:?Configure .env.selfhost first}
+      SELFHOST_DB_AUTHENTICATED_PASSWORD: ${SELFHOST_DB_AUTHENTICATED_PASSWORD:?Configure .env.selfhost first}
+    restart: "no"
+
+  runtime:
+    image: ${SELFHOST_IMAGE_PREFIX:-ghcr.io/meltiplyorg/meltiply}-runtime:${SELFHOST_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: scripts/selfhost/Dockerfile
+      target: runtime
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 11m
+    env_file: ${SELFHOST_ENV_FILE:-.env.selfhost}
+    environment:
+      SELFHOST_DATA: /data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${SELFHOST_BIND_ADDRESS:-127.0.0.1}:8080:8080"
+      - "${SELFHOST_BIND_ADDRESS:-127.0.0.1}:8081:8081"
+    volumes:
+      - runtime:/data
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/api/v1/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 10s
+      start_period: 60s
+      retries: 12
+
+  processor:
+    image: ${SELFHOST_IMAGE_PREFIX:-ghcr.io/meltiplyorg/meltiply}-processor:${SELFHOST_IMAGE_TAG:-latest}
+    build:
+      context: workers/automation/processor
+      args:
+        PROCESSOR_PLATFORM: ${SELFHOST_PLATFORM:-linux/amd64}
+    platform: ${SELFHOST_PLATFORM:-linux/amd64}
+    # Sharing the runtime network lets signed localhost capabilities work on a
+    # local machine too. No Docker socket or processor port is published.
+    network_mode: service:runtime
+    depends_on:
+      runtime:
+        condition: service_started
+    environment:
+      PROCESSOR_JOB_TOKEN: ${PROCESSOR_JOB_TOKEN:?Configure .env.selfhost first}
+      PROCESSOR_PORT: "8082"
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 11m
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=2g
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8082/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  gateway:
+    image: caddy:2.10.2-alpine
+    profiles: [tls]
+    restart: unless-stopped
+    depends_on:
+      runtime:
+        condition: service_healthy
+    environment:
+      SELFHOST_APP_DOMAIN: ${SELFHOST_APP_DOMAIN:-localhost}
+      SELFHOST_PUBLIC_DOMAIN: ${SELFHOST_PUBLIC_DOMAIN:-public.localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    configs:
+      - source: ingress
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - certificates:/data
+      - caddy-config:/config
+
+  # CI-only real SMTP protocol endpoint; production must configure a delivering
+  # SMTP server. This profile must never be used as production email delivery.
+  smtp-test:
+    image: axllent/mailpit:v1.27.4
+    profiles: [verification]
+    ports:
+      - "127.0.0.1:8025:8025"
+
+volumes:
+  postgres:
+  runtime:
+  certificates:
+  caddy-config:
+
+configs:
+  ingress:
+    content: |
+      {$$SELFHOST_APP_DOMAIN} {
+        reverse_proxy runtime:8080
+      }
+      {$$SELFHOST_PUBLIC_DOMAIN} {
+        reverse_proxy runtime:8081
+      }

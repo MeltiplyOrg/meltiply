@@ -1,0 +1,10 @@
+{
+  "name": "@meltiply/selfhost-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "miniflare": "5.20261006.0-alpha",
+    "nodemailer": "10.1.2",
+    "zod": "4.6.5"
+  }
+}

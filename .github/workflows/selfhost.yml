@@ -1,0 +1,129 @@
+name: Self-hosted images
+
+on:
+  pull_request:
+    paths:
+      - "scripts/selfhost/**"
+      - "compose.selfhost.yml"
+      - ".dockerignore"
+      - ".github/workflows/selfhost.yml"
+      - "workers/**"
+      - "packages/**"
+      - "frontend/**"
+      - "bun.lock"
+      - "package.json"
+  push:
+    branches: ["feat/docker-compose-selfhost"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish verified images to GHCR
+        type: boolean
+        default: false
+      tag:
+        description: Image tag for a manual publication
+        type: string
+        default: manual
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: selfhost-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'release' }}
+
+jobs:
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CI: "true"
+      WRANGLER_SEND_METRICS: "false"
+      COMPOSE_PARALLEL_LIMIT: "1"
+      SELFHOST_IMAGE_TAG: ci
+    steps:
+      - uses: actions/checkout@v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.18.0"
+      - uses: docker/setup-buildx-action@v3
+      - name: Select lowercase image namespace and private smoke configuration
+        run: |
+          echo "SELFHOST_IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          node scripts/selfhost/configure.mjs --ci
+      - name: Build production application and Workers
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: scripts/selfhost/Dockerfile
+          target: runtime
+          load: true
+          tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-runtime:ci
+          cache-from: type=gha,scope=selfhost-runtime
+          cache-to: type=gha,mode=max,scope=selfhost-runtime
+      - name: Build migration image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: scripts/selfhost/Dockerfile
+          target: database
+          load: true
+          tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-database:ci
+      - name: Build native processor image
+        uses: docker/build-push-action@v6
+        with:
+          context: workers/automation/processor
+          load: true
+          tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-processor:ci
+          cache-from: type=gha,scope=selfhost-processor
+          cache-to: type=gha,mode=max,scope=selfhost-processor
+      - name: Validate durable broker behavior
+        run: docker run --rm --entrypoint node "${SELFHOST_IMAGE_PREFIX}-runtime:ci" --test scripts/selfhost/jobs.test.mjs
+      - name: Start complete production deployment
+        run: |
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification config --quiet
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification up -d --no-build --wait --wait-timeout 240
+      - name: Exercise built application, email, storage, jobs, workflows, and restart recovery
+        run: node scripts/selfhost/smoke.mjs
+      - name: Publish only verified images
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if ! [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo 'Invalid image tag' >&2
+            exit 1
+          fi
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for component in runtime database processor; do
+            image="${SELFHOST_IMAGE_PREFIX}-${component}"
+            docker tag "$image:ci" "$image:$RELEASE_TAG"
+            docker push "$image:$RELEASE_TAG"
+            docker tag "$image:ci" "$image:sha-$GITHUB_SHA"
+            docker push "$image:sha-$GITHUB_SHA"
+            if [ "$GITHUB_EVENT_NAME" = release ] && [ "$PRERELEASE" = false ]; then
+              docker tag "$image:ci" "$image:latest"
+              docker push "$image:latest"
+            fi
+          done
+      - name: Preserve deployment diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts/selfhost
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification logs --no-color > artifacts/selfhost/compose.log 2>&1 || true
+      - uses: actions/upload-artifact@v7.0.2
+        if: failure()
+        with:
+          name: selfhost-diagnostics
+          path: artifacts/selfhost
+          retention-days: 7
+      - name: Stop owned deployment
+        if: always()
+        run: docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification down --volumes --remove-orphans

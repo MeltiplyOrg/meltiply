@@ -1,0 +1,25 @@
+import { randomBytes } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+
+const ci = process.argv.includes("--ci");
+const path = process.env.SELFHOST_ENV_FILE || ".env.selfhost";
+const values = {
+  SELFHOST_ORIGIN: "http://localhost:8080",
+  SELFHOST_PUBLIC_ORIGIN: "http://localhost:8081",
+  SELFHOST_BIND_ADDRESS: "127.0.0.1",
+  SELFHOST_IMAGE_PREFIX: "ghcr.io/meltiplyorg/meltiply",
+  SELFHOST_IMAGE_TAG: "latest",
+  SELFHOST_DB_PASSWORD: randomBytes(32).toString("hex"),
+  SELFHOST_DB_SYSTEM_PASSWORD: randomBytes(32).toString("hex"),
+  SELFHOST_DB_AUTHENTICATED_PASSWORD: randomBytes(32).toString("hex"),
+  BETTER_AUTH_SECRET: randomBytes(32).toString("hex"),
+  TOKEN_ENCRYPTION_KEY: randomBytes(32).toString("base64url"),
+  SELFHOST_OPERATOR_SECRET: randomBytes(32).toString("hex"),
+  PROCESSOR_JOB_TOKEN: randomBytes(32).toString("hex"),
+  R2_ACCESS_KEY_ID: randomBytes(16).toString("hex"),
+  R2_SECRET_ACCESS_KEY: randomBytes(32).toString("hex"),
+  MAIL_FROM_ADDRESS: ci ? "no-reply@example.com" : "",
+  SELFHOST_SMTP_URL: ci ? "smtp://smtp-test:1025" : "",
+};
+await writeFile(path, Object.entries(values).map(([name, value]) => `${name}=${value}\n`).join(""), { mode: 0o600, flag: "wx" });
+console.log(`Created ${path} with private random credentials. Set MAIL_FROM_ADDRESS and SELFHOST_SMTP_URL before starting.`);

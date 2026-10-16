@@ -81,6 +81,7 @@ await api("/api/auth/sign-up/email", {
   name: "Selfhost smoke",
   callbackURL: `${origin}/posts`,
 });
+await api("/api/auth/sign-in/email", { email, password }, 403);
 let captured;
 for (let attempt = 0; attempt < 60; attempt++) {
   const messages = await (await fetch("http://localhost:8025/api/v1/messages")).json();

@@ -27,6 +27,8 @@ export interface ApiWorkerEnv {
   AUTOMATION?: AutomationRelayStub;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
+  /** Standalone workerd owns sockets per request; omitted keeps the environment's existing pool policy. */
+  DATABASE_POOL_MODE?: "request";
   DB_AUTHENTICATED?: Hyperdrive;
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: "local" | "preview" | "staging" | "test";

@@ -40,7 +40,7 @@ interface RateLimitHitRow extends Record<string, unknown> {
  * normalized sender address/display name, and the system-database connection
  * string (pool identity in `systemPoolFor`). A changed dependency yields a
  * fresh instance rather than leaking a previous environment's configuration.
- * Local instances are never cached because their pool is request-owned.
+ * Local and DATABASE_POOL_MODE=request instances are never cached because their pools are request-owned.
  *
  * Email verification is an explicit policy, not an accident of configuration:
  * deployed environments (`staging`/`preview`) always require a verified email,
@@ -58,6 +58,7 @@ interface RateLimitHitRow extends Record<string, unknown> {
  */
 export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstance> {
   const isLocalOrTest = env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
+  const requestOwnedPool = env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request";
   const secret =
     env.BETTER_AUTH_SECRET?.trim() ||
     (isLocalOrTest ? "meltiply-local-auth-secret-32-chars-long" : undefined);
@@ -82,7 +83,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
 
   const databaseConnectionString = env.DB_SYSTEM?.connectionString;
   if (
-    env.ENVIRONMENT !== "local" &&
+    !requestOwnedPool &&
     betterAuthCached &&
     betterAuthCached.secret === secret &&
     betterAuthCached.baseURL === baseURL &&
@@ -115,18 +116,20 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     trustedOrigins: trustedOrigins.length > 0 ? trustedOrigins : undefined,
   });
 
-  betterAuthCached = {
-    baseURL,
-    databaseConnectionString,
-    environment: env.ENVIRONMENT,
-    mailBinding: env.MAIL,
-    mailFromAddress: senderAddress?.email,
-    mailFromName: senderAddress?.name,
-    origins,
-    requireEmailVerification,
-    secret,
-    value: auth,
-  };
+  if (!requestOwnedPool) {
+    betterAuthCached = {
+      baseURL,
+      databaseConnectionString,
+      environment: env.ENVIRONMENT,
+      mailBinding: env.MAIL,
+      mailFromAddress: senderAddress?.email,
+      mailFromName: senderAddress?.name,
+      origins,
+      requireEmailVerification,
+      secret,
+      value: auth,
+    };
+  }
 
   return auth;
 }

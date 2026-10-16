@@ -8,13 +8,16 @@ Actions use version tags, not commit-hash references.
 
 Automatic checks run in separate jobs:
 
-| Job               | Checks                                                                                                                                                                         |
-| --- | --- |
-| `changes`         | Select frontend/backend lanes from changed paths.                                                                                                                              |
-| `baseline`        | Full-history secret scan, documentation checks, and routing regression tests; always runs.                                                                                     |
-| `frontend-fast`   | App formatting, types, bindings, lint, coverage, production build, and public-site checks.                                                                                     |
-| `cloudflare-fast` | Spelling, contracts, Worker bindings, package/Worker types, tests and builds, strict lint, dead code, formatting, drift/routing regressions, and PostgreSQL integration tests. |
-| `ci-gate`         | Require baseline and every selected lane to succeed; reject failures, cancellations, and unexpectedly skipped jobs.                                                            |
+- `changes`: select frontend/backend lanes from changed paths.
+- `baseline`: full-history secret scan, documentation checks, and routing
+  regression tests; always runs.
+- `frontend-fast`: app formatting, types, bindings, lint, coverage, production
+  build, and public-site checks.
+- `cloudflare-fast`: spelling, contracts, Worker bindings, package/Worker types,
+  tests and builds, strict lint, dead code, formatting, drift/routing regressions,
+  and PostgreSQL integration tests.
+- `ci-gate`: require baseline and every selected lane to succeed; reject
+  failures, cancellations, and unexpectedly skipped jobs.
 
 The application lanes run independently after routing. Documentation-only changes
 run baseline and the final gate without installing application dependencies.

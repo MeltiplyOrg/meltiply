@@ -1,4 +1,4 @@
-name: Public CI
+name: CI
 
 on:
   push:
@@ -9,66 +9,159 @@ permissions:
   contents: read
 
 concurrency:
-  group: public-ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  CI: "true"
+  WRANGLER_SEND_METRICS: "false"
+
 jobs:
-  quality:
-    # Run this workflow only for publicly accessible repositories.
-    if: github.event.repository.private == false
+  changes:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      CI: "true"
-      WRANGLER_SEND_METRICS: "false"
-      MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable
-      MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.route.outputs.frontend }}
+      cloudflare: ${{ steps.route.outputs.cloudflare }}
     steps:
-      - name: Check out public source and history without retaining credentials
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24.18.0"
+      - name: Select automatic fast lanes
+        id: route
+        run: node scripts/ci/github-routing.mjs
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
         with:
-          bun-version: "1.4.2"
-
-      - name: Install checksum-verified quality tools
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.18.0"
+      - name: Scan full history for secrets
         run: |
           ./scripts/ci/install-quality-tool.sh gitleaks
-          ./scripts/ci/install-quality-tool.sh typos
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Scan the public Git history for secrets
-        run: ./scripts/ci/gitleaks-check.sh --all-history
-
-      - name: Install locked workspace dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Start isolated local PostgreSQL
-        run: ./scripts/cloudflare-local/compose.sh up -d postgres
-
-      - name: Check spelling
-        run: typos --config .typos.toml
-
-      - name: Check generated Worker bindings
+          export PATH="$HOME/.local/bin:$PATH"
+          ./scripts/ci/gitleaks-check.sh --all-history
+      - name: Check documentation and routing behavior
         run: |
+          node --test scripts/ci/docs-links.test.mjs scripts/ci/github-routing.test.mjs
+          node scripts/ci/docs-links.mjs
+
+  frontend-fast:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Format, type, bindings, lint, coverage, and production builds
+        run: |
+          bun run --cwd frontend/app format-check
+          bun run --cwd frontend/app type-check
+          bun run --cwd frontend/app cf-typegen:check
+          bun run --cwd frontend/app lint
+          bun run --cwd frontend/app test --coverage
+          bun run --cwd frontend/app build:production
+          bun run --cwd frontend/public check
+
+  cloudflare-fast:
+    needs: changes
+    if: needs.changes.outputs.cloudflare == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Check CI file formatting
+        run: bunx --no-install vp fmt scripts/ci/github-routing.mjs scripts/ci/github-routing.test.mjs .github/workflows/ci.yml .github/actions/install-workspace/action.yml docs/public-ci.md --check
+      - name: Start isolated PostgreSQL
+        run: ./scripts/cloudflare-local/compose.sh up -d postgres
+      - name: Check spelling
+        run: |
+          ./scripts/ci/install-quality-tool.sh typos
+          export PATH="$HOME/.local/bin:$PATH"
+          typos --config .typos.toml
+      - name: Validate contracts and generated Worker bindings
+        run: |
+          bun run contract:check
           bun run workers:types
           git diff --exit-code -- workers/api/worker-configuration.d.ts workers/automation/worker-configuration.d.ts workers/state/worker-configuration.d.ts
-
-      - name: Run existing application and repository quality gate
-        run: bun run cloudflare:check
-
-      - name: Reject uncommitted generated contract changes
-        run: git diff --exit-code -- packages/contracts
-
-      - name: Stop isolated local PostgreSQL
+      - name: Restore content-addressed build tasks
+        uses: actions/cache/restore@v5
+        with:
+          path: node_modules/.vite/task-cache
+          key: vite-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vite-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**') }}-
+      - name: Type-check, test, and build packages and Workers
+        run: |
+          bunx vp run --cache --filter './packages/*' --filter './workers/*' --concurrency-limit 1 type-check
+          bunx vp run --filter './packages/*' --filter './workers/*' --concurrency-limit 1 test
+          bunx vp run --cache --filter './packages/*' --filter './workers/*' --concurrency-limit 1 build
+      - name: Save successful build tasks
+        uses: actions/cache/save@v5
+        with:
+          path: node_modules/.vite/task-cache
+          key: vite-v1-${{ runner.os }}-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Repository fast checks
+        run: |
+          bun run lint
+          bun run lint:dead
+          bun run test:wrangler-drift
+          bun run test:frontend-directives
+          bun run format-check:cloudflare
+          bunx --no-install vp fmt .github/workflows/ci.yml .github/actions/install-workspace/action.yml docs/public-ci.md --check
+          git diff --exit-code -- packages/contracts
+          bun run test:ci-routing
+          bun run test:ci-gate
+      - name: PostgreSQL integration tests
+        env:
+          MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: bun run test:integration
+      - name: Stop isolated PostgreSQL
         if: always()
         run: ./scripts/cloudflare-local/database.sh stop
+
+  ci-gate:
+    needs: [changes, baseline, frontend-fast, cloudflare-fast]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every selected lane to pass
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          BASELINE: ${{ needs.baseline.result }}
+          FRONTEND_SELECTED: ${{ needs.changes.outputs.frontend }}
+          FRONTEND: ${{ needs.frontend-fast.result }}
+          CLOUDFLARE_SELECTED: ${{ needs.changes.outputs.cloudflare }}
+          CLOUDFLARE: ${{ needs.cloudflare-fast.result }}
+        run: |
+          test "$CHANGES" = success
+          test "$BASELINE" = success
+          if [ "$FRONTEND_SELECTED" = true ]; then
+            test "$FRONTEND" = success
+          else
+            test "$FRONTEND" = skipped
+          fi
+          if [ "$CLOUDFLARE_SELECTED" = true ]; then
+            test "$CLOUDFLARE" = success
+          else
+            test "$CLOUDFLARE" = skipped
+          fi

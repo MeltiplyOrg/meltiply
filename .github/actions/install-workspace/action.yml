@@ -1,0 +1,21 @@
+name: Install workspace
+description: Install pinned runtimes and locked dependencies using the Bun download cache.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v6
+      with:
+        node-version: "24.18.0"
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: "1.4.2"
+    - name: Restore Bun downloads
+      uses: actions/cache@v5
+      with:
+        path: ~/.bun/install/cache
+        key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.2-${{ hashFiles('bun.lock', 'bunfig.toml', 'package.json', 'patches/**') }}
+        restore-keys: |
+          bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.2-
+    - name: Install locked workspace
+      shell: bash
+      run: bun install --frozen-lockfile

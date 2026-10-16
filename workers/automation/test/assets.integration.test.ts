@@ -11,7 +11,11 @@ import {
   ProviderRegistry,
 } from "@meltiply/providers";
 import type { EffectTransactionClient, Queryable } from "@meltiply/database";
-import { analyticsTerminalAgeSeconds, COMMUNITY_LIMITS, mediaUploadMaximum } from "@meltiply/domain";
+import {
+  analyticsTerminalAgeSeconds,
+  COMMUNITY_LIMITS,
+  mediaUploadMaximum,
+} from "@meltiply/domain";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { createApiApp } from "../../api/src/app";

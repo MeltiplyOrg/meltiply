@@ -320,7 +320,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       withSystemTransactionEffect(env, (client) =>
         Effect.gen(function* () {
           yield* client.query(
-            "DELETE FROM assets WHERE org_id = $1 AND title LIKE 'query-budget-upload-%'",
+            "DELETE FROM assets WHERE org_id = $1 AND title LIKE 'Query budget upload %'",
             [queryBudgetClaims.organizationId],
           );
           yield* client.query(

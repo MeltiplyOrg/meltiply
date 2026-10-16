@@ -2968,6 +2968,8 @@ describeIntegration("post-owned media retention with PostgreSQL", () => {
       attachmentIds: [abandoned.assetId],
       defaultText: "Draft whose multipart upload was abandoned",
     });
+    // Keep the release delta observable independently of any earlier scenario.
+    await setRecordedUsage(67_108_864);
     const usageBefore = await recordedUsageBytes();
 
     // Time control: the session's own deadline is the only clock the abort

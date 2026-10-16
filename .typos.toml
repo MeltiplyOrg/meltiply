@@ -16,3 +16,17 @@ fpr = "fpr"
 publicaly = "publicaly"
 trak = "trak"
 unparseable = "unparseable"
+
+# Preserve upstream legal text verbatim, including its original spelling.
+[type.cc-by-license]
+extend-glob = ["LICENSES/CC-BY-3.0.txt"]
+
+[type.cc-by-license.extend-words]
+MERCHANTIBILITY = "MERCHANTIBILITY"
+
+[type.python-license]
+extend-glob = ["LICENSES/python-argparse.txt"]
+
+[type.python-license.extend-words]
+Stichting = "Stichting"
+Mathematisch = "Mathematisch"

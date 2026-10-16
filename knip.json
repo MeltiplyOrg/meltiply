@@ -35,5 +35,5 @@
   },
   "ignore": [".agents/**", "scripts/cloudflare-local/k6/**"],
   "ignoreDependencies": ["cloudflare", "typescript-language-server", "wrangler"],
-  "ignoreBinaries": ["tailscale", "tofu"]
+  "ignoreBinaries": ["tofu"]
 }

@@ -424,7 +424,7 @@ export function idempotencyKey(c: Context<ApiWorkerEnvironment>): string {
  * @returns Raw body string.
  * @throws {CoreApiError} if Content-Length or actual body exceeds maximumBytes.
  */
-export async function rawBody(
+async function rawBody(
   request: Request,
   code: string,
   message: string,

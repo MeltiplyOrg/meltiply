@@ -15,37 +15,70 @@ const successSchema = z.object({
   input: z.object({ bytes: z.number(), sha256: z.string() }),
   job_id: z.string(),
   media: z.object({
-    animated: z.boolean(), content_type: z.string(), duration_seconds: z.number().nullable(),
-    frame_count: z.number().nullable(), has_audio: z.boolean(), height: z.number().nullable(), width: z.number().nullable(),
+    animated: z.boolean(),
+    content_type: z.string(),
+    duration_seconds: z.number().nullable(),
+    frame_count: z.number().nullable(),
+    has_audio: z.boolean(),
+    height: z.number().nullable(),
+    width: z.number().nullable(),
   }),
-  output: z.object({ bytes: z.number(), content_type: z.string(), etag: z.string().nullable(), sha256: z.string() }).nullable(),
+  output: z
+    .object({
+      bytes: z.number(),
+      content_type: z.string(),
+      etag: z.string().nullable(),
+      sha256: z.string(),
+    })
+    .nullable(),
   replayed: z.boolean().optional(),
   result: z.enum(["optimized", "original_compatible"]),
   status: z.literal("succeeded"),
 });
-const failureSchema = z.object({ error: z.object({ code: z.string(), message: z.string(), retryable: z.boolean() }) });
+const failureSchema = z.object({
+  error: z.object({ code: z.string(), message: z.string(), retryable: z.boolean() }),
+});
 
 /** Addresses the Compose processor over its private network; bucket credentials never enter the processor. */
 export class MediaProcessorContainer extends DurableObject<{ PROCESSOR_JOB_TOKEN: string }> {
   /** Validates jobs and engine responses, retaining the Cloudflare adapter's failure classification and deadline. */
   async process(job: NativeProcessorJob): Promise<MediaProcessorRpcOutcome> {
     const invalid = validateJob(job);
-    if (invalid) return { ok: false, error: { code: "invalid_request", message: invalid, retryable: false } };
+    if (invalid)
+      return { ok: false, error: { code: "invalid_request", message: invalid, retryable: false } };
     try {
       const response = await fetch("http://127.0.0.1:8082/process", {
-        method: "POST", headers: { authorization: `Bearer ${this.env.PROCESSOR_JOB_TOKEN}`, "content-type": "application/json" },
-        body: JSON.stringify(job), signal: AbortSignal.timeout(PROCESSOR_CONTAINER_TIMEOUT_MS),
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.env.PROCESSOR_JOB_TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(job),
+        signal: AbortSignal.timeout(PROCESSOR_CONTAINER_TIMEOUT_MS),
       });
       const payload: unknown = await response.json();
       if (!response.ok) return { ok: false, error: failureSchema.parse(payload).error };
       return { ok: true, result: successSchema.parse(payload) };
     } catch {
-      return { ok: false, error: { code: "engine_error", message: "The self-hosted processor could not complete the job.", retryable: true } };
+      return {
+        ok: false,
+        error: {
+          code: "engine_error",
+          message: "The self-hosted processor could not complete the job.",
+          retryable: true,
+        },
+      };
     }
   }
 }
 
-type Delivery = { id: string; body: unknown; content_type: string; created: number; attempts: number };
+type Delivery = {
+  id: string;
+  body: unknown;
+  content_type: string;
+  created: number;
+  attempts: number;
+};
 
 /** Keeps the canonical automation handler and exposes private RPC for durable host delivery and schedules. */
 export default class SelfhostAutomation extends AutomationEntrypoint {
@@ -56,25 +89,47 @@ export default class SelfhostAutomation extends AutomationEntrypoint {
     let retryBatch: { retry: boolean; delaySeconds?: number } = { retry: false };
     let ackAll = false;
     const messages = rows.map((row) => ({
-      id: row.id, timestamp: new Date(row.created), attempts: row.attempts,
-      body: row.content_type === "bytes" && typeof row.body === "string"
-        ? Uint8Array.from(atob(row.body), (character) => character.charCodeAt(0)).buffer : row.body,
-      ack: () => { if (!retryMessages.some((retry) => retry.msgId === row.id)) explicitAcks.push(row.id); },
+      id: row.id,
+      timestamp: new Date(row.created),
+      attempts: row.attempts,
+      body:
+        row.content_type === "bytes" && typeof row.body === "string"
+          ? Uint8Array.from(atob(row.body), (character) => character.charCodeAt(0)).buffer
+          : row.body,
+      ack: () => {
+        if (
+          !explicitAcks.includes(row.id) &&
+          !retryMessages.some((retry) => retry.msgId === row.id)
+        )
+          explicitAcks.push(row.id);
+      },
       retry: (options?: { delaySeconds?: number }) => {
-        if (!explicitAcks.includes(row.id)) retryMessages.push({ msgId: row.id, ...options });
+        if (
+          !explicitAcks.includes(row.id) &&
+          !retryMessages.some((retry) => retry.msgId === row.id)
+        )
+          retryMessages.push({ msgId: row.id, ...options });
       },
     }));
     let outcome = "ok";
     try {
       await this.queue({
-        queue, messages, metadata: { metrics },
-        ackAll: () => { if (!retryBatch.retry) ackAll = true; },
-        retryAll: (options?: { delaySeconds?: number }) => { if (!ackAll) retryBatch = { retry: true, ...options }; },
+        queue,
+        messages,
+        metadata: { metrics },
+        ackAll: () => {
+          if (!retryBatch.retry) ackAll = true;
+        },
+        retryAll: (options?: { delaySeconds?: number }) => {
+          if (!ackAll) retryBatch = { retry: true, ...options };
+        },
       });
     } catch {
       outcome = "exception";
     }
-    if (ackAll) for (const row of rows) if (!retryMessages.some((retry) => retry.msgId === row.id)) explicitAcks.push(row.id);
+    if (ackAll)
+      for (const row of rows)
+        if (!retryMessages.some((retry) => retry.msgId === row.id)) explicitAcks.push(row.id);
     return { outcome, explicitAcks, retryMessages, retryBatch };
   }
 
@@ -82,7 +137,13 @@ export default class SelfhostAutomation extends AutomationEntrypoint {
   async runScheduled(cron: string, scheduledTime: number) {
     let retry = true;
     try {
-      await this.scheduled({ cron, scheduledTime, noRetry() { retry = false; } });
+      await this.scheduled({
+        cron,
+        scheduledTime,
+        noRetry() {
+          retry = false;
+        },
+      });
       return { outcome: "ok" };
     } catch {
       return { outcome: retry ? "exception" : "ok" };

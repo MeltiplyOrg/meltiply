@@ -10,7 +10,7 @@ RUN bun install --frozen-lockfile
 RUN npm ci --prefix scripts/selfhost --ignore-scripts
 RUN bun x --no-install tsc --project scripts/selfhost/tsconfig.json
 RUN bun run --cwd frontend/app build:production && bun run --cwd frontend/public build
-RUN node scripts/selfhost/build.mjs
+RUN node scripts/selfhost/build.mjs && node scripts/selfhost/notices.mjs
 
 FROM node:24.18.0-bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libatomic1 && rm -rf /var/lib/apt/lists/*
@@ -19,7 +19,7 @@ ENV NODE_ENV=production SELFHOST_DATA=/data
 COPY scripts/selfhost/package.json scripts/selfhost/package-lock.json ./scripts/selfhost/
 RUN npm ci --prefix scripts/selfhost --omit=dev && npm cache clean --force
 COPY --from=build /source/dist/selfhost ./dist/selfhost
-COPY scripts/selfhost/*.mjs ./scripts/selfhost/
+COPY scripts/selfhost/server.mjs scripts/selfhost/control.mjs scripts/selfhost/admin.mjs scripts/selfhost/jobs.mjs scripts/selfhost/configure.mjs ./scripts/selfhost/
 COPY LICENSE* THIRD_PARTY_NOTICES.md ./
 RUN mkdir /data && chown node:node /data
 USER node

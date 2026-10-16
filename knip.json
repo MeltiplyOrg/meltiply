@@ -38,6 +38,7 @@
         "automation.ts",
         "bindings.ts",
         "build.mjs",
+        "notices.mjs",
         "configure.mjs",
         "server.mjs",
         "smoke.mjs",

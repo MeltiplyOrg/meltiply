@@ -50,9 +50,18 @@ export class JobStore {
     const now = this.now();
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const insert = this.db.prepare("INSERT INTO jobs (id, queue, body, content_type, created, available) VALUES (?, ?, ?, ?, ?, ?)");
+      const insert = this.db.prepare(
+        "INSERT INTO jobs (id, queue, body, content_type, created, available) VALUES (?, ?, ?, ?, ?, ?)",
+      );
       for (const row of rows) {
-        insert.run(randomUUID(), queue, row.body, row.contentType, now, now + row.delaySeconds * 1000);
+        insert.run(
+          randomUUID(),
+          queue,
+          row.body,
+          row.contentType,
+          now,
+          now + row.delaySeconds * 1000,
+        );
       }
       this.db.exec("COMMIT");
     } catch (error) {
@@ -68,9 +77,22 @@ export class JobStore {
     try {
       const previous = this.db.prepare("SELECT slot FROM schedules WHERE name = ?").get(name);
       if (!previous || previous.slot < slot) {
-        this.db.prepare("INSERT INTO schedules VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET slot = excluded.slot").run(name, slot);
-        this.db.prepare("INSERT INTO jobs (id, queue, body, content_type, created, available) VALUES (?, ?, ?, 'json', ?, ?)")
-          .run(randomUUID(), name, JSON.stringify({ cron, scheduledTime: slot * period }), this.now(), this.now());
+        this.db
+          .prepare(
+            "INSERT INTO schedules VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET slot = excluded.slot",
+          )
+          .run(name, slot);
+        this.db
+          .prepare(
+            "INSERT INTO jobs (id, queue, body, content_type, created, available) VALUES (?, ?, ?, 'json', ?, ?)",
+          )
+          .run(
+            randomUUID(),
+            name,
+            JSON.stringify({ cron, scheduledTime: slot * period }),
+            this.now(),
+            this.now(),
+          );
       }
       this.db.exec("COMMIT");
     } catch (error) {
@@ -85,12 +107,21 @@ export class JobStore {
     if (!config || config.deadLetter) return [];
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const rows = this.db.prepare("SELECT * FROM jobs WHERE queue = ? AND available <= ? ORDER BY available, created LIMIT ?")
+      const rows = this.db
+        .prepare(
+          "SELECT * FROM jobs WHERE queue = ? AND available <= ? ORDER BY available, created LIMIT ?",
+        )
         .all(queue, this.now(), config.maxBatchSize ?? 1);
-      const lease = this.db.prepare("UPDATE jobs SET available = ?, attempts = attempts + 1 WHERE id = ?");
+      const lease = this.db.prepare(
+        "UPDATE jobs SET available = ?, attempts = attempts + 1 WHERE id = ?",
+      );
       for (const row of rows) lease.run(this.now() + 900000, row.id);
       this.db.exec("COMMIT");
-      return rows.map((row) => ({ ...row, attempts: row.attempts + 1, body: JSON.parse(row.body) }));
+      return rows.map((row) => ({
+        ...row,
+        attempts: row.attempts + 1,
+        body: JSON.parse(row.body),
+      }));
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -101,18 +132,30 @@ export class JobStore {
   settle(queue, rows, result) {
     const config = this.queues[queue];
     const acks = new Set(result.explicitAcks ?? []);
-    const retries = new Map((result.retryMessages ?? []).map((retry) => [retry.msgId, retry.delaySeconds]));
+    const retries = new Map(
+      (result.retryMessages ?? []).map((retry) => [retry.msgId, retry.delaySeconds]),
+    );
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const row of rows) {
-        const retry = !acks.has(row.id) && (result.outcome !== "ok" || result.retryBatch?.retry || retries.has(row.id));
+        const retry =
+          !acks.has(row.id) &&
+          (result.outcome !== "ok" || result.retryBatch?.retry || retries.has(row.id));
         if (!retry) {
           this.db.prepare("DELETE FROM jobs WHERE id = ?").run(row.id);
         } else if (row.attempts > config.maxRetries) {
-          this.db.prepare("UPDATE jobs SET queue = ?, available = ? WHERE id = ?").run(config.deadLetterQueue, this.now(), row.id);
+          this.db
+            .prepare("UPDATE jobs SET queue = ?, available = ? WHERE id = ?")
+            .run(config.deadLetterQueue, this.now(), row.id);
         } else {
-          const delay = retries.get(row.id) ?? result.retryBatch?.delaySeconds ?? config.retryDelay ?? Math.min(3600, 2 ** row.attempts);
-          this.db.prepare("UPDATE jobs SET available = ? WHERE id = ?").run(this.now() + delay * 1000, row.id);
+          const delay =
+            retries.get(row.id) ??
+            result.retryBatch?.delaySeconds ??
+            config.retryDelay ??
+            Math.min(3600, 2 ** row.attempts);
+          this.db
+            .prepare("UPDATE jobs SET available = ? WHERE id = ?")
+            .run(this.now() + delay * 1000, row.id);
         }
       }
       this.db.exec("COMMIT");
@@ -124,13 +167,23 @@ export class JobStore {
 
   /** Returns aggregate counts without exposing message bodies or credentials. */
   counts() {
-    return this.db.prepare("SELECT queue, count(*) AS count FROM jobs GROUP BY queue ORDER BY queue").all();
+    return this.db
+      .prepare("SELECT queue, count(*) AS count FROM jobs GROUP BY queue ORDER BY queue")
+      .all();
   }
 
   /** Supplies queue-handler metadata from committed backlog, including leased messages and delayed work. */
   metrics(queue) {
-    const row = this.db.prepare("SELECT count(*) AS count, coalesce(sum(length(CAST(body AS BLOB))), 0) AS bytes, min(created) AS oldest FROM jobs WHERE queue = ?").get(queue);
-    return { backlogCount: row.count, backlogBytes: row.bytes, ...(row.oldest === null ? {} : { oldestMessageTimestamp: new Date(row.oldest) }) };
+    const row = this.db
+      .prepare(
+        "SELECT count(*) AS count, coalesce(sum(length(CAST(body AS BLOB))), 0) AS bytes, min(created) AS oldest FROM jobs WHERE queue = ?",
+      )
+      .get(queue);
+    return {
+      backlogCount: row.count,
+      backlogBytes: row.bytes,
+      ...(row.oldest === null ? {} : { oldestMessageTimestamp: new Date(row.oldest) }),
+    };
   }
 
   /** Requeues a bounded operator-selected DLQ batch, resetting its retry budget atomically. */
@@ -139,7 +192,10 @@ export class JobStore {
     if (!config?.deadLetter || !Number.isInteger(limit) || limit < 1 || limit > 1000) {
       throw new TypeError("Expected a dead-letter queue and a limit between 1 and 1000");
     }
-    return this.db.prepare("UPDATE jobs SET queue = ?, attempts = 0, available = ? WHERE id IN (SELECT id FROM jobs WHERE queue = ? ORDER BY created LIMIT ?)")
+    return this.db
+      .prepare(
+        "UPDATE jobs SET queue = ?, attempts = 0, available = ? WHERE id IN (SELECT id FROM jobs WHERE queue = ? ORDER BY created LIMIT ?)",
+      )
       .run(config.source, this.now(), queue, limit).changes;
   }
 

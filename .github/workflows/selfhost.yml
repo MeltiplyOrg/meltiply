@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "scripts/selfhost/**"
+      - "scripts/ci/supply-chain.mjs"
       - "compose.selfhost.yml"
       - ".dockerignore"
       - ".github/workflows/selfhost.yml"
@@ -13,7 +14,17 @@ on:
       - "bun.lock"
       - "package.json"
   push:
-    branches: ["feat/docker-compose-selfhost"]
+    paths:
+      - "scripts/selfhost/**"
+      - "scripts/ci/supply-chain.mjs"
+      - "compose.selfhost.yml"
+      - ".dockerignore"
+      - ".github/workflows/selfhost.yml"
+      - "workers/**"
+      - "packages/**"
+      - "frontend/**"
+      - "bun.lock"
+      - "package.json"
   release:
     types: [published]
   workflow_dispatch:
@@ -83,13 +94,20 @@ jobs:
           cache-from: type=gha,scope=selfhost-processor
           cache-to: type=gha,mode=max,scope=selfhost-processor
       - name: Validate durable broker behavior
-        run: docker run --rm --entrypoint node "${SELFHOST_IMAGE_PREFIX}-runtime:ci" --test scripts/selfhost/jobs.test.mjs
+        run: docker run --rm -v "$PWD/scripts/selfhost/jobs.test.mjs:/app/scripts/selfhost/jobs.test.mjs:ro" --entrypoint node "${SELFHOST_IMAGE_PREFIX}-runtime:ci" --test scripts/selfhost/jobs.test.mjs
       - name: Start complete production deployment
         run: |
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification config --quiet
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification up -d --no-build --wait --wait-timeout 240
       - name: Exercise built application, email, storage, jobs, workflows, and restart recovery
         run: node scripts/selfhost/smoke.mjs
+      - uses: ./.github/actions/install-workspace
+      - name: Check the complete existing Cloudflare deployment target
+        run: |
+          npm ci --prefix scripts/selfhost --ignore-scripts
+          bun run setup --skip-dependencies --skip-image-pull
+          bun run cloudflare:check
+          bunx --no-install vp fmt scripts/selfhost compose.selfhost.yml .github/workflows/selfhost.yml knip.json --check
       - name: Publish only verified images
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish)
         env:

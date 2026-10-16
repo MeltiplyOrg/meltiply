@@ -21,5 +21,13 @@ const values = {
   MAIL_FROM_ADDRESS: ci ? "no-reply@example.com" : "",
   SELFHOST_SMTP_URL: ci ? "smtp://smtp-test:1025" : "",
 };
-await writeFile(path, Object.entries(values).map(([name, value]) => `${name}=${value}\n`).join(""), { mode: 0o600, flag: "wx" });
-console.log(`Created ${path} with private random credentials. Set MAIL_FROM_ADDRESS and SELFHOST_SMTP_URL before starting.`);
+await writeFile(
+  path,
+  Object.entries(values)
+    .map(([name, value]) => `${name}=${value}\n`)
+    .join(""),
+  { mode: 0o600, flag: "wx" },
+);
+console.log(
+  `Created ${path} with private random credentials. Set MAIL_FROM_ADDRESS and SELFHOST_SMTP_URL before starting.`,
+);

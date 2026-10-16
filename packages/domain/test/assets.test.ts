@@ -4,6 +4,7 @@ import {
   ASSET_UPLOAD_POLICY,
   type AssetPolicyError,
   isoDateTime,
+  mediaUploadMaximum,
   uploadLayout,
   validateUpload,
 } from "../src";
@@ -97,6 +98,34 @@ describe("asset upload policy", () => {
       );
     },
   );
+
+  it("resolves processing capacity only for accepted own MIME keys", () => {
+    expect(mediaUploadMaximum("image/jpeg")).toBe(25 * 1024 * 1024);
+    expect(mediaUploadMaximum("video/mp4")).toBe(500 * 1024 * 1024);
+    for (const contentType of [null, undefined, "", "text/plain", "constructor", "__proto__"]) {
+      expect(mediaUploadMaximum(contentType)).toBeNull();
+    }
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid upload and multipart sizes %s before reserving capacity",
+    (fileSize) => {
+      expect(() =>
+        validateUpload({ assetType: "image", contentType: "image/jpeg", fileSize, filename: "a.jpg" }),
+      ).toThrow(expect.objectContaining({ code: "validation_error" }));
+      expect(() => uploadLayout(fileSize)).toThrow(
+        expect.objectContaining({ code: "validation_error" }),
+      );
+    },
+  );
+
+  it("rejects a multipart layout beyond the object-store part ceiling", () => {
+    const maximum = ASSET_UPLOAD_POLICY.multipartPartSizeBytes * 10_000;
+    expect(uploadLayout(maximum)).toMatchObject({ strategy: "multipart", partCount: 10_000 });
+    expect(() => uploadLayout(maximum + 1)).toThrow(
+      expect.objectContaining({ code: "payload_too_large" }),
+    );
+  });
 
   it("selects the server-owned single/multipart boundary", () => {
     expect(uploadLayout(ASSET_UPLOAD_POLICY.multipartThresholdBytes)).toEqual({

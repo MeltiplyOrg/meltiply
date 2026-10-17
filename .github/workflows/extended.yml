@@ -39,7 +39,8 @@ jobs:
       - uses: actions/setup-go@v6
         if: inputs.lane == 'object-storage'
         with:
-          go-version: "1.24.2"
+          go-version: "1.26"
+          cache: false
       - name: Exercise S3-compatible storage against MinIO
         if: inputs.lane == 'object-storage'
         env:
@@ -49,8 +50,7 @@ jobs:
           go build -C "$RUNNER_TEMP/minio" -o "$RUNNER_TEMP/minio-server" .
           MINIO_ROOT_USER=s3-check-access-key MINIO_ROOT_PASSWORD=s3-check-secret-key \
             "$RUNNER_TEMP/minio-server" server "$RUNNER_TEMP/storage-check" >"$RUNNER_TEMP/minio.log" 2>&1 &
-          storage_pid=$!
-          trap 'kill "$storage_pid"' EXIT
+          echo "$!" >"$RUNNER_TEMP/storage-check.pid"
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then break; fi
             sleep 1
@@ -61,6 +61,29 @@ jobs:
         run: |
           ./scripts/cloudflare-local/compose.sh up -d postgres
           bun run cloudflare:check
+      - name: Exercise provider switching through application lifecycle
+        if: inputs.lane == 'object-storage'
+        env:
+          S3_CHECK_ENDPOINT: http://127.0.0.1:9000
+          PROCESSOR_JOB_TOKEN: storage-check-private-native-engine-token
+          PROCESSOR_PORT: "8082"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libvips-tools
+          node workers/automation/processor/engine/server.mjs >"$RUNNER_TEMP/processor.log" 2>&1 &
+          processor_pid=$!
+          trap 'kill "$processor_pid"' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8082/healthz; then break; fi
+            sleep 1
+          done
+          bun scripts/selfhost/storage-pipeline-check.ts
+      - name: Stop object storage origin
+        if: always() && inputs.lane == 'object-storage'
+        run: |
+          if [ -f "$RUNNER_TEMP/storage-check.pid" ]; then kill "$(cat "$RUNNER_TEMP/storage-check.pid")"; fi
+          mkdir -p artifacts/storage
+          cp "$RUNNER_TEMP/minio.log" "$RUNNER_TEMP/processor.log" artifacts/storage/ 2>/dev/null || true
       - name: Validate release, infrastructure, and dependency policies
         if: inputs.lane == 'cloudflare-extended'
         run: |

@@ -373,15 +373,16 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
 }: PostDetailDialogProps) {
   const { t } = useI18n();
   const post = useLatchedValue(livePost);
+  if (!post) return null;
 
-  const caption = post ? resolveRowCaption(post) : "";
-  const dateLabel = formatPostDate(post?.date);
-  const attachments = post?.post?.attachments ?? [];
-  const isDraft = post?.post?.status === "draft";
-  const cancellableIds = post ? resolveCancellableDistributionIds(post) : [];
+  const caption = resolveRowCaption(post);
+  const dateLabel = formatPostDate(post.date);
+  const attachments = post.post?.attachments ?? [];
+  const isDraft = post.post?.status === "draft";
+  const cancellableIds = resolveCancellableDistributionIds(post);
   const editable = Boolean(isDraft || cancellableIds.length > 0);
 
-  const status = post ? normalizePostStatus(post) : "draft";
+  const status = normalizePostStatus(post);
 
   return (
     <SideDialog
@@ -395,20 +396,15 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
         <span className="flex min-w-0 items-center gap-2">
           <span>{t("Posts")}</span>
           <span className="text-ink-3">/</span>
-          <code className="truncate text-(length:--font-size-micro) text-ink-3" title={post?.id}>
-            {post?.id.slice(0, 8)}
+          <code className="truncate text-(length:--font-size-micro) text-ink-3" title={post.id}>
+            {post.id.slice(0, 8)}
           </code>
         </span>
       }
       description={
-        post
-          ? dateLabel
-            ? t("{count} channel(s) · {date}", {
-                count: post.channels.length,
-                date: dateLabel,
-              })
-            : t("{count} channel(s)", { count: post.channels.length })
-          : null
+        dateLabel
+          ? t("{count} channel(s) · {date}", { count: post.channels.length, date: dateLabel })
+          : t("{count} channel(s)", { count: post.channels.length })
       }
       actions={
         <>
@@ -417,7 +413,7 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
               variant="ghost"
               size="sm"
               className="h-7 gap-1.5 text-(length:--font-size-control)"
-              onClick={() => post && onEdit(post.id)}
+              onClick={() => onEdit(post.id)}
             >
               <Edit3 className="size-3.5" />
               {t("Edit post")}
@@ -434,7 +430,6 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
                 <DropdownMenuItem
                   className="text-red focus:text-red"
                   onSelect={() =>
-                    post &&
                     onRequestDelete({
                       kind: "cancel-channels",
                       postId: post.id,
@@ -450,7 +445,6 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
               <DropdownMenuItem
                 className="text-red focus:text-red"
                 onSelect={() =>
-                  post &&
                   onRequestDelete({
                     kind: "delete-post",
                     postId: post.id,
@@ -469,7 +463,7 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
     >
       <div>
         <h2 className="text-[22px] font-semibold leading-snug tracking-tight text-ink">
-          {post?.post?.title || t("Post details")}
+          {post.post?.title || t("Post details")}
         </h2>
         <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-(length:--font-size-control)">
           <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
@@ -483,7 +477,7 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
             <Share2 className="size-3.5 text-ink-3" />
             {t("Channels")}
           </dt>
-          <dd className="text-ink">{post?.channels.length ?? 0}</dd>
+          <dd className="text-ink">{post.channels.length}</dd>
           {dateLabel && (
             <>
               <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
@@ -534,16 +528,15 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
         <section className="mt-6.5">
           <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
             {t("Channels")}
-            <span className="text-xs font-normal text-ink-3">{post?.channels.length ?? 0}</span>
+            <span className="text-xs font-normal text-ink-3">{post.channels.length}</span>
           </h3>
-          {post?.channels.map((item) => (
+          {post.channels.map((item) => (
             <ChannelOutcomeRow
               key={item.id}
               item={item}
               postAttachments={attachments.length}
               canMutate={canMutate}
               onRequestDelete={(ids) =>
-                post &&
                 onRequestDelete({
                   kind: "cancel-channels",
                   postId: post.id,

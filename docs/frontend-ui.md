@@ -13,9 +13,10 @@ changing a control.
 | Shared palette, Geist fonts, compact type/space/radius/shadow tokens       | `frontend/shared/tokens.css`                            |
 | Buttons, inputs, menus, dialogs, feedback, cards, tables, tabs, and badges | `frontend/shared/src/components/ui`                     |
 | Shared selection, status, and navigation atoms                             | `frontend/shared/src/components/atoms` and `primitives` |
-| Static Astro controls and brand mark                                       | `frontend/shared/src/components/public`                 |
 | Theme preference, consent, clipboard, notifications, motion infrastructure | Existing modules in `frontend/shared`                   |
+| Animated interface glyph behavior                                          | `frontend/shared/animated-icons/icon-motion-frame.tsx`  |
 | App navigation, jump search, Settings, Post/Channel data and behavior      | `frontend/app/src/components`                           |
+| Cross-surface workspace sign-out                                           | `frontend/app/src/hooks/use-workspace-sign-out.ts`      |
 | Documentation tree, article search, reading navigation                     | `frontend/public/src/components`                        |
 | Marketing copy and explicitly labeled sample content                       | `frontend/public/src`                                   |
 
@@ -36,6 +37,10 @@ theme tokens, and browser interop that utility classes cannot express. Do not
 add page-specific component selectors, copy long CSS blocks between pages, or
 recreate shared controls locally. Public Astro/Fumadocs adapters remain within
 their framework and resolve the same shared palette tokens.
+
+Retained animated glyphs use `IconMotionFrame` for common sizing, hover
+forwarding, and shared motion policy; each icon owns only its SVG and variants.
+Do not add another per-icon interaction wrapper.
 
 ## Visual language
 
@@ -70,9 +75,9 @@ not unsupported task-specific operators. Add/remove restores useful keyboard
 focus; portalled menus remain part of the disclosure interaction.
 
 Shared `TooltipProvider` uses the reference's 350ms hover delay. `TooltipContent`
-uses compact inverse-ink styling, 11px medium text, 5px corners, a 6px offset, and
-opacity-only motion; Radix retains focus, Escape, collision, and portal behavior.
-Keyboard hints never substitute for accessible control names.
+uses compact inverse-ink styling, 11px medium text, 5px corners, a 6px offset,
+and opacity-only motion; Radix retains focus, Escape, collision, and portal
+behavior. Keyboard hints never substitute for accessible control names.
 
 ## Reference page compositions
 
@@ -147,6 +152,11 @@ persuasion and reading respectively; public article search is not app-wide
 search. Native scrolling, keyboard navigation, fragments, and reduced-motion
 behavior must remain usable. Existing public scroll adapters release state
 during Astro navigation.
+
+`DocumentationSearchTrigger` in `frontend/public/src/components/search.tsx`
+owns the shared trigger used by documentation preferences and the landing page.
+Keep the article-index dialog canonical; do not add a second search button
+implementation or conflate it with the workspace jump palette.
 
 ## Change workflow
 

@@ -37,9 +37,9 @@ export function createSmoothScroll(): () => void {
 /**
  * Headless controller component that mounts document-level Lenis smooth scrolling on the root window.
  * Mounts in `main.tsx` and unmounts cleanly without rendering any DOM nodes.
- * When {@link useMotionPreference} reports effective low motion (manual toggle or OS
- * `prefers-reduced-motion`), Lenis is not created — or is destroyed mid-session if the
- * preference flips — so scrolling stays fully native; the effect re-runs on every
+ * When {@link useMotionPreference} reports reduced presentation or OS
+ * `prefers-reduced-motion`, Lenis is not created or is destroyed mid-session.
+ * Scrolling stays native; the effect re-runs on every
  * `lowMotion` change, and its cleanup destroys the previous instance.
  *
  * @returns null as this is a purely lifecycle-driven headless component.

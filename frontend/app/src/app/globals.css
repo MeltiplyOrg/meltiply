@@ -184,20 +184,6 @@
   }
 }
 
-.stream-caret {
-  display: inline-block;
-  width: 2px;
-  height: 1.1em;
-  background-color: var(--accent);
-  margin-left: 2px;
-  vertical-align: -0.15em;
-  border-radius: 1px;
-}
-
-.stream-caret.is-streaming {
-  animation: caret-blink 750ms ease-in-out infinite;
-}
-
 .hide-scrollbar {
   scrollbar-width: none;
   -ms-overflow-style: none;

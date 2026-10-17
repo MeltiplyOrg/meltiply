@@ -200,19 +200,6 @@ export type PostQueryParams = NonNullable<operations["listPosts"]["parameters"][
  */
 export type PaginationParams = Pick<PostQueryParams, "limit" | "offset">;
 
-export type DistributionStatus = components["schemas"]["DistributionStatus"];
-export const distributionStatuses = [
-  "scheduled",
-  "queued",
-  "processing",
-  "awaiting_provider",
-  "published",
-  "failed",
-  "cancel_requested",
-  "cancelled",
-  "needs_reconciliation",
-] as const satisfies readonly DistributionStatus[];
-
 export type Distribution = components["schemas"]["Distribution"];
 export type DistributionListResponse = components["schemas"]["DistributionListResponse"];
 export type UpdateDistributionInput = components["schemas"]["UpdateDistributionRequest"];

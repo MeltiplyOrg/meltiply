@@ -176,5 +176,3 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
 export function useTheme(): ThemeContextValue {
   return useContext(ThemeContext);
 }
-
-export { ThemeContext };

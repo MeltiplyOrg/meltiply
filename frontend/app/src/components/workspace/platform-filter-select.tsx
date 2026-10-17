@@ -30,7 +30,7 @@ export interface PlatformFilterSelectProps {
   /**
    * Trigger element rendered inside `DropdownMenuTrigger asChild` (typically a
    * `TopToolbarButton` whose `label` is {@link platformFilterLabel} output), so
-   * each screen keeps its own trigger geometry and label crossfade while the
+   * each screen keeps stable trigger geometry while the
    * button's accessible name stays identical to the visible selection text.
    */
   trigger: ReactElement;

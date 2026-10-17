@@ -56,7 +56,7 @@ interface SkeletonsTabProps {
  * The 390px frame and breakpoint pill cover the responsive gate; Capture and
  * Compare record placeholder vs resolved geometry; the Agentation toggle
  * mounts the visual feedback tool from the same control surface.
- * Theme segments anchor the shared ink transition to the activated button.
+ * Theme segments apply the same immediate Light/Dark/System preference as Settings.
  */
 export function SkeletonsTab({
   latency,

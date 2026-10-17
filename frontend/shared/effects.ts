@@ -16,9 +16,8 @@ export const effectEasing = "cubic-bezier(0.16, 1, 0.3, 1)";
 export const effectDurationMs = 240;
 
 /**
- * Lift-and-clear entrance: the WAAPI twin of the `fade-up` keyframe, extended
- * with a short blur settle. Elements keep their own styles as the final state,
- * so a cancelled reveal never hides content.
+ * Lift-and-clear entrance with a bounded blur settle. Elements keep their own
+ * styles as the final state, so a cancelled reveal never hides content.
  */
 export const revealEffectFrames: Keyframe[] = [
   { opacity: 0.45, transform: "translateY(10px)", filter: "blur(2px)" },

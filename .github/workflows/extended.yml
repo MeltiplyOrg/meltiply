@@ -12,6 +12,7 @@ on:
           - frontend-ui
           - cloudflare-integration
           - cloudflare-extended
+          - cloudflare-full
 
 permissions:
   contents: read
@@ -36,6 +37,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Validate complete application contract
+        if: inputs.lane == 'cloudflare-full'
+        run: bun run cloudflare:check
       - name: Validate release, infrastructure, and dependency policies
         if: inputs.lane == 'cloudflare-extended'
         run: |

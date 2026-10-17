@@ -17,7 +17,7 @@ function destroyScroll() {
  * Gives the public document longer wheel travel and slip (Facebook-FYP-like
  * inertia) without changing native touch, keyboard, or nested overflow
  * scrolling. A lower 0.1 lerp keeps a coasting tail and a raised wheel
- * multiplier covers more distance per gesture; live manual/OS low motion and
+ * multiplier covers more distance per gesture; root/OS reduced presentation and
  * theme capture release the controller.
  */
 function syncMotion() {

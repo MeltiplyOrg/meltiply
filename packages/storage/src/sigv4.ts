@@ -404,7 +404,14 @@ export class SigV4Signer {
    *
    * The S3 copy API always names the bucket in the path, even under
    * virtual-hosted addressing, so this is derived from the bucket rather than
-   * from {@link objectUrl}.
+   * from {@link objectUrl}. The leading slash is the AWS-specified form that
+   * S3, MinIO, and Ceph all accept; an origin that rejects it is
+   * non-conformant, and dropping the slash to satisfy one would break every
+   * conforming origin.
+   *
+   * Note: this primitive is not covered by `bun run storage:s3:check` because
+   * workerd's local S3 gateway reports `NoSuchBucket` for every copy-source
+   * shape it is given.
    *
    * @param key - Source object key.
    * @returns Encoded, bucket-qualified source path.

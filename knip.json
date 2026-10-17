@@ -42,6 +42,7 @@
         "notices.mjs",
         "configure.mjs",
         "server.mjs",
+        "s3-check.ts",
         "smoke.mjs",
         "admin.mjs",
         "jobs.test.mjs"

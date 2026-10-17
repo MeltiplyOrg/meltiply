@@ -112,6 +112,12 @@ Both providers offer identical behavior: uploads and multipart uploads, media
 processing, retention and brand-profile purges, and private media delivery all
 run through whichever provider is configured.
 
+`/api/v1/ready` validates storage _configuration_, not connectivity. It reports
+an unusable provider or endpoint as unavailable, but it never contacts the
+origin, so a container stays healthy while an S3 service is down. Watch the
+runtime logs and the first asset upload for that failure; `admin.mjs probe-write`
+/ `probe-read` also exercises the configured provider's storage.
+
 ## HTTPS and public callbacks
 
 Point the app's DNS name at the host, allow TCP 80/443 and optionally UDP 443, and add:

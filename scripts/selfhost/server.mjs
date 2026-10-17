@@ -192,6 +192,38 @@ function databaseUrl(role, password) {
   url.password = password;
   return url.href;
 }
+/**
+ * The only bindings the restart probe needs.
+ *
+ * It is granted object storage settings and nothing else: the probe must not
+ * receive the session secret, the provider credentials, or the operator secret
+ * that the API and Automation workers legitimately hold. The R2 binding itself
+ * arrives from this worker's own `r2Buckets` entry, not from here.
+ */
+function diagnosticBindings() {
+  const granted = {};
+  for (const name of [
+    "ENVIRONMENT",
+    "OBJECT_STORAGE_PROVIDER",
+    "R2_ACCESS_KEY_ID",
+    "R2_ACCOUNT_ID",
+    "R2_BUCKET_NAME",
+    "R2_ENDPOINT",
+    "R2_ENDPOINT_PATH_PREFIX",
+    "R2_SECRET_ACCESS_KEY",
+    "S3_ACCESS_KEY_ID",
+    "S3_BUCKET",
+    "S3_ENDPOINT",
+    "S3_FORCE_PATH_STYLE",
+    "S3_REGION",
+    "S3_SECRET_ACCESS_KEY",
+    "VERSION",
+  ]) {
+    if (bindings[name]) granted[name] = bindings[name];
+  }
+  return granted;
+}
+
 /** Points at immutable Wrangler output; imports/chunks are resolved by the runtime, never rebuilt at startup. */
 function worker(name) {
   const built = metadata[name];
@@ -204,7 +236,9 @@ function worker(name) {
     bindings:
       name === "api" || name === "automation"
         ? bindings
-        : { ENVIRONMENT: bindings.ENVIRONMENT, VERSION: bindings.VERSION },
+        : name === "diagnostics"
+          ? diagnosticBindings()
+          : { ENVIRONMENT: bindings.ENVIRONMENT, VERSION: bindings.VERSION },
   };
 }
 const proxySecret = randomBytes(32).toString("hex");

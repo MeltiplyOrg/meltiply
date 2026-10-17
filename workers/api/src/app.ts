@@ -16,8 +16,10 @@ import {
 } from "@meltiply/observability";
 import { Hono, type Context } from "hono";
 import { matchedRoutes } from "hono/route";
+import { bodyLimit } from "hono/body-limit";
 
 import { resolveActor, type ResolvedActor } from "./actor-resolution";
+import { activeOwnerIdentity } from "./auth-policy";
 import { checkAuthRateLimit, type AuthRateLimitResult } from "./better-auth";
 import {
   providerMediaRoutePrefix,
@@ -199,6 +201,8 @@ const readinessCacheTtlMilliseconds = 30_000;
  */
 function authRateLimitAction(path: string): string {
   if (path.startsWith("/api/auth/sign-in/")) return "sign-in";
+  if (path.startsWith("/api/auth/two-factor/")) return "two-factor";
+  if (path === "/api/auth/change-password") return "change-password";
   if (path.startsWith("/api/auth/sign-up/")) return "sign-up";
   if (path.startsWith("/api/auth/request-password-reset")) {
     return "request-password-reset";
@@ -250,7 +254,8 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   };
   const verifyJwtToken =
     dependencies.verifyJwtToken ??
-    (async (env: ApiWorkerEnv, token: string) => jwtVerifierFor(env)(token));
+    (async (env: ApiWorkerEnv, token: string) =>
+      activeOwnerIdentity(env, await jwtVerifierFor(env)(token)));
   const resolveRequestActor =
     dependencies.resolveActor ??
     (async (env: ApiWorkerEnv, identity: JwtIdentity, request: Request) =>
@@ -361,7 +366,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         applyCorsHeaders();
         c.header(
           "Access-Control-Allow-Headers",
-          "Authorization, Content-Type, X-Request-ID, X-Workspace-ID, Idempotency-Key, If-None-Match",
+          "Authorization, Content-Type, X-Request-ID, X-Workspace-ID, X-Setup-Secret, Idempotency-Key, If-None-Match",
         );
         c.header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
         c.header("Access-Control-Max-Age", "600");
@@ -373,6 +378,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   };
   app.use("/api/v1/*", corsMiddlewareFor(false));
   app.use("/api/auth/*", corsMiddlewareFor(true));
+  app.use("/api/auth/*", bodyLimit({ maxSize: 16 * 1024 }));
 
   // Operator surface: Cloudflare Access JWT on the dedicated operator hostname.
   app.use("/operator/v1/*", async (c, next) => {

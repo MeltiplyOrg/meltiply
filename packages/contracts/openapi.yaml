@@ -104,6 +104,216 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Readiness"
+  /api/auth/setup-status:
+    servers: &authServers
+      - url: http://localhost:8787
+      - url: https://staging.meltiply.com
+    get:
+      tags: [Auth]
+      operationId: getSetupStatus
+      security: []
+      summary: Read whether this installation has an owner
+      description: Returns only the initialized bit with Cache-Control no-store. Missing bootstrap configuration fails closed.
+      responses:
+        "200":
+          description: Installation status.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [initialized]
+                properties:
+                  initialized:
+                    type: boolean
+        "503":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/send-verification-email:
+    servers: *authServers
+    post:
+      tags: [Auth]
+      operationId: resendVerification
+      security: []
+      summary: Resend an owner verification link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              additionalProperties: false
+              properties:
+                email:
+                  type: string
+                  format: email
+                callbackURL:
+                  type: string
+                  format: uri
+      responses:
+        "200":
+          description: Verification request accepted without disclosing account existence.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatusResult"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/two-factor/enable:
+    servers: *authServers
+    post:
+      tags: [Auth]
+      operationId: enableTwoFactor
+      security:
+        - sessionCookie: []
+      summary: Begin password-reauthenticated authenticator enrollment
+      description: Returns a secret URI and backup codes once. TOTP remains disabled until verify-totp succeeds.
+      requestBody: &factorPasswordBody
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+      responses:
+        "200":
+          description: Pending authenticator and encrypted-at-rest backup codes.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [totpURI, backupCodes]
+                properties:
+                  method:
+                    type: string
+                    enum: [totp]
+                  totpURI:
+                    type: string
+                  backupCodes:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/two-factor/disable:
+    servers: *authServers
+    post:
+      tags: [Auth]
+      operationId: disableTwoFactor
+      security:
+        - sessionCookie: []
+      summary: Disable or cancel authenticator enrollment after password verification
+      requestBody: *factorPasswordBody
+      responses:
+        "200":
+          description: Authenticator disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatusResult"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/two-factor/generate-backup-codes:
+    servers: *authServers
+    post:
+      tags: [Auth]
+      operationId: generateBackupCodes
+      security:
+        - sessionCookie: []
+      summary: Replace all backup codes after password verification
+      requestBody: *factorPasswordBody
+      responses:
+        "200":
+          description: New one-use backup codes; previous codes are invalid.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [backupCodes]
+                properties:
+                  backupCodes:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/two-factor/verify-totp:
+    servers: *authServers
+    post:
+      tags: [Auth]
+      operationId: verifyTotp
+      security: []
+      summary: Confirm enrollment or complete a pending authenticator sign-in
+      description: Requires either a session cookie for enrollment or the signed pending-factor cookie from password sign-in.
+      requestBody: &factorCodeBody
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  minLength: 1
+                trustDevice:
+                  type: boolean
+                  default: false
+      responses: &factorVerifyResponses
+        "200":
+          description: Factor accepted and session established or enrollment confirmed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                  token:
+                    type: string
+                  user:
+                    $ref: "#/components/schemas/AuthUser"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/auth/two-factor/verify-backup-code:
+    servers: *authServers
+    post:
+      tags: [Auth]
+      operationId: verifyBackupCode
+      security: []
+      summary: Consume a backup code to complete a pending sign-in
+      description: Requires the signed pending-factor cookie. A consumed code cannot be reused.
+      requestBody: *factorCodeBody
+      responses: *factorVerifyResponses
   /api/auth/sign-in/email:
     servers:
       - url: http://localhost:8787
@@ -137,7 +347,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthTokenResult"
+                oneOf:
+                  - $ref: "#/components/schemas/AuthTokenResult"
+                  - type: object
+                    additionalProperties: false
+                    required: [twoFactorRedirect]
+                    properties:
+                      twoFactorRedirect:
+                        type: boolean
+                        const: true
+                      twoFactorMethods:
+                        type: array
+                        items:
+                          type: string
         "400":
           $ref: "#/components/responses/AuthError"
         "401":
@@ -165,6 +387,15 @@ paths:
         response header on GET /api/auth/get-session. Subject to the
         database-backed fixed-window authentication rate limit keyed by
         action and normalized email/IP.
+        This installation accepts exactly one owner; subsequent signup is forbidden.
+      parameters:
+        - name: X-Setup-Secret
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 32
+          description: Deployment-controlled bootstrap secret, used only before an owner exists.
       requestBody:
         required: true
         content:
@@ -182,6 +413,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthTokenResult"
         "400":
+          $ref: "#/components/responses/AuthError"
+        "403":
+          $ref: "#/components/responses/AuthError"
+        "503":
           $ref: "#/components/responses/AuthError"
         "422":
           $ref: "#/components/responses/AuthError"
@@ -2319,6 +2554,8 @@ components:
         updatedAt:
           type: string
           format: date-time
+        twoFactorEnabled:
+          type: boolean
     AuthSession:
       type: object
       additionalProperties: false
@@ -2434,7 +2671,7 @@ components:
         name:
           type: string
           minLength: 1
-          maxLength: 200
+          maxLength: 100
         email:
           type: string
           format: email

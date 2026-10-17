@@ -18,6 +18,7 @@ const values = {
   SELFHOST_DB_SYSTEM_PASSWORD: randomBytes(32).toString("hex"),
   SELFHOST_DB_AUTHENTICATED_PASSWORD: randomBytes(32).toString("hex"),
   BETTER_AUTH_SECRET: randomBytes(32).toString("hex"),
+  AUTH_SETUP_SECRET: randomBytes(32).toString("hex"),
   TOKEN_ENCRYPTION_KEY: randomBytes(32).toString("base64url"),
   SELFHOST_OPERATOR_SECRET: randomBytes(32).toString("hex"),
   PROCESSOR_JOB_TOKEN: randomBytes(32).toString("hex"),

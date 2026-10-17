@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { generatedCredentials, signUp, waitForWorkspace } from "./workspace-session";
+import { ownerCredentials, openOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 
 const protectedRoutes = ["/posts", "/channels"] as const;
 
@@ -112,7 +112,7 @@ for (const route of retiredRoutes) {
  * navigation and collapse remain usable without any Workspace menu.
  */
 test("shows Workspace identity without offering unsupported switching", async ({ page }) => {
-  await signUp(page, generatedCredentials());
+  await openOwnerWorkspace(page, ownerCredentials());
   await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
   await waitForWorkspace(page);
   const sidebar = page.locator("aside").first();

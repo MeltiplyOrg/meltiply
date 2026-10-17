@@ -2,6 +2,34 @@
   "schemaVersion": 1,
   "contractVersion": "1.0.0-target.0",
   "operations": {
+    "getSetupStatus": {
+      "state": "specified",
+      "evidenceAndGate": "Single-owner bootstrap implementation; hosted database and browser acceptance required."
+    },
+    "resendVerification": {
+      "state": "specified",
+      "evidenceAndGate": "Better Auth verification delivery; hosted database and browser acceptance required."
+    },
+    "enableTwoFactor": {
+      "state": "specified",
+      "evidenceAndGate": "Better Auth TOTP enrollment; hosted database and browser acceptance required."
+    },
+    "disableTwoFactor": {
+      "state": "specified",
+      "evidenceAndGate": "Password-reauthenticated factor removal; hosted database and browser acceptance required."
+    },
+    "generateBackupCodes": {
+      "state": "specified",
+      "evidenceAndGate": "Password-reauthenticated backup replacement; hosted database and browser acceptance required."
+    },
+    "verifyTotp": {
+      "state": "specified",
+      "evidenceAndGate": "Better Auth enrollment and sign-in verification; hosted database and browser acceptance required."
+    },
+    "verifyBackupCode": {
+      "state": "specified",
+      "evidenceAndGate": "One-use backup recovery; hosted database and browser acceptance required."
+    },
     "getHealth": {
       "state": "specified",
       "evidenceAndGate": "Workerd route and OpenAPI conformance tests pass; isolated preview conformance is still required."

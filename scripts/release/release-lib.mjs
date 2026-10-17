@@ -858,7 +858,7 @@ export function validateDatabaseEnvironment(environment) {
 
 /**
  * Computes the remote secret names each Worker requires for a release: common storage/encryption
- * keys, the Better Auth session secret for the API Worker, and
+ * keys, the session and first-owner bootstrap secrets for the API Worker, and
  * provider-specific credentials enabled in provider acceptance. Mail delivery uses the native
  * send_email binding, so no delivery credential is required.
  *
@@ -867,7 +867,7 @@ export function validateDatabaseEnvironment(environment) {
  */
 function requiredRemoteSecrets(spec) {
   const common = ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "TOKEN_ENCRYPTION_KEY"];
-  const api = [...common, "BETTER_AUTH_SECRET"];
+  const api = [...common, "AUTH_SETUP_SECRET", "BETTER_AUTH_SECRET"];
   const automation = [...common];
   for (const [provider, fields] of Object.entries(providerVariables)) {
     if (spec.provider_acceptance[provider]) {

@@ -16,7 +16,7 @@ import {
   provisionControlledChannels,
   type ControlledPlatform,
 } from "./publication-fixtures";
-import { signIn, signUpIsolatedWorkspace, waitForWorkspace } from "./workspace-session";
+import { signIn, openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 
 test.use({ screenshot: "only-on-failure", trace: "retain-on-failure" });
 test.setTimeout(240_000);
@@ -441,7 +441,7 @@ test("keeps a saved text-only draft across reload and a separate session", async
   page,
   browser,
 }) => {
-  const { credentials } = await signUpIsolatedWorkspace(page);
+  const { credentials } = await openIsolatedOwnerWorkspace(page);
   await openComposer(page);
 
   const caption = "Draft persistence regression caption";
@@ -474,7 +474,7 @@ test("keeps a saved text-only draft across reload and a separate session", async
 test("restores an unsaved new composition after a reload and clears it on save", async ({
   page,
 }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
   await openComposer(page);
 
   const caption = "Unsaved new composition survives reload";
@@ -506,7 +506,7 @@ test("restores an unsaved new composition after a reload and clears it on save",
  * and reports it as unsaved work instead of discarding it.
  */
 test("restores unsaved edits on a reopened saved draft after a reload", async ({ page }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
   await openComposer(page);
 
   const savedCaption = "Saved caption before the reload";
@@ -536,7 +536,7 @@ test("restores unsaved edits on a reopened saved draft after a reload", async ({
  * server Post, so the order read back is the persisted one.
  */
 test("uploads media in the composer and saves the ordered attachments", async ({ page }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
   await openComposer(page);
 
   const png = pngFixture();
@@ -571,7 +571,7 @@ test("uploads media in the composer and saves the ordered attachments", async ({
  * rest of the composition intact.
  */
 test("replaces and removes attachments without losing the caption", async ({ page }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
   await openComposer(page);
 
   const png = pngFixture();
@@ -619,7 +619,7 @@ test("replaces one attachment without changing the count, order, or channel sele
 }) => {
   // Four real uploads, two of them videos the processor has to probe.
   test.slow();
-  const { profileName } = await signUpIsolatedWorkspace(page);
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
   const [narrow, silent] = await attachChannels(page, request, profileName, [
     "instagram",
     "threads",
@@ -732,7 +732,7 @@ test("replaces one attachment without changing the count, order, or channel sele
  * otherwise finish the upload before the control could be reached.
  */
 test("cancels an upload that is still in flight", async ({ page, context }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
   const cdp = await context.newCDPSession(page);
   await cdp.send("Network.enable");
   await cdp.send("Network.emulateNetworkConditions", {
@@ -791,7 +791,7 @@ test("detaches an in-flight attachment without reattaching or leaking it", async
   context,
 }) => {
   await trackBlobUrls(page);
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
   await openComposer(page);
   const mutations = await watchPostMutations(page);
 
@@ -874,7 +874,7 @@ test("detaches an in-flight attachment without reattaching or leaking it", async
  * genuinely interrupted rather than faked.
  */
 test("reports a failed upload and retries it in place", async ({ page, context }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
   await openComposer(page);
 
   const png = pngFixture();
@@ -929,7 +929,7 @@ test("reports an actionable processing failure and blocks publishing", async ({
   page,
   request,
 }) => {
-  const { profileName } = await signUpIsolatedWorkspace(page);
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
   const [threads] = await attachChannels(page, request, profileName, ["threads"]);
   await openComposer(page);
 
@@ -970,7 +970,7 @@ test("identifies media-required channels before submitting text-only posts", asy
   page,
   request,
 }) => {
-  const { profileName } = await signUpIsolatedWorkspace(page);
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
   const [instagram] = await attachChannels(page, request, profileName, ["instagram"]);
   const mutations = await watchPostMutations(page);
 
@@ -1010,7 +1010,7 @@ test("identifies media-required channels before submitting text-only posts", asy
  * pause mutations before transmission rather than exercise failed-save handling.
  */
 test("keeps composer input and reports no saved state when saving fails", async ({ page }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
   await openComposer(page);
 
   const png = pngFixture();
@@ -1064,7 +1064,7 @@ test("reopens one Post with its ordered attachments and channel targets", async 
   browser,
   request,
 }) => {
-  const { credentials, profileName } = await signUpIsolatedWorkspace(page);
+  const { credentials, profileName } = await openIsolatedOwnerWorkspace(page);
   const [instagram, threads] = await attachChannels(page, request, profileName, [
     "instagram",
     "threads",
@@ -1152,7 +1152,7 @@ test("reopens one Post with its ordered attachments and channel targets", async 
  */
 test("reopens a draft whose provider options have no distribution", async ({ page, request }) => {
   test.slow();
-  const { profileName } = await signUpIsolatedWorkspace(page);
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
   const [channel] = await attachChannels(page, request, profileName, ["instagram"]);
   await presentChannelAsProvider(page, channel, "youtube");
   await reloadWithScopedProfile(page);
@@ -1226,7 +1226,7 @@ test("reopens a draft whose provider options have no distribution", async ({ pag
  * cannot be located by the shared caption it deliberately does not inherit.
  */
 test("keeps an enabled but blank channel caption blank across saves", async ({ page, request }) => {
-  const { profileName } = await signUpIsolatedWorkspace(page);
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
   const [channel] = await attachChannels(page, request, profileName, ["threads"]);
   await openComposer(page);
 
@@ -1271,7 +1271,7 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
  * attachment control is reachable and operable from the keyboard alone.
  */
 test("keeps the composer operable on a narrow screen with the keyboard", async ({ page }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
   await page.setViewportSize({ height: 844, width: 390 });
   await openComposer(page);
 
@@ -1320,7 +1320,7 @@ test("keeps the composer operable on a narrow screen with the keyboard", async (
  * other unknown path while signed in.
  */
 test("has no Media navigation and treats /media as an unknown route", async ({ page }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
 
   await expect(page.getByRole("button", { name: /media library/i })).toHaveCount(0);
   await page.goto("/media");
@@ -1341,7 +1341,7 @@ test("previews a camera-codec QuickTime upload as playable video and downloads t
   page,
   request,
 }) => {
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
 
   // The composer's own preview calls are the acceptance seam for the public
   // signing route: recording them from before the upload hands the run the exact

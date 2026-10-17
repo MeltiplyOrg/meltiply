@@ -312,6 +312,68 @@ fixtures:
     updated_at: 2026-01-01T01:01:00Z
 
 operations:
+  getSetupStatus:
+    success:
+      status: 200
+      body: { initialized: false }
+    errors:
+      - status: 503
+        body: *auth_error
+      - status: 429
+        body: *rate_limited_error
+  resendVerification:
+    request: { email: owner@example.test, callbackURL: "https://staging.meltiply.com/sign-in" }
+    success:
+      status: 200
+      body: { status: true }
+    errors:
+      - status: 400
+        body: *auth_error
+      - status: 429
+        body: *rate_limited_error
+  enableTwoFactor:
+    headers: *session_cookie
+    request: { password: contract-placeholder-not-a-credential }
+    success:
+      status: 200
+      body: { totpURI: "otpauth://totp/contract-placeholder", backupCodes: [contract-placeholder] }
+    errors:
+      - status: 401
+        body: *auth_error
+  disableTwoFactor:
+    headers: *session_cookie
+    request: { password: contract-placeholder-not-a-credential }
+    success:
+      status: 200
+      body: { status: true }
+    errors:
+      - status: 401
+        body: *auth_error
+  generateBackupCodes:
+    headers: *session_cookie
+    request: { password: contract-placeholder-not-a-credential }
+    success:
+      status: 200
+      body: { backupCodes: [contract-placeholder] }
+    errors:
+      - status: 401
+        body: *auth_error
+  verifyTotp:
+    request: { code: contract-placeholder, trustDevice: false }
+    success:
+      status: 200
+      body: { status: true }
+    errors:
+      - status: 401
+        body: *auth_error
+  verifyBackupCode:
+    request: { code: contract-placeholder, trustDevice: false }
+    success:
+      status: 200
+      body: { token: contract-placeholder, user: *auth_user }
+    errors:
+      - status: 401
+        body: *auth_error
   getHealth:
     success:
       status: 200
@@ -354,6 +416,8 @@ operations:
       - status: 429
         body: *rate_limited_error
   signUpWithEmail:
+    headers:
+      X-Setup-Secret: contract-placeholder-not-a-real-setup-secret
     request:
       name: Alpha Admin
       email: alpha-admin@example.test
@@ -367,6 +431,10 @@ operations:
         user: *auth_user
     errors:
       - status: 400
+        body: *auth_error
+      - status: 403
+        body: *auth_error
+      - status: 503
         body: *auth_error
       - status: 429
         body: *rate_limited_error

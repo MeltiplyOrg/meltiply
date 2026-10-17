@@ -11,6 +11,7 @@ on:
           - frontend-full
           - cloudflare-integration
           - cloudflare-extended
+          - auth-acceptance
 
 permissions:
   contents: read
@@ -35,6 +36,40 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Prepare generated auth contracts and formatting
+        if: inputs.lane == 'auth-acceptance'
+        run: |
+          bun run contract:generate
+          bun run contract:readiness:generate
+          bunx --no-install vp fmt frontend/app packages/auth packages/contracts workers/api scripts/selfhost .github/workflows/extended.yml .github/workflows/selfhost-ci.yml
+          mkdir -p artifacts/auth-prepared
+          git diff --name-only -z --diff-filter=ACM HEAD | tar --null -T - -czf artifacts/auth-prepared/prepared.tar.gz
+      - name: Check changed React surfaces
+        if: inputs.lane == 'auth-acceptance'
+        run: npx --yes react-doctor@latest --verbose --scope changed
+      - name: Run comprehensive application gate
+        if: inputs.lane == 'auth-acceptance'
+        run: |
+          ./scripts/cloudflare-local/compose.sh up -d postgres
+          bun run cloudflare:check
+      - name: Exercise first-run owner journeys in production images
+        if: inputs.lane == 'auth-acceptance'
+        env:
+          SELFHOST_IMAGE_PREFIX: local/meltiply
+          SELFHOST_IMAGE_TAG: auth-check
+          COMPOSE_PARALLEL_LIMIT: "1"
+        run: |
+          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+          node scripts/selfhost/configure.mjs --ci
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification build
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification up -d --wait --wait-timeout 240
+          node scripts/selfhost/smoke.mjs
+      - name: Stop owner acceptance deployment
+        if: always() && inputs.lane == 'auth-acceptance'
+        run: |
+          if test -f .env.selfhost; then
+            docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification down --volumes --remove-orphans
+          fi
       - name: Validate release, infrastructure, and dependency policies
         if: inputs.lane == 'cloudflare-extended'
         run: |

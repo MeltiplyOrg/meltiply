@@ -40,6 +40,7 @@ const stagingEnv = {
   ASSETS: {} as R2Bucket,
   AUTOMATION: {} as AutomationRelayStub,
   BETTER_AUTH_SECRET: "staging-auth-secret-32-chars-minimum",
+  AUTH_SETUP_SECRET: "staging-bootstrap-placeholder-not-a-real-secret",
   DB_AUTHENTICATED: {} as Hyperdrive,
   DB_SYSTEM: {} as Hyperdrive,
   ENVIRONMENT: "staging",
@@ -297,21 +298,13 @@ describe("API Worker foundation", () => {
     ).not.toThrow();
   });
 
-  it("requires Better Auth secret in staging", () => {
-    expect(() =>
-      validateProductionBindings({
-        ...stagingEnv,
-        BETTER_AUTH_SECRET: undefined,
-      }),
-    ).toThrow("missing required Worker bindings: BETTER_AUTH_SECRET");
-    expect(() =>
-      validateProductionBindings({
-        ...stagingEnv,
-        BETTER_AUTH_SECRET: "short",
-      }),
-    ).toThrow("BETTER_AUTH_SECRET must be at least 32 characters");
-    expect(() => validateProductionBindings(stagingEnv)).not.toThrow();
-  });
+  it.each(["BETTER_AUTH_SECRET", "AUTH_SETUP_SECRET"] as const)(
+    "rejects missing or short %s in staging",
+    (name) => {
+      expect(() => validateProductionBindings({ ...stagingEnv, [name]: undefined })).toThrow();
+      expect(() => validateProductionBindings({ ...stagingEnv, [name]: "short" })).toThrow();
+    },
+  );
 
   it("requires a usable mail binding and valid sender in staging", () => {
     expect(() => validateProductionBindings({ ...stagingEnv, MAIL: undefined })).toThrow(

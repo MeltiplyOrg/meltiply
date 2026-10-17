@@ -13,6 +13,7 @@ import { Toaster } from "@meltiply/ui/sileo";
 import { LogOut, Menu } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 import { preloadDashboardRoute } from "@/lib/preload-routes";
+import { AccountSecurity } from "@/components/auth/account-security";
 export type { WorkspaceView };
 
 interface NavigationShellProps {
@@ -82,6 +83,8 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
             <span className="font-bold text-sm tracking-tight text-ink">MELTIPLY</span>
           </div>
 
+          <div className="flex items-center gap-2">
+            <AccountSecurity />
           <Button
             variant="outline"
             size="icon"
@@ -91,6 +94,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
           >
             <Menu className="size-4" />
           </Button>
+          </div>
         </header>
 
         {/* Mobile Navigation Drawer — CenterDialog owns focus trap, Escape, scroll lock */}

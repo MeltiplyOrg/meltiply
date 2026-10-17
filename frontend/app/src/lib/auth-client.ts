@@ -7,6 +7,7 @@ export interface AuthUser {
   id: string;
   image?: string | null;
   name?: string | null;
+  twoFactorEnabled?: boolean;
 }
 
 interface AuthSession {
@@ -21,6 +22,12 @@ interface AuthSessionResult {
   user: AuthUser;
 }
 
+interface AuthTokenResult {
+  token?: string | null;
+  user?: AuthUser;
+  twoFactorRedirect?: boolean;
+}
+
 interface SignInCredentials {
   email: string;
   password: string;
@@ -28,6 +35,7 @@ interface SignInCredentials {
 
 interface SignUpCredentials extends SignInCredentials {
   name: string;
+  setupSecret: string;
 }
 
 /**
@@ -71,9 +79,7 @@ async function getSession(): Promise<AuthSessionResult | null> {
     method: "GET",
   });
 
-  if (!response.ok) {
-    return null;
-  }
+  if (!response.ok) throw await parseAuthError(response);
 
   captureAuthJwt(response);
   const data = (await response.json()) as AuthSessionResult | null;
@@ -95,7 +101,7 @@ async function getSession(): Promise<AuthSessionResult | null> {
  * @returns The authenticated session and user details.
  * @throws {Error} When authentication fails or credentials are invalid.
  */
-async function signInEmail(credentials: SignInCredentials): Promise<AuthSessionResult> {
+async function signInEmail(credentials: SignInCredentials): Promise<AuthTokenResult> {
   const baseUrl = getApiBaseUrl();
   const response = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
     body: JSON.stringify(credentials),
@@ -110,7 +116,7 @@ async function signInEmail(credentials: SignInCredentials): Promise<AuthSessionR
     throw await parseAuthError(response);
   }
 
-  return (await response.json()) as AuthSessionResult;
+  return (await response.json()) as AuthTokenResult;
 }
 
 /**
@@ -125,13 +131,14 @@ async function signInEmail(credentials: SignInCredentials): Promise<AuthSessionR
  * @returns The created user and initial session details.
  * @throws {Error} When registration fails or inputs are rejected.
  */
-async function signUpEmail(credentials: SignUpCredentials): Promise<AuthSessionResult> {
+async function signUpEmail({ setupSecret, ...credentials }: SignUpCredentials): Promise<AuthTokenResult> {
   const baseUrl = getApiBaseUrl();
   const response = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
     body: JSON.stringify(credentials),
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      "X-Setup-Secret": setupSecret,
     },
     method: "POST",
   });
@@ -140,7 +147,7 @@ async function signUpEmail(credentials: SignUpCredentials): Promise<AuthSessionR
     throw await parseAuthError(response);
   }
 
-  return (await response.json()) as AuthSessionResult;
+  return (await response.json()) as AuthTokenResult;
 }
 
 /**
@@ -167,16 +174,14 @@ async function signOut(): Promise<void> {
 
 /**
  * Requests a password reset email via Better Auth.
- * Issues `POST /api/auth/forget-password`; the JWT plugin emits
- * `set-auth-jwt` only on get-session, so no bearer credential is captured
- * here.
+ * Issues `POST /api/auth/request-password-reset` with the app recovery callback.
  *
  * @param params User email address.
  */
-async function forgetPassword(params: { email: string }): Promise<void> {
+async function requestPasswordReset(params: { email: string }): Promise<void> {
   const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/auth/forget-password`, {
-    body: JSON.stringify(params),
+  const response = await fetch(`${baseUrl}/api/auth/request-password-reset`, {
+    body: JSON.stringify({ ...params, redirectTo: `${window.location.origin}/sign-in?recovery=1` }),
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     method: "POST",
@@ -209,18 +214,15 @@ async function resetPassword(params: { newPassword: string; token: string }): Pr
 
 /**
  * Verifies email address using an email verification token.
- * Issues `POST /api/auth/verify-email`; the JWT plugin emits `set-auth-jwt`
- * only on get-session, so no bearer credential is captured here.
+ * Issues `GET /api/auth/verify-email` with the token in the query string.
  *
  * @param params Verification token.
  */
 async function verifyEmail(params: { token: string }): Promise<void> {
   const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/auth/verify-email`, {
-    body: JSON.stringify(params),
+  const response = await fetch(`${baseUrl}/api/auth/verify-email?${new URLSearchParams(params)}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
+    method: "GET",
   });
   if (!response.ok) {
     throw await parseAuthError(response);
@@ -241,7 +243,7 @@ async function changePassword(params: {
 }): Promise<void> {
   const baseUrl = getApiBaseUrl();
   const response = await fetch(`${baseUrl}/api/auth/change-password`, {
-    body: JSON.stringify(params),
+    body: JSON.stringify({ ...params, revokeOtherSessions: true }),
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     method: "POST",
@@ -251,13 +253,68 @@ async function changePassword(params: {
   }
 }
 
+/** Reads the no-store initialized bit; configuration failures never look like an empty installation. */
+async function setupStatus(): Promise<{ initialized: boolean }> {
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/setup-status`, { cache: "no-store", credentials: "include" });
+  if (!response.ok) throw await parseAuthError(response);
+  const data: unknown = await response.json();
+  if (!data || typeof data !== "object" || !("initialized" in data) || typeof data.initialized !== "boolean") {
+    throw new Error("Invalid installation status. Try again.");
+  }
+  return { initialized: data.initialized };
+}
+
+/** Sends a verification link to the owner; the server controls enumeration and send limits. */
+async function resendVerification(email: string): Promise<void> {
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/send-verification-email`, {
+    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, callbackURL: `${window.location.origin}/sign-in?verified=1` }),
+  });
+  if (!response.ok) throw await parseAuthError(response);
+}
+
+/** Completes a pending sign-in with a TOTP or one-use backup code; no trusted-device bypass. */
+async function verifySecondFactor(code: string, backup = false): Promise<void> {
+  const path = backup ? "verify-backup-code" : "verify-totp";
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/two-factor/${path}`, {
+    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, trustDevice: false }),
+  });
+  if (!response.ok) throw await parseAuthError(response);
+}
+
+/**
+ * Password-reauthenticated TOTP lifecycle. Enrollment and regenerated backup
+ * codes are returned once to the dialog, never persisted in browser storage.
+ */
+async function manageTwoFactor(
+  action: "enable" | "disable" | "generate-backup-codes",
+  password: string,
+): Promise<{ totpURI?: string; backupCodes?: string[] }> {
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/two-factor/${action}`, {
+    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!response.ok) throw await parseAuthError(response);
+  const data: unknown = await response.json();
+  if (!data || typeof data !== "object") throw new Error("Invalid security response.");
+  const result: { totpURI?: string; backupCodes?: string[] } = {};
+  if ("totpURI" in data && typeof data.totpURI === "string") result.totpURI = data.totpURI;
+  if ("backupCodes" in data && Array.isArray(data.backupCodes) && data.backupCodes.every((code): code is string => typeof code === "string")) result.backupCodes = data.backupCodes;
+  return result;
+}
+
 export const authClient = {
   changePassword,
-  forgetPassword,
+  requestPasswordReset,
   getSession,
   resetPassword,
   signInEmail,
   signOut,
   signUpEmail,
   verifyEmail,
+  setupStatus,
+  resendVerification,
+  verifySecondFactor,
+  manageTwoFactor,
 };

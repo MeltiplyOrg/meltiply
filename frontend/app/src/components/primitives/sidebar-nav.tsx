@@ -24,6 +24,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@meltiply/ui/avatar";
 import { SidebarGlideHighlight } from "@meltiply/ui/sidebar-glide-highlight";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
+import { AccountSecurity } from "@/components/auth/account-security";
 
 /**
  * Motion-wrapped canonical Button: `motion.create` forwards every `ButtonProps`
@@ -712,6 +713,7 @@ export function SidebarNav({
           </Button>
         </div>
 
+        <AccountSecurity />
         {/* User profile row */}
         <div className="flex items-center rounded-control p-1.5 text-left transition-colors hover:bg-hover/70 min-h-[36px] overflow-hidden">
           <Avatar className="size-7 border border-line shrink-0">

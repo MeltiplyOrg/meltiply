@@ -2,8 +2,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   allowFunctionalConsent,
-  generatedCredentials,
-  signUp,
+  ownerCredentials,
+  openOwnerWorkspace,
   waitForWorkspace,
 } from "./workspace-session";
 
@@ -864,7 +864,7 @@ test.describe("signed-in shell", () => {
     page,
   }) => {
     await page.emulateMedia({ colorScheme: "light" });
-    await signUp(page, generatedCredentials());
+    await openOwnerWorkspace(page, ownerCredentials());
     await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
     await waitForWorkspace(page);
 

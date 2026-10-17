@@ -3,6 +3,7 @@ import type { ApiWorkerEnv } from "./env";
 import { sha256Hex } from "./crypto";
 import { allowedOriginsFor } from "./verifier-cache";
 import { createCloudflareMailSender, mailSenderConfiguration } from "./mail";
+import { ownerAuthHandler } from "./auth-policy";
 
 let betterAuthCached:
   | {
@@ -15,6 +16,7 @@ let betterAuthCached:
       origins: string;
       requireEmailVerification: boolean;
       secret: string;
+      setupSecret: string | undefined;
       value: BetterAuthInstance;
     }
   | undefined;
@@ -94,6 +96,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     betterAuthCached.mailBinding === env.MAIL &&
     betterAuthCached.mailFromAddress === senderAddress?.email &&
     betterAuthCached.mailFromName === senderAddress?.name
+    && betterAuthCached.setupSecret === env.AUTH_SETUP_SECRET
   ) {
     return betterAuthCached.value;
   }
@@ -101,7 +104,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
   // Exception: dynamic import avoids loading pg in workerd unit test isolates
   const { systemPoolFor } = await import("./database");
   const database = systemPoolFor(env);
-  const auth = await createBetterAuth({
+  const auth = ownerAuthHandler(env, await createBetterAuth({
     baseURL,
     database,
     ...(mailUsable
@@ -114,7 +117,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     requireEmailVerification,
     secret,
     trustedOrigins: trustedOrigins.length > 0 ? trustedOrigins : undefined,
-  });
+  }));
 
   if (!requestOwnedPool) {
     betterAuthCached = {
@@ -127,6 +130,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
       origins,
       requireEmailVerification,
       secret,
+      setupSecret: env.AUTH_SETUP_SECRET,
       value: auth,
     };
   }
@@ -154,6 +158,8 @@ const AUTH_RATE_LIMITS: Record<string, AuthRateLimitRule> = {
   "send-verification-email": { maxAttempts: 5, windowSeconds: 3600 },
   "sign-in": { maxAttempts: 10, windowSeconds: 600 },
   "sign-up": { maxAttempts: 5, windowSeconds: 3600 },
+  "two-factor": { maxAttempts: 10, windowSeconds: 600 },
+  "change-password": { maxAttempts: 10, windowSeconds: 600 },
 };
 
 const EMAIL_RATE_LIMIT_ACTIONS = new Set([
@@ -198,16 +204,14 @@ async function authRateLimitHit(
 }
 
 /**
- * Extracts the caller IP from Cloudflare or forwarded headers for rate-limit keying.
- *
- * @param request - Incoming auth request.
- * @returns Best-effort client IP string, or undefined when unavailable.
+ * Extracts only the edge-authenticated client IP. The self-hosted ingress strips
+ * forwarding headers and writes its socket address; arbitrary X-Forwarded-For
+ * is never trusted. Missing IPs deliberately share a conservative bucket.
  */
 function clientIp(request: Request): string | undefined {
   const connecting = request.headers.get("cf-connecting-ip")?.trim();
   if (connecting) return connecting;
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || undefined;
+  return undefined;
 }
 
 /**

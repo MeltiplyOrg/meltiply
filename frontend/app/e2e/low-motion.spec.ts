@@ -2,9 +2,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { animatedGifFixture, attachmentTitle, pngFixture } from "./media-fixtures";
 import {
-  generatedCredentials,
-  signUp,
-  signUpIsolatedWorkspace,
+  ownerCredentials,
+  openOwnerWorkspace,
+  openIsolatedOwnerWorkspace,
   waitForWorkspace,
 } from "./workspace-session";
 
@@ -36,7 +36,7 @@ function attachmentStrip(page: Page, fileName: string) {
 test("keeps low motion across workspace navigation and honors the device preference", async ({
   page,
 }) => {
-  await signUp(page, generatedCredentials());
+  await openOwnerWorkspace(page, ownerCredentials());
   await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
   await waitForWorkspace(page);
 
@@ -123,7 +123,7 @@ test("keeps low motion across workspace navigation and honors the device prefere
  * draft state.
  */
 test("keeps an unsaved composer draft when toggling low motion on and off", async ({ page }) => {
-  await signUp(page, generatedCredentials());
+  await openOwnerWorkspace(page, ownerCredentials());
   await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
   await waitForWorkspace(page);
 
@@ -153,7 +153,7 @@ test("keeps composer media and its feedback working under low motion", async ({ 
   // Real signed uploads plus native processing run inside this case, so it needs
   // more headroom than the shell-only checks above it.
   test.setTimeout(240_000);
-  await signUpIsolatedWorkspace(page);
+  await openIsolatedOwnerWorkspace(page);
 
   await page.getByRole("button", { name: "Create post" }).click();
   const composer = page.getByPlaceholder(/what do you want to publish/i);

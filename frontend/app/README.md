@@ -14,13 +14,14 @@ The active Workspace identity is noninteractive; workspace switching is unavaila
 Account pictures use the authenticated user's avatar URL, with a user-icon fallback
 for missing or failed images; no email-based avatar lookup is performed.
 
-Meltiply has two dialog types. Use `CenterDialog` (`@meltiply/ui/center-dialog`)
-for compact centered modals and `CenterAlertDialog` for confirmations. Use
-[`SideDialog`](../shared/src/components/ui/side-dialog.tsx) from
-`@meltiply/ui/side-dialog` for right-edge
-inspection panels. Its controlled `open`/`onOpenChange`, required `title`, optional
-`description`/`footer`, and body children share scrolling, focus restoration, and
-low-motion behavior; Post details is the first consumer.
+Use `CenterDialog` (`@meltiply/ui/center-dialog`) for focused forms and
+`CenterAlertDialog` for confirmations.
+[`SideDialog`](../shared/src/components/ui/side-dialog.tsx) owns the Gr8r-style
+620px inspection drawer, compact record toolbar, and optional 980px expanded
+view. Controlled `open`/`onOpenChange`, required accessible `title`, optional
+`description`, `breadcrumb`, and `actions` frame the native scroll body. It owns
+keyboard dismissal, opener-focus restoration, responsive geometry, and reduced
+presentation. Post details supplies real publishing data, not task-only fields.
 
 ## Local development
 

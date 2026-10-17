@@ -111,6 +111,16 @@ editing.
 | Destructive confirmation    | `CenterAlertDialog` |
 | Large Post inspection       | `SideDialog`        |
 
+`SideDialog` ports Gr8r's compact 46px record toolbar and 620px edge drawer,
+with an optional 980px expanded inspector and full-viewport mobile layout.
+The header accepts real record context/actions; the canonical expand and close
+controls retain tooltip and keyboard support. Normal mode leaves the workspace
+visually clear; expanded mode dims the outside surface. Post inspection uses flat
+properties, caption, attachments, and channel outcomes—not task fields or fake
+comments. Editing stays in the composer; destructive actions use the header menu
+and the existing confirmation flow. The body owns native scrolling; no separate
+footer or duplicated Close action remains.
+
 Primitives own accessible names, focus trapping, Escape, scroll lock, focus
 restoration, and transitions. Keep confirmation content stable; retain data
 through exits with `useLatchedValue` when necessary. Route code does not

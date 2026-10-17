@@ -16,6 +16,10 @@ export type TranslationValues = Record<string, number | string>;
 const languageStorageKey = "meltiply.language";
 
 const spanishTranslations: Record<string, string> = {
+  "Expand panel": "Ampliar panel",
+  "Restore side panel": "Restaurar panel lateral",
+  Created: "Creado",
+  Caption: "Texto de la publicación",
   "Calendar period": "Período del calendario",
   "Previous week": "Semana anterior",
   "Next week": "Semana siguiente",

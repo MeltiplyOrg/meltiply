@@ -294,25 +294,6 @@ html.theme-changing *::after {
   animation: none;
 }
 
-/* SideDialog enters from and exits to the right edge; geometry stays anchored. */
-@keyframes dialog-slide-in-right {
-  0% {
-    translate: 100% 0;
-  }
-  100% {
-    translate: 0 0;
-  }
-}
-
-@keyframes dialog-slide-out-right {
-  0% {
-    translate: 0 0;
-  }
-  100% {
-    translate: 100% 0;
-  }
-}
-
 /* Standalone icon geometry for Astro; Tailwind utilities can still override it in the app. */
 @layer components {
   [data-animated-icon] {

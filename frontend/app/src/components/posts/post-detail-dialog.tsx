@@ -8,11 +8,19 @@ import {
   Clock,
   TriangleAlert,
   Images,
+  Ellipsis,
+  CircleDot,
+  Share2,
 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { SideDialog } from "@meltiply/ui/side-dialog";
-import { CenterDialogFooter } from "@meltiply/ui/center-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@meltiply/ui/dropdown-menu";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { StatusBadge } from "./status-badge";
 import { toast } from "@meltiply/ui/toast";
@@ -25,6 +33,7 @@ import {
   isCancellableStatus,
   resolveCancellableDistributionIds,
   resolveRowCaption,
+  normalizePostStatus,
 } from "./posts-helpers";
 import type { PostDestructiveRequest, PostDetailItem, PostRow } from "./types";
 
@@ -178,7 +187,10 @@ function ChannelOutcomeRow({
   };
 
   return (
-    <div className="rounded-card border border-line bg-page p-3 flex flex-col gap-2">
+    <article
+      aria-label={channelName ?? t("Unassigned channel")}
+      className="flex flex-col gap-2 border-b border-line py-3 last:border-b-0"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface shadow-hairline">
@@ -329,7 +341,7 @@ function ChannelOutcomeRow({
           </Button>
         </div>
       )}
-    </div>
+    </article>
   );
 }
 
@@ -342,15 +354,15 @@ function ChannelOutcomeRow({
  * Every action keeps the Post identity, so editing or retrying one Channel never
  * rewrites another's result.
  *
- * The panel owns scrolling, escape/backdrop dismissal, and focus restore to the
- * element that opened it; the full caption stays unclamped and wraps long tokens
- * so mobile widths never overflow horizontally. Footer rows and their action
- * groups wrap independently so localized labels remain visible on narrow panels.
+ * The shared Gr8r drawer owns scroll, expansion, dismissal, and opener focus.
+ * Compact breadcrumb/action chrome frames flat property rows, the full caption,
+ * ordered attachments, and real per-channel outcomes. No task-only properties
+ * or editable publication status are copied from the reference.
  *
  * Destructive affordances state their Platform consequence: cancelling a pending
  * Channel and deleting a Post both leave anything already published live on its
  * platform. `post === null` closes the panel; the last post stays rendered
- * through the slide-out so content never blanks mid-animation.
+ * through dismissal so content never blanks during the shared fade.
  */
 export const PostDetailDialog = React.memo(function PostDetailDialog({
   post: livePost,
@@ -369,31 +381,23 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
   const cancellableIds = post ? resolveCancellableDistributionIds(post) : [];
   const editable = Boolean(isDraft || cancellableIds.length > 0);
 
-  /**
-   * Forwards edit intent for a Post that still has an editable surface; a fully
-   * published Post has no edit endpoint, so the affordance reports honestly via
-   * toast.
-   */
-  const handleEdit = () => {
-    if (!post) return;
-    if (editable && canMutate) {
-      onEdit(post.id);
-      return;
-    }
-    toast(t("Editing published posts is not supported yet"), {
-      description: t("Only drafts and scheduled posts can be edited."),
-    });
-  };
+  const status = post ? normalizePostStatus(post) : "draft";
 
   return (
     <SideDialog
       closeLabel={t("Close")}
       open={livePost !== null}
       onOpenChange={(open) => !open && onClose()}
-      title={
-        <span className="flex items-center gap-2 text-lg">
-          <CalendarDays className="size-5 text-accent" />
-          {t("Post details")}
+      title={t("Post details")}
+      expandLabel={t("Expand panel")}
+      restoreLabel={t("Restore side panel")}
+      breadcrumb={
+        <span className="flex min-w-0 items-center gap-2">
+          <span>{t("Posts")}</span>
+          <span className="text-ink-3">/</span>
+          <code className="truncate text-(length:--font-size-micro) text-ink-3" title={post?.id}>
+            {post?.id.slice(0, 8)}
+          </code>
         </span>
       }
       description={
@@ -406,107 +410,150 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
             : t("{count} channel(s)", { count: post.channels.length })
           : null
       }
-      footer={
-        <CenterDialogFooter className="flex min-w-0 w-full flex-col flex-wrap gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-            {canMutate && cancellableIds.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
+      actions={
+        <>
+          {canMutate && editable && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 text-(length:--font-size-control)"
+              onClick={() => post && onEdit(post.id)}
+            >
+              <Edit3 className="size-3.5" />
+              {t("Edit post")}
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="size-7" aria-label={t("Post actions")}>
+                <Ellipsis className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {canMutate && cancellableIds.length > 0 && (
+                <DropdownMenuItem
+                  className="text-red focus:text-red"
+                  onSelect={() =>
+                    post &&
+                    onRequestDelete({
+                      kind: "cancel-channels",
+                      postId: post.id,
+                      brandProfileId: post.brandProfileId,
+                      distributionIds: cancellableIds,
+                    })
+                  }
+                >
+                  <Trash2 className="size-3.5" />
+                  {t("Cancel all pending")}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                className="text-red focus:text-red"
+                onSelect={() =>
                   post &&
                   onRequestDelete({
-                    kind: "cancel-channels",
+                    kind: "delete-post",
                     postId: post.id,
                     brandProfileId: post.brandProfileId,
-                    distributionIds: cancellableIds,
+                    distributionIds: [],
                   })
                 }
-                className="h-8 text-xs rounded-control text-destructive border-destructive/30 hover:bg-destructive/10 gap-1"
               >
-                <Trash2 className="size-3" />
-                {t("Cancel all pending")}
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                post &&
-                onRequestDelete({
-                  kind: "delete-post",
-                  postId: post.id,
-                  brandProfileId: post.brandProfileId,
-                  distributionIds: [],
-                })
-              }
-              className="h-8 text-xs rounded-control text-destructive border-destructive/30 hover:bg-destructive/10 gap-1"
-            >
-              <Trash2 className="size-3" />
-              {isDraft ? t("Delete draft") : t("Delete post")}
-            </Button>
-          </div>
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={onClose} className="rounded-control">
-              {t("Close")}
-            </Button>
-            {canMutate && (
-              <Button variant="default" onClick={handleEdit} className="rounded-control gap-1.5">
-                <Edit3 className="size-3.5" />
-                {t("Edit post")}
-              </Button>
-            )}
-          </div>
-        </CenterDialogFooter>
+                <Trash2 className="size-3.5" />
+                {isDraft ? t("Delete draft") : t("Delete post")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
       }
     >
-      <div className="flex flex-col gap-3">
-        <div className="rounded-control border border-line-soft bg-inset/60 px-3 py-2.5">
-          <p className="text-sm text-ink whitespace-pre-wrap break-words">
-            {caption || <span className="italic text-ink-3">{t("No caption")}</span>}
+      <div>
+        <h2 className="text-[22px] font-semibold leading-snug tracking-tight text-ink">
+          {post?.post?.title || t("Post details")}
+        </h2>
+        <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-(length:--font-size-control)">
+          <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+            <CircleDot className="size-3.5 text-ink-3" />
+            {t("Status")}
+          </dt>
+          <dd>
+            <StatusBadge status={status} compact />
+          </dd>
+          <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+            <Share2 className="size-3.5 text-ink-3" />
+            {t("Channels")}
+          </dt>
+          <dd className="text-ink">{post?.channels.length ?? 0}</dd>
+          {dateLabel && (
+            <>
+              <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+                <CalendarDays className="size-3.5 text-ink-3" />
+                {isDraft ? t("Created") : t("Publish date")}
+              </dt>
+              <dd className="text-ink">{dateLabel}</dd>
+            </>
+          )}
+        </dl>
+        <section className="mt-6.5">
+          <h3 className="mb-2 text-(length:--font-size-ui) font-semibold">{t("Caption")}</h3>
+          <p className="whitespace-pre-wrap break-words text-(length:--font-size-ui) leading-relaxed text-ink-2">
+            {caption || t("No caption")}
           </p>
-        </div>
+        </section>
 
         {attachments.length > 0 && (
-          <div className="flex items-center gap-2 overflow-x-auto">
-            {attachments.map((attachment) => {
-              const path = attachment.asset.thumbnail_url ?? attachment.asset.download_url ?? null;
-              return (
-                <div
-                  key={attachment.asset_id}
-                  className="size-12 shrink-0 overflow-hidden rounded-control border border-line bg-page flex items-center justify-center"
-                >
-                  {path ? (
-                    <img src={path} alt="" className="size-full object-cover" />
-                  ) : (
-                    <Images className="size-4 text-ink-3" />
-                  )}
-                </div>
-              );
-            })}
-            <span className="text-[11px] text-ink-3 shrink-0">
-              {t("{count} ordered attachment(s)", { count: attachments.length })}
-            </span>
-          </div>
+          <section className="mt-6.5">
+            <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
+              {t("Attachments")}
+              <span className="text-xs font-normal text-ink-3">{attachments.length}</span>
+            </h3>
+            <div className="flex items-center gap-2 overflow-x-auto">
+              {attachments.map((attachment) => {
+                const path =
+                  attachment.asset.thumbnail_url ?? attachment.asset.download_url ?? null;
+                return (
+                  <div
+                    key={attachment.asset_id}
+                    className="size-12 shrink-0 overflow-hidden rounded-control border border-line bg-page flex items-center justify-center"
+                  >
+                    {path ? (
+                      <img src={path} alt="" className="size-full object-cover" />
+                    ) : (
+                      <Images className="size-4 text-ink-3" />
+                    )}
+                  </div>
+                );
+              })}
+              <span className="text-[11px] text-ink-3 shrink-0">
+                {t("{count} ordered attachment(s)", { count: attachments.length })}
+              </span>
+            </div>
+          </section>
         )}
 
-        {post?.channels.map((item) => (
-          <ChannelOutcomeRow
-            key={item.id}
-            item={item}
-            postAttachments={attachments.length}
-            canMutate={canMutate}
-            onRequestDelete={(ids) =>
-              post &&
-              onRequestDelete({
-                kind: "cancel-channels",
-                postId: post.id,
-                brandProfileId: post.brandProfileId,
-                distributionIds: ids,
-              })
-            }
-          />
-        ))}
+        <section className="mt-6.5">
+          <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
+            {t("Channels")}
+            <span className="text-xs font-normal text-ink-3">{post?.channels.length ?? 0}</span>
+          </h3>
+          {post?.channels.map((item) => (
+            <ChannelOutcomeRow
+              key={item.id}
+              item={item}
+              postAttachments={attachments.length}
+              canMutate={canMutate}
+              onRequestDelete={(ids) =>
+                post &&
+                onRequestDelete({
+                  kind: "cancel-channels",
+                  postId: post.id,
+                  brandProfileId: post.brandProfileId,
+                  distributionIds: ids,
+                })
+              }
+            />
+          ))}
+        </section>
       </div>
     </SideDialog>
   );

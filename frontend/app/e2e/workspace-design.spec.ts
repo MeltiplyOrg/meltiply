@@ -49,6 +49,25 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.screenshot({ path: testInfo.outputPath("composer-desktop.png"), fullPage: true });
   await page.getByRole("button", { name: /back to posts/i }).click();
   await expect(page.getByRole("row").filter({ hasText: "Studio update" })).toBeVisible();
+  const inspectTrigger = page
+    .getByRole("row")
+    .filter({ hasText: "Studio update" })
+    .getByTitle("View details");
+  await inspectTrigger.click();
+  const inspector = page.getByRole("dialog", { name: "Post details", exact: true });
+  await expect(
+    inspector.getByText("Studio update — ready for the next publishing window.", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("post-drawer-desktop.png"), fullPage: true });
+  await inspector.getByRole("button", { name: "Expand panel", exact: true }).click();
+  await page.screenshot({
+    path: testInfo.outputPath("post-drawer-expanded-desktop.png"),
+    fullPage: true,
+  });
+  await inspector.getByRole("button", { name: "Restore side panel", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(inspector).toBeHidden();
+  await expect(inspectTrigger).toBeFocused();
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: "Studio update" }));
   await expect(page.getByPlaceholder(/what do you want to publish/i)).toHaveValue(
     "Studio update — ready for the next publishing window.",
@@ -161,6 +180,16 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("settings-light-desktop.png"),
     fullPage: true,
   });
+  for (const section of ["Language", "Account"] as const) {
+    await page
+      .getByRole("navigation", { name: "Settings sections", exact: true })
+      .getByRole("button", { name: section, exact: true })
+      .click();
+    await page.screenshot({
+      path: testInfo.outputPath(`settings-${section.toLowerCase()}-desktop.png`),
+      fullPage: true,
+    });
+  }
   await page.getByRole("button", { name: "Security", exact: true }).click();
   const security = page.getByRole("region", { name: "Account security", exact: true });
   await expect(security.getByLabel("Current password", { exact: true })).toBeVisible();
@@ -257,6 +286,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const mobileMenu = page.getByRole("button", { name: "Open navigation menu", exact: true });
   await expect(mobileMenu).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("posts-dark-mobile.png"), fullPage: true });
+  await inspectTrigger.click();
+  await expect(inspector).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("post-drawer-mobile.png"), fullPage: true });
+  await page.keyboard.press("Escape");
+  await expect(inspector).toBeHidden();
   await viewSelector.getByRole("button", { name: "Calendar", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Publishing calendar", exact: true }),

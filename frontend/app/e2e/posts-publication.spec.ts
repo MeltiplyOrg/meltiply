@@ -746,9 +746,6 @@ test("edits a pending target without touching published history and explains wha
   await returnToPosts(page);
 
   await waitForPostUnderStatus(page, pendingCaption, /^scheduled$/i);
-  const scheduledDetail = await openPostDetails(page, pendingCaption);
-  await expect(scheduledDetail.locator("dt")).toHaveCount(1, { timeout: 30_000 });
-  await closePostDetails(page);
 
   // Scheduling the second Post published nothing.
   expect(await readChannelLiveCopies(request, channels)).toEqual(historyBefore);
@@ -765,9 +762,11 @@ test("edits a pending target without touching published history and explains wha
   await waitForPostUnderStatus(page, pendingEditCaption, /^scheduled$/i);
   const editedDetail = await openPostDetails(page, pendingEditCaption);
   await expect(editedDetail.getByText(pendingEditCaption, { exact: true })).toBeVisible();
-  await expect(editedDetail.getByText("Scheduled", { exact: true })).toHaveCount(1, {
-    timeout: 30_000,
-  });
+  await expect(
+    editedDetail
+      .getByRole("article", { name: channelNames.threads, exact: true })
+      .getByText("Scheduled", { exact: true }),
+  ).toBeVisible({ timeout: 30_000 });
   await closePostDetails(page);
 
   // The published Post's Platform copies are the very same records as before.
@@ -775,7 +774,8 @@ test("edits a pending target without touching published history and explains wha
 
   // The delete confirmation states the consequence before it happens.
   const deleteDetail = await openPostDetails(page, pendingEditCaption);
-  await deleteDetail.getByRole("button", { name: /delete post/i }).click();
+  await deleteDetail.getByRole("button", { name: "Post actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Delete post", exact: true }).click();
   const confirmation = page.getByRole("alertdialog");
   await expect(confirmation.getByText(/delete this post\?/i)).toBeVisible();
   await expect(
@@ -788,7 +788,8 @@ test("edits a pending target without touching published history and explains wha
   await expect(deleteDetail).toBeVisible({ timeout: 30_000 });
 
   // --- Deleting for real: the pending Post stops, the live copy does not move.
-  await deleteDetail.getByRole("button", { name: /delete post/i }).click();
+  await deleteDetail.getByRole("button", { name: "Post actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Delete post", exact: true }).click();
   await page
     .getByRole("alertdialog")
     .getByRole("button", { name: /^delete post$/i })

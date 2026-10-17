@@ -163,18 +163,7 @@
   }
 }
 
-/* Shared keyframes (--ease-*, fade-up, fade-in, pop-in, caret-blink,
- * dialog-popup/popout-from-bottom, dialog-morph-*, dialog-slide-in/out-right,
- * …) live in @meltiply/ui/motion.css, which also binds the centered-dialog
- * surface animations to `data-dialog-surface` and `data-state`. */
-
-@utility animate-dialog-slide-in-right {
-  animation: dialog-slide-in-right 300ms var(--ease-enter) forwards;
-}
-
-@utility animate-dialog-slide-out-right {
-  animation: dialog-slide-out-right 200ms var(--ease-exit) forwards;
-}
+/* Shared motion and centered-dialog surface states live in @meltiply/ui/motion.css. */
 
 /* Centered modals and the mobile nav panel share vertical motion, not geometry. */
 .dialog-bottom-popup {

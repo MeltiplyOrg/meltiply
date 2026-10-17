@@ -1,49 +1,31 @@
 # Workspace interactions
 
-Use the Gr8r-adapted compact control vocabulary without adding choreography to
-publishing tasks. Shared primitives own interaction details; route code supplies
-real state and actions.
+Shared primitives own interaction mechanics; features supply real state and actions. Use [shared UI ownership](../../../docs/frontend-ui.md) for canonical modules and [layout](../../../docs/frontend-layout.md) for geometry.
 
-## Control states
+## Controls and state
 
-- Idle: semantic field/surface colors and one boundary.
-- Hover and active: bounded neutral or accent color feedback.
-- Focus-visible: a clear accent ring/outline; icon-only buttons have names.
-- Disabled/busy: prevent duplicate actions and retain useful labels.
-- Empty/error: name the missing state or failure and offer the next safe action.
+Use semantic surface/field colors, clear hover/active feedback, visible focus, and named icon-only buttons. Busy states prevent duplicate mutations while retaining useful labels. Empty/error states identify the missing state or failure and expose the next safe action.
 
-Keep buttons, inputs, and filters mounted across label changes. Preserve focus,
-selection, and unsaved content; do not split or stagger page-heading words.
-Navigation and theme selection update immediately. Any retained transition must
-honor reduced motion and cannot delay access to the task.
+Keep inputs, buttons, and filters mounted as labels change. Preserve drafts, selection, and focus through recoverable errors. Actual provider outcomes remain observed data, not editable completion flags.
 
-## Navigation and search
+## Navigation and collections
 
-Navigation rows use an immediate neutral hover/selected surface. The sidebar is
-252px or a 52px icon rail; collapsed actions retain accessible labels. Posts is
-one destination; Table, Grid, and Calendar live only in its page toolbar.
-The top bar owns jump search; the sidebar has no Search or Brand Profiles
-section. Keyboard shortcuts and platform hints come from `lib/hotkeys.ts`.
+Posts and Channels are single destinations. The Posts toolbar orders Table, Calendar, Grid. Top-bar jump search finds supported destinations and loaded Brand Profiles; collection search and the field-row Filter builder narrow route data. Profiles are scope, not sidebar navigation.
 
-Jump search filters supported pages and loaded Brand Profiles. Native Tab/Enter
-navigation and Escape dismissal remain available. Search Posts and Channels
-through their collection toolbar; never imply a global content index.
+The Filter builder adds supported equality rows through field chips. Adding an empty row does not change results. Removing a row clears its value; Clear all resets the builder. Nested portalled controls stay inside the disclosure interaction and keyboard focus returns to a useful control.
 
-## Dialogs
+Selection belongs to the feature, survives view/filter/group presentation changes, and excludes unloaded records. Select-all is visually checked only for a fully selected visible set. The shared pill reports the actual count; destructive actions confirm a fixed target snapshot and retain failed targets for retry.
 
-Use `CenterDialog` for focused tasks, `CenterAlertDialog` for destructive
-confirmation, and `SideDialog` for large Post inspection. Shared primitives own
-focus trapping, Escape, scroll lock, focus restoration, and any retained exit
-lifecycle. Keep data stable through an exit with `useLatchedValue` when needed;
-clear secrets according to the account-security lifecycle, not cosmetic timing.
+## Dialogs and Settings
 
-Settings composes the same controls into Appearance, Account, and Security. Theme
-cards call the existing consent-aware provider. Identity is read-only; account
-security keeps its password, authenticator, and recovery-code requirements.
+Use `CenterDialog` for focused tasks/search, `CenterAlertDialog` for destructive confirmation, and `SideDialog` for large Post inspection. Primitives own focus, dismissal, scroll lock, opener restoration, and exit retention. Keep data through exits with `useLatchedValue` where needed; clear secrets according to security requirements, not cosmetic timing.
 
-## Feedback
+Post inspection uses real properties, caption, attachments, and Channel outcomes. Header actions expose supported editing/deletion/cancellation; expansion and Close belong to the shared drawer.
 
-Use the shared `@meltiply/ui/toast` store and Sileo renderer. Confirm actual
-outcomes, name the affected object, and include a recovery action when useful.
-Clipboard feedback includes the copied value. Inline validation stays beside its
-input. A pending provider operation must not masquerade as published success.
+Settings has Appearance, Language, Account, and Security. Every section shares the same content maximum and surface background. Theme offers Light, Dark, and System through the existing consent-aware owner. Identity is read-only. Security controls are inline and retain password reauthentication, authenticator verification, and recovery-code handling.
+
+## Animation and feedback
+
+Preserve existing animations and extend their canonical owners when requested. There is one implementation path, without motion-mode state, providers, storage, flags, alternate branches, or a rule requiring such guards for new animation work.
+
+Use `@meltiply/ui/toast` and Sileo for transient outcomes. Name the affected object and useful recovery action; clipboard feedback includes the copied value. Keep validation beside the input and durable failures beside the affected record. Accepted/queued work is not published success.

@@ -1,59 +1,57 @@
 ---
 title: Settings
-description: Appearance, language, account identity, and security in Meltiply's workspace settings.
+description: Use Appearance, Language, Account, and Security in the current workspace Settings page.
 section: Workspace
 order: 11
 ---
 
-Open **Settings** in the sidebar or mobile navigation to visit `/settings`. The full-height page keeps the workspace rail, title/search bar, and account controls available. Section navigation shares the page background: a vertical rail on desktop and a horizontal row on phones. Every section uses the same bounded, left-aligned content column so forms and text do not stretch across wide screens.
+Open **Settings** from the sidebar or mobile navigation. It is a full workspace page, not a modal. The section rail and page share a background; all sections use the same bounded, left-aligned content column so forms do not stretch across wide screens. On phones, section choices become a horizontal row and the content scrolls independently.
 
 ## Appearance
 
-Choose **Light**, **Dark**, or **System**. The selected card is marked and the shared palette changes immediately without moving the page or resetting your work. **System** follows your device's color scheme, including changes while Meltiply is open.
+Choose **Light**, **Dark**, or **System** from the compact theme cards. The selected card is marked; palette changes preserve the page and your work. **System** follows device color-scheme changes while Meltiply is open.
 
-Meltiply uses warm off-white pages, a stone sidebar, compact controls, and indigo primary actions. Dark mode keeps the same layout with warm charcoal surfaces and a periwinkle accent. The palette is shared by the application, landing page, and these guides.
+The shared palette uses warm light surfaces, stone navigation, compact controls, and indigo actions. Dark mode keeps the same geometry with warm charcoal layers and a periwinkle accent. The application, landing page, and documentation share these tokens.
 
-A current-page theme choice works without optional storage. Remembering it across visits requires **functional cookie consent**. See [Cookies and storage](/docs/cookies). Without an explicit choice, initial appearance follows your device's color scheme.
+A theme choice works for the current page without optional storage. Remembering it across visits requires [functional cookie consent](/docs/cookies). Without an explicit choice, appearance follows the device.
 
-The workspace keeps its implemented transitions and scrolling behavior. There is one animation path, with no separate motion mode or switch. Theme and layout do not expose a custom accent or density control.
+There is one implemented animation path, with no separate motion mode or switch. Settings does not offer custom accents, density, or additional layout modes.
 
 ## Language
 
-Select a supported interface language from **Language**. The current app supports English and Spanish; changing language applies immediately. Remembering it across visits requires functional cookie consent.
+Choose **English** or **Español**. The interface changes immediately; remembering the selection across visits requires functional consent. Public guides are separate content rather than a promise that every article is translated.
 
 ## Account
 
-The Account section displays your name, email, and workspace as read-only details. It also provides **Sign out**, including on smaller screens. The sidebar shows your account avatar when one is supplied, or a user-icon fallback; it does not invent an avatar from your email.
+Review your name, email, and workspace as read-only identity details. **Sign out** is available here on desktop and phones, as well as in the sidebar account area.
 
-The workspace name at the top of the rail is an identity label, not a workspace switcher. No plan tier is shown or implied.
+The workspace name is not a workspace switcher. There is no plan-tier selector. Where an account avatar exists it is shown; missing/failed images use the shared user-icon fallback, not an email-derived avatar service.
 
 ## Security
 
-Open **Settings → Security** to see current-password verification, authenticator controls, and the new-password form directly on the page. No extra opener or dialog is required. Actions still require your current password. Enabling an authenticator requires verification before enrollment is complete; save recovery codes before finishing. Replacing codes invalidates the old set.
+Open Security to see password verification, authenticator controls, and the new-password form directly on the page. There is no additional opener hiding these options.
 
-Security changes sign out previous sessions. Keep passwords, setup keys, and recovery codes private.
+- **Verify your current password** for sensitive changes.
+- **Change your password** using the current form and its validation.
+- **Enable an authenticator** by completing setup and verifying a live code before activation.
+- **Save recovery codes** offline. Each code is single-use; replacing the set invalidates the old codes.
+- **Disable the authenticator** only through the password-verified action.
 
-## Brand Profiles and connected accounts
+Keep passwords, setup keys, and recovery codes private. Follow each action's confirmation and session-handling instructions; opening a section is not sufficient authorization for a security change.
 
-Brand Profiles are named scopes inside your workspace that own Channels and Posts. Select a profile in a collection's Brand Profile filter or the top-bar jump palette; **All Brand Profiles** returns to aggregate review. Profile selection is not workspace switching.
+## Profiles and connected accounts
 
-Workspace admins manage profiles from the **Channels** page:
+Manage Brand Profiles and platform connections in [Channels](/docs/channels), not a generic Settings panel. The Brand Profiles tab shows real profile cards. Admins can create/edit profiles and confirm deletion; account settings expose permissions, publishing support, and disconnect controls.
 
-- **Create Brand Profile** opens the profile form; saving a new profile opens the account connection flow.
-- **Edit profile** in the Brand Profile filter opens the existing profile form.
-- The form includes a name, optional description, and profile color.
-- **Delete profile** requires confirmation and explains the consequences.
+Select a profile through Posts/Channels filters or top-bar jump search. **All Brand Profiles** restores aggregate review. A profile is an owning scope, not another workspace.
 
-Use the Accounts directory to connect, re-authenticate, or disconnect platform accounts. Provider-specific configuration remains beside the affected account or Post, not in a generic settings panel.
+## What Settings does not include
 
-## Scope of Settings
+The current route does not provide billing, team invitations, notification configuration, API-key management, or self-service identity editing. Reference-design examples do not create those product capabilities.
 
-Settings is a preference and account route, not an administration console. It does not include billing, team invitations, notification configuration, API-key management, or self-service account identity editing. Reference-design examples do not imply these capabilities.
+## Related guides
 
-## Related
-
-- [Getting started](/docs/getting-started) — workspace navigation and search.
-- [Workspaces & Brand Profiles](/docs/workspaces) — ownership and scope.
-- [Channels](/docs/channels) — connected accounts and Brand Profiles.
-- [Publishing](/docs/publishing) — composing and monitoring Posts.
-- [Resource limits](/docs/resource-limits) — workspace quotas.
+- [Getting started](/docs/getting-started) — navigation and first use.
+- [Workspaces & Brand Profiles](/docs/workspaces) — scope and permissions.
+- [Publishing](/docs/publishing) — composing and inspecting Posts.
+- [Cookies and storage](/docs/cookies) — persistence and browser-local recovery.

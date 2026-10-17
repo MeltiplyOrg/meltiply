@@ -67,118 +67,88 @@ do next.
 
 ### Palette
 
-Adopt [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio)'s warm, compact
-workspace language across the application, landing, and documentation. Source
-reuse was authorized for this redesign. The reference's project-management demo
-is visual material, not a source of Meltiply product capabilities.
+Use [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio)'s warm, compact
+workspace language across app, landing, and docs. The user selected this visual
+world; reference task/team/billing examples do not become Meltiply capabilities.
+Keep Meltiply's faceted mark and actual provider identities.
 
-[`frontend/shared/tokens.css`](frontend/shared/tokens.css) owns all palette,
-font, radius, and elevation values. React utilities and static Astro styles
-resolve through these semantic tokens; pages do not maintain separate palettes.
-
-| Role         | Light                    | Dark                    |
-| ------------ | ------------------------ | ----------------------- |
-| Page         | Warm off-white `#fbfaf8` | Warm charcoal `#1a1a19` |
-| Sidebar      | Stone `#f4f3f0`          | Deep charcoal `#151514` |
-| Surface      | White `#ffffff`          | Charcoal `#1d1d1c`      |
-| Primary text | `#1d1c1a`                | `#eceae5`               |
-| Accent       | Indigo `#4b5bd6`         | Periwinkle `#8e9af3`    |
-
-Primary actions use the accent with the theme's contrasting `--on-accent`.
-Green means confirmed success, amber means attention, and red means failure or
-destruction. State always includes a label or icon. Platform colors identify
-external providers only.
+[`frontend/shared/tokens.css`](frontend/shared/tokens.css) owns the implemented
+palette, fonts, density, radius, and elevation. Light surfaces are warm white
+and stone; dark surfaces are layered warm charcoal. Indigo/periwinkle identifies
+actions and focus, neutral paint identifies navigation selection, and semantic
+status colors always have labels or accessible icons. Geometry is shared across
+palettes rather than redesigned per theme.
 
 ### Design Direction
 
-The visual contract is a calm, warm workbench: Geist typography, thin stone
-separators, compact controls, quiet selected rows, and aligned working surfaces.
-Keep Meltiply's faceted brand mark and real publishing terminology. Replace
-Gr8r's Projects with Brand Profiles and its task views with Posts; do not copy
-its seed content, branding, billing, notifications, or collaboration claims.
+The current interface is a compact publishing workbench: Geist typography,
+aligned working edges, quiet selection, thin separators, opaque surfaces, and
+clear outcomes. Preserve its established appearance during cleanup; remove
+duplicate implementations and obsolete code without substituting another design.
 
-The 252px sidebar collapses to 52px; a 46px top bar holds workspace context,
-route title, and jump search. Posts is one sidebar destination without nested
-view shortcuts. Its page toolbar offers exactly Table, Grid, and Calendar;
-Table is the default. Table uses counted, collapsible status/profile groups and
-metadata visibility controls. All views retain real Post selection and supported
-inspect/edit/delete/create actions. Channels follows Gr8r Members' centered
-directory with underline tabs, search/status segments, inset identity table,
-icon-only health controls, and real Brand Profile cards. Its background and shared controls
-match Posts; domain-specific page structure stays distinct.
-Reference task seed records and unsupported project-management actions never
-become publishing capabilities.
+Posts is one sidebar destination with **Table → Calendar → Grid** in its toolbar.
+Table is default and uses grouped spreadsheet presentation. Calendar supplies
+real Month/Week dates, inspection/day lists, and explicit scheduling entry. Grid
+uses real attachments. All views retain Post identity, authorized scope,
+selection, and supported actions.
 
-Route headings, toolbar rows, tables, cards, and directory own their reference
-gutters and scroll regions. Table reaches workspace edges with first-cell
-gutters; Grid owns its content padding; Channels remains centered to a 1200px
-maximum. On phones, gutters are 16px, toolbar controls wrap, and directory
-tables may scroll horizontally without clipping available actions.
+Channels uses the Members-style account directory and actual Brand Profile
+cards. Its background and canonical controls match Posts; its directory
+composition stays distinct. Connection health is one accessible icon per row,
+with recovery beside the affected account.
 
-`/settings` is a full-height, reference-style Settings page with responsive
-section navigation on the same surface as a consistently bounded content column. Appearance
-offers Light, Dark, and System; System follows live OS palette changes. Language
-uses supported locales; account identity is read-only; Security shows its
-password-reauthenticated controls directly, without another opener or dialog.
-This route adds no billing, team administration, notification, or unsupported preferences.
+Settings is a full route with Appearance, Language, read-only Account, and
+inline Security. Every section shares one bounded content layout and background.
+Light/Dark/System and supported languages use the existing consent-aware owners.
+System follows live OS palette changes. Password verification, authenticator
+enrollment, and recovery-code handling retain their real security requirements.
 
-Search/jump opens only from the top bar or platform-correct Command/Control
-shortcut. The sidebar contains no duplicate Search or Brand Profiles section.
-Jump search finds supported destinations and loaded profiles; Posts and Channels
-own collection search and Brand Profile filters without claiming unloaded data.
+Top-bar jump search finds supported pages and loaded Brand Profiles. Collection
+toolbars search/filter their own data; profiles are scope rather than sidebar
+sections. Workspace identity stays read-only.
 
 #### Calm Workbench
 
-- Lead with posts, schedules, channel health, and the next safe action.
-- Use one accent-filled primary action; secondary controls are outlined or quiet.
-- Separate page sections with alignment, whitespace, or hairlines. Cards represent
-  objects and independent panels, not layers of decorative containers.
-- Show actual pending and failed outcomes. Saving a draft is not publication.
-- Preserve user input, selection, and focus through navigation and recoverable errors.
+- Lead with Posts, schedules, Channel health, and the next safe action.
+- Keep domain state explicit: saving/queuing is not publication, and one Channel's
+  result does not overwrite another's.
+- Use alignment, spacing, and separators for hierarchy; cards represent objects,
+  not layers of decorative framing.
+- Preserve unsaved work, selection, and useful focus through recoverable errors.
+- Confirm destructive scope and explain that published platform copies remain.
 
 #### Modular, Consistent Surfaces
 
-- [`@meltiply/ui`](frontend/shared) owns reusable controls, theme tokens, icons,
-  consent, and notifications. Extend its canonical implementation instead of
-  cloning a primitive in route code. Follow [shared UI ownership](docs/frontend-ui.md).
-- Use the same compact control shapes, typography, status treatment, and focus
-  rules on every route. Geometry is theme-independent.
-- Dialogs use `CenterDialog`, destructive confirmations use `CenterAlertDialog`,
-  and large inspection surfaces use `SideDialog`. Shared primitives own focus,
-  dismissal, scroll lock, and content retention.
-- Feedback uses the shared `@meltiply/ui/toast` store and `@meltiply/ui/sileo`
-  renderer. Include the affected object and a useful recovery action; clipboard
-  feedback includes the exact copied value.
-- Keep provider-specific settings beside the Channel or Post they affect.
-  Progressive disclosure must not hide the primary state or recovery action.
+- [`@meltiply/ui`](frontend/shared) owns canonical controls, tokens, icons,
+  dialogs, feedback, consent, and animation recipes. Extend the owner rather than
+  cloning controls or page CSS. See [shared UI ownership](docs/frontend-ui.md).
+- Rewritten app components use strict TypeScript/React and Tailwind; public
+  Astro/Fumadocs adapters share the same tokens within their framework.
+- Features own real data, permissions, selection, async outcomes, labels, and
+  actions. Reference-only fields and demo flows are not substitutes.
+- `CenterDialog` handles focused forms/search, `CenterAlertDialog` handles
+  destructive confirmation, and `SideDialog` handles large Post inspection.
+  Shared primitives own frames, focus, dismissal, scrolling, and transitions.
+- Feedback uses the shared toast store/Sileo renderer. Name the affected object
+  and useful recovery; clipboard feedback includes the copied value.
+- There is one animation implementation, without a separate motion mode,
+  provider, preference state, root flag, or alternate branches. Preserve current
+  animations and extend their shared owners when animation work is requested.
 
 #### Visual System
 
-- Geist is the interface face; Geist Mono is for code, identifiers, and shortcut
-  hints. Both are self-hosted through the shared workspace.
-- Titles are 23px semibold; working text is around 13.5px; secondary labels are
-  12px. Use the three-step ink ramp, not arbitrary opacity for essential copy.
-- Desktop controls use the reference's 30px standard height and 26px small
-  variant. Mobile navigation and important touch controls stay comfortably tappable.
-- Radii: 4px chips, 6px controls, 8px cards, 10px dialogs. Use a border or the
-  named elevation treatment without stacking duplicate hairline rings.
-- Backgrounds are flat warm surfaces. The retired diagonal stripe canvas is not
-  part of this system.
-- The interface has one implemented animation path. Do not restore the retired
-  motion mode, preference provider, storage, root flags, or alternate-mode branches.
-  Existing animations remain intact; new animations extend the shared primitives
-  and recipes rather than duplicating components or adding mode-specific guards.
-- Light/dark preferences share the consent-aware owner across app and public
-  surfaces. A current-page choice works without optional persistence.
+Use the canonical palette, self-hosted Geist/Geist Mono, interface/provider icon
+system, compact controls, and named radius/elevation tokens. Apply consistent
+surface boundaries and ink hierarchy across routes. Detailed geometry and scroll
+ownership live in [the layout contract](docs/frontend-layout.md), not a second
+per-page style system.
 
 #### Responsive and Accessible by Default
 
-- Preserve the primary task and readable hierarchy from desktop to mobile rather
-  than shrinking every control into a dense layout.
-- Use semantic controls, visible focus, sufficient contrast, keyboard navigation,
-  and screen-reader announcements as part of the design—not as a later pass.
-- Never communicate state through color alone; pair color with text, icons,
-  labels, or structure.
+Preserve the primary task and readable hierarchy from desktop to phone. Keep
+controls named, keyboard-operable, visibly focused, and readable with long real
+content. Wide collections scroll within their working area; navigation and
+Settings remain reachable. Status never relies on color alone.
 
 ## Evidence on Hand
 

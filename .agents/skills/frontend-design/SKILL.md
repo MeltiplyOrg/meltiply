@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Build or restyle Meltiply React or Astro interfaces with the Gr8r-adapted shared UI system. Use for components, layout, controls, settings, search, and dialogs.
+description: Build, restyle, or document Meltiply React and Astro interfaces using the current Gr8r-adapted shared system. Use for components, layout, controls, settings, search, dialogs, and animation changes.
 ---
 
 # Frontend Design
@@ -9,27 +9,17 @@ description: Build or restyle Meltiply React or Astro interfaces with the Gr8r-a
 > Original material retains [Apache-2.0](../../../LICENSES/anthropic-frontend-design.txt);
 > see [third-party notices](../../../THIRD_PARTY_NOTICES.md).
 
-Meltiply adopts Gr8r Studio's warm, compact workspace design while retaining its
-own publishing features and brand. [Product conventions](../../../PRODUCT.md#modular-consistent-surfaces)
-own behavior; [shared UI ownership](../../../docs/frontend-ui.md) owns component
-boundaries; [layout](../../../docs/frontend-layout.md) owns geometry. The source
-reference is not authority to invent capabilities.
+Preserve the current warm, compact Gr8r-adapted interface and Meltiply's real publishing behavior. The reference supplies visual language, not additional product capabilities.
 
 ## Workflow
 
-1. Read relevant contracts, shared exports, the matching implementation, and a real caller. Trace exported references with the language server before changing an interface.
-2. Reuse canonical React controls and page compositions. Keep Post/Channel data, permission checks, async status, labels, and actions in the consuming feature.
-3. New or rewritten app React components use strict TypeScript/TSX and Tailwind utilities. Compose shared primitives; use `cn` for state/caller classes and semantic tokens from `frontend/shared/tokens.css`. Do not copy CSS-heavy markup, add page-specific CSS selectors, or duplicate a shared control. Shared CSS is reserved for palette tokens, global reset/focus, and unavoidable browser interop.
-4. Extend an existing shared primitive where possible: `Table` for Posts and Channels, `PostCard` for media Grid, shared toolbar/filter/chip patterns, tabs, and sidebar rows. Posts stays one sidebar destination; its toolbar offers only Table, Grid, and Calendar, with Table as default.
-5. Preserve the Gr8r-adapted visual grammar: flat warm surfaces, indigo actions, Geist type, compact densities, restrained borders, aligned gutters, and neutral selected states. Keep Meltiply identity, real provider marks, and real product outcomes. [Theme reference](theme-gr8r.md) records semantic values.
-6. Follow [interaction guidance](clean-interactions.md): immediate navigation, stable control identity, visible focus, actionable failures, and canonical dialog ownership. Preserve drafts, selection, auth boundaries, and recoverable errors. Provider publication outcomes are observed, never manually edited.
-7. Update every affected caller and user-facing guide. Run affected frontend checks on GitHub-hosted runners unless local verification is explicitly authorized. Exercise the actual changed desktop/mobile surface in both themes.
+1. Read [product UI intent](../../../PRODUCT.md#modular-consistent-surfaces), [shared ownership](../../../docs/frontend-ui.md), [layout](../../../docs/frontend-layout.md), and the [capability inventory](../../../docs/frontend-capabilities.md). Read the affected implementation, shared exports, and a real caller before changing a control. Trace exported interfaces through the language server.
+2. Extend the canonical TypeScript/React/Tailwind component or composition. Use semantic tokens and `cn`; keep Post/Channel data, permissions, selection, async status, labels, and actions in the consuming feature. Public Astro adapters share those tokens without duplicating React behavior.
+3. Preserve the page grammar: one Posts destination with Table → Calendar → Grid; a Members-style Channels directory; one shared Settings content width; canonical filters, tooltips, selection pill, and Post drawer. Consult [visual application](theme-gr8r.md) and [interaction ownership](clean-interactions.md) for the affected branch.
+4. Preserve the existing animation implementation. There is one animation path, without a motion-mode provider, preference state, mode props, or alternate branches. Requested animation work extends shared primitives and recipes; it does not require mode-specific guards.
+5. Migrate every affected caller, remove obsolete definitions/aliases/styles, and update the relevant public guide. Keep actual provider outcomes, draft recovery, authentication, and confirmation behavior intact.
+6. Run the scoped repository gate on GitHub-hosted runners unless local execution is explicitly authorized. Exercise the changed desktop/phone surface and both palettes; inspect actual states and screenshots rather than treating compilation as UI proof.
 
-## Completion criteria
+## Completion
 
-- Canonical primitives and compositions are reused; no parallel per-page CSS or duplicated controls remain.
-- Reference-derived Table, Grid, Calendar, directory, profile, navigation, search, and Settings compositions use real Meltiply data and supported behavior.
-- Empty, loading, disabled, hover, focus-visible, selected, and recoverable-error states remain reachable.
-- Keyboard navigation, focus restoration, mobile access, reduced-motion behavior, and horizontal table overflow work without relying on decorative transitions.
-- Required frontend checks pass and hosted browser evidence covers the changed behavior.
-- Product instructions and public guides describe the shipped interface, not retired themes, CSS structures, or reference-only demo features.
+The changed flow uses canonical owners; replaced code has no callers; supported data/actions remain reachable; hover, focus, busy, empty, failure, and recovery states work; nested scrolling and responsive layouts remain usable; and instructions/public guides describe the shipped interface. Report exact verification results and any environment blocker.

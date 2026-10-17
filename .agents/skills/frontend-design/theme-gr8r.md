@@ -1,64 +1,23 @@
-# Gr8r-adapted visual reference
+# Applying the current visual system
 
-The visual authority is [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio),
-adapted to Meltiply's publishing workflows. Exact values live in
-`frontend/shared/tokens.css`; consult that file rather than maintaining a second
-token-value table here.
+Meltiply adapts [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio) to real publishing workflows. [`frontend/shared/tokens.css`](../../../frontend/shared/tokens.css) is the implementation source for fonts, palette, density, radius, and elevation. [Layout](../../../docs/frontend-layout.md) owns route geometry and scrolling; [shared UI ownership](../../../docs/frontend-ui.md) owns reusable modules. Read these sources instead of maintaining another token table here.
 
-## Palette and surfaces
+## Surfaces and color
 
-Use warm off-white for the page, stone for navigation, and opaque surfaces for
-content. Dark mode uses warm charcoal layers, not a blue-black inversion. Indigo
-is the primary action and focus color; periwinkle is its dark counterpart.
-Neutral selected navigation is distinct from accent-filled actions. Semantic
-green, amber, and red communicate confirmed success, attention, and failure with
-labels or icons. Provider colors identify external accounts only.
+Use the warm off-white/stone light palette and warm charcoal dark layers. Posts, Channels, and Settings use consistent content backgrounds; domain-specific compositions may differ without inventing another palette. Indigo/periwinkle identifies primary actions and focus. Neutral navigation selection stays distinct from accent-filled actions. Provider colors identify platforms; semantic status colors carry labels or accessible icons.
 
-Use `bg-page/canvas/surface/inset/field`, `text-ink/ink-2/ink-3`,
-`border-line/line-strong/line-soft`, `bg-primary`, `text-primary-foreground`, and
-`bg-accent-tint`. Backgrounds are flat; the retired stripe tokens and pattern are
-not part of the design. Use opaque menus/dialogs; never reduce essential text
-contrast with arbitrary opacity.
+Use semantic utilities such as `bg-page`, `bg-canvas`, `bg-surface`, `bg-field`, `text-ink`, `text-ink-2`, `text-ink-3`, and `border-line`. Shared menu, tooltip, card, and dialog variants own their states and boundaries.
 
-## Typography and geometry
+## Type and composition
 
-- Self-hosted Geist for interface text; Geist Mono for identifiers, code, and
-  keyboard hints. Use semibold for titles and medium for controls.
-- 23px page title; 13.5px working text; 12.5px controls; 11px metadata.
-- Desktop rail 252px, collapsed rail 52px, desktop top bar 46px, page gutters
-  24px. Mobile uses 16px content gutters and a 52px top bar.
-- WorkspaceSurface headings own their padding; the shell does not add outer page
-  gutters. Table reaches working edges with an inset first-cell gutter; Grid
-  owns padding. Channels is a centered 1200px directory. Posts has no sidebar
-  sub-navigation and only Table, Grid, and Calendar toolbar views.
-- Settings is a full-height page with a 220px desktop section rail and content
-  limited to 720px; on phones, section choices become a horizontal row.
-- Controls 30px, small controls 26px, large controls 36px. Mobile navigation and
-  important touch actions use 44px targets rather than desktop density.
-- Radii: `rounded-chip` 4px, `rounded-control` 6px, `rounded-card` 8px,
-  `rounded-window` 10px.
-- Use 4pt spacing, tighter within groups and larger between tasks.
+Self-hosted Geist is the interface face; Geist Mono is for code, identifiers, and shortcut hints. Use shared type/density/radius utilities rather than per-page values. Keep Meltiply's faceted mark and canonical interface/provider icons.
 
-## Elevation and implementation
+Posts uses the grouped spreadsheet, flush Month/Week calendar, and media Grid over the same real records. Channels uses the centered Members-style account directory and real Brand Profile cards. Settings uses one 672px maximum content column across all sections, with compact wrapping theme cards. Drawer, tooltip, filter, and selection-pill treatments come from their shared implementations; do not recreate them in features.
 
-A surface gets one crisp boundary. `shadow-card` is quiet, not a second hairline
-ring under an existing border. Menus and dialogs may use `shadow-overlay`; dark
-cards rely on borders rather than luminous shadows. Toolbars are flat rows, not
-nested cards. Shared Tables own row densities/dividers; data-specific columns
-stay in callers.
+## Implementation and adaptation
 
-Rewritten app React components use TypeScript and Tailwind utilities. Shared CSS
-owns palette tokens, global reset/focus, and browser interop only. Avoid local
-page-selector systems, duplicated row/card/table treatments, and inline styles.
-Use canonical `Table`, `PostCard`, filter/search/chip, tabs, and navigation
-compositions rather than copying structure.
+Rewritten app components are strict TypeScript/React with Tailwind utilities and `cn`. Shared CSS owns global tokens/reset/focus and browser interop; public Astro/Fumadocs adapters resolve the same tokens. Route code owns data and supported actions rather than a parallel style system.
 
-## Adaptation boundaries
+Keep the current visual identity during cleanup. Remove unused definitions, duplicate wrappers, obsolete selectors, aliases, and stale guidance only with consumer evidence. Preserve existing animation recipes; future animation work extends the same owners without restoring a separate mode.
 
-Keep Meltiply's faceted logo, Post/Channel/Brand Profile terms, real account data,
-and existing publication semantics. Gr8r project/task seed content, its logo,
-member photos, billing, notifications, and collaboration features do not ship as
-Meltiply capabilities. Settings exposes supported Appearance/Language
-preferences, read-only account data, and existing security. Jump search covers
-pages and loaded Brand Profiles; route filters own content search. Publication
-outcomes cannot be manually changed.
+Use real Post, Channel, Brand Profile, and account data. Reference-only task fields, seed records, logos, member photos, billing, notifications, and team-administration controls do not become Meltiply capabilities.

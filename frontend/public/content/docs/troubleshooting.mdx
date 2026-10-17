@@ -11,9 +11,9 @@ Most issues have a safe, self-serve fix. Work through the symptom you're seeing 
 
 ### The action buttons are disabled in the composer
 
-- **Select a Brand Profile** in the toolbar or composer. The "All Brand Profiles" view can't publish — the composer shows a banner asking you to choose one.
-- **Select at least one destination channel** in the Destinations bar. If the bar is empty, connect a channel on the [Channels](/docs/channels) screen first.
-- If you're editing a post and see "This post belongs to…", the post was created under a different Brand Profile — switch the Brand Profile dropdown selection to the profile named in the banner.
+- Select one owning **Brand Profile** in the collection filter or composer. All Brand Profiles is for aggregate review.
+- Add text or media. **Save Draft** does not require a destination; Schedule and Publish Now require at least one eligible selected channel.
+- If the Post belongs to another profile, use the profile named by the composer before changing its publishing targets.
 
 ### A channel can't be selected in Destinations
 
@@ -56,9 +56,9 @@ These are normal in-progress states — posts update automatically while deliver
 
 The outcome couldn't be confirmed with the platform — the post may or may not have been published. **Check the post on the platform itself before doing anything else**, otherwise you could publish a duplicate. If it didn't go live, cancel the unconfirmed delivery and submit the post again (for example by editing it and re-scheduling).
 
-### I can't edit or delete a post
+### I can't edit a Post or remove a published platform copy
 
-Only drafts and posts with pending or unconfirmed channels can be edited, rescheduled, or cancelled. Published posts can't be edited or deleted from Meltiply — remove them on the platform. Cancelling never pulls down already-published channels; it only stops the pending ones, and for an in-flight delivery it is a request rather than a guaranteed stop.
+Editing requires a draft or eligible pending/unconfirmed Channel delivery. Open Details and review the available header actions. Deleting the stored Post is a separate confirmed action: it stops pending delivery but leaves published copies on their platforms. Remove those copies on the platform itself. Cancelling an in-flight delivery is a request, not a guarantee that it did not publish.
 
 ### My draft disappeared
 
@@ -68,7 +68,7 @@ Drafts live under the **Drafts** status filter in [Posts](/docs/publishing). If 
 
 ### Connecting a channel fails
 
-Connecting redirects you to the platform to approve access, then returns you to Meltiply. Facebook opens a Page chooser: select a Page and **Connect Page** before expecting it on [Channels](/docs/channels). No eligible Pages means the required publishing permissions or Page access are missing. A connection-limit error requires disconnecting an account or upgrading the verified plan; retry the chosen Page while the selection remains valid. Expired selections require starting **Connect** again.
+Connecting redirects you to the platform, then returns to Meltiply. Facebook opens a Page chooser: select a Page and **Connect Page** before expecting it in Channels. No eligible Pages means required permissions or Page access are missing. For connection limits, review [Resource limits](/docs/resource-limits) and free capacity where appropriate; there is no in-app plan upgrade flow. Retry while the selection is valid, or start Connect again after expiry.
 
 If you cancelled the provider's permission prompt or authorization failed, run **Connect** or **Re-authenticate** again. A platform that can't be connected right now reports that its connection isn't available yet; try again later.
 

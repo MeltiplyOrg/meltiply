@@ -9,32 +9,31 @@ The **Posts** screen is the publishing hub. It lists everything you have drafted
 
 ## Views
 
-Posts supports exactly three views, selected from the page toolbar. **Table** is the default; Posts remains a single sidebar destination.
+The page toolbar orders **Table → Calendar → Grid**. **Table** is the default; Posts remains a single sidebar destination. Creating or editing a Post opens the composer workflow, not another collection view.
 
 - **Table** — a spreadsheet-density collection with a sticky metadata header and collapsible counted groups. Group by publication **Status**, **Brand Profile**, or **None**. Use **Columns** to show or hide Status, Channels, Publish date, and Brand Profile without changing Post data.
-- **Grid** — a media-card gallery of the same Posts with an adjustable column count.
 - **Calendar** — Gr8r-style **Month** and **Week** layouts for actual publishing dates. Use **Today** or previous/next controls to navigate. Month shows up to three compact Post chips per day; **+N more** or the day number opens that day's selectable Post list. Week shows all Posts in seven date columns. Select a Post chip to inspect it; a day's **+** opens the composer with that date pre-filled when a Brand Profile is selected. Calendar does not drag-reschedule existing Posts.
+- **Grid** — a media-card gallery of the same Posts with an adjustable column count.
 
-Open **Filter** to use the field-row builder. Choose **Add filter:** Platform, Brand Profile, Post status, or Publish date, then select a value. Rows combine with **and** using the supported equality filters. Use a row's trash icon to remove it, or **Clear all** to reset. Adding a row alone does not change results. Active filters also appear as removable chips. Sort by newest/oldest; Table groups by status, profile, or none. **Scheduled** shows manually selected publication times.
+Open **Filter** to add Platform, Brand Profile, Post status, or Publish date rows, then choose their values. Empty added rows do not change results; supported filters combine with **and**. Remove a row with its trash control, reset the builder with **Clear all**, or remove an applied value through its chip. Collection search stays separate from top-bar jump search. Sort by newest/oldest; Table grouping and column visibility change presentation without changing Post data.
 
 Checkboxes select Posts in Table and Grid; Calendar day details expose the same
 controls. A select-all checkbox is checked only when every visible filtered Post
 is selected; partial selections leave it visually unchecked. Selection survives
-view/filter changes and collapsing a group. Gr8r's inverse-color floating pill
-shows the count, **Delete**, and an **×** button named **Deselect**. Confirm the
+view/filter changes and collapsing a group. The inverse-ink floating pill
+shows the actual count, **Delete**, and an icon-only **Deselect** button. Confirm the
 exact batch before deletion. Successful deletions leave the selection; failed
 Posts remain selected for retry.
 
 Deletion uses each Post's owning Brand Profile, so individual and bulk deletion
-also work in **All Brand Profiles**. Switching Workspace or Brand Profile clears
-selection. Already-published platform copies are never removed by deleting here.
+also work in **All Brand Profiles**. Changing the active Brand Profile clears
+selection. Deleting a stored Post never removes its published platform copies.
 
 ## Before you publish
 
-Two things must be in place, or the action buttons stay disabled:
+A Post needs one owning Brand Profile and text or media. Select the profile in the collection filter or composer; **All Brand Profiles** is for aggregate review, not publishing under multiple owners.
 
-1. **A Brand Profile selected** in the toolbar or composer. With "All Brand Profiles" selected, the composer shows an info banner asking you to pick one profile first — publishing is always done on behalf of a single profile.
-2. **At least one connected channel** under that profile. The **Destinations** bar at the top of the composer lists the profile's channels as toggleable pills. Channels marked **Disabled**, **Expired**, or **Incomplete** can't be selected — fix them on the [Channels](/docs/channels) screen, or use **Add Channel** to connect a new one.
+Drafts can be saved without destination channels. Scheduling and Publish Now additionally require at least one eligible channel from the composer's **Destinations** bar. Disabled, expired, or incomplete connections must be recovered on [Channels](/docs/channels), or connected through **Add Channel**.
 
 ## Composing a post
 
@@ -58,7 +57,7 @@ Facebook and Instagram channels publish using standard post text and attached me
 
 When you submit, the composer checks the post before anything is sent: a Brand Profile must be selected and the post needs text or media. Scheduling or publishing additionally requires at least one selected channel (and a valid date/time for **Schedule**) — **Save Draft** has neither requirement. Each channel's text must also fit that platform's limits (caption length, hashtag count, accepted media type, YouTube title, TikTok privacy level, and so on). Every problem is listed in a banner — fix them and submit again. Your text, media, and settings are kept even if submission fails.
 
-The composer also keeps an in-progress copy of your text, media, and overrides in your browser for the active Brand Profile, so leaving and coming back restores what you were writing. The copy is cleared when the post is successfully scheduled or published.
+With functional cookie consent, the composer can keep browser-local text, attachment, and override recovery for the active workspace/profile. Without that optional storage, composition and server-backed draft saving still work; do not rely on browser recovery after leaving. Successful scheduling or publication clears the local recovery copy. See [Cookies and storage](/docs/cookies).
 
 ## Draft, schedule, or publish now
 
@@ -86,7 +85,7 @@ Each post shows a status per channel in the post details (open any post to see t
 
 ## Managing posts
 
-Click a Table row, Grid card, or Calendar Post chip—or choose **Details** in a Calendar day's list—to open the Gr8r-style side drawer. Its compact header identifies the Post and keeps supported actions visible. The body shows properties, the full caption, ordered attachments, and real per-channel status, times, failures, and platform links.
+Click a Table row, Grid card, or Calendar Post chip—or choose **Details** in a Calendar day's list—to open the side drawer. Its compact header identifies the Post and exposes supported actions. Flat properties, the full caption, ordered attachments, and real Channel outcomes share one scrollable body; this is not an editable task/status panel.
 
 Use **Expand panel** for a wider centered inspector or **Restore side panel** to return to the edge. Phones use the full viewport. The body scrolls independently; close with the header's **Close** icon, **Escape**, or a click outside. Focus returns to the opening control.
 
@@ -97,7 +96,7 @@ Available actions depend on the channel's state:
 - **Retry** — re-queues delivery for a **Failed** channel. Not every failure is retryable; when it isn't, the retry is refused with an error toast and the failure stays on the post.
 - **Reschedule** — picks a new date and time for a delivery that hasn't published yet (also offered for unconfirmed deliveries).
 - **Cancel** / **Cancel all pending** — stops pending deliveries. For a channel already in flight, this sends a cancellation request rather than a guaranteed stop — watch the status and check the platform. A confirmation dialog explains that only pending channels are cancelled; channels that already published are unaffected and the post stays live there. Cancelling never unpublishes a post that already went out.
-- **Edit post** — opens drafts and not-yet-published posts in the composer. Removing a channel while editing removes that channel's pending delivery. Published posts can't be edited — the button tells you so.
+- **Edit post** — opens a draft or a Post with eligible pending channels in the composer. Removing a channel removes its pending delivery. Published Channel outcomes remain observed results and cannot be manually rewritten.
 - **Delete post / Delete draft** — removes the stored Post and stops its pending channels after confirmation. Anything already published remains on its platform; remove that copy on the platform itself.
 
 > **Heads-up on unconfirmed deliveries:** if a channel shows **Awaiting provider** or **Needs reconciliation**, check the post directly on that platform before sending it again — the delivery may have actually gone through, and reposting could create a duplicate.

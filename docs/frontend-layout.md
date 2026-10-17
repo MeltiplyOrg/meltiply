@@ -1,60 +1,61 @@
 # Frontend layout contract
 
-The Gr8r-adapted workspace uses compact chrome, warm flat surfaces, and route-owned working edges. Read alongside [shared UI ownership](frontend-ui.md) and [product conventions](../PRODUCT.md#modular-consistent-surfaces).
+This document owns layout and scroll boundaries for the current Gr8r-adapted interface. Use [shared UI ownership](frontend-ui.md) for implementation seams and [product conventions](../PRODUCT.md#modular-consistent-surfaces) for supported behavior. Exact shared values come from [`tokens.css`](../frontend/shared/tokens.css), not a parallel page theme.
 
-## Page geometry
+## Workspace shell
 
-- `NavigationShell` owns the 252px desktop rail, 52px collapsed rail, 46px desktop top bar, and a shrinkable route column. The top bar contains workspace/profile context, route title, and jump search. Settings is a full route, not a dialog.
-- The shell has no global page padding. Headers and toolbars own 24px desktop gutters; mobile uses 16px. Table rows reach working edges and inset the leading cell. Grid owns its viewport gutter. Posts has one sidebar entry, without nested views.
-- `WorkspaceSurface` is a full-bleed flex column. Its header uses 24px top and 12px bottom padding, 23px semibold title, and 13.5px description. Actions wrap without creating a second card.
-- Posts supports Table (default), Grid, and Calendar, selected only from its page toolbar. Table adopts the Tasks spreadsheet grammar with counted collapsible groups and column controls; Grid and Calendar retain publishing-specific data and behavior.
-- Calendar is flush rather than a rounded nested panel. Its compact toolbar orders Today, previous/next, localized period heading, and Month/Week segments. Month uses seven columns, 35/42 local dates, 112px minimum rows, compact three-chip previews, and inset adjacent-month days. Week uses seven date columns with bordered Post cards. On narrow screens, only the calendar canvas scrolls horizontally; navigation wraps.
-- Channels follows Gr8r Members: centered 1200px page, underlined Accounts/Brand Profiles tabs, search and connection-status segments, bordered directory table, identity rows, one accessible health icon per row, and actual profile cards. Its background is the same `bg-surface` as Posts; table overflow stays inside the directory panel.
-- Cards represent Posts or genuinely independent objects. Use spacing and separators for page hierarchy; avoid nested decorative cards.
+`NavigationShell` owns the viewport frame, persistent header, desktop rail, mobile navigation dialog, skip link, and route working column. Routes own their headings, toolbars, content gutters, and scroll regions; the shell does not add a second padded card.
 
-## Density and tokens
+| Region            | Current geometry and behavior                                                                                                       |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop rail      | Visible from 1024px; 252px expanded or 52px collapsed. Destinations scroll independently of the account/footer controls.            |
+| Header            | 52px below 640px; 46px from 640px. Contains navigation access, workspace/profile context, page title, and jump search.              |
+| Mobile navigation | Below 1024px, the header opens the shared navigation dialog. Posts, Channels, Settings, help, and account actions remain reachable. |
+| Working column    | `min-w-0` and `min-h-0` preserve bounded scrolling. No document-level horizontal overflow.                                          |
+| Route gutters     | Normally 16px on phones and 24px from the small breakpoint. A collection owns its own edge treatment.                               |
 
-| Element                                | Desktop contract                                           |
-| -------------------------------------- | ---------------------------------------------------------- |
-| Standard / small / large button        | 30px / 26px / 36px                                         |
-| Standard input                         | 30px; a task may explicitly request a larger editing field |
-| Sidebar row                            | 30px; Posts is one destination without view shortcuts      |
-| Working / control / micro text         | 13.5px / 12.5px / 11px                                     |
-| Radius: chip / control / card / dialog | 4px / 6px / 8px / 10px                                     |
+Posts is one destination. Its view switcher belongs in the page toolbar, in **Table → Calendar → Grid** order. Brand Profiles remain collection scope and a Channels tab; jump search belongs in the header.
 
-Use the shared semantic tokens and Tailwind utilities. Rewritten app React components use TypeScript/Tailwind and `cn`; do not add page-specific CSS selectors or copy style blocks. Shared CSS is for tokens, global focus/reset, or browser interoperability that utilities cannot represent. Use 8–12px between related controls and 20–24px between major groups. Compact desktop density never shrinks mobile primary touch targets below 44px.
+## Collection surfaces
 
-## Shared compositions
+### Posts
 
-- `TopToolbar` composes search, filter disclosure, active chips, sort/group/column menus, and view controls. It wraps on small screens; filters stay reachable.
-- Shared `Table` owns row density, header stickiness, dividers, and hover/selection. Posts Table and Channel directory supply columns/data, not a second style system.
-- Posts Grid uses `PostCard`; Post actions/selection and brand context do not fork per view.
-- `Tabs` owns accessible section switching and shared segment/underline/navigation treatments. Route panels own their actual content and scroll region.
-- Empty/loading/error states use canonical shared primitives and actual query state.
+`WorkspaceSurface` composes the page heading/actions, toolbar, active filters, and selected collection view on the shared surface background.
 
-## Scroll ownership
+- **Table** is the default. The shared spreadsheet table has a sticky header, selection column, title, optional metadata, and counted collapsible groups. Status, Brand Profile, or no grouping changes presentation without changing identity or selection. Rows reach the working edges and inset the leading cell. There is no trailing actions column.
+- **Calendar** is a flush canvas, not a nested card. Its toolbar contains Today, previous/next, the period heading, and Month/Week controls. Month is Monday-first with 35 or 42 local dates, 112px minimum rows, three Post chips per day, and overflow/day-list access. Week uses seven date columns. The canvas may scroll horizontally; its surrounding controls wrap.
+- **Grid** uses `PostCard`, real attachments, and the selected column count. The grid viewport owns its gutters. Cards reflow rather than causing document overflow.
 
-| Region               | Owner                                    | Behavior                                                                                                                                                                     |
-| -------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Document frame       | `NavigationShell`                        | Viewport-bound, no document horizontal overflow                                                                                                                              |
-| Route working column | `NavigationShell` main                   | Vertical overflow fallback                                                                                                                                                   |
-| Sidebar destinations | Sidebar nav                              | Independent vertical scroll; footer remains reachable; no Search or Brand Profile section                                                                                    |
-| Posts Table          | Shared table viewport                    | Bounded vertical and horizontal overflow                                                                                                                                     |
-| Grid/Calendar        | Route-specific collection viewport       | Bounded scrolling with route-owned gutters                                                                                                                                   |
-| Channel directory    | Channel tab panel and directory viewport | Horizontal table overflow stays inside centered page                                                                                                                         |
-| Settings sections    | Full-height route                        | Shared page/navigation background and one 672px content maximum across Appearance, Language, Account, and Security; 192px wrapping theme cards; content owns vertical scroll |
-| Composer/dialog body | Composer/shared dialog content           | Bounded scroll; dialogs preserve `data-lenis-prevent`                                                                                                                        |
+Table, Grid, and Calendar day lists share real Post identity, selection, and supported actions. A partial selection leaves select-all visually unchecked. The shared bottom pill reports the actual selected count and opens the existing destructive confirmation.
 
-Every flex/grid ancestor of a bounded scroller needs `min-h-0` and/or `min-w-0`. Avoid giving both the full page and an unbounded child ownership of the same vertical content.
+### Channels
 
-## Responsive behavior
+Channels uses the Members-style directory composition, not a copy of Posts grouping: a centered 1200px maximum, heading/actions, underlined Accounts/Brand Profiles tabs, account search, connection-status segments, field-row filters, and an inset directory table.
 
-- Below the desktop rail breakpoint, use the navigation drawer and persistent 52px top bar. Search remains in the top bar; Settings remains reachable from mobile navigation.
-- Below 640px, gutters are 16px, page actions wrap, and toolbar search/filter/view controls remain visible and keyboard-operable.
-- Settings section navigation becomes a horizontal scrollable row. Content scrolls inside the viewport-bound route.
-- Channel and spreadsheet tables scroll horizontally rather than clipping actions. Post and profile grids reflow naturally.
-- Verify desktop and phone widths, keyboard traversal, long profile names, empty collections, loading, failures, and both palettes. No unintended document horizontal overflow.
+Accounts show identity, platform, owning profile, a single accessible health icon, and channel settings. The Brand Profiles tab shows real profile cards and connection counts. Both tabs use the same background and canonical controls as Posts. Table horizontal overflow stays inside the directory viewport.
 
-## State and motion
+## Settings
 
-Navigation, headings, filters, and palette changes are immediate. Keep controls mounted when state or labels change so input and focus survive. Status groups preserve unknown provider outcomes; hiding a table column does not lose underlying data. Selection covers the visible filtered collection, including collapsed groups, without expanding to unloaded records. Use reduced-motion-aware shared transitions only where retained UI already uses motion; no animation is required to communicate an action.
+All sections share one layout; Security does not get a separate width rule.
+
+- Navigation and content use the same surface background.
+- Below 768px, section navigation is a horizontally scrollable row; from 768px it is a 220px rail.
+- Appearance, Language, Account, and Security all use one left-aligned **672px maximum** content column with full available width below that limit.
+- Light, Dark, and System cards are **192px**, wrap, and do not stretch to fill a wide screen.
+- The content pane owns vertical scrolling. Security forms and authenticator controls are inline; focused confirmation/enrollment steps retain their real security requirements.
+
+## Dialogs and floating controls
+
+`CenterDialog` owns focused forms and search; `CenterAlertDialog` owns destructive confirmations. `SideDialog` owns large Post inspection: a 620px right-edge drawer, compact 46px toolbar, optional 980px expanded inspector, and full-viewport phone layout. Expanded mode is inset on larger screens and dims the outside surface; the normal edge drawer leaves it visually clear.
+
+Dialog bodies own native scrolling and keep `data-lenis-prevent` where the document's smooth-scroll controller must not intercept them. Primitives own focus, Escape, scroll lock, and opener restoration. Route content supplies context/actions rather than another frame or duplicated footer.
+
+`BulkSelectionBar` is portalled outside clipped collection viewports. Its inverse-ink pill stays 24px above the safe-area edge and within the available viewport width.
+
+## State, motion, and verification
+
+Keep control identity, unsaved content, selection, and keyboard focus stable as labels or state change. Hidden columns retain underlying data; filters operate only on loaded, authorized records. Scope changes clear selection according to the owning feature's contract.
+
+There is one implemented animation path, with no application motion mode or mode-specific guards. Preserve existing animation recipes when cleaning up; extend their canonical owners when animation work is requested.
+
+Verify the actual desktop, phone, and reported user viewport. Cover both palettes, long content, loading, empty/error states, keyboard traversal, nested scrolling, and available actions. Every bounded scroller needs shrinkable flex/grid ancestors; only the intended table or calendar canvas may overflow horizontally.

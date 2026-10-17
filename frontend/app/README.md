@@ -1,27 +1,34 @@
 # Meltiply product application
 
 React/Vite SPA with React Router, served by a Cloudflare Worker. It consumes
-[@meltiply/contracts](../../packages/contracts/README.md) for the API and
-`@meltiply/ui` in `frontend/shared/` for shared design and motion. The landing
-page and public docs are separate Astro workspaces.
+[@meltiply/contracts](../../packages/contracts/README.md) for API contracts and
+`@meltiply/ui` in `frontend/shared/` for the canonical controls, palette, fonts,
+icons, dialogs, feedback, and animation recipes. The public site/docs use Astro.
 
-App and docs sidebar hover selectors share their borderless, shadow-free paint in
-[`frontend/shared/motion.css`](../shared/motion.css). Keep selector styling there
-rather than adding per-page overrides.
+## UI implementation
 
-The sidebar header and browser tab reuse the shared Meltiply mark and favicon.
-The active Workspace identity is noninteractive; workspace switching is unavailable.
-Account pictures use the authenticated user's avatar URL, with a user-icon fallback
-for missing or failed images; no email-based avatar lookup is performed.
+Read [shared UI ownership](../../docs/frontend-ui.md),
+[layout/scroll boundaries](../../docs/frontend-layout.md), and the
+[capability inventory](../../docs/frontend-capabilities.md) before changing a surface.
+They describe the current Gr8r-adapted design, not a second theme or migration plan.
 
-Use `CenterDialog` (`@meltiply/ui/center-dialog`) for focused forms and
-`CenterAlertDialog` for confirmations.
-[`SideDialog`](../shared/src/components/ui/side-dialog.tsx) owns the Gr8r-style
-620px inspection drawer, compact record toolbar, and optional 980px expanded
-view. Controlled `open`/`onOpenChange`, required accessible `title`, optional
-`description`, `breadcrumb`, and `actions` frame the native scroll body. It owns
-keyboard dismissal, opener-focus restoration, responsive geometry, and reduced
-presentation. Post details supplies real publishing data, not task-only fields.
+Posts orders Table, Calendar, Grid in its toolbar; Channels uses the Accounts/
+Brand Profiles directory; Settings exposes Appearance, Language, Account, and
+inline Security. The shell keeps Posts and Channels as single destinations and
+puts jump search in the top bar. Workspace identity is read-only.
+
+Features own authorized data, selection, labels, and mutations. Shared
+`CenterDialog`, `CenterAlertDialog`, and `SideDialog` own their frames, scrolling,
+focus, dismissal, and transitions. `PostDetailDialog` supplies real properties,
+caption, attachments, and Channel outcomes to the edge/expanded/phone inspector.
+
+There is one animation path, without a motion-mode provider, stored preference,
+root flag, mode props, or alternate branches. Preserve implemented animations
+during cleanup; extend their canonical owners for new animation work.
+
+Self-hosted font assets have explicit exports in `frontend/shared/package.json`.
+The Vite reload hook watches that manifest as well as the root environment file,
+so export-map changes invalidate cached package resolution in development.
 
 ## Local development
 

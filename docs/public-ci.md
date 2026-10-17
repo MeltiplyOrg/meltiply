@@ -43,19 +43,21 @@ Tokens have read-only repository access, checkouts retain no credentials, and no
 deployment secrets are supplied. Do not execute contributor code through
 `pull_request_target` or persistent self-hosted runners.
 
-The [extended workflow](../.github/workflows/extended.yml) preserves manually
-selected `frontend-full`, `frontend-ui`, `cloudflare-integration`, and
-`cloudflare-extended` lanes for full browser/Lighthouse journeys, focused UI
-review, live-local topology/load, and release/staging/IaC checks.
-These run on GitHub-hosted machines without deployment
-secrets; a passing automatic `ci-gate` does not imply the manual lanes ran.
+The [extended workflow](../.github/workflows/extended.yml) exposes manually
+selected lanes: `frontend-full` for full browser/Lighthouse journeys,
+`frontend-ui` for focused UI verification, `cloudflare-full` for
+`bun run cloudflare:check`, `cloudflare-integration` for live-local topology/load,
+and `cloudflare-extended` for release/staging/IaC checks. They run on GitHub-hosted
+machines without deployment secrets. A passing automatic `ci-gate` does not imply
+that a manual lane ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
 `frontend-full` provisions local signing/storage configuration before browser
 journeys. User-facing journeys and screenshots use production assets without
-DevBox chrome. The `frontend-ui` lane runs
-both frontend checks, documentation links, React review, and the focused
-workspace/public-site browser journey with desktop/mobile screenshot artifacts.
+DevBox chrome. `frontend-ui` runs both frontend checks, dead-code detection,
+documentation links, React review, development CSS/font HTTP smoke, and the
+controlled-backend workspace/public browser journey. Artifacts include desktop,
+phone, and reported-user-width captures plus failure traces.
 The topology lane owns a separate backend process for load checks after smoke exits.
 
 The existing self-hosted image smoke includes Chromium owner journeys: first-run

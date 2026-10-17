@@ -1,187 +1,76 @@
 # Shared UI ownership and reuse
 
-Meltiply uses the Gr8r-adapted warm workspace system. [Product UI conventions](../PRODUCT.md#modular-consistent-surfaces) define behavior; [layout conventions](frontend-layout.md) define geometry. The reference is [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio), inspected at `904205c626918ee96054eb35495c394a60c0c601`. Source reuse was authorized for this redesign; its public repository has no general-purpose license grant. Do not treat that authorization as a license for unrelated third-party reuse.
+Meltiply's current interface adapts [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio) to publishing. The inspected reference is `904205c626918ee96054eb35495c394a60c0c601`. Source reuse was authorized for this redesign; public availability is not a general-purpose license grant.
 
-## Ownership
+Use [product UI intent](../PRODUCT.md#modular-consistent-surfaces) for behavior, [layout](frontend-layout.md) for geometry/scroll boundaries, and the [capability inventory](frontend-capabilities.md) for shipped workflows. Components and [`tokens.css`](../frontend/shared/tokens.css) are implementation truth; reference demo features are not product requirements.
 
-[`@meltiply/ui`](../frontend/shared/package.json) is the canonical UI workspace.
-Read its explicit exports, implementation, and an existing caller before
-changing a control.
+## Canonical owners
 
-| Responsibility                                                             | Owner                                                   |
-| -------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Shared palette, Geist fonts, compact type/space/radius/shadow tokens       | `frontend/shared/tokens.css`                            |
-| Buttons, inputs, menus, dialogs, feedback, cards, tables, tabs, and badges | `frontend/shared/src/components/ui`                     |
-| Shared selection, status, and navigation atoms                             | `frontend/shared/src/components/atoms` and `primitives` |
-| Theme preference, consent, clipboard, notifications, motion infrastructure | Existing modules in `frontend/shared`                   |
-| Animated interface glyph behavior                                          | `frontend/shared/animated-icons/icon-motion-frame.tsx`  |
-| App navigation, jump search, Settings, Post/Channel data and behavior      | `frontend/app/src/components`                           |
-| Cross-surface workspace sign-out                                           | `frontend/app/src/hooks/use-workspace-sign-out.ts`      |
-| Documentation tree, article search, reading navigation                     | `frontend/public/src/components`                        |
-| Marketing copy and explicitly labeled sample content                       | `frontend/public/src`                                   |
+| Responsibility                                                | Owner                                                                         |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Palette, self-hosted Geist fonts, density, radius, elevation  | `frontend/shared/tokens.css` and shared CSS entrypoints                       |
+| Buttons, fields, menus, tabs, tables, dialogs, feedback       | `frontend/shared/src/components/ui`                                           |
+| Shared status, navigation, and selection atoms                | `frontend/shared/src/components/atoms` and `primitives`                       |
+| Static Astro controls and the faceted brand mark              | `frontend/shared/src/components/public`                                       |
+| Icon sizing/hover/animation loop                              | `frontend/shared/animated-icons/icon-motion-frame.tsx` and `use-icon-loop.ts` |
+| Theme, consent, clipboard, toast store, animation recipes     | Existing modules in `frontend/shared`                                         |
+| Navigation, workspace jump search, Settings, collection state | `frontend/app/src/components` and owning context/hooks                        |
+| Sidebar/Settings sign-out behavior                            | `frontend/app/src/hooks/use-workspace-sign-out.ts`                            |
+| Public article search trigger/dialog                          | `frontend/public/src/components/search.tsx`                                   |
+| Documentation tree, reading navigation, public content        | `frontend/public/src/components` and `content/docs`                           |
 
-Use explicit subpath imports such as `@meltiply/ui/button` and
-`@meltiply/ui/table`. Keep data, product semantics, and accessible labels in
-the consuming app; shared controls cannot import app internals. Static Astro
-controls stay static. Extend a canonical variant or build a route from shared
-primitives rather than duplicating one. Posts and Channels share the same
-`Table`; media Grid uses `PostCard`; filter disclosures, search, chips,
-navigation rows, and view segments are reused.
+Read [`@meltiply/ui` exports](../frontend/shared/package.json), the implementation, and a real caller before changing a control. Use explicit subpaths such as `@meltiply/ui/button` or `@meltiply/ui/table`. Shared modules do not import app internals; feature owners supply authorized data, labels, pending state, and actions.
 
-## React and styling
+## TypeScript, React, and styling
 
-New or rewritten app React components are TypeScript (`.tsx`) and Tailwind
-utilities. Use `cn` to combine caller and state variants; put finite style maps
-outside render functions. Shared CSS is reserved for global reset/focus rules,
-theme tokens, and browser interop that utility classes cannot express. Do not
-add page-specific component selectors, copy long CSS blocks between pages, or
-recreate shared controls locally. Public Astro/Fumadocs adapters remain within
-their framework and resolve the same shared palette tokens.
+Rewritten app components use strict TypeScript/TSX, React, Tailwind utilities, semantic tokens, and `cn`. Extend a canonical variant or compose a page from existing primitives. Keep finite style maps outside render functions. Shared CSS owns global reset/focus, tokens, and browser interoperability; public Astro/Fumadocs adapters use the same tokens within their framework.
 
-Retained animated glyphs use `IconMotionFrame` for common sizing and hover
-forwarding; each icon owns only its SVG and variants. There is one implemented
-animation path: no motion provider, preference hook, mode props, root flag,
-stored motion setting, or alternate-mode branches. New animations extend the
-existing shared primitives and recipes; no mode-specific guards are required.
-Do not add another per-icon interaction wrapper.
+Remove replaced callers, aliases, local re-exports, duplicate wrappers, and unconsumed selectors during cutovers. Preserve feature behavior and the user-approved visual state during cleanup. Keep real API adapters distinct when endpoint contracts differ; deduplication is not a reason to invent a generic abstraction.
 
-## Visual language
+The interface has one implemented animation path. Existing animations remain; new animation work extends their shared owners. There is no motion provider, preference hook, mode state/props, root flag, stored motion setting, alternate-mode branch, or lint rule requiring those guards.
 
-- Flat warm page and stone rail, white light-theme surfaces, layered warm charcoal in dark mode. No striped background or separate marketing palette.
-- Indigo primary actions and focus, neutral navigation selections, labeled semantic status colors. Provider identity remains in `PlatformIcon`.
-- Self-hosted Geist for UI, Geist Mono for code and shortcut hints. Primary titles are compact semibold, not oversized display typography.
-- One border per surface. Use `rounded-chip/control/card/window` and named elevation tokens. Avoid rings stacked on an already bordered card.
-- Interface glyphs use `lucide-react` with a consistent 1.8px stroke and 16px default size. Keep Meltiply's faceted brand mark; do not transplant Gr8r's logo or avatars.
+## Shared visual grammar
 
-Use semantic Tailwind utilities: `bg-page`, `bg-canvas`, `bg-surface`,
-`text-ink`, `text-ink-2`, `text-ink-3`, and `border-line`. Use typed length
-utilities such as `text-(length:--font-size-ui)` for the shared compact scale.
-Exact values belong in shared tokens, not inline CSS or page-specific values.
+Use warm flat page/navigation fields, opaque content surfaces, the shared three-step ink ramp, and theme-independent geometry. Indigo/periwinkle identifies actions and focus; selected navigation is neutral. Semantic states have labels or accessible icons; platform colors identify providers rather than product state.
 
-## Navigation and search
+Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. Interface glyphs use the canonical Lucide system; retain Meltiply's faceted mark and actual provider identity. Use named radius/elevation tokens and one intentional surface boundary, not duplicated borders/rings or a separate page palette.
 
-`SidebarNav` owns the 252px/52px rail, Posts and Channels destinations, Settings,
-help, and account actions. It contains no Brand Profiles section, duplicate
-Search entry, or nested Post views. `NavigationShell` owns the 46px top bar and
-mobile drawer. Destinations derive from `WORKSPACE_NAV_ITEMS`; workspace
-identity stays read-only.
+## Navigation, search, and filters
 
-`WorkspaceSearch` is a jump palette, not a global content index. Only the top
-bar and `hotkeys.commandMenu` open it. It finds supported destinations and
-loaded profiles. Route toolbars own collection search and Brand Profile filters.
+`SidebarNav` and `NavigationShell` own the rail, header, mobile navigation, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations. Posts and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
 
-`TopToolbarFilters` ports the reference field-row builder: Filter by heading,
-Where/and rows, Add filter chips, per-row removal, and Clear all. Routes supply
-localized field metadata, real value controls, and reset callbacks; adding an
-empty row does not change data. Existing predicates combine by equality/AND,
-not unsupported task-specific operators. Add/remove restores useful keyboard
-focus; portalled menus remain part of the disclosure interaction.
+`WorkspaceSearch` is a jump palette over supported pages and loaded profiles, opened from the top bar or `hotkeys.commandMenu`. It is not a global Post index. Route toolbars own collection search and the current Brand Profile filter.
 
-Shared `TooltipProvider` uses the reference's 350ms hover delay. `TooltipContent`
-uses compact inverse-ink styling, 11px medium text, 5px corners, a 6px offset,
-and opacity-only motion; Radix retains focus, Escape, collision, and portal
-behavior. Keyboard hints never substitute for accessible control names.
+`TopToolbarFilters` owns the shared field-row disclosure: Where/and rows, Add filter chips, equality controls, per-row removal, Clear all, and active-value chips. Routes supply localized field metadata, real predicates, and reset callbacks. Empty added rows do not filter data. Removing/adding rows restores useful focus; nested portalled menus remain part of the disclosure.
 
-## Reference page compositions
+Shared tooltips use the reference-derived compact inverse treatment and timing. Radix owns focus, Escape, collision, and portals. Keyboard hints supplement accessible names, never replace them.
 
-Posts supports exactly Table, Grid, and Calendar. The page toolbar owns view
-selection; Table is the default and adopts Gr8r Tasks' grouped spreadsheet
-density. Status/profile grouping preserves Post identity and sorted order;
-column visibility hides metadata only. Grid retains real attachments and
-Calendar ports the reference's flat Month grid and Week columns: Today/date
-navigation, three-chip month previews, overflow/day lists, and explicit per-day
-scheduling. Chips open real Post inspection; plus controls seed the composer.
-No task-only events or drag-rescheduling are implied. All three views share
-real Post identity, filters, selection, and supported actions.
+## Collections and selection
 
-Channels uses Gr8r Members' centered directory: underlined Accounts/Brand
-Profiles tabs, compact search and status segments, and an inset table with avatar,
-identity, metadata, one accessible health icon, and overflow actions. Account/profile
-filters retain real scope; no member/role editor is invented. `WorkspaceSurface`
-and shell main share Posts' `bg-surface`; shared Card, Table, and control tokens
-keep the palette consistent without erasing the directory composition.
+Posts orders **Table → Calendar → Grid**, with Table as default. All three share Post identity, owning Brand Profile, real outcomes, filtering, and supported actions. Table grouping/column visibility is presentation, not a different data model. Its rows open Details and have no trailing actions column. Calendar Month/Week uses actual dates, day lists, overflow, and explicit composer entry; it does not imply drag-rescheduling. Grid uses `PostCard` and real attachments.
 
-`BulkSelectionBar` uses the reference's inverse-ink, 10px-corner floating pill,
-24px safe-area-aware offset, compact icon action, separators, and icon-only
-Deselect control. Callers supply the real action icon, labels, pending state,
-and confirmation flow. Select-all controls are checked only for a fully selected
-visible collection; partial selection stays visually unchecked and the live pill
-reports the actual count. Table, Grid, day lists, and Channels use this rule.
+Channels follows the Members directory composition: Accounts/Brand Profiles tabs, account search, status segments, field-row filters, identity table, and real profile cards. Connection cells contain one accessible health icon; recovery remains available without duplicate status text. Its background and controls match Posts.
 
-## Settings
+`BulkSelectionBar` owns the inverse-ink floating pill, separators, count, action icon/label, and icon-only Deselect. Callers own selection, confirmation, and mutations. Select-all is visually checked only when the entire visible collection is selected. Partial selection stays unchecked while the pill reports the real count. Confirm a stable batch; remove successful targets and retain failures for retry.
 
-`WorkspaceSettings` renders the full `/settings` React route. Its reference-style
-section rail exposes only real Appearance, Language, Account, and Security
-workflows. Theme and language call existing consent-aware providers; account
-details stay read-only; `AccountSecurity` retains password reauthentication,
-authenticator enrollment, recovery-code handling, and sign-out behavior.
-Never advertise demo billing, team management, notifications, or identity
-editing.
+## Settings and dialogs
 
-## Dialogs and feedback
+`WorkspaceSettings` is a full route with Appearance, Language, Account, and Security. Every section shares the same background and bounded content column. Compact theme cards offer Light/Dark/System; System follows live OS palette changes. Current-page preferences work without optional storage; persistence follows the shared consent-aware owners. Account identity is read-only. Security controls are inline and retain password verification, authenticator enrollment, and recovery-code requirements.
 
-| Purpose                     | Shared primitive    |
+| Task                        | Primitive           |
 | --------------------------- | ------------------- |
 | Focused form or jump search | `CenterDialog`      |
 | Destructive confirmation    | `CenterAlertDialog` |
 | Large Post inspection       | `SideDialog`        |
 
-`SideDialog` ports Gr8r's compact 46px record toolbar and 620px edge drawer,
-with an optional 980px expanded inspector and full-viewport mobile layout.
-The header accepts real record context/actions; the canonical expand and close
-controls retain tooltip and keyboard support. Normal mode leaves the workspace
-visually clear; expanded mode dims the outside surface. Post inspection uses flat
-properties, caption, attachments, and channel outcomes—not task fields or fake
-comments. Editing stays in the composer; destructive actions use the header menu
-and the existing confirmation flow. The body owns native scrolling; no separate
-footer or duplicated Close action remains.
+`SideDialog` owns edge/expanded/phone geometry, the compact record toolbar, expansion/Close controls, native body scrolling, and opener restoration. Features supply breadcrumb/context, supported header actions, and real content. Post inspection shows properties, caption, ordered attachments, and independent Channel outcomes; editing stays in the composer. It has no duplicated footer or reference-only task fields/comments.
 
-Primitives own accessible names, focus trapping, Escape, scroll lock, focus
-restoration, and transitions. Keep confirmation content stable; retain data
-through exits with `useLatchedValue` when necessary. Routes reuse shared dialogs
-instead of implementing another one. Existing transitions and immediate state
-updates remain intact; future animation work extends the canonical primitive
-without adding a separate mode.
+Primitives own accessible names, focus trapping, Escape/dismissal, scroll lock, and transitions. Preserve stable content through exits with `useLatchedValue` where needed; clear secrets according to the security lifecycle. Features compose a dialog rather than implementing another frame.
 
-Transient outcomes use `@meltiply/ui/toast`, rendered by `@meltiply/ui/sileo`.
-Pair a headline with the affected object and recovery action. Clipboard feedback
-includes the copied value. Inline validation and durable failures remain beside
-the controls they affect.
+Use `@meltiply/ui/toast` and `@meltiply/ui/sileo` for transient outcomes, with the affected object and useful recovery. Clipboard feedback includes the copied value. Keep inline validation and durable failures beside their controls/records. Accepted delivery is not published success.
 
-## Public surfaces
+## Public surfaces and verification
 
-Landing and docs import the same palette and fonts. Their layout serves
-persuasion and reading respectively; public article search is not app-wide
-search. Native scrolling, keyboard navigation, fragments, and reduced-motion
-behavior must remain usable. Existing public scroll adapters release state
-during Astro navigation.
+Landing and docs share palette/fonts but serve different jobs: product explanation and reading. `DocumentationSearchTrigger` opens the canonical article-index dialog from both landing and documentation preferences; it is separate from workspace jump search. Public scrolling/navigation adapters release state during Astro swaps. Native links, keyboard navigation, fragments, and accessibility behavior remain usable.
 
-`DocumentationSearchTrigger` in `frontend/public/src/components/search.tsx`
-owns the shared trigger used by documentation preferences and the landing page.
-Keep the article-index dialog canonical; do not add a second search button
-implementation or conflate it with the workspace jump palette.
-
-## Change workflow
-
-1. Read product and layout contracts, shared exports, the matching implementation, and a real caller.
-2. Extend the canonical primitive or compose it with route data. New modules need a clear reuse need and canonical ownership.
-3. Migrate affected callers and remove replaced definitions, aliases, selectors, and stale instructions.
-4. Verify hover, focus-visible, active, disabled, loading, empty, and recoverable-error states, including keyboard use and mobile overflow.
-5. Run affected frontend checks and exercise the actual changed surface. Use GitHub-hosted runners unless local verification is explicitly authorized. Passing lint is not visual proof.
-
-## Reference-to-product mapping
-
-| Reference family                                        | Meltiply adaptation                                                                                  |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Workspace rail, top bar, breadcrumbs                    | `SidebarNav`, `NavigationShell`, real workspace/profile context                                      |
-| Tasks Table, grouping, metadata controls                | Posts Table built on shared `Table`, toolbar, and Post-owned state                                   |
-| Grid and media previews                                 | Meltiply media Grid uses `PostCard` and real attachments                                             |
-| Members and Teams directories                           | Connected-account `ChannelTableView` and actual Brand Profile `BrandProfileDirectory`                |
-| Command palette                                         | `WorkspaceSearch` over supported destinations and loaded profiles                                    |
-| Full Settings navigation                                | `/settings` section rail over Appearance, Language, read-only Account, and Security                  |
-| Buttons, fields, selects, tabs, menus                   | Canonical shared React controls and semantic Tailwind tokens                                         |
-| Task drawer and confirmation modals                     | Post `SideDialog`, focused `CenterDialog`, destructive `CenterAlertDialog`                           |
-| Auth screens and form states                            | Existing owner sign-in/setup/recovery with the warm palette and compact form language                |
-| Empty, loading, error, and notification states          | Shared Empty/Skeleton/Alert/Sileo with real pending/error semantics                                  |
-| Glyphs, type, colors, spacing, corners                  | Shared Lucide system, self-hosted Geist, and reference-derived semantic tokens                       |
-| Files, timeline, teams, billing, reference seed content | No copied product routes; composer attachments and scheduling stay in supported publishing workflows |
+For each change: read the owner/caller, extend the canonical implementation, migrate callers and guides, and exercise actual states at desktop/phone widths in both palettes. Verify focus, hover, busy, loading, empty, recoverable errors, selection, and nested overflow. Follow the repository's hosted completion gate. Compilation and lint are not visual proof; report only verification actually exercised.

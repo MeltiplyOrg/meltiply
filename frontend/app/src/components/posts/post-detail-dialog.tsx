@@ -391,8 +391,6 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
       onOpenChange={(open) => !open && onClose()}
       title={t("Post details")}
       contentKey={post.id}
-      expandLabel={t("Expand panel")}
-      restoreLabel={t("Restore side panel")}
       breadcrumb={
         <span className="flex min-w-0 items-center gap-2">
           <span>{t("Posts")}</span>

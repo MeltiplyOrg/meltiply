@@ -69,7 +69,7 @@ Channels follows the Members directory composition: Accounts/Brand Profiles tabs
 | Destructive confirmation    | `CenterAlertDialog` |
 | Large Post inspection       | `SideDialog`        |
 
-`SideDialog` owns edge/expanded/phone geometry, the compact record toolbar, expansion/Close controls, native body scrolling, and opener restoration. Features supply breadcrumb/context, supported header actions, and real content. Post inspection shows properties, caption, ordered attachments, and independent Channel outcomes; editing stays in the composer. It has no duplicated footer or reference-only task fields/comments.
+`SideDialog` owns the edge/phone drawer geometry, the compact record toolbar, its Close control, native body scrolling, and opener restoration. Features supply breadcrumb/context, supported header actions, and real content. Post inspection shows properties, caption, ordered attachments, and independent Channel outcomes; editing stays in the composer. It has no duplicated footer or reference-only task fields/comments.
 
 Primitives own accessible names, focus trapping, Escape/dismissal, scroll lock, and transitions. Preserve stable content through exits with `useLatchedValue` where needed; clear secrets according to the security lifecycle. Features compose a dialog rather than implementing another frame.
 

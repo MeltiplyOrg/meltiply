@@ -188,10 +188,14 @@ export function TopToolbarFilters({
         className="group/filter relative"
         onToggle={(event) => setOpen(event.currentTarget.open)}
         onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            close();
-            event.currentTarget.querySelector("summary")?.focus();
-          }
+          if (event.key !== "Escape") return;
+          // A nested list closes itself on this key. Its keydown reaches here
+          // through the portal, and the list is still mounted in the same
+          // commit, so the builder stays open for the next field instead of
+          // dismissing both layers with one Escape.
+          if (document.querySelector("[data-radix-popper-content-wrapper]")) return;
+          close();
+          event.currentTarget.querySelector("summary")?.focus();
         }}
       >
         <summary

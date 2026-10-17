@@ -1,6 +1,6 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { Maximize2, Minimize2, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Button } from "./button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
 import { cn } from "@meltiply/ui/utils";
@@ -9,8 +9,8 @@ import { cn } from "@meltiply/ui/utils";
 export interface SideDialogProps {
   open: boolean;
   /**
-   * Receives dismissal requests from Escape, Close, or the expanded scrim; the
-   * edge inspector ignores outside clicks so the workspace stays live.
+   * Receives dismissal requests from Escape or Close; the drawer ignores outside
+   * clicks so the workspace stays live while a record is inspected.
    */
   onOpenChange: (open: boolean) => void;
   /** Required accessible dialog heading, visually hidden when breadcrumb is supplied. */
@@ -18,38 +18,33 @@ export interface SideDialogProps {
   description?: React.ReactNode;
   /** Record context displayed at the left of the compact header. */
   breadcrumb?: React.ReactNode;
-  /** Caller-owned supported actions; expand and close remain canonical. */
+  /** Caller-owned supported actions; Close remains canonical. */
   actions?: React.ReactNode;
   /**
-   * Identity of the record the content shows. When it changes while the panel
-   * stays open, the body steps in from the direction of travel instead of
-   * replaying the staggered entrance; reopening always replays the entrance.
+   * Identity of the record the content shows. Changing it while the panel stays
+   * open replaces the body, replaying the same staggered entrance for the new
+   * record instead of swapping the content in place.
    */
   contentKey?: string;
   children: React.ReactNode;
   className?: string;
   closeLabel?: string;
-  expandLabel?: string;
-  restoreLabel?: string;
 }
 
 /**
- * Ports Gr8r's 620px edge drawer, 46px record toolbar, and optional 980px expanded
- * inspector. The drawer is a non-modal companion, as in the reference: the
- * workspace keeps painting and taking input, so clicking another record
- * re-inspects it in place instead of being swallowed by a scrim. Only the
- * expanded inspector renders a scrim, and clicking that scrim dismisses. Radix
- * still owns Escape dismissal, the portal, and opener restoration; the
- * inspection container receives initial focus so a toolbar tooltip cannot
- * consume the first Escape. Keyboard focus is deliberately not trapped: this is
- * a companion panel over live content, so Tab reaches the workspace.
- * Native body scrolling stays untouched. Motion is the reference drawer's: the
- * panel steps 48px in on `--ease-drawer` and slides back out on dismissal
- * (`side-dialog-enter`/`side-dialog-exit`, which read their shape from custom
- * properties so expanding never replays the entrance), its body blocks rise
- * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`), and a
- * record that replaces another while the panel is open steps in from the
- * direction of travel (`side-dialog-swap-in`).
+ * Ports Gr8r's 620px edge drawer and 46px record toolbar. The drawer is a
+ * non-modal companion, as in the reference: the workspace keeps painting and
+ * taking input, so clicking another record re-inspects it in place instead of
+ * being swallowed by a scrim. Radix still owns Escape dismissal, the portal, and
+ * opener restoration; the inspection container receives initial focus so a
+ * toolbar tooltip cannot consume the first Escape. Keyboard focus is
+ * deliberately not trapped: this is a companion panel over live content, so Tab
+ * reaches the workspace. Native body scrolling stays untouched. Motion is the
+ * reference drawer's: the panel steps 48px in on `--ease-drawer` and slides back
+ * out on dismissal (`side-dialog-enter`/`side-dialog-exit`), its body blocks rise
+ * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`), and
+ * `contentKey` keys that body so inspecting another record replays the same
+ * staggered entrance for the new one.
  */
 export function SideDialog({
   open,
@@ -62,49 +57,27 @@ export function SideDialog({
   children,
   className,
   closeLabel = "Close",
-  expandLabel = "Expand panel",
-  restoreLabel = "Restore side panel",
 }: SideDialogProps): React.ReactElement {
-  const [expanded, setExpanded] = React.useState(false);
   const previousActiveElement = React.useRef<HTMLElement | null>(null);
   const contentRef = React.useRef<HTMLDivElement | null>(null);
   const hasDescription = description !== undefined && description !== null && description !== false;
   const hasBreadcrumb = breadcrumb !== undefined && breadcrumb !== null;
-  const expandAction = expanded ? restoreLabel : expandLabel;
   /**
-   * The first record of an open cycle takes the entrance; a record that arrives
-   * while the panel is already open is a swap. The baseline is the key the panel
-   * opened with, so the flag survives later renders and clears when it closes.
+   * Keying the body by the shown record replays the staggered entrance for a
+   * replacement, exactly as the reference's drawer content does.
    */
-  const shownContentKey = contentKey ?? "";
-  const [baselineKey, setBaselineKey] = React.useState<string | null>(null);
-  if (open && baselineKey === null) setBaselineKey(shownContentKey);
-  else if (!open && baselineKey !== null) setBaselineKey(null);
-  const swapped = open && baselineKey !== null && shownContentKey !== baselineKey;
+  const shownContentKey = contentKey ?? "content";
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <DialogPrimitive.Portal>
-        {/* The reference scrim exists only for the expanded inspector: it fades in
-            on expand and stays inert and invisible otherwise, so the edge drawer
-            never blocks the workspace. Radix keeps each portal child mounted for
-            its own exit animation. */}
-        <div
-          data-side-dialog-scrim=""
-          data-state={expanded && open ? "open" : "closed"}
-          aria-hidden="true"
-          className={cn("fixed inset-0 z-50 bg-overlay/40", !expanded && "pointer-events-none")}
-          onClick={() => onOpenChange(false)}
-        />
         <DialogPrimitive.Content
           ref={contentRef}
           data-side-dialog=""
-          data-expanded={expanded ? "true" : "false"}
           {...(!hasDescription ? { "aria-describedby": undefined } : {})}
           onInteractOutside={(event) => {
             // A companion panel ignores outside use: the workspace stays live so
-            // another record can be inspected, and the expanded scrim owns
-            // dismissal instead.
+            // another record can be inspected in place.
             event.preventDefault();
           }}
           onOpenAutoFocus={(event) => {
@@ -120,10 +93,7 @@ export function SideDialog({
             if (active?.isConnected) active.focus();
           }}
           className={cn(
-            "fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 flex-col overflow-hidden border-l border-line bg-surface shadow-overlay outline-none",
-            expanded
-              ? "sm:inset-y-6 sm:left-1/2 sm:right-auto sm:h-auto sm:w-[min(980px,calc(100vw-48px))] sm:-translate-x-1/2 sm:rounded-xl sm:border"
-              : "sm:max-w-155",
+            "fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 flex-col overflow-hidden border-l border-line bg-surface shadow-overlay outline-none sm:max-w-155",
             className,
           )}
         >
@@ -149,26 +119,6 @@ export function SideDialog({
               <div className="flex shrink-0 items-center gap-1">{actions}</div>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="hidden size-7 sm:inline-flex"
-                    aria-label={expandAction}
-                    aria-pressed={expanded}
-                    onClick={() => setExpanded((previous) => !previous)}
-                  >
-                    {expanded ? (
-                      <Minimize2 className="size-3.75" />
-                    ) : (
-                      <Maximize2 className="size-3.75" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{expandAction}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
                   <DialogPrimitive.Close asChild>
                     <Button
                       type="button"
@@ -191,13 +141,9 @@ export function SideDialog({
           <div
             data-lenis-prevent=""
             data-side-dialog-body=""
-            data-content={swapped ? "swapped" : "initial"}
-            className={cn(
-              "min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-10 pt-4 sm:px-6 sm:pb-8 sm:pt-5",
-              expanded && "sm:px-12 sm:pb-10 sm:pt-7",
-            )}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-10 pt-4 sm:px-6 sm:pb-8 sm:pt-5"
           >
-            <React.Fragment key={shownContentKey || "content"}>{children}</React.Fragment>
+            <React.Fragment key={shownContentKey}>{children}</React.Fragment>
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

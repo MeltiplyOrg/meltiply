@@ -311,23 +311,22 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   };
   await inspectAnotherPost("Second draft — selection review.");
   await expect(inspector).toBeVisible();
-  // The replacing record steps in from the direction of travel.
-  const swap = await page.evaluate(() => {
+  // The replacement replays the same staggered rise for the new record.
+  const swappedRise = await page.evaluate(() => {
     const body = document.querySelector("[data-side-dialog-body]");
-    const animation = body?.firstElementChild?.getAnimations()[0] as CSSAnimation | undefined;
-    const frames = (animation?.effect as KeyframeEffect | null)?.getKeyframes?.() ?? [];
-    return { name: animation?.animationName ?? "", from: String(frames[0]?.translate ?? "") };
+    return Array.from(body?.children ?? [])
+      .slice(0, 2)
+      .map((child) => {
+        const animation = child.getAnimations()[0] as CSSAnimation | undefined;
+        return {
+          name: animation?.animationName ?? "",
+          delay: animation?.effect?.getTiming?.().delay ?? -1,
+        };
+      });
   });
-  expect(swap.name).toBe("side-dialog-swap-in");
-  expect(swap.from.startsWith("18px")).toBe(true);
+  expect(swappedRise[0]).toEqual({ name: "side-dialog-rise-in", delay: 0 });
+  expect(swappedRise[1]).toEqual({ name: "side-dialog-rise-in", delay: 55 });
   await inspectAnotherPost("Studio update — ready for the next publishing window.");
-  await inspector.getByRole("button", { name: "Expand panel", exact: true }).click();
-  await page.screenshot({
-    animations: "disabled",
-    path: testInfo.outputPath("post-drawer-expanded-desktop.png"),
-    fullPage: true,
-  });
-  await inspector.getByRole("button", { name: "Restore side panel", exact: true }).click();
   // Record the dismissal from inside the page: Radix unmounts the panel when the
   // exit animation ends, so the event is the only durable proof it played.
   await page.evaluate(() => {

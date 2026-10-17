@@ -46,6 +46,23 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       }),
     )
     .toBe(true);
+  const railGlide = page.locator("[data-glide-highlight]");
+  const postsRow = page.locator("aside").getByRole("button", { name: "Posts", exact: true });
+  const channelsRow = page.locator("aside").getByRole("button", { name: "Channels", exact: true });
+  await page.mouse.move(1200, 500);
+  await expect(railGlide).toHaveCSS("opacity", "0");
+  await postsRow.hover();
+  await expect(railGlide).toHaveCSS("opacity", "1");
+  const postsGlideBox = await railGlide.boundingBox();
+  const postsRowBox = await postsRow.boundingBox();
+  expect(postsGlideBox?.y).toBeCloseTo(postsRowBox?.y ?? 0, 0);
+  await channelsRow.hover();
+  await expect
+    .poll(async () => (await railGlide.boundingBox())?.y ?? 0)
+    .toBeGreaterThan((postsGlideBox?.y ?? 0) + 1);
+  await expect(railGlide).toHaveCSS("opacity", "1");
+  await page.mouse.move(1200, 500);
+  await expect(railGlide).toHaveCSS("opacity", "0");
   const accountTrigger = page.getByRole("button", { name: "Account menu", exact: true });
   const footerSlots = await Promise.all(
     [

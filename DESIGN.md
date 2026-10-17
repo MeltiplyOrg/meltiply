@@ -154,6 +154,8 @@ The rail uses quiet text and neutral selected rows, not accent-filled navigation
 
 **The One Icon Column Rule.** Every rail row reserves the same 16px leading slot. A larger 24px identity avatar centers inside that slot instead of widening it, so icons, labels, and the account name share one axis.
 
+**The Gliding Highlight Rule.** Rail rows never paint their own hover fill. One shared pill (`SidebarGlideHighlight`) springs to the hovered row and fades out on leave, while the row keeps its labels, focus ring, and selected surface above it.
+
 ### Filters and tooltips
 
 Canonical field-row filters share Where/and rows, equality controls, Add filter chips, clear/remove actions, and active-value chips. Tooltips use compact inverse ink, a 350ms opening delay, 120ms fade, and 6px offset. Radix owns portals, collision handling, focus, and Escape.

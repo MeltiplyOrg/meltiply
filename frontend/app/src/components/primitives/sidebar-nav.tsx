@@ -1,4 +1,4 @@
-import { forwardRef, useState, type ComponentType } from "react";
+import { forwardRef, useRef, useState, type ComponentType } from "react";
 import {
   CircleHelp,
   ChevronsUpDown,
@@ -14,6 +14,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { BrandMark } from "@meltiply/ui/brand-mark";
+import { SidebarGlideHighlight } from "@meltiply/ui/sidebar-glide-highlight";
 import { Avatar, AvatarFallback, AvatarImage } from "@meltiply/ui/avatar";
 import { Button, type ButtonProps } from "@meltiply/ui/button";
 import { useWorkspaceSignOut } from "@/hooks/use-workspace-sign-out";
@@ -71,8 +72,9 @@ export const SidebarNavRow = forwardRef<
     <Button
       ref={ref}
       variant="ghost"
+      data-sidebar-item=""
       className={cn(
-        "h-control w-full justify-start gap-2.25 px-2 text-left text-(length:--font-size-ui) font-normal",
+        "relative z-10 h-control w-full justify-start gap-2.25 px-2 text-left text-(length:--font-size-ui) font-normal hover:bg-transparent",
         collapsed && "justify-center px-0",
         active &&
           "bg-surface font-medium text-ink shadow-btn hover:bg-surface dark:bg-hover-2 dark:shadow-none dark:hover:bg-hover-2",
@@ -127,23 +129,34 @@ function AccountAvatar({ src, className }: { src?: string | null; className?: st
  * page controls. Search lives in the top bar. The compact account row opens the
  * real identity/settings/sign-out menu with immediate shared theme preferences;
  * collapse preserves its accessible name.
+ *
+ * Every rail row is a `data-sidebar-item` target for the shared
+ * `SidebarGlideHighlight` pill, which springs to the hovered row instead of each
+ * row painting its own hover fill; rows stay `relative z-10` so their labels and
+ * selected surface read above the travelling background.
  */
 export function SidebarNav({ currentView, onNavigate, className }: SidebarNavProps) {
   const { user, workspaceName } = useWorkspace();
   const { t } = useI18n();
   const { requestedTheme, setTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const asideRef = useRef<HTMLElement | null>(null);
   const name = workspaceName ?? "Meltiply Workspace";
   const handleSignOut = useWorkspaceSignOut();
   return (
     <aside
+      ref={asideRef}
       className={cn(
-        "flex h-full flex-col border-r border-line bg-canvas",
+        "relative flex h-full flex-col border-r border-line bg-canvas",
         collapsed ? "w-sidebar-collapsed" : "w-sidebar",
         className,
       )}
       aria-label={t("Workspace navigation")}
     >
+      {/* Rows sit in the scrolling nav and the pinned footer, so the rail aside owns
+          the pill. The 26px snap radius crosses the nav divider (~21px) without
+          lighting a row from the identity header above the list. */}
+      <SidebarGlideHighlight containerRef={asideRef} snapThreshold={26} />
       <div className="flex h-topbar shrink-0 items-center gap-2 px-3">
         <BrandMark className="size-5.5 shrink-0 text-ink" />
         {!collapsed && (

@@ -44,17 +44,20 @@ interface ClipInsets {
 }
 
 /**
- * Configuration for `SidebarGlideHighlight`. The app passes only its scrolling
- * `<nav>` via `containerRef`; the docs adapter additionally resolves its
- * enclosing `aside` as container plus the nested Radix ScrollArea viewport.
+ * Configuration for `SidebarGlideHighlight`. Both consumers pass their rail
+ * `<aside>` as the container: the workspace rail adds no `viewportSelector`
+ * because its rows live in one scrolling `<nav>` under a short header (scroll
+ * re-measures the hovered row), while the docs rail adds a Radix ScrollArea
+ * viewport so the pill stays clipped to that column.
  */
 export interface SidebarGlideHighlightProps {
   /**
-   * Element that establishes the positioning containing block rows are measured
-   * against. When it scrolls itself (the app `<nav>`), the rendered pill rides
-   * the scroll content and the container's own overflow clips it. When it does
-   * not (the docs `aside`), pass `viewportSelector` so the overlay can clip to
-   * and follow the nested scroller's visible region.
+   * Element that establishes the positioning containing block rows are
+   * measured against; it must be a positioned ancestor of the rendered pill.
+   * When it scrolls itself, the pill rides the scroll content and the
+   * container's own overflow clips it. When it does not, pass
+   * `viewportSelector` so the overlay can clip to and follow the nested
+   * scroller's visible region.
    */
   containerRef: RefObject<HTMLElement | null>;
   /** CSS selector identifying navigable item elements within the container. Defaults to `[data-sidebar-item]`. */
@@ -349,6 +352,8 @@ function useGlideTracking({
  * paint layers. Entry fades in at the hovered row; exit fades out in place.
  * Tracking drops unchanged geometry before state writes; this renderer owns
  * clipping and FLIP projection, preserving position and velocity on retargets.
+ * Consumers mark their rows with `itemSelector` and must keep them painted above
+ * the pill (a positioned row with a higher stacking order).
  */
 export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
   const { className, viewportSelector } = props;

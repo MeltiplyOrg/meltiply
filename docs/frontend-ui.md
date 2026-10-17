@@ -72,7 +72,7 @@ Calendar retains scheduling. All three share real Post identity and actions.
 
 Channels uses Gr8r Members' centered directory: underlined Accounts/Brand
 Profiles tabs, compact search and status segments, and an inset table with avatar,
-identity, metadata, status badge, and overflow-action rows. Account/profile
+identity, metadata, one accessible health icon, and overflow actions. Account/profile
 filters retain real scope; no member/role editor is invented. `WorkspaceSurface`
 and shell main share Posts' `bg-surface`; shared Card, Table, and control tokens
 keep the palette consistent without erasing the directory composition.

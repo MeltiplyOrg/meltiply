@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
-import { controlledProviderAccountId, provisionControlledChannels } from "./publication-fixtures";
+import {
+  activeBrandProfileName,
+  controlledProviderAccountId,
+  editPostFromRow,
+  provisionControlledChannels,
+} from "./publication-fixtures";
 
 /**
  * Exercises real owner-authenticated Posts, directory, Settings, keyboard search,
@@ -28,6 +33,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   ]);
   await page.reload();
   await waitForWorkspace(page);
+  await activeBrandProfileName(page);
   await page
     .locator("main header")
     .getByRole("button", { name: "Create post", exact: true })
@@ -43,6 +49,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.screenshot({ path: testInfo.outputPath("composer-desktop.png"), fullPage: true });
   await page.getByRole("button", { name: /back to posts/i }).click();
   await expect(page.getByRole("row").filter({ hasText: "Studio update" })).toBeVisible();
+  await editPostFromRow(page, page.getByRole("row").filter({ hasText: "Studio update" }));
+  await expect(page.getByPlaceholder(/what do you want to publish/i)).toHaveValue(
+    "Studio update — ready for the next publishing window.",
+  );
+  await page.getByRole("button", { name: /back to posts/i }).click();
 
   const searchTrigger = page
     .getByRole("banner")
@@ -78,7 +89,19 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(page.getByText("No accounts match the active filters.")).toBeVisible();
   await connectionFilters.getByRole("button", { name: "All statuses", exact: true }).click();
   await expect(page.getByRole("row").filter({ hasText: "Studio Threads" })).toBeVisible();
+  const connectionCell = page
+    .getByRole("row")
+    .filter({ hasText: "Studio Instagram" })
+    .getByRole("cell")
+    .nth(4);
+  await expect(
+    connectionCell.getByRole("button", { name: "Connected", exact: true }),
+  ).toBeVisible();
+  await expect(connectionCell).toHaveText("");
   await page.screenshot({ path: testInfo.outputPath("channels-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 1808, height: 984 });
+  await page.screenshot({ path: testInfo.outputPath("channels-user-1808.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("tab", { name: /Brand Profiles/ }).click();
   await expect(page.getByRole("button", { name: "View channels" })).toBeVisible();
   await page.screenshot({
@@ -117,6 +140,13 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     await viewButton.click();
     await expect(viewButton).toHaveAttribute("aria-pressed", "true");
     if (view === "Table") {
+      const postsTable = page.getByRole("table", { name: "Posts table", exact: true });
+      await expect(
+        postsTable.getByRole("columnheader", { name: "Actions", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        postsTable.getByRole("button", { name: "Post actions", exact: true }),
+      ).toHaveCount(0);
       await expect(page.getByRole("columnheader", { name: "Status" })).toBeVisible();
       await page.getByRole("button", { name: "Columns" }).click();
       await page.getByRole("menuitemcheckbox", { name: "Status" }).click();

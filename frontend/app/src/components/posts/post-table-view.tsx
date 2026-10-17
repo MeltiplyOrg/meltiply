@@ -7,7 +7,6 @@ import { Empty, EmptyDescription } from "@meltiply/ui/empty";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@meltiply/ui/table";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { StatusBadge } from "./status-badge";
-import { PostActions } from "./post-actions";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@meltiply/ui/utils";
 import { normalizePostStatus, resolveRowCaption, resolveRowProviders } from "./posts-helpers";
@@ -25,12 +24,9 @@ export interface PostTableViewProps extends PostSelectionProps {
   isLoading: boolean;
   sortKey: PostSortKey;
   brandProfiles: BrandProfile[];
-  canMutate: boolean;
   groupBy: PostGroupBy;
   hiddenColumns: ReadonlySet<string>;
   onSortChange: (key: PostSortKey) => void;
-  onEdit: (postId: string) => void;
-  onDelete: (postId: string) => void;
   onViewDetails: (postId: string) => void;
   onCreatePost: () => void;
 }
@@ -38,19 +34,16 @@ export interface PostTableViewProps extends PostSelectionProps {
 /**
  * Gr8r Tasks' grouped spreadsheet Table shares semantic primitives with the
  * channel directory. Selection includes collapsed filtered rows, not unloaded
- * records; grouping never changes Post identity or publication status.
+ * records; grouping preserves Post identity. Rows open Details instead of a trailing action column.
  */
 export const PostTableView = React.memo(function PostTableView({
   posts,
   isLoading,
   sortKey,
   brandProfiles,
-  canMutate,
   groupBy,
   hiddenColumns,
   onSortChange,
-  onEdit,
-  onDelete,
   onViewDetails,
   onCreatePost,
   selectedIds,
@@ -76,10 +69,10 @@ export const PostTableView = React.memo(function PostTableView({
   const showDate = !hiddenColumns.has("date");
   const showProfile = !hiddenColumns.has("profile");
   const columnCount =
-    3 + Number(showStatus) + Number(showChannels) + Number(showDate) + Number(showProfile);
+    2 + Number(showStatus) + Number(showChannels) + Number(showDate) + Number(showProfile);
   return (
     <div className={cn("min-h-0 flex-1 overflow-auto pb-24", selectedIds.size > 0 && "pb-32")}>
-      <Table variant="spreadsheet" className="min-w-215 sm:min-w-245" aria-label={t("Posts table")}>
+      <Table variant="spreadsheet" className="min-w-191 sm:min-w-221" aria-label={t("Posts table")}>
         <colgroup>
           <col className="w-12" />
           <col />
@@ -87,7 +80,6 @@ export const PostTableView = React.memo(function PostTableView({
           {showChannels && <col className="w-27.5" />}
           {showDate && <col className="w-38.5" />}
           {showProfile && <col className="w-40" />}
-          <col className="w-24" />
         </colgroup>
         <TableHeader>
           <TableRow>
@@ -120,9 +112,6 @@ export const PostTableView = React.memo(function PostTableView({
               </TableHead>
             )}
             {showProfile && <TableHead>{t("Brand Profile")}</TableHead>}
-            <TableHead>
-              <span className="sr-only">{t("Actions")}</span>
-            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -289,15 +278,6 @@ export const PostTableView = React.memo(function PostTableView({
                               </span>
                             </TableCell>
                           )}
-                          <TableCell>
-                            <PostActions
-                              postId={post.id}
-                              canMutate={canMutate}
-                              onViewDetails={onViewDetails}
-                              onEdit={onEdit}
-                              onDelete={onDelete}
-                            />
-                          </TableCell>
                         </TableRow>
                       );
                     })}

@@ -8,7 +8,7 @@ The Gr8r-adapted workspace uses compact chrome, warm flat surfaces, and route-ow
 - The shell has no global page padding. Headers and toolbars own 24px desktop gutters; mobile uses 16px. Table rows reach working edges and inset the leading cell. Grid owns its viewport gutter. Posts has one sidebar entry, without nested views.
 - `WorkspaceSurface` is a full-bleed flex column. Its header uses 24px top and 12px bottom padding, 23px semibold title, and 13.5px description. Actions wrap without creating a second card.
 - Posts supports Table (default), Grid, and Calendar, selected only from its page toolbar. Table adopts the Tasks spreadsheet grammar with counted collapsible groups and column controls; Grid and Calendar retain publishing-specific data and behavior.
-- Channels follows Gr8r Members: centered 1200px page, underlined Accounts/Brand Profiles tabs, search and connection-status segments, bordered directory table, identity rows, health badges, and actual profile cards. Its background is the same `bg-surface` as Posts; table overflow stays inside the directory panel.
+- Channels follows Gr8r Members: centered 1200px page, underlined Accounts/Brand Profiles tabs, search and connection-status segments, bordered directory table, identity rows, one accessible health icon per row, and actual profile cards. Its background is the same `bg-surface` as Posts; table overflow stays inside the directory panel.
 - Cards represent Posts or genuinely independent objects. Use spacing and separators for page hierarchy; avoid nested decorative cards.
 
 ## Density and tokens

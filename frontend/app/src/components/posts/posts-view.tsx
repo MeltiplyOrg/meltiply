@@ -945,10 +945,7 @@ export function PostsView({
         groupBy={groupBy}
         hiddenColumns={hiddenColumns}
         onCreatePost={handleCreatePost}
-        canMutate={selectedBrandProfileId !== null}
         onSortChange={setSortKey}
-        onEdit={handleEditPost}
-        onDelete={handleDeletePostAction}
         onViewDetails={handleViewDetails}
         selectedIds={selectedIds}
         onToggleSelection={handleTogglePostSelection}

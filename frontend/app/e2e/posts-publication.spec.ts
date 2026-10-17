@@ -5,6 +5,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from "@
 import {
   activeBrandProfileName,
   controlledProviderAccountId,
+  editPostFromRow,
   provisionControlledChannels,
   readControlledMedia,
   readControlledPublications,
@@ -662,8 +663,8 @@ test("keeps separately created identical Posts distinct and publishes only the o
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 0);
   await waitForLiveCopyCount(request, channels.threads.providerUserId, 0);
 
-  // Publish exactly one of them, through that row's own edit affordance.
-  await rows.first().getByTitle("Edit post").click();
+  // Publish exactly one stored Post through its own Details panel.
+  await editPostFromRow(page, rows.first());
   await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
     timeout: 30_000,
   });
@@ -746,8 +747,8 @@ test("edits a pending target without touching published history and explains wha
   // Scheduling the second Post published nothing.
   expect(await readChannelLiveCopies(request, channels)).toEqual(historyBefore);
 
-  // Edit the pending Post through its own edit affordance.
-  await page.getByRole("row").filter({ hasText: pendingCaption }).getByTitle("Edit post").click();
+  // Edit the pending Post through its own Details panel.
+  await editPostFromRow(page, page.getByRole("row").filter({ hasText: pendingCaption }));
   await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
     timeout: 30_000,
   });

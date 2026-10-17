@@ -1089,7 +1089,7 @@ describe("Posts surfaces", () => {
    * Guards the published Post projection: caption, status, and actions remain
    * usable without inventing engagement data that has no supported data path.
    */
-  it("renders the published Post and its actions without unsupported metrics", () => {
+  it("renders the published Post without unsupported metrics", () => {
     seedPublishedPost();
     renderPosts();
 
@@ -1103,8 +1103,6 @@ describe("Posts surfaces", () => {
       ).not.toBeInTheDocument();
       expect(screen.queryByText(label), `${label} must not render`).not.toBeInTheDocument();
     }
-    expect(within(row).getByRole("button", { name: "Edit post" })).toBeVisible();
-    expect(within(row).getByRole("button", { name: "Delete post" })).toBeVisible();
   });
 
   /**

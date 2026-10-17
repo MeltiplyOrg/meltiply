@@ -13,6 +13,7 @@ import {
 } from "./media-fixtures";
 import {
   activeBrandProfileName,
+  editPostFromRow,
   provisionControlledChannels,
   type ControlledPlatform,
 } from "./publication-fixtures";
@@ -156,7 +157,7 @@ async function reopenDraft(page: Page, caption: string): Promise<void> {
   await page.getByRole("button", { name: /back to posts/i }).click();
   const row = page.getByRole("row").filter({ hasText: caption });
   await expect(row).toBeVisible({ timeout: 30_000 });
-  await row.getByTitle("Edit post").click();
+  await editPostFromRow(page, row);
   await expect(composerTextarea(page)).toHaveValue(caption);
 }
 
@@ -524,7 +525,7 @@ test("restores unsaved edits on a reopened saved draft after a reload", async ({
   await reloadWithScopedProfile(page);
   const row = page.getByRole("row").filter({ hasText: savedCaption });
   await expect(row).toBeVisible({ timeout: 30_000 });
-  await row.getByTitle("Edit post").click();
+  await editPostFromRow(page, row);
   await expect(composerTextarea(page)).toHaveValue(unsavedCaption);
   await expect(page.getByText(/Unsaved changes are kept in this browser/i)).toBeVisible();
 });
@@ -698,7 +699,7 @@ test("replaces one attachment without changing the count, order, or channel sele
 
   // The same composition rebuilt from the server after a reload.
   await reloadWithScopedProfile(page);
-  await page.getByRole("row").filter({ hasText: caption }).getByTitle("Edit post").click();
+  await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
   await expect(composerTextarea(page)).toHaveValue(caption);
   await expectAttachmentPhases(page, [
     [png.name, "1. "],
@@ -1103,7 +1104,7 @@ test("reopens one Post with its ordered attachments and channel targets", async 
   // scope must be restored first: the Posts surface keeps its mutating actions
   // hidden in the read-only aggregate view.
   await reloadWithScopedProfile(page);
-  await page.getByRole("row").filter({ hasText: savedPreview }).getByTitle("Edit post").click();
+  await editPostFromRow(page, page.getByRole("row").filter({ hasText: savedPreview }));
   await expect(composerTextarea(page)).toHaveValue(caption);
   await expectAttachmentPhases(page, [
     [gif.name, "1. "],
@@ -1123,11 +1124,7 @@ test("reopens one Post with its ordered attachments and channel targets", async 
   await signIn(secondPage, credentials);
   await waitForWorkspace(secondPage);
   await activeBrandProfileName(secondPage);
-  await secondPage
-    .getByRole("row")
-    .filter({ hasText: savedPreview })
-    .getByTitle("Edit post")
-    .click();
+  await editPostFromRow(secondPage, secondPage.getByRole("row").filter({ hasText: savedPreview }));
   await expect(composerTextarea(secondPage)).toHaveValue(caption);
   await expectAttachmentPhases(secondPage, [
     [gif.name, "1. "],
@@ -1191,11 +1188,10 @@ test("reopens a draft whose provider options have no distribution", async ({ pag
   // Reopened from the server after a reload: the composer resolved the
   // descriptor from the Channel list and rebuilt the controls it had emptied.
   await reloadWithScopedProfile(page);
-  await page
-    .getByRole("row")
-    .filter({ hasText: created.response.id.slice(0, 8) })
-    .getByTitle("Edit post")
-    .click();
+  await editPostFromRow(
+    page,
+    page.getByRole("row").filter({ hasText: created.response.id.slice(0, 8) }),
+  );
   await expect(composerTextarea(page)).toHaveValue(caption);
   await page.getByRole("tab", { name: channel }).click();
   await expect(page.getByRole("tabpanel").getByPlaceholder(/enter youtube title/i)).toHaveValue(
@@ -1246,11 +1242,10 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
   expect(saved.response.targets[0]?.description_override).toBe("");
 
   await reloadWithScopedProfile(page);
-  await page
-    .getByRole("row")
-    .filter({ hasText: saved.response.id.slice(0, 8) })
-    .getByTitle("Edit post")
-    .click();
+  await editPostFromRow(
+    page,
+    page.getByRole("row").filter({ hasText: saved.response.id.slice(0, 8) }),
+  );
   await expect(composerTextarea(page)).toHaveValue(caption);
   await page.getByRole("tab", { name: channel }).click();
   await expect(page.getByRole("button", { name: /remove custom override/i })).toBeVisible();

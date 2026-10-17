@@ -104,7 +104,7 @@ Table is the default. Table uses counted, collapsible status/profile groups and
 metadata visibility controls. All views retain real Post selection and supported
 inspect/edit/delete/create actions. Channels follows Gr8r Members' centered
 directory with underline tabs, search/status segments, inset identity table,
-health badges, and actual Brand Profile cards. Its background and shared controls
+icon-only health controls, and real Brand Profile cards. Its background and shared controls
 match Posts; domain-specific page structure stays distinct.
 Reference task seed records and unsupported project-management actions never
 become publishing capabilities.

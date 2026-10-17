@@ -2,9 +2,8 @@ import React from "react";
 import { TooltipProvider } from "@meltiply/ui/tooltip";
 import { Input } from "@meltiply/ui/input";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@meltiply/ui/table";
-import { StatusPill } from "@meltiply/ui/status-pill";
 import { useI18n } from "@/lib/i18n";
-import { CONNECTION_TONES, platformDisplayName } from "@/lib/platforms";
+import { platformDisplayName } from "@/lib/platforms";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { brandProfileColorClass, type BrandProfile, type PlatformAccount } from "@/types";
 import { cn } from "@meltiply/ui/utils";
@@ -57,7 +56,7 @@ export function ChannelTableView({
   onReconnect,
   onDisconnect,
 }: ChannelTableViewProps): React.ReactElement {
-  const { t, tStatus } = useI18n();
+  const { t } = useI18n();
   return (
     <TooltipProvider delayDuration={250}>
       <div className="overflow-x-auto rounded-card border border-line bg-surface">
@@ -149,19 +148,13 @@ export function ChannelTableView({
                     </span>
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      <ChannelHealthControl
-                        account={account}
-                        statusReason={statusReason}
-                        isReconnecting={isReconnecting}
-                        lowMotion={lowMotion}
-                        onReconnect={onReconnect}
-                      />
-                      <StatusPill
-                        tone={CONNECTION_TONES[account.connection_status]}
-                        label={tStatus(account.connection_status)}
-                      />
-                    </div>
+                    <ChannelHealthControl
+                      account={account}
+                      statusReason={statusReason}
+                      isReconnecting={isReconnecting}
+                      lowMotion={lowMotion}
+                      onReconnect={onReconnect}
+                    />
                   </TableCell>
                   <TableCell>
                     <ChannelSettingsAction

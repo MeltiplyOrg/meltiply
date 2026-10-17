@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 import { expect } from "@playwright/test";
 
@@ -145,6 +145,15 @@ export async function activeBrandProfileName(page: Page): Promise<string> {
   await page.getByRole("option", { name, exact: true }).click();
   await disclosure.click();
   return name;
+}
+
+/** Opens a stored Post's editor through table row inspection; Table has no inline action column. */
+export async function editPostFromRow(page: Page, row: Locator): Promise<void> {
+  await row.getByTitle("View details").click();
+  await page
+    .getByRole("dialog", { name: "Post details", exact: true })
+    .getByRole("button", { name: "Edit post", exact: true })
+    .click();
 }
 
 /**

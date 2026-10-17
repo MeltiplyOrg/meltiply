@@ -20,6 +20,12 @@ export interface SideDialogProps {
   breadcrumb?: React.ReactNode;
   /** Caller-owned supported actions; expand and close remain canonical. */
   actions?: React.ReactNode;
+  /**
+   * Identity of the record the content shows. When it changes while the panel
+   * stays open, the body steps in from the direction of travel instead of
+   * replaying the staggered entrance; reopening always replays the entrance.
+   */
+  contentKey?: string;
   children: React.ReactNode;
   className?: string;
   closeLabel?: string;
@@ -40,8 +46,10 @@ export interface SideDialogProps {
  * Native body scrolling stays untouched. Motion is the reference drawer's: the
  * panel steps 48px in on `--ease-drawer` and slides back out on dismissal
  * (`side-dialog-enter`/`side-dialog-exit`, which read their shape from custom
- * properties so expanding never replays the entrance), and its body blocks rise
- * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`).
+ * properties so expanding never replays the entrance), its body blocks rise
+ * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`), and a
+ * record that replaces another while the panel is open steps in from the
+ * direction of travel (`side-dialog-swap-in`).
  */
 export function SideDialog({
   open,
@@ -50,6 +58,7 @@ export function SideDialog({
   description,
   breadcrumb,
   actions,
+  contentKey,
   children,
   className,
   closeLabel = "Close",
@@ -62,6 +71,16 @@ export function SideDialog({
   const hasDescription = description !== undefined && description !== null && description !== false;
   const hasBreadcrumb = breadcrumb !== undefined && breadcrumb !== null;
   const expandAction = expanded ? restoreLabel : expandLabel;
+  /**
+   * The first record of an open cycle takes the entrance; a record that arrives
+   * while the panel is already open is a swap. The baseline is the key the panel
+   * opened with, so the flag survives later renders and clears when it closes.
+   */
+  const shownContentKey = contentKey ?? "";
+  const [baselineKey, setBaselineKey] = React.useState<string | null>(null);
+  if (open && baselineKey === null) setBaselineKey(shownContentKey);
+  else if (!open && baselineKey !== null) setBaselineKey(null);
+  const swapped = open && baselineKey !== null && shownContentKey !== baselineKey;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
@@ -172,12 +191,13 @@ export function SideDialog({
           <div
             data-lenis-prevent=""
             data-side-dialog-body=""
+            data-content={swapped ? "swapped" : "initial"}
             className={cn(
               "min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-10 pt-4 sm:px-6 sm:pb-8 sm:pt-5",
               expanded && "sm:px-12 sm:pb-10 sm:pt-7",
             )}
           >
-            {children}
+            <React.Fragment key={shownContentKey || "content"}>{children}</React.Fragment>
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

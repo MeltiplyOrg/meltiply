@@ -311,6 +311,15 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   };
   await inspectAnotherPost("Second draft — selection review.");
   await expect(inspector).toBeVisible();
+  // The replacing record steps in from the direction of travel.
+  const swap = await page.evaluate(() => {
+    const body = document.querySelector("[data-side-dialog-body]");
+    const animation = body?.firstElementChild?.getAnimations()[0] as CSSAnimation | undefined;
+    const frames = (animation?.effect as KeyframeEffect | null)?.getKeyframes?.() ?? [];
+    return { name: animation?.animationName ?? "", from: String(frames[0]?.translate ?? "") };
+  });
+  expect(swap.name).toBe("side-dialog-swap-in");
+  expect(swap.from.startsWith("18px")).toBe(true);
   await inspectAnotherPost("Studio update — ready for the next publishing window.");
   await inspector.getByRole("button", { name: "Expand panel", exact: true }).click();
   await page.screenshot({

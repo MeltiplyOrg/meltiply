@@ -260,6 +260,19 @@ html.theme-changing *::after {
   }
 }
 
+/* The reference's step-change step (`slideInR`): the next record travels in from
+   the direction of travel as one piece, without the entrance's stagger. */
+@keyframes side-dialog-swap-in {
+  from {
+    opacity: 0;
+    translate: 18px 0;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
 /* The expanded scrim dims the workspace, as in the reference: it fades in on
  * expand and is simply absent otherwise, so it never blocks the edge inspector
  * and can never flash a dim while mounting. */
@@ -289,20 +302,31 @@ html.theme-changing *::after {
  * not on its body. The reference runs it for 380ms on its front-loaded entrance
  * curve, which lands as a flash; the travel is spread over the drawer curve
  * instead so each body block is catchable without the stagger feeling slow. */
-[data-side-dialog][data-state="open"] [data-side-dialog-body] > * {
+[data-side-dialog][data-state="open"] [data-side-dialog-body][data-content="initial"] > * {
   animation: side-dialog-rise-in 460ms var(--ease-drawer) both;
 }
 
-[data-side-dialog][data-state="open"] [data-side-dialog-body] > :nth-child(2) {
+[data-side-dialog][data-state="open"]
+  [data-side-dialog-body][data-content="initial"]
+  > :nth-child(2) {
   animation-delay: 55ms;
 }
 
-[data-side-dialog][data-state="open"] [data-side-dialog-body] > :nth-child(3) {
+[data-side-dialog][data-state="open"]
+  [data-side-dialog-body][data-content="initial"]
+  > :nth-child(3) {
   animation-delay: 105ms;
 }
 
-[data-side-dialog][data-state="open"] [data-side-dialog-body] > :nth-child(n + 4) {
+[data-side-dialog][data-state="open"]
+  [data-side-dialog-body][data-content="initial"]
+  > :nth-child(n + 4) {
   animation-delay: 150ms;
+}
+
+/* A record that replaces another while the panel is open. */
+[data-side-dialog][data-state="open"] [data-side-dialog-body][data-content="swapped"] > * {
+  animation: side-dialog-swap-in 320ms var(--ease-drawer) both;
 }
 
 [data-side-dialog-scrim][data-state="open"] {

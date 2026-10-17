@@ -36,7 +36,7 @@ describe("collection toolbar interactions", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Limpiar búsqueda" }));
     expect(onChange).toHaveBeenCalledWith("");
-    const filter = screen.getByText("Filter").closest("summary");
+    const filter = screen.getByText("Filtrar").closest("summary");
     expect(filter).not.toBeNull();
     fireEvent.click(filter!);
     expect(screen.getByText("Status choices")).toBeVisible();

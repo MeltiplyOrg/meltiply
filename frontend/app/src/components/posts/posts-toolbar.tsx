@@ -36,12 +36,6 @@ import {
   POST_VIEW_OPTIONS,
   type PostCollectionMode,
 } from "./post-view-options";
-const COLUMNS = [
-  { id: "status", label: "Status" },
-  { id: "channels", label: "Channels" },
-  { id: "date", label: "Publish date" },
-  { id: "profile", label: "Brand Profile" },
-] as const;
 
 export interface PostsToolbarProps {
   searchQuery: string;
@@ -96,6 +90,12 @@ export const PostsToolbar = React.memo(function PostsToolbar({
   onEditProfile,
 }: PostsToolbarProps) {
   const { t, tStatus } = useI18n();
+  const columnOptions = [
+    { id: "status", label: t("Status") },
+    { id: "channels", label: t("Channels") },
+    { id: "date", label: t("Publish date") },
+    { id: "profile", label: t("Brand Profile") },
+  ];
   const activeCount =
     Number(statusFilter !== "all") +
     Number(platformFilter.length > 0) +
@@ -185,7 +185,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm">
               <ArrowDownUp className="size-3.5" />
-              {t("Sort:")} {t(sortKey === "date-desc" ? "Newest" : "Oldest")}
+              {t("Sort:")} {sortKey === "date-desc" ? t("Newest") : t("Oldest")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
@@ -203,13 +203,11 @@ export const PostsToolbar = React.memo(function PostsToolbar({
               <Button variant="ghost" size="sm">
                 <Rows3 className="size-3.5" />
                 {t("Group:")}{" "}
-                {t(
-                  groupBy === "status"
-                    ? "Status"
-                    : groupBy === "profile"
-                      ? "Brand Profile"
-                      : "None",
-                )}
+                {groupBy === "status"
+                  ? t("Status")
+                  : groupBy === "profile"
+                    ? t("Brand Profile")
+                    : t("None")}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
@@ -234,14 +232,14 @@ export const PostsToolbar = React.memo(function PostsToolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              {COLUMNS.map((column) => (
+              {columnOptions.map((column) => (
                 <DropdownMenuCheckboxItem
                   key={column.id}
                   checked={!hiddenColumns.has(column.id)}
                   onCheckedChange={() => onToggleColumn(column.id)}
                   onSelect={(event) => event.preventDefault()}
                 >
-                  {t(column.label)}
+                  {column.label}
                 </DropdownMenuCheckboxItem>
               ))}
             </DropdownMenuContent>
@@ -258,7 +256,9 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             return (
               <>
                 <Icon className="size-3.5" />
-                <span>{t(POST_VIEW_OPTIONS[mode].label)}</span>
+                <span>
+                  {mode === "table" ? t("Table") : mode === "grid" ? t("Grid") : t("Calendar")}
+                </span>
               </>
             );
           }}

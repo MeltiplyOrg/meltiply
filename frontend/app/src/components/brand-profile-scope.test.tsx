@@ -902,6 +902,7 @@ describe("Channels table contract", () => {
     workspace.brandProfiles = [alphaProfile, betaProfile];
     queryResults.platforms.data = [connectedAccount, expiredAccount, betaAccount];
     renderChannels();
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
 
     expect(screen.getByLabelText("Search accounts")).toBeVisible();
     const platformControl = screen.getByRole("button", { name: "All platforms" });
@@ -981,6 +982,7 @@ describe("Channels table contract", () => {
   it("keeps checkbox-menu semantics in the platform multi-select", () => {
     queryResults.platforms.data = [connectedAccount, betaAccount];
     renderChannels();
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
 
     const platformFilter = screen.getByRole("button", { name: "All platforms" });
     fireEvent.pointerDown(platformFilter);
@@ -1089,17 +1091,15 @@ describe("Posts surfaces", () => {
   });
 
   /**
-   * Guards the published Post row in list view: caption, status, and edit/delete
-   * actions stay while every metric column is gone — there is no engagement
-   * data path, so no metric header or value may render.
+   * Guards the published Post projection: caption, status, and actions remain
+   * usable without inventing engagement data that has no supported data path.
    */
-  it("renders the published Post row without metric columns in list view", () => {
+  it("renders the published Post and its actions without unsupported metrics", () => {
     seedPublishedPost();
     renderPosts();
 
     const row = screen.getByRole("row", { name: /Launch note/ });
     expect(within(row).getByText("published")).toBeVisible();
-    expect(screen.getByRole("columnheader", { name: "Date" })).toBeVisible();
     expect(screen.getByRole("columnheader", { name: "Status" })).toBeVisible();
     for (const label of METRIC_LABELS) {
       expect(

@@ -16,6 +16,67 @@ export type TranslationValues = Record<string, number | string>;
 const languageStorageKey = "meltiply.language";
 
 const spanishTranslations: Record<string, string> = {
+  "No Brand Profiles yet. Ask a workspace admin to create one, or use Create Brand Profile if you are an admin.":
+    "Aún no hay perfiles de marca. Pide a un administrador que cree uno o usa Crear perfil de marca si eres administrador.",
+  "Edit {name}": "Editar {name}",
+  "Publishing identity and connected accounts.": "Identidad de publicación y cuentas conectadas.",
+  "{count} connected accounts": "{count} cuentas conectadas",
+  "View channels": "Ver canales",
+  "Could not sign out": "No se pudo cerrar la sesión",
+  "Try again to end your session.": "Inténtalo de nuevo para cerrar la sesión.",
+  "Workspace navigation": "Navegación del espacio de trabajo",
+  "Collapse sidebar": "Contraer barra lateral",
+  "Expand sidebar": "Expandir barra lateral",
+  "Search and jump to": "Buscar e ir a",
+  "Help and resources": "Ayuda y recursos",
+  Creator: "Creador",
+  "Post actions": "Acciones de publicación",
+  "Showing {count} posts across your Brand Profiles.":
+    "Mostrando {count} publicaciones de tus perfiles de marca.",
+  "Posts table": "Tabla de publicaciones",
+  Channels: "Canales",
+  "Publish date": "Fecha de publicación",
+  "All posts": "Todas las publicaciones",
+  "Toggle {label} group": "Expandir o contraer el grupo {label}",
+  "Sort:": "Ordenar:",
+  Newest: "Más recientes",
+  Oldest: "Más antiguas",
+  "Group:": "Agrupar:",
+  None: "Ninguno",
+  Columns: "Columnas",
+  "Post view": "Vista de publicaciones",
+  Table: "Tabla",
+  "Skip to content": "Saltar al contenido",
+  "Search or jump to…": "Buscar o ir a…",
+  Filter: "Filtrar",
+  Filters: "Filtros",
+  "Clear {label} filter": "Quitar filtro {label}",
+  "Reset filters": "Restablecer filtros",
+  "Clear all": "Limpiar todo",
+  Appearance: "Apariencia",
+  "Choose the palette for this device.": "Elige la paleta para este dispositivo.",
+  "Choose the language used throughout your workspace.":
+    "Elige el idioma de tu espacio de trabajo.",
+  "Account and workspace": "Cuenta y espacio de trabajo",
+  "Your installation identity. These details are read-only.":
+    "Tu identidad en esta instalación. Estos datos son de solo lectura.",
+  Security: "Seguridad",
+  "Change your password, set up an authenticator, or replace recovery codes. Security changes require your current password.":
+    "Cambia tu contraseña, configura un autenticador o reemplaza los códigos de recuperación. Los cambios de seguridad requieren tu contraseña actual.",
+  "Settings sections": "Secciones de configuración",
+  "Theme changes apply immediately. Saving your preference across visits requires functional cookie consent.":
+    "El tema cambia de inmediato. Para recordar tu preferencia entre visitas debes aceptar las cookies funcionales.",
+  "Interface language": "Idioma de la interfaz",
+  "Language changes apply immediately. Saving your preference across visits requires functional cookie consent.":
+    "El idioma cambia de inmediato. Para recordar tu preferencia entre visitas debes aceptar las cookies funcionales.",
+  "Open account security": "Abrir seguridad de la cuenta",
+  "Find workspace pages and Brand Profiles. Search posts and channels from their page toolbar.":
+    "Busca páginas y perfiles de marca. Busca publicaciones y canales desde la barra de su página.",
+  "Search pages and Brand Profiles": "Buscar páginas y perfiles de marca",
+  "Search pages and Brand Profiles…": "Buscar páginas y perfiles de marca…",
+  "No matching pages or Brand Profiles.": "No hay páginas ni perfiles de marca que coincidan.",
+  "Tab to move · Enter to open · Esc to close":
+    "Tab para moverte · Intro para abrir · Esc para cerrar",
   "Selection actions": "Acciones de selección",
   "{count} selected": "{count} seleccionados",
   Deselect: "Deseleccionar",

@@ -23,10 +23,9 @@ export interface PostCardProps extends PostActionsProps {
 }
 
 /**
- * Canonical app-owned Gr8r card for Board and media Grid. Real captions replace
- * task titles; profile, channel, date, and attachment facts replace task metadata.
- * It never offers fake status drag/drop. Dedicated title/action controls retain
- * focus restoration while selection and quick actions do not open inspection.
+ * Canonical media Grid card over real caption, profile, channel, date, and
+ * attachment data. The title button's stretched hit area opens inspection with
+ * native keyboard semantics; selection and quick actions sit above that area.
  */
 export function PostCard({
   post,
@@ -47,10 +46,6 @@ export function PostCard({
     <article
       className="group/card relative flex min-w-0 cursor-pointer flex-col gap-2 rounded-card border border-line bg-surface px-3 py-2.5 shadow-card hover:border-line-strong data-[selected=true]:border-accent"
       data-selected={selected || undefined}
-      onClick={(event) => {
-        event.currentTarget.querySelector<HTMLButtonElement>("[data-post-details]")?.focus();
-        actions.onViewDetails(postId);
-      }}
     >
       <div className="flex min-w-0 max-w-[calc(100%-24px)] items-center gap-1.5 truncate text-(length:--font-size-micro) text-ink-3">
         <span className="size-1.75 shrink-0 rounded-chip bg-accent" />
@@ -59,7 +54,7 @@ export function PostCard({
       <Button
         variant="ghost"
         data-post-details
-        className="h-auto justify-start whitespace-normal p-0 text-left text-(length:--font-size-ui) font-normal leading-snug text-ink hover:bg-transparent"
+        className="h-auto justify-start whitespace-normal p-0 text-left text-(length:--font-size-ui) font-normal leading-snug text-ink after:absolute after:inset-0 after:rounded-card hover:bg-transparent"
         title={t("View details")}
         onClick={(event) => {
           event.stopPropagation();
@@ -104,7 +99,7 @@ export function PostCard({
         )}
         <Input
           type="checkbox"
-          className="ml-auto size-3.25"
+          className="relative z-10 ml-auto size-3.25"
           aria-label={t("Select post")}
           checked={selected}
           disabled={selectionDisabled}
@@ -112,7 +107,7 @@ export function PostCard({
           onChange={() => onToggleSelection(postId)}
         />
       </div>
-      <div className="absolute right-1.5 top-1.5 rounded-control bg-surface">
+      <div className="absolute right-1.5 top-1.5 z-10 rounded-control bg-surface">
         <PostActions postId={postId} {...actions} />
       </div>
     </article>

@@ -20,7 +20,7 @@ const rows: PostRow[] = [
   {
     id: "unknown",
     date: "2026-02-01T11:00:00Z",
-    status: "awaiting_provider",
+    status: "future_provider_status",
     channels: [],
     brandProfileId: "missing-profile",
   },
@@ -43,7 +43,7 @@ const rows: PostRow[] = [
 describe("groupPostRows", () => {
   it("keeps unknown publication outcomes and sorted row order within ordered status groups", () => {
     const groups = groupPostRows(rows, "status", []);
-    expect(groups.map(({ id }) => id)).toEqual(["draft", "published", "awaiting_provider"]);
+    expect(groups.map(({ id }) => id)).toEqual(["draft", "published", "future_provider_status"]);
     expect(groups.map(({ posts }) => posts.map(({ id }) => id))).toEqual([
       ["draft-a", "draft-b"],
       ["published-early", "published-late"],

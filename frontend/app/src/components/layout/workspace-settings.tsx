@@ -9,29 +9,6 @@ import { useTheme } from "@/lib/theme";
 import { supportedLanguages, useI18n } from "@/lib/i18n";
 import { AccountSecurity } from "@/components/auth/account-security";
 
-const SECTIONS = {
-  appearance: {
-    label: "Appearance",
-    description: "Choose the palette for this device.",
-    icon: Palette,
-  },
-  language: {
-    label: "Language",
-    description: "Choose the language used throughout your workspace.",
-    icon: Languages,
-  },
-  account: {
-    label: "Account and workspace",
-    description: "Your installation identity. These details are read-only.",
-    icon: UserRound,
-  },
-  security: {
-    label: "Account security",
-    description:
-      "Change your password, set up an authenticator, or replace recovery codes. Security changes require your current password.",
-    icon: ShieldCheck,
-  },
-} as const;
 const SECTION_IDS = ["appearance", "language", "account", "security"] as const;
 const LANGUAGE_CODES = supportedLanguages.map(({ code }) => code);
 
@@ -56,10 +33,38 @@ export default function WorkspaceSettings() {
   const { requestedTheme, setTheme } = useTheme();
   const { user, workspaceName, logout } = useWorkspace();
   const { t, language, setLanguage } = useI18n();
+  const sections = {
+    appearance: {
+      label: t("Appearance"),
+      navLabel: t("Appearance"),
+      description: t("Choose the palette for this device."),
+      icon: Palette,
+    },
+    language: {
+      label: t("Language"),
+      navLabel: t("Language"),
+      description: t("Choose the language used throughout your workspace."),
+      icon: Languages,
+    },
+    account: {
+      label: t("Account and workspace"),
+      navLabel: t("Account"),
+      description: t("Your installation identity. These details are read-only."),
+      icon: UserRound,
+    },
+    security: {
+      label: t("Account security"),
+      navLabel: t("Security"),
+      description: t(
+        "Change your password, set up an authenticator, or replace recovery codes. Security changes require your current password.",
+      ),
+      icon: ShieldCheck,
+    },
+  };
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSection = searchParams.get("section");
   const section = SECTION_IDS.find((id) => id === requestedSection) ?? "appearance";
-  const current = SECTIONS[section];
+  const current = sections[section];
   /** Reports a failed server sign-out instead of discarding session errors. */
   const handleSignOut = async () => {
     try {
@@ -81,7 +86,7 @@ export default function WorkspaceSettings() {
           {t("Settings")}
         </span>
         {SECTION_IDS.map((id) => {
-          const Icon = SECTIONS[id].icon;
+          const Icon = sections[id].icon;
           return (
             <Button
               key={id}
@@ -91,9 +96,7 @@ export default function WorkspaceSettings() {
               onClick={() => setSearchParams({ section: id })}
             >
               <Icon className="size-3.5" />
-              {t(
-                id === "account" ? "Account" : id === "security" ? "Security" : SECTIONS[id].label,
-              )}
+              {sections[id].navLabel}
             </Button>
           );
         })}
@@ -101,11 +104,9 @@ export default function WorkspaceSettings() {
       <div className="min-h-0 min-w-0 overflow-y-auto">
         <div className="max-w-180 px-4 pb-20 pt-6 sm:px-10 sm:pt-8">
           <h1 className="text-(length:--text-title) font-semibold leading-tight tracking-page-title">
-            {t(current.label)}
+            {current.label}
           </h1>
-          <p className="mb-6 mt-1 text-(length:--font-size-ui) text-ink-2">
-            {t(current.description)}
-          </p>
+          <p className="mb-6 mt-1 text-(length:--font-size-ui) text-ink-2">{current.description}</p>
           {section === "appearance" && (
             <section aria-label={t("Theme")} className="space-y-4">
               <h2 className="text-(length:--font-size-ui) font-semibold">{t("Theme")}</h2>
@@ -137,7 +138,7 @@ export default function WorkspaceSettings() {
                       </span>
                       <span className="flex items-center gap-2">
                         <Icon className="size-4" />
-                        {t(theme === "light" ? "Light" : "Dark")}
+                        {theme === "light" ? t("Light") : t("Dark")}
                       </span>
                     </Button>
                   );
@@ -175,15 +176,15 @@ export default function WorkspaceSettings() {
             <section className="space-y-5">
               <dl>
                 {[
-                  { label: "Name", value: user?.name },
-                  { label: "Email", value: user?.email },
-                  { label: "Workspace", value: workspaceName ?? "Meltiply" },
+                  { label: t("Name"), value: user?.name },
+                  { label: t("Email"), value: user?.email },
+                  { label: t("Workspace"), value: workspaceName ?? "Meltiply" },
                 ].map((field) => (
                   <div
                     key={field.label}
                     className="grid grid-cols-[96px_minmax(0,1fr)] gap-4 border-b border-line py-3.5 text-(length:--font-size-control)"
                   >
-                    <dt className="text-ink-2">{t(field.label)}</dt>
+                    <dt className="text-ink-2">{field.label}</dt>
                     <dd className="wrap-anywhere">{field.value ?? "—"}</dd>
                   </div>
                 ))}

@@ -41,7 +41,12 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
     onNavigate(view, options);
     setMobileMenuOpen(false);
   };
-  const destination = WORKSPACE_NAV_ITEMS.find((item) => item.id === currentView);
+  const pageTitle =
+    currentView === "posts"
+      ? t("Posts")
+      : currentView === "channels"
+        ? t("Channels")
+        : t("Settings");
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-page text-ink antialiased">
       <a
@@ -74,7 +79,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
               {selectedBrandProfile?.name ?? t("Workspace")}
             </span>
             <ChevronRight className="hidden size-3 shrink-0 text-ink-3 sm:block" />
-            <span className="font-medium">{t(destination?.label ?? "Workspace")}</span>
+            <span className="font-medium">{pageTitle}</span>
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <Button

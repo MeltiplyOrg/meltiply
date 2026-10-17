@@ -119,7 +119,7 @@ export default function WorkspaceSettings() {
           {section === "appearance" && (
             <section aria-label={t("Theme")} className="space-y-4">
               <h2 className="text-(length:--font-size-ui) font-semibold">{t("Theme")}</h2>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="flex flex-wrap gap-3">
                 {(["light", "dark", "system"] as const).map((theme) => {
                   const Icon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
                   return (
@@ -129,7 +129,7 @@ export default function WorkspaceSettings() {
                       aria-pressed={requestedTheme === theme}
                       onClick={() => setTheme(theme)}
                       className={cn(
-                        "h-auto flex-col items-stretch gap-3 p-3",
+                        "h-auto w-48 max-w-full flex-col items-stretch gap-3 p-3",
                         requestedTheme === theme && "border-accent ring-1 ring-accent",
                       )}
                     >

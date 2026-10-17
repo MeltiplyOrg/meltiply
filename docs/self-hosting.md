@@ -14,19 +14,19 @@ host, not the Cloudflare managed service or an availability guarantee.
 
 ## Services and differences
 
-| Service                 | Self-hosted implementation                                                                                       |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| App, API                | Production app assets and Workers; port 8080                                                                     |
-| PostgreSQL / Hyperdrive | PostgreSQL 18, canonical migrations, distinct system and RLS roles; request-scoped direct connections            |
-| R2                      | Persistent local R2 binding and authenticated SigV4 upload/download endpoint                                     |
-| Durable Objects         | SQLite-backed canonical OAuth coordinator                                                                        |
-| Workflows               | Persistent local binding running the canonical reply workflow                                                    |
-| Queues                  | SQLite WAL broker; commit-before-ack, delayed delivery, visibility leases, retries and dead-letter queues        |
-| Cron                    | Durable hourly/daily schedule ledger invoking canonical scheduled handlers; missed slots coalesce after downtime |
-| Email                   | Real SMTP transport; signup still requires email verification                                                    |
-| Operator authentication | Private administrator-issued HMAC tokens, at most 15 minutes, instead of Cloudflare Access                       |
-| Media processing        | Existing FFmpeg/libvips processor in a private container; no Docker socket                                       |
-| TLS                     | Optional Caddy profile in the same Compose file                                                                  |
+| Service                 | Self-hosted implementation                                                                                        |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| App, API                | Production app assets and Workers; port 8080                                                                      |
+| PostgreSQL / Hyperdrive | PostgreSQL 18, canonical migrations, distinct system and RLS roles; request-scoped direct connections             |
+| R2                      | Persistent local R2 binding and authenticated SigV4 upload/download endpoint, or an external S3-compatible origin |
+| Durable Objects         | SQLite-backed canonical OAuth coordinator                                                                         |
+| Workflows               | Persistent local binding running the canonical reply workflow                                                     |
+| Queues                  | SQLite WAL broker; commit-before-ack, delayed delivery, visibility leases, retries and dead-letter queues         |
+| Cron                    | Durable hourly/daily schedule ledger invoking canonical scheduled handlers; missed slots coalesce after downtime  |
+| Email                   | Real SMTP transport; signup still requires email verification                                                     |
+| Operator authentication | Private administrator-issued HMAC tokens, at most 15 minutes, instead of Cloudflare Access                        |
+| Media processing        | Existing FFmpeg/libvips processor in a private container; no Docker socket                                        |
+| TLS                     | Optional Caddy profile in the same Compose file                                                                   |
 
 This is a **single-host** deployment, not a replacement for Cloudflare's global
 network, managed durability, autoscaling, Access, or service SLAs. Run one runtime
@@ -71,6 +71,46 @@ Set optional Provider/billing variables in `.env.selfhost` using the names in
 [`.env.example`](../.env.example). Self-hosting does not bypass Provider live-mode
 checks or account permissions. Do not change `ENVIRONMENT` to disable verification;
 the supervisor deliberately retains deployed security behavior.
+
+## Object storage
+
+Stored assets live in Cloudflare R2 by default: the runtime provides a persistent
+local R2 binding and signs upload, preview, and download capabilities against its
+own authenticated SigV4 endpoint. Nothing needs configuring.
+
+To store objects in an external S3-compatible service instead (MinIO, Ceph RGW,
+Wasabi, Backblaze B2's S3 endpoint, or another gateway), set these in
+`.env.selfhost` and restart the runtime:
+
+```dotenv
+OBJECT_STORAGE_PROVIDER=s3
+S3_ACCESS_KEY_ID=<access key>
+S3_SECRET_ACCESS_KEY=<secret key>
+S3_BUCKET=meltiply-assets
+S3_ENDPOINT=https://objects.example.com
+S3_REGION=us-east-1          # optional, defaults to us-east-1
+S3_FORCE_PATH_STYLE=true     # optional; set false for virtual-hosted addressing
+```
+
+`S3_ENDPOINT` must be an origin with no path, and must use HTTPS: the
+supervisor runs as `ENVIRONMENT=staging`, which never permits signing a
+plain-HTTP origin. `S3_FORCE_PATH_STYLE` defaults to `true`, which is what
+MinIO, Ceph, and other self-hosted services expect; AWS endpoints want `false`.
+The origin must be reachable from the runtime container and from any machine or
+service that fetches signed URLs.
+
+Leaving `OBJECT_STORAGE_PROVIDER` unset keeps R2, so an existing installation
+is unaffected. The runtime refuses to start when the `s3` provider is selected
+without its required settings. `S3_ENDPOINT` must additionally be an origin
+with no path and must use HTTPS: `/api/v1/ready` reports either as an
+unavailable storage component rather than letting a green probe sit over a
+deployment whose asset requests would fail. The origin must also be reachable
+from the runtime container and from any machine or service that fetches signed
+URLs.
+
+Both providers offer identical behavior: uploads and multipart uploads, media
+processing, retention and brand-profile purges, and private media delivery all
+run through whichever provider is configured.
 
 ## HTTPS and public callbacks
 

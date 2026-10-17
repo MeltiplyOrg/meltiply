@@ -783,7 +783,7 @@ describe("R2SigV4Signer", () => {
 
     const uploaded = new Date("2026-01-01T00:00:00Z");
     const liveLayer = createStorageServiceLive({
-      bucket: {
+      store: new R2ObjectStore({
         createMultipartUpload: vi.fn(),
         delete: vi.fn(),
         get: vi.fn(),
@@ -796,7 +796,7 @@ describe("R2SigV4Signer", () => {
         }),
         put: vi.fn(),
         resumeMultipartUpload: vi.fn(),
-      },
+      }),
     });
 
     const liveProgram = Effect.gen(function* () {
@@ -931,7 +931,7 @@ describe("R2SigV4Signer", () => {
 
     const uploaded = new Date("2026-01-01T00:00:00Z");
     const liveLayer = createStorageServiceLive({
-      bucket: {
+      store: new R2ObjectStore({
         createMultipartUpload: vi.fn().mockResolvedValue({
           abort: vi.fn(),
           complete: vi.fn().mockResolvedValue({
@@ -972,7 +972,7 @@ describe("R2SigV4Signer", () => {
           uploadId: "upl-resumed",
           uploadPart: vi.fn().mockResolvedValue({ etag: "p1", partNumber: 1 }),
         }),
-      },
+      }),
       signer: {
         accessKeyId: "access-key",
         accountId: "account-id",
@@ -1078,14 +1078,14 @@ describe("R2SigV4Signer", () => {
 
     // Live layer without signer fails closed on signing
     const noSignerLayer = createStorageServiceLive({
-      bucket: {
+      store: new R2ObjectStore({
         createMultipartUpload: vi.fn(),
         delete: vi.fn(),
         get: vi.fn(),
         head: vi.fn(),
         put: vi.fn(),
         resumeMultipartUpload: vi.fn(),
-      },
+      }),
     });
 
     const noSignerProgram = Effect.gen(function* () {
@@ -1098,14 +1098,14 @@ describe("R2SigV4Signer", () => {
 
     // Live layer with plain ObjectUrlSigner (Promise-based)
     const customSignerLayer = createStorageServiceLive({
-      bucket: {
+      store: new R2ObjectStore({
         createMultipartUpload: vi.fn(),
         delete: vi.fn(),
         get: vi.fn(),
         head: vi.fn(),
         put: vi.fn(),
         resumeMultipartUpload: vi.fn(),
-      },
+      }),
       signer: {
         signDownload: vi.fn().mockResolvedValue("https://plain.signer/download"),
         signMultipartPart: vi.fn().mockResolvedValue("https://plain.signer/part"),
@@ -1140,14 +1140,14 @@ describe("R2SigV4Signer", () => {
 
     // Live layer with invalid signer options catches and fails closed
     const invalidSignerLayer = createStorageServiceLive({
-      bucket: {
+      store: new R2ObjectStore({
         createMultipartUpload: vi.fn(),
         delete: vi.fn(),
         get: vi.fn(),
         head: vi.fn(),
         put: vi.fn(),
         resumeMultipartUpload: vi.fn(),
-      },
+      }),
       signer: {
         accessKeyId: "",
         accountId: "",
@@ -1199,14 +1199,14 @@ describe("R2SigV4Signer", () => {
 
     // Custom signer failure maps to StorageUnavailableError
     const failingSignerLayer = createStorageServiceLive({
-      bucket: {
+      store: new R2ObjectStore({
         createMultipartUpload: vi.fn(),
         delete: vi.fn(),
         get: vi.fn(),
         head: vi.fn(),
         put: vi.fn(),
         resumeMultipartUpload: vi.fn(),
-      },
+      }),
       signer: {
         signDownload: vi.fn().mockRejectedValue(new Error("network failure")),
         signMultipartPart: vi.fn().mockRejectedValue(new Error("network failure")),
@@ -1263,7 +1263,7 @@ describe("R2SigV4Signer", () => {
 
     // Multipart upload errors in EffectMultipartUpload
     const failingMultipartLayer = createStorageServiceLive({
-      bucket: {
+      store: new R2ObjectStore({
         createMultipartUpload: vi.fn().mockResolvedValue({
           abort: vi.fn().mockRejectedValue(new Error("abort failed")),
           complete: vi.fn().mockRejectedValue(new Error("complete failed")),
@@ -1278,7 +1278,7 @@ describe("R2SigV4Signer", () => {
         head: vi.fn(),
         put: vi.fn(),
         resumeMultipartUpload: vi.fn(),
-      },
+      }),
     });
 
     const mpFailProgram = Effect.gen(function* () {
@@ -1371,7 +1371,7 @@ describe("R2SigV4Signer", () => {
     }
 
     const liveLayer = createStorageServiceLive({
-      bucket: bucketWith(vi.fn().mockReturnValue(nativeHandle)),
+      store: new R2ObjectStore(bucketWith(vi.fn().mockReturnValue(nativeHandle))),
     });
     const liveResumed = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1382,10 +1382,12 @@ describe("R2SigV4Signer", () => {
     expect(liveResumed.uploadId).toBe("upl-resumed");
 
     const liveValidationLayer = createStorageServiceLive({
-      bucket: bucketWith(
-        vi.fn().mockImplementation(() => {
-          throw new TypeError("bad upload id");
-        }),
+      store: new R2ObjectStore(
+        bucketWith(
+          vi.fn().mockImplementation(() => {
+            throw new TypeError("bad upload id");
+          }),
+        ),
       ),
     });
     const liveExit = await Effect.runPromiseExit(
@@ -1439,7 +1441,7 @@ describe("R2SigV4Signer", () => {
     const downloadRequest = { expiresInSeconds: 60, key: "k" } as const;
 
     const validationLayer = createStorageServiceLive({
-      bucket: bucket(),
+      store: new R2ObjectStore(bucket()),
       signer: {
         signDownload: vi.fn().mockRejectedValue(new TypeError("bad key")),
         signMultipartPart: vi.fn().mockRejectedValue(new RangeError("bad part number")),
@@ -1473,7 +1475,7 @@ describe("R2SigV4Signer", () => {
     }
 
     const infraLayer = createStorageServiceLive({
-      bucket: bucket(),
+      store: new R2ObjectStore(bucket()),
       signer: {
         signDownload: vi.fn().mockRejectedValue(new Error("network failure")),
         signMultipartPart: vi.fn().mockRejectedValue(new Error("network failure")),

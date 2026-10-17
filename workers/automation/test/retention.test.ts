@@ -1,6 +1,6 @@
 import type { EffectTransactionClient } from "@meltiply/database";
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { withSystemTransactionEffect, claimObjectsForDeletion, settleDeletedObjects } = vi.hoisted(
   () => ({
@@ -45,6 +45,10 @@ describe("retention cleanup", () => {
     settleDeletedObjects.mockImplementation(() => Effect.void);
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("rejects out-of-range batch sizes without opening a transaction", async () => {
     // Caller misuse fails before any work: an invalid batch size must neither
     // delete a partial batch nor reach the database.
@@ -67,5 +71,59 @@ describe("retention cleanup", () => {
 
     const result = await Effect.runPromise(runRetention(env, { batchSize: 10 }));
     expect(result).toEqual({ deleted: 0, errors: 7 });
+  });
+
+  /**
+   * A retention sweep must reclaim the operator's chosen backend, not assume
+   * R2: switching to an S3-compatible origin changes configuration only, and the
+   * per-object durable completion still releases each object's charge once.
+   */
+  it("purges owed bytes through the configured object storage provider", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    // The sweep runs every cleanup class, so statements are routed by shape:
+    // one due profile is selected, and only a drained inventory may cascade.
+    withSystemTransactionEffect.mockImplementation(
+      (
+        _env: AutomationEnv,
+        operation: (client: EffectTransactionClient) => Effect.Effect<unknown>,
+      ) =>
+        operation({
+          query: (statement: string) =>
+            Effect.succeed(
+              statement.includes("SELECT profile.id")
+                ? { rowCount: 1, rows: [{ id: "profile-1" }] }
+                : statement.includes("DELETE FROM brand_profiles")
+                  ? { rowCount: 1, rows: [] }
+                  : { rowCount: 0, rows: [] },
+            ),
+        } as unknown as EffectTransactionClient),
+    );
+    claimObjectsForDeletion.mockImplementation(() =>
+      Effect.succeed([
+        { brand_profile_id: "profile-1", id: "object-1", r2_key: "org/asset/original" },
+      ]),
+    );
+
+    const result = await Effect.runPromise(
+      runRetention(
+        {
+          ...env,
+          OBJECT_STORAGE_PROVIDER: "s3",
+          S3_ACCESS_KEY_ID: "s3-access-key",
+          S3_BUCKET: "meltiply-assets",
+          S3_ENDPOINT: "https://objects.example.test",
+          S3_SECRET_ACCESS_KEY: "s3-secret",
+        },
+        { batchSize: 10 },
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://objects.example.test/meltiply-assets/org/asset/original",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(settleDeletedObjects).toHaveBeenCalledWith(expect.anything(), [{ id: "object-1" }]);
+    expect(result.errors).toBe(0);
   });
 });

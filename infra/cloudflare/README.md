@@ -153,6 +153,34 @@ storage headroom for the probe. The API enforces community quotas, and admission
 failures produce failed evidence and run resource cleanup. The probe verifies
 object lifecycle cleanup, not a billing usage endpoint.
 
+### Object storage provider
+
+Workers read stored assets from Cloudflare R2 unless `OBJECT_STORAGE_PROVIDER`
+says otherwise. To store assets in an S3-compatible service instead, set
+`OBJECT_STORAGE_PROVIDER=s3` together with `S3_ENDPOINT`, `S3_BUCKET`,
+`S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` (plus optional `S3_REGION` and
+`S3_FORCE_PATH_STYLE`, which defaults to `true`). Uploads, multipart uploads,
+media processing, retention purges, and private media delivery all follow the
+selected provider; presigned capabilities keep the same shape either way.
+
+Two consequences for this Terraform-managed deployment:
+
+- The `ASSETS` R2 bucket binding stays declared in the Workers' `wrangler.jsonc`
+  and here, so the bucket must continue to exist. An S3 deployment simply never
+  reads through it; the R2 lifecycle, CORS, and event resources become unused
+  rather than removed.
+- `release:deploy` renders `R2_*` from the IaC outputs and requires the `R2_*`
+  secrets, because the R2 bucket is the resource Terraform manages here. An S3
+  deployment therefore configures `OBJECT_STORAGE_PROVIDER` and the `S3_*`
+  settings outside that flow — the bucket and region as Worker variables
+  (`wrangler versions secret`/`wrangler secret put` or the dashboard), never as
+  Terraform variables, so credentials stay out of state and out of logs.
+  `S3_ENDPOINT` must be HTTPS.
+
+`/api/v1/ready` reports the bindings the selected provider needs, and reports a
+rejected endpoint or addressing switch as unavailable, so readiness never shows
+a green probe over a deployment whose asset requests would fail.
+
 API smoke is not async acceptance. There is no synthetic canary Queue: approved
 real staging messages and durable outcomes are still required for async acceptance.
 Worker rollback changes routing/code, not PostgreSQL, R2, Queue, Workflow, or

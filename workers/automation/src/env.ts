@@ -45,6 +45,8 @@ export interface AutomationEnv {
   PUBLIC_API_URL?: string;
   REPLIES_QUEUE?: Queue<unknown>;
   REPLY_WORKFLOW?: Workflow<ReplyWorkflowPayload>;
+  /** Object storage backend: `r2` (default) or `s3`. Selects which bindings below apply. */
+  OBJECT_STORAGE_PROVIDER?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_ACCOUNT_ID?: string;
   R2_BUCKET_NAME?: string;
@@ -53,6 +55,18 @@ export interface AutomationEnv {
   /** Optional path prefix the local runtime serves the bucket under (e.g. /cdn-cgi/local/r2/s3). */
   R2_ENDPOINT_PATH_PREFIX?: string;
   R2_SECRET_ACCESS_KEY?: string;
+  /** Access key for the `s3` object storage provider; unused when the provider is `r2`. */
+  S3_ACCESS_KEY_ID?: string;
+  /** Bucket name for the `s3` object storage provider; unused when the provider is `r2`. */
+  S3_BUCKET?: string;
+  /** Origin only (no path) of the S3-compatible service, e.g. `https://minio.internal:9000`. */
+  S3_ENDPOINT?: string;
+  /** `true` (default) addresses the bucket in the path, `false` in the host. */
+  S3_FORCE_PATH_STYLE?: string;
+  /** S3 signing region; defaults to `us-east-1`. */
+  S3_REGION?: string;
+  /** Secret access key for the `s3` object storage provider; unused when the provider is `r2`. */
+  S3_SECRET_ACCESS_KEY?: string;
   TIKTOK_CLIENT_KEY?: string;
   TIKTOK_CLIENT_SECRET?: string;
   TIKTOK_LIVE_ACCEPTED?: string;

@@ -20,6 +20,7 @@ import {
   type YouTubePublishOptions,
 } from "@meltiply/providers";
 import { errorDiagnostic, log } from "@meltiply/observability";
+import { createObjectStoreFromEnv, type ConfiguredObjectStore } from "@meltiply/storage";
 import type { Context, Hono } from "hono";
 import { CoreApiError, type CoreApiService } from "./core-types";
 import type { BrandProfileApiService } from "./brand-profile-service";
@@ -1030,9 +1031,11 @@ export function registerCoreRoutes(
   // Verified-domain provider media: a public surface authenticated by the URL's HMAC
   // bearer credential rather than a user session (the auth middleware exempts this
   // prefix). The signature is verified in constant time and the expiry checked before
-  // any R2 access, so invalid, expired, or tampered URLs never reach storage; the
-  // object stays private and streams only to a bearer the Automation Worker authorized
-  // for exactly this key until exactly that second.
+  // any object storage access, so invalid, expired, or tampered URLs never reach
+  // storage; the object stays private and streams only to a bearer the Automation
+  // Worker authorized for exactly this key until exactly that second. The read goes
+  // through the configured provider store, so delivery works on R2 and on any
+  // S3-compatible origin alike.
   app.get(`${providerMediaRoutePrefix}*`, async (c) => {
     const key = providerMediaKey(c.req.path);
     const expires = c.req.query("expires");
@@ -1052,7 +1055,10 @@ export function registerCoreRoutes(
         "The media URL is invalid or has expired.",
       );
     }
-    if (!c.env.ASSETS) {
+    let store: ConfiguredObjectStore | undefined;
+    try {
+      store = createObjectStoreFromEnv(c.env);
+    } catch {
       return errorResponse(
         requestId(c),
         503,
@@ -1060,7 +1066,7 @@ export function registerCoreRoutes(
         "Asset storage is unavailable.",
       );
     }
-    const object = await c.env.ASSETS.get(key);
+    const object = await store.read(key);
     if (!object) {
       return errorResponse(requestId(c), 404, "not_found", "The media object was not found.");
     }
@@ -1068,7 +1074,7 @@ export function registerCoreRoutes(
       headers: {
         "Cache-Control": "private, no-store",
         "Content-Length": String(object.size),
-        "Content-Type": object.httpMetadata?.contentType ?? "application/octet-stream",
+        "Content-Type": object.contentType ?? "application/octet-stream",
         "X-Request-ID": requestId(c),
       },
       status: 200,

@@ -1002,7 +1002,7 @@ function resolveSource(
         : {}),
     });
 
-    // Bound, never detached: R2ObjectStore.copyObject reads `this.bucket`, so a
+    // Bound, never detached: the store's copyObject reads private state, so a
     // bare method reference would throw at call time instead of failing as the
     // unsupported-storage case it actually is.
     const copy = objectStore.copyObject?.bind(objectStore);

@@ -150,6 +150,36 @@ for (const name of [
 ]) {
   if (process.env[name]) bindings[name] = process.env[name];
 }
+
+// Object storage defaults to the bundled local R2 binding. An operator who
+// runs against an external S3-compatible service sets OBJECT_STORAGE_PROVIDER=s3
+// plus the S3_* settings in .env.selfhost; the same Workers code then reads,
+// writes, and signs there instead. Startup rejects missing or malformed S3
+// settings rather than letting the stack boot with every asset request failing.
+// Origin trust rules (HTTPS, origin only) stay with the signer and surface
+// through /api/v1/ready, so they are reported there rather than duplicated here.
+const objectStorageProvider = process.env.OBJECT_STORAGE_PROVIDER || "r2";
+z.enum(["r2", "s3"]).parse(objectStorageProvider);
+if (objectStorageProvider === "s3") {
+  z.object({
+    S3_ACCESS_KEY_ID: z.string().min(1),
+    S3_BUCKET: z.string().min(1),
+    S3_ENDPOINT: z.url(),
+    S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).optional(),
+    S3_SECRET_ACCESS_KEY: z.string().min(1),
+  }).parse(process.env);
+}
+bindings.OBJECT_STORAGE_PROVIDER = objectStorageProvider;
+for (const name of [
+  "S3_ACCESS_KEY_ID",
+  "S3_BUCKET",
+  "S3_ENDPOINT",
+  "S3_FORCE_PATH_STYLE",
+  "S3_REGION",
+  "S3_SECRET_ACCESS_KEY",
+]) {
+  if (process.env[name]) bindings[name] = process.env[name];
+}
 const credentials = {
   accessKeyId: config.R2_ACCESS_KEY_ID,
   secretAccessKey: config.R2_SECRET_ACCESS_KEY,

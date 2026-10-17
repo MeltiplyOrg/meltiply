@@ -1,3 +1,4 @@
+import { objectStorageBindings } from "@meltiply/storage";
 import type { AccessClaims } from "@meltiply/auth";
 
 import type { ResolvedActor } from "./actor-resolution";
@@ -45,6 +46,8 @@ export interface ApiWorkerEnv {
   INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED?: string;
   INSTAGRAM_LIVE_ACCEPTED?: string;
   OAUTH_STATE?: DurableObjectNamespace<OAuthStateStub>;
+  /** Object storage backend: `r2` (default) or `s3`. Selects which bindings below apply. */
+  OBJECT_STORAGE_PROVIDER?: string;
   OPERATOR_HOSTNAME?: string;
   PUBLIC_API_URL?: string;
   R2_ACCESS_KEY_ID?: string;
@@ -63,6 +66,18 @@ export interface ApiWorkerEnv {
    * Ignored unless `R2_ENDPOINT` is set.
    */
   R2_ENDPOINT_PATH_PREFIX?: string;
+  /** Access key for the `s3` object storage provider; unused when the provider is `r2`. */
+  S3_ACCESS_KEY_ID?: string;
+  /** Bucket name for the `s3` object storage provider; unused when the provider is `r2`. */
+  S3_BUCKET?: string;
+  /** Origin only (no path) of the S3-compatible service, e.g. `https://minio.internal:9000`. */
+  S3_ENDPOINT?: string;
+  /** `true` (default) addresses the bucket in the path, `false` in the host. */
+  S3_FORCE_PATH_STYLE?: string;
+  /** S3 signing region; defaults to `us-east-1`. */
+  S3_REGION?: string;
+  /** Secret access key for the `s3` object storage provider; unused when the provider is `r2`. */
+  S3_SECRET_ACCESS_KEY?: string;
   TOKEN_ENCRYPTION_KEY?: string;
   TIKTOK_CLIENT_KEY?: string;
   TIKTOK_CLIENT_SECRET?: string;
@@ -86,14 +101,9 @@ export interface BindingStatus {
 const requiredBindings: (keyof ApiWorkerEnv)[] = [
   "DB_SYSTEM",
   "DB_AUTHENTICATED",
-  "ASSETS",
   "FRONTEND_URL",
   "OAUTH_STATE",
   "PUBLIC_API_URL",
-  "R2_ACCESS_KEY_ID",
-  "R2_ACCOUNT_ID",
-  "R2_BUCKET_NAME",
-  "R2_SECRET_ACCESS_KEY",
   "TOKEN_ENCRYPTION_KEY",
 ];
 
@@ -105,10 +115,34 @@ const stagingAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET"];
 const stagingMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
 
 /**
+ * Reports the object-storage bindings the configured provider actually needs.
+ *
+ * Storage requirements come from the shared provider resolution rather than a
+ * fixed list, so an S3 deployment is told about its own `S3_*` settings instead
+ * of R2 names it does not have. An unparseable `OBJECT_STORAGE_PROVIDER` is
+ * reported as a single unavailable component instead of throwing, so the probe
+ * still answers with a usable diagnosis.
+ *
+ * @param env - Worker environment bindings.
+ * @returns Readiness entries for the selected provider's bindings.
+ */
+function objectStorageStatuses(env: ApiWorkerEnv): BindingStatus[] {
+  try {
+    return objectStorageBindings(env).map((binding) => ({
+      name: binding.name,
+      status: binding.ready ? "ready" : "unavailable",
+    }));
+  } catch {
+    return [{ name: "OBJECT_STORAGE_PROVIDER", status: "unavailable" }];
+  }
+}
+
+/**
  * Reports readiness status for required and environment-specific Worker bindings.
  *
  * Evaluates core bindings for all environments, plus auth, mail delivery, and
- * Automation RPC bindings in staging. Used by the `/api/v1/ready` probe.
+ * Automation RPC bindings in staging, plus the object-storage bindings the
+ * configured provider requires. Used by the `/api/v1/ready` probe.
  *
  * @param env - Worker environment bindings.
  * @returns Array of `BindingStatus` entries with name and "ready" | "unavailable" status.
@@ -123,20 +157,23 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
           ...stagingAutomationBindings,
         ]
       : requiredBindings;
-  return bindings.map((name) => {
-    // `MAIL` is only ready when the Email Sending binding exposes a callable
-    // `send`; `MAIL_FROM_ADDRESS` only when `mailSenderConfiguration` can
-    // normalize a valid sender. Presence alone must not report ready — an
-    // unusable binding or malformed sender fails closed. No send occurs: this
-    // is a local capability check, not a DNS/deliverability probe.
-    const ready =
-      name === "MAIL"
-        ? typeof env.MAIL?.send === "function"
-        : name === "MAIL_FROM_ADDRESS"
-          ? mailSenderConfiguration(env) !== undefined
-          : Boolean(env[name]);
-    return { name, status: ready ? "ready" : "unavailable" };
-  });
+  return [
+    ...bindings.map((name) => {
+      // `MAIL` is only ready when the Email Sending binding exposes a callable
+      // `send`; `MAIL_FROM_ADDRESS` only when `mailSenderConfiguration` can
+      // normalize a valid sender. Presence alone must not report ready — an
+      // unusable binding or malformed sender fails closed. No send occurs: this
+      // is a local capability check, not a DNS/deliverability probe.
+      const ready =
+        name === "MAIL"
+          ? typeof env.MAIL?.send === "function"
+          : name === "MAIL_FROM_ADDRESS"
+            ? mailSenderConfiguration(env) !== undefined
+            : Boolean(env[name]);
+      return { name, status: ready ? ("ready" as const) : ("unavailable" as const) };
+    }),
+    ...objectStorageStatuses(env),
+  ];
 }
 
 /**

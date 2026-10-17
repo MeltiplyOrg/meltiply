@@ -39,10 +39,9 @@ export interface SideDialogProps {
  * a companion panel over live content, so Tab reaches the workspace.
  * Native body scrolling stays untouched. Motion is the reference drawer's: the
  * panel steps 48px in on `--ease-drawer` and slides back out on dismissal
- * (`side-dialog-slide-*`), its body children rise 8px with the reference's
- * stagger (`side-dialog-rise-in`), and the expanded panel pops
- * (`side-dialog-pop-*`) because an animated `translate` would overwrite the
- * centering utility.
+ * (`side-dialog-enter`/`side-dialog-exit`, which read their shape from custom
+ * properties so expanding never replays the entrance), and its body blocks rise
+ * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`).
  */
 export function SideDialog({
   open,
@@ -67,17 +66,15 @@ export function SideDialog({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <DialogPrimitive.Portal>
-        {/* The reference scrim exists only for the expanded inspector. Radix keeps
-            each portal child mounted for its own exit animation, so `data-state`
-            is derived here and the dim fades out with the panel. */}
+        {/* The reference scrim exists only for the expanded inspector: it fades in
+            on expand and stays inert and invisible otherwise, so the edge drawer
+            never blocks the workspace. Radix keeps each portal child mounted for
+            its own exit animation. */}
         <div
           data-side-dialog-scrim=""
           data-state={expanded && open ? "open" : "closed"}
           aria-hidden="true"
-          className={cn(
-            "fixed inset-0 z-50",
-            expanded ? "bg-overlay/40" : "pointer-events-none bg-transparent",
-          )}
+          className={cn("fixed inset-0 z-50 bg-overlay/40", !expanded && "pointer-events-none")}
           onClick={() => onOpenChange(false)}
         />
         <DialogPrimitive.Content

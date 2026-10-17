@@ -49,7 +49,7 @@
       {
         "name": "drawer",
         "value": "cubic-bezier(0.32, 0.72, 0, 1)",
-        "purpose": "Reference drawer curve for the edge inspector: a soft pull off the edge, then a decisive settle. Its body blocks rise 8px on the same curve for 460ms with a 0/55/105/150ms stagger — the reference rise is front-loaded and lands as a flash, so the travel is spread to stay catchable."
+        "purpose": "Reference drawer curve for the edge inspector: a soft pull off the edge, then a decisive settle. Its body blocks rise behind it for 460ms on the same curve with a 0/55/105/150ms stagger — the reference rise is front-loaded and lands as a flash, so the travel is spread to stay catchable. `side-dialog-enter`/`side-dialog-exit` read their from/rest values from custom properties so the expanded shape shares one animation name and expanding never replays the entrance."
       }
     ],
     "breakpoints": [

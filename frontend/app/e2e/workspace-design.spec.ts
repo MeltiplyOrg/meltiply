@@ -271,7 +271,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   });
   expect(
     panelEntrance.some(
-      (animation) => animation.name === "side-dialog-slide-in" && animation.from.startsWith("48px"),
+      (animation) => animation.name === "side-dialog-enter" && animation.from.startsWith("48px"),
     ),
   ).toBe(true);
   // The body rises behind the panel with the reference's stagger.
@@ -327,7 +327,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     Reflect.set(window, "__sideDialogExits", exits);
     panel?.addEventListener("animationstart", (event) => {
       const { animationName } = event as AnimationEvent;
-      if (animationName !== "side-dialog-slide-out") return;
+      if (animationName !== "side-dialog-exit") return;
       const running = panel
         .getAnimations()
         .find((animation) => (animation as CSSAnimation).animationName === animationName);
@@ -340,7 +340,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(inspectTrigger).toBeFocused();
   const exits = await page.evaluate(() => Reflect.get(window, "__sideDialogExits") as string[]);
   expect(exits.length).toBe(1);
-  expect(exits[0]?.startsWith("side-dialog-slide-out:48px")).toBe(true);
+  expect(exits[0]?.startsWith("side-dialog-exit:48px")).toBe(true);
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: "Studio update" }));
   await expect(page.getByPlaceholder(/what do you want to publish/i)).toHaveValue(
     "Studio update — ready for the next publishing window.",

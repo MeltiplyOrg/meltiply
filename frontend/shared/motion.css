@@ -212,32 +212,40 @@ html.theme-changing *::after {
 
 /*
  * Edge inspector, ported from the reference drawer: the surface steps 48px in
- * from its edge on the drawer curve while its content rises 8px behind it with
- * the reference's 0/40/70/100ms stagger, then the whole panel slides back out on
- * dismissal. The expanded inspector is a centered panel by then, so it takes the
- * reference `modalIn` pop (scale only: the panel already carries the
- * `-translate-x-1/2` centering utility on the `translate` property and an
- * animated `translate` would overwrite it). Phones keep the slide.
+ * from its edge on the drawer curve while its content rises behind it, then the
+ * whole panel slides back out on dismissal. The expanded inspector is a centered
+ * panel by then, so it takes the reference `modalIn` step (8px up with a 0.97
+ * scale) at its own centered rest position.
+ *
+ * One animation name covers both shapes, with the from/rest keyframe values read
+ * from custom properties. Switching mode therefore changes the values of a
+ * finished animation instead of its name, so expanding or restoring never
+ * replays the entrance — a replay would restart opacity at 0 and blink a panel
+ * that is already on screen.
  */
-@keyframes side-dialog-slide-in {
+@keyframes side-dialog-enter {
   from {
     opacity: 0;
-    translate: 48px 0;
+    translate: var(--side-dialog-enter-translate, 48px 0);
+    scale: var(--side-dialog-enter-scale, 1);
   }
   to {
     opacity: 1;
-    translate: 0 0;
+    translate: var(--side-dialog-rest-translate, 0 0);
+    scale: 1;
   }
 }
 
-@keyframes side-dialog-slide-out {
+@keyframes side-dialog-exit {
   from {
     opacity: 1;
-    translate: 0 0;
+    translate: var(--side-dialog-rest-translate, 0 0);
+    scale: 1;
   }
   to {
     opacity: 0;
-    translate: 48px 0;
+    translate: var(--side-dialog-enter-translate, 48px 0);
+    scale: var(--side-dialog-enter-scale, 1);
   }
 }
 
@@ -252,31 +260,9 @@ html.theme-changing *::after {
   }
 }
 
-/* The reference `modalIn`. It animates `transform`, not `translate`, because the
-   expanded panel keeps its centering on the `translate` property. */
-@keyframes side-dialog-pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes side-dialog-pop-out {
-  from {
-    opacity: 1;
-    transform: none;
-  }
-  to {
-    opacity: 0;
-    transform: translateY(8px) scale(0.97);
-  }
-}
-
-/* The expanded scrim dims the workspace; the edge inspector leaves it clear. */
+/* The expanded scrim dims the workspace, as in the reference: it fades in on
+ * expand and is simply absent otherwise, so it never blocks the edge inspector
+ * and can never flash a dim while mounting. */
 @keyframes side-dialog-scrim-in {
   from {
     opacity: 0;
@@ -286,22 +272,17 @@ html.theme-changing *::after {
   }
 }
 
-@keyframes side-dialog-scrim-out {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
+[data-side-dialog-scrim] {
+  opacity: 0;
 }
 
 [data-side-dialog][data-state="open"] {
-  animation: side-dialog-slide-in 340ms var(--ease-drawer) both;
+  animation: side-dialog-enter 340ms var(--ease-drawer) both;
 }
 
 /* Dismissal is shorter than the entrance and carries no lingering translucency. */
 [data-side-dialog][data-state="closed"] {
-  animation: side-dialog-slide-out 180ms var(--ease-exit) both;
+  animation: side-dialog-exit 180ms var(--ease-exit) both;
 }
 
 /* The rise is scoped to the open panel: Radix sets `data-state` on the panel,
@@ -328,17 +309,13 @@ html.theme-changing *::after {
   animation: side-dialog-scrim-in 180ms var(--ease-enter) both;
 }
 
-[data-side-dialog-scrim][data-state="closed"] {
-  animation: side-dialog-scrim-out 180ms var(--ease-exit) both;
-}
-
+/* Phones reach the expanded panel only through the desktop-only expand control,
+ * so the centered motion stays scoped to the widths that can use it. */
 @media (min-width: 40rem) {
-  [data-side-dialog][data-expanded="true"][data-state="open"] {
-    animation: side-dialog-pop-in 260ms var(--ease-enter) both;
-  }
-
-  [data-side-dialog][data-expanded="true"][data-state="closed"] {
-    animation: side-dialog-pop-out 200ms var(--ease-exit) both;
+  [data-side-dialog][data-expanded="true"] {
+    --side-dialog-enter-translate: -50% 8px;
+    --side-dialog-enter-scale: 0.97;
+    --side-dialog-rest-translate: -50% 0;
   }
 }
 

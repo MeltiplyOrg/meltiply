@@ -22,7 +22,7 @@ Use `CenterDialog` for focused tasks/search, `CenterAlertDialog` for destructive
 
 Post inspection uses real properties, caption, attachments, and Channel outcomes. Header actions expose supported editing/deletion/cancellation; expansion and Close belong to the shared drawer.
 
-Settings has Appearance, Language, Account, and Security. Every section shares the same content maximum and surface background. Theme offers Light, Dark, and System through the existing consent-aware owner. Identity is read-only. Security controls are inline and retain password reauthentication, authenticator verification, and recovery-code handling.
+Settings has Appearance, Language, Account, and Security. Every section shares the same content maximum and surface background. Theme offers Light, Dark, and System through the existing consent-aware owner. The sidebar account menu exposes the same three choices inline; selecting one applies immediately without dismissing the menu. Identity is read-only. Security controls are inline and retain password reauthentication, authenticator verification, and recovery-code handling.
 
 ## Animation and feedback
 

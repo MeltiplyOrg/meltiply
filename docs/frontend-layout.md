@@ -34,16 +34,16 @@ Use the shared semantic tokens and Tailwind utilities. Rewritten app React compo
 
 ## Scroll ownership
 
-| Region               | Owner                                    | Behavior                                                                                  |
-| -------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Document frame       | `NavigationShell`                        | Viewport-bound, no document horizontal overflow                                           |
-| Route working column | `NavigationShell` main                   | Vertical overflow fallback                                                                |
-| Sidebar destinations | Sidebar nav                              | Independent vertical scroll; footer remains reachable; no Search or Brand Profile section |
-| Posts Table          | Shared table viewport                    | Bounded vertical and horizontal overflow                                                  |
-| Grid/Calendar        | Route-specific collection viewport       | Bounded scrolling with route-owned gutters                                                |
-| Channel directory    | Channel tab panel and directory viewport | Horizontal table overflow stays inside centered page                                      |
-| Settings sections    | Full-height route                        | Responsive section rail; content owns vertical scroll                                     |
-| Composer/dialog body | Composer/shared dialog content           | Bounded scroll; dialogs preserve `data-lenis-prevent`                                     |
+| Region               | Owner                                    | Behavior                                                                                                                                           |
+| -------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Document frame       | `NavigationShell`                        | Viewport-bound, no document horizontal overflow                                                                                                    |
+| Route working column | `NavigationShell` main                   | Vertical overflow fallback                                                                                                                         |
+| Sidebar destinations | Sidebar nav                              | Independent vertical scroll; footer remains reachable; no Search or Brand Profile section                                                          |
+| Posts Table          | Shared table viewport                    | Bounded vertical and horizontal overflow                                                                                                           |
+| Grid/Calendar        | Route-specific collection viewport       | Bounded scrolling with route-owned gutters                                                                                                         |
+| Channel directory    | Channel tab panel and directory viewport | Horizontal table overflow stays inside centered page                                                                                               |
+| Settings sections    | Full-height route                        | Shared page/navigation background; full-width content, 192px wrapping theme cards, and a 576px maximum Security form; content owns vertical scroll |
+| Composer/dialog body | Composer/shared dialog content           | Bounded scroll; dialogs preserve `data-lenis-prevent`                                                                                              |
 
 Every flex/grid ancestor of a bounded scroller needs `min-h-0` and/or `min-w-0`. Avoid giving both the full page and an unbounded child ownership of the same vertical content.
 

@@ -55,6 +55,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const quickTheme = accountMenu.getByRole("group", { name: "Theme", exact: true });
   await quickTheme.getByRole("menuitemradio", { name: "Dark", exact: true }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("sidebar-account-menu-dark-desktop.png"),
+    fullPage: true,
+  });
   await expect(accountMenu).toBeVisible();
   await expect(quickTheme.getByRole("menuitemradio", { name: "Dark", exact: true })).toBeChecked();
   await quickTheme.getByRole("menuitemradio", { name: "System", exact: true }).click();
@@ -291,6 +296,12 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       .getByRole("navigation", { name: "Settings sections", exact: true })
       .getByRole("button", { name: section, exact: true })
       .click();
+    await expect(
+      page.getByRole("heading", {
+        name: section === "Account" ? "Account and workspace" : section,
+        exact: true,
+      }),
+    ).toBeVisible();
     await page.screenshot({
       animations: "disabled",
       path: testInfo.outputPath(`settings-${section.toLowerCase()}-desktop.png`),

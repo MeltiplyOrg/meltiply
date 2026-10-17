@@ -37,6 +37,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Prepare full gate database
+        if: inputs.lane == 'cloudflare-full'
+        run: bun run setup --skip-dependencies --skip-image-pull
       - name: Validate complete application contract
         if: inputs.lane == 'cloudflare-full'
         run: bun run cloudflare:check

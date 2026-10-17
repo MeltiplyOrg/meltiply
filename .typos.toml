@@ -16,6 +16,8 @@ fpr = "fpr"
 publicaly = "publicaly"
 trak = "trak"
 unparseable = "unparseable"
+# RFC 7515 JOSE header parameter; not an English identifier.
+typ = "typ"
 
 # Preserve upstream legal text verbatim, including its original spelling.
 [type.cc-by-license]

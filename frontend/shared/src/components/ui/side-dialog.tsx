@@ -27,6 +27,11 @@ export interface SideDialogProps {
    */
   contentKey?: string;
   children: React.ReactNode;
+  /**
+   * Extra classes for the scrolling body, e.g. removing its bottom padding so a
+   * pinned action bar can sit flush against the drawer's bottom edge.
+   */
+  bodyClassName?: string;
   className?: string;
   closeLabel?: string;
 }
@@ -55,6 +60,7 @@ export function SideDialog({
   actions,
   contentKey,
   children,
+  bodyClassName,
   className,
   closeLabel = "Close",
 }: SideDialogProps): React.ReactElement {
@@ -141,7 +147,10 @@ export function SideDialog({
           <div
             data-lenis-prevent=""
             data-side-dialog-body=""
-            className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-10 pt-4 sm:px-6 sm:pb-8 sm:pt-5"
+            className={cn(
+              "min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-10 pt-4 sm:px-6 sm:pb-8 sm:pt-5",
+              bodyClassName,
+            )}
           >
             <React.Fragment key={shownContentKey}>{children}</React.Fragment>
           </div>

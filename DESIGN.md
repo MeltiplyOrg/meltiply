@@ -126,7 +126,7 @@ Posts is one destination with **Table → Calendar → Grid**. Channels follows 
 
 Settings uses one bounded 672px content column for every section. Its section rail is 220px from 768px and horizontal below; theme choices remain compact rather than stretching across the column. The Channels directory has a centered 1200px ceiling. Do not apply Settings' form width to collection tables.
 
-The side dialog is a 620px drawer at the right edge and fills the phone viewport. Its 46px record toolbar remains separate from the native scrolling body. See [layout ownership](docs/frontend-layout.md) for scroll boundaries and responsive details.
+The side dialog is a 620px drawer at the right edge and fills the phone viewport. Its 46px record toolbar remains separate from the native scrolling body. The same drawer hosts composition: flat sections with a shared tab strip, and a pinned footer carrying the schedule field plus Save, Schedule, and Publish Now. See [layout ownership](docs/frontend-layout.md) for scroll boundaries and responsive details.
 
 ## Elevation & Depth
 

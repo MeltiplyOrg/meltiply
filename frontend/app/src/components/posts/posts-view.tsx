@@ -1,10 +1,10 @@
-import { lazy, Suspense, useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useWorkspace } from "@/context/workspace.context";
 import { Button } from "@meltiply/ui/button";
 import { WorkspaceSurface } from "@/components/layout/workspace-surface";
 import { BulkSelectionBar } from "@/components/layout/bulk-selection-bar";
-import { AlertCircle, Plus, ArrowLeft, Trash2 } from "lucide-react";
-import { RouteFallback } from "@/components/layout/route-fallback";
+import { AlertCircle, Plus, Trash2 } from "lucide-react";
+
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useCalendar, useCancelDistribution, useDeletePost, usePosts } from "@/lib/queries";
 import { useI18n } from "@/lib/i18n";
@@ -30,6 +30,7 @@ import { PostCalendarGridView } from "./post-calendar-grid-view";
 import { PostGridCardView } from "./post-grid-card-view";
 import type { PostGroupBy } from "./post-groups";
 import { CalendarDateDetailDialog } from "./calendar-date-detail-dialog";
+import { PostComposerDialog } from "./post-composer-dialog";
 import { PostDetailDialog } from "./post-detail-dialog";
 import { PostsToolbar } from "./posts-toolbar";
 import {
@@ -55,12 +56,6 @@ import type {
   PostSelectionEntry,
   ChannelMediaItem,
 } from "./types";
-
-/** Keep editing and upload dependencies out of Table, Grid, and Calendar startup. */
-const Composer = lazy(async () => {
-  const { Composer } = await import("@/components/composer/composer");
-  return { default: Composer };
-});
 
 /** Page size for the Post list, which every view mode projects into rows. */
 const POSTS_PAGE_LIMIT = 100;
@@ -258,6 +253,7 @@ export function PostsView({
   initialViewMode = "table",
   initialStatusFilter = "all",
   initialPostId,
+  initialComposerOpen = false,
   onNavigate,
 }: PostsViewProps) {
   const {
@@ -284,6 +280,10 @@ export function PostsView({
   const [editingPostId, setEditingPostId] = useState<string | undefined>(initialPostId);
   const [schedulingDate, setSchedulingDate] = useState<Date | undefined>(undefined);
   const [composerKey, setComposerKey] = useState<number>(0);
+  /** Composition lives in the shared drawer, seeded by a compose deep link. */
+  const [composerOpen, setComposerOpen] = useState<boolean>(
+    initialComposerOpen || Boolean(initialPostId),
+  );
 
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
@@ -324,7 +324,7 @@ export function PostsView({
     if (initialPostId) {
       setEditingPostId(initialPostId);
       setComposerKey((k) => k + 1);
-      setViewMode("composer");
+      setComposerOpen(true);
     }
   }
 
@@ -694,10 +694,11 @@ export function PostsView({
   }, [bulkDeleteTargets, bulkDeleteBusy, deletePost, t]);
 
   /**
-   * Opens the composer for a Post that still has an editable surface: a stored
-   * draft, or a Post with at least one pending Channel whose targets can still
-   * be added, removed, or rescheduled. Increments the composer session key so
-   * an existing composer instance resets and hydrates the selected Post identity.
+   * Opens the composer drawer for a Post that still has an editable surface: a
+   * stored draft, or a Post with at least one pending Channel whose targets can
+   * still be added, removed, or rescheduled. Increments the composer session key
+   * so an existing composer instance resets and hydrates the selected Post
+   * identity. The drawer replaces the inspection rather than navigating away.
    */
   const handleEditPost = useCallback(
     (postId: string) => {
@@ -716,33 +717,35 @@ export function PostsView({
       setEditingPostId(postId);
       setSchedulingDate(undefined);
       setComposerKey((k) => k + 1);
-      setViewMode("composer");
+      setComposerOpen(true);
     },
     [posts, t],
   );
 
   /**
-   * Opens the composer for authoring a new Post. Increments the composer session
-   * key so the composer starts with fresh component state, unmounting any previous
-   * composition without retaining a completed save or clearing unsaved recovery.
+   * Opens the composer drawer for authoring a new Post. Increments the composer
+   * session key so the composer starts with fresh component state, unmounting any
+   * previous composition without retaining a completed save or clearing unsaved
+   * recovery.
    */
   const handleCreatePost = useCallback(() => {
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
     setComposerKey((k) => k + 1);
-    setViewMode("composer");
+    setComposerOpen(true);
   }, []);
 
-  const handleBackToPosts = useCallback(() => {
+  const handleComposerOpenChange = useCallback((open: boolean) => {
+    if (open) return;
+    setComposerOpen(false);
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
-    setViewMode("table");
   }, []);
 
   const handlePostSuccess = useCallback(() => {
+    setComposerOpen(false);
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
-    setViewMode("table");
     refetchActive().catch(() => {});
   }, [refetchActive]);
 
@@ -807,13 +810,13 @@ export function PostsView({
     setSelectedCalendarDate(null);
   }, []);
 
-  /** Opens a fresh composition seeded with a calendar slot and discards the prior editor session. */
+  /** Opens a fresh composition in the drawer, seeded with a calendar slot. */
   const handleScheduleCalendarDate = useCallback((date: Date) => {
     setSchedulingDate(date);
     setSelectedCalendarDate(null);
     setEditingPostId(undefined);
     setComposerKey((key) => key + 1);
-    setViewMode("composer");
+    setComposerOpen(true);
   }, []);
 
   /** Uses the same calendar composer entrypoint from the selectable day-detail list. */
@@ -881,19 +884,7 @@ export function PostsView({
             : "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4";
 
   const viewModeContent =
-    viewMode === "composer" ? (
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
-        <Suspense fallback={<RouteFallback />}>
-          <Composer
-            key={composerKey}
-            initialPostId={editingPostId}
-            initialDate={schedulingDate}
-            onPostSuccess={handlePostSuccess}
-            onNavigate={onNavigate}
-          />
-        </Suspense>
-      </div>
-    ) : viewMode === "calendar" ? (
+    viewMode === "calendar" ? (
       <PostCalendarGridView
         posts={processedPosts}
         calendarMonth={calendarMonth}
@@ -949,21 +940,10 @@ export function PostsView({
         count: processedPosts.length,
       })}
       actions={
-        viewMode === "composer" ? (
-          <Button
-            variant="outline"
-            onClick={handleBackToPosts}
-            className="rounded-control border-line bg-surface text-ink shadow-hairline hover:bg-hover"
-          >
-            <ArrowLeft className="size-4" />
-            {t("Back to posts")}
-          </Button>
-        ) : (
-          <Button variant="default" onClick={handleCreatePost}>
-            <Plus className="size-4" />
-            {t("Create post")}
-          </Button>
-        )
+        <Button variant="default" onClick={handleCreatePost}>
+          <Plus className="size-4" />
+          {t("Create post")}
+        </Button>
       }
     >
       {queryError && (
@@ -976,39 +956,37 @@ export function PostsView({
         </Alert>
       )}
 
-      {viewMode !== "composer" && (
-        <PostsToolbar
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          groupBy={groupBy}
-          onGroupByChange={setGroupBy}
-          hiddenColumns={hiddenColumns}
-          onToggleColumn={(column) =>
-            setHiddenColumns((previous) => {
-              const next = new Set(previous);
-              if (next.has(column)) next.delete(column);
-              else next.add(column);
-              return next;
-            })
-          }
-          columns={columns}
-          onColumnsChange={setColumns}
-          statusFilter={statusFilter}
-          onStatusChange={setStatusFilter}
-          platformFilter={selectedPlatforms}
-          onPlatformChange={setSelectedPlatforms}
-          profileFilter={profileFilter}
-          onProfileChange={(id) => setSelectedBrandProfileId(id === "all" ? null : id)}
-          dateFilter={dateFilter}
-          onDateChange={setDateFilter}
-          sortKey={sortKey}
-          onSortChange={setSortKey}
-          brandProfiles={brandProfiles}
-          unresolvedProfileIds={postProfileIds}
-        />
-      )}
+      <PostsToolbar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        groupBy={groupBy}
+        onGroupByChange={setGroupBy}
+        hiddenColumns={hiddenColumns}
+        onToggleColumn={(column) =>
+          setHiddenColumns((previous) => {
+            const next = new Set(previous);
+            if (next.has(column)) next.delete(column);
+            else next.add(column);
+            return next;
+          })
+        }
+        columns={columns}
+        onColumnsChange={setColumns}
+        statusFilter={statusFilter}
+        onStatusChange={setStatusFilter}
+        platformFilter={selectedPlatforms}
+        onPlatformChange={setSelectedPlatforms}
+        profileFilter={profileFilter}
+        onProfileChange={(id) => setSelectedBrandProfileId(id === "all" ? null : id)}
+        dateFilter={dateFilter}
+        onDateChange={setDateFilter}
+        sortKey={sortKey}
+        onSortChange={setSortKey}
+        brandProfiles={brandProfiles}
+        unresolvedProfileIds={postProfileIds}
+      />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{viewModeContent}</div>
 
@@ -1033,6 +1011,16 @@ export function PostsView({
         onClose={handleCloseDetail}
         onEdit={handleEditPost}
         onRequestDelete={handleModalRequestDelete}
+      />
+
+      <PostComposerDialog
+        open={composerOpen}
+        onOpenChange={handleComposerOpenChange}
+        initialPostId={editingPostId}
+        initialDate={schedulingDate}
+        sessionKey={composerKey}
+        onPostSuccess={handlePostSuccess}
+        onNavigate={onNavigate}
       />
 
       <CenterAlertDialog

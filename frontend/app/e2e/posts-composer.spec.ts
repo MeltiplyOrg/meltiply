@@ -13,6 +13,7 @@ import {
 } from "./media-fixtures";
 import {
   activeBrandProfileName,
+  closeComposer,
   editPostFromRow,
   provisionControlledChannels,
   type ControlledPlatform,
@@ -154,7 +155,7 @@ async function saveAndSettle(
  * @param caption - Caption identifying the row to edit.
  */
 async function reopenDraft(page: Page, caption: string): Promise<void> {
-  await page.getByRole("button", { name: /back to posts/i }).click();
+  await closeComposer(page);
   const row = page.getByRole("row").filter({ hasText: caption });
   await expect(row).toBeVisible({ timeout: 30_000 });
   await editPostFromRow(page, row);
@@ -495,7 +496,7 @@ test("restores an unsaved new composition after a reload and clears it on save",
   // namespace and the saved Post's, so a fresh composition starts empty.
   await saveDraft(page);
   expect(await composerRecoveryKeys(page)).toHaveLength(0);
-  await page.getByRole("button", { name: /back to posts/i }).click();
+  await closeComposer(page);
   await openComposer(page);
   await expect(composerTextarea(page)).toHaveValue("");
 });

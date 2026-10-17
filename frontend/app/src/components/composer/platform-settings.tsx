@@ -175,10 +175,10 @@ function ProviderPanel({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4">
+    <div className="flex flex-col gap-4 rounded-control border border-line bg-surface p-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-foreground flex items-center gap-2">
-          <Badge variant="outline" className="font-mono text-[10px] uppercase">
+        <span className="text-xs font-semibold text-ink flex items-center gap-2">
+          <Badge variant="outline" className="font-mono text-(length:--font-size-micro) uppercase">
             {providerLabel}
           </Badge>
           {t("{name} Configuration", { name: channelName })}
@@ -221,7 +221,7 @@ function YoutubeEditor({
     <ProviderPanel providerLabel="YouTube" channelName={channelName} t={t}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5 sm:col-span-2">
-          <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-muted-foreground">
+          <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-ink-3">
             {t("Video Title (required, 2-100 characters)")}
           </label>
           <Input
@@ -231,13 +231,13 @@ function YoutubeEditor({
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => update("title", e.target.value)}
             maxLength={100}
           />
-          <span className="text-[10px] text-muted-foreground self-end">
+          <span className="text-(length:--font-size-micro) text-ink-3 self-end">
             {(yt.title ?? "").length}/100
           </span>
         </div>
 
         <div className="flex flex-col gap-1.5 sm:col-span-2">
-          <label htmlFor={`${fieldId}-tags`} className="text-xs font-medium text-muted-foreground">
+          <label htmlFor={`${fieldId}-tags`} className="text-xs font-medium text-ink-3">
             {t("Tags (comma separated, max 500 chars combined)")}
           </label>
           <Input
@@ -282,7 +282,7 @@ function TikTokEditor({
   return (
     <ProviderPanel providerLabel="TikTok" channelName={channelName} t={t}>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-muted-foreground">
+        <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-ink-3">
           {t("Post Title (optional, max 90 characters)")}
         </label>
         <Input
@@ -295,7 +295,7 @@ function TikTokEditor({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${fieldId}-privacy`} className="text-xs font-medium text-muted-foreground">
+        <label htmlFor={`${fieldId}-privacy`} className="text-xs font-medium text-ink-3">
           {t("Privacy Level")}
         </label>
         <Select
@@ -316,8 +316,8 @@ function TikTokEditor({
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-        <div className="flex items-center justify-between border border-border rounded-lg p-2.5">
-          <label htmlFor={`${fieldId}-duet`} className="text-xs font-medium text-foreground">
+        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
+          <label htmlFor={`${fieldId}-duet`} className="text-xs font-medium text-ink">
             {t("Duet")}
           </label>
           <Switch
@@ -328,8 +328,8 @@ function TikTokEditor({
           />
         </div>
 
-        <div className="flex items-center justify-between border border-border rounded-lg p-2.5">
-          <label htmlFor={`${fieldId}-stitch`} className="text-xs font-medium text-foreground">
+        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
+          <label htmlFor={`${fieldId}-stitch`} className="text-xs font-medium text-ink">
             {t("Stitch")}
           </label>
           <Switch
@@ -340,8 +340,8 @@ function TikTokEditor({
           />
         </div>
 
-        <div className="flex items-center justify-between border border-border rounded-lg p-2.5">
-          <label htmlFor={`${fieldId}-comment`} className="text-xs font-medium text-foreground">
+        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
+          <label htmlFor={`${fieldId}-comment`} className="text-xs font-medium text-ink">
             {t("Comments")}
           </label>
           <Switch
@@ -354,11 +354,8 @@ function TikTokEditor({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="flex items-center justify-between border border-border rounded-lg p-2.5">
-          <label
-            htmlFor={`${fieldId}-brand-content`}
-            className="text-xs font-medium text-foreground"
-          >
+        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
+          <label htmlFor={`${fieldId}-brand-content`} className="text-xs font-medium text-ink">
             {t("Brand Content")}
           </label>
           <Switch
@@ -368,11 +365,8 @@ function TikTokEditor({
           />
         </div>
 
-        <div className="flex items-center justify-between border border-border rounded-lg p-2.5">
-          <label
-            htmlFor={`${fieldId}-brand-organic`}
-            className="text-xs font-medium text-foreground"
-          >
+        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
+          <label htmlFor={`${fieldId}-brand-organic`} className="text-xs font-medium text-ink">
             {t("Organic Brand")}
           </label>
           <Switch
@@ -382,11 +376,8 @@ function TikTokEditor({
           />
         </div>
 
-        <div className="flex items-center justify-between border border-border rounded-lg p-2.5">
-          <label
-            htmlFor={`${fieldId}-ai-generated`}
-            className="text-xs font-medium text-foreground"
-          >
+        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
+          <label htmlFor={`${fieldId}-ai-generated`} className="text-xs font-medium text-ink">
             {t("AI Generated")}
           </label>
           <Switch
@@ -406,9 +397,9 @@ function TikTokEditor({
  */
 function ThreadsEditor({ t }: ProviderEditorProps<Record<string, never>>): React.ReactElement {
   return (
-    <div className="rounded-lg border border-border bg-card p-4 text-xs text-muted-foreground flex items-center justify-between">
+    <div className="rounded-control border border-line bg-surface p-4 text-xs text-ink-3 flex items-center justify-between">
       <div className="flex items-center gap-2">
-        <Badge variant="outline" className="font-mono text-[10px] uppercase">
+        <Badge variant="outline" className="font-mono text-(length:--font-size-micro) uppercase">
           Threads
         </Badge>
         <span>{t("Uses standard text and attached media.")}</span>

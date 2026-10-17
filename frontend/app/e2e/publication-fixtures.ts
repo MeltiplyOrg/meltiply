@@ -159,6 +159,19 @@ export async function editPostFromRow(page: Page, row: Locator): Promise<void> {
 }
 
 /**
+ * Closes the composer drawer so the collection behind it is interactive again.
+ * Composing replaces inspection inside the same drawer instead of navigating to a
+ * composer page, so specs return to the collection through this dismissed state.
+ *
+ * @param page - Playwright page bound to the app under test.
+ */
+export async function closeComposer(page: Page): Promise<void> {
+  const composer = page.getByRole("dialog", { name: /^(?:new post|edit post)$/i });
+  await composer.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(composer).toBeHidden();
+}
+
+/**
  * Attaches controlled-Provider Channels to an existing Brand Profile.
  *
  * The real OAuth connect boundary is unreachable in a plain-HTTP local stack

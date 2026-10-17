@@ -5,6 +5,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from "@
 import {
   activeBrandProfileName,
   controlledProviderAccountId,
+  closeComposer,
   editPostFromRow,
   provisionControlledChannels,
   readControlledMedia,
@@ -123,9 +124,9 @@ async function returnToPosts(page: Page): Promise<void> {
     timeout: 30_000,
   });
   await expect(page.getByRole("alert")).toHaveCount(0);
-  const back = page.getByRole("button", { name: /back to posts/i });
-  if (await back.isVisible().catch(() => false)) {
-    await back.click();
+  const composer = page.getByRole("dialog", { name: /^(?:new post|edit post)$/i });
+  if (await composer.isVisible().catch(() => false)) {
+    await closeComposer(page);
   }
   await waitForWorkspace(page);
 }

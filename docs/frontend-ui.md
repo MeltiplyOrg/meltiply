@@ -53,7 +53,7 @@ Shared tooltips use the reference-derived compact inverse treatment and timing. 
 
 ## Collections and selection
 
-Posts orders **Table → Calendar → Grid**, with Table as default. All three share Post identity, owning Brand Profile, real outcomes, filtering, and supported actions. Table grouping/column visibility is presentation, not a different data model. Its rows open Details and have no trailing actions column. Calendar Month/Week uses actual dates, day lists, overflow, and explicit composer entry; it does not imply drag-rescheduling. Grid uses `PostCard` and real attachments.
+Posts orders **Table → Calendar → Grid**, with Table as default. All three share Post identity, owning Brand Profile, real outcomes, filtering, and supported actions. Table grouping/column visibility is presentation, not a different data model. Its rows open Details and have no trailing actions column. Calendar Month/Week uses actual dates, day lists, overflow, and explicit compose entry that opens the composer drawer; it does not imply drag-rescheduling. Grid uses `PostCard` and real attachments.
 
 Channels follows the Members directory composition: Accounts/Brand Profiles tabs, account search, status segments, field-row filters, identity table, and real profile cards. Connection cells contain one accessible health icon; recovery remains available without duplicate status text. Its background and controls match Posts.
 
@@ -69,7 +69,7 @@ Channels follows the Members directory composition: Accounts/Brand Profiles tabs
 | Destructive confirmation    | `CenterAlertDialog` |
 | Large Post inspection       | `SideDialog`        |
 
-`SideDialog` owns the edge/phone drawer geometry, the compact record toolbar, its Close control, native body scrolling, and opener restoration. Features supply breadcrumb/context, supported header actions, and real content. Post inspection shows properties, caption, ordered attachments, and independent Channel outcomes; editing stays in the composer. It has no duplicated footer or reference-only task fields/comments.
+`SideDialog` owns the edge/phone drawer geometry, the compact record toolbar, its Close control, native body scrolling, opener restoration, and the optional body-class hook a pinned action bar needs. Features supply breadcrumb/context, supported header actions, and real content. Post inspection shows properties, caption, ordered attachments, and independent Channel outcomes; composing and editing a Post open the same drawer with the composer body, so no separate composer surface exists. It has no duplicated footer or reference-only task fields/comments.
 
 Primitives own accessible names, focus trapping, Escape/dismissal, scroll lock, and transitions. Preserve stable content through exits with `useLatchedValue` where needed; clear secrets according to the security lifecycle. Features compose a dialog rather than implementing another frame.
 

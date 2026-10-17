@@ -25,6 +25,7 @@ const spanishTranslations: Record<string, string> = {
   "Schedule post on {date}": "Programar publicación para el {date}",
   "+{count} more": "+{count} más",
   "No posts": "Sin publicaciones",
+  "New Post": "Nueva publicación",
   System: "Sistema",
   "Filter by": "Filtrar por",
   "No filters applied. Add a filter to narrow this collection.":
@@ -437,7 +438,6 @@ const spanishTranslations: Record<string, string> = {
   "All statuses": "Todos los estados",
   Apply: "Aplicar",
   "Attached Media ({count})": "Medios adjuntos ({count})",
-  "Back to posts": "Volver a publicaciones",
   "Brand Content": "Contenido de marca",
   "Brand Profile": "Perfil de marca",
   "Post status": "Estado de publicación",
@@ -457,8 +457,6 @@ const spanishTranslations: Record<string, string> = {
   "Channel is unavailable": "El canal no está disponible",
   "Clear filters": "Limpiar filtros",
   "Clear search": "Limpiar búsqueda",
-  "Compose once, preview channel-specific variations, and schedule or publish across your accounts.":
-    "Redacta una vez, previsualiza variaciones por canal y programa o publica en todas tus cuentas.",
   "Connect a channel": "Conectar un canal",
   "Connect social account": "Conectar cuenta social",
   "Connect your social accounts to start publishing and scheduling across platforms.":
@@ -536,7 +534,6 @@ const spanishTranslations: Record<string, string> = {
   "Public to Everyone": "Público para todos",
   "Publish Now": "Publicar ahora",
   Published: "Publicado",
-  "Publishing Composer": "Redactor de publicaciones",
   Queued: "En cola",
   "Re-authenticate": "Volver a autenticar",
   "Redirecting…": "Redirigiendo…",

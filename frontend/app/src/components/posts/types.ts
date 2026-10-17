@@ -111,9 +111,10 @@ export interface PostRow {
 }
 
 /**
- * View mode options for the unified Posts section.
+ * Collection view mode options for the unified Posts section. Composition is a
+ * drawer workflow, not a collection view.
  */
-export type PostViewMode = "table" | "calendar" | "grid" | "composer";
+export type PostViewMode = "table" | "calendar" | "grid";
 
 /**
  * Status filter buckets for the Posts toolbar. `'draft'` matches the contract
@@ -213,12 +214,14 @@ export interface PostDestructiveRequest {
  * Props accepted by the unified `PostsView` workspace screen.
  */
 export interface PostsViewProps {
-  /** Initial collection/composer mode. Defaults to the grouped Tasks-style List. */
+  /** Initial collection view. Defaults to the grouped Tasks-style List. */
   initialViewMode?: PostViewMode;
   /** Initial status filter ('all', 'scheduled', 'published', 'draft', 'failed'). Defaults to 'all'. */
   initialStatusFilter?: PostStatusFilter;
-  /** Stable `Post.id` to open in the composer for editing. */
+  /** Stable `Post.id` to open in the composer drawer for editing. */
   initialPostId?: string;
+  /** Opens the composer drawer on a new composition, as `?view=composer` requests. */
+  initialComposerOpen?: boolean;
   /** Callback for outer workspace navigation. */
   onNavigate?: (view: WorkspaceView, options?: { search?: string }) => void;
 }

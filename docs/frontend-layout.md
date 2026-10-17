@@ -46,7 +46,7 @@ All sections share one layout; Security does not get a separate width rule.
 
 ## Dialogs and floating controls
 
-`CenterDialog` owns focused forms and search; `CenterAlertDialog` owns destructive confirmations. `SideDialog` owns large Post inspection: a 620px right-edge drawer, a compact 46px toolbar, and the full-viewport phone layout. It is a non-modal companion — the workspace stays clickable so another Post is inspected in place — and it never dims or blocks the surface behind it.
+`CenterDialog` owns focused forms and search; `CenterAlertDialog` owns destructive confirmations. `SideDialog` owns large Post inspection: a 620px right-edge drawer, a compact 46px toolbar, and the full-viewport phone layout. It is a non-modal companion — the workspace stays clickable so another Post is inspected in place — and it never dims or blocks the surface behind it. Composition uses the same drawer: flat sections and the shared tab strip inside the scrolling body, with the schedule field and the Save/Schedule/Publish bar pinned at its bottom, and no composer route of its own.
 
 Dialog bodies own native scrolling and keep `data-lenis-prevent` where the document's smooth-scroll controller must not intercept them. Primitives own Escape, scroll lock, and opener restoration; the side inspector deliberately leaves focus untrapped so the workspace stays reachable, while the centered dialogs keep containment.
 

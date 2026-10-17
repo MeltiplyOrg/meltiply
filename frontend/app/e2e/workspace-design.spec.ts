@@ -3,6 +3,7 @@ import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-sessio
 import {
   activeBrandProfileName,
   controlledProviderAccountId,
+  closeComposer,
   editPostFromRow,
   provisionControlledChannels,
 } from "./publication-fixtures";
@@ -224,7 +225,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
         path: testInfo.outputPath("composer-desktop.png"),
         fullPage: true,
       });
-    await page.getByRole("button", { name: /back to posts/i }).click();
+    await closeComposer(page);
   }
   const firstPost = page.getByRole("row").filter({ hasText: "Studio update" });
   await firstPost.getByRole("checkbox", { name: "Select post", exact: true }).check();
@@ -353,7 +354,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(page.getByPlaceholder(/what do you want to publish/i)).toHaveValue(
     "Studio update — ready for the next publishing window.",
   );
-  await page.getByRole("button", { name: /back to posts/i }).click();
+  await closeComposer(page);
 
   const searchTrigger = page
     .getByRole("banner")
@@ -697,7 +698,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       await expect(page.getByLabel("Schedule date and time", { exact: true })).toHaveValue(
         `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T10:00`,
       );
-      await page.getByRole("button", { name: /back to posts/i }).click();
+      await closeComposer(page);
     }
   }
   await page.locator("aside").getByRole("button", { name: "Settings", exact: true }).click();

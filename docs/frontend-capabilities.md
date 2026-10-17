@@ -19,7 +19,7 @@ This document records the current creator-facing interface. Backend endpoints an
 - Profile selection lives in collection filters or jump search, not sidebar sections. All Brand Profiles is aggregate review; composition/publishing requires one owning profile.
 - Field-row filters use supported equality predicates. Top-bar jump search covers pages and loaded profiles; route search covers the current collection, not a global index.
 - Selection belongs to loaded authorized records and survives view/filter/group presentation changes. Select-all is visually checked only for the whole visible set. The shared pill reports the real count; confirmed batches remove successes and retain failures.
-- Post inspection uses the canonical edge/phone drawer and real properties, caption, attachments, and Channel outcomes. Editing stays in the composer. Deleting a stored Post or disconnecting a Channel does not remove published platform copies.
+- Post inspection uses the canonical edge/phone drawer and real properties, caption, attachments, and Channel outcomes. Composing and editing open the same drawer, whose footer pins Save, Schedule, and Publish Now in view. Deleting a stored Post or disconnecting a Channel does not remove published platform copies.
 - One animation implementation is retained. There is no separate motion mode, preference provider, root flag, or alternate-mode branch.
 
 ## Public surfaces

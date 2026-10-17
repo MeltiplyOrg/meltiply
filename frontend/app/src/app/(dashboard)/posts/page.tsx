@@ -8,16 +8,15 @@ import type { PostStatusFilter, PostViewMode } from "@/components/posts/types";
 import { useSearchParams } from "@/lib/navigation";
 
 /**
- * Resolves the posts hub's initial view mode from the `?view=` deep-link param.
+ * Resolves the posts hub's initial collection view from the `?view=` deep-link
+ * param. `?view=composer` is a composition request rather than a collection view,
+ * so it falls back to Table while `initialComposerOpen` opens the drawer.
  *
  * @param viewParam - Parsed `?view=` query value, if present.
  * @returns The initial `PostViewMode` for `PostsView` (`table` when absent/unknown).
  */
 function resolveViewMode(viewParam: string | null): PostViewMode {
-  return viewParam === "table" ||
-    viewParam === "calendar" ||
-    viewParam === "composer" ||
-    viewParam === "grid"
+  return viewParam === "table" || viewParam === "calendar" || viewParam === "grid"
     ? viewParam
     : "table";
 }
@@ -81,6 +80,7 @@ export default function PostsPage(): React.ReactElement {
       initialPostId={initialPostId}
       initialViewMode={initialViewMode}
       initialStatusFilter={initialStatusFilter}
+      initialComposerOpen={searchParams.get("view") === "composer"}
       onNavigate={handleNavigate}
     />
   );

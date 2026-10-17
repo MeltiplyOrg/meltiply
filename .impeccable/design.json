@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-17T14:36:31.253Z",
+  "title": "Design System: Meltiply",
+  "extensions": {
+    "shadows": [
+      {
+        "name": "button",
+        "value": "var(--shadow-btn)",
+        "purpose": "Subtle interactive control separation."
+      },
+      {
+        "name": "card",
+        "value": "var(--shadow-card)",
+        "purpose": "Resting card; dark theme resolves to none."
+      },
+      {
+        "name": "raised",
+        "value": "var(--shadow-raised)",
+        "purpose": "Raised controls."
+      },
+      {
+        "name": "overlay",
+        "value": "var(--shadow-overlay)",
+        "purpose": "Portalled overlay separation."
+      }
+    ],
+    "motion": [
+      {
+        "name": "enter",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Existing shared entrance settle; mirrored in effects.ts."
+      },
+      {
+        "name": "exit",
+        "value": "cubic-bezier(0.4, 0, 1, 1)",
+        "purpose": "Existing accelerating dismissal."
+      },
+      {
+        "name": "control-colors",
+        "value": "150ms",
+        "purpose": "Canonical Button and Input color transitions."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Canonical Button primary variant.",
+      "html": "<button class=\"ds-button\">Save changes</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 11px;border:0;border-radius:var(--radius-control);font:500 12.5px var(--font-sans);white-space:nowrap;transition:color 150ms,background-color 150ms}.ds-button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}.ds-button:disabled{pointer-events:none;opacity:.45}.ds-button{background:var(--primary);color:var(--primary-foreground);box-shadow:var(--shadow-btn)}.ds-button:hover{background:color-mix(in srgb,var(--primary) 90%,transparent)}.ds-button:active{background:color-mix(in srgb,var(--primary) 80%,transparent)}"
+    },
+    {
+      "name": "Destructive button",
+      "kind": "button",
+      "description": "Canonical Button destructive variant.",
+      "html": "<button class=\"ds-button\">Delete</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 11px;border:0;border-radius:var(--radius-control);font:500 12.5px var(--font-sans);white-space:nowrap;transition:color 150ms,background-color 150ms}.ds-button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}.ds-button:disabled{pointer-events:none;opacity:.45}.ds-button{background:var(--destructive);color:var(--destructive-foreground);box-shadow:var(--shadow-btn)}.ds-button:hover{background:color-mix(in srgb,var(--destructive) 90%,transparent)}.ds-button:active{background:color-mix(in srgb,var(--destructive) 80%,transparent)}"
+    },
+    {
+      "name": "Outline button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Canonical Button outline variant.",
+      "html": "<button class=\"ds-button\">Save changes</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 11px;border:0;border-radius:var(--radius-control);font:500 12.5px var(--font-sans);white-space:nowrap;transition:color 150ms,background-color 150ms}.ds-button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}.ds-button:disabled{pointer-events:none;opacity:.45}.ds-button{border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);box-shadow:var(--shadow-btn)}.ds-button:hover{background:var(--hover)}.ds-button:active{background:var(--hover-2)}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "description": "Canonical Button secondary variant.",
+      "html": "<button class=\"ds-button\">Save changes</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 11px;border:0;border-radius:var(--radius-control);font:500 12.5px var(--font-sans);white-space:nowrap;transition:color 150ms,background-color 150ms}.ds-button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}.ds-button:disabled{pointer-events:none;opacity:.45}.ds-button{background:var(--secondary);color:var(--secondary-foreground)}.ds-button:hover{background:var(--hover-2)}.ds-button:active{background:var(--hover-2)}"
+    },
+    {
+      "name": "Ghost button",
+      "kind": "button",
+      "description": "Canonical Button ghost variant.",
+      "html": "<button class=\"ds-button\">Save changes</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 11px;border:0;border-radius:var(--radius-control);font:500 12.5px var(--font-sans);white-space:nowrap;transition:color 150ms,background-color 150ms}.ds-button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}.ds-button:disabled{pointer-events:none;opacity:.45}.ds-button{background:transparent;color:var(--ink-2)}.ds-button:hover{background:var(--hover);color:var(--ink)}.ds-button:active{background:var(--hover-2)}"
+    },
+    {
+      "name": "Link button",
+      "kind": "button",
+      "description": "Canonical Button link variant.",
+      "html": "<button class=\"ds-button\">View details</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 11px;border:0;border-radius:var(--radius-control);font:500 12.5px var(--font-sans);white-space:nowrap;transition:color 150ms,background-color 150ms}.ds-button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}.ds-button:disabled{pointer-events:none;opacity:.45}.ds-button{background:transparent;color:var(--accent-ink);text-underline-offset:4px}.ds-button:hover{text-decoration:underline}.ds-button:active{text-decoration:underline}"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Canonical Input text field with native label and accent focus.",
+      "html": "<label class=\"ds-label\">Post title<input class=\"ds-input\" placeholder=\"Add a title\"></label>",
+      "css": ".ds-label{display:grid;gap:6px;font:13px var(--font-sans);color:var(--ink)}.ds-input{width:100%;height:30px;border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--field);color:var(--ink);padding:4px 10px;font:13px var(--font-sans);transition:color 150ms,background-color 150ms,border-color 150ms}.ds-input::placeholder{color:var(--ink-3)}.ds-input:focus-visible{outline:2px solid var(--ring)}.ds-input:disabled{cursor:not-allowed;opacity:.45}"
+    },
+    {
+      "name": "Selected navigation row",
+      "kind": "nav",
+      "description": "Neutral selected SidebarNavRow; route actions stay app-owned.",
+      "html": "<nav aria-label=\"Workspace\"><button class=\"ds-nav\" aria-current=\"page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" aria-hidden=\"true\"><path d=\"M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M16 3l5 5M10 14l3-1L22 4l-3-3-9 9z\"/></svg>Posts</button></nav>",
+      "css": ".ds-nav{display:flex;align-items:center;gap:9px;width:100%;height:30px;padding:0 8px;border:0;border-radius:var(--radius-control);background:var(--surface);color:var(--ink);box-shadow:var(--shadow-btn);font:500 13.5px var(--font-sans);text-align:left;transition:background-color 150ms}.ds-nav:hover{background:var(--surface)}.ds-nav:focus-visible{outline:2px solid var(--ring);outline-offset:2px}"
+    },
+    {
+      "name": "Secondary metadata badge",
+      "kind": "chip",
+      "description": "Canonical inert secondary Badge; no invented action semantics.",
+      "html": "<span class=\"ds-badge\">Draft</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;padding:2px 8px;border:1px solid transparent;border-radius:6px;background:var(--secondary);color:var(--secondary-foreground);font:500 12px var(--font-sans);transition:background-color 150ms}.ds-badge:hover{background:color-mix(in srgb,var(--secondary) 80%,transparent)}"
+    },
+    {
+      "name": "Card surface",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Canonical Card and CardHeader surface, not a separate collection-card implementation.",
+      "html": "<section class=\"ds-card\"><header class=\"ds-card-header\"><h3 class=\"ds-card-title\">Post details</h3></header></section>",
+      "css": ".ds-card{border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);color:var(--ink);box-shadow:var(--shadow-card);font-family:var(--font-sans)}.ds-card-header{display:flex;flex-direction:column;gap:6px;padding:24px}.ds-card-title{margin:0;font-weight:600;line-height:1;letter-spacing:-.025em}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Gr8r-adapted publishing workspace",
+    "overview": "Warm, compact, and flat: the interface borrows Gr8r Studio's visual language while keeping Meltiply's real publishing workflows. Quiet neutral navigation and opaque surfaces support scanning; indigo identifies actions and focus rather than decorating every panel.\n\nReact and Astro share semantic tokens. TypeScript components and Tailwind compositions extend canonical controls rather than copying page-specific primitives. Preserve the current visual state when cleaning implementation code.",
+    "keyCharacteristics": [
+      "Warm neutral fields with a restrained indigo accent.",
+      "Geist typography, compact controls, and precise shared geometry.",
+      "One visual grammar across Posts, Channels, Settings, and dialogs.",
+      "Real identity, provider outcomes, and supported actions instead of reference demo features."
+    ],
+    "rules": [
+      {
+        "name": "The Shared Palette Rule",
+        "body": "Use semantic roles from the shared token owner; do not create route-specific background or ink palettes.",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "**Do** extend shared TypeScript/React controls and semantic Tailwind compositions.",
+      "**Do** use one palette and consistent collection grammar across routes.",
+      "**Do** keep all Settings sections within the shared content width.",
+      "**Do** preserve real data, async outcomes, accessible names, and focus behavior.",
+      "**Do** extend existing animation owners when adding animation."
+    ],
+    "donts": [
+      "**Don't** restore sidebar view/profile/search subsections or obsolete view modes.",
+      "**Don't** duplicate primitives, palette definitions, dialog frames, or sign-out behavior.",
+      "**Don't** introduce an app motion mode, preference provider, or alternate animation branch.",
+      "**Don't** copy reference-only capabilities that Meltiply does not implement.",
+      "**Don't** treat compilation as visual proof; inspect actual desktop and phone states in both palettes."
+    ]
+  }
+}

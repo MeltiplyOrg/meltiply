@@ -2,7 +2,8 @@
 
 Read [STATE.md](STATE.md) before refactors, schema changes, or data resets. It owns
 compatibility and migration rules. Use [CONTEXT.md](CONTEXT.md) for domain terms and
-[PRODUCT.md](PRODUCT.md) for product intent; inspect code for the current layout.
+[PRODUCT.md](PRODUCT.md) for product intent and [DESIGN.md](DESIGN.md) for the
+current visual system; inspect code for the current layout.
 
 ## Completion gate
 

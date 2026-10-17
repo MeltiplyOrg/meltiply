@@ -2,7 +2,7 @@
 
 Meltiply's current interface adapts [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio) to publishing. The inspected reference is `904205c626918ee96054eb35495c394a60c0c601`. Source reuse was authorized for this redesign; public availability is not a general-purpose license grant.
 
-Use [product UI intent](../PRODUCT.md#modular-consistent-surfaces) for behavior, [layout](frontend-layout.md) for geometry/scroll boundaries, and the [capability inventory](frontend-capabilities.md) for shipped workflows. Components and [`tokens.css`](../frontend/shared/tokens.css) are implementation truth; reference demo features are not product requirements.
+Use [product UI intent](../PRODUCT.md#modular-consistent-surfaces) for behavior, [the visual system](../DESIGN.md) for reusable design rules, [layout](frontend-layout.md) for geometry/scroll boundaries, and the [capability inventory](frontend-capabilities.md) for shipped workflows. Components and [`tokens.css`](../frontend/shared/tokens.css) are implementation truth; reference demo features are not product requirements.
 
 ## Canonical owners
 

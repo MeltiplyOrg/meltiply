@@ -16,7 +16,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { useMotionPreference } from "../../../motion-preference";
 import "../../../sileo.css";
 import {
   DEFAULT_TOAST_DURATION,
@@ -158,7 +157,7 @@ const GooeyDefs = memo(function GooeyDefs({
 
 /**
  * Physics-based morphing toast surface adapted from `hiaaryan/sileo` to
- * Meltiply's OKLCH token palette and low-motion accessibility contract.
+ * Meltiply's shared token palette.
  *
  * Renders a compact header pill (`[data-sileo-header]`) and an expandable
  * body (`[data-sileo-content]`) backed by two spring-animated `<motion.rect>`
@@ -202,8 +201,6 @@ export const Sileo = memo(function Sileo({
   onMouseLeave,
   onDismiss,
 }: SileoProps): ReactElement {
-  const { lowMotion } = useMotionPreference();
-
   // Incoming payload; the committed `view` state below is what paints, so
   // header/body/fill can stage behind a collapse before swapping.
   const next: SileoView = useMemo(
@@ -260,20 +257,17 @@ export const Sileo = memo(function Sileo({
   // Crossfade bookkeeping as a render-phase state adjustment: a headerKey
   // change demotes the outgoing layer to `prev` (which exits over
   // HEADER_EXIT_MS) while the new layer enters; same key swaps the view in
-  // place, and low-motion commits without a prev so no exit layer or timer
-  // lingers.
+  // place without adding another animation path.
   if (headerLayer.current.key === headerKey) {
     if (headerLayer.current.view !== view) {
       setHeaderLayer((state) => ({
         ...state,
         current: { key: headerKey, view },
       }));
-    } else if (lowMotion && headerLayer.prev) {
-      setHeaderLayer((state) => ({ ...state, prev: null }));
     }
   } else {
     setHeaderLayer({
-      prev: lowMotion ? null : headerLayer.current,
+      prev: headerLayer.current,
       current: { key: headerKey, view },
     });
   }
@@ -413,7 +407,7 @@ export const Sileo = memo(function Sileo({
   // SWAP_COLLAPSE_MS (or until the collapse transition ends), while a refresh
   // received collapsed or still pinned commits immediately. Pinned form
   // controls must not wait behind a hidden copy. Same-key updates replace any
-  // staged payload; low-motion commits immediately without a swap timer.
+  // staged payload without restarting the implemented collapse timer.
   useEffect(() => {
     // The staged morph lifecycle must commit/collapse synchronously inside
     // this effect (upstream parity), so the paint decisions live inside this
@@ -430,9 +424,6 @@ export const Sileo = memo(function Sileo({
       if (lastRefreshKeyRef.current === refreshKey) {
         if (pendingRef.current) {
           pendingRef.current = { ...pendingRef.current, payload: next };
-          // A staged swap that survives into a low-motion switch commits at
-          // once rather than riding out the collapse timer.
-          if (lowMotion) commitPendingView();
         } else if (applied === refreshKey && view !== next) {
           setView(next);
         }
@@ -445,7 +436,7 @@ export const Sileo = memo(function Sileo({
         swapTimerRef.current = null;
       }
 
-      if (pinned || !open || lowMotion) {
+      if (pinned || !open) {
         pendingRef.current = null;
         setView(next);
         setApplied(refreshKey);
@@ -460,7 +451,7 @@ export const Sileo = memo(function Sileo({
       }, SWAP_COLLAPSE_MS);
     };
     applyRefresh();
-  }, [pinned, open, refreshKey, next, lowMotion, applied, view, commitPendingView]);
+  }, [pinned, open, refreshKey, next, applied, view, commitPendingView]);
 
   // Re-arm only after the incoming view commits. Unpinning a consent prompt
   // changes these dependencies before the swap finishes; expanding at that
@@ -676,7 +667,7 @@ export const Sileo = memo(function Sileo({
                 width: resolvedPillWidth,
                 height: open ? pillHeight : HEIGHT,
               }}
-              transition={lowMotion ? { duration: 0 } : ready ? SPRING : { duration: 0 }}
+              transition={ready ? SPRING : { duration: 0 }}
             />
             <motion.rect
               data-sileo-body
@@ -690,7 +681,7 @@ export const Sileo = memo(function Sileo({
                 height: open ? expandedContent : 0,
                 opacity: open ? 1 : 0,
               }}
-              transition={lowMotion ? { duration: 0 } : open ? SPRING : { ...SPRING, bounce: 0 }}
+              transition={open ? SPRING : { ...SPRING, bounce: 0 }}
             />
           </g>
         </svg>
@@ -753,7 +744,7 @@ export const Sileo = memo(function Sileo({
 /**
  * Fixed-position Sileo toast viewport rendering all active notifications from
  * the shared store. Pauses dismissal timers while the pointer hovers over a
- * toast and respects Meltiply's low-motion preference.
+ * toast, while retaining the existing spring and morph lifecycle.
  *
  * @param props.children - Optional child tree rendered alongside the viewport.
  * Notifications always occupy the bottom-right corner and expand upward.

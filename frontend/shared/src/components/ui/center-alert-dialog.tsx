@@ -38,8 +38,7 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
  * centered dialog, or handing its box back to one, resizes the surface in place
  * with the content sliding sideways, and a confirmation opened on its own pops
  * up and pops out from the bottom edge. Traps focus and blocks outside dismissal
- * so destructive actions require an explicit answer; shared CSS respects
- * low-motion preferences.
+ * so destructive actions require an explicit answer.
  */
 export const CenterAlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,

@@ -6,7 +6,7 @@ import { IconMotionFrame } from "./icon-motion-frame";
 export function AnimatedPlus({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
-      {(controls, lowMotion) => (
+      {(controls) => (
         <motion.svg
           className="size-full overflow-visible"
           viewBox="0 0 24 24"
@@ -16,7 +16,6 @@ export function AnimatedPlus({ strokeWidth = 2, ...props }: AnimatedIconProps) {
           strokeLinecap="round"
           strokeLinejoin="round"
           animate={controls}
-          transition={{ duration: lowMotion ? 0 : undefined }}
           variants={{
             normal: { rotate: 0 },
             animate: {
@@ -36,7 +35,7 @@ export function AnimatedPlus({ strokeWidth = 2, ...props }: AnimatedIconProps) {
 export function AnimatedCalendar({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
-      {(controls, lowMotion) => (
+      {(controls) => (
         <svg
           className="size-full overflow-visible"
           viewBox="0 0 24 24"
@@ -50,7 +49,6 @@ export function AnimatedCalendar({ strokeWidth = 2, ...props }: AnimatedIconProp
           <line x1="3" x2="21" y1="10" y2="10" />
           <motion.g
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { y: 0 },
               animate: {
@@ -72,7 +70,7 @@ export function AnimatedCalendar({ strokeWidth = 2, ...props }: AnimatedIconProp
 export function AnimatedClock({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
-      {(controls, lowMotion) => (
+      {(controls) => (
         <svg
           className="size-full overflow-visible"
           viewBox="0 0 24 24"
@@ -85,7 +83,6 @@ export function AnimatedClock({ strokeWidth = 2, ...props }: AnimatedIconProps) 
           <circle cx="12" cy="12" r="10" />
           <motion.g
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { rotate: 0 },
               animate: {

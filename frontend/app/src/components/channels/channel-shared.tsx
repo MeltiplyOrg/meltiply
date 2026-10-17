@@ -182,7 +182,6 @@ export interface ChannelHealthControlProps {
   account: PlatformAccount;
   statusReason?: string | null;
   isReconnecting?: boolean;
-  lowMotion: boolean;
   onReconnect: (account: PlatformAccount) => void;
 }
 
@@ -195,7 +194,6 @@ export function ChannelHealthControl({
   account,
   statusReason = null,
   isReconnecting = false,
-  lowMotion,
   onReconnect,
 }: ChannelHealthControlProps): React.ReactElement {
   const { t, tStatus } = useI18n();
@@ -232,7 +230,7 @@ export function ChannelHealthControl({
           <p className="px-2 py-1.5 text-xs text-ink-2">{healthDescription}</p>
           <DropdownMenuItem disabled={isReconnecting} onSelect={() => onReconnect(account)}>
             <RefreshCw
-              className={cn("size-3.5", isReconnecting && !lowMotion && "animate-spin")}
+              className={cn("size-3.5", isReconnecting && "animate-spin")}
               aria-hidden="true"
             />
             {isReconnecting ? t("Redirecting…") : t("Re-authenticate")}

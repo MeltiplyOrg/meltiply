@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { motion } from "motion/react";
 import { cn } from "@meltiply/ui/utils";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
 
 /**
  * Configuration properties for the `SlidingMenuHighlight` component.
@@ -35,9 +34,7 @@ interface TargetBox {
  * changes drive the pill so keyboard and pointer highlights both track; the
  * first paint snaps without motion, then springs between items. Repeated
  * measurements of the same item are ignored so Radix Popper repositioning
- * during menu entry cannot shake the overlay. Under the shared low-motion
- * preference the pill still tracks the highlighted item but every property
- * jumps to its final value (`duration: 0`), so nothing slides or fades.
+ * during menu entry cannot shake the overlay.
  *
  * @param props - Target container ref, custom item selector, and optional styling overrides.
  * @returns An absolute motion-animated highlight element rendered behind menu items.
@@ -47,7 +44,6 @@ export function SlidingMenuHighlight({
   itemSelector = "[data-dropdown-item]",
   className,
 }: SlidingMenuHighlightProps) {
-  const { lowMotion } = useMotionPreference();
   const [targetBox, setTargetBox] = useState<TargetBox | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const isVisibleRef = useRef(false);
@@ -194,25 +190,21 @@ export function SlidingMenuHighlight({
         opacity: isVisible && targetBox ? 1 : 0,
         scale: 1,
       }}
-      transition={
-        lowMotion
+      transition={{
+        top: isFirstEntry
           ? { duration: 0 }
-          : {
-              top: isFirstEntry
-                ? { duration: 0 }
-                : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
-              left: isFirstEntry
-                ? { duration: 0 }
-                : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
-              width: isFirstEntry
-                ? { duration: 0 }
-                : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
-              height: isFirstEntry
-                ? { duration: 0 }
-                : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
-              opacity: { duration: 0.14, ease: "easeOut" },
-            }
-      }
+          : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
+        left: isFirstEntry
+          ? { duration: 0 }
+          : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
+        width: isFirstEntry
+          ? { duration: 0 }
+          : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
+        height: isFirstEntry
+          ? { duration: 0 }
+          : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
+        opacity: { duration: 0.14, ease: "easeOut" },
+      }}
     />
   );
 }

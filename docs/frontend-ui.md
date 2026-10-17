@@ -38,8 +38,11 @@ add page-specific component selectors, copy long CSS blocks between pages, or
 recreate shared controls locally. Public Astro/Fumadocs adapters remain within
 their framework and resolve the same shared palette tokens.
 
-Retained animated glyphs use `IconMotionFrame` for common sizing, hover
-forwarding, and shared motion policy; each icon owns only its SVG and variants.
+Retained animated glyphs use `IconMotionFrame` for common sizing and hover
+forwarding; each icon owns only its SVG and variants. There is one implemented
+animation path: no motion provider, preference hook, mode props, root flag,
+stored motion setting, or alternate-mode branches. New animations extend the
+existing shared primitives and recipes; no mode-specific guards are required.
 Do not add another per-icon interaction wrapper.
 
 ## Visual language
@@ -135,10 +138,10 @@ footer or duplicated Close action remains.
 
 Primitives own accessible names, focus trapping, Escape, scroll lock, focus
 restoration, and transitions. Keep confirmation content stable; retain data
-through exits with `useLatchedValue` when necessary. Route code does not
-implement another dialog or add entrance choreography. Immediate navigation
-and preference changes are the default; retain reduced-motion support where
-the existing interface uses motion.
+through exits with `useLatchedValue` when necessary. Routes reuse shared dialogs
+instead of implementing another one. Existing transitions and immediate state
+updates remain intact; future animation work extends the canonical primitive
+without adding a separate mode.
 
 Transient outcomes use `@meltiply/ui/toast`, rendered by `@meltiply/ui/sileo`.
 Pair a headline with the affected object and recovery action. Clipboard feedback

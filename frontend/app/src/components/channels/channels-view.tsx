@@ -72,7 +72,6 @@ import {
   TopToolbarFilterChip,
 } from "@/components/layout/top-toolbar";
 import { AlertCircle, Check, Plus, Search, Share2, Unplug, UserPlus } from "lucide-react";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
 import { cn } from "@meltiply/ui/utils";
 
 /**
@@ -188,7 +187,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   } = useWorkspace();
   const scope = useSessionScope();
   const { t, tStatus, language } = useI18n();
-  const { lowMotion } = useMotionPreference();
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -869,7 +867,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 onToggleVisibleSelection={handleToggleVisibleSelection}
                 onToggleSelection={handleToggleSelection}
                 selectionDisabled={bulkRunning}
-                lowMotion={lowMotion}
                 onReconnect={(account) =>
                   void handleConnect(account.platform, account.brand_profile_id)
                 }

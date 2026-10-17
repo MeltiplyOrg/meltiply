@@ -28,7 +28,7 @@ const defaultControlSelector = "a, button, [role='tab'], .feature-card";
  * still-focused control. A first-frame check also covers interaction before
  * lazy hydration. Wrapping the icon keeps the parent's
  * semantics, labels, and focus order untouched; `useIconLoop` gates playback on
- * the shared root/OS motion policy.
+ * the native OS accessibility preference, without an app motion mode.
  *
  * The bound control is captured once per mount; Astro islands never reparent without remounting.
  *

@@ -33,7 +33,6 @@ export interface ChannelTableViewProps {
   onToggleVisibleSelection: () => void;
   onToggleSelection: (id: string) => void;
   selectionDisabled?: boolean;
-  lowMotion: boolean;
   onReconnect: (account: PlatformAccount) => void;
   onDisconnect: (account: PlatformAccount) => void;
 }
@@ -50,7 +49,6 @@ export function ChannelTableView({
   onToggleVisibleSelection,
   onToggleSelection,
   selectionDisabled = false,
-  lowMotion,
   onReconnect,
   onDisconnect,
 }: ChannelTableViewProps): React.ReactElement {
@@ -147,7 +145,6 @@ export function ChannelTableView({
                       account={account}
                       statusReason={statusReason}
                       isReconnecting={isReconnecting}
-                      lowMotion={lowMotion}
                       onReconnect={onReconnect}
                     />
                   </TableCell>

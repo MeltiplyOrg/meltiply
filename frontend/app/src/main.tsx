@@ -7,7 +7,6 @@ import { BrowserRouter } from "react-router";
 import { FrontendErrorBoundary } from "@/components/layout/frontend-error-boundary";
 import { SmoothScroll } from "@/components/layout/smooth-scroll";
 import { I18nProvider } from "@/lib/i18n";
-import { MotionPreferenceProvider } from "@meltiply/ui/motion-preference";
 import { ThemeProvider } from "@/lib/theme";
 import { isDevMode } from "@/lib/env";
 import { installFrontendErrorLogging } from "@/lib/frontend-telemetry";
@@ -29,23 +28,21 @@ installFrontendErrorLogging();
 createRoot(root).render(
   <StrictMode>
     <link rel="icon" type="image/svg+xml" href={favicon} />
-    <MotionPreferenceProvider>
-      <ThemeProvider>
-        <I18nProvider>
-          <FrontendErrorBoundary>
-            <SmoothScroll />
-            <CookieNotice policyUrl="https://meltiply.com/docs/cookies" />
-            <BrowserRouter>
-              <AppRouter />
-            </BrowserRouter>
-            {DevBox && (
-              <Suspense fallback={null}>
-                <DevBox />
-              </Suspense>
-            )}
-          </FrontendErrorBoundary>
-        </I18nProvider>
-      </ThemeProvider>
-    </MotionPreferenceProvider>
+    <ThemeProvider>
+      <I18nProvider>
+        <FrontendErrorBoundary>
+          <SmoothScroll />
+          <CookieNotice policyUrl="https://meltiply.com/docs/cookies" />
+          <BrowserRouter>
+            <AppRouter />
+          </BrowserRouter>
+          {DevBox && (
+            <Suspense fallback={null}>
+              <DevBox />
+            </Suspense>
+          )}
+        </FrontendErrorBoundary>
+      </I18nProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

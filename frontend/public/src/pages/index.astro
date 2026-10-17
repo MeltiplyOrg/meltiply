@@ -837,7 +837,7 @@ const posts = [
           if (returnFocus) menuButton.focus();
         }
         // Native disclosure keeps links accessible immediately; its entrance
-        // respects low motion and closing never delays Escape or focus restoration.
+        // never delays Escape or focus restoration on closing.
         menuButton?.addEventListener("click", () => {
           if (!mobileNav || !menuButton) return;
           const open = mobileNav.hidden;

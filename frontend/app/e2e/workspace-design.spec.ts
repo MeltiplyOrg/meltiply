@@ -61,7 +61,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       .click();
     await expect(page.getByText(/Saved to your workspace at/i)).toBeVisible({ timeout: 30_000 });
     if (index === 0)
-      await page.screenshot({ path: testInfo.outputPath("composer-desktop.png"), fullPage: true });
+      await page.screenshot({
+        animations: "disabled",
+        path: testInfo.outputPath("composer-desktop.png"),
+        fullPage: true,
+      });
     await page.getByRole("button", { name: /back to posts/i }).click();
   }
   const firstPost = page.getByRole("row").filter({ hasText: "Studio update" });
@@ -76,6 +80,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(selectionPill).toContainText("1 selected");
   await page.setViewportSize({ width: 1808, height: 984 });
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("posts-selection-pill-desktop.png"),
     fullPage: true,
   });
@@ -95,9 +100,14 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(
     inspector.getByText("Studio update — ready for the next publishing window.", { exact: true }),
   ).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("post-drawer-desktop.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("post-drawer-desktop.png"),
+    fullPage: true,
+  });
   await inspector.getByRole("button", { name: "Expand panel", exact: true }).click();
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("post-drawer-expanded-desktop.png"),
     fullPage: true,
   });
@@ -154,9 +164,17 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     connectionCell.getByRole("button", { name: "Connected", exact: true }),
   ).toBeVisible();
   await expect(connectionCell).toHaveText("");
-  await page.screenshot({ path: testInfo.outputPath("channels-desktop.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("channels-desktop.png"),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 1808, height: 984 });
-  await page.screenshot({ path: testInfo.outputPath("channels-user-1808.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("channels-user-1808.png"),
+    fullPage: true,
+  });
   const filterSummary = page.locator("summary").filter({ hasText: /^Filter/ });
   await filterSummary.click();
   const filterPanel = page.getByRole("group", { name: "Filters", exact: true });
@@ -168,6 +186,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   if (!(await filterSummary.locator("..").evaluate((element) => element.hasAttribute("open"))))
     await filterSummary.click();
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("channels-filter-builder.png"),
     fullPage: true,
   });
@@ -177,6 +196,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await connectionCell.getByRole("button", { name: "Connected", exact: true }).hover();
   await expect(page.getByRole("tooltip")).toContainText("Connected");
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("channels-health-tooltip.png"),
     fullPage: true,
   });
@@ -185,6 +205,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.getByRole("tab", { name: /Brand Profiles/ }).click();
   await expect(page.getByRole("button", { name: "View channels" })).toBeVisible();
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("brand-profiles-desktop.png"),
     fullPage: true,
   });
@@ -214,6 +235,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await page.setViewportSize({ width: 1808, height: 984 });
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("settings-light-desktop.png"),
     fullPage: true,
   });
@@ -223,6 +245,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       .getByRole("button", { name: section, exact: true })
       .click();
     await page.screenshot({
+      animations: "disabled",
       path: testInfo.outputPath(`settings-${section.toLowerCase()}-desktop.png`),
       fullPage: true,
     });
@@ -240,13 +263,18 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   );
   await page.setViewportSize({ width: 1808, height: 984 });
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("settings-security-desktop.png"),
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.locator("aside").getByRole("button", { name: "Posts", exact: true }).click();
   await waitForWorkspace(page);
-  await page.screenshot({ path: testInfo.outputPath("posts-light-desktop.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("posts-light-desktop.png"),
+    fullPage: true,
+  });
 
   await expect(
     page.locator("aside").getByRole("button", { name: "Table", exact: true }),
@@ -278,6 +306,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       await page.keyboard.press("Escape");
     }
     await page.screenshot({
+      animations: "disabled",
       path: testInfo.outputPath(`posts-${view.toLowerCase()}-desktop.png`),
       fullPage: true,
     });
@@ -291,6 +320,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       await calendar.getByRole("button", { name: "Previous week", exact: true }).click();
       await expect(calendar.getByRole("heading")).toHaveText(currentWeek);
       await page.screenshot({
+        animations: "disabled",
         path: testInfo.outputPath("posts-calendar-week-desktop.png"),
         fullPage: true,
       });
@@ -317,34 +347,52 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.reload();
   await waitForWorkspace(page);
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.screenshot({ path: testInfo.outputPath("posts-dark-desktop.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("posts-dark-desktop.png"),
+    fullPage: true,
+  });
 
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileMenu = page.getByRole("button", { name: "Open navigation menu", exact: true });
   await expect(mobileMenu).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("posts-dark-mobile.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("posts-dark-mobile.png"),
+    fullPage: true,
+  });
   await firstPost.getByRole("checkbox", { name: "Select post", exact: true }).check();
   await expect(selectionPill).toContainText("1 selected");
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("posts-selection-pill-dark-mobile.png"),
     fullPage: true,
   });
   await selectionPill.getByRole("button", { name: "Deselect", exact: true }).click();
   await inspectTrigger.click();
   await expect(inspector).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("post-drawer-mobile.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("post-drawer-mobile.png"),
+    fullPage: true,
+  });
   await page.keyboard.press("Escape");
   await expect(inspector).toBeHidden();
   await viewSelector.getByRole("button", { name: "Calendar", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Publishing calendar", exact: true }),
   ).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("posts-calendar-mobile.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("posts-calendar-mobile.png"),
+    fullPage: true,
+  });
   await page
     .getByRole("group", { name: "Calendar period", exact: true })
     .getByRole("button", { name: "Week", exact: true })
     .click();
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("posts-calendar-week-mobile.png"),
     fullPage: true,
   });
@@ -356,7 +404,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const mobileNavigation = page.getByRole("dialog", { name: "Workspace navigation", exact: true });
   await mobileNavigation.getByRole("button", { name: "Channels", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("channels-mobile.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("channels-mobile.png"),
+    fullPage: true,
+  });
   await mobileMenu.click();
   await page
     .getByRole("dialog", { name: "Workspace navigation", exact: true })
@@ -364,11 +416,16 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     .click();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("settings-mobile.png"), fullPage: true });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("settings-mobile.png"),
+    fullPage: true,
+  });
   await page.getByRole("button", { name: "Security", exact: true }).click();
   await expect(security.getByLabel("Current password", { exact: true })).toBeVisible();
   await expect(security.getByLabel("New password", { exact: true })).toBeVisible();
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("settings-security-mobile.png"),
     fullPage: true,
   });
@@ -404,6 +461,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
         await page.goto(new URL(route, publicUrl).href);
         await expect(page.locator("main").first()).toBeVisible();
         await page.screenshot({
+          animations: "disabled",
           path: testInfo.outputPath(
             `public-${route === "/" ? "landing" : "settings"}-${size.width}.png`,
           ),

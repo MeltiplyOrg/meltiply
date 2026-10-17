@@ -64,9 +64,8 @@ export type CenterDialogContentProps = React.ComponentPropsWithoutRef<
  * slides sideways, so a step between dialogs reads as one surface reshaping.
  * Opening with no dialog behind it pops up bottom-up, and the last dialog to
  * close pops out to the bottom. Radix retains content through exit, traps
- * focus, and restores it on close. Low-motion preferences collapse these
- * transitions through the shared motion CSS. Callers may customize layout, but
- * cannot select a different animation variant.
+ * focus, and restores it on close. Shared CSS owns the implemented transitions;
+ * callers customize content and layout without duplicating the primitive.
  */
 export const CenterDialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,

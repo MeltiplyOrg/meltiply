@@ -61,8 +61,7 @@ export function NavItem({ item }: { item: PageTreeItem }) {
  * contents probe resolves the enclosing `aside` on desktop or in the drawer,
  * which becomes the shared pill's non-scrolling positioning root, while
  * `viewportSelector` points it at the nested Radix ScrollArea so the travelling
- * indicator stays clipped to the nav column. Pointer hover drives the pill;
- * reduced presentation settles it without a travelling animation.
+ * indicator stays clipped to the nav column. Pointer hover drives the pill.
  * Fumadocs mounts only the matching mode, giving each surface an
  * independent pill that rebinds on breakpoint remounts and document swaps.
  */

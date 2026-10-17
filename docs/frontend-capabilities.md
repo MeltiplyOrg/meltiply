@@ -17,7 +17,7 @@ are not shipped; the community resource policy is defined in
 | Public landing page                      | Publishing, scheduling, Channel organization, and composer attachments. The clearly labeled interactive sample illustrates retained workflows with local sample content, not authenticated Workspace data; it cannot publish or persist real Posts.                                                                                                                                                                                                                                   |
 | Public docs                              | Setup, Channels, Brand Profiles, composer attachments, publishing, preferences, troubleshooting, and legal guidance. Capability-status pages describe unavailable workflows instead of directing users to retired app routes.                                                                                                                                                                                                                                                         |
 
-The workspace uses immediate navigation and reduced-motion presentation.
+The workspace has one implemented animation path, without a separate motion mode.
 Shared primitives retain focus and dismissal ownership. Collection selection
 remains owned by its page across view changes and excludes unloaded records.
 

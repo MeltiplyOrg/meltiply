@@ -356,12 +356,8 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
-  document.documentElement.removeAttribute("data-low-motion");
 });
 beforeEach(() => {
-  // jsdom never settles the bulk pill's motion transitions; the real low-motion
-  // attribute makes entrance/exit instant instead of mocking components.
-  document.documentElement.setAttribute("data-low-motion", "");
   resetScope();
 });
 

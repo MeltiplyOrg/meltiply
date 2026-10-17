@@ -1,18 +1,3 @@
-/* Preserve animationend/final fills used by Radix while removing spatial motion. */
-html[data-low-motion],
-html[data-low-motion]::before,
-html[data-low-motion]::after,
-html[data-low-motion] *,
-html[data-low-motion] *::before,
-html[data-low-motion] *::after {
-  animation-delay: 0ms !important;
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
-  scroll-behavior: auto !important;
-  transition-delay: 0ms !important;
-  transition-duration: 0ms !important;
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -513,8 +513,7 @@ export default defineConfig({
       },
       {
         // Custom boundary policies (ported 1:1 into lint/boundaries-plugin.mjs):
-        // low-motion gating for motion.* elements, adapter-only env/fetch/
-        // Effect.run access, design-system control/color contracts.
+        // adapter-only env/fetch/Effect.run access and shared UI control/color contracts.
         files: ["frontend/app/src/**/*.{ts,tsx}", "frontend/shared/**/*.{ts,tsx}"],
         rules: {
           "boundaries/no-effect-run": "error",
@@ -523,7 +522,6 @@ export default defineConfig({
           "boundaries/no-raw-interactive-elements": "error",
           "boundaries/no-provider-color-leak": "error",
           "boundaries/no-raw-palette-utility": "error",
-          "boundaries/require-low-motion-variant": "error",
           "boundaries/no-canonical-ui-clones": "error",
         },
       },

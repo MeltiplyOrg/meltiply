@@ -15,7 +15,6 @@ import {
   useMotionValue,
   type MotionValue,
 } from "motion/react";
-import { useMotionPreference } from "./motion-preference";
 
 /** Avoids React's server-render warning; commit-time FLIP needs a layout effect on the client. */
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
@@ -94,15 +93,9 @@ const OBSERVED_ATTRIBUTES = ["data-active", "aria-current", "aria-selected", "cl
 /**
  * Drives one motion value through a velocity-preserving spring: retargeting
  * mid-flight seeds the animation with the captured velocity, so rapid pointer
- * hops chain momentum instead of restarting at rest. `lowMotion` `jump()`s the
- * value to its destination synchronously, which also cancels any in-flight
- * animation — the preference's snap behaviour.
+ * hops chain momentum instead of restarting at rest.
  */
-function springTo(mv: MotionValue<number>, to: number, velocity: number, lowMotion: boolean): void {
-  if (lowMotion) {
-    mv.jump(to);
-    return;
-  }
+function springTo(mv: MotionValue<number>, to: number, velocity: number): void {
   animate(mv, to, { ...SPRING, velocity });
 }
 
@@ -356,11 +349,10 @@ function useGlideTracking({
  * paint layers. Entry fades in at the hovered row; exit fades out in place.
  * Tracking drops unchanged geometry before state writes; this renderer owns
  * clipping and FLIP projection, preserving position and velocity on retargets.
- * Manual/OS low motion jumps to rest instead of interpolating.
  */
 export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
   const { className, viewportSelector } = props;
-  const { lowMotion } = useMotionPreference();
+
   const { target, clip, scrollOffsetX, scrollOffsetY } = useGlideTracking(props);
 
   const x = useMotionValue(0);
@@ -375,18 +367,13 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
    * Commits the measured box and drives every motion value to rest at it.
    * Velocities are captured *before* the FLIP `set()`s so retargets preserve
    * momentum; scale velocities are re-expressed in the new unit box so visual
-   * growth speed survives the projection. Low motion `jump()`s everything,
-   * instantly settling the pill and cancelling in-flight movement.
+   * growth speed survives the projection.
    */
   useIsomorphicLayoutEffect(() => {
     const prev = committedRef.current;
     committedRef.current = target;
     if (!target) {
-      if (lowMotion) {
-        opacity.jump(0);
-      } else {
-        animate(opacity, 0, FADE);
-      }
+      animate(opacity, 0, FADE);
       return;
     }
     if (!prev) {
@@ -395,11 +382,7 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
       y.jump(0);
       scaleX.jump(1);
       scaleY.jump(1);
-      if (lowMotion) {
-        opacity.jump(1);
-      } else {
-        animate(opacity, 1, FADE);
-      }
+      animate(opacity, 1, FADE);
       return;
     }
     const velocityX = x.getVelocity();
@@ -416,16 +399,12 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
     y.set(visualTop - target.top);
     scaleX.set(target.width > 0 ? visualWidth / target.width : 1);
     scaleY.set(target.height > 0 ? visualHeight / target.height : 1);
-    springTo(x, 0, velocityX, lowMotion);
-    springTo(y, 0, velocityY, lowMotion);
-    springTo(scaleX, 1, velocitySX, lowMotion);
-    springTo(scaleY, 1, velocitySY, lowMotion);
-    if (lowMotion) {
-      opacity.jump(1);
-    } else {
-      animate(opacity, 1, FADE);
-    }
-  }, [target, lowMotion, x, y, scaleX, scaleY, opacity]);
+    springTo(x, 0, velocityX);
+    springTo(y, 0, velocityY);
+    springTo(scaleX, 1, velocitySX);
+    springTo(scaleY, 1, velocitySY);
+    animate(opacity, 1, FADE);
+  }, [target, x, y, scaleX, scaleY, opacity]);
 
   /**
    * Static paint and layer roles come from shared data hooks in

@@ -40,13 +40,8 @@ const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
   /**
    * Paints the server-rendered rail independently of the React island bundle.
    * Hydration later takes over its observers without hiding or resetting it;
-   * the head bootstrap supplies the initial reduced-presentation policy.
+   * the existing plane geometry is adopted without replaying initial motion.
    */
   const rail = document.querySelector<HTMLElement>(".docs-reading-rail");
-  if (rail)
-    initializeReadingRail(
-      rail,
-      document.documentElement.hasAttribute("data-low-motion"),
-      true,
-    );
+  if (rail) initializeReadingRail(rail, true);
 </script>

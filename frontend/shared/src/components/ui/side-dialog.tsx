@@ -29,7 +29,7 @@ export interface SideDialogProps {
  * inspector. The normal outside surface stays clear; expanded mode dims it.
  * Phones always use the full viewport. Radix retains modal focus/scroll ownership,
  * Escape and outside dismissal. Close receives initial focus; only a connected
- * opener is restored. Native body scrolling and opacity-only reduced presentation
+ * opener is restored. Native body scrolling and the implemented opacity fade
  * avoid blank slide frames or duplicated page snapshots.
  */
 export function SideDialog({

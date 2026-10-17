@@ -9,17 +9,15 @@
  * `data-theme` attribute); docs toggles `.dark` like the app. `motion.css`
  * supplies the ease variables, shared keyframes, `[data-brand-accent]` fill,
  * `data-animated-icon` and `data-preference-icon` geometry and glyph
- * selection, and the low-motion suppression contract (manual
- * `html[data-low-motion]` and `prefers-reduced-motion` both collapse every
- * animation/transition to a single instant iteration, so final keyframes
- * still land and Radix Presence still receives animationend).
+ * selection, and native `prefers-reduced-motion` accessibility behavior. Reduced
+ * animations still reach final keyframes and dispatch Radix Presence's animationend.
  */
 @import "@meltiply/ui/tokens.css";
 @import "@meltiply/ui/motion.css";
 
 /* The public Lenis controller owns smooth input and heading pulls. Keeping the
    native document instant avoids competing browser and JS scroll timelines;
-   low-motion users retain native scrolling and immediate fragment navigation. */
+   native keyboard and fragment navigation remain available. */
 html {
   scroll-behavior: auto;
   scrollbar-width: none;
@@ -208,9 +206,8 @@ html > body[data-scroll-locked] {
 /* Unlayered component rules below outrank Tailwind utilities, so they can
    refine Fumadocs defaults (which only emit layered utilities) without
    `!important` or attribute selector arms races. Transitions stay in the
-   restrained 150–220ms range and target paint-cheap properties only; both
-   `html[data-low-motion]` and `prefers-reduced-motion` suppress them
-   entirely via @meltiply/ui/motion.css. */
+ * restrained 150–220ms range and target paint-cheap properties only; native
+ * `prefers-reduced-motion` suppresses them via @meltiply/ui/motion.css. */
 
 /* — Sidebar navigation ————————————————————————————————————————
    The page tree renders flat <a> page links grouped by .docs-nav-section
@@ -812,17 +809,6 @@ body > [role="dialog"] {
   visibility: hidden;
 }
 
-.docs-reading-rail[data-low-motion="true"] .docs-reading-plane {
-  width: 8px;
-  height: 8px;
-  margin: 3px;
-  background: var(--accent-ink);
-}
-
-.docs-reading-rail[data-low-motion="true"] .docs-reading-plane svg {
-  display: none;
-}
-
 /* Mobile disclosure shares rail semantics and tokens with the desktop column. */
 .docs-rail-popover header {
   border-bottom: 1px solid var(--line);
@@ -968,10 +954,6 @@ body > [role="dialog"] {
   50% {
     opacity: 1;
   }
-}
-
-html[data-low-motion] .docs-article-skeleton > span {
-  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

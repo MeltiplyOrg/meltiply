@@ -78,6 +78,39 @@ jobs:
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Smoke development stylesheet and self-hosted fonts
+        if: inputs.lane == 'frontend-ui'
+        run: |
+          mkdir -p artifacts
+          setsid bun run --cwd frontend/app dev --host 127.0.0.1 --port 3011 --strictPort >artifacts/frontend-dev.log 2>&1 &
+          dev_pid=$!
+          trap 'kill -TERM -- "-$dev_pid" 2>/dev/null || true' EXIT
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { setTimeout } from "node:timers/promises";
+          const origin = "http://127.0.0.1:3011";
+          let response;
+          for (let attempt = 0; attempt < 60; attempt++) {
+            try {
+              response = await fetch(`${origin}/src/app/globals.css?direct`);
+              break;
+            } catch {
+              await setTimeout(1000);
+            }
+          }
+          assert(response, "Development server did not become reachable");
+          const css = await response.text();
+          assert.equal(response.status, 200, css);
+          const fonts = [...css.matchAll(/url\(["']?([^"')]*geist[^"')]*\.ttf[^"')]*)["']?\)/g)];
+          assert.equal(fonts.length, 4, "Stylesheet must resolve all four self-hosted Geist faces");
+          for (const [, path] of fonts) {
+            const font = await fetch(new URL(path, origin));
+            assert.equal(font.status, 200, `Font request failed: ${path}`);
+            const bytes = new Uint8Array(await font.arrayBuffer());
+            assert.deepEqual([...bytes.slice(0, 4)], [0, 1, 0, 0], `Invalid TrueType response: ${path}`);
+            console.log(`Loaded development font: ${path}`);
+          }
+          NODE
       - name: Validate frontend and install Chromium
         if: inputs.lane == 'frontend-full'
         working-directory: frontend/app

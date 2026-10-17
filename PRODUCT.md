@@ -164,9 +164,10 @@ own collection search and Brand Profile filters without claiming unloaded data.
   named elevation treatment without stacking duplicate hairline rings.
 - Backgrounds are flat warm surfaces. The retired diagonal stripe canvas is not
   part of this system.
-- Navigation, page titles, and theme selection update immediately. Keep retained
-  transitions bounded and reduced-motion-safe; do not add staggered text,
-  decorative icon travel, or theme ink reveals to the publishing workflow.
+- The interface has one implemented animation path. Do not restore the retired
+  motion mode, preference provider, storage, root flags, or alternate-mode branches.
+  Existing animations remain intact; new animations extend the shared primitives
+  and recipes rather than duplicating components or adding mode-specific guards.
 - Light/dark preferences share the consent-aware owner across app and public
   surfaces. A current-page choice works without optional persistence.
 

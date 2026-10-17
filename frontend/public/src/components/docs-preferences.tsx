@@ -13,8 +13,8 @@ function useMounted(): boolean {
 }
 
 /**
- * Public theme control backed by the shared consent-aware theme owner. Motion
- * is a reduced presentation policy, not a preference with a nonfunctional switch.
+ * Public theme control backed by the shared consent-aware theme owner.
+ * There is no app motion mode; native OS accessibility is handled by effects.
  * Optional article search stays bound to Fumadocs' existing search context.
  */
 export function DocsPreferences({

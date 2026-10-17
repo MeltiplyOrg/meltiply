@@ -1,5 +1,3 @@
-import { motionAllowed, reducedMotionQuery } from "./motion-state";
-
 /*
  * Shared WAAPI effect engine and animation vocabulary for both frontends.
  * The CSS-facing keyframes live in `motion.css`; the recipes below are their
@@ -40,24 +38,19 @@ export interface EffectTiming {
   fill?: FillMode;
 }
 
-/** Tracks shared effects so navigation or root/OS suppression can cancel them together. */
+/** Tracks shared effects so navigation can cancel them together. */
 const activeEffects = new Set<Animation>();
 
 /** Latest effect per element; a new effect on the same element replaces the previous one. */
 const elementEffects = new WeakMap<Element, Animation>();
-const suppressionCleanups = new Set<() => void>();
-let cancellingEffects = false;
 
 /**
  * Plays one bounded WAAPI effect on a mounted element, replacing any effect
- * already running on it. The shared root/OS motion policy is evaluated at call
- * time: when disallowed, the previous effect is
- * still cancelled but no new one starts, so underlying styles are the final
- * state and cancellation never hides content or leaves a fixed height behind.
+ * already running on it. Underlying styles remain the final state, so
+ * cancellation never hides content or leaves a fixed height behind.
  * Completion and cancellation both release tracking.
  *
- * @returns The started `Animation`, or `null` when suppressed or when the
- *   platform lacks `element.animate`.
+ * @returns The started `Animation`, or `null` when the platform lacks `element.animate`.
  */
 export function playEffect(
   element: Element,
@@ -66,7 +59,7 @@ export function playEffect(
   timing: EffectTiming = {},
 ): Animation | null {
   elementEffects.get(element)?.cancel();
-  if (!motionAllowed() || typeof element.animate !== "function") return null;
+  if (typeof element.animate !== "function") return null;
   const animation = element.animate(frames, {
     duration: effectDurationMs,
     delay,
@@ -83,22 +76,10 @@ export function playEffect(
   return animation;
 }
 
-/**
- * Cancels tracked effects and synchronously restores their owners' live DOM.
- * Public navigation and policy changes flush held effects and snapshots.
- * The reentry guard permits an owner to register cancelEffects itself
- * without recursively flushing the same cancellation.
- */
+/** Cancels every tracked effect during navigation; resting styles remain visible. */
 export function cancelEffects(): void {
-  if (cancellingEffects) return;
-  cancellingEffects = true;
-  try {
-    for (const cleanup of suppressionCleanups) cleanup();
-  } finally {
-    for (const animation of activeEffects) animation.cancel();
-    activeEffects.clear();
-    cancellingEffects = false;
-  }
+  for (const animation of activeEffects) animation.cancel();
+  activeEffects.clear();
 }
 
 /**
@@ -134,39 +115,4 @@ export function morphHeightEffect(element: HTMLElement, previousHeight?: number)
  */
 export function riseEffect(element: Element, delay = 0): Animation | null {
   return playEffect(element, [{ transform: "scaleY(0.85)" }, { transform: "scaleY(1)" }], delay);
-}
-
-/**
- * Calls the owner's cleanup when root/OS policy suppresses spatial motion.
- * Explicit cancellation also flushes registered owners synchronously so
- * temporary snapshots and hidden controls cannot outlive their page.
- * Returns a disposer for policy observation and cancellation registration.
- */
-export function watchMotionSuppression(onSuppressed: () => void): () => void {
-  suppressionCleanups.add(onSuppressed);
-  const check = (): void => {
-    if (!motionAllowed()) onSuppressed();
-  };
-  const observer = new MutationObserver(check);
-  observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ["data-low-motion"],
-  });
-  let media: MediaQueryList | null = null;
-  try {
-    media = window.matchMedia(reducedMotionQuery);
-    // Test stubs can provide `matches` without listener APIs.
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", check);
-    } else {
-      media = null;
-    }
-  } catch {
-    media = null;
-  }
-  return () => {
-    suppressionCleanups.delete(onSuppressed);
-    observer.disconnect();
-    if (media) media.removeEventListener("change", check);
-  };
 }

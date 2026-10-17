@@ -6,7 +6,7 @@ import { IconMotionFrame } from "./icon-motion-frame";
 export function AnimatedSquarePen({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
-      {(controls, lowMotion) => (
+      {(controls) => (
         <svg
           className="size-full overflow-visible"
           viewBox="0 0 24 24"
@@ -20,7 +20,6 @@ export function AnimatedSquarePen({ strokeWidth = 2, ...props }: AnimatedIconPro
           <motion.path
             d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { rotate: 0, x: 0, y: 0 },
               animate: {
@@ -41,7 +40,7 @@ export function AnimatedSquarePen({ strokeWidth = 2, ...props }: AnimatedIconPro
 export function AnimatedImage({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
-      {(controls, lowMotion) => (
+      {(controls) => (
         <svg
           className="size-full overflow-visible"
           viewBox="0 0 24 24"
@@ -57,7 +56,6 @@ export function AnimatedImage({ strokeWidth = 2, ...props }: AnimatedIconProps) 
             cy="9"
             r="2"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { y: 0, scale: 1 },
               animate: {
@@ -71,7 +69,6 @@ export function AnimatedImage({ strokeWidth = 2, ...props }: AnimatedIconProps) 
           <motion.path
             d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { y: 0 },
               animate: {
@@ -90,7 +87,7 @@ export function AnimatedImage({ strokeWidth = 2, ...props }: AnimatedIconProps) 
 export function AnimatedShare({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
-      {(controls, lowMotion) => (
+      {(controls) => (
         <svg
           className="size-full overflow-visible"
           viewBox="0 0 24 24"
@@ -105,7 +102,6 @@ export function AnimatedShare({ strokeWidth = 2, ...props }: AnimatedIconProps) 
             cy="5"
             r="3"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { scale: 1 },
               animate: {
@@ -120,7 +116,6 @@ export function AnimatedShare({ strokeWidth = 2, ...props }: AnimatedIconProps) 
             cy="12"
             r="3"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { scale: 1 },
               animate: {
@@ -135,7 +130,6 @@ export function AnimatedShare({ strokeWidth = 2, ...props }: AnimatedIconProps) 
             cy="19"
             r="3"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { scale: 1 },
               animate: {
@@ -151,7 +145,6 @@ export function AnimatedShare({ strokeWidth = 2, ...props }: AnimatedIconProps) 
             x2="15.42"
             y2="17.49"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { opacity: 1 },
               animate: {
@@ -166,7 +159,6 @@ export function AnimatedShare({ strokeWidth = 2, ...props }: AnimatedIconProps) 
             x2="8.59"
             y2="10.49"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { opacity: 1 },
               animate: {
@@ -185,7 +177,7 @@ export function AnimatedShare({ strokeWidth = 2, ...props }: AnimatedIconProps) 
 export function AnimatedLayers({ strokeWidth = 2, ...props }: AnimatedIconProps) {
   return (
     <IconMotionFrame {...props}>
-      {(controls, lowMotion) => (
+      {(controls) => (
         <svg
           className="size-full overflow-visible"
           viewBox="0 0 24 24"
@@ -198,7 +190,6 @@ export function AnimatedLayers({ strokeWidth = 2, ...props }: AnimatedIconProps)
           <motion.path
             d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { y: 0 },
               animate: {
@@ -210,7 +201,6 @@ export function AnimatedLayers({ strokeWidth = 2, ...props }: AnimatedIconProps)
           <motion.path
             d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"
             animate={controls}
-            transition={{ duration: lowMotion ? 0 : undefined }}
             variants={{
               normal: { y: 0 },
               animate: {

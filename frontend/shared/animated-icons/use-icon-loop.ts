@@ -1,8 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useAnimation } from "motion/react";
 
-import { useMotionPreference, useMotionAllowed } from "../motion-preference";
-
 /**
  * Manages looping motion animation sequences for interactive SVG icons.
  *
@@ -16,12 +14,8 @@ import { useMotionPreference, useMotionAllowed } from "../motion-preference";
  *    timeout is cancelled immediately and the runner is marked idle.
  * 4. **Safety & Teardown**: Component unmounting clears pending timeouts and suppresses downstream animation promises
  *    via ref-tracked mount state. A generation stamp invalidates in-flight `controls.start()` promise chains whenever
- *    a cycle is cancelled (policy suppression or unmount), so stale resolutions cannot restart an old loop.
+ *    the owner unmounts, so stale resolutions cannot restart an old loop.
  *    Teardown resets idle flags so StrictMode's effect replay can restart an initially active icon.
- * 5. **Motion policy**: Root presentation policy or OS reduction stops each cycle,
- *    restores `normal`, and clears its timer. Provider-free landing islands observe
- *    the same root through the shared subscription.
- * 6. **Suppression**: Other disallowed states stop playback until the shared policy permits it.
  *
  * @param active - Boolean indicating whether hover/active state is engaged (either internally or via external props).
  * @param restMs - Rest duration in milliseconds spent at rest between successive animation cycles while hovered (default: 2000ms).
@@ -35,8 +29,7 @@ import { useMotionPreference, useMotionAllowed } from "../motion-preference";
  */
 export function useIconLoop(active: boolean, restMs: number = 2000) {
   const controls = useAnimation();
-  const { lowMotion } = useMotionPreference();
-  const allowed = useMotionAllowed();
+
   const activeRef = useRef(active);
   const runningRef = useRef(false);
   const isMountedRef = useRef(true);
@@ -58,33 +51,6 @@ export function useIconLoop(active: boolean, restMs: number = 2000) {
   }, []);
 
   useEffect(() => {
-    // Low motion suppresses hover loops entirely: stop any in-flight cycle, snap the
-    // icon back to `normal`, and cancel the rest timer so no timers keep running.
-    if (lowMotion) {
-      activeRef.current = false;
-      runningRef.current = false;
-      generationRef.current += 1;
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      controls.stop();
-      controls.set("normal");
-      return;
-    }
-
-    // Stop in place while the shared effect policy disallows playback.
-    if (!allowed) {
-      runningRef.current = false;
-      generationRef.current += 1;
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      controls.stop();
-      return;
-    }
-
     activeRef.current = active;
 
     // If hover ends while resting, cancel rest timer immediately
@@ -98,7 +64,7 @@ export function useIconLoop(active: boolean, restMs: number = 2000) {
       runningRef.current = true;
       const generation = generationRef.current;
       // Only the generation that launched this chain may settle flags or schedule loops;
-      // a stale chain (cancelled by low motion, ink, or unmount) must not resurrect itself.
+      // a stale chain from an unmounted owner must not restart.
       const isCurrent = () => generationRef.current === generation && isMountedRef.current;
 
       const runCycle = () => {
@@ -138,7 +104,7 @@ export function useIconLoop(active: boolean, restMs: number = 2000) {
 
       runCycle();
     }
-  }, [active, controls, lowMotion, allowed, restMs]);
+  }, [active, controls, restMs]);
 
   return controls;
 }

@@ -11,6 +11,7 @@ on:
           - frontend-full
           - cloudflare-integration
           - cloudflare-extended
+          - object-storage
 
 permissions:
   contents: read
@@ -35,6 +36,26 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Exercise S3-compatible storage against MinIO
+        if: inputs.lane == 'object-storage'
+        env:
+          S3_CHECK_ENDPOINT: http://127.0.0.1:9000
+        run: |
+          docker run -d --name storage-check -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=s3-check-access-key \
+            -e MINIO_ROOT_PASSWORD=s3-check-secret-key \
+            quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          trap 'docker rm -f storage-check' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then break; fi
+            sleep 1
+          done
+          bun run storage:s3:check
+      - name: Validate complete application gate
+        if: inputs.lane == 'object-storage'
+        run: |
+          ./scripts/cloudflare-local/compose.sh up -d postgres
+          bun run cloudflare:check
       - name: Validate release, infrastructure, and dependency policies
         if: inputs.lane == 'cloudflare-extended'
         run: |

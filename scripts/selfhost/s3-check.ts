@@ -1,23 +1,17 @@
-// Live signature check for the S3 object storage provider.
-//
-// Unit tests drive `S3ObjectStore` against a fake origin, which proves the
-// requests are shaped correctly but never proves a real S3 implementation
-// accepts them. This check closes that gap: it starts Miniflare's genuine
-// S3-protocol gateway over an R2 bucket and performs the exact operations the
-// product uses — metadata reads, writes, deletes, multipart uploads, and every
-// presigned capability — so a canonical-request or signing-key regression fails
-// here instead of in an operator's bucket.
-//
-// It is deliberately not wired into the upload/promotion pipeline: workerd's
-// local gateway does not implement server-side CopyObject, so promotion cannot
-// run against it. See `SigV4Signer.copySource`.
+// Live object storage check. With no arguments, uses Miniflare's S3 gateway.
+// S3_CHECK_ENDPOINT selects a disposable, empty S3-compatible bucket instead;
+// the hosted object-storage lane uses MinIO to also exercise server-side copy.
+// Never point this check at a production bucket: it creates and deletes objects.
 import assert from "node:assert/strict";
 import { createServer } from "node:net";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { S3ObjectStore, S3SigV4Signer } from "../../packages/storage/src/index";
 
-const bucket = "meltiply-assets";
-const credentials = { accessKeyId: "s3-check-access-key", secretAccessKey: "s3-check-secret-key" };
+const bucket = process.env.S3_CHECK_BUCKET ?? "meltiply-assets";
+const credentials = {
+  accessKeyId: process.env.S3_CHECK_ACCESS_KEY ?? "s3-check-access-key",
+  secretAccessKey: process.env.S3_CHECK_SECRET_KEY ?? "s3-check-secret-key",
+};
 
 /**
  * Reserves an ephemeral loopback port for the gateway.
@@ -33,36 +27,39 @@ async function freePort(): Promise<number> {
   return address.port;
 }
 
-const port = await freePort();
-const endpoint = `http://127.0.0.1:${port}`;
+const externalEndpoint = process.env.S3_CHECK_ENDPOINT;
+const port = externalEndpoint ? 0 : await freePort();
+const endpoint = externalEndpoint ?? `http://127.0.0.1:${port}`;
 
-const runtime = new Miniflare(
-  convertV4MiniflareOptions({
-    host: "127.0.0.1",
-    port,
-    cf: {},
-    logRequests: false,
-    telemetry: { enabled: false },
-    workers: [
-      {
-        compatibilityDate: "2026-07-01",
-        compatibilityFlags: [],
-        modules: true,
-        name: "s3-gateway",
-        r2Buckets: { ASSETS: { id: bucket, s3Credentials: credentials } },
-        script: "export default { fetch() { return new Response('ok'); } };",
-      },
-    ],
-  }),
-);
-await runtime.ready;
+const runtime = externalEndpoint
+  ? undefined
+  : new Miniflare(
+      convertV4MiniflareOptions({
+        host: "127.0.0.1",
+        port,
+        cf: {},
+        logRequests: false,
+        telemetry: { enabled: false },
+        workers: [
+          {
+            compatibilityDate: "2026-07-01",
+            compatibilityFlags: [],
+            modules: true,
+            name: "s3-gateway",
+            r2Buckets: { ASSETS: { id: bucket, s3Credentials: credentials } },
+            script: "export default { fetch() { return new Response('ok'); } };",
+          },
+        ],
+      }),
+    );
+await runtime?.ready;
 
 const signer = new S3SigV4Signer({
   accessKeyId: credentials.accessKeyId,
   allowInsecureEndpoint: true,
   bucket,
   endpoint,
-  endpointPathPrefix: "/cdn-cgi/local/r2/s3",
+  ...(externalEndpoint ? {} : { endpointPathPrefix: "/cdn-cgi/local/r2/s3" }),
   region: "us-east-1",
   secretAccessKey: credentials.secretAccessKey,
 });
@@ -71,7 +68,7 @@ const store = new S3ObjectStore({
   allowInsecureEndpoint: true,
   bucket,
   endpoint,
-  endpointPathPrefix: "/cdn-cgi/local/r2/s3",
+  ...(externalEndpoint ? {} : { endpointPathPrefix: "/cdn-cgi/local/r2/s3" }),
   region: "us-east-1",
   secretAccessKey: credentials.secretAccessKey,
 });
@@ -80,6 +77,13 @@ const key = "org-1/asset-1/original";
 const body = "live-signature-check-bytes";
 
 try {
+  if (externalEndpoint) {
+    const request = await signer.requestSigner().prepareBucketRequest("PUT");
+    const headers = new Headers(request.headers);
+    headers.delete("host");
+    const response = await fetch(request.url, { headers, method: "PUT" });
+    assert.equal(response.status, 200, await response.text());
+  }
   // An absent object must read as absent rather than as an origin failure.
   assert.equal(await store.head(key), null);
 
@@ -99,6 +103,24 @@ try {
     [...((await store.readRange(key, 0, 4)) ?? [])],
     [...new TextEncoder().encode(body.slice(0, 4))],
   );
+
+  if (externalEndpoint) {
+    const copied = await store.copyObject(key, `${key}-ready`, {
+      contentType: "video/mp4",
+      ifDestinationAbsent: true,
+      ifSourceEtagMatches: completed.etag,
+    });
+    assert.ok(copied, "promotion must copy a pinned source");
+    assert.equal(await new Response((await store.read(`${key}-ready`))?.body).text(), body);
+    assert.equal(await store.copyObject(key, `${key}-ready`, { ifDestinationAbsent: true }), null);
+    assert.equal(
+      await store.copyObject(key, `${key}-stale`, {
+        ifSourceEtagMatches: "stale-etag",
+      }),
+      null,
+    );
+    await store.delete(`${key}-ready`);
+  }
 
   // Presigned upload: the capability a browser receives for a direct PUT.
   const uploadUrl = await signer.signUpload({
@@ -165,5 +187,5 @@ try {
 
   console.log("S3 provider signature accepted by a live S3 gateway.");
 } finally {
-  await runtime.dispose();
+  await runtime?.dispose();
 }

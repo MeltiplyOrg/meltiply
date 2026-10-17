@@ -432,14 +432,50 @@ export class SigV4Signer {
    * @param input - Method, object key, query map, extra headers, and optional raw body.
    * @returns Absolute request URL plus the complete signed header set.
    */
-  async prepareRequest(input: {
+  prepareRequest(input: {
     body?: Uint8Array | null;
     headers?: Readonly<Record<string, string>>;
     key: string;
     method: string;
     query?: ReadonlyMap<string, string>;
   }): Promise<SignedRequest> {
-    const url = this.objectUrl(input.key, input.query);
+    return this.#sign(this.objectUrl(input.key, input.query), input);
+  }
+
+  /**
+   * Signs a request addressed at the bucket itself rather than an object, which
+   * is what CreateBucket and HeadBucket require.
+   *
+   * Kept separate from {@link prepareRequest} because the bucket path is not an
+   * object key and must not be run through key validation.
+   *
+   * @param method - HTTP method, normally `PUT` for CreateBucket.
+   * @returns Absolute bucket URL plus the complete signed header set.
+   */
+  prepareBucketRequest(method: string): Promise<SignedRequest> {
+    // Path-style naming keeps the bucket in the path; virtual-hosted addressing
+    // has already moved it into the host, leaving the bare prefix.
+    const segment = this.#target.addressing === "virtual" ? "" : `/${encode(this.#target.bucket)}`;
+    return this.#sign(new URL(`${this.#target.origin}${this.#target.pathPrefix}${segment}`), {
+      method,
+    });
+  }
+
+  /**
+   * Signs the supplied URL and headers, deriving every SigV4 input from them.
+   *
+   * @param url - Absolute request URL, whose query is canonicalized as given.
+   * @param input - Method, extra headers, and optional raw body.
+   * @returns Absolute request URL plus the complete signed header set.
+   */
+  async #sign(
+    url: URL,
+    input: {
+      body?: Uint8Array | null;
+      headers?: Readonly<Record<string, string>>;
+      method: string;
+    },
+  ): Promise<SignedRequest> {
     const now = timestamp(this.#now());
     const payloadHash = input.body
       ? await sha256Bytes(input.body.slice().buffer)

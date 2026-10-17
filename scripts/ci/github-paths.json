@@ -1,6 +1,6 @@
 {
   "frontend": [
-    "^\\.github/",
+    "^\\.github/(?:workflows|actions)/",
     "^\\.devcontainer/",
     "^\\.node-version$",
     "^Makefile$",
@@ -15,12 +15,12 @@
     "^vite\\.config\\.ts$"
   ],
   "cloudflare": [
-    "^\\.github/",
+    "^\\.github/(?:workflows|actions)/",
     "^\\.devcontainer/",
     "^\\.node-version$",
     "^\\.typos\\.toml$",
     "^Makefile$",
-    "^docker-compose\\.cloudflare\\.yml$",
+    "^compose\\.(?:dev|selfhost)\\.yml$",
     "^infra/",
     "^knip\\.json$",
     "^package\\.json$",
@@ -34,5 +34,27 @@
     "^tsconfig\\.base\\.json$",
     "^vite\\.config\\.ts$",
     "^workers/"
+  ],
+  "selfhost": [
+    "^\\.github/workflows/(?:ci|selfhost|selfhost-ci)\\.yml$",
+    "^\\.github/actions/install-workspace/",
+    "^\\.dockerignore$",
+    "^compose\\.selfhost\\.yml$",
+    "^scripts/selfhost/",
+    "^scripts/lib/",
+    "^scripts/ci/(?:supply-chain\\.mjs|allowed-licenses\\.json|github-paths\\.json|github-routing(?:\\.test)?\\.mjs)$",
+    "^scripts/cloudflare-local/postgres/migrate\\.sh$",
+    "^frontend/(?:app|shared)/",
+    "^frontend/public/package\\.json$",
+    "^packages/",
+    "^workers/",
+    "^package\\.json$",
+    "^bun\\.lock$",
+    "^bunfig\\.toml$",
+    "^patches/",
+    "^tsconfig\\.base\\.json$",
+    "^vite\\.config\\.ts$",
+    "^LICENSE[^/]*$",
+    "^THIRD_PARTY_NOTICES\\.md$"
   ]
 }

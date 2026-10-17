@@ -8,7 +8,7 @@ Actions use version tags, not commit-hash references.
 
 Automatic checks run in separate jobs:
 
-- `changes`: select frontend/backend lanes from changed paths.
+- `changes`: select application and image lanes from changed paths.
 - `baseline`: full-history secret scan, documentation checks, and routing
   regression tests; always runs.
 - `frontend-fast`: app formatting, types, bindings, lint, coverage, production
@@ -16,16 +16,18 @@ Automatic checks run in separate jobs:
 - `cloudflare-fast`: spelling, contracts, Worker bindings, package/Worker types,
   tests and builds, strict lint, dead code, formatting, drift/routing regressions,
   local-tooling and release regressions, supply-chain/SBOM policy, costs, and PostgreSQL integration tests.
-- `selfhost-images`: on every push, pull request, and manual CI run, build the
-  three production images for both amd64 and ARM64 in six parallel native-runner
-  jobs, then smoke the exact image artifacts on each architecture, including
-  crash recovery and HTTPS. Nothing is published.
-- `ci-gate`: require baseline, self-hosted images, and every selected application
-  lane to succeed; reject failures, cancellations, and unexpectedly skipped jobs.
+- `selfhost-images`: when production image inputs change, build the three images
+  for both amd64 and ARM64 in six parallel native-runner jobs, then smoke the exact
+  artifacts on each architecture, including crash recovery and HTTPS. Nothing is
+  published.
+- `ci-gate`: require baseline and every selected lane to succeed; accept only
+  deliberate skips for unselected lanes and reject failures or cancellations.
 
-The application lanes run independently after routing. Image builds start
-independently of baseline and path routing, so documentation-only changes also
-exercise production images without selecting the application lanes.
+Application and image lanes run independently after routing. Documentation,
+PR-template, and agent-skill-only PRs run baseline and the final gate without
+installing dependencies or building images. Public-site source changes select
+frontend checks but not app-only image builds; its package manifest still affects
+the shared dependency installation and selects image checks.
 [The router](../scripts/ci/github-routing.mjs) reads the public CI-owned
 [path rules](../scripts/ci/github-paths.json). Workflow, routing, and development
 container changes select both application lanes.
@@ -33,7 +35,7 @@ container changes select both application lanes.
 Default-branch pushes compare the previous commit with the new HEAD. Feature
 branches and pull requests compare against their base merge point, retaining
 earlier unmerged changes. Renames and deletions count. Manual runs and unavailable
-ancestry conservatively select both lanes.
+ancestry conservatively select every lane.
 
 The jobs use Node 24.18.0 and Bun 1.4.2. The database is a disposable local Docker
 PostgreSQL instance with fixture-only credentials; cleanup runs after failures.

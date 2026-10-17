@@ -99,7 +99,10 @@ client IPs.
 ## Published images and CI
 
 The main [CI workflow](../.github/workflows/ci.yml) builds and smoke-checks three
-images on every push and pull request, in parallel for Linux amd64 and ARM64:
+images when production inputs change, in parallel for Linux amd64 and ARM64.
+[Path rules](../scripts/ci/github-paths.json) select image checks for code,
+dependencies, migrations, Docker/Compose, and image-CI changes; documentation-only
+PRs skip them.
 
 - `ghcr.io/meltiplyorg/meltiply-runtime`
 - `ghcr.io/meltiplyorg/meltiply-database`

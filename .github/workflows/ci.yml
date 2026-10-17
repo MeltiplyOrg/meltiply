@@ -23,6 +23,7 @@ jobs:
     outputs:
       frontend: ${{ steps.route.outputs.frontend }}
       cloudflare: ${{ steps.route.outputs.cloudflare }}
+      selfhost: ${{ steps.route.outputs.selfhost }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -153,6 +154,8 @@ jobs:
         run: ./scripts/cloudflare-local/database.sh stop
 
   selfhost-images:
+    needs: changes
+    if: needs.changes.outputs.selfhost == 'true'
     uses: ./.github/workflows/selfhost-ci.yml
 
   ci-gate:
@@ -169,11 +172,16 @@ jobs:
           FRONTEND: ${{ needs.frontend-fast.result }}
           CLOUDFLARE_SELECTED: ${{ needs.changes.outputs.cloudflare }}
           CLOUDFLARE: ${{ needs.cloudflare-fast.result }}
+          SELFHOST_SELECTED: ${{ needs.changes.outputs.selfhost }}
           SELFHOST_IMAGES: ${{ needs.selfhost-images.result }}
         run: |
           test "$CHANGES" = success
           test "$BASELINE" = success
-          test "$SELFHOST_IMAGES" = success
+          if [ "$SELFHOST_SELECTED" = true ]; then
+            test "$SELFHOST_IMAGES" = success
+          else
+            test "$SELFHOST_IMAGES" = skipped
+          fi
           if [ "$FRONTEND_SELECTED" = true ]; then
             test "$FRONTEND" = success
           else

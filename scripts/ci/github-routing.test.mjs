@@ -61,18 +61,31 @@ function push(before) {
   return { before, ref: "refs/heads/master", repository: { default_branch: "master" } };
 }
 
-test("default-branch pushes select only affected application lanes", (t) => {
+test("default-branch pushes select only lanes with affected inputs", (t) => {
   const repo = fixture(t);
   let before = repo.initial;
   for (const [path, expected] of [
-    ["docs/example.md", "frontend=false\ncloudflare=false\n"],
-    ["frontend/app/example.ts", "frontend=true\ncloudflare=false\n"],
-    ["workers/api/example.ts", "frontend=false\ncloudflare=true\n"],
-    ["bun.lock", "frontend=true\ncloudflare=true\n"],
-    [".github/workflows/example.yml", "frontend=true\ncloudflare=true\n"],
-    ["scripts/ci/github-routing.mjs", "frontend=true\ncloudflare=true\n"],
-    ["scripts/ci/github-paths.json", "frontend=true\ncloudflare=true\n"],
-    [".devcontainer/devcontainer.json", "frontend=true\ncloudflare=true\n"],
+    ["docs/example.md", "frontend=false\ncloudflare=false\nselfhost=false\n"],
+    [".github/PULL_REQUEST_TEMPLATE.md", "frontend=false\ncloudflare=false\nselfhost=false\n"],
+    [".agents/skills/pr/SKILL.md", "frontend=false\ncloudflare=false\nselfhost=false\n"],
+    ["frontend/app/example.ts", "frontend=true\ncloudflare=false\nselfhost=true\n"],
+    ["frontend/public/src/example.astro", "frontend=true\ncloudflare=false\nselfhost=false\n"],
+    ["frontend/public/package.json", "frontend=true\ncloudflare=false\nselfhost=true\n"],
+    ["workers/api/example.ts", "frontend=false\ncloudflare=true\nselfhost=true\n"],
+    [
+      "packages/database/migrations/example.sql",
+      "frontend=false\ncloudflare=true\nselfhost=true\n",
+    ],
+    ["bun.lock", "frontend=true\ncloudflare=true\nselfhost=true\n"],
+    ["compose.dev.yml", "frontend=false\ncloudflare=true\nselfhost=false\n"],
+    ["compose.selfhost.yml", "frontend=false\ncloudflare=true\nselfhost=true\n"],
+    [".dockerignore", "frontend=false\ncloudflare=false\nselfhost=true\n"],
+    ["LICENSE.md", "frontend=false\ncloudflare=false\nselfhost=true\n"],
+    [".github/workflows/example.yml", "frontend=true\ncloudflare=true\nselfhost=false\n"],
+    [".github/workflows/selfhost-ci.yml", "frontend=true\ncloudflare=true\nselfhost=true\n"],
+    ["scripts/ci/github-routing.mjs", "frontend=true\ncloudflare=true\nselfhost=true\n"],
+    ["scripts/ci/github-paths.json", "frontend=true\ncloudflare=true\nselfhost=true\n"],
+    [".devcontainer/devcontainer.json", "frontend=true\ncloudflare=true\nselfhost=false\n"],
   ]) {
     const head = repo.commit(path);
     assert.equal(repo.route(push(before)), expected, path);
@@ -88,14 +101,28 @@ test("feature pushes and PRs retain all changes since their merge base", (t) => 
   const head = repo.commit("docs/example.md");
   assert.equal(
     repo.route({ ...push(previous), ref: "refs/heads/feature" }),
-    "frontend=true\ncloudflare=false\n",
+    "frontend=true\ncloudflare=false\nselfhost=true\n",
   );
   assert.equal(
     repo.route(
       { pull_request: { base: { sha: repo.initial }, head: { sha: head } } },
       "pull_request",
     ),
-    "frontend=true\ncloudflare=false\n",
+    "frontend=true\ncloudflare=false\nselfhost=true\n",
+  );
+});
+
+test("documentation-only PRs keep application and image lanes skipped", (t) => {
+  const repo = fixture(t);
+  repo.git("switch", "-qc", "docs-only");
+  repo.commit("docs/example.md");
+  const head = repo.commit(".github/PULL_REQUEST_TEMPLATE.md");
+  assert.equal(
+    repo.route(
+      { pull_request: { base: { sha: repo.initial }, head: { sha: head } } },
+      "pull_request",
+    ),
+    "frontend=false\ncloudflare=false\nselfhost=false\n",
   );
 });
 
@@ -104,17 +131,20 @@ test("renames out of a lane and deletions still schedule that lane", (t) => {
   const before = repo.commit("frontend/app/example.ts");
   repo.git("mv", "frontend/app/example.ts", "example.txt");
   repo.git("commit", "-qm", "move");
-  assert.equal(repo.route(push(before)), "frontend=true\ncloudflare=false\n");
+  assert.equal(repo.route(push(before)), "frontend=true\ncloudflare=false\nselfhost=true\n");
   const next = repo.commit("workers/api/example.ts");
   repo.git("rm", "workers/api/example.ts");
   repo.git("commit", "-qm", "delete");
-  assert.equal(repo.route(push(next)), "frontend=false\ncloudflare=true\n");
+  assert.equal(repo.route(push(next)), "frontend=false\ncloudflare=true\nselfhost=true\n");
 });
 
-test("initial pushes, missing ancestry, and manual runs fail closed to both lanes", (t) => {
+test("initial pushes, missing ancestry, and manual runs fail closed to every lane", (t) => {
   const repo = fixture(t);
   for (const before of ["0".repeat(40), "f".repeat(40)]) {
-    assert.equal(repo.route(push(before)), "frontend=true\ncloudflare=true\n");
+    assert.equal(repo.route(push(before)), "frontend=true\ncloudflare=true\nselfhost=true\n");
   }
-  assert.equal(repo.route({}, "workflow_dispatch"), "frontend=true\ncloudflare=true\n");
+  assert.equal(
+    repo.route({}, "workflow_dispatch"),
+    "frontend=true\ncloudflare=true\nselfhost=true\n",
+  );
 });

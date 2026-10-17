@@ -336,7 +336,12 @@ operations:
     request: { password: contract-placeholder-not-a-credential }
     success:
       status: 200
-      body: { method: totp, totpURI: "otpauth://totp/contract-placeholder", backupCodes: [contract-placeholder] }
+      body:
+        {
+          method: totp,
+          totpURI: "otpauth://totp/contract-placeholder",
+          backupCodes: [contract-placeholder],
+        }
     errors:
       - status: 401
         body: *auth_error

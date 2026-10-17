@@ -78,9 +78,17 @@ const cases: ConformanceCase[] = [
   { method: "POST", operationId: "resendVerification", path: "/api/auth/send-verification-email" },
   { method: "POST", operationId: "enableTwoFactor", path: "/api/auth/two-factor/enable" },
   { method: "POST", operationId: "disableTwoFactor", path: "/api/auth/two-factor/disable" },
-  { method: "POST", operationId: "generateBackupCodes", path: "/api/auth/two-factor/generate-backup-codes" },
+  {
+    method: "POST",
+    operationId: "generateBackupCodes",
+    path: "/api/auth/two-factor/generate-backup-codes",
+  },
   { method: "POST", operationId: "verifyTotp", path: "/api/auth/two-factor/verify-totp" },
-  { method: "POST", operationId: "verifyBackupCode", path: "/api/auth/two-factor/verify-backup-code" },
+  {
+    method: "POST",
+    operationId: "verifyBackupCode",
+    path: "/api/auth/two-factor/verify-backup-code",
+  },
   {
     method: "POST",
     operationId: "signInWithEmail",

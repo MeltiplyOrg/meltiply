@@ -20,19 +20,33 @@ async function isolateLocalAuthClient(page: Page) {
   if (!["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname)) return;
   const identifier = randomUUID().replaceAll("-", "").slice(0, 24);
   const address = `2001:db8:${Array.from({ length: 6 }, (_, index) => identifier.slice(index * 4, index * 4 + 4)).join(":")}`;
-  await page.route(`${origin.origin}/api/auth/**`, (route) => route.continue({ headers: { ...route.request().headers(), "cf-connecting-ip": address } }));
+  await page.route(`${origin.origin}/api/auth/**`, (route) =>
+    route.continue({ headers: { ...route.request().headers(), "cf-connecting-ip": address } }),
+  );
   isolatedAuthPages.add(page);
 }
 
 /** Uses the documented local-only owner fixture, with unique labels for each test's Brand Profile. */
 export function ownerCredentials(): GeneratedCredentials {
-  return { name: `E2E ${randomUUID().slice(0, 8)}`, email: "alpha@meltiply.local", password: "MeltiplyLocal1!" };
+  return {
+    name: `E2E ${randomUUID().slice(0, 8)}`,
+    email: "alpha@meltiply.local",
+    password: "MeltiplyLocal1!",
+  };
 }
 
 /** Grants functional consent before boot; analytics and marketing remain explicitly denied. */
 export async function allowFunctionalConsent(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const consent = encodeURIComponent(JSON.stringify({ analytics: false, expires: Date.now() + 180 * 24 * 60 * 60 * 1_000, functional: true, marketing: false, v: 1 }));
+    const consent = encodeURIComponent(
+      JSON.stringify({
+        analytics: false,
+        expires: Date.now() + 180 * 24 * 60 * 60 * 1_000,
+        functional: true,
+        marketing: false,
+        v: 1,
+      }),
+    );
     document.cookie = `meltiply-consent=${consent}; Path=/; Max-Age=15552000; SameSite=Lax`;
   });
 }
@@ -45,13 +59,21 @@ export async function allowFunctionalConsent(page: Page): Promise<void> {
  */
 export async function openOwnerWorkspace(page: Page, credentials: GeneratedCredentials) {
   if (process.env.STAGING_E2E_BASE_URL) throw new Error("Owner fixture reset is local-only");
-  const connectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ?? "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+  const connectionString =
+    process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
+    "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
   const url = new URL(connectionString);
-  if (!["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/meltiply") throw new Error("Owner fixtures require the dedicated loopback test database");
+  if (!["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/meltiply")
+    throw new Error("Owner fixtures require the dedicated loopback test database");
   const pool = new Pool({ connectionString });
   try {
-    await pool.query(`DELETE FROM organizations o USING users u WHERE o.personal_user_id = u.id AND u.auth_user_id = $1`, ["auth_user_local_alpha"]);
-  } finally { await pool.end(); }
+    await pool.query(
+      `DELETE FROM organizations o USING users u WHERE o.personal_user_id = u.id AND u.auth_user_id = $1`,
+      ["auth_user_local_alpha"],
+    );
+  } finally {
+    await pool.end();
+  }
   await signIn(page, credentials);
 }
 

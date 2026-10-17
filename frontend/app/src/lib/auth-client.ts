@@ -130,10 +130,16 @@ async function signInEmail(credentials: SignInCredentials): Promise<AuthTokenRes
  * @returns The created user with a nullable initial token.
  * @throws {Error} When registration fails or inputs are rejected.
  */
-async function signUpEmail({ setupSecret, ...credentials }: SignUpCredentials): Promise<AuthTokenResult> {
+async function signUpEmail({
+  setupSecret,
+  ...credentials
+}: SignUpCredentials): Promise<AuthTokenResult> {
   const baseUrl = getApiBaseUrl();
   const response = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
-    body: JSON.stringify({ ...credentials, callbackURL: `${window.location.origin}/sign-in?verified=1` }),
+    body: JSON.stringify({
+      ...credentials,
+      callbackURL: `${window.location.origin}/sign-in?verified=1`,
+    }),
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
@@ -254,10 +260,18 @@ async function changePassword(params: {
 
 /** Reads the no-store initialized bit; configuration failures never look like an empty installation. */
 async function setupStatus(): Promise<{ initialized: boolean }> {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/setup-status`, { cache: "no-store", credentials: "include" });
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/setup-status`, {
+    cache: "no-store",
+    credentials: "include",
+  });
   if (!response.ok) throw await parseAuthError(response);
   const data: unknown = await response.json();
-  if (!data || typeof data !== "object" || !("initialized" in data) || typeof data.initialized !== "boolean") {
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !("initialized" in data) ||
+    typeof data.initialized !== "boolean"
+  ) {
     throw new Error("Invalid installation status. Try again.");
   }
   return { initialized: data.initialized };
@@ -266,7 +280,9 @@ async function setupStatus(): Promise<{ initialized: boolean }> {
 /** Sends a verification link to the owner; the server controls enumeration and send limits. */
 async function resendVerification(email: string): Promise<void> {
   const response = await fetch(`${getApiBaseUrl()}/api/auth/send-verification-email`, {
-    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, callbackURL: `${window.location.origin}/sign-in?verified=1` }),
   });
   if (!response.ok) throw await parseAuthError(response);
@@ -276,7 +292,9 @@ async function resendVerification(email: string): Promise<void> {
 async function verifySecondFactor(code: string, backup = false): Promise<void> {
   const path = backup ? "verify-backup-code" : "verify-totp";
   const response = await fetch(`${getApiBaseUrl()}/api/auth/two-factor/${path}`, {
-    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code, trustDevice: false }),
   });
   if (!response.ok) throw await parseAuthError(response);
@@ -291,7 +309,9 @@ async function manageTwoFactor(
   password: string,
 ): Promise<{ totpURI?: string; backupCodes?: string[] }> {
   const response = await fetch(`${getApiBaseUrl()}/api/auth/two-factor/${action}`, {
-    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password }),
   });
   if (!response.ok) throw await parseAuthError(response);
@@ -305,7 +325,13 @@ async function manageTwoFactor(
     }
     result.totpURI = uri.href;
   }
-  if ("backupCodes" in data && Array.isArray(data.backupCodes) && data.backupCodes.length > 0 && data.backupCodes.every((code: unknown): code is string => typeof code === "string")) result.backupCodes = data.backupCodes;
+  if (
+    "backupCodes" in data &&
+    Array.isArray(data.backupCodes) &&
+    data.backupCodes.length > 0 &&
+    data.backupCodes.every((code: unknown): code is string => typeof code === "string")
+  )
+    result.backupCodes = data.backupCodes;
   if (action !== "disable" && (!result.backupCodes || (action === "enable" && !result.totpURI))) {
     throw new Error("Incomplete authenticator enrollment.");
   }

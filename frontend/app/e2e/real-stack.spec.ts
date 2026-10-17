@@ -49,7 +49,6 @@ test("redirects the root path to sign-in without a session", async ({ page }) =>
   await expect(page).toHaveURL(/\/sign-in(?:\/|$)/, { timeout: 30_000 });
 });
 
-
 test("keeps public registration closed after the owner exists", async ({ page }) => {
   await page.goto("/sign-up");
   await expect(page).toHaveURL(/\/sign-in(?:\/|$)/);

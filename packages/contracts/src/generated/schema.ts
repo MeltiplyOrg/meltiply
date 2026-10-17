@@ -1645,7 +1645,7 @@ export interface components {
         };
         VerifyEmailResult: {
             status: boolean;
-            user: components["schemas"]["AuthUser"];
+            user: components["schemas"]["AuthUser"] | null;
         };
         AuthError: {
             /** @description Better Auth error code such as INVALID_EMAIL_OR_PASSWORD. */
@@ -2633,6 +2633,16 @@ export interface components {
                 "application/json": components["schemas"]["ErrorEnvelope"];
             };
         };
+        /** @description Authentication attempt budget or temporary factor lockout is exhausted. */
+        AuthRateLimited: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorEnvelope"] | components["schemas"]["AuthError"];
+            };
+        };
         /** @description Required synchronous upstream failed. */
         UpstreamError: {
             headers: {
@@ -2862,7 +2872,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        method?: "totp";
+                        method: "totp";
                         totpURI: string;
                         backupCodes: string[];
                     };
@@ -2924,6 +2934,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        status: boolean;
                         backupCodes: string[];
                     };
                 };
@@ -2956,16 +2967,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        status?: boolean;
-                        token?: string;
-                        user?: components["schemas"]["AuthUser"];
-                    };
+                    "application/json": components["schemas"]["AuthTokenResult"];
                 };
             };
             400: components["responses"]["AuthError"];
             401: components["responses"]["AuthError"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["AuthRateLimited"];
         };
     };
     verifyBackupCode: {
@@ -2985,22 +2992,19 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Factor accepted and session established or enrollment confirmed. */
+            /** @description Backup code consumed and a session established. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        status?: boolean;
-                        token?: string;
-                        user?: components["schemas"]["AuthUser"];
-                    };
+                    "application/json": components["schemas"]["AuthTokenResult"];
                 };
             };
             400: components["responses"]["AuthError"];
             401: components["responses"]["AuthError"];
-            429: components["responses"]["RateLimited"];
+            409: components["responses"]["AuthError"];
+            429: components["responses"]["AuthRateLimited"];
         };
     };
     signInWithEmail: {

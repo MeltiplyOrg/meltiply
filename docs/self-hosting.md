@@ -99,7 +99,7 @@ bound credential attempts and verification/reset delivery across API instances;
 client-supplied `X-Forwarded-For` cannot select a different budget.
 
 Deployed sign-in requires verified email and configured mail delivery. Use
-**Resend verification email** on the sign-in form if needed, or **Forgot password?**
+**Resend verification** on the sign-in form if needed, or **Forgot password?**
 for a single-use, expiring reset link. Recovery responses do not disclose whether
 an address is registered. Mailpit proves SMTP submission and link handling in CI,
 not delivery to an external inbox.

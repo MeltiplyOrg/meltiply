@@ -85,15 +85,15 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
 
           <div className="flex items-center gap-2">
             <AccountSecurity />
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-8 rounded-control border-line"
-            onClick={() => setMobileMenuOpen(true)}
-            aria-label="Open navigation menu"
-          >
-            <Menu className="size-4" />
-          </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-8 rounded-control border-line"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open navigation menu"
+            >
+              <Menu className="size-4" />
+            </Button>
           </div>
         </header>
 

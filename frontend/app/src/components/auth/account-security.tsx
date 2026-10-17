@@ -124,9 +124,15 @@ export function AccountSecurity(): React.ReactElement {
                   <label htmlFor="authenticator-uri" className="text-sm font-medium text-ink">
                     {t("Authenticator setup key")}
                   </label>
-                  <Input id="authenticator-uri" readOnly value={new URL(enrollment.totpURI).searchParams.get("secret") ?? ""} />
+                  <Input
+                    id="authenticator-uri"
+                    readOnly
+                    value={new URL(enrollment.totpURI).searchParams.get("secret") ?? ""}
+                  />
                   <p className="text-xs text-ink-2">
-                    {t("Add a time-based account named Meltiply in your authenticator using this key. Keep it secret.")}
+                    {t(
+                      "Add a time-based account named Meltiply in your authenticator using this key. Keep it secret.",
+                    )}
                   </p>
                 </div>
               )}
@@ -180,8 +186,15 @@ export function AccountSecurity(): React.ReactElement {
                   type="button"
                   disabled={busy}
                   onClick={async () => {
-                    try { await signOut(); }
-                    catch { setError(t("Could not confirm server sign-out. Sign in again to check your sessions.")); }
+                    try {
+                      await signOut();
+                    } catch {
+                      setError(
+                        t(
+                          "Could not confirm server sign-out. Sign in again to check your sessions.",
+                        ),
+                      );
+                    }
                   }}
                 >
                   {t("I saved my codes")}
@@ -193,7 +206,13 @@ export function AccountSecurity(): React.ReactElement {
               <section className="space-y-3 border-t border-line pt-4">
                 <h3 className="text-sm font-medium text-ink">{t("Two-factor authentication")}</h3>
                 <p className="text-sm text-ink-2">
-                  {(user?.twoFactorEnabled ? t("An authenticator code is required at sign-in. Use a backup code if you lose your authenticator.") : t("Add an authenticator app and save recovery codes before enabling this extra sign-in check."))}
+                  {user?.twoFactorEnabled
+                    ? t(
+                        "An authenticator code is required at sign-in. Use a backup code if you lose your authenticator.",
+                      )
+                    : t(
+                        "Add an authenticator app and save recovery codes before enabling this extra sign-in check.",
+                      )}
                 </p>
                 {user?.twoFactorEnabled ? (
                   <div className="flex flex-wrap gap-2">

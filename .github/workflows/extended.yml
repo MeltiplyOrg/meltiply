@@ -11,7 +11,6 @@ on:
           - frontend-full
           - cloudflare-integration
           - cloudflare-extended
-          - auth-acceptance
 
 permissions:
   contents: read
@@ -33,54 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6.1.0
         with:
-          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
-      - name: Prepare generated auth contracts and formatting
-        if: inputs.lane == 'auth-acceptance'
-        run: |
-          bun run contract:generate
-          bun run contract:readiness:generate
-          bunx --no-install vp fmt frontend/app packages/auth packages/contracts workers/api scripts/selfhost .github/workflows/extended.yml .github/workflows/selfhost-ci.yml README.md docs/self-hosting.md docs/frontend-capabilities.md docs/public-ci.md infra/cloudflare/README.md frontend/public/content/docs/getting-started.mdx frontend/public/src/pages/index.astro
-          mkdir -p artifacts/auth-prepared
-          git diff --name-only -z --diff-filter=ACM HEAD | tar --null -T - -czf artifacts/auth-prepared/prepared.tar.gz
-          bun run docs:links
-      - name: Check changed React surfaces
-        if: inputs.lane == 'auth-acceptance'
-        run: npx --yes react-doctor@latest --verbose --scope changed
-      - name: Exercise real authentication database boundaries
-        if: inputs.lane == 'auth-acceptance'
-        env:
-          MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable
-          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
-        run: |
-          bun run db:start
-          bun run --cwd workers/api --no-install vp test run --config vitest.integration.config.ts test/better-auth.integration.test.ts
-      - name: Run comprehensive application gate
-        if: inputs.lane == 'auth-acceptance'
-        run: |
-          ./scripts/cloudflare-local/compose.sh up -d postgres
-          # Tooling tests own their tunnel fixtures; the workflow-wide override
-          # would otherwise replace their explicit per-fixture configuration.
-          env -u MELTIPLY_DEV_TUNNEL bun run cloudflare:check
-      - name: Exercise first-run owner journeys in production images
-        if: inputs.lane == 'auth-acceptance'
-        env:
-          SELFHOST_IMAGE_PREFIX: local/meltiply
-          SELFHOST_IMAGE_TAG: auth-check
-          COMPOSE_PARALLEL_LIMIT: "1"
-        run: |
-          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
-          node scripts/selfhost/configure.mjs --ci
-          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification build
-          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification up -d --wait --wait-timeout 240
-          node scripts/selfhost/smoke.mjs
-      - name: Stop owner acceptance deployment
-        if: always() && inputs.lane == 'auth-acceptance'
-        run: |
-          if test -f .env.selfhost; then
-            docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification down --volumes --remove-orphans
-          fi
       - name: Validate release, infrastructure, and dependency policies
         if: inputs.lane == 'cloudflare-extended'
         run: |

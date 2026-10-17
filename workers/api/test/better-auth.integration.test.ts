@@ -39,7 +39,8 @@ const isolatedDatabase = new URL(baseSystemConnectionString);
 isolatedDatabase.searchParams.set("options", "-c search_path=auth_lifecycle,public");
 const systemConnectionString = isolatedDatabase.href;
 const setupSecret = crypto.randomUUID() + crypto.randomUUID();
-const adminConnectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
+const adminConnectionString =
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
   "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
 const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
 
@@ -48,11 +49,14 @@ const adminPool = createHyperdrivePool({ connectionString: adminConnectionString
 beforeAll(async () => {
   for (const connection of [systemConnectionString, adminConnectionString]) {
     const url = new URL(connection);
-    if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply") throw new Error("Auth tests require the isolated local database.");
+    if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply")
+      throw new Error("Auth tests require the isolated local database.");
   }
   await adminPool.query(`CREATE SCHEMA auth_lifecycle AUTHORIZATION meltiply_system`);
   for (const table of ["user", "session", "account", "verification", "jwks", "twoFactor"]) {
-    await adminPool.query(`CREATE TABLE auth_lifecycle."${table}" (LIKE public."${table}" INCLUDING ALL)`);
+    await adminPool.query(
+      `CREATE TABLE auth_lifecycle."${table}" (LIKE public."${table}" INCLUDING ALL)`,
+    );
     await adminPool.query(`GRANT ALL ON auth_lifecycle."${table}" TO meltiply_system`);
   }
   await adminPool.query(`
@@ -64,7 +68,9 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await systemPoolFor(systemEnv()).query(`TRUNCATE "user", "session", "account", "verification", "twoFactor"`);
+  await systemPoolFor(systemEnv()).query(
+    `TRUNCATE "user", "session", "account", "verification", "twoFactor"`,
+  );
 });
 
 /**
@@ -542,7 +548,9 @@ describe("password recovery through the shared sender", () => {
     expect(resetSubmissions()).toHaveLength(beforeReset + 1);
     const recovery = resetSubmissions().at(-1)!;
     expect(recovery.to).toBe(emails.enumeration);
-    expect(new URL(actionLink(recovery)).pathname.startsWith("/api/auth/reset-password/")).toBe(true);
+    expect(new URL(actionLink(recovery)).pathname.startsWith("/api/auth/reset-password/")).toBe(
+      true,
+    );
 
     const unknownSignIn = await authPost(auth, "/api/auth/sign-in/email", {
       email: unknown,
@@ -617,29 +625,53 @@ describe("session cookie, bearer JWT, and sign-out", () => {
     // Revocation is observed on both cookie reads and the protected API's
     // authoritative session lookup, including the already-minted bearer JWT.
     expect(await sessionRowsFor(sessionUserId)).toBe(0);
-    expect((await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null).toBe(true);
-    await expect(activeOwnerIdentity(stagingEnv(mail), jwtClaims(payload))).rejects.toMatchObject({ status: 401 });
-    const published = recordOf(await (await auth.handler(new Request(`${baseURL}/api/auth/jwks`))).json());
+    expect(
+      (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
+    ).toBe(true);
+    await expect(activeOwnerIdentity(stagingEnv(mail), jwtClaims(payload))).rejects.toMatchObject({
+      status: 401,
+    });
+    const published = recordOf(
+      await (await auth.handler(new Request(`${baseURL}/api/auth/jwks`))).json(),
+    );
     if (!Array.isArray(published.keys)) throw new Error("Expected published verification keys");
     const publicKey = recordOf(published.keys[0]);
-    if (publicKey.kty !== "OKP" || publicKey.crv !== "Ed25519" || typeof publicKey.x !== "string") throw new Error("Unexpected auth signing algorithm");
-    const key = await crypto.subtle.importKey("jwk", { kty: publicKey.kty, crv: publicKey.crv, x: publicKey.x }, { name: "Ed25519" }, false, ["verify"]);
+    if (publicKey.kty !== "OKP" || publicKey.crv !== "Ed25519" || typeof publicKey.x !== "string")
+      throw new Error("Unexpected auth signing algorithm");
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      { kty: publicKey.kty, crv: publicKey.crv, x: publicKey.x },
+      { name: "Ed25519" },
+      false,
+      ["verify"],
+    );
     const verifier = createJwtVerifier({ audience: baseURL, issuer: baseURL }, async () => key);
     expect(typeof (await verifier(jwt)).sessionId).toBe("string");
     let relays = 0;
     const app = createApiApp({
       verifyJwtToken: async (env, token) => activeOwnerIdentity(env, await verifier(token)),
-      resolveActor: async () => { throw new Error("Revoked authority reached actor resolution"); },
-    });
-    const denied = await app.request("/api/v1/posts", {
-      method: "POST", headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }, body: "{}",
-    }, {
-      ...stagingEnv(mail),
-      AUTOMATION: {
-        relayOutbox: async () => { relays++; return { claimed: 0, dead: 0, failed: 0, published: 0 }; },
-        requestCommentsSync: async () => 0,
+      resolveActor: async () => {
+        throw new Error("Revoked authority reached actor resolution");
       },
     });
+    const denied = await app.request(
+      "/api/v1/posts",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
+        body: "{}",
+      },
+      {
+        ...stagingEnv(mail),
+        AUTOMATION: {
+          relayOutbox: async () => {
+            relays++;
+            return { claimed: 0, dead: 0, failed: 0, published: 0 };
+          },
+          requestCommentsSync: async () => 0,
+        },
+      },
+    );
     expect(denied.status).toBe(401);
     expect(relays).toBe(0);
   });
@@ -649,7 +681,9 @@ describe("single-owner bootstrap and security changes", () => {
   it("requires the setup secret, rejects invalid profile data, and admits exactly one racing registration", async () => {
     const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
     const body = { email: emails.localUnverified, name: "Owner", password: crypto.randomUUID() };
-    const noSecret = await authPost(auth, "/api/auth/sign-up/email", body, { "X-Setup-Secret": "" });
+    const noSecret = await authPost(auth, "/api/auth/sign-up/email", body, {
+      "X-Setup-Secret": "",
+    });
     expect(noSecret.status).toBe(403);
     const invalid = await authPost(auth, "/api/auth/sign-up/email", { ...body, name: "\u0000" });
     expect(invalid.status).toBe(400);
@@ -658,9 +692,13 @@ describe("single-owner bootstrap and security changes", () => {
       authPost(auth, "/api/auth/sign-up/email", { ...body, email: emails.stagingVerified }),
     ]);
     expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
-    const count = await systemPoolFor(systemEnv()).query<{ count: string }>(`SELECT count(*)::text AS count FROM "user" WHERE "installationOwner"`);
+    const count = await systemPoolFor(systemEnv()).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "user" WHERE "installationOwner"`,
+    );
     expect(count.rows[0]?.count).toBe("1");
-    expect((await authPost(auth, "/api/auth/sign-up/email", { ...body, email: emails.reset })).status).toBe(403);
+    expect(
+      (await authPost(auth, "/api/auth/sign-up/email", { ...body, email: emails.reset })).status,
+    ).toBe(403);
     const status = await auth.handler(new Request(`${baseURL}/api/auth/setup-status`));
     expect(await status.json()).toEqual({ initialized: true });
     const stored = await systemPoolFor(systemEnv()).query<{ plaintext: boolean; stored: boolean }>(
@@ -675,26 +713,60 @@ describe("single-owner bootstrap and security changes", () => {
     const env = localTestEnv(mail);
     const auth = await betterAuthFor(env);
     const password = crypto.randomUUID();
-    const registered = await authPost(auth, "/api/auth/sign-up/email", { email: emails.reset, name: "Owner", password });
+    const registered = await authPost(auth, "/api/auth/sign-up/email", {
+      email: emails.reset,
+      name: "Owner",
+      password,
+    });
     let cookie = sessionCookiePair(registered);
     const mintIdentity = async () => {
-      const minted = recordOf(await (await authGetWithCookie(auth, "/api/auth/token", cookie)).json());
+      const minted = recordOf(
+        await (await authGetWithCookie(auth, "/api/auth/token", cookie)).json(),
+      );
       if (typeof minted.token !== "string") throw new Error("Expected access token");
-      return jwtClaims(recordOf(JSON.parse(Buffer.from(minted.token.split(".")[1]!, "base64url").toString())));
+      return jwtClaims(
+        recordOf(JSON.parse(Buffer.from(minted.token.split(".")[1]!, "base64url").toString())),
+      );
     };
     const first = await mintIdentity();
     await activeOwnerIdentity(env, first);
     const nextPassword = crypto.randomUUID();
-    expect((await authPost(auth, "/api/auth/change-password", { currentPassword: password, newPassword: nextPassword, revokeOtherSessions: true }, { Cookie: cookie, Origin: "http://app.test" })).status).toBe(200);
+    expect(
+      (
+        await authPost(
+          auth,
+          "/api/auth/change-password",
+          { currentPassword: password, newPassword: nextPassword, revokeOtherSessions: true },
+          { Cookie: cookie, Origin: "http://app.test" },
+        )
+      ).status,
+    ).toBe(200);
     await expect(activeOwnerIdentity(env, first)).rejects.toMatchObject({ status: 401 });
-    expect((await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null).toBe(true);
-    cookie = sessionCookiePair(await authPost(auth, "/api/auth/sign-in/email", { email: emails.reset, password: nextPassword }));
+    expect(
+      (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
+    ).toBe(true);
+    cookie = sessionCookiePair(
+      await authPost(auth, "/api/auth/sign-in/email", {
+        email: emails.reset,
+        password: nextPassword,
+      }),
+    );
     const second = await mintIdentity();
-    await authPost(auth, "/api/auth/request-password-reset", { email: emails.reset, redirectTo: "http://app.test/sign-in" });
+    await authPost(auth, "/api/auth/request-password-reset", {
+      email: emails.reset,
+      redirectTo: "http://app.test/sign-in",
+    });
     const message = mail.sent.find((entry) => entry.subject === "Reset your Meltiply password");
     if (!message) throw new Error("Expected reset delivery");
     const token = new URL(actionLink(message)).pathname.split("/").pop();
-    expect((await authPost(auth, "/api/auth/reset-password", { token, newPassword: crypto.randomUUID() })).status).toBe(200);
+    expect(
+      (
+        await authPost(auth, "/api/auth/reset-password", {
+          token,
+          newPassword: crypto.randomUUID(),
+        })
+      ).status,
+    ).toBe(200);
     await expect(activeOwnerIdentity(env, second)).rejects.toMatchObject({ status: 401 });
   });
 });
@@ -732,56 +804,100 @@ describe("optional authenticator lifecycle", () => {
       }
     };
     const post = async (path: string, body: Record<string, unknown>) => {
-      const response = await authPost(auth, `/api/auth/${path}`, body, { Cookie: [...jar].map(([key, value]) => `${key}=${value}`).join("; "), Origin: "http://app.test" });
+      const response = await authPost(auth, `/api/auth/${path}`, body, {
+        Cookie: [...jar].map(([key, value]) => `${key}=${value}`).join("; "),
+        Origin: "http://app.test",
+      });
       capture(response);
       return response;
     };
     const signedUp = await post("sign-up/email", { email, name: "Owner", password });
     expect(signedUp.status).toBe(200);
     const pending = recordOf(await (await post("two-factor/enable", { password })).json());
-    if (typeof pending.totpURI !== "string" || !Array.isArray(pending.backupCodes)) throw new Error("Expected real enrollment");
+    if (typeof pending.totpURI !== "string" || !Array.isArray(pending.backupCodes))
+      throw new Error("Expected real enrollment");
     const backups = pending.backupCodes;
-    const before = await systemPoolFor(systemEnv()).query<{ enabled: boolean }>(`SELECT "twoFactorEnabled" AS enabled FROM "user"`);
+    const before = await systemPoolFor(systemEnv()).query<{ enabled: boolean }>(
+      `SELECT "twoFactorEnabled" AS enabled FROM "user"`,
+    );
     expect(before.rows[0]?.enabled).toBe(false);
-    const confirmed = await post("two-factor/verify-totp", { code: enrollmentCode(pending.totpURI), trustDevice: false });
+    const confirmed = await post("two-factor/verify-totp", {
+      code: enrollmentCode(pending.totpURI),
+      trustDevice: false,
+    });
     expect(confirmed.status).toBe(200);
     jar.clear();
     const challenge = await post("sign-in/email", { email, password });
     expect(recordOf(await challenge.json()).twoFactorRedirect).toBe(true);
     const cookie = [...jar].map(([key, value]) => `${key}=${value}`).join("; ");
-    expect((await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null).toBe(true);
+    expect(
+      (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
+    ).toBe(true);
     await post("request-password-reset", { email, redirectTo: "http://app.test/sign-in" });
     const resetMail = mail.sent.find((entry) => entry.subject === "Reset your Meltiply password");
     if (!resetMail) throw new Error("Expected reset delivery");
     password = crypto.randomUUID();
     const resetToken = new URL(actionLink(resetMail)).pathname.split("/").pop();
-    expect((await post("reset-password", { token: resetToken, newPassword: password })).status).toBe(200);
+    expect(
+      (await post("reset-password", { token: resetToken, newPassword: password })).status,
+    ).toBe(200);
     // A challenge issued before recovery cannot be upgraded into a fresh session.
-    expect((await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false })).status).toBe(401);
+    expect(
+      (await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false }))
+        .status,
+    ).toBe(401);
     jar.clear();
-    expect(recordOf(await (await post("sign-in/email", { email, password })).json()).twoFactorRedirect).toBe(true);
-    const recovered = await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false });
+    expect(
+      recordOf(await (await post("sign-in/email", { email, password })).json()).twoFactorRedirect,
+    ).toBe(true);
+    const recovered = await post("two-factor/verify-backup-code", {
+      code: backups[0],
+      trustDevice: false,
+    });
     expect(recovered.status).toBe(200);
     jar.clear();
     await post("sign-in/email", { email, password });
-    expect((await post("two-factor/verify-totp", { code: enrollmentCode(pending.totpURI), trustDevice: false })).status).toBe(200);
-    const invalidPassword = await post("two-factor/generate-backup-codes", { password: crypto.randomUUID() });
+    expect(
+      (
+        await post("two-factor/verify-totp", {
+          code: enrollmentCode(pending.totpURI),
+          trustDevice: false,
+        })
+      ).status,
+    ).toBe(200);
+    const invalidPassword = await post("two-factor/generate-backup-codes", {
+      password: crypto.randomUUID(),
+    });
     expect(invalidPassword.status).toBeGreaterThanOrEqual(400);
     jar.clear();
     await post("sign-in/email", { email, password });
-    expect((await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false })).status).toBeGreaterThanOrEqual(400);
-    expect((await post("two-factor/verify-backup-code", { code: backups[1], trustDevice: false })).status).toBe(200);
+    expect(
+      (await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false }))
+        .status,
+    ).toBeGreaterThanOrEqual(400);
+    expect(
+      (await post("two-factor/verify-backup-code", { code: backups[1], trustDevice: false }))
+        .status,
+    ).toBe(200);
     const regenerated = await post("two-factor/generate-backup-codes", { password });
     expect(regenerated.status).toBe(200);
     const currentCookie = [...jar].map(([key, value]) => `${key}=${value}`).join("; ");
-    const currentSession = await (await authGetWithCookie(auth, "/api/auth/get-session", currentCookie)).json();
+    const currentSession = await (
+      await authGetWithCookie(auth, "/api/auth/get-session", currentCookie)
+    ).json();
     expect(currentSession !== null).toBe(true);
     jar.clear();
     await post("sign-in/email", { email, password });
-    expect((await post("two-factor/verify-backup-code", { code: backups[2], trustDevice: false })).status).toBeGreaterThanOrEqual(400);
+    expect(
+      (await post("two-factor/verify-backup-code", { code: backups[2], trustDevice: false }))
+        .status,
+    ).toBeGreaterThanOrEqual(400);
     const replacement = recordOf(await regenerated.json()).backupCodes;
     if (!Array.isArray(replacement)) throw new Error("Expected replacement codes");
-    expect((await post("two-factor/verify-backup-code", { code: replacement[0], trustDevice: false })).status).toBe(200);
+    expect(
+      (await post("two-factor/verify-backup-code", { code: replacement[0], trustDevice: false }))
+        .status,
+    ).toBe(200);
     expect((await post("two-factor/disable", { password })).status).toBe(200);
     jar.clear();
     const signedIn = await post("sign-in/email", { email, password });
@@ -793,19 +909,30 @@ describe("shared credential and delivery budgets", () => {
   it("shares normalized credential and delivery budgets across independent callers", async () => {
     const env = localTestEnv(recordingMailBinding());
     const email = `${crypto.randomUUID()}@example.test`;
-    const request = (index: number) => new Request(`${baseURL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "CF-Connecting-IP": `2001:db8:${email.slice(0, 4)}::${index}` },
-      body: JSON.stringify({ email: index % 2 ? email.toUpperCase() : email, password: crypto.randomUUID() }),
-    });
-    const admitted = await Promise.all(Array.from({ length: 10 }, (_, index) =>
-      checkAuthRateLimit({ ...env }, "sign-in", request(index))));
+    const request = (index: number) =>
+      new Request(`${baseURL}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": `2001:db8:${email.slice(0, 4)}::${index}`,
+        },
+        body: JSON.stringify({
+          email: index % 2 ? email.toUpperCase() : email,
+          password: crypto.randomUUID(),
+        }),
+      });
+    const admitted = await Promise.all(
+      Array.from({ length: 10 }, (_, index) =>
+        checkAuthRateLimit({ ...env }, "sign-in", request(index)),
+      ),
+    );
     expect(admitted.every((result) => result.status === "ok")).toBe(true);
     const blocked = await checkAuthRateLimit({ ...env }, "sign-in", request(11));
     expect(blocked.status).toBe("limited");
     expect(blocked.retryAfterSeconds! > 0 && blocked.retryAfterSeconds! <= 600).toBe(true);
     const sends = [];
-    for (let index = 20; index < 26; index++) sends.push(await checkAuthRateLimit({ ...env }, "send-verification-email", request(index)));
+    for (let index = 20; index < 26; index++)
+      sends.push(await checkAuthRateLimit({ ...env }, "send-verification-email", request(index)));
     expect(sends.map((result) => result.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "limited"]);
   });
 });

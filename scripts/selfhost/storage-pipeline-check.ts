@@ -16,7 +16,7 @@ import { systemPoolFor as automationPoolFor } from "../../workers/automation/src
 import type { AutomationEnv } from "../../workers/automation/src/env";
 import { runRetention } from "../../workers/automation/src/retention";
 import { createProviderMediaResolver } from "../../workers/automation/src/provider-media";
-import { processNativeJob } from "./processor-client";
+import { processNativeJob } from "../lib/processor-client";
 
 const organizationId = "20000000-0000-4000-8000-000000000001";
 const subject = "auth_user_local_alpha";
@@ -42,16 +42,25 @@ const runtime = new Miniflare(
             s3Credentials: { accessKeyId: "pipeline-access", secretAccessKey: "pipeline-secret" },
           },
         },
+        hyperdrives: {
+          DB_AUTHENTICATED:
+            "postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable",
+          DB_SYSTEM:
+            "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
+        },
         script: "export default { fetch() { return new Response('ok'); } };",
       },
     ],
   }),
 );
 await runtime.ready;
-const bucket = await runtime.getR2Bucket("ASSETS");
-const providers: ObjectStorageEnv[] = [
+const bindings =
+  await runtime.getBindings<
+    Required<Pick<ApiWorkerEnv, "ASSETS" | "DB_AUTHENTICATED" | "DB_SYSTEM">>
+  >("pipeline-r2");
+const providers = [
   {
-    ASSETS: bucket as unknown as NonNullable<ObjectStorageEnv["ASSETS"]>,
+    ASSETS: bindings.ASSETS,
     R2_ACCOUNT_ID: "pipeline",
     R2_ACCESS_KEY_ID: "pipeline-access",
     R2_SECRET_ACCESS_KEY: "pipeline-secret",
@@ -66,37 +75,41 @@ const providers: ObjectStorageEnv[] = [
     S3_BUCKET: "meltiply-assets",
     S3_ENDPOINT: endpoint,
   },
-];
+] satisfies ObjectStorageEnv[];
 // Pools are cached by connection settings across both provider iterations.
 const pools = new Set<Pool>();
 
+/**
+ * Adapts asset-scoped processor lookup to the live private native engine.
+ * IDs retain stable name/equality semantics; process returns the production RPC outcome.
+ */
+const mediaProcessor = {
+  idFromName: (name: string): DurableObjectId => ({
+    name,
+    toString: () => name,
+    equals: (other) => other.toString() === name,
+  }),
+  get: () => ({
+    process: (job: Parameters<typeof processNativeJob>[0]) => processNativeJob(job, token),
+  }),
+} satisfies NonNullable<AutomationEnv["MEDIA_PROCESSOR"]>;
+
 try {
   for (const provider of providers) {
-    const storageEnv = { ...provider, ENVIRONMENT: "test" };
+    const storageEnv = { ...provider, ENVIRONMENT: "test" } satisfies Partial<ApiWorkerEnv>;
     const env = {
       ...storageEnv,
       ALLOWED_ORIGINS: "http://localhost:3000",
       VERSION: "storage-pipeline-check",
       TOKEN_ENCRYPTION_KEY: "storage-pipeline-private-media-secret",
       PUBLIC_API_URL: "https://api.storage.example.test",
-      DB_AUTHENTICATED: {
-        connectionString:
-          "postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable",
-      },
-      DB_SYSTEM: {
-        connectionString:
-          "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
-      },
-    } as ApiWorkerEnv;
+      DB_AUTHENTICATED: bindings.DB_AUTHENTICATED,
+      DB_SYSTEM: bindings.DB_SYSTEM,
+    } satisfies ApiWorkerEnv;
     const automationEnv = {
       ...env,
-      MEDIA_PROCESSOR: {
-        idFromName: (name: string) => ({ name }),
-        get: () => ({
-          process: (job: Parameters<typeof processNativeJob>[0]) => processNativeJob(job, token),
-        }),
-      },
-    } as unknown as AutomationEnv;
+      MEDIA_PROCESSOR: mediaProcessor,
+    } satisfies AutomationEnv;
     const app = createApiApp({
       resolveActor: async () => ({
         authUserId: subject,

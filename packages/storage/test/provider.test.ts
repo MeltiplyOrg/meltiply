@@ -97,6 +97,36 @@ describe("createObjectStoreFromEnv", () => {
       }),
     ).not.toThrow();
   });
+
+  it.each(["us/east-1", "us east-1", "US-EAST-1"])(
+    "rejects malformed S3 region %s before issuing storage capabilities",
+    (region) => {
+      const env = { ...s3Env, S3_REGION: region };
+      expect(() => createObjectStoreFromEnv(env)).toThrow("S3_REGION");
+      expect(() => createObjectUrlSignerFromEnv(env)).toThrow("S3_REGION");
+      expect(objectStorageBindings(env).filter((binding) => !binding.ready)).toEqual([
+        { name: "S3_REGION", ready: false },
+      ]);
+    },
+  );
+
+  it.each([
+    [undefined, "us-east-1"],
+    ["  ", "us-east-1"],
+    [" eu-west-1 ", "eu-west-1"],
+  ])("signs with the resolved S3 region %s", async (configured, expected) => {
+    const env = { ...s3Env, S3_REGION: configured };
+    const signer = createObjectUrlSignerFromEnv(env);
+    const url = new URL(
+      await signer.signDownload({ key: "org/asset/original", expiresInSeconds: 60 }),
+    );
+    expect(url.searchParams.get("X-Amz-Credential")?.split("/").slice(2)).toEqual([
+      expected,
+      "s3",
+      "aws4_request",
+    ]);
+    expect(objectStorageBindings(env).filter((binding) => !binding.ready)).toEqual([]);
+  });
 });
 
 describe("objectStorageBindings", () => {
@@ -122,6 +152,7 @@ describe("objectStorageBindings", () => {
       { name: "S3_BUCKET", ready: true },
       { name: "S3_ENDPOINT", ready: true },
       { name: "S3_FORCE_PATH_STYLE", ready: true },
+      { name: "S3_REGION", ready: true },
       { name: "S3_SECRET_ACCESS_KEY", ready: true },
     ]);
     expect(missing({ ...s3Env, S3_SECRET_ACCESS_KEY: "" })).toEqual(["S3_SECRET_ACCESS_KEY"]);

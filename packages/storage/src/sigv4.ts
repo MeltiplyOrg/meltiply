@@ -104,12 +104,12 @@ function hex(value: ArrayBuffer): string {
 }
 
 /**
- * Computes the SHA-256 hex digest of raw bytes using WebCrypto.
+ * Computes the SHA-256 hex digest of raw, non-shared bytes using WebCrypto.
  *
- * @param value - Bytes to hash.
+ * @param value - Buffer or bounded byte view to hash without copying its payload.
  * @returns 64-character lowercase hex digest.
  */
-async function sha256Bytes(value: ArrayBuffer): Promise<string> {
+async function sha256Bytes(value: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<string> {
   return hex(await crypto.subtle.digest("SHA-256", value));
 }
 
@@ -434,11 +434,11 @@ export class SigV4Signer {
    * URL rather than a caller-supplied header, so a signed request can never be
    * replayed against another origin.
    *
-   * @param input - Method, object key, query map, extra headers, and optional raw body.
+   * @param input - Method, object key, query map, extra headers, and optional non-shared body view.
    * @returns Absolute request URL plus the complete signed header set.
    */
   prepareRequest(input: {
-    body?: Uint8Array | null;
+    body?: Uint8Array<ArrayBuffer> | null;
     headers?: Readonly<Record<string, string>>;
     key: string;
     method: string;
@@ -470,20 +470,20 @@ export class SigV4Signer {
    * Signs the supplied URL and headers, deriving every SigV4 input from them.
    *
    * @param url - Absolute request URL, whose query is canonicalized as given.
-   * @param input - Method, extra headers, and optional raw body.
+   * @param input - Method, extra headers, and optional non-shared body view.
    * @returns Absolute request URL plus the complete signed header set.
    */
   async #sign(
     url: URL,
     input: {
-      body?: Uint8Array | null;
+      body?: Uint8Array<ArrayBuffer> | null;
       headers?: Readonly<Record<string, string>>;
       method: string;
     },
   ): Promise<SignedRequest> {
     const now = timestamp(this.#now());
     const payloadHash = input.body
-      ? await sha256Bytes(input.body.slice().buffer)
+      ? await sha256Bytes(input.body)
       : await sha256Bytes(new ArrayBuffer(0));
     const headers = new Map<string, string>();
     for (const [rawName, rawValue] of Object.entries(input.headers ?? {})) {

@@ -44,6 +44,7 @@ export interface ObjectStorageEnv {
   S3_ENDPOINT?: string;
   /** `true` (default) addresses the bucket in the path, `false` in the host. */
   S3_FORCE_PATH_STYLE?: string;
+  /** Lowercase letters, digits, and hyphens; defaults to `us-east-1`. */
   S3_REGION?: string;
   S3_SECRET_ACCESS_KEY?: string;
 }
@@ -90,6 +91,22 @@ function forcePathStyle(value: string | undefined): boolean {
 }
 
 /**
+ * Parses an optional S3 signing region without allowing credential-scope separators.
+ *
+ * @param value - Raw `S3_REGION`; unset or blank uses the signer's default.
+ * @returns Trimmed region, or undefined to retain the default.
+ * @throws {TypeError} When a nonblank value contains anything except lowercase letters, digits, or hyphens.
+ */
+function s3Region(value: string | undefined): string | undefined {
+  const region = value?.trim();
+  if (!region) return undefined;
+  if (!/^[a-z0-9-]+$/.test(region)) {
+    throw new TypeError("S3_REGION must contain only lowercase letters, digits, and hyphens");
+  }
+  return region;
+}
+
+/**
  * Validates the S3 settings and returns them as signer options.
  *
  * @param env - Worker environment bindings carrying the S3 settings.
@@ -111,7 +128,7 @@ function s3SignerOptions(
       "S3 object storage requires S3_ACCESS_KEY_ID, S3_BUCKET, S3_ENDPOINT, and S3_SECRET_ACCESS_KEY",
     );
   }
-  const region = env.S3_REGION?.trim();
+  const region = s3Region(env.S3_REGION);
   return {
     accessKeyId,
     allowInsecureEndpoint,
@@ -175,10 +192,10 @@ export function createObjectStoreFromEnv(env: ObjectStorageEnv): ConfiguredObjec
  * reporting ready while every asset request fails.
  *
  * Readiness is semantic, not mere presence: `S3_ENDPOINT` is ready only when it
- * is an origin the signer would accept, and `S3_FORCE_PATH_STYLE` only when it
- * is a boolean, so the probe agrees with `createObjectStoreFromEnv` rather than
- * contradicting it. The R2 list keeps the historical binding names, which is
- * what makes an existing deployment's readiness output unchanged.
+ * is an origin the signer would accept, `S3_FORCE_PATH_STYLE` must parse as a
+ * boolean, and `S3_REGION` must be safe to include in a signing scope. The probe
+ * agrees with `createObjectStoreFromEnv` rather than contradicting it. The R2
+ * list keeps the historical binding names and readiness output unchanged.
  *
  * @param env - Worker environment bindings.
  * @returns One entry per binding the selected provider requires.
@@ -193,6 +210,7 @@ export function objectStorageBindings(
       { name: "S3_BUCKET", ready: Boolean(env.S3_BUCKET?.trim()) },
       { name: "S3_ENDPOINT", ready: isUsableS3Endpoint(env) },
       { name: "S3_FORCE_PATH_STYLE", ready: isUsablePathStyle(env) },
+      { name: "S3_REGION", ready: isUsableS3Region(env) },
       { name: "S3_SECRET_ACCESS_KEY", ready: Boolean(env.S3_SECRET_ACCESS_KEY?.trim()) },
     ];
   }
@@ -239,6 +257,21 @@ function isUsableS3Endpoint(env: ObjectStorageEnv): boolean {
 function isUsablePathStyle(env: ObjectStorageEnv): boolean {
   try {
     forcePathStyle(env.S3_FORCE_PATH_STYLE);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reports whether the optional region can form a valid SigV4 credential scope.
+ *
+ * @param env - Worker environment bindings.
+ * @returns True when `S3_REGION` is absent, blank, or valid.
+ */
+function isUsableS3Region(env: ObjectStorageEnv): boolean {
+  try {
+    s3Region(env.S3_REGION);
     return true;
   } catch {
     return false;

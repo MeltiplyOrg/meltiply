@@ -72,14 +72,20 @@ function xmlText(xml: string, tag: string): string | null {
  * Converts a multipart part payload into the bytes an S3 part upload carries.
  *
  * @param value - ArrayBuffer, typed-array view, or Blob supplied by the caller.
- * @returns The underlying bytes of the value.
+ * @returns A bounded non-shared byte view; only shared backing storage is copied.
  */
-async function toBytes(value: ArrayBuffer | ArrayBufferView | Blob): Promise<Uint8Array> {
+async function toBytes(
+  value: ArrayBuffer | ArrayBufferView | Blob,
+): Promise<Uint8Array<ArrayBuffer>> {
   if (value instanceof Blob) {
     return new Uint8Array(await value.arrayBuffer());
   }
   if (ArrayBuffer.isView(value)) {
-    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    if (value.buffer instanceof ArrayBuffer) {
+      return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
+    // WebCrypto and fetch require non-shared storage; normalize it once here.
+    return new Uint8Array(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
   }
   return new Uint8Array(value);
 }
@@ -248,10 +254,10 @@ export class S3ObjectStore extends EffectObjectStore {
    *
    * `host` is dropped from the wire headers because the runtime derives it from
    * the URL, while the signed header block still contains the value the origin
-   * will see.
+   * will see. The bounded, non-shared payload view is hashed and sent without copying.
    */
   async #send(input: {
-    body?: Uint8Array;
+    body?: Uint8Array<ArrayBuffer>;
     headers?: Readonly<Record<string, string>>;
     key: string;
     method: string;
@@ -270,7 +276,7 @@ export class S3ObjectStore extends EffectObjectStore {
       return await this.#fetch(signed.url.toString(), {
         headers,
         method: input.method,
-        ...(input.body ? { body: input.body.slice().buffer } : {}),
+        ...(input.body ? { body: input.body } : {}),
       });
     } catch (cause) {
       // Fetch uses TypeError for transport failures; the shared classifier

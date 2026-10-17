@@ -223,6 +223,21 @@ describe("S3ObjectStore copy", () => {
 });
 
 describe("S3ObjectStore multipart uploads", () => {
+  it.each(["typed array", "DataView"])("signs and uploads only a bounded %s", async (kind) => {
+    const { requests, store } = fakeOrigin(
+      () => new Response(null, { headers: { etag: '"part-etag"' } }),
+    );
+    const bytes = new Uint8Array([0, 97, 98, 99, 0]);
+    const value = kind === "DataView" ? new DataView(bytes.buffer, 1, 3) : bytes.subarray(1, 4);
+
+    await store.resumeMultipartUpload("org/asset/clip.mp4", "upload-9").uploadPart(1, value);
+
+    expect(requests[0]?.body).toBe("abc");
+    expect(requests[0]?.headers.get("x-amz-content-sha256")).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
+  });
+
   it("drives create, part, complete, and abort against the S3 protocol", async () => {
     const { requests, store } = fakeOrigin((_request, index) => {
       if (index === 0) {

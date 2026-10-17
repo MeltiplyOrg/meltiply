@@ -31,15 +31,15 @@ export interface AutomationEnv {
   INSTAGRAM_LIVE_ACCEPTED?: string;
   INSTAGRAM_PUBLISH_QUEUE?: Queue<unknown>;
   /**
-   * Private processor lookup and RPC surface; excludes stub lifecycle methods
-   * whose class-specific types make full DurableObjectNamespace types invariant.
-   * The engine remains reachable only through this binding.
+   * Private processor lookup and awaited process outcome. Excludes stub lifecycle
+   * and promise-pipelining APIs, so both Durable Object RPC and the self-hosted
+   * engine transport satisfy the same contract without assertions.
    */
   MEDIA_PROCESSOR?: {
     /** Maps the asset-scoped processor name to its stable Durable Object ID. */
     idFromName(name: string): DurableObjectId;
-    /** Resolves the ID to the typed process RPC without exposing container internals. */
-    get(id: DurableObjectId): Pick<DurableObjectStub<MediaProcessorStub>, "process">;
+    /** Resolves the ID to the awaited process contract without exposing transport internals. */
+    get(id: DurableObjectId): Pick<MediaProcessorStub, "process">;
   };
   /** Verified public API origin; remote-ingest media URLs are signed under its `/api/v1/provider-media/` route. */
   PUBLIC_API_URL?: string;

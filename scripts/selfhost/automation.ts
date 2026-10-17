@@ -5,7 +5,7 @@ import type {
   NativeProcessorJob,
   MediaProcessorRpcOutcome,
 } from "../../workers/automation/src/native-processor";
-import { processNativeJob } from "./processor-client";
+import { processNativeJob } from "../lib/processor-client";
 
 export { ReplyWorkflow } from "../../workers/automation/src/index";
 

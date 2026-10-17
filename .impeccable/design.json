@@ -167,7 +167,7 @@
       },
       {
         "name": "The Gliding Highlight Rule",
-        "body": "Rail rows never paint their own hover fill. One shared pill (SidebarGlideHighlight) springs to the hovered row and fades out on leave, while the row keeps its labels, focus ring, and selected surface above it.",
+        "body": "Rail rows never paint their own hover fill. One shared pill (SidebarGlideHighlight) springs to the hovered row and fades out on leave, in the workspace rail and the Settings section rail alike, while the row keeps its labels, focus ring, and selected surface above it.",
         "section": "components"
       }
     ],

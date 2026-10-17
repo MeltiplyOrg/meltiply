@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   LogOut,
   Languages,
@@ -11,6 +12,7 @@ import {
 import { useSearchParams } from "react-router";
 import { Button } from "@meltiply/ui/button";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
+import { SidebarGlideHighlight } from "@meltiply/ui/sidebar-glide-highlight";
 import { cn } from "@meltiply/ui/utils";
 import { useWorkspaceSignOut } from "@/hooks/use-workspace-sign-out";
 import { useWorkspace } from "@/context/workspace.context";
@@ -37,6 +39,10 @@ function PreviewLines() {
  * and account operations. Section URLs are reloadable; language/theme delegate
  * to existing consent-aware providers. Identity is read-only and security keeps
  * password reauthentication. No demo billing, teams, or fake controls survive.
+ *
+ * The section rail marks its rows as `data-sidebar-item` targets so the shared
+ * `SidebarGlideHighlight` pill owns the hover background here too, exactly as in
+ * the workspace rail.
  */
 export default function WorkspaceSettings() {
   const { requestedTheme, setTheme } = useTheme();
@@ -75,23 +81,33 @@ export default function WorkspaceSettings() {
   const section = SECTION_IDS.find((id) => id === requestedSection) ?? "appearance";
   const current = sections[section];
   const handleSignOut = useWorkspaceSignOut();
+  const navRef = useRef<HTMLElement | null>(null);
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-surface md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
       <nav
+        ref={navRef}
         aria-label={t("Settings sections")}
-        className="flex gap-1 overflow-x-auto border-b border-line bg-surface px-3 py-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-2.5 md:py-5"
+        className="relative flex gap-1 overflow-x-auto border-b border-line bg-surface px-3 py-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-2.5 md:py-5"
       >
+        {/* The section rail reuses the rail pill: a 12px snap radius crosses the
+            4px row gap without lighting a row from the neighbouring content. */}
+        <SidebarGlideHighlight containerRef={navRef} snapThreshold={12} />
         <span className="hidden px-2 pb-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 md:block">
           {t("Settings")}
         </span>
         {SECTION_IDS.map((id) => {
           const Icon = sections[id].icon;
+          const isCurrent = section === id;
           return (
             <Button
               key={id}
-              variant={section === id ? "secondary" : "ghost"}
-              className="h-8 shrink-0 justify-start px-2 text-(length:--font-size-control) font-normal"
-              aria-current={section === id ? "page" : undefined}
+              variant={isCurrent ? "secondary" : "ghost"}
+              data-sidebar-item=""
+              className={cn(
+                "relative z-10 h-8 shrink-0 justify-start px-2 text-(length:--font-size-control) font-normal",
+                isCurrent ? "hover:bg-secondary" : "hover:bg-transparent",
+              )}
+              aria-current={isCurrent ? "page" : undefined}
               onClick={() => setSearchParams({ section: id })}
             >
               <Icon className="size-3.5" />

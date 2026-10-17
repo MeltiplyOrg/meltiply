@@ -12,7 +12,7 @@ Keep inputs, buttons, and filters mounted as labels change. Preserve drafts, sel
 
 Posts and Channels are single destinations. The Posts toolbar orders Table, Calendar, Grid. Top-bar jump search finds supported destinations and loaded Brand Profiles; collection search and the field-row Filter builder narrow route data. Profiles are scope, not sidebar navigation.
 
-The rail marks every row as a glide target and lets `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`) own the hover background: one pill springs to the hovered row and fades out on leave, so rows do not paint their own hover fill. Rows stay above the pill, keyboard focus rings and the selected surface remain the row's own paint, and the public docs rail reuses the same component with its nested-scroll viewport.
+The rail and the Settings section rail mark every row as a glide target and let `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`) own the hover background: one pill springs to the hovered row and fades out on leave, so rows do not paint their own hover fill. Rows stay above the pill, keyboard focus rings and the selected surface remain the row's own paint, and the public docs rail reuses the same component with its nested-scroll viewport.
 
 The Filter builder adds supported equality rows through field chips. Adding an empty row does not change results. Removing a row clears its value; Clear all resets the builder. Nested portalled controls stay inside the disclosure interaction and keyboard focus returns to a useful control.
 

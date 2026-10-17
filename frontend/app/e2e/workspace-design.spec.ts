@@ -299,6 +299,21 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await waitForWorkspace(page);
   await page.locator("aside").getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page).toHaveURL(/\/settings(?:\?|$)/);
+  const settingsNav = page.getByRole("navigation", { name: "Settings sections", exact: true });
+  const settingsGlide = settingsNav.locator("[data-glide-highlight]");
+  const settingsRow = (name: string) => settingsNav.getByRole("button", { name, exact: true });
+  await page.mouse.move(1200, 500);
+  await expect(settingsGlide).toHaveCSS("opacity", "0");
+  await settingsRow("Security").hover();
+  await expect(settingsGlide).toHaveCSS("opacity", "1");
+  const securityGlideBox = await settingsGlide.boundingBox();
+  expect(securityGlideBox?.y).toBeCloseTo((await settingsRow("Security").boundingBox())?.y ?? 0, 0);
+  await settingsRow("Language").hover();
+  await expect
+    .poll(async () => (await settingsGlide.boundingBox())?.y ?? 0)
+    .toBeLessThan((securityGlideBox?.y ?? 0) - 1);
+  await page.mouse.move(1200, 500);
+  await expect(settingsGlide).toHaveCSS("opacity", "0");
   await page.emulateMedia({ colorScheme: "dark" });
   await page.getByRole("button", { name: "System", exact: true }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);

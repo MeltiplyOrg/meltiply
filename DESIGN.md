@@ -154,7 +154,7 @@ The rail uses quiet text and neutral selected rows, not accent-filled navigation
 
 **The One Icon Column Rule.** Every rail row reserves the same 16px leading slot. A larger 24px identity avatar centers inside that slot instead of widening it, so icons, labels, and the account name share one axis.
 
-**The Gliding Highlight Rule.** Rail rows never paint their own hover fill. One shared pill (`SidebarGlideHighlight`) springs to the hovered row and fades out on leave, while the row keeps its labels, focus ring, and selected surface above it.
+**The Gliding Highlight Rule.** Rail rows never paint their own hover fill. One shared pill (`SidebarGlideHighlight`) springs to the hovered row and fades out on leave, in the workspace rail and the Settings section rail alike, while the row keeps its labels, focus ring, and selected surface above it.
 
 ### Filters and tooltips
 

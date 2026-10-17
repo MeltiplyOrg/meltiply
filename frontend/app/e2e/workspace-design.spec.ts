@@ -106,22 +106,28 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("sidebar-hover-highlight-desktop.png"),
     clip: { x: 0, y: 0, width: 260, height: 320 },
   });
-  await page.mouse.move(1200, 500);
-  // The pill fades out over its own duration instead of snapping away.
-  const railFade = await page.evaluate(async () => {
-    const pill = document.querySelector<HTMLElement>("aside [data-glide-highlight]");
-    if (!pill) throw new Error("Rail highlight is missing");
-    const read = () => Number(getComputedStyle(pill).opacity);
-    const first = read();
-    const { promise, resolve } = Promise.withResolvers<void>();
-    setTimeout(resolve, 60);
-    await promise;
-    return { first, later: read() };
+  // The pill fades out over its own duration instead of snapping away. Sampling
+  // starts inside the page on the container's pointer leave: a round trip would
+  // miss the first frames of a 200ms fade.
+  await page.evaluate(() => {
+    const rail = document.querySelector("aside");
+    const samples: number[] = [];
+    Reflect.set(window, "__railFadeSamples", samples);
+    rail?.addEventListener("pointerleave", () => {
+      const read = () => {
+        const pill = document.querySelector<HTMLElement>("aside [data-glide-highlight]");
+        if (pill) samples.push(Number(getComputedStyle(pill).opacity));
+      };
+      const timer = setInterval(read, 30);
+      setTimeout(() => clearInterval(timer), 300);
+    });
   });
-  expect(railFade.first).toBeGreaterThan(0);
-  expect(railFade.first).toBeLessThan(1);
-  expect(railFade.later).toBeLessThan(railFade.first);
+  await page.mouse.move(1200, 500);
   await expect(railGlide).toHaveCSS("opacity", "0");
+  const railFade = await page.evaluate(() => Reflect.get(window, "__railFadeSamples") as number[]);
+  expect(railFade.length).toBeGreaterThan(2);
+  expect(railFade[0]).toBeLessThan(1);
+  expect(Math.min(...railFade)).toBeLessThan(0.5);
   const accountTrigger = page.getByRole("button", { name: "Account menu", exact: true });
   const footerSlots = await Promise.all(
     [
@@ -252,11 +258,60 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(
     inspector.getByText("Studio update — ready for the next publishing window.", { exact: true }),
   ).toBeVisible();
+  // The record drawer steps 48px in from its edge instead of fading in place.
+  const panelEntrance = await page.evaluate(() => {
+    const panel = document.querySelector("[data-side-dialog]");
+    return (panel?.getAnimations() ?? []).map((animation) => {
+      const frames = (animation.effect as KeyframeEffect | null)?.getKeyframes?.() ?? [];
+      return {
+        name: (animation as CSSAnimation).animationName,
+        from: String(frames[0]?.translate ?? ""),
+      };
+    });
+  });
+  expect(
+    panelEntrance.some(
+      (animation) => animation.name === "side-dialog-slide-in" && animation.from.startsWith("48px"),
+    ),
+  ).toBe(true);
+  // The body rises behind the panel with the reference's stagger.
+  const bodyRise = await page.evaluate(() => {
+    const body = document.querySelector("[data-side-dialog-body]");
+    return Array.from(body?.children ?? [])
+      .slice(0, 3)
+      .map((child) => {
+        const animation = child.getAnimations()[0] as CSSAnimation | undefined;
+        return {
+          name: animation?.animationName ?? "",
+          delay: animation?.effect?.getTiming?.().delay ?? -1,
+        };
+      });
+  });
+  expect(bodyRise[0]).toEqual({ name: "side-dialog-rise-in", delay: 0 });
+  expect(bodyRise[1]?.name).toBe("side-dialog-rise-in");
+  expect(bodyRise[1]?.delay ?? 0).toBeGreaterThan(0);
+  await page.screenshot({
+    path: testInfo.outputPath("post-drawer-sliding-in-desktop.png"),
+    fullPage: true,
+  });
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("post-drawer-desktop.png"),
     fullPage: true,
   });
+  // The edge inspector is non-modal: another record is inspectable in place, so
+  // the click must reach the row instead of being swallowed by a scrim. Aim left
+  // of the panel, which overlaps the right of the row.
+  const inspectAnotherPost = async (caption: string) => {
+    await page
+      .getByRole("row")
+      .filter({ hasText: caption })
+      .click({ position: { x: 220, y: 20 } });
+    await expect(inspector.getByText(caption, { exact: true })).toBeVisible();
+  };
+  await inspectAnotherPost("Second draft — selection review.");
+  await expect(inspector).toBeVisible();
+  await inspectAnotherPost("Studio update — ready for the next publishing window.");
   await inspector.getByRole("button", { name: "Expand panel", exact: true }).click();
   await page.screenshot({
     animations: "disabled",
@@ -264,9 +319,28 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     fullPage: true,
   });
   await inspector.getByRole("button", { name: "Restore side panel", exact: true }).click();
+  // Record the dismissal from inside the page: Radix unmounts the panel when the
+  // exit animation ends, so the event is the only durable proof it played.
+  await page.evaluate(() => {
+    const panel = document.querySelector("[data-side-dialog]");
+    const exits: string[] = [];
+    Reflect.set(window, "__sideDialogExits", exits);
+    panel?.addEventListener("animationstart", (event) => {
+      const { animationName } = event as AnimationEvent;
+      if (animationName !== "side-dialog-slide-out") return;
+      const running = panel
+        .getAnimations()
+        .find((animation) => (animation as CSSAnimation).animationName === animationName);
+      const frames = (running?.effect as KeyframeEffect | null)?.getKeyframes?.() ?? [];
+      exits.push(`${animationName}:${String(frames.at(-1)?.translate ?? "")}`);
+    });
+  });
   await page.keyboard.press("Escape");
   await expect(inspector).toBeHidden();
   await expect(inspectTrigger).toBeFocused();
+  const exits = await page.evaluate(() => Reflect.get(window, "__sideDialogExits") as string[]);
+  expect(exits.length).toBe(1);
+  expect(exits[0]?.startsWith("side-dialog-slide-out:48px")).toBe(true);
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: "Studio update" }));
   await expect(page.getByPlaceholder(/what do you want to publish/i)).toHaveValue(
     "Studio update — ready for the next publishing window.",
@@ -395,23 +469,29 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("settings-hover-highlight-desktop.png"),
     clip: { x: 240, y: 0, width: 280, height: 480 },
   });
-  await page.mouse.move(1200, 500);
-  const settingsFade = await page.evaluate(async () => {
-    const pill = document.querySelector<HTMLElement>(
-      '[aria-label="Settings sections"] [data-glide-highlight]',
-    );
-    if (!pill) throw new Error("Settings highlight is missing");
-    const read = () => Number(getComputedStyle(pill).opacity);
-    const first = read();
-    const { promise, resolve } = Promise.withResolvers<void>();
-    setTimeout(resolve, 60);
-    await promise;
-    return { first, later: read() };
+  await page.evaluate(() => {
+    const nav = document.querySelector('[aria-label="Settings sections"]');
+    const samples: number[] = [];
+    Reflect.set(window, "__settingsFadeSamples", samples);
+    nav?.addEventListener("pointerleave", () => {
+      const read = () => {
+        const pill = document.querySelector<HTMLElement>(
+          '[aria-label="Settings sections"] [data-glide-highlight]',
+        );
+        if (pill) samples.push(Number(getComputedStyle(pill).opacity));
+      };
+      const timer = setInterval(read, 30);
+      setTimeout(() => clearInterval(timer), 300);
+    });
   });
-  expect(settingsFade.first).toBeGreaterThan(0);
-  expect(settingsFade.first).toBeLessThan(1);
-  expect(settingsFade.later).toBeLessThan(settingsFade.first);
+  await page.mouse.move(1200, 500);
   await expect(settingsGlide).toHaveCSS("opacity", "0");
+  const settingsFade = await page.evaluate(
+    () => Reflect.get(window, "__settingsFadeSamples") as number[],
+  );
+  expect(settingsFade.length).toBeGreaterThan(2);
+  expect(settingsFade[0]).toBeLessThan(1);
+  expect(Math.min(...settingsFade)).toBeLessThan(0.5);
   await page.emulateMedia({ colorScheme: "dark" });
   await page.getByRole("button", { name: "System", exact: true }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);

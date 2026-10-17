@@ -65,6 +65,11 @@ html.theme-changing *::after {
   --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
   /* Accelerating exit for dismissed surfaces. */
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  /* The reference drawer curve: a soft pull off the edge that settles decisively.
+     `--ease-enter` jumps most of the distance on the first frames and then creeps
+     for the rest of the duration, which reads as a slow, translucent slide; a
+     drawer and its content rise both use this curve instead. */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @keyframes dialog-popup-from-bottom {
@@ -203,6 +208,138 @@ html.theme-changing *::after {
 
 [data-dialog-backdrop][data-dialog-handoff] {
   animation: none;
+}
+
+/*
+ * Edge inspector, ported from the reference drawer: the surface steps 48px in
+ * from its edge on the drawer curve while its content rises 8px behind it with
+ * the reference's 0/40/70/100ms stagger, then the whole panel slides back out on
+ * dismissal. The expanded inspector is a centered panel by then, so it takes the
+ * reference `modalIn` pop (scale only: the panel already carries the
+ * `-translate-x-1/2` centering utility on the `translate` property and an
+ * animated `translate` would overwrite it). Phones keep the slide.
+ */
+@keyframes side-dialog-slide-in {
+  from {
+    opacity: 0;
+    translate: 48px 0;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes side-dialog-slide-out {
+  from {
+    opacity: 1;
+    translate: 0 0;
+  }
+  to {
+    opacity: 0;
+    translate: 48px 0;
+  }
+}
+
+@keyframes side-dialog-rise-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* The reference `modalIn`. It animates `transform`, not `translate`, because the
+   expanded panel keeps its centering on the `translate` property. */
+@keyframes side-dialog-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes side-dialog-pop-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
+/* The expanded scrim dims the workspace; the edge inspector leaves it clear. */
+@keyframes side-dialog-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes side-dialog-scrim-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+[data-side-dialog][data-state="open"] {
+  animation: side-dialog-slide-in 340ms var(--ease-drawer) both;
+}
+
+/* Dismissal is shorter than the entrance and carries no lingering translucency. */
+[data-side-dialog][data-state="closed"] {
+  animation: side-dialog-slide-out 180ms var(--ease-exit) both;
+}
+
+/* The rise is scoped to the open panel: Radix sets `data-state` on the panel,
+ * not on its body. The reference runs it for 380ms on its front-loaded entrance
+ * curve, which lands as a flash; the travel is spread over the drawer curve
+ * instead so each body block is catchable without the stagger feeling slow. */
+[data-side-dialog][data-state="open"] [data-side-dialog-body] > * {
+  animation: side-dialog-rise-in 460ms var(--ease-drawer) both;
+}
+
+[data-side-dialog][data-state="open"] [data-side-dialog-body] > :nth-child(2) {
+  animation-delay: 55ms;
+}
+
+[data-side-dialog][data-state="open"] [data-side-dialog-body] > :nth-child(3) {
+  animation-delay: 105ms;
+}
+
+[data-side-dialog][data-state="open"] [data-side-dialog-body] > :nth-child(n + 4) {
+  animation-delay: 150ms;
+}
+
+[data-side-dialog-scrim][data-state="open"] {
+  animation: side-dialog-scrim-in 180ms var(--ease-enter) both;
+}
+
+[data-side-dialog-scrim][data-state="closed"] {
+  animation: side-dialog-scrim-out 180ms var(--ease-exit) both;
+}
+
+@media (min-width: 40rem) {
+  [data-side-dialog][data-expanded="true"][data-state="open"] {
+    animation: side-dialog-pop-in 260ms var(--ease-enter) both;
+  }
+
+  [data-side-dialog][data-expanded="true"][data-state="closed"] {
+    animation: side-dialog-pop-out 200ms var(--ease-exit) both;
+  }
 }
 
 /* Standalone icon geometry for Astro; Tailwind utilities can still override it in the app. */

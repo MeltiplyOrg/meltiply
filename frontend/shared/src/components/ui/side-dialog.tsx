@@ -8,7 +8,10 @@ import { cn } from "@meltiply/ui/utils";
 /** Record content and real actions for the shared Gr8r-style inspection drawer. */
 export interface SideDialogProps {
   open: boolean;
-  /** Receives dismissal requests from Escape, the outside surface, or Close. */
+  /**
+   * Receives dismissal requests from Escape, Close, or the expanded scrim; the
+   * edge inspector ignores outside clicks so the workspace stays live.
+   */
   onOpenChange: (open: boolean) => void;
   /** Required accessible dialog heading, visually hidden when breadcrumb is supplied. */
   title: React.ReactNode;
@@ -26,12 +29,20 @@ export interface SideDialogProps {
 
 /**
  * Ports Gr8r's 620px edge drawer, 46px record toolbar, and optional 980px expanded
- * inspector. The normal outside surface stays clear; expanded mode dims it.
- * Phones always use the full viewport. Radix retains modal focus/scroll ownership,
- * Escape and outside dismissal. The inspection container receives initial focus
- * so a toolbar tooltip cannot consume the first Escape. Only a connected opener
- * is restored. Native body scrolling and the implemented opacity fade avoid
- * blank slide frames or duplicated page snapshots.
+ * inspector. The drawer is a non-modal companion, as in the reference: the
+ * workspace keeps painting and taking input, so clicking another record
+ * re-inspects it in place instead of being swallowed by a scrim. Only the
+ * expanded inspector renders a scrim, and clicking that scrim dismisses. Radix
+ * still owns Escape dismissal, the portal, and opener restoration; the
+ * inspection container receives initial focus so a toolbar tooltip cannot
+ * consume the first Escape. Keyboard focus is deliberately not trapped: this is
+ * a companion panel over live content, so Tab reaches the workspace.
+ * Native body scrolling stays untouched. Motion is the reference drawer's: the
+ * panel steps 48px in on `--ease-drawer` and slides back out on dismissal
+ * (`side-dialog-slide-*`), its body children rise 8px with the reference's
+ * stagger (`side-dialog-rise-in`), and the expanded panel pops
+ * (`side-dialog-pop-*`) because an animated `translate` would overwrite the
+ * centering utility.
  */
 export function SideDialog({
   open,
@@ -54,14 +65,32 @@ export function SideDialog({
   const expandAction = expanded ? restoreLabel : expandLabel;
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay
-          className={cn("fixed inset-0 z-50", expanded ? "bg-overlay/40" : "bg-transparent")}
+        {/* The reference scrim exists only for the expanded inspector. Radix keeps
+            each portal child mounted for its own exit animation, so `data-state`
+            is derived here and the dim fades out with the panel. */}
+        <div
+          data-side-dialog-scrim=""
+          data-state={expanded && open ? "open" : "closed"}
+          aria-hidden="true"
+          className={cn(
+            "fixed inset-0 z-50",
+            expanded ? "bg-overlay/40" : "pointer-events-none bg-transparent",
+          )}
+          onClick={() => onOpenChange(false)}
         />
         <DialogPrimitive.Content
           ref={contentRef}
+          data-side-dialog=""
+          data-expanded={expanded ? "true" : "false"}
           {...(!hasDescription ? { "aria-describedby": undefined } : {})}
+          onInteractOutside={(event) => {
+            // A companion panel ignores outside use: the workspace stays live so
+            // another record can be inspected, and the expanded scrim owns
+            // dismissal instead.
+            event.preventDefault();
+          }}
           onOpenAutoFocus={(event) => {
             const active = document.activeElement;
             previousActiveElement.current = active instanceof HTMLElement ? active : null;
@@ -75,7 +104,7 @@ export function SideDialog({
             if (active?.isConnected) active.focus();
           }}
           className={cn(
-            "fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 flex-col overflow-hidden border-l border-line bg-surface shadow-overlay outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 duration-120 motion-reduce:animate-none",
+            "fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 flex-col overflow-hidden border-l border-line bg-surface shadow-overlay outline-none",
             expanded
               ? "sm:inset-y-6 sm:left-1/2 sm:right-auto sm:h-auto sm:w-[min(980px,calc(100vw-48px))] sm:-translate-x-1/2 sm:rounded-xl sm:border"
               : "sm:max-w-155",
@@ -145,6 +174,7 @@ export function SideDialog({
           </TooltipProvider>
           <div
             data-lenis-prevent=""
+            data-side-dialog-body=""
             className={cn(
               "min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-10 pt-4 sm:px-6 sm:pb-8 sm:pt-5",
               expanded && "sm:px-12 sm:pb-10 sm:pt-7",

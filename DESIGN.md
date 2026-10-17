@@ -170,7 +170,7 @@ Canonical field-row filters share Where/and rows, equality controls, Add filter 
 
 The floating selection pill uses inverse ink, separators, a real count, supported actions, and icon-only Deselect. Select-all is checked only when every visible item is selected; partial selection remains visually unchecked.
 
-Use CenterDialog for focused work, CenterAlertDialog for destructive confirmation, and SideDialog for Post inspection. Feature content supplies real Post properties, attachments, caption, and independent Channel outcomes. Preserve keyboard dismissal, focus containment, opener restoration, and pending/error states. Do not duplicate drawer actions in a footer.
+Use CenterDialog for focused work, CenterAlertDialog for destructive confirmation, and SideDialog for Post inspection. Feature content supplies real Post properties, attachments, caption, and independent Channel outcomes. Preserve keyboard dismissal, focus containment, opener restoration, and pending/error states. Do not duplicate drawer actions in a footer. The inspector is a non-modal companion, as in the reference: the workspace stays clickable so another Post is inspected in place, and only the expanded panel dims behind a click-to-dismiss scrim. Focus containment does not apply to it — Tab leaves the panel for the workspace; retain it for the centered dialogs. The panel steps 48px in from its edge on the reference drawer curve (`--ease-drawer`) and slides back out on dismissal, its body blocks rise 8px for 460ms with a 0/55/105/150ms stagger, and the expanded panel takes the reference pop (`transform`-driven, so its centering `translate` utility survives).
 
 ## Do's and Don'ts
 

@@ -46,9 +46,9 @@ All sections share one layout; Security does not get a separate width rule.
 
 ## Dialogs and floating controls
 
-`CenterDialog` owns focused forms and search; `CenterAlertDialog` owns destructive confirmations. `SideDialog` owns large Post inspection: a 620px right-edge drawer, compact 46px toolbar, optional 980px expanded inspector, and full-viewport phone layout. Expanded mode is inset on larger screens and dims the outside surface; the normal edge drawer leaves it visually clear.
+`CenterDialog` owns focused forms and search; `CenterAlertDialog` owns destructive confirmations. `SideDialog` owns large Post inspection: a 620px right-edge drawer, compact 46px toolbar, optional 980px expanded inspector, and full-viewport phone layout. It is a non-modal companion — the workspace stays clickable so another Post is inspected in place — and only the expanded inspector dims the outside surface behind a dismissible scrim.
 
-Dialog bodies own native scrolling and keep `data-lenis-prevent` where the document's smooth-scroll controller must not intercept them. Primitives own focus, Escape, scroll lock, and opener restoration. Route content supplies context/actions rather than another frame or duplicated footer.
+Dialog bodies own native scrolling and keep `data-lenis-prevent` where the document's smooth-scroll controller must not intercept them. Primitives own Escape, scroll lock, and opener restoration; the side inspector deliberately leaves focus untrapped so the workspace stays reachable, while the centered dialogs keep containment.
 
 `BulkSelectionBar` is portalled outside clipped collection viewports. Its inverse-ink pill stays 24px above the safe-area edge and within the available viewport width.
 

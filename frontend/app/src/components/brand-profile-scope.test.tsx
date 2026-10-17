@@ -289,9 +289,12 @@ function renderChannels() {
 /**
  * Opens the profile editor through its surviving entry point: the Channels
  * directory card action. The toolbar Brand Profile picker is selection-only.
+ * Radix tabs activate on pointer down, so the tab needs a real press.
  */
 function openProfileEditorFromDirectory(name: string) {
-  fireEvent.click(screen.getByRole("tab", { name: /Brand Profiles/ }));
+  const tab = screen.getByRole("tab", { name: /Brand Profiles/ });
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
   fireEvent.click(screen.getByRole("button", { name: `Edit ${name}` }));
 }
 

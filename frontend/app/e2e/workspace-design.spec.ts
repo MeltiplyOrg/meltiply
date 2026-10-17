@@ -88,7 +88,26 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     .poll(async () => (await railGlide.boundingBox())?.y ?? 0)
     .toBeGreaterThan((postsGlideBox?.y ?? 0) + 1);
   await expect(railGlide).toHaveCSS("opacity", "1");
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("sidebar-hover-highlight-desktop.png"),
+    clip: { x: 0, y: 0, width: 260, height: 320 },
+  });
   await page.mouse.move(1200, 500);
+  // The pill fades out over its own duration instead of snapping away.
+  const railFade = await page.evaluate(async () => {
+    const pill = document.querySelector<HTMLElement>("aside [data-glide-highlight]");
+    if (!pill) throw new Error("Rail highlight is missing");
+    const read = () => Number(getComputedStyle(pill).opacity);
+    const first = read();
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, 60);
+    await promise;
+    return { first, later: read() };
+  });
+  expect(railFade.first).toBeGreaterThan(0);
+  expect(railFade.first).toBeLessThan(1);
+  expect(railFade.later).toBeLessThan(railFade.first);
   await expect(railGlide).toHaveCSS("opacity", "0");
   const accountTrigger = page.getByRole("button", { name: "Account menu", exact: true });
   const footerSlots = await Promise.all(
@@ -358,7 +377,27 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect
     .poll(async () => (await settingsGlide.boundingBox())?.y ?? 0)
     .toBeLessThan((securityGlideBox?.y ?? 0) - 1);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("settings-hover-highlight-desktop.png"),
+    clip: { x: 240, y: 0, width: 280, height: 480 },
+  });
   await page.mouse.move(1200, 500);
+  const settingsFade = await page.evaluate(async () => {
+    const pill = document.querySelector<HTMLElement>(
+      '[aria-label="Settings sections"] [data-glide-highlight]',
+    );
+    if (!pill) throw new Error("Settings highlight is missing");
+    const read = () => Number(getComputedStyle(pill).opacity);
+    const first = read();
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, 60);
+    await promise;
+    return { first, later: read() };
+  });
+  expect(settingsFade.first).toBeGreaterThan(0);
+  expect(settingsFade.first).toBeLessThan(1);
+  expect(settingsFade.later).toBeLessThan(settingsFade.first);
   await expect(settingsGlide).toHaveCSS("opacity", "0");
   await page.emulateMedia({ colorScheme: "dark" });
   await page.getByRole("button", { name: "System", exact: true }).click();

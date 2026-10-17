@@ -903,7 +903,8 @@ const maximumEndpointPathPrefixLength = 128;
  * runtime serves the bucket at `/cdn-cgi/local/r2/s3/<bucket>/<key>`). It is
  * rejected unless it is a bounded sequence of ordinary path segments, which
  * keeps it from smuggling traversal, empty segments, or a trailing slash that
- * would produce a double slash in the signed canonical path.
+ * would produce a double slash in the signed canonical path. Boundary slashes
+ * are scanned once so even oversized invalid prefixes take linear time.
  *
  * @param name - Option name used in error messages.
  * @param value - Raw prefix, possibly with a leading slash, possibly empty.
@@ -913,7 +914,11 @@ const maximumEndpointPathPrefixLength = 128;
 function normalizeEndpointPathPrefix(name: string, value: string | undefined): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return "";
-  const withoutLeadingSlash = trimmed.replace(/^\/+/, "").replace(/\/+$/, "");
+  let start = 0;
+  let end = trimmed.length;
+  while (start < end && trimmed[start] === "/") start += 1;
+  while (end > start && trimmed[end - 1] === "/") end -= 1;
+  const withoutLeadingSlash = trimmed.slice(start, end);
   if (!withoutLeadingSlash) {
     throw new TypeError(`${name} must not be only slashes`);
   }

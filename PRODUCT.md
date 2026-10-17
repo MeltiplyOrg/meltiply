@@ -131,6 +131,9 @@ visible, with their geometry reserved before JavaScript runs.
   decorative cards, gradients, or motion to manufacture importance.
 - Keep product language concise, concrete, and honest about partial or pending
   work.
+- The UI is agent-first: a human may rarely touch it. Prioritize load time,
+  accessibility, and deterministic behavior over visual richness; every
+  animation must earn its keep.
 
 #### Modular, Consistent Surfaces
 
@@ -188,8 +191,11 @@ visible, with their geometry reserved before JavaScript runs.
 - Keep focusable controls mounted during state changes. When label changes
   resize adjacent controls, use the installed Motion layout and label transitions
   to preserve spatial continuity and keyboard focus.
-- Motion should clarify state and provide tactile feedback. Respect reduced
-  motion; avoid decorative animation that competes with the work.
+- Motion is a last resort, not a feature: prefer instant state changes and
+  static feedback. Keep transitions under 150ms, disable entrance/exit
+  animation unless it preserves focus or spatial continuity, and honor reduced
+  motion fully. The UI is agent-first: optimize for speed, load time, and
+  accessibility over visual richness.
 
 #### Responsive and Accessible by Default
 

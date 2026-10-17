@@ -38,6 +38,6 @@ Inner scroll containers must use `min-h-0` and never become the page scroll owne
 
 ## Motion and loading
 
-- Entrance motion is tied to route/view transitions, not data updates. Low motion disables travel but does not remount.
+- Motion is minimal: prefer instant state changes. Entrance motion is reserved for preserving focus or spatial continuity, not decoration. Low motion disables travel but does not remount.
 - Loading placeholders match destination geometry (shared `Skeleton`).
 - Background refresh keeps usable content visible; full-page loading only for initial load.

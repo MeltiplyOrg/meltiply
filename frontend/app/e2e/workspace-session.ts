@@ -55,13 +55,14 @@ export async function allowFunctionalConsent(page: Page): Promise<void> {
  * Starts a serial local journey with the same single owner and an empty personal
  * Workspace. Resets only that fixture's domain rows in the dedicated loopback test
  * database; auth tables, owner credentials, and other RLS users are untouched.
- * Remote/staging resets are forbidden. A second browser uses signIn, never reset.
+ * Requires explicit MELTIPLY_DATABASE_TEST_ADMIN_URL. Remote/staging resets are
+ * forbidden. A second browser uses signIn, never reset.
  */
 export async function openOwnerWorkspace(page: Page, credentials: GeneratedCredentials) {
   if (process.env.STAGING_E2E_BASE_URL) throw new Error("Owner fixture reset is local-only");
-  const connectionString =
-    process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
-    "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+  const connectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL;
+  if (!connectionString?.trim())
+    throw new Error("MELTIPLY_DATABASE_TEST_ADMIN_URL is required for owner fixture resets");
   const url = new URL(connectionString);
   if (!["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/meltiply")
     throw new Error("Owner fixtures require the dedicated loopback test database");

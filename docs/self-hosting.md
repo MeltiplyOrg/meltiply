@@ -82,6 +82,8 @@ Migration `010_single_owner_auth.sql` adopts a sole existing account; it refuses
 to choose between multiple existing accounts. Back up and explicitly reconcile
 authentication identities and their domain ownership before retrying that migration;
 do not delete accounts blindly or reset production data to bypass the guard.
+For local development databases seeded before this migration, use `make reset`
+to recreate the disposable fixtures; never use it against production data.
 
 `AUTH_SETUP_SECRET` must be a private, randomly generated value of at least 32
 characters. Existing environment files must add it; the generator does not

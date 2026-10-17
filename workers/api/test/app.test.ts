@@ -923,7 +923,7 @@ describe("API Worker foundation", () => {
   it("rejects an invalid bearer JWT without resolving the actor", async () => {
     const resolveActor = vi.fn(async () => actor);
     const verifyJwtToken = vi.fn(async () => {
-      throw new Error("signature verification failed");
+      throw new CoreApiError(401, "authentication_required", "Authentication is required.");
     });
     const app = createApiApp({
       betterAuth: fakeBetterAuth as never,
@@ -951,7 +951,7 @@ describe("API Worker foundation", () => {
     fakeBetterAuth.api.getSession.mockClear();
     const resolveActor = vi.fn(async () => actor);
     const verifyJwtToken = vi.fn(async () => {
-      throw new Error("token expired");
+      throw new CoreApiError(401, "authentication_required", "Authentication is required.");
     });
     const app = createApiApp({
       betterAuth: fakeBetterAuth as never,
@@ -979,6 +979,30 @@ describe("API Worker foundation", () => {
     expect(resolveActor).not.toHaveBeenCalled();
     expect(fakeBetterAuth.api.getSession).not.toHaveBeenCalled();
   });
+
+  it.each([
+    new Error("Session database connection failed"),
+    new CoreApiError(503, "dependency_unavailable", "Session database is unavailable"),
+  ])(
+    "does not report session infrastructure failure as invalid credentials: %s",
+    async (failure) => {
+      const resolveActor = vi.fn(async () => actor);
+      const app = createApiApp({
+        resolveActor,
+        verifyJwtToken: async () => {
+          throw failure;
+        },
+      });
+      const response = await app.request(
+        "/api/v1/users/me",
+        { headers: { Authorization: bearerAuthorization } },
+        { ALLOWED_ORIGINS: "http://localhost:3000", ENVIRONMENT: "test", VERSION: "test" },
+      );
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "internal_error" } });
+      expect(resolveActor).not.toHaveBeenCalled();
+    },
+  );
 
   it("denies inaccessible workspace selections resolved by the actor", async () => {
     const app = createApiApp({

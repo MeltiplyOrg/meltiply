@@ -254,8 +254,16 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   };
   const verifyJwtToken =
     dependencies.verifyJwtToken ??
-    (async (env: ApiWorkerEnv, token: string) =>
-      activeOwnerIdentity(env, await jwtVerifierFor(env)(token)));
+    (async (env: ApiWorkerEnv, token: string) => {
+      let identity: JwtIdentity;
+      try {
+        identity = await jwtVerifierFor(env)(token);
+      } catch {
+        throw new CoreApiError(401, "authentication_required", "Authentication is required.");
+      }
+      // Session lookup failures are infrastructure errors, not invalid credentials.
+      return activeOwnerIdentity(env, identity);
+    });
   const resolveRequestActor =
     dependencies.resolveActor ??
     (async (env: ApiWorkerEnv, identity: JwtIdentity, request: Request) =>
@@ -436,6 +444,8 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   // well-formed `Authorization: Bearer` header are rejected before any
   // verification or database work; session cookies are never accepted on this
   // surface and there is no client-supplied workspace fallback.
+  // Only explicit authentication failures become 401; session-store failures
+  // propagate to onError without falsely invalidating the owner's credentials.
   app.use("/api/v1/*", async (c, next) => {
     const publicPath =
       c.req.path === "/api/v1/health" ||
@@ -460,7 +470,15 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     let identity: JwtIdentity;
     try {
       identity = await verifyJwtToken(c.env, token);
-    } catch {
+    } catch (cause) {
+      if (
+        !(
+          cause instanceof CoreApiError &&
+          cause.status === 401 &&
+          cause.code === "authentication_required"
+        )
+      )
+        throw cause;
       return errorResponse(
         c.get("requestId"),
         401,

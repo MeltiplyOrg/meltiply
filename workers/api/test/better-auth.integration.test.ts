@@ -52,6 +52,7 @@ beforeAll(async () => {
     if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply")
       throw new Error("Auth tests require the isolated local database.");
   }
+  await adminPool.query(`DROP SCHEMA IF EXISTS auth_lifecycle CASCADE`);
   await adminPool.query(`CREATE SCHEMA auth_lifecycle AUTHORIZATION meltiply_system`);
   for (const table of ["user", "session", "account", "verification", "jwks", "twoFactor"]) {
     await adminPool.query(

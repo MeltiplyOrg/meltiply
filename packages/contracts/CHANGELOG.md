@@ -5,6 +5,8 @@
 - Add `GET /api/auth/setup-status` and require `X-Setup-Secret` for initial
   `POST /api/auth/sign-up/email`. Registration closes after the installation's
   sole owner exists; document closed-registration and missing-configuration errors.
+- Reduce `SignUpEmailRequest.name` maximum length from 200 to 100 characters.
+  Change `VerifyEmailResult.user` from `AuthUser` to nullable `AuthUser | null`.
 - Add verification resend and authenticator enrollment, confirmation, backup-code
   verification/replacement, and disabling contracts. Sign-in can return a pending
   factor challenge instead of an authenticated token; deployed signup can return

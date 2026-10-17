@@ -7,7 +7,7 @@ ALTER TABLE "user" ADD COLUMN "twoFactorEnabled" BOOLEAN NOT NULL DEFAULT FALSE;
 DO $$
 BEGIN
     IF (SELECT count(*) FROM "user") > 1 THEN
-        RAISE EXCEPTION 'Single-user migration requires exactly one existing account or an empty installation. Back up and explicitly select the retained owner before migrating.';
+        RAISE EXCEPTION 'Single-user migration requires exactly one existing account or an empty installation. Local databases seeded before this migration should be reset with make reset. For production databases, back up and explicitly select the retained owner before migrating.';
     END IF;
     UPDATE "user" SET "installationOwner" = TRUE;
 END;

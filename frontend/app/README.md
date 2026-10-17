@@ -98,6 +98,8 @@ reinstall the browser after upgrading Playwright.
 Local journeys sign in as the seeded owner rather than registering more users.
 The isolated-workspace helper resets that owner's domain fixtures only on the
 guarded loopback test database; never point it at shared or production data.
+Set `MELTIPLY_DATABASE_TEST_ADMIN_URL` explicitly to that disposable database's
+admin connection URL before running local journeys; there is no reset fallback.
 The [production-image owner journey](e2e/selfhost-auth-smoke.mjs) instead exercises
 an empty installation, real SMTP capture, verification, recovery, and 2FA.
 

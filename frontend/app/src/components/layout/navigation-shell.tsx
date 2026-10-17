@@ -151,7 +151,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
         {/* Main Content Area: persistent layout group coordinates route-surface morphs. */}
         <main
           ref={workspaceContentRef}
-          className="flex-1 overflow-y-auto min-h-0 min-w-0 p-3 sm:p-5 lg:p-6 flex flex-col"
+          className="flex-1 overflow-y-auto min-h-0 min-w-0 overscroll-contain p-3 sm:p-5 lg:p-6 flex flex-col"
         >
           <LayoutGroup id="workspace-route-layout">
             <div className="w-full h-full flex flex-col min-h-0 min-w-0">{children}</div>

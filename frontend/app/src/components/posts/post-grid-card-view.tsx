@@ -82,7 +82,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
   if (isLoading) {
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
         <div className={cn("grid gap-4", gridColumnClass)}>
           {SKELETON_CARD_KEYS.map((key) => (
             <div

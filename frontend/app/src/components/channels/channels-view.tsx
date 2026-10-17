@@ -831,7 +831,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
           </CardContent>
         </Card>
       ) : (
-        <div className={cn("min-h-0 flex-1 overflow-y-auto pr-1", selectedIds.size > 0 && "pb-24")}>
+        <div className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1", selectedIds.size > 0 && "pb-24")}>
           {accounts.length === 0 ? (
             <Card className="border border-line bg-surface shadow-card">
               <CardContent className="flex flex-col items-center p-12 text-center">
@@ -990,7 +990,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                   {t("No platforms match “{query}”.", { query: search })}
                 </div>
               ) : (
-                <div className="flex flex-col gap-2.5 max-h-[48vh] overflow-y-auto pr-1">
+                <div className="flex flex-col gap-2.5 max-h-[48vh] overflow-y-auto overscroll-contain pr-1">
                   {filteredPlatforms.map((platform) => {
                     // The directory is the contract roster, so every row is a
                     // connectable Platform. The guard only narrows `id` to the

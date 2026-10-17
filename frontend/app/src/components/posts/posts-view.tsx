@@ -916,7 +916,7 @@ export function PostsView({
 
   const viewModeContent =
     viewMode === "composer" ? (
-      <div className="flex-1 min-h-0 overflow-y-auto rounded-card border border-line bg-surface p-4 shadow-card">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4">
         <Suspense fallback={<RouteFallback />}>
           <Composer
             key={composerKey}

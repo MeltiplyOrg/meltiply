@@ -1,5 +1,7 @@
 # Shared UI ownership and reuse
 
+See also [frontend-layout.md](frontend-layout.md) for the workspace alignment, density, responsive, and scroll-ownership contract.
+
 ## Review findings
 
 The UI had a shared visual system but incomplete component ownership:

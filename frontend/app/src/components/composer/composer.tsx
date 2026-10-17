@@ -457,6 +457,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [channelOverrides, setChannelOverrides] = useState<Record<string, ChannelOverride>>({});
   const [attachmentOverrides, setAttachmentOverrides] = useState<Record<string, string[]>>({});
   const [activeTab, setActiveTab] = useState<string>("shared");
+  /**
+   * The scheduling picker stays hidden until it is asked for, or until a calendar
+   * entry point seeded a slot: the pinned bar then holds only the three actions.
+   */
+  const [scheduleOpen, setScheduleOpen] = useState<boolean>(initialDate !== undefined);
   const [scheduleDate, setScheduleDate] = useState<string>(() => {
     const seeded = initialDate ? formatInitialScheduleDate(initialDate) : "";
     if (seeded) return seeded;
@@ -2284,86 +2289,106 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         </div>
       </Tabs>
 
-      {/* The drawer keeps its primary actions in view: a Save/Schedule/Publish
-          bar pinned to the bottom of the scrolling body, bled to its edges. */}
-      <div className="sticky bottom-0 -mx-4 shrink-0 border-t border-line bg-surface px-4 py-3 sm:-mx-6 sm:px-6">
-        <div className="flex flex-col gap-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <label className="flex flex-1 flex-col gap-1.5">
-              <span className="text-(length:--font-size-micro) font-medium text-ink-2">
-                {t("Schedule date and time")}
-              </span>
-              <Input
-                type="datetime-local"
-                value={scheduleDate}
-                aria-label={t("Schedule date and time")}
-                onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-                  setScheduleDate(event.target.value);
-                  markDirty();
-                }}
-                className="h-9 w-full text-xs sm:w-[220px]"
-              />
-            </label>
+      {/* The save state rides the content, not the action bar: it belongs to the
+          draft being written and disappears with the panel when the drawer closes. */}
+      <p className="-mt-3 text-(length:--font-size-micro) text-ink-3" role="status">
+        {savedAt && !isDirty
+          ? t("Saved to your workspace at {time}", {
+              time: new Date(savedAt).toLocaleTimeString(language),
+            })
+          : isDirty
+            ? t("Unsaved changes are kept in this browser until you save.")
+            : t("Draft changes are saved to your workspace when you save.")}
+      </p>
 
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void handleSubmit("draft")}
-                disabled={submitDisabled}
-                className="gap-1.5"
-                title={t(
-                  "Saves this post's text, attachments, and channel settings without publishing",
-                )}
-              >
-                {isSubmitting ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Save className="size-3.5" />
-                )}
-                {postId ? t("Save") : t("Save Draft")}
-              </Button>
-
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => void handleSubmit("schedule")}
-                disabled={submitDisabled}
-                className="gap-1.5"
-              >
-                <Calendar className="size-3.5" />
-                {t("Schedule")}
-              </Button>
-
-              <Button
-                type="button"
-                variant="default"
-                size="sm"
-                onClick={() => void handleSubmit("now")}
-                disabled={submitDisabled}
-                className="gap-1.5"
-              >
-                {isSubmitting ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Send className="size-3.5" />
-                )}
-                {t("Publish Now")}
-              </Button>
-            </div>
+      {/* The drawer keeps its primary actions in view: the Save/Schedule/Publish
+          row pinned to the bottom of the scrolling body and bled to its edges.
+          Scheduling opens its own picker row above them, matching the inline
+          picker the Channel outcome rows use, so the resting bar stays one row. */}
+      <div className="sticky bottom-0 -mx-4 shrink-0 border-t border-line bg-surface px-4 py-2.5 sm:-mx-6 sm:px-6">
+        {scheduleOpen && (
+          <div className="flex items-center gap-2 pb-2.5">
+            <Input
+              type="datetime-local"
+              value={scheduleDate}
+              aria-label={t("Scheduled for")}
+              autoFocus
+              onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+                setScheduleDate(event.target.value);
+                markDirty();
+              }}
+              className="h-8 flex-1 rounded-control border border-line bg-page px-2 text-(length:--font-size-control) text-ink focus:border-line-strong focus:outline-none"
+            />
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              disabled={submitDisabled || !scheduleDate}
+              onClick={() => void handleSubmit("schedule")}
+              className="h-8 gap-1.5"
+            >
+              {isSubmitting ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              {t("Schedule")}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setScheduleOpen(false)}
+              className="h-8"
+            >
+              {t("Cancel")}
+            </Button>
           </div>
+        )}
 
-          <span className="text-(length:--font-size-micro) text-ink-3" role="status">
-            {savedAt && !isDirty
-              ? t("Saved to your workspace at {time}", {
-                  time: new Date(savedAt).toLocaleTimeString(language),
-                })
-              : isDirty
-                ? t("Unsaved changes are kept in this browser until you save.")
-                : t("Draft changes are saved to your workspace when you save.")}
-          </span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void handleSubmit("draft")}
+            disabled={submitDisabled}
+            className="h-8 gap-1.5"
+            title={t(
+              "Saves this post's text, attachments, and channel settings without publishing",
+            )}
+          >
+            {isSubmitting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Save className="size-3.5" />
+            )}
+            {postId ? t("Save") : t("Save Draft")}
+          </Button>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setScheduleOpen(true)}
+            disabled={submitDisabled}
+            className="h-8 gap-1.5"
+          >
+            <Calendar className="size-3.5" />
+            {t("Schedule")}
+          </Button>
+
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            onClick={() => void handleSubmit("now")}
+            disabled={submitDisabled}
+            className="h-8 gap-1.5"
+          >
+            {isSubmitting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Send className="size-3.5" />
+            )}
+            {t("Publish Now")}
+          </Button>
         </div>
       </div>
     </fieldset>

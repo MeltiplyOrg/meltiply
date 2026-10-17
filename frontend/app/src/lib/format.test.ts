@@ -38,12 +38,12 @@ describe("formatDuration", () => {
 
 describe("abbreviateRecordId", () => {
   it("distinguishes records whose prefixes are identical", () => {
-    expect(abbreviateRecordId("48000000-0000-4000-8000-000000000001")).toBe("…00000001");
-    expect(abbreviateRecordId("48000000-0000-4000-8000-000000000002")).toBe("…00000002");
+    expect(abbreviateRecordId("48000000-0000-4000-8000-000000000001")).toBe("000001");
+    expect(abbreviateRecordId("48000000-0000-4000-8000-000000000002")).toBe("000002");
   });
 
-  it("keeps short ids intact and marks truncation", () => {
+  it("keeps ids that are already short", () => {
     expect(abbreviateRecordId("abc123")).toBe("abc123");
-    expect(abbreviateRecordId("3f7c1a92-5b4e-4d21-9a77-0c8f2e1b6d40")).toBe("…2e1b6d40");
+    expect(abbreviateRecordId("3f7c1a92-5b4e-4d21-9a77-0c8f2e1b6d40")).toBe("1b6d40");
   });
 });

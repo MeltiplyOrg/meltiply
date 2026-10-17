@@ -1191,7 +1191,7 @@ test("reopens a draft whose provider options have no distribution", async ({ pag
   await reloadWithScopedProfile(page);
   await editPostFromRow(
     page,
-    page.getByRole("row").filter({ hasText: created.response.id.slice(-8) }),
+    page.getByRole("row").filter({ hasText: created.response.id.slice(-6) }),
   );
   await expect(composerTextarea(page)).toHaveValue(caption);
   await page.getByRole("tab", { name: channel }).click();
@@ -1245,7 +1245,7 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
   await reloadWithScopedProfile(page);
   await editPostFromRow(
     page,
-    page.getByRole("row").filter({ hasText: saved.response.id.slice(-8) }),
+    page.getByRole("row").filter({ hasText: saved.response.id.slice(-6) }),
   );
   await expect(composerTextarea(page)).toHaveValue(caption);
   await page.getByRole("tab", { name: channel }).click();

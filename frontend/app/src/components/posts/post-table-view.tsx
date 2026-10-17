@@ -209,7 +209,10 @@ export const PostTableView = React.memo(function PostTableView({
                           </TableCell>
                           <TableCell>
                             <div className="flex min-w-0 items-center gap-2">
-                              <span className="shrink-0 font-mono text-(length:--font-size-micro) text-ink-3">
+                              <span
+                                title={post.id}
+                                className="shrink-0 font-mono text-(length:--font-size-micro) text-ink-3"
+                              >
                                 {abbreviateRecordId(post.id)}
                               </span>
                               <Button

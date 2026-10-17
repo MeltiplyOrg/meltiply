@@ -148,7 +148,7 @@ const spanishTranslations: Record<string, string> = {
   "{channel} scheduled for {date}": "{channel} programado para {date}",
   "Previous month": "Mes anterior",
   "Next month": "Mes siguiente",
-  "Schedule date and time": "Fecha y hora de programación",
+  "Scheduled for": "Programado para",
   "Sort by date": "Ordenar por fecha",
   "has no channels yet": "aún no tiene canales",
   "Optional context for this profile": "Contexto opcional para este perfil",

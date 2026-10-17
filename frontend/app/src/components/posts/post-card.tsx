@@ -78,7 +78,9 @@ export function PostCard({
       </div>
       <StatusBadge status={normalizePostStatus(post)} compact />
       <div className="flex min-h-4.5 flex-wrap items-center gap-2 text-(length:--font-size-micro) text-ink-3">
-        <span className="shrink-0 font-mono">{abbreviateRecordId(postId)}</span>
+        <span className="shrink-0 font-mono" title={postId}>
+          {abbreviateRecordId(postId)}
+        </span>
         <span className="flex items-center gap-1">
           {providers.map((provider) => (
             <PlatformIcon key={provider} provider={provider} className="size-3" />

@@ -239,7 +239,10 @@ html.theme-changing *::after {
   height: var(--glide-height, 0);
   border: 0;
   border-radius: var(--glide-radius, 7px);
-  background-color: var(--hover);
+  /* The reference row hover (`--surface-3`): one visible step below the warm
+     rail canvas (`--canvas`) and below the white Settings rail, where `--hover`
+     sits only 2 units above the rail and reads as no highlight at all. */
+  background-color: var(--hover-2);
   box-shadow: none;
   transform-origin: 0 0;
   transform: translate3d(calc(var(--glide-x, 0) * 1px), calc(var(--glide-y, 0) * 1px), 0)

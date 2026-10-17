@@ -80,6 +80,19 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(railGlide).toHaveCSS("opacity", "0");
   await postsRow.hover();
   await expect(railGlide).toHaveCSS("opacity", "1");
+  // The highlight must read against the rail canvas in one visible step; a tone
+  // within the rail's own warmth (the old `--hover`) renders as no highlight.
+  const railHighlightDelta = await page.evaluate(() => {
+    const pill = document.querySelector<HTMLElement>("aside [data-glide-highlight]");
+    const rail = document.querySelector<HTMLElement>("aside");
+    if (!pill || !rail) throw new Error("Rail highlight is missing");
+    const channels = (value: string) =>
+      (value.match(/\d+/g) ?? []).slice(0, 3).map(Number) as [number, number, number];
+    const [pr, pg, pb] = channels(getComputedStyle(pill).backgroundColor);
+    const [rr, rg, rb] = channels(getComputedStyle(rail).backgroundColor);
+    return Math.abs(pr - rr) + Math.abs(pg - rg) + Math.abs(pb - rb);
+  });
+  expect(railHighlightDelta).toBeGreaterThan(6);
   const postsGlideBox = await railGlide.boundingBox();
   const postsRowBox = await postsRow.boundingBox();
   expect(postsGlideBox?.y).toBeCloseTo(postsRowBox?.y ?? 0, 0);

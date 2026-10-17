@@ -103,13 +103,18 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.getByRole("button", { name: "Forgot password?", exact: true }).click();
     await page.getByLabel("Email address", { exact: true }).fill(email);
     await page.getByRole("button", { name: "Send reset link", exact: true }).click();
+    phase = "password reset request acknowledgement";
     await expect(page.getByRole("status").filter({ hasText: "If this address belongs" })).toBeVisible();
+    phase = "password reset SMTP delivery";
     const resetLink = await mailLink(email, "Reset your Meltiply password", new Set());
     await page.goto(resetLink);
+    phase = "password reset form";
     const recoveredPassword = randomUUID() + randomUUID();
     await page.getByLabel("Password", { exact: true }).fill(recoveredPassword);
     await page.getByRole("button", { name: "Update password", exact: true }).click();
+    phase = "password reset completion";
     await expect(page.getByRole("status").filter({ hasText: "Password updated" })).toBeVisible();
+    phase = "sign-in after password reset";
     await signIn(recoveredPassword);
     await page.waitForURL(/\/posts/);
     phase = "authenticator enrollment";

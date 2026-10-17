@@ -11,7 +11,7 @@
     "type-check": "tsc --project tsconfig.json"
   },
   "dependencies": {
-    "effect": "4.0.0-rc.115"
+    "effect": "4.0.5"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "catalog:",

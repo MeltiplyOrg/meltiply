@@ -1,6 +1,6 @@
 # Core Effect v4 idioms
 
-Applies to backend and frontend. `effect@4.0.0-rc.115` is the single version; core carries zero external dependencies.
+Applies to backend and frontend. `effect@4.0.5` is the single version; core carries zero external dependencies.
 
 ## Effect type
 

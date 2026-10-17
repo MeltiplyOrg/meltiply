@@ -1,4 +1,13 @@
-import { LogOut, Languages, Moon, Palette, ShieldCheck, Sun, UserRound } from "lucide-react";
+import {
+  LogOut,
+  Languages,
+  Monitor,
+  Moon,
+  Palette,
+  ShieldCheck,
+  Sun,
+  UserRound,
+} from "lucide-react";
 import { useSearchParams } from "react-router";
 import { Button } from "@meltiply/ui/button";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
@@ -77,10 +86,10 @@ export default function WorkspaceSettings() {
     }
   };
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-page md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-surface md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
       <nav
         aria-label={t("Settings sections")}
-        className="flex gap-1 overflow-x-auto border-b border-line bg-canvas px-3 py-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-2.5 md:py-5"
+        className="flex gap-1 overflow-x-auto border-b border-line bg-surface px-3 py-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-2.5 md:py-5"
       >
         <span className="hidden px-2 pb-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 md:block">
           {t("Settings")}
@@ -102,7 +111,7 @@ export default function WorkspaceSettings() {
         })}
       </nav>
       <div className="min-h-0 min-w-0 overflow-y-auto">
-        <div className="max-w-180 px-4 pb-20 pt-6 sm:px-10 sm:pt-8">
+        <div className="w-full px-4 pb-20 pt-6 sm:px-10 sm:pt-8">
           <h1 className="text-(length:--text-title) font-semibold leading-tight tracking-page-title">
             {current.label}
           </h1>
@@ -110,9 +119,9 @@ export default function WorkspaceSettings() {
           {section === "appearance" && (
             <section aria-label={t("Theme")} className="space-y-4">
               <h2 className="text-(length:--font-size-ui) font-semibold">{t("Theme")}</h2>
-              <div className="grid grid-cols-2 gap-3">
-                {(["light", "dark"] as const).map((theme) => {
-                  const Icon = theme === "light" ? Sun : Moon;
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {(["light", "dark", "system"] as const).map((theme) => {
+                  const Icon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
                   return (
                     <Button
                       key={theme}
@@ -125,7 +134,7 @@ export default function WorkspaceSettings() {
                       )}
                     >
                       <span
-                        data-palette={theme}
+                        data-palette={theme === "system" ? undefined : theme}
                         className="grid h-22 grid-cols-[28%_1fr] overflow-hidden rounded-chip border border-line"
                         aria-hidden="true"
                       >
@@ -138,7 +147,11 @@ export default function WorkspaceSettings() {
                       </span>
                       <span className="flex items-center gap-2">
                         <Icon className="size-4" />
-                        {theme === "light" ? t("Light") : t("Dark")}
+                        {theme === "light"
+                          ? t("Light")
+                          : theme === "dark"
+                            ? t("Dark")
+                            : t("System")}
                       </span>
                     </Button>
                   );

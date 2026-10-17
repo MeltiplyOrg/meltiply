@@ -16,6 +16,7 @@ export type TranslationValues = Record<string, number | string>;
 const languageStorageKey = "meltiply.language";
 
 const spanishTranslations: Record<string, string> = {
+  System: "Sistema",
   "Filter by": "Filtrar por",
   "No filters applied. Add a filter to narrow this collection.":
     "No hay filtros aplicados. Añade un filtro para acotar esta colección.",

@@ -138,8 +138,25 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await waitForWorkspace(page);
   await page.locator("aside").getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page).toHaveURL(/\/settings(?:\?|$)/);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.getByRole("button", { name: "System", exact: true }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await expect(page.getByRole("button", { name: "System", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.reload();
+  await expect(page.getByRole("button", { name: "System", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveClass(/dark/);
   await page.getByRole("button", { name: "Light", exact: true }).click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await page.setViewportSize({ width: 1808, height: 984 });
   await page.screenshot({
     path: testInfo.outputPath("settings-light-desktop.png"),
     fullPage: true,

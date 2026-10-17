@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Switch } from "@meltiply/ui/switch";
-import { useTheme, type Theme } from "@/lib/theme";
+import { useTheme } from "@/lib/theme";
 import { cn } from "@meltiply/ui/utils";
 
 import { type DevBoxLatency } from "./devbox-state";
@@ -121,11 +121,6 @@ export function SkeletonsTab({
     if (audit) setDiffs(diffSkeletonRects(audit));
   };
 
-  /** Anchors the theme wave to the selected segment's button for pointer and keyboard activation. */
-  const selectTheme = (next: Theme) => {
-    setTheme(next);
-  };
-
   return (
     <div className="flex flex-col gap-3 text-[12px]">
       <div className="flex items-center justify-between gap-2">
@@ -184,9 +179,9 @@ export function SkeletonsTab({
         <span className="font-medium">Theme</span>
         <div>
           <SegmentedControl
-            options={["light", "dark"] as const}
+            options={["light", "dark", "system"] as const}
             value={requestedTheme}
-            onChange={selectTheme}
+            onChange={setTheme}
             label="Theme"
             className="h-7"
           />

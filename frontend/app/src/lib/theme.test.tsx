@@ -43,6 +43,9 @@ function SelectProbe(): React.ReactElement {
       <button type="button" onClick={() => setTheme("dark")}>
         dark-instant
       </button>
+      <button type="button" onClick={() => setTheme("system")}>
+        system
+      </button>
       <button type="button" onClick={() => setTheme(theme)}>
         same
       </button>
@@ -159,6 +162,36 @@ it("persists the current choice on acceptance and clears it on withdrawal", () =
   expect(window.localStorage.getItem(themeStorageKey)).toBeNull();
   expect(document.cookie).not.toContain("meltiply-theme=dark");
   expect(screen.getByTestId("committed")).toHaveTextContent("light");
+});
+
+/** OS changes update System mode without overwriting intent; explicit choices remain authoritative. */
+it("follows live OS changes only while System is selected", () => {
+  const media = Object.assign(new EventTarget(), { matches: false });
+  vi.stubGlobal("matchMedia", () => media);
+  render(
+    <ThemeProvider>
+      <SelectProbe />
+    </ThemeProvider>,
+  );
+  act(() => screen.getByRole("button", { name: "system", exact: true }).click());
+  expect(window.localStorage.getItem(themeStorageKey)).toBe("system");
+  act(() => {
+    media.matches = true;
+    media.dispatchEvent(new Event("change"));
+  });
+  expect(document.documentElement).toHaveClass("dark");
+  expect(screen.getByTestId("requested")).toHaveTextContent("system");
+  act(() => screen.getByRole("button", { name: "light", exact: true }).click());
+  act(() => media.dispatchEvent(new Event("change")));
+  expect(document.documentElement).not.toHaveClass("dark");
+  act(() => screen.getByRole("button", { name: "system", exact: true }).click());
+  expect(document.documentElement).toHaveClass("dark");
+  act(() => {
+    media.matches = false;
+    media.dispatchEvent(new Event("change"));
+  });
+  expect(document.documentElement).not.toHaveClass("dark");
+  expect(window.localStorage.getItem(themeStorageKey)).toBe("system");
 });
 
 describe("ThemeProvider", () => {

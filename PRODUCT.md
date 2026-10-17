@@ -116,10 +116,11 @@ maximum. On phones, gutters are 16px, toolbar controls wrap, and directory
 tables may scroll horizontally without clipping available actions.
 
 `/settings` is a full-height, reference-style Settings page with responsive
-section navigation. Appearance changes the real light/dark palette; Language
-uses the existing supported locales; account identity is read-only; Security
-uses the existing password-reauthenticated controls. This route adds no billing,
-team administration, notification, or unsupported preference capabilities.
+section navigation on the same surface as its full-width content. Appearance
+offers Light, Dark, and System; System follows live OS palette changes. Language
+uses supported locales; account identity is read-only; Security shows its
+password-reauthenticated controls directly, without another opener or dialog.
+This route adds no billing, team administration, notification, or unsupported preferences.
 
 Search/jump opens only from the top bar or platform-correct Command/Control
 shortcut. The sidebar contains no duplicate Search or Brand Profiles section.

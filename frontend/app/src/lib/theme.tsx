@@ -35,14 +35,14 @@ function prefersDarkScheme(): boolean {
 }
 
 interface ThemeContextValue {
-  requestedTheme: Theme;
-  setTheme: (theme: Theme) => void;
+  requestedTheme: ThemePreference;
+  setTheme: (theme: ThemePreference) => void;
   theme: Theme;
   toggleTheme: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  requestedTheme: "dark",
+  requestedTheme: "system",
   setTheme: () => undefined,
   theme: "dark",
   toggleTheme: () => undefined,
@@ -52,20 +52,21 @@ const ThemeContext = createContext<ThemeContextValue>({
  * Owns the application's immediate palette and consent-aware persistence.
  * Current-page choices work without optional storage; consent withdrawal drops
  * persisted intent, and transferred pre-hydration intent survives first paint.
- * Repeated toggles resolve against the latest request without a reveal timer.
+ * System intent stays distinct from its resolved palette and follows live OS
+ * changes. Repeated toggles resolve against the committed palette immediately.
  */
 export function ThemeProvider({ children }: { children: React.ReactNode }): React.ReactElement {
-  const [theme, setThemeState] = useState(() =>
-    resolveTheme(readInitialThemePreference(), prefersDarkScheme()),
+  const [requestedTheme, setRequestedThemeState] = useState<ThemePreference>(
+    () => readInitialThemePreference() ?? "system",
   );
-  const [requestedTheme, setRequestedThemeState] = useState<Theme>(theme);
+  const [theme, setThemeState] = useState(() => resolveTheme(requestedTheme, prefersDarkScheme()));
 
   const committedRef = useRef(theme);
-  const requestedRef = useRef(theme);
+  const requestedRef = useRef<ThemePreference>(requestedTheme);
   const mountedRef = useRef(false);
   const hasSelectedThemeRef = useRef(
     typeof document !== "undefined" &&
-      document.documentElement.getAttribute("data-theme-preference") === theme,
+      document.documentElement.getAttribute("data-theme-preference") === requestedTheme,
   );
 
   const commitPalette = useCallback((next: Theme) => {
@@ -76,11 +77,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
   }, []);
 
   const setTheme = useCallback(
-    (nextTheme: Theme) => {
-      requestedRef.current = nextTheme;
-      if (mountedRef.current) setRequestedThemeState(nextTheme);
+    (preference: ThemePreference) => {
+      requestedRef.current = preference;
+      if (mountedRef.current) setRequestedThemeState(preference);
       hasSelectedThemeRef.current = true;
-      writeThemePreference(nextTheme);
+      writeThemePreference(preference);
+      const nextTheme = resolveTheme(preference, prefersDarkScheme());
       if (committedRef.current !== nextTheme) {
         applyThemeImmediately(() => commitPalette(nextTheme));
       }
@@ -89,24 +91,38 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
   );
 
   const toggleTheme = useCallback(() => {
-    setTheme(requestedRef.current === "dark" ? "light" : "dark");
+    setTheme(committedRef.current === "dark" ? "light" : "dark");
   }, [setTheme]);
 
   const applyExternalPreference = useCallback(
     (preference: ThemePreference | null) => {
-      if (preference === requestedRef.current) return;
+      if (preference !== null && preference === requestedRef.current) return;
       if (preference === null && hasSelectedThemeRef.current && hasCookieConsent("functional")) {
         return;
       }
       const nextTheme = resolveTheme(preference, prefersDarkScheme());
-      requestedRef.current = nextTheme;
-      if (mountedRef.current) setRequestedThemeState(nextTheme);
+      requestedRef.current = preference ?? "system";
+      if (mountedRef.current) setRequestedThemeState(preference ?? "system");
       if (committedRef.current !== nextTheme) {
         applyThemeImmediately(() => commitPalette(nextTheme));
       }
     },
     [commitPalette],
   );
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      if (requestedRef.current !== "system") return;
+      const nextTheme = media.matches ? "dark" : "light";
+      if (committedRef.current !== nextTheme) {
+        applyThemeImmediately(() => commitPalette(nextTheme));
+      }
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [commitPalette]);
 
   useEffect(() => {
     let functionalConsent = hasCookieConsent("functional");

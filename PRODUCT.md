@@ -102,8 +102,10 @@ route title, and jump search. Posts is one sidebar destination without nested
 view shortcuts. Its page toolbar offers exactly Table, Grid, and Calendar;
 Table is the default. Table uses counted, collapsible status/profile groups and
 metadata visibility controls. All views retain real Post selection and supported
-inspect/edit/delete/create actions. Channel connections use a centered compact
-directory with Accounts and Brand Profiles tabs and actual connection counts.
+inspect/edit/delete/create actions. Channels follows Gr8r Members' centered
+directory with underline tabs, search/status segments, inset identity table,
+health badges, and actual Brand Profile cards. Its background and shared controls
+match Posts; domain-specific page structure stays distinct.
 Reference task seed records and unsupported project-management actions never
 become publishing capabilities.
 
@@ -119,10 +121,10 @@ uses the existing supported locales; account identity is read-only; Security
 uses the existing password-reauthenticated controls. This route adds no billing,
 team administration, notification, or unsupported preference capabilities.
 
-Search/jump opens from the sidebar or top bar using the platform-correct
-Command/Control shortcut. It searches supported destinations and loaded Brand
-Profiles. Collection search and filters stay with Posts and Channels, without
-claiming to search unloaded or inaccessible data.
+Search/jump opens only from the top bar or platform-correct Command/Control
+shortcut. The sidebar contains no duplicate Search or Brand Profiles section.
+Jump search finds supported destinations and loaded profiles; Posts and Channels
+own collection search and Brand Profile filters without claiming unloaded data.
 
 #### Calm Workbench
 

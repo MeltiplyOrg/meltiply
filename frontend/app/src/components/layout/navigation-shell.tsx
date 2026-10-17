@@ -56,11 +56,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
         {t("Skip to content")}
       </a>
       <div className="hidden h-full shrink-0 lg:flex">
-        <SidebarNav
-          currentView={currentView}
-          onNavigate={handleNavClick}
-          onOpenSearch={() => setSearchOpen(true)}
-        />
+        <SidebarNav currentView={currentView} onNavigate={handleNavClick} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line bg-surface px-3 sm:h-topbar sm:px-6">
@@ -129,7 +125,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
         <main
           id="workspace-content"
           tabIndex={-1}
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-surface"
         >
           <div className="flex h-full min-h-0 w-full min-w-0 flex-col">{children}</div>
         </main>

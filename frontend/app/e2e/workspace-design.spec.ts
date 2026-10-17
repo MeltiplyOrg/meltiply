@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
+import { controlledProviderAccountId, provisionControlledChannels } from "./publication-fixtures";
 
 /**
  * Exercises real owner-authenticated Posts, directory, Settings, keyboard search,
@@ -8,10 +9,25 @@ import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-sessio
  */
 test("keeps publishing work reachable through the redesigned workspace", async ({
   page,
+  request,
 }, testInfo) => {
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   const workspace = await openIsolatedOwnerWorkspace(page);
+  await provisionControlledChannels(request, workspace.profileName, [
+    {
+      platform: "instagram",
+      displayName: "Studio Instagram",
+      providerUserId: controlledProviderAccountId("instagram"),
+    },
+    {
+      platform: "threads",
+      displayName: "Studio Threads",
+      providerUserId: controlledProviderAccountId("threads"),
+    },
+  ]);
+  await page.reload();
+  await waitForWorkspace(page);
   await page
     .locator("main header")
     .getByRole("button", { name: "Create post", exact: true })
@@ -42,13 +58,26 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await search.getByRole("textbox").fill(workspace.profileName);
   await search.getByRole("button", { name: workspace.profileName, exact: true }).click();
   await expect(
+    page.getByRole("button", { name: `Clear ${workspace.profileName} filter`, exact: true }),
+  ).toBeVisible();
+  await expect(
     page.locator("aside").getByRole("button", { name: workspace.profileName, exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
+  ).toHaveCount(0);
+  await expect(
+    page.locator("aside").getByRole("button", { name: "Search and jump to", exact: true }),
+  ).toHaveCount(0);
   await page.keyboard.press("Control+k");
   await search.getByRole("textbox").fill("Channels");
   await search.getByRole("button", { name: "Channels", exact: true }).click();
   await expect(page).toHaveURL(/\/channels(?:\?|$)/);
   await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Connected accounts" })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "Studio Instagram" })).toBeVisible();
+  const connectionFilters = page.getByRole("group", { name: "Connection status", exact: true });
+  await connectionFilters.getByRole("button", { name: "Expired", exact: true }).click();
+  await expect(page.getByText("No accounts match the active filters.")).toBeVisible();
+  await connectionFilters.getByRole("button", { name: "All statuses", exact: true }).click();
+  await expect(page.getByRole("row").filter({ hasText: "Studio Threads" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("channels-desktop.png"), fullPage: true });
   await page.getByRole("tab", { name: /Brand Profiles/ }).click();
   await expect(page.getByRole("button", { name: "View channels" })).toBeVisible();

@@ -21,17 +21,11 @@ import {
 } from "@/types";
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription } from "@meltiply/ui/empty";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@meltiply/ui/tabs";
+import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { BrandProfileDirectory } from "@/components/workspace/brand-profile-directory";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
-import {
-  FilterSelect,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@meltiply/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { Alert } from "@meltiply/ui/alert";
 import { toast } from "@meltiply/ui/toast";
@@ -143,6 +137,10 @@ const SUPPORTED_PLATFORMS: PlatformMeta[] = [
  * `tStatus` so they share the status translation catalog.
  */
 const CONNECTION_STATUS_OPTIONS = Object.keys(CONNECTION_TONES) as ConnectionStatus[];
+const CONNECTION_FILTER_OPTIONS: readonly ("all" | ConnectionStatus)[] = [
+  "all",
+  ...CONNECTION_STATUS_OPTIONS,
+];
 
 /** Toolbar status filter value: the aggregate sentinel or one contract status. */
 type StatusFilter = "all" | ConnectionStatus;
@@ -665,7 +663,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         count: accounts.length,
         profiles: brandProfiles.length,
       })}
-      className="mx-auto max-w-300 bg-page"
+      className="mx-auto max-w-300"
       actions={
         <>
           <Button
@@ -738,13 +736,21 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="accounts" className="mt-0 flex min-h-0 flex-1 flex-col">
-          <TopToolbar className="border-0 py-3.5">
+          <TopToolbar className="border-0 pb-3 pt-3.5">
             <TopToolbarSearch
               id="account-search"
               ariaLabel={t("Search accounts")}
               placeholder={t("Search accounts…")}
               value={accountQuery}
               onChange={setAccountQuery}
+            />
+            <SegmentedControl
+              options={CONNECTION_FILTER_OPTIONS}
+              value={statusFilter}
+              onChange={setStatusFilter}
+              label={t("Connection status")}
+              className="max-w-full overflow-x-auto"
+              renderOption={(status) => (status === "all" ? t("All statuses") : tStatus(status))}
             />
             <TopToolbarFilters activeCount={activeFilterCount}>
               <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
@@ -766,20 +772,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 onEditProfile={isAdmin ? openProfileEditor : undefined}
                 label={t("Brand Profile")}
                 trigger={<TopToolbarButton label={profileFilterLabel} className="w-full" />}
-              />
-              <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
-                {t("Connection status")}
-              </span>
-              <FilterSelect
-                value={statusFilter}
-                onValueChange={setStatusFilter}
-                aggregateOption={{ value: "all", label: t("All statuses") }}
-                options={CONNECTION_STATUS_OPTIONS.map((status) => ({
-                  value: status,
-                  label: tStatus(status),
-                }))}
-                ariaLabel={t("Connection status")}
-                trigger={<TopToolbarButton label={statusFilterLabel} className="w-full" />}
               />
             </TopToolbarFilters>
             <span className="ml-auto text-xs tabular-nums text-ink-3">
@@ -811,18 +803,18 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
           )}
           <div
             className={cn(
-              "min-h-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-6",
-              selectedIds.size > 0 && "pb-24",
+              "min-h-0 flex-1 overflow-y-auto px-4 pb-24 sm:px-6",
+              selectedIds.size > 0 && "pb-32",
             )}
           >
             {isLoading ? (
-              <div className="space-y-2 rounded-card border border-line bg-surface p-3">
+              <div className="space-y-2 px-4 pt-3.5 sm:px-6">
                 {[0, 1, 2].map((key) => (
                   <Skeleton key={key} className="h-16 rounded-control" />
                 ))}
               </div>
             ) : accounts.length === 0 ? (
-              <Empty className="border-solid bg-surface">
+              <Empty className="min-h-60 gap-3.5 border-0">
                 <EmptyIcon>
                   <Share2 className="size-5" />
                 </EmptyIcon>
@@ -845,7 +837,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 )}
               </Empty>
             ) : hasActiveFilter && totalMatchingAccounts === 0 ? (
-              <Empty className="border-solid bg-surface">
+              <Empty className="min-h-60 gap-3.5 border-0">
                 <EmptyDescription>{t("No accounts match the active filters.")}</EmptyDescription>
                 <Button variant="link" onClick={resetAccountFilters}>
                   {t("Clear filters")}
@@ -869,7 +861,10 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
             )}
           </div>
         </TabsContent>
-        <TabsContent value="profiles" className="min-h-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-6">
+        <TabsContent
+          value="profiles"
+          className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 pb-24 pt-3.5 sm:px-6"
+        >
           <BrandProfileDirectory
             profiles={brandProfiles}
             channelCounts={profileChannelCounts}

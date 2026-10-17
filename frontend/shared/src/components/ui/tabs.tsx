@@ -9,7 +9,7 @@ type TabsListProps = React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> &
   variant?: "segment" | "line" | "navigation";
 };
 const listStyles = {
-  segment: "inline-flex h-8 items-center justify-center gap-0.5 rounded-control bg-hover-2 p-0.5",
+  segment: "inline-flex h-7 items-center justify-center gap-0.5 rounded-control bg-hover-2 p-0.5",
   line: "flex h-10 items-center justify-start gap-6 border-b border-line",
   navigation: "flex flex-col items-stretch gap-1",
 };
@@ -36,7 +36,7 @@ export const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex h-7 items-center justify-center gap-1.5 whitespace-nowrap rounded-control px-3 text-(length:--font-size-control) font-medium outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45 data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-btn group-data-[variant=line]/tabs:h-10 group-data-[variant=line]/tabs:rounded-none group-data-[variant=line]/tabs:border-b-2 group-data-[variant=line]/tabs:border-transparent group-data-[variant=line]/tabs:px-0 group-data-[variant=line]/tabs:data-[state=active]:border-accent group-data-[variant=line]/tabs:data-[state=active]:bg-transparent group-data-[variant=line]/tabs:data-[state=active]:shadow-none group-data-[variant=navigation]/tabs:h-8 group-data-[variant=navigation]/tabs:justify-start group-data-[variant=navigation]/tabs:data-[state=active]:bg-hover-2 group-data-[variant=navigation]/tabs:data-[state=active]:shadow-none",
+      "inline-flex h-6 items-center justify-center gap-1 whitespace-nowrap rounded-control px-2.5 text-xs font-medium outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45 data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-btn group-data-[variant=line]/tabs:h-10 group-data-[variant=line]/tabs:rounded-none group-data-[variant=line]/tabs:border-b-2 group-data-[variant=line]/tabs:border-transparent group-data-[variant=line]/tabs:px-0 group-data-[variant=line]/tabs:data-[state=active]:border-accent group-data-[variant=line]/tabs:data-[state=active]:bg-transparent group-data-[variant=line]/tabs:data-[state=active]:shadow-none group-data-[variant=navigation]/tabs:h-8 group-data-[variant=navigation]/tabs:justify-start group-data-[variant=navigation]/tabs:data-[state=active]:bg-hover-2 group-data-[variant=navigation]/tabs:data-[state=active]:shadow-none",
       className,
     )}
     {...props}

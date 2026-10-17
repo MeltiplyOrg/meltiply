@@ -2,8 +2,9 @@ import React from "react";
 import { TooltipProvider } from "@meltiply/ui/tooltip";
 import { Input } from "@meltiply/ui/input";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@meltiply/ui/table";
+import { StatusPill } from "@meltiply/ui/status-pill";
 import { useI18n } from "@/lib/i18n";
-import { platformDisplayName } from "@/lib/platforms";
+import { CONNECTION_TONES, platformDisplayName } from "@/lib/platforms";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { brandProfileColorClass, type BrandProfile, type PlatformAccount } from "@/types";
 import { cn } from "@meltiply/ui/utils";
@@ -41,8 +42,8 @@ export interface ChannelTableViewProps {
 
 /**
  * Gr8r Members' inset directory adapted to channel identity, platform, ownership,
- * connection health, and real settings. Shared Table owns density and dividers;
- * selection changes exactly the visible accounts without clearing hidden ids.
+ * health, and real settings. Shared Table owns density and dividers; selection
+ * changes visible accounts without clearing hidden ids.
  */
 export function ChannelTableView({
   channels,
@@ -60,7 +61,7 @@ export function ChannelTableView({
   return (
     <TooltipProvider delayDuration={250}>
       <div className="overflow-x-auto rounded-card border border-line bg-surface">
-        <Table variant="directory" className="min-w-215" aria-label={t("Connected accounts")}>
+        <Table variant="directory" className="min-w-220" aria-label={t("Connected accounts")}>
           <colgroup>
             <col className="w-12" />
             <col />
@@ -156,9 +157,10 @@ export function ChannelTableView({
                         lowMotion={lowMotion}
                         onReconnect={onReconnect}
                       />
-                      <span className="truncate capitalize">
-                        {tStatus(account.connection_status)}
-                      </span>
+                      <StatusPill
+                        tone={CONNECTION_TONES[account.connection_status]}
+                        label={tStatus(account.connection_status)}
+                      />
                     </div>
                   </TableCell>
                   <TableCell>

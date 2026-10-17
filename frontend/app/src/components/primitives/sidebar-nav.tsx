@@ -1,12 +1,10 @@
 import { forwardRef, useState, type ComponentType } from "react";
 import {
   CircleHelp,
-  LayoutGrid,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   PenSquare,
-  Search,
   Settings,
   Share2,
   UserRound,
@@ -72,7 +70,6 @@ SidebarNavRow.displayName = "SidebarNavRow";
 export interface SidebarNavProps {
   currentView: WorkspaceView;
   onNavigate: (view: WorkspaceView, options?: { search?: string }) => void;
-  onOpenSearch: () => void;
   className?: string;
 }
 
@@ -80,19 +77,12 @@ const HEADING_CLASS =
   "mt-3.5 px-2 py-1.25 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3";
 
 /**
- * Gr8r's 252px/52px rail, rewritten in React/Tailwind. Real profile selection
- * scopes existing queries. Posts is one destination; its view selector lives
- * within the page. Collapse preserves named controls without a morph layer.
+ * Gr8r's 252px/52px rail, rewritten in React/Tailwind. Posts and Channels are
+ * single destinations; view selection and Brand Profile scope belong to their
+ * page controls. Search lives in the top bar. Collapse preserves named controls.
  */
-export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }: SidebarNavProps) {
-  const {
-    user,
-    workspaceName,
-    brandProfiles,
-    selectedBrandProfileId,
-    setSelectedBrandProfileId,
-    logout,
-  } = useWorkspace();
+export function SidebarNav({ currentView, onNavigate, className }: SidebarNavProps) {
+  const { user, workspaceName, logout } = useWorkspace();
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
   const name = workspaceName ?? "Meltiply Workspace";
@@ -151,15 +141,6 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
             <PanelLeftOpen className="size-4" />
           </SidebarNavRow>
         )}
-        <SidebarNavRow
-          collapsed={collapsed}
-          onClick={onOpenSearch}
-          aria-label={t("Search and jump to")}
-          title={collapsed ? t("Search") : undefined}
-        >
-          <Search className="size-4" />
-          {!collapsed && t("Search")}
-        </SidebarNavRow>
         {!collapsed && <div className={HEADING_CLASS}>{t("Workspace")}</div>}
         {WORKSPACE_NAV_ITEMS.map((item) => {
           if (item.id === "settings") return null;
@@ -183,36 +164,6 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
             </div>
           );
         })}
-        {!collapsed && <div className={HEADING_CLASS}>{t("Brand Profiles")}</div>}
-        <SidebarNavRow
-          collapsed={collapsed}
-          onClick={() => setSelectedBrandProfileId(null)}
-          aria-pressed={selectedBrandProfileId === null}
-          aria-label={t("All Brand Profiles")}
-          title={collapsed ? t("All Brand Profiles") : undefined}
-        >
-          <LayoutGrid className="size-4" />
-          {!collapsed && t("All Brand Profiles")}
-        </SidebarNavRow>
-        {brandProfiles.map((profile) => (
-          <SidebarNavRow
-            key={profile.id}
-            collapsed={collapsed}
-            active={selectedBrandProfileId === profile.id}
-            onClick={() => setSelectedBrandProfileId(profile.id)}
-            aria-pressed={selectedBrandProfileId === profile.id}
-            aria-label={profile.name}
-            title={collapsed ? profile.name : undefined}
-          >
-            <span
-              className="flex size-4.5 shrink-0 items-center justify-center rounded-chip bg-accent-tint text-(length:--font-size-micro) font-semibold text-accent-ink"
-              aria-hidden="true"
-            >
-              {profile.name.slice(0, 1).toUpperCase()}
-            </span>
-            {!collapsed && <span className="truncate">{profile.name}</span>}
-          </SidebarNavRow>
-        ))}
       </nav>
       <div className="shrink-0 border-t border-line px-2 py-2">
         <SidebarNavRow asChild collapsed={collapsed}>

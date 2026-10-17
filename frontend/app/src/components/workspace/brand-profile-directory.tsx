@@ -41,19 +41,22 @@ export function BrandProfileDirectory({
       </Empty>
     );
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {profiles.map((profile) => (
         <Card key={profile.id}>
-          <CardHeader className="gap-3 p-4">
-            <div className="flex items-center justify-between">
+          <CardHeader className="gap-2 px-3 pb-2 pt-2.5">
+            <div className="flex items-center gap-2.5">
               <span
                 className={cn(
-                  "flex size-9 items-center justify-center rounded-card",
+                  "flex size-7 items-center justify-center rounded-control",
                   brandProfileColorClass(profile.color),
                 )}
               >
                 <Users className="size-4 text-ink-inverse" />
               </span>
+              <CardTitle className="min-w-0 flex-1 truncate text-(length:--font-size-ui) font-semibold">
+                {profile.name}
+              </CardTitle>
               {onEdit && (
                 <Button
                   variant="ghost"
@@ -65,19 +68,14 @@ export function BrandProfileDirectory({
                 </Button>
               )}
             </div>
-            <div>
-              <CardTitle className="text-(length:--font-size-ui) font-semibold">
-                {profile.name}
-              </CardTitle>
-              <CardDescription className="mt-1 line-clamp-2 text-(length:--font-size-control)">
-                {profile.description || t("Publishing identity and connected accounts.")}
-              </CardDescription>
-            </div>
+            <CardDescription className="mt-1 line-clamp-2 text-(length:--font-size-control)">
+              {profile.description || t("Publishing identity and connected accounts.")}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="px-4 pb-4 text-xs text-ink-3">
+          <CardContent className="px-3 pb-2.5 text-xs text-ink-3">
             {t("{count} connected accounts", { count: channelCounts.get(profile.id) ?? 0 })}
           </CardContent>
-          <CardFooter className="justify-between border-t border-line-soft px-4 py-2">
+          <CardFooter className="justify-between border-t border-line-soft px-3 py-2">
             <span className="font-mono text-(length:--font-size-micro) text-ink-3">
               {profile.id.slice(0, 8)}
             </span>

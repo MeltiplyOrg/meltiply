@@ -1,6 +1,7 @@
 import { CalendarDays, FileText, Paperclip, Play } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
+import { Card } from "@meltiply/ui/card";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { useI18n } from "@/lib/i18n";
 import { PostActions, type PostActionsProps } from "./post-actions";
@@ -41,8 +42,9 @@ export function PostCard({
   const image = preview?.asset.thumbnail_url ?? preview?.asset.download_url;
   const attachments = post.post?.attachments.length ?? 0;
   return (
-    <article
-      className="group/card relative flex min-w-0 cursor-pointer flex-col gap-2 rounded-card border border-line bg-surface px-3 py-2.5 shadow-card hover:border-line-strong data-[selected=true]:border-accent"
+    <Card
+      role="article"
+      className="group/card relative flex min-w-0 cursor-pointer flex-col gap-2 px-3 py-2.5 hover:border-line-strong data-[selected=true]:border-accent"
       data-selected={selected || undefined}
     >
       <div className="flex min-w-0 max-w-[calc(100%-24px)] items-center gap-1.5 truncate text-(length:--font-size-micro) text-ink-3">
@@ -106,6 +108,6 @@ export function PostCard({
       <div className="absolute right-1.5 top-1.5 z-10 rounded-control bg-surface">
         <PostActions postId={postId} {...actions} />
       </div>
-    </article>
+    </Card>
   );
 }

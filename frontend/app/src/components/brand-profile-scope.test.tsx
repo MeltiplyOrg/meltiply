@@ -907,7 +907,7 @@ describe("Channels table contract", () => {
     expect(screen.getByLabelText("Search accounts")).toBeVisible();
     const platformControl = screen.getByRole("button", { name: "All platforms" });
     const profileControl = screen.getByRole("combobox", { name: "All Brand Profiles" });
-    const statusControl = screen.getByRole("combobox", { name: "Connection status" });
+    const statusControl = screen.getByRole("group", { name: "Connection status" });
     expect(platformControl).toBeVisible();
     expect(profileControl).toBeVisible();
     expect(statusControl).toBeVisible();
@@ -961,12 +961,7 @@ describe("Channels table contract", () => {
       "All Brand Profiles",
     );
     expect(screen.getByRole("combobox", { name: "All Brand Profiles" })).toBe(profileControl);
-    fireEvent.click(statusControl);
-    fireEvent.click(screen.getByRole("option", { name: /^expired$/i }));
-    expect(screen.getByRole("combobox", { name: "Connection status" })).toBe(statusControl);
-    expect(screen.getByRole("combobox", { name: "Connection status" })).toHaveTextContent(
-      "expired",
-    );
+    fireEvent.click(within(statusControl).getByRole("button", { name: /^expired$/i }));
     expect(screen.getByText("Alpha YouTube")).toBeVisible();
     expect(screen.queryByText("Alpha TikTok")).not.toBeInTheDocument();
     expect(screen.queryByText("Beta Instagram")).not.toBeInTheDocument();

@@ -22,8 +22,8 @@ honor reduced motion and cannot delay access to the task.
 Navigation rows use an immediate neutral hover/selected surface. The sidebar is
 252px or a 52px icon rail; collapsed actions retain accessible labels. Posts is
 one destination; Table, Grid, and Calendar live only in its page toolbar.
-The top bar and sidebar open the same jump palette. Shortcut definitions and
-platform-correct hints come from `lib/hotkeys.ts`.
+The top bar owns jump search; the sidebar has no Search or Brand Profiles
+section. Keyboard shortcuts and platform hints come from `lib/hotkeys.ts`.
 
 Jump search filters supported pages and loaded Brand Profiles. Native Tab/Enter
 navigation and Escape dismissal remain available. Search Posts and Channels

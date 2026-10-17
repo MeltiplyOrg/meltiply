@@ -52,15 +52,15 @@ Exact values belong in shared tokens, not inline CSS or page-specific values.
 
 ## Navigation and search
 
-`SidebarNav` owns the 252px/52px rail, real workspace destinations, Brand
-Profiles, Settings, help, and account actions. Posts is one entry with no nested
-views. `NavigationShell` owns the 46px top bar and mobile drawer. Destinations
-derive from `WORKSPACE_NAV_ITEMS`; profile names and scope come from workspace
-context. Workspace identity stays read-only.
+`SidebarNav` owns the 252px/52px rail, Posts and Channels destinations, Settings,
+help, and account actions. It contains no Brand Profiles section, duplicate
+Search entry, or nested Post views. `NavigationShell` owns the 46px top bar and
+mobile drawer. Destinations derive from `WORKSPACE_NAV_ITEMS`; workspace
+identity stays read-only.
 
-`WorkspaceSearch` is a jump palette, not a global content index. The sidebar,
-top bar, and `hotkeys.commandMenu` open it. It finds supported destinations and
-loaded Brand Profiles. Route toolbars own collection search and filters.
+`WorkspaceSearch` is a jump palette, not a global content index. Only the top
+bar and `hotkeys.commandMenu` open it. It finds supported destinations and
+loaded profiles. Route toolbars own collection search and Brand Profile filters.
 
 ## Reference page compositions
 
@@ -70,12 +70,12 @@ density. Status/profile grouping preserves Post identity and sorted order;
 column visibility hides metadata only. Grid retains real attachments and
 Calendar retains scheduling. All three share real Post identity and actions.
 
-Channels adapts the Members directory to real connected accounts and adds an
-Accounts/Brand Profiles switch matching the reference's directory/team split.
-Rows retain platform identity, account and profile names, connection health,
-copy/reconnect/disconnect/settings actions, and filtered visible-selection
-semantics. Profile cards count loaded workspace connections. No seed member,
-team, billing, or role editor is copied.
+Channels uses Gr8r Members' centered directory: underlined Accounts/Brand
+Profiles tabs, compact search and status segments, and an inset table with avatar,
+identity, metadata, status badge, and overflow-action rows. Account/profile
+filters retain real scope; no member/role editor is invented. `WorkspaceSurface`
+and shell main share Posts' `bg-surface`; shared Card, Table, and control tokens
+keep the palette consistent without erasing the directory composition.
 
 ## Settings
 

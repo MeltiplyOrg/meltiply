@@ -154,6 +154,11 @@
         "name": "The Shared Palette Rule",
         "body": "Use semantic roles from the shared token owner; do not create route-specific background or ink palettes.",
         "section": "colors"
+      },
+      {
+        "name": "The One Icon Column Rule",
+        "body": "Every rail row reserves the same 16px leading slot. A larger 24px identity avatar centers inside that slot instead of widening it, so icons, labels, and the account name share one axis.",
+        "section": "components"
       }
     ],
     "dos": [

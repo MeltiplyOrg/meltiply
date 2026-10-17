@@ -94,16 +94,19 @@ client IPs.
 
 ## Published images and CI
 
-[Self-hosted images](../.github/workflows/selfhost.yml) builds three images on
-GitHub-hosted Linux amd64 runners:
+The main [CI workflow](../.github/workflows/ci.yml) builds and smoke-checks three
+images on every push and pull request using GitHub-hosted Linux amd64 runners:
 
 - `ghcr.io/meltiplyorg/meltiply-runtime`
 - `ghcr.io/meltiplyorg/meltiply-database`
 - `ghcr.io/meltiplyorg/meltiply-processor`
 
-Pushes and pull requests build and exercise images without publishing. A published
-GitHub release, or a manually dispatched workflow with `publish=true` and an
-explicit image tag, publishes only after all verification passes. Tags include
+Ordinary CI never publishes images, and its required `ci-gate` fails if image
+builds or smoke checks fail. The separate
+[release workflow](../.github/workflows/selfhost.yml) reuses the same build-and-smoke
+action. A published GitHub release, or a manually dispatched release workflow
+with `publish=true` and an explicit image tag, publishes only after all
+verification passes. Tags include
 the release tag and `sha-<full-commit>`; non-prerelease releases also update
 `latest`. Images include source/revision labels; the runtime carries dependency
 license notices and an SBOM. The workflow uses `GITHUB_TOKEN` with package-write

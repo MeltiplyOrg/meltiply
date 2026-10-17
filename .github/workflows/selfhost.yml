@@ -1,44 +1,6 @@
 name: Self-hosted images
 
 on:
-  pull_request:
-    paths:
-      - "scripts/selfhost/**"
-      - "scripts/ci/supply-chain.mjs"
-      - "scripts/ci/allowed-licenses.json"
-      - "scripts/lib/**"
-      - "scripts/cloudflare-local/postgres/migrate.sh"
-      - "compose.selfhost.yml"
-      - ".dockerignore"
-      - ".github/workflows/selfhost.yml"
-      - "workers/**"
-      - "packages/**"
-      - "frontend/**"
-      - "bun.lock"
-      - "package.json"
-      - "bunfig.toml"
-      - "tsconfig.base.json"
-      - "vite.config.ts"
-      - ".github/actions/install-workspace/**"
-  push:
-    paths:
-      - "scripts/selfhost/**"
-      - "scripts/ci/supply-chain.mjs"
-      - "scripts/ci/allowed-licenses.json"
-      - "scripts/lib/**"
-      - "scripts/cloudflare-local/postgres/migrate.sh"
-      - "compose.selfhost.yml"
-      - ".dockerignore"
-      - ".github/workflows/selfhost.yml"
-      - "workers/**"
-      - "packages/**"
-      - "frontend/**"
-      - "bun.lock"
-      - "package.json"
-      - "bunfig.toml"
-      - "tsconfig.base.json"
-      - "vite.config.ts"
-      - ".github/actions/install-workspace/**"
   release:
     types: [published]
   workflow_dispatch:
@@ -67,75 +29,18 @@ jobs:
     env:
       CI: "true"
       WRANGLER_SEND_METRICS: "false"
-      COMPOSE_PARALLEL_LIMIT: "1"
-      SELFHOST_IMAGE_TAG: ci
     steps:
       - uses: actions/checkout@v6.1.0
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24.18.0"
-      - uses: docker/setup-buildx-action@v4.4.1
-      - name: Select lowercase image namespace and private smoke configuration
-        run: |
-          echo "SELFHOST_IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-          node scripts/selfhost/configure.mjs --ci
-      - name: Build production application and Workers
-        uses: docker/build-push-action@v7.4.0
-        with:
-          context: .
-          file: scripts/selfhost/Dockerfile
-          target: runtime
-          load: true
-          tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-runtime:ci
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=selfhost-runtime
-          cache-to: type=gha,mode=max,scope=selfhost-runtime
-      - name: Build migration image
-        uses: docker/build-push-action@v7.4.0
-        with:
-          context: .
-          file: scripts/selfhost/Dockerfile
-          target: database
-          load: true
-          tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-database:ci
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-      - name: Build native processor image
-        uses: docker/build-push-action@v7.4.0
-        with:
-          context: workers/automation/processor
-          load: true
-          tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-processor:ci
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=selfhost-processor
-          cache-to: type=gha,mode=max,scope=selfhost-processor
-      - name: Validate durable broker behavior
-        run: docker run --rm -v "$PWD/scripts/selfhost/jobs.test.mjs:/app/scripts/selfhost/jobs.test.mjs:ro" --entrypoint node "${SELFHOST_IMAGE_PREFIX}-runtime:ci" --test scripts/selfhost/jobs.test.mjs
-      - name: Start complete production deployment
-        run: |
-          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification config --quiet
-          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification up -d --no-build --wait --wait-timeout 240
-      - name: Exercise built application, email, storage, jobs, workflows, and restart recovery
-        run: node scripts/selfhost/smoke.mjs
-      - name: Validate and exercise optional TLS ingress
-        run: |
-          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile
-          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls up -d --no-deps gateway
-          curl --retry 10 --retry-all-errors --retry-delay 1 --max-time 10 --insecure --fail --show-error --silent https://localhost/api/v1/ready
+      - uses: ./.github/actions/selfhost-images
       - uses: ./.github/actions/install-workspace
       - name: Check the complete existing Cloudflare deployment target
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run cloudflare:check
           bun run docs:links
-          bunx --no-install vp fmt scripts/selfhost compose.selfhost.yml .github/workflows/selfhost.yml knip.json README.md docs/self-hosting.md docs/public-ci.md --check
+          bunx --no-install vp fmt scripts/selfhost compose.selfhost.yml .github/workflows/selfhost.yml .github/actions/selfhost-images/action.yml knip.json README.md docs/self-hosting.md docs/public-ci.md --check
       - name: Publish only verified images
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish)
         env:
@@ -159,17 +64,3 @@ jobs:
               docker push "$image:latest"
             fi
           done
-      - name: Preserve deployment diagnostics
-        if: always()
-        run: |
-          mkdir -p artifacts/selfhost
-          docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification --profile tls logs --no-color > artifacts/selfhost/compose.log 2>&1 || true
-      - uses: actions/upload-artifact@v7.0.2
-        if: failure()
-        with:
-          name: selfhost-diagnostics
-          path: artifacts/selfhost
-          retention-days: 7
-      - name: Stop owned deployment
-        if: always()
-        run: docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification --profile tls down --volumes --remove-orphans

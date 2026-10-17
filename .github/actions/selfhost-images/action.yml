@@ -1,0 +1,87 @@
+name: Build and smoke self-hosted images
+description: Build all production images locally and exercise Compose without publishing packages.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v6
+      with:
+        node-version: "24.18.0"
+    - uses: docker/setup-buildx-action@v4.4.1
+    - name: Select lowercase image namespace and private smoke configuration
+      shell: bash
+      run: |
+        echo "SELFHOST_IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+        echo "SELFHOST_IMAGE_TAG=ci" >> "$GITHUB_ENV"
+        echo "COMPOSE_PARALLEL_LIMIT=1" >> "$GITHUB_ENV"
+        node scripts/selfhost/configure.mjs --ci
+    - name: Build production application and Workers
+      uses: docker/build-push-action@v7.4.0
+      with:
+        context: .
+        file: scripts/selfhost/Dockerfile
+        target: runtime
+        load: true
+        push: false
+        tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-runtime:ci
+        labels: |
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+        cache-from: type=gha,scope=selfhost-runtime
+        cache-to: type=gha,mode=max,scope=selfhost-runtime
+    - name: Build migration image
+      uses: docker/build-push-action@v7.4.0
+      with:
+        context: .
+        file: scripts/selfhost/Dockerfile
+        target: database
+        load: true
+        push: false
+        tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-database:ci
+        labels: |
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+    - name: Build native processor image
+      uses: docker/build-push-action@v7.4.0
+      with:
+        context: workers/automation/processor
+        load: true
+        push: false
+        tags: ${{ env.SELFHOST_IMAGE_PREFIX }}-processor:ci
+        labels: |
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+        cache-from: type=gha,scope=selfhost-processor
+        cache-to: type=gha,mode=max,scope=selfhost-processor
+    - name: Validate durable broker behavior
+      shell: bash
+      run: docker run --rm -v "$PWD/scripts/selfhost/jobs.test.mjs:/app/scripts/selfhost/jobs.test.mjs:ro" --entrypoint node "${SELFHOST_IMAGE_PREFIX}-runtime:ci" --test scripts/selfhost/jobs.test.mjs
+    - name: Start complete production deployment
+      shell: bash
+      run: |
+        docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification config --quiet
+        docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification up -d --no-build --wait --wait-timeout 240
+    - name: Exercise built application, email, storage, jobs, workflows, and restart recovery
+      shell: bash
+      run: node scripts/selfhost/smoke.mjs
+    - name: Validate and exercise optional TLS ingress
+      shell: bash
+      run: |
+        docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile
+        docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls up -d --no-deps gateway
+        curl --retry 10 --retry-all-errors --retry-delay 1 --max-time 10 --insecure --fail --show-error --silent https://localhost/api/v1/ready
+    - name: Preserve deployment diagnostics
+      if: always()
+      shell: bash
+      run: |
+        mkdir -p artifacts/selfhost
+        docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification --profile tls logs --no-color > artifacts/selfhost/compose.log 2>&1 || true
+    - uses: actions/upload-artifact@v7.0.2
+      if: failure()
+      with:
+        name: selfhost-diagnostics
+        path: artifacts/selfhost
+        retention-days: 7
+    - name: Stop owned deployment
+      if: always()
+      shell: bash
+      run: docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification --profile tls down --volumes --remove-orphans

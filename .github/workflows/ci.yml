@@ -125,7 +125,7 @@ jobs:
           bun run test:wrangler-drift
           bun run test:frontend-directives
           bun run format-check:cloudflare
-          bunx --no-install vp fmt .github/workflows/ci.yml .github/actions/install-workspace/action.yml docs/public-ci.md --check
+          bunx --no-install vp fmt .github/workflows/ci.yml .github/workflows/selfhost.yml .github/actions/install-workspace/action.yml .github/actions/selfhost-images/action.yml scripts/selfhost compose.selfhost.yml docs/public-ci.md --check
           git diff --exit-code -- packages/contracts
           bun run test:ci-routing
       - name: Local tooling, release, and supply-chain contracts
@@ -152,8 +152,18 @@ jobs:
         if: always()
         run: ./scripts/cloudflare-local/database.sh stop
 
+  selfhost-images:
+    needs: baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/selfhost-images
+
   ci-gate:
-    needs: [changes, baseline, frontend-fast, cloudflare-fast]
+    needs: [changes, baseline, frontend-fast, cloudflare-fast, selfhost-images]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -166,9 +176,11 @@ jobs:
           FRONTEND: ${{ needs.frontend-fast.result }}
           CLOUDFLARE_SELECTED: ${{ needs.changes.outputs.cloudflare }}
           CLOUDFLARE: ${{ needs.cloudflare-fast.result }}
+          SELFHOST_IMAGES: ${{ needs.selfhost-images.result }}
         run: |
           test "$CHANGES" = success
           test "$BASELINE" = success
+          test "$SELFHOST_IMAGES" = success
           if [ "$FRONTEND_SELECTED" = true ]; then
             test "$FRONTEND" = success
           else

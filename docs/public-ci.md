@@ -16,11 +16,16 @@ Automatic checks run in separate jobs:
 - `cloudflare-fast`: spelling, contracts, Worker bindings, package/Worker types,
   tests and builds, strict lint, dead code, formatting, drift/routing regressions,
   local-tooling and release regressions, supply-chain/SBOM policy, costs, and PostgreSQL integration tests.
-- `ci-gate`: require baseline and every selected lane to succeed; reject
-  failures, cancellations, and unexpectedly skipped jobs.
+- `selfhost-images`: on every push, pull request, and manual CI run, build all
+  three production images and smoke the complete Compose deployment, including
+  crash recovery and HTTPS. Images are loaded only into the runner; nothing is
+  published.
+- `ci-gate`: require baseline, self-hosted images, and every selected application
+  lane to succeed; reject failures, cancellations, and unexpectedly skipped jobs.
 
-The application lanes run independently after routing. Documentation-only changes
-run baseline and the final gate without installing application dependencies.
+The application lanes run independently after routing. Image checks run after
+baseline regardless of changed paths, so documentation-only changes also exercise
+production images without selecting the application lanes.
 [The router](../scripts/ci/github-routing.mjs) reads the public CI-owned
 [path rules](../scripts/ci/github-paths.json). Workflow, routing, and development
 container changes select both application lanes.
@@ -51,16 +56,18 @@ owns a separate backend process for load checks after the smoke process exits.
 
 ## Self-hosted release images
 
-The [self-hosted image workflow](../.github/workflows/selfhost.yml) builds the
-production workerd runtime, migration image, and native media processor serially
-on GitHub-hosted runners. It starts the complete Compose deployment and exercises
-email verification, authenticated database access, signed storage, queue delivery,
-media processing, and persistence across an abrupt restart. Publication is gated
-on these scenarios and the existing `cloudflare:check` gate.
+The normal [CI workflow](../.github/workflows/ci.yml) and the
+[release image workflow](../.github/workflows/selfhost.yml) share the
+[image build-and-smoke action](../.github/actions/selfhost-images/action.yml).
+It builds the app-only workerd runtime, migration image, and native media
+processor serially on GitHub-hosted runners, then exercises email verification,
+authenticated database access, signed storage, queue delivery, media processing,
+abrupt-restart recovery, and HTTPS.
 
-Push and PR builds do not publish packages. Published releases and explicitly
-requested manual runs can publish verified images to GHCR with package-scoped
-`GITHUB_TOKEN` permissions. See [self-hosting](self-hosting.md#published-images-and-ci)
+Ordinary CI has read-only repository permissions and no registry login or image
+push step. Only published releases and explicitly requested manual release runs
+can publish to GHCR with package-write `GITHUB_TOKEN` permissions, after the image
+checks and `cloudflare:check` pass. See [self-hosting](self-hosting.md#published-images-and-ci)
 for tags, configuration, and deployment.
 
 ## Caching

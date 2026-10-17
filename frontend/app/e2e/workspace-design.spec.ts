@@ -259,6 +259,10 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(
     inspector.getByText("Studio update — ready for the next publishing window.", { exact: true }),
   ).toBeVisible();
+  // The header identifies the record by its full Post id, not a fragment.
+  await expect(inspector.locator("header code").first()).toHaveText(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  );
   // The record drawer steps 48px in from its edge instead of fading in place.
   const panelEntrance = await page.evaluate(() => {
     const panel = document.querySelector("[data-side-dialog]");

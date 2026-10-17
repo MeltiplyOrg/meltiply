@@ -395,8 +395,10 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
         <span className="flex min-w-0 items-center gap-2">
           <span>{t("Posts")}</span>
           <span className="text-ink-3">/</span>
+          {/* The record identity, not a truncated fragment: the full Post id is
+              what the API, fixtures, and support reproduce. */}
           <code className="truncate text-(length:--font-size-micro) text-ink-3" title={post.id}>
-            {post.id.slice(0, 8)}
+            {post.id}
           </code>
         </span>
       }

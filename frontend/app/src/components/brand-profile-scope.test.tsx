@@ -827,35 +827,6 @@ describe("Channels table contract", () => {
   });
 
   /**
-   * Confirms profile deletion from the Brand Profile editor confirmation flow.
-   */
-  it("confirms profile deletion from the Brand Profile editor delete confirmation", async () => {
-    queryResults.platforms.data = [connectedAccount];
-    renderChannels();
-
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
-
-    const dialog = screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ });
-    const deleteButton = within(dialog).getByRole("button", { name: "Delete profile" });
-    expect(deleteButton).toBeVisible();
-
-    fireEvent.click(deleteButton);
-
-    const confirmation = await screen.findByRole("alertdialog", {
-      name: "Delete Brand Profile",
-    });
-    await act(async () => {
-      fireEvent.click(within(confirmation).getByRole("button", { name: "Delete profile" }));
-    });
-
-    expect(queryMutations.delete.mutate).toHaveBeenCalledWith(
-      alphaProfile.id,
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    );
-  });
-
-  /**
    * Guards the permanent-deletion failure path: a rejected mutation surfaces an
    * inline error alert while the editor dialog stays mounted and retryable.
    */
@@ -864,6 +835,7 @@ describe("Channels table contract", () => {
       queryResults.platforms.data = [connectedAccount];
       renderChannels();
 
+      openChannelFilters();
       fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
       fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
 

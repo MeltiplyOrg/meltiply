@@ -95,8 +95,8 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     betterAuthCached.databaseConnectionString === databaseConnectionString &&
     betterAuthCached.mailBinding === env.MAIL &&
     betterAuthCached.mailFromAddress === senderAddress?.email &&
-    betterAuthCached.mailFromName === senderAddress?.name
-    && betterAuthCached.setupSecret === env.AUTH_SETUP_SECRET
+    betterAuthCached.mailFromName === senderAddress?.name &&
+    betterAuthCached.setupSecret === env.AUTH_SETUP_SECRET
   ) {
     return betterAuthCached.value;
   }
@@ -104,20 +104,23 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
   // Exception: dynamic import avoids loading pg in workerd unit test isolates
   const { systemPoolFor } = await import("./database");
   const database = systemPoolFor(env);
-  const auth = ownerAuthHandler(env, await createBetterAuth({
-    baseURL,
-    database,
-    ...(mailUsable
-      ? {
-          email: {
-            send: createCloudflareMailSender(env.MAIL, senderAddress).send,
-          },
-        }
-      : {}),
-    requireEmailVerification,
-    secret,
-    trustedOrigins: trustedOrigins.length > 0 ? trustedOrigins : undefined,
-  }));
+  const auth = ownerAuthHandler(
+    env,
+    await createBetterAuth({
+      baseURL,
+      database,
+      ...(mailUsable
+        ? {
+            email: {
+              send: createCloudflareMailSender(env.MAIL, senderAddress).send,
+            },
+          }
+        : {}),
+      requireEmailVerification,
+      secret,
+      trustedOrigins: trustedOrigins.length > 0 ? trustedOrigins : undefined,
+    }),
+  );
 
   if (!requestOwnedPool) {
     betterAuthCached = {

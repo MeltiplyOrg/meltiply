@@ -354,7 +354,7 @@ operations:
     request: { password: contract-placeholder-not-a-credential }
     success:
       status: 200
-      body: { backupCodes: [contract-placeholder] }
+      body: { status: true, backupCodes: [contract-placeholder] }
     errors:
       - status: 401
         body: *auth_error

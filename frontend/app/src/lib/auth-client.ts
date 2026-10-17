@@ -299,8 +299,17 @@ async function manageTwoFactor(
   const data: unknown = await response.json();
   if (!data || typeof data !== "object") throw new Error("Invalid security response.");
   const result: { totpURI?: string; backupCodes?: string[] } = {};
-  if ("totpURI" in data && typeof data.totpURI === "string") result.totpURI = data.totpURI;
-  if ("backupCodes" in data && Array.isArray(data.backupCodes) && data.backupCodes.every((code): code is string => typeof code === "string")) result.backupCodes = data.backupCodes;
+  if ("totpURI" in data && typeof data.totpURI === "string") {
+    const uri = new URL(data.totpURI);
+    if (uri.protocol !== "otpauth:" || uri.hostname !== "totp" || !uri.searchParams.get("secret")) {
+      throw new Error("Invalid authenticator enrollment.");
+    }
+    result.totpURI = uri.href;
+  }
+  if ("backupCodes" in data && Array.isArray(data.backupCodes) && data.backupCodes.length > 0 && data.backupCodes.every((code: unknown): code is string => typeof code === "string")) result.backupCodes = data.backupCodes;
+  if (action !== "disable" && (!result.backupCodes || (action === "enable" && !result.totpURI))) {
+    throw new Error("Incomplete authenticator enrollment.");
+  }
   return result;
 }
 

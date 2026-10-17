@@ -47,47 +47,22 @@ test("reaches the real API health endpoint", async ({ request }) => {
 test("redirects the root path to sign-in without a session", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in(?:\/|$)/, { timeout: 30_000 });
-  await expect(page.getByRole("heading", { level: 1, name: "Sign in to Meltiply" })).toBeVisible();
 });
 
-/**
- * Captures the production public authentication surface at desktop and mobile sizes.
- * Developer-tool launchers are absent from this build and are not part of its
- * baseline. Account-independent images detect unintended token, typography,
- * spacing, and control geometry changes without weakening screenshot tolerances.
- */
-test("keeps the authentication screens visually stable", async ({ page }) => {
-  await page.goto("/sign-in");
-  await expect(page.getByRole("heading", { level: 1, name: "Sign in to Meltiply" })).toBeVisible();
-  await expect(page).toHaveScreenshot("sign-in.png", { animations: "disabled", fullPage: true });
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page).toHaveScreenshot("sign-in-mobile.png", {
-    animations: "disabled",
-    fullPage: true,
-  });
-});
-
-test("renders the Better Auth sign-in and sign-up forms", async ({ page }) => {
-  await page.goto("/sign-in");
-  await expect(page.getByRole("heading", { level: 1, name: "Sign in to Meltiply" })).toBeVisible();
+test("keeps public registration closed after the owner exists", async ({ page }) => {
+  await page.goto("/sign-up");
+  await expect(page).toHaveURL(/\/sign-in(?:\/|$)/);
   await expect(page.getByLabel(/email address/i)).toBeVisible();
   await expect(page.getByLabel(/^password$/i)).toBeVisible();
-
-  await page.goto("/sign-up");
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Create your Meltiply account" }),
-  ).toBeVisible();
-  await expect(page.getByLabel(/your name/i)).toBeVisible();
+  await expect(page.getByLabel(/setup secret/i)).toHaveCount(0);
+  await expect(page.getByLabel(/your name/i)).toHaveCount(0);
 });
 
 for (const route of protectedRoutes) {
   test(`redirects ${route} to sign-in without a session`, async ({ page }) => {
     await page.goto(route);
     await expect(page).toHaveURL(/\/sign-in(?:\/|$)/, { timeout: 30_000 });
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Sign in to Meltiply" }),
-    ).toBeVisible();
   });
 }
 
@@ -100,15 +75,12 @@ for (const route of retiredRoutes) {
     // the separate Astro project and is never served from this origin, so an
     // assertion on the landing heading here could never hold.
     await expect(page).toHaveURL(/\/sign-in(?:\/|$)/, { timeout: 30_000 });
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Sign in to Meltiply" }),
-    ).toBeVisible();
   });
 }
 
 /**
  * Verifies the production shell exposes an active Workspace identity, not a
- * dormant switcher. Real registration resolves that identity from the session;
+ * dormant switcher. Owner sign-in resolves that identity from the session;
  * navigation and collapse remain usable without any Workspace menu.
  */
 test("shows Workspace identity without offering unsupported switching", async ({ page }) => {

@@ -117,9 +117,9 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     dialog = page.getByRole("dialog", { name: "Account security" });
     await dialog.getByLabel("Current password", { exact: true }).fill(recoveredPassword);
     await dialog.getByRole("button", { name: "Set up authenticator", exact: true }).click();
-    const uri = await dialog.getByLabel("Authenticator setup URI", { exact: true }).inputValue();
+    const setupKey = await dialog.getByLabel("Authenticator setup key", { exact: true }).inputValue();
     const backupCodes = (await dialog.locator("pre").textContent()).trim().split("\n");
-    await dialog.getByLabel("Authenticator code", { exact: true }).fill(totp(uri));
+    await dialog.getByLabel("Authenticator code", { exact: true }).fill(totp(`otpauth://totp/Meltiply?secret=${setupKey}`));
     await dialog.getByRole("button", { name: "I saved my codes — verify", exact: true }).click();
     await page.waitForURL(/\/sign-in/);
     phase = "backup recovery";

@@ -1,11 +1,11 @@
 import { createHmac } from "node:crypto";
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Pool } from "pg";
+import { createHyperdrivePool } from "@meltiply/database";
 import { activeOwnerIdentity } from "../src/auth-policy";
 import { jwtClaims } from "@meltiply/auth";
 
-import { betterAuthFor } from "../src/better-auth";
+import { betterAuthFor, checkAuthRateLimit } from "../src/better-auth";
 import { systemPoolFor } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 
@@ -38,16 +38,17 @@ const isolatedDatabase = new URL(baseSystemConnectionString);
 isolatedDatabase.searchParams.set("options", "-c search_path=auth_lifecycle,public");
 const systemConnectionString = isolatedDatabase.href;
 const setupSecret = crypto.randomUUID() + crypto.randomUUID();
-const adminPool = new Pool({
-  connectionString: process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
-    "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable",
-});
+const adminConnectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
+  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
 
 // Exercise the actual migrated auth tables and indexes without taking ownership
 // of the shared RLS fixtures. No production or external database is accepted.
 beforeAll(async () => {
-  const url = new URL(systemConnectionString);
-  if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply") throw new Error("Auth tests require the isolated local database.");
+  for (const connection of [systemConnectionString, adminConnectionString]) {
+    const url = new URL(connection);
+    if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply") throw new Error("Auth tests require the isolated local database.");
+  }
   await adminPool.query(`CREATE SCHEMA auth_lifecycle AUTHORIZATION meltiply_system`);
   for (const table of ["user", "session", "account", "verification", "jwks", "twoFactor"]) {
     await adminPool.query(`CREATE TABLE auth_lifecycle."${table}" (LIKE public."${table}" INCLUDING ALL)`);
@@ -57,6 +58,8 @@ beforeAll(async () => {
     CREATE TRIGGER revoke_password_sessions AFTER UPDATE OF password ON auth_lifecycle."account"
       FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
     CREATE TRIGGER revoke_account_sessions AFTER UPDATE OF "twoFactorEnabled", email, "emailVerified", "installationOwner" ON auth_lifecycle."user"
+      FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
+    CREATE TRIGGER revoke_backup_sessions AFTER UPDATE OF secret, "backupCodes" ON auth_lifecycle."twoFactor"
       FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
   `);
 });
@@ -638,8 +641,11 @@ describe("single-owner bootstrap and security changes", () => {
     expect((await authPost(auth, "/api/auth/sign-up/email", { ...body, email: emails.reset })).status).toBe(403);
     const status = await auth.handler(new Request(`${baseURL}/api/auth/setup-status`));
     expect(await status.json()).toEqual({ initialized: true });
-    const stored = await systemPoolFor(systemEnv()).query<{ password: string }>(`SELECT password FROM "account" WHERE "providerId" = 'credential'`);
-    expect(stored.rows.every((row) => row.password !== body.password && row.password.includes(":"))).toBe(true);
+    const stored = await systemPoolFor(systemEnv()).query<{ plaintext: boolean; stored: boolean }>(
+      `SELECT password = $1 AS plaintext, password IS NOT NULL AS stored FROM "account" WHERE "providerId" = 'credential'`,
+      [body.password],
+    );
+    expect(stored.rows).toEqual([{ plaintext: false, stored: true }]);
   });
 
   it("revokes old bearer and cookie authority on password change and password reset", async () => {
@@ -742,5 +748,25 @@ describe("optional authenticator lifecycle", () => {
     const signedIn = await post("sign-in/email", { email, password });
     expect(recordOf(await signedIn.json()).twoFactorRedirect).toBeUndefined();
     expect(signedIn.status).toBe(200);
+  });
+});
+describe("shared credential and delivery budgets", () => {
+  it("shares normalized email limits across independent callers without permanent account lockout", async () => {
+    const env = localTestEnv(recordingMailBinding());
+    const email = `${crypto.randomUUID()}@example.test`;
+    const request = (index: number) => new Request(`${baseURL}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "CF-Connecting-IP": `2001:db8::${index}` },
+      body: JSON.stringify({ email: index % 2 ? email.toUpperCase() : email, password: crypto.randomUUID() }),
+    });
+    const admitted = await Promise.all(Array.from({ length: 10 }, (_, index) =>
+      checkAuthRateLimit({ ...env }, "sign-in", request(index))));
+    expect(admitted.every((result) => result.status === "ok")).toBe(true);
+    const blocked = await checkAuthRateLimit({ ...env }, "sign-in", request(11));
+    expect(blocked.status).toBe("limited");
+    expect(blocked.retryAfterSeconds! > 0 && blocked.retryAfterSeconds! <= 600).toBe(true);
+    const sends = [];
+    for (let index = 20; index < 26; index++) sends.push(await checkAuthRateLimit({ ...env }, "send-verification-email", request(index)));
+    expect(sends.map((result) => result.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "limited"]);
   });
 });

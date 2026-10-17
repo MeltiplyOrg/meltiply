@@ -249,8 +249,10 @@ paths:
               schema:
                 type: object
                 additionalProperties: false
-                required: [backupCodes]
+                required: [status, backupCodes]
                 properties:
+                  status:
+                    type: boolean
                   backupCodes:
                     type: array
                     items:

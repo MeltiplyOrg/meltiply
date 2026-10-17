@@ -444,6 +444,7 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
       }),
       twoFactor({
         issuer: "Meltiply",
+        trustDeviceMaxAge: 0,
         backupCodeOptions: { storeBackupCodes: "encrypted" },
       }),
     ],

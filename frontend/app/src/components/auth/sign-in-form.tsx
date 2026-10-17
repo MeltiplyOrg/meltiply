@@ -27,6 +27,7 @@ export function SignInForm({ onSuccess, redirectTo = "/posts" }: SignInFormProps
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [resetToken] = useState(() => params.get("token"));
+  const [linkError] = useState(() => params.has("error"));
   const [mode, setMode] = useState<Mode>("loading");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -44,16 +45,16 @@ export function SignInForm({ onSuccess, redirectTo = "/posts" }: SignInFormProps
     authClient.setupStatus().then((status) => {
       if (!cancelled) {
         setMode(!status.initialized ? "setup" : resetToken ? "reset" : "signin");
-        setError(null);
+        setError(linkError ? "This link is invalid or expired. Request a new verification or password reset link." : null);
       }
     }).catch((cause: unknown) => {
       if (!cancelled) {
         setMode("unavailable");
-        setError(cause instanceof Error ? cause.message : t("Could not check installation status."));
+        setError(cause instanceof Error ? cause.message : "Could not check installation status.");
       }
     });
     return () => { cancelled = true; };
-  }, [attempt, resetToken, t]);
+  }, [attempt, resetToken, linkError]);
 
   useEffect(() => {
     // Remove recovery credentials from browser history immediately, not on submit.
@@ -100,6 +101,18 @@ export function SignInForm({ onSuccess, redirectTo = "/posts" }: SignInFormProps
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("Authentication failed. Please try again."));
+      if (mode === "setup") {
+        try {
+          if ((await authClient.setupStatus()).initialized) {
+            setMode("signin");
+            setSetupSecret("");
+            setPassword("");
+            setNotice(t("This installation now has an owner. Sign in, or resend verification if this is your account."));
+          }
+        } catch {
+          // Preserve the original signup failure when readiness is also unavailable.
+        }
+      }
     } finally { setBusy(false); }
   };
 

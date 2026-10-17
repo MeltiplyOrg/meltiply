@@ -38,6 +38,137 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/setup-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read whether this installation has an owner
+         * @description Returns only the initialized bit with Cache-Control no-store. Missing bootstrap configuration fails closed.
+         */
+        get: operations["getSetupStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/send-verification-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resend an owner verification link */
+        post: operations["resendVerification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/two-factor/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin password-reauthenticated authenticator enrollment
+         * @description Returns a secret URI and backup codes once. TOTP remains disabled until verify-totp succeeds.
+         */
+        post: operations["enableTwoFactor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/two-factor/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable or cancel authenticator enrollment after password verification */
+        post: operations["disableTwoFactor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/two-factor/generate-backup-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace all backup codes after password verification */
+        post: operations["generateBackupCodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/two-factor/verify-totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm enrollment or complete a pending authenticator sign-in
+         * @description Requires either a session cookie for enrollment or the signed pending-factor cookie from password sign-in.
+         */
+        post: operations["verifyTotp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/two-factor/verify-backup-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Consume a backup code to complete a pending sign-in
+         * @description Requires the signed pending-factor cookie. A consumed code cannot be reused.
+         */
+        post: operations["verifyBackupCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/sign-in/email": {
         parameters: {
             query?: never;
@@ -81,6 +212,7 @@ export interface paths {
          *     response header on GET /api/auth/get-session. Subject to the
          *     database-backed fixed-window authentication rate limit keyed by
          *     action and normalized email/IP.
+         *     This installation accepts exactly one owner; subsequent signup is forbidden.
          */
         post: operations["signUpWithEmail"];
         delete?: never;
@@ -1470,6 +1602,7 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            twoFactorEnabled?: boolean;
         };
         AuthSession: {
             id: string;
@@ -2651,6 +2784,225 @@ export interface operations {
             };
         };
     };
+    getSetupStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installation status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        initialized: boolean;
+                    };
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            503: components["responses"]["AuthError"];
+        };
+    };
+    resendVerification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    /** Format: uri */
+                    callbackURL?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Verification request accepted without disclosing account existence. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthStatusResult"];
+                };
+            };
+            400: components["responses"]["AuthError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    enableTwoFactor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Pending authenticator and encrypted-at-rest backup codes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        method?: "totp";
+                        totpURI: string;
+                        backupCodes: string[];
+                    };
+                };
+            };
+            400: components["responses"]["AuthError"];
+            401: components["responses"]["AuthError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    disableTwoFactor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Authenticator disabled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthStatusResult"];
+                };
+            };
+            400: components["responses"]["AuthError"];
+            401: components["responses"]["AuthError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    generateBackupCodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description New one-use backup codes; previous codes are invalid. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        backupCodes: string[];
+                    };
+                };
+            };
+            400: components["responses"]["AuthError"];
+            401: components["responses"]["AuthError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    verifyTotp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    code: string;
+                    /** @default false */
+                    trustDevice?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Factor accepted and session established or enrollment confirmed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status?: boolean;
+                        token?: string;
+                        user?: components["schemas"]["AuthUser"];
+                    };
+                };
+            };
+            400: components["responses"]["AuthError"];
+            401: components["responses"]["AuthError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    verifyBackupCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    code: string;
+                    /** @default false */
+                    trustDevice?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Factor accepted and session established or enrollment confirmed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status?: boolean;
+                        token?: string;
+                        user?: components["schemas"]["AuthUser"];
+                    };
+                };
+            };
+            400: components["responses"]["AuthError"];
+            401: components["responses"]["AuthError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     signInWithEmail: {
         parameters: {
             query?: never;
@@ -2671,7 +3023,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AuthTokenResult"];
+                    "application/json": components["schemas"]["AuthTokenResult"] | {
+                        /** @constant */
+                        twoFactorRedirect: true;
+                        twoFactorMethods?: string[];
+                    };
                 };
             };
             400: components["responses"]["AuthError"];
@@ -2683,7 +3039,10 @@ export interface operations {
     signUpWithEmail: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Deployment-controlled bootstrap secret, used only before an owner exists. */
+                "X-Setup-Secret": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2704,8 +3063,10 @@ export interface operations {
                 };
             };
             400: components["responses"]["AuthError"];
+            403: components["responses"]["AuthError"];
             422: components["responses"]["AuthError"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["AuthError"];
         };
     };
     signOut: {

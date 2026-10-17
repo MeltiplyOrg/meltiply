@@ -5,7 +5,7 @@ import { ownerCredentials, signIn, openOwnerWorkspace } from "./workspace-sessio
 test.use({ screenshot: "off", trace: "off" });
 test.setTimeout(90_000);
 
-test("signs up, signs out, and signs in through the Better Auth forms", async ({ page }) => {
+test("signs the owner out and back in through the Better Auth forms", async ({ page }) => {
   const credentials = ownerCredentials();
 
   await openOwnerWorkspace(page, credentials);

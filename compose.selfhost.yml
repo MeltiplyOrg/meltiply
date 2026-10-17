@@ -18,6 +18,7 @@ services:
 
   migrate:
     image: ${SELFHOST_IMAGE_PREFIX:-ghcr.io/meltiplyorg/meltiply}-database:${SELFHOST_IMAGE_TAG:-latest}
+    platform: ${SELFHOST_PLATFORM:?Generate .env.selfhost or set SELFHOST_PLATFORM}
     build:
       context: .
       dockerfile: scripts/selfhost/Dockerfile
@@ -36,6 +37,7 @@ services:
 
   runtime:
     image: ${SELFHOST_IMAGE_PREFIX:-ghcr.io/meltiplyorg/meltiply}-runtime:${SELFHOST_IMAGE_TAG:-latest}
+    platform: ${SELFHOST_PLATFORM:?Generate .env.selfhost or set SELFHOST_PLATFORM}
     build:
       context: .
       dockerfile: scripts/selfhost/Dockerfile
@@ -77,8 +79,8 @@ services:
     build:
       context: workers/automation/processor
       args:
-        PROCESSOR_PLATFORM: ${SELFHOST_PLATFORM:-linux/amd64}
-    platform: ${SELFHOST_PLATFORM:-linux/amd64}
+        PROCESSOR_PLATFORM: ${SELFHOST_PLATFORM:?Generate .env.selfhost or set SELFHOST_PLATFORM}
+    platform: ${SELFHOST_PLATFORM:?Generate .env.selfhost or set SELFHOST_PLATFORM}
     # Sharing the runtime network lets signed localhost capabilities work on a
     # local machine too. No Docker socket or processor port is published.
     network_mode: service:runtime

@@ -125,7 +125,7 @@ jobs:
           bun run test:wrangler-drift
           bun run test:frontend-directives
           bun run format-check:cloudflare
-          bunx --no-install vp fmt .github/workflows/ci.yml .github/workflows/selfhost.yml .github/actions/install-workspace/action.yml .github/actions/selfhost-images/action.yml scripts/selfhost compose.selfhost.yml docs/public-ci.md --check
+          bunx --no-install vp fmt .github/workflows/ci.yml .github/workflows/selfhost.yml .github/workflows/selfhost-ci.yml .github/actions/install-workspace/action.yml scripts/selfhost compose.selfhost.yml docs/public-ci.md --check
           git diff --exit-code -- packages/contracts
           bun run test:ci-routing
       - name: Local tooling, release, and supply-chain contracts
@@ -153,14 +153,7 @@ jobs:
         run: ./scripts/cloudflare-local/database.sh stop
 
   selfhost-images:
-    needs: baseline
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/selfhost-images
+    uses: ./.github/workflows/selfhost-ci.yml
 
   ci-gate:
     needs: [changes, baseline, frontend-fast, cloudflare-fast, selfhost-images]

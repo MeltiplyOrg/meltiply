@@ -1,8 +1,8 @@
 # Native media processor image (issue #284).
 #
 # Cloudflare Containers require linux/amd64, which remains the default even on
-# ARM workstations. Only smoke fixture helpers override PROCESSOR_PLATFORM to
-# run the same pinned codecs natively; the processor under test stays amd64.
+# ARM workstations. Self-hosting and native smoke fixture helpers override
+# PROCESSOR_PLATFORM to run the same pinned codecs natively on ARM64 too.
 #
 # Alpine 3.23 provides the native engines this feature requires: ffmpeg 8.x
 # (ffmpeg + ffprobe) for full decode, duration, frame and audio verification and

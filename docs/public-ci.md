@@ -16,16 +16,16 @@ Automatic checks run in separate jobs:
 - `cloudflare-fast`: spelling, contracts, Worker bindings, package/Worker types,
   tests and builds, strict lint, dead code, formatting, drift/routing regressions,
   local-tooling and release regressions, supply-chain/SBOM policy, costs, and PostgreSQL integration tests.
-- `selfhost-images`: on every push, pull request, and manual CI run, build all
-  three production images and smoke the complete Compose deployment, including
-  crash recovery and HTTPS. Images are loaded only into the runner; nothing is
-  published.
+- `selfhost-images`: on every push, pull request, and manual CI run, build the
+  three production images for both amd64 and ARM64 in six parallel native-runner
+  jobs, then smoke the exact image artifacts on each architecture, including
+  crash recovery and HTTPS. Nothing is published.
 - `ci-gate`: require baseline, self-hosted images, and every selected application
   lane to succeed; reject failures, cancellations, and unexpectedly skipped jobs.
 
-The application lanes run independently after routing. Image checks run after
-baseline regardless of changed paths, so documentation-only changes also exercise
-production images without selecting the application lanes.
+The application lanes run independently after routing. Image builds start
+independently of baseline and path routing, so documentation-only changes also
+exercise production images without selecting the application lanes.
 [The router](../scripts/ci/github-routing.mjs) reads the public CI-owned
 [path rules](../scripts/ci/github-paths.json). Workflow, routing, and development
 container changes select both application lanes.
@@ -58,11 +58,14 @@ owns a separate backend process for load checks after the smoke process exits.
 
 The normal [CI workflow](../.github/workflows/ci.yml) and the
 [release image workflow](../.github/workflows/selfhost.yml) share the
-[image build-and-smoke action](../.github/actions/selfhost-images/action.yml).
+[reusable image workflow](../.github/workflows/selfhost-ci.yml).
 It builds the app-only workerd runtime, migration image, and native media
-processor serially on GitHub-hosted runners, then exercises email verification,
-authenticated database access, signed storage, queue delivery, media processing,
-abrupt-restart recovery, and HTTPS.
+processor in parallel on native `ubuntu-24.04` and `ubuntu-24.04-arm` runners.
+Each image is exported directly to a compressed Docker archive with one-day
+artifact retention. Two downstream smoke jobs load these exact artifacts without
+rebuilding and exercise email verification, authenticated database access, signed
+storage, queue delivery, media processing, abrupt-restart recovery, and HTTPS.
+Archives use zstd once; artifact upload disables redundant compression.
 
 Ordinary CI has read-only repository permissions and no registry login or image
 push step. Only published releases and explicitly requested manual release runs
@@ -77,6 +80,14 @@ Bun's download store, keyed by runner OS/architecture, Bun version, lockfile,
 workspace configuration, and dependency patches. A compatible download-cache
 fallback avoids re-downloading unchanged packages; installation always uses
 `--frozen-lockfile`. Installed `node_modules` is not cached.
+
+Docker layer caches are isolated by component and architecture. The runtime
+Dockerfile installs workspace dependencies from manifests, lockfiles, and patches
+before copying application source, so source-only changes reuse dependency layers.
+Its audited production npm dependencies are installed once and reused by the
+builder and final runtime. Release checks reuse the image workflow and run the
+Cloudflare gate concurrently; publication loads verified artifacts and creates
+multi-architecture manifests without rebuilding.
 
 The backend lane persists Vite's content-addressed task store. Keys include the
 runtime, dependency fingerprint, commit, run ID, and attempt; dependency-matched

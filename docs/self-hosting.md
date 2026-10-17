@@ -39,8 +39,8 @@ No Cloudflare account or remote Workers are needed by this deployment.
 
 Requirements: Docker Engine with a recent Docker Compose v2 supporting inline
 `configs.content`, Node 24 for the configuration generator, and a delivering SMTP
-server. Images produced by the supplied hosted workflow target Linux amd64; use
-an amd64 host or explicitly configured Docker emulation on ARM.
+server. Images support Linux amd64 and ARM64, with native CI builds and complete
+Compose smoke checks on both architectures; no emulation is required.
 
 From the repository root:
 
@@ -50,6 +50,10 @@ node scripts/selfhost/configure.mjs
 docker compose --env-file .env.selfhost -f compose.selfhost.yml build
 docker compose --env-file .env.selfhost -f compose.selfhost.yml up -d --wait
 ```
+
+The generator records the native architecture as `SELFHOST_PLATFORM=linux/amd64`
+or `linux/arm64`. Existing environment files must add this setting explicitly.
+Only 64-bit ARM is supported; 32-bit ARM is not a release target.
 
 The generator creates private random credentials in `.env.selfhost` with mode
 0600 and refuses to overwrite an existing file. Keep it outside version control
@@ -95,7 +99,7 @@ client IPs.
 ## Published images and CI
 
 The main [CI workflow](../.github/workflows/ci.yml) builds and smoke-checks three
-images on every push and pull request using GitHub-hosted Linux amd64 runners:
+images on every push and pull request, in parallel for Linux amd64 and ARM64:
 
 - `ghcr.io/meltiplyorg/meltiply-runtime`
 - `ghcr.io/meltiplyorg/meltiply-database`
@@ -103,12 +107,15 @@ images on every push and pull request using GitHub-hosted Linux amd64 runners:
 
 Ordinary CI never publishes images, and its required `ci-gate` fails if image
 builds or smoke checks fail. The separate
-[release workflow](../.github/workflows/selfhost.yml) reuses the same build-and-smoke
-action. A published GitHub release, or a manually dispatched release workflow
-with `publish=true` and an explicit image tag, publishes only after all
-verification passes. Tags include
-the release tag and `sha-<full-commit>`; non-prerelease releases also update
-`latest`. Images include source/revision labels; the runtime carries dependency
+[release workflow](../.github/workflows/selfhost.yml) reuses the same
+[image verification workflow](../.github/workflows/selfhost-ci.yml).
+A published GitHub release, or a manually dispatched release workflow with
+`publish=true` and an explicit image tag, publishes only after verification passes
+on both architectures. Publication uses the exact verified image artifacts,
+without rebuilding. The release tag and `sha-<full-commit>` are multi-architecture
+manifests; Docker selects the native image automatically. Non-prerelease releases
+also update `latest`. Architecture-specific commit tags retain the `-amd64` or
+`-arm64` suffix. Images include source/revision labels; the runtime carries dependency
 license notices and an SBOM. The workflow uses `GITHUB_TOKEN` with package-write
 permission, not Cloudflare deployment secrets. Configure the GHCR packages as
 public if unauthenticated pulls are required.

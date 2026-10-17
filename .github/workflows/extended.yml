@@ -59,7 +59,9 @@ jobs:
         if: inputs.lane == 'auth-acceptance'
         run: |
           ./scripts/cloudflare-local/compose.sh up -d postgres
-          bun run cloudflare:check
+          # Tooling tests own their tunnel fixtures; the workflow-wide override
+          # would otherwise replace their explicit per-fixture configuration.
+          env -u MELTIPLY_DEV_TUNNEL bun run cloudflare:check
       - name: Exercise first-run owner journeys in production images
         if: inputs.lane == 'auth-acceptance'
         env:

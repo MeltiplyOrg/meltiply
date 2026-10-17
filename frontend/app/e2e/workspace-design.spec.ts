@@ -430,7 +430,25 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   // One menu vocabulary: the filter panel, its select list, and the platform menu
   // must render the same surface and rows as the account menu above.
   const postsFilterSummary = page.locator("summary").filter({ hasText: /^Filter/ });
-  await postsFilterSummary.click();
+  // A native disclosure shows its panel before React re-renders, so the surface
+  // state must already be the entering one in the same task as the open — the
+  // first painted frame otherwise runs the exit animation and the panel flashes.
+  const firstOpen = await page.evaluate(() => {
+    const summary = Array.from(document.querySelectorAll("summary")).find((element) =>
+      element.textContent?.trim().startsWith("Filter"),
+    );
+    if (!summary) throw new Error("Filter disclosure is missing");
+    summary.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    const details = summary.closest("details");
+    const panel = details?.querySelector<HTMLElement>("[data-menu-surface]");
+    if (!details || !panel) throw new Error("Filter panel is missing");
+    return {
+      open: details.open,
+      state: panel.dataset.state,
+      animation: getComputedStyle(panel).animationName,
+    };
+  });
+  expect(firstOpen).toEqual({ open: true, state: "open", animation: "menu-surface-in" });
   const postsFilterPanel = page.getByRole("group", { name: "Filters", exact: true });
   await postsFilterPanel
     .getByRole("button", { name: "Add Post status filter", exact: true })

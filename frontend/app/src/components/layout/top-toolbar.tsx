@@ -103,6 +103,7 @@ export function TopToolbarFilters({
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDetailsElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const pendingFocusField = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -111,13 +112,33 @@ export function TopToolbarFilters({
   const visibleFields = fields.filter((field) => field.active || addedFields.has(field.id));
   const availableFields = fields.filter((field) => !field.active && !addedFields.has(field.id));
   /**
+   * Writes the surface state straight to the panel. A native disclosure shows its
+   * content before React re-renders, so the attribute has to change in the same
+   * handler as `details.open`; otherwise the first painted frame runs the exit
+   * animation and the panel flashes before its entrance.
+   */
+  const setSurfaceState = (state: "open" | "closed") => {
+    if (panelRef.current) panelRef.current.dataset.state = state;
+  };
+  /** Opens the disclosure with its surface already in the entering state. */
+  const openPanel = () => {
+    const details = ref.current;
+    if (!details || details.open) return;
+    setSurfaceState("open");
+    details.open = true;
+    setClosing(false);
+    setOpen(true);
+  };
+  /**
    * Holds the native disclosure open for the shared exit animation so the panel
    * leaves exactly like a Radix menu, then closes it for real. Every close path
-   * (Escape, outside pointer, summary toggle) routes through here.
+   * (Escape, outside pointer, summary toggle) routes through here; toggling the
+   * summary mid-exit cancels the pending close instead of swallowing the click.
    */
   const close = useCallback(() => {
     const details = ref.current;
     if (!details?.open || closeTimer.current !== null) return;
+    setSurfaceState("closed");
     setClosing(true);
     closeTimer.current = window.setTimeout(() => {
       closeTimer.current = null;
@@ -162,8 +183,18 @@ export function TopToolbarFilters({
         <summary
           className="flex h-control-sm cursor-pointer list-none items-center gap-1.5 rounded-control px-2 text-xs text-ink-2 hover:bg-hover group-open/filter:bg-hover [&::-webkit-details-marker]:hidden"
           onClick={(event) => {
-            if (!open) return;
             event.preventDefault();
+            if (ref.current?.open === false) {
+              openPanel();
+              return;
+            }
+            if (closeTimer.current !== null) {
+              window.clearTimeout(closeTimer.current);
+              closeTimer.current = null;
+              setSurfaceState("open");
+              setClosing(false);
+              return;
+            }
             close();
           }}
         >
@@ -176,6 +207,7 @@ export function TopToolbarFilters({
           )}
         </summary>
         <div
+          ref={panelRef}
           role="group"
           aria-label={t("Filters")}
           data-menu-surface=""

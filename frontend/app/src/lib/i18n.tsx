@@ -458,6 +458,8 @@ const spanishTranslations: Record<string, string> = {
   "Clear filters": "Limpiar filtros",
   "Clear search": "Limpiar búsqueda",
   "Connect a channel": "Conectar un canal",
+  "Composer sections": "Secciones del redactor",
+  "What do you want to publish?": "¿Qué quieres publicar?",
   "Connect social account": "Conectar cuenta social",
   "Connect your social accounts to start publishing and scheduling across platforms.":
     "Conecta tus cuentas sociales para empezar a publicar y programar en todas las plataformas.",

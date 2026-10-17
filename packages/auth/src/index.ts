@@ -12,6 +12,7 @@ export interface JwtIdentity {
   email: string;
   name?: string;
   subject: string;
+  sessionId?: string;
 }
 
 /**
@@ -106,12 +107,12 @@ export function bearerToken(authorization: string | undefined): string | undefin
 
 /**
  * Validates and extracts tenant identity claims from a verified Better Auth JWT payload.
- * The JWT plugin mints a minimized payload (`sub`, `email`, optional `name`); this
- * parser enforces that contract so a structurally valid but identity-less token
- * can never reach actor resolution.
+ * The plugin mints `sub`, `email`, `sid`, and optional `name`. This parser
+ * validates identity and extracts the session ID; protected API authorization
+ * separately requires that ID to reference a live owner session.
  *
  * @param payload - Decoded JWT payload from a signature/issuer/audience-verified token.
- * @returns Validated JwtIdentity with lowercase email and optional display name.
+ * @returns Validated JwtIdentity with lowercase email and optional display name/session ID.
  * @throws {TypeError} When subject or email is missing or empty.
  */
 export function jwtClaims(payload: JWTPayload): JwtIdentity {
@@ -121,7 +122,8 @@ export function jwtClaims(payload: JWTPayload): JwtIdentity {
     throw new TypeError("JWT requires an identity subject and email");
   }
   const name = nonEmptyString(payload.name);
-  return { email, ...(name ? { name } : {}), subject };
+  const sessionId = nonEmptyString(payload.sid);
+  return { email, ...(name ? { name } : {}), ...(sessionId ? { sessionId } : {}), subject };
 }
 
 /**
@@ -337,14 +339,10 @@ export type BetterAuthInstance = BetterAuthShape;
  * plain-text bodies stay raw. `config.requireEmailVerification` independently
  * controls whether sign-in requires a verified email.
  *
- * The `jwt()` plugin exposes `/api/auth/token` (mints a 15-minute bearer JWT for
- * the session cookie) and `/api/auth/jwks` (publishes the managed EdDSA keys the
- * API verifies against). `definePayload` keeps the token to the identity
- * minimum — `sub` (Better Auth user id), `email`, `name` — and
- * `sessionCookieCache` signs the 5-minute session cookie cache with the same
- * managed JWKS so `/api/auth` session reads stay database-free. Issuer and
- * audience default to `baseURL`; `config.jwt` overrides them when the verifier
- * pins different values.
+ * JWTs include the database session id (`sid`), never its bearer secret. The API
+ * checks that session on every protected operation, so revocation is immediate.
+ * Cookie caching is disabled for the same reason. Password reset revokes all
+ * sessions; TOTP enrollment requires confirmation and backup codes are encrypted.
  *
  * @param config - Database pool, secret, verification policy, optional baseURL/trustedOrigins, JWT claims, and email delivery.
  * @returns Configured Better Auth instance.
@@ -352,14 +350,37 @@ export type BetterAuthInstance = BetterAuthShape;
 export async function createBetterAuth(config: BetterAuthConfig): Promise<BetterAuthInstance> {
   // Exception: dynamic imports avoid loading pg and plugin code in workerd unit test isolates
   const { betterAuth } = await import("better-auth");
-  const { jwt } = await import("better-auth/plugins");
+  const { jwt, twoFactor } = await import("better-auth/plugins");
   const email = config.email;
   return betterAuth({
     baseURL: config.baseURL,
     database: config.database,
+    appName: "Meltiply",
+    logger: { disabled: true },
+    // The API owns authoritative PostgreSQL rate limits; no isolate-local limit.
+    rateLimit: { enabled: false },
+    user: {
+      additionalFields: {
+        installationOwner: { type: "boolean", defaultValue: true, input: false, returned: false },
+      },
+    },
+    databaseHooks: {
+      session: {
+        create: {
+          before: async (session, ctx) => {
+            const user = await ctx?.context.internalAdapter.findUserById(session.userId);
+            if (!user || !("installationOwner" in user) || user.installationOwner !== true) {
+              return false;
+            }
+            return { data: session };
+          },
+        },
+      },
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: config.requireEmailVerification,
+      revokeSessionsOnPasswordReset: true,
       ...(email
         ? {
             sendResetPassword: async ({
@@ -411,23 +432,25 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
       jwt({
         jwt: {
           ...(config.jwt?.audience ? { audience: config.jwt.audience } : {}),
-          definePayload: ({ user }) => ({
+          definePayload: ({ user, session }) => ({
             email: user.email,
             name: user.name,
+            sid: session.id,
           }),
           expirationTime: "15m",
           ...(config.jwt?.issuer ? { issuer: config.jwt.issuer } : {}),
         },
-        sessionCookieCache: true,
+        sessionCookieCache: false,
+      }),
+      twoFactor({
+        issuer: "Meltiply",
+        trustDeviceMaxAge: 0,
+        backupCodeOptions: { storeBackupCodes: "encrypted" },
       }),
     ],
     secret: config.secret,
     session: {
-      cookieCache: {
-        enabled: true,
-        maxAge: 5 * 60,
-        strategy: "jwt",
-      },
+      cookieCache: { enabled: false },
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24,
     },

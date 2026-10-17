@@ -12,9 +12,9 @@
 -- the API integration suite) and the per-object storage inventory is
 -- 4100…/4200… for objects and their renditions.
 --
--- Sign-in for the seeded workspaces (Better Auth email + password):
+-- Only Alpha is the installation owner and can sign in through Better Auth:
 --   alpha@meltiply.local / MeltiplyLocal1!   (rich personal workspace)
---   beta@meltiply.local  / MeltiplyLocal1!   (near-empty personal workspace)
+-- Beta remains a database-only RLS isolation fixture, never a second login.
 -- The account.password value is a scrypt hash (N=16384, r=16, p=1, dkLen=64,
 -- "<salt-hex>:<key-hex>") of MeltiplyLocal1! in the exact format Better Auth's
 -- verifyPassword expects; it is a local-only fixture, never a real credential.
@@ -32,6 +32,8 @@ SET name = EXCLUDED.name,
     email = EXCLUDED.email,
     "emailVerified" = EXCLUDED."emailVerified",
     "updatedAt" = now();
+UPDATE "user" SET "installationOwner" = (id = 'auth_user_local_alpha')
+WHERE id IN ('auth_user_local_alpha', 'auth_user_local_beta');
 
 -- Credential accounts so the seeded users can sign in through the real
 -- /sign-in UI instead of bypassing auth. accountId mirrors Better Auth's

@@ -7,7 +7,6 @@ import { RouteFallback } from "@/components/layout/route-fallback";
 const ChannelsPage = lazy(() => import("@/app/(dashboard)/channels/page"));
 const PostsPage = lazy(() => import("@/app/(dashboard)/posts/page"));
 const SignInRoute = lazy(() => import("@/app/sign-in-route"));
-const SignUpRoute = lazy(() => import("@/app/sign-up-route"));
 
 /**
  * Root routing component for the authenticated React application.
@@ -26,7 +25,6 @@ export function AppRouter(): React.ReactElement {
       <Routes>
         <Route path="/" element={<Navigate to="/posts" replace />} />
         <Route path="/sign-in/*" element={<SignInRoute />} />
-        <Route path="/sign-up/*" element={<SignUpRoute />} />
         <Route element={<AuthenticatedShell />}>
           <Route path="/posts" element={<PostsPage />} />
           <Route path="/channels" element={<ChannelsPage />} />

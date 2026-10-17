@@ -1,72 +1,41 @@
 import { randomUUID } from "node:crypto";
-
+import { Pool } from "pg";
 import { expect, type Page } from "@playwright/test";
-
 import { activeBrandProfileName } from "./publication-fixtures";
 
 export type GeneratedCredentials = Readonly<{ name: string; email: string; password: string }>;
 
-/**
- * A Workspace that belongs to exactly one test: a freshly registered account,
- * one Brand Profile created through Channels, and that profile left selected
- * so profile-scoped composer mutations can run.
- */
+/** A test's empty owner Workspace and selected Brand Profile, not an extra login account. */
 export interface IsolatedWorkspace {
-  /** Credentials a second browser context can sign in with. */
   credentials: GeneratedCredentials;
-  /** Display name of the workspace's Brand Profile, for fixtures that resolve it by name. */
   profileName: string;
 }
 
 const isolatedAuthPages = new WeakSet<Page>();
 
-/**
- * Gives each local browser actor its own IP bucket without changing auth limits.
- * Only loopback auth requests carry a unique documentation-range IPv6 address;
- * they still reach the real Worker and database. Staging/external traffic is
- * untouched, and reloads retain the page's identity.
- */
+/** Gives loopback Worker browser actors distinct edge-IP fixtures; never changes external requests. */
 async function isolateLocalAuthClient(page: Page) {
   if (isolatedAuthPages.has(page) || process.env.STAGING_E2E_BASE_URL) return;
-  const apiOrigin = new URL(
-    process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://127.0.0.1:8787",
-  );
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(apiOrigin.hostname)) return;
+  const origin = new URL(process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://127.0.0.1:8787");
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname)) return;
   const identifier = randomUUID().replaceAll("-", "").slice(0, 24);
-  const address = `2001:db8:${Array.from({ length: 6 }, (_, index) =>
-    identifier.slice(index * 4, index * 4 + 4),
-  ).join(":")}`;
-  await page.route(`${apiOrigin.origin}/api/auth/**`, (route) =>
-    route.continue({
-      headers: { ...route.request().headers(), "cf-connecting-ip": address },
-    }),
+  const address = `2001:db8:${Array.from({ length: 6 }, (_, index) => identifier.slice(index * 4, index * 4 + 4)).join(":")}`;
+  await page.route(`${origin.origin}/api/auth/**`, (route) =>
+    route.continue({ headers: { ...route.request().headers(), "cf-connecting-ip": address } }),
   );
   isolatedAuthPages.add(page);
 }
 
-/**
- * Builds unique sign-up credentials for one test run. A UUID suffix keeps the
- * email and display name collision-free across parallel workers and repeated
- * runs against a shared backend; the password embeds the same identifier plus
- * fixed characters so it satisfies the sign-up form's complexity rules.
- *
- * @returns Name, email, and password safe to submit to `/sign-up` once.
- */
-export function generatedCredentials(): GeneratedCredentials {
-  const identifier = randomUUID().replaceAll("-", "");
+/** Uses the documented local-only owner fixture, with unique labels for each test's Brand Profile. */
+export function ownerCredentials(): GeneratedCredentials {
   return {
-    name: `E2E ${identifier.slice(0, 8)}`,
-    email: `meltiply-e2e-${identifier}@example.com`,
-    password: `Meltiply!${identifier}a1`,
+    name: `E2E ${randomUUID().slice(0, 8)}`,
+    email: "alpha@meltiply.local",
+    password: "MeltiplyLocal1!",
   };
 }
 
-/**
- * Grants functional consent before app boot for journeys that assert optional
- * preference persistence; analytics and marketing remain explicitly denied.
- *
- * @param page - Playwright page bound to the app under test.
- */
+/** Grants functional consent before boot; analytics and marketing remain explicitly denied. */
 export async function allowFunctionalConsent(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const consent = encodeURIComponent(
@@ -83,41 +52,33 @@ export async function allowFunctionalConsent(page: Page): Promise<void> {
 }
 
 /**
- * Drives the real `/sign-up` form through account creation. Fills each labelled
- * field and submits via the "Create account" button so the test exercises the
- * same client path a user takes; resolves after the click, so callers must wait
- * for the post-sign-up redirect (`waitForURL(/\/posts/)`) and the rendered
- * workspace ({@link waitForWorkspace}) before asserting.
- * Local browser actors use independent IP fixtures, preserving auth rate limits
- * without competing for the host's shared sign-up budget. Functional consent is
- * seeded explicitly so optional recovery assertions test consented persistence.
- *
- * @param page - Playwright page bound to the app under test.
- * @param credentials - Unique credentials from {@link generatedCredentials}.
+ * Starts a serial local journey with the same single owner and an empty personal
+ * Workspace. Resets only that fixture's domain rows in the dedicated loopback test
+ * database; auth tables, owner credentials, and other RLS users are untouched.
+ * Requires explicit MELTIPLY_DATABASE_TEST_ADMIN_URL. Remote/staging resets are
+ * forbidden. A second browser uses signIn, never reset.
  */
-export async function signUp(page: Page, credentials: GeneratedCredentials) {
-  await allowFunctionalConsent(page);
-  await isolateLocalAuthClient(page);
-  await page.goto("/sign-up");
-  await page.getByLabel(/your name/i).fill(credentials.name);
-  await page.getByLabel(/email address/i).fill(credentials.email);
-  await page.getByLabel(/^password$/i).fill(credentials.password);
-  await page.getByRole("button", { name: /create account/i }).click();
+export async function openOwnerWorkspace(page: Page, credentials: GeneratedCredentials) {
+  if (process.env.STAGING_E2E_BASE_URL) throw new Error("Owner fixture reset is local-only");
+  const connectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL;
+  if (!connectionString?.trim())
+    throw new Error("MELTIPLY_DATABASE_TEST_ADMIN_URL is required for owner fixture resets");
+  const url = new URL(connectionString);
+  if (!["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/meltiply")
+    throw new Error("Owner fixtures require the dedicated loopback test database");
+  const pool = new Pool({ connectionString });
+  try {
+    await pool.query(
+      `DELETE FROM organizations o USING users u WHERE o.personal_user_id = u.id AND u.auth_user_id = $1`,
+      ["auth_user_local_alpha"],
+    );
+  } finally {
+    await pool.end();
+  }
+  await signIn(page, credentials);
 }
 
-/**
- * Signs an existing account back in through the real `/sign-in` form.
- *
- * Used to prove that saved work is recoverable from a browser-local state that
- * never carried it: a second context starts without the auth session or optional
- * browser data; only the consent cookie is seeded for the recovery contract, so
- * anything recovered must have come from the server.
- * Local browser actors use their own IP fixture; production auth limits remain
- * unchanged and requests are not mocked.
- *
- * @param page - Playwright page bound to the app under test.
- * @param credentials - Credentials previously passed to {@link signUp}.
- */
+/** Signs the existing owner in through the actual form without resetting saved work or session state. */
 export async function signIn(page: Page, credentials: GeneratedCredentials) {
   await allowFunctionalConsent(page);
   await isolateLocalAuthClient(page);
@@ -128,37 +89,15 @@ export async function signIn(page: Page, credentials: GeneratedCredentials) {
   await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
 }
 
-/**
- * Waits until the signed-in workspace has actually rendered, not just
- * navigated: `/posts` matches while the lazy `DashboardLayout`/`PostsPage`
- * chunks still download, leaving `RouteFallback` ("Loading Meltiply…") or the
- * previous route on screen and the sidebar controls absent. The Posts `h1`
- * only mounts inside the loaded chunks, so it is the readiness signal on the
- * posts route; the bound matches `waitForURL` so broken hydration fails fast.
- *
- * @param page - Playwright page bound to the app under test.
- */
+/** Waits for the hydrated Posts surface, not merely the route URL. */
 export async function waitForWorkspace(page: Page) {
   await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible({ timeout: 30_000 });
 }
 
-/**
- * Registers a brand new account and scopes the session to its Brand Profile.
- *
- * Every test that owns this Workspace starts with an empty Posts list, an empty
- * Asset inventory, and no Channels, so nothing another test wrote can satisfy an
- * assertion. Registration provisions the organization, not a Brand Profile:
- * this helper creates one through the real Channels dialog, which selects the
- * new profile and opens account connection. Returning to Posts closes that flow;
- * the scoped profile then permits the composer to own media and save drafts.
- *
- * @param page - Playwright page bound to the app under test.
- * @returns Credentials for a second browser context, plus the active profile name.
- */
-export async function signUpIsolatedWorkspace(page: Page): Promise<IsolatedWorkspace> {
-  const credentials = generatedCredentials();
-  await signUp(page, credentials);
-  await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
+/** Creates a selected Brand Profile in an empty owner Workspace through the real Channels dialog. */
+export async function openIsolatedOwnerWorkspace(page: Page): Promise<IsolatedWorkspace> {
+  const credentials = ownerCredentials();
+  await openOwnerWorkspace(page, credentials);
   await waitForWorkspace(page);
   await page.goto("/channels");
   await page.getByRole("button", { name: "Create Brand Profile", exact: true }).click();

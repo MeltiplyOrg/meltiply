@@ -56,6 +56,12 @@ DevBox motion scenarios use a separate loopback development server on the
 adjacent port. Production tests never enable DevBox controls. The topology lane
 owns a separate backend process for load checks after the smoke process exits.
 
+The existing self-hosted image smoke includes Chromium owner journeys: first-run
+creation, SMTP-captured verification/reset links, closed registration, password
+changes, and optional authenticator recovery. Login screenshots contain only
+blank forms, not credentials or browser traces. These checks do not prove
+external inbox delivery or a managed Cloudflare rollout.
+
 ## Self-hosted release images
 
 The normal [CI workflow](../.github/workflows/ci.yml) and the

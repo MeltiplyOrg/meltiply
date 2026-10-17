@@ -1,29 +1,32 @@
 ---
 title: Getting started
-description: Create your Meltiply account, sign in, learn the workspace layout, and finish first-time setup — Brand Profile, channel, and first post.
+description: Set up your installation's single owner, sign in securely, and prepare your Brand Profile, channel, and first post.
 section: Getting started
 order: 2
 ---
 
-This guide takes you from a brand-new account to a workspace that's ready to publish.
+Each Meltiply installation has one owner. First-run setup appears only until that owner is created; it does not change how Workspaces and Brand Profiles organize publishing.
 
 ## Create an account
 
-1. Open the Meltiply app and choose **Sign up** on the sign-in page (or go straight to `/sign-up`).
-2. Enter **Your name**, **Email address**, and a **Password** of at least 8 characters.
-3. Select **Create Account**.
+1. Open the app at `/sign-in` on an empty installation.
+2. Enter the private **Setup secret** supplied by your deployment administrator, **Your name**, **Email address**, and a unique **Password** of 8–128 characters.
+3. Select **Create owner account**.
+4. Follow the verification link sent to your email, then return to sign in.
 
-You're signed in immediately and land on the **Posts** area.
+After setup, registration closes and the page becomes the owner's sign-in form. The setup secret is not your login password. If the verification email is missing, use **Resend verification** on the sign-in form.
 
 ## Sign in
 
 1. Go to `/sign-in`.
 2. Enter your **Email address** and **Password**.
-3. Select **Sign In**.
+3. Select **Sign in**. If an authenticator is enabled, enter its current code or a saved, unused backup code.
 
-If you don't have an account yet, use the **Sign up** link at the bottom of the form. Successful sign-in always lands on **Posts** — including when you follow a link to another part of the app while signed out.
+Successful sign-in lands on **Posts**. Use **Forgot password?** to request an expiring reset link; password reset does not bypass an enabled authenticator.
 
-To sign out, open the account area at the bottom of the sidebar and select the sign-out icon next to your name and email.
+Open **Account security** in desktop or mobile navigation to change your password or enable an authenticator. Enrollment requires a live code before activation. Save the backup codes offline: each works once, and replacing them invalidates the previous set. Password reauthentication is required for sensitive security changes.
+
+To sign out, select the sign-out control beside your account identity. Signing out revokes your session, but does not cancel already scheduled publishing.
 
 ## Your first five minutes
 
@@ -58,11 +61,11 @@ At the bottom of the sidebar you can:
 - Switch between **light and dark** themes
 - Turn **Low motion** on or off (Meltiply also follows your device's reduced-motion setting)
 - **Collapse** the sidebar to an icon rail
-- See your account name and email, and **sign out**
+- Open **Account security**, see your account name and email, and **sign out**
 
 ### On smaller screens
 
-On phones and tablets the sidebar is replaced by a top bar with a **menu button** that opens the same navigation in a panel, along with your account email and a **Log out** option.
+On phones and tablets the sidebar is replaced by a top bar with a **menu button** that opens the same navigation in a panel, along with your account email, **Account security**, and a **Log out** option.
 
 ## Where things live
 

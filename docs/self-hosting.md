@@ -62,10 +62,12 @@ URL or a properly configured STARTTLS SMTP server; URL-encode credential
 characters. Startup verifies the SMTP connection. The `verification` profile
 contains a capture-only Mailpit service for CI, **not email delivery**.
 
-Open <http://localhost:8080> for the app. Create a new account and follow its
-emailed verification link. Development
-fixtures and development passwords are not installed. PostgreSQL is not published
-to the host. Only loopback application ports are published by default.
+Open <http://localhost:8080/sign-in>. On an empty installation, enter the private
+`AUTH_SETUP_SECRET` from `.env.selfhost`, your name, email, and a unique password
+to create the installation's only owner. Follow the emailed verification link,
+then sign in. Once the owner exists, registration closes, including direct API
+requests. Development fixtures and passwords are not installed. PostgreSQL is
+not published to the host. Only loopback application ports are published by default.
 
 Signed storage URLs support a path prefix of at most 128 characters after
 boundary slashes are removed. Prefix normalization scans boundary slashes in
@@ -76,6 +78,57 @@ Set optional Provider/billing variables in `.env.selfhost` using the names in
 [`.env.example`](../.env.example). Self-hosting does not bypass Provider live-mode
 checks or account permissions. Do not change `ENVIRONMENT` to disable verification;
 the supervisor deliberately retains deployed security behavior.
+
+## Authentication and owner recovery
+
+Each installation accepts one owner, without changing Workspace or Brand Profile
+ownership. The database enforces the singleton even if two setup requests race.
+Migration `010_single_owner_auth.sql` adopts a sole existing account; it refuses
+to choose between multiple existing accounts. Back up and explicitly reconcile
+authentication identities and their domain ownership before retrying that migration;
+do not delete accounts blindly or reset production data to bypass the guard.
+For local development databases seeded before this migration, use `make reset`
+to recreate the disposable fixtures; never use it against production data.
+
+`AUTH_SETUP_SECRET` must be a private, randomly generated value of at least 32
+characters. Existing environment files must add it; the generator does not
+overwrite them. It is an API-only bootstrap credential, never a browser build
+variable. Setup status reveals only whether registration has closed. After setup,
+the owner's password and optional second factor authenticate sign-in, not the
+bootstrap secret.
+
+Better Auth stores salted scrypt password hashes, not plaintext passwords.
+Passwords are 8–128 characters; use a password manager and a unique passphrase.
+No remote compromised-password screening or Turnstile service is configured:
+password creation has no external screening dependency and does not reject a
+reused password solely because it appeared in a breach. PostgreSQL-backed limits
+bound credential attempts and verification/reset delivery across API instances;
+client-supplied `X-Forwarded-For` cannot select a different budget.
+
+Deployed sign-in requires verified email and configured mail delivery. Use
+**Resend verification** on the sign-in form if needed, or **Forgot password?**
+for a single-use, expiring reset link. Recovery responses do not disclose whether
+an address is registered. Mailpit proves SMTP submission and link handling in CI,
+not delivery to an external inbox.
+
+Open **Account security** from desktop or mobile navigation to change the password
+or configure an authenticator. Enrollment provides a manual setup key and backup
+codes, then requires a live authenticator code before activation. Save backup
+codes offline: each works once; generating replacements invalidates the old set.
+Password reauthentication protects enrollment, replacement, and disabling the
+factor. There is no trusted-device bypass. Password reset does not bypass 2FA;
+if both the authenticator and backup codes are lost, privileged operator recovery
+is required, not an email-only second-factor bypass.
+
+Sign-out revokes the stored session. Protected API calls require a signed JWT
+whose session is still live and belongs to the owner. Password changes, resets,
+and factor activation/deactivation revoke existing sessions and pending factor
+challenges. Regenerating backup codes retains the current session until the owner
+saves them and signs out. Already committed durable work retains its original
+authorization; signing out is not a cancellation of scheduled publishing.
+
+Protect database backups and preserve `BETTER_AUTH_SECRET` and encryption keys:
+factor material is encrypted, and replacing keys can make it unreadable.
 
 ## HTTPS and public callbacks
 

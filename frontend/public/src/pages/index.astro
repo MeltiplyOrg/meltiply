@@ -14,7 +14,6 @@ const appUrl = new URL(
 );
 const docsUrl = "/docs/";
 const signInUrl = new URL("/sign-in", appUrl);
-const signUpUrl = new URL("/sign-up", appUrl);
 const title = "Meltiply — Your social content. Finally, in sync.";
 const description =
   "One calm workspace to plan, schedule, and publish your social content. Bring your channels and your content together with Meltiply.";
@@ -179,7 +178,7 @@ const posts = [
           back to creating.
         </p>
         <div class="hero-actions">
-          <a class="button button-dark" href={signUpUrl}>
+          <a class="button button-dark" href={signInUrl}>
             Create your workspace <Icon name="arrow" />
           </a>
           <a class="button button-light" href="#product">
@@ -298,7 +297,7 @@ const posts = [
                   </span>
                   <h3>Your content, under control.</h3>
                 </div>
-                <a class="button button-dark compose-button" href={signUpUrl}>
+                <a class="button button-dark compose-button" href={signInUrl}>
                   <AnimatedIcon name="plus" client:idle />
                   Create a post
                 </a>
@@ -452,7 +451,7 @@ const posts = [
                   </span>
                   <h3>Every account, one board.</h3>
                 </div>
-                <a class="button button-dark compose-button" href={signUpUrl}>
+                <a class="button button-dark compose-button" href={signInUrl}>
                   <AnimatedIcon name="plus" client:idle />
                   Add account
                 </a>
@@ -799,7 +798,7 @@ const posts = [
           your next great idea.
         </h2>
         <p>Bring your channels and your content together.</p>
-        <a class="button button-dark" href={signUpUrl}>
+        <a class="button button-dark" href={signInUrl}>
           Create your workspace <Icon name="arrow" />
         </a>
       </section>

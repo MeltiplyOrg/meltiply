@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { readFile } from "node:fs/promises";
+import { parseEnv } from "node:util";
+import { ownerBrowserSession } from "../../frontend/app/e2e/selfhost-auth-smoke.mjs";
 
 const composeArgs = [
   "compose",
@@ -73,40 +76,9 @@ console.log("Production app, readiness, private routing, and operator authentica
 
 const email = `selfhost-${randomUUID()}@example.com`;
 const password = `Selfhost-${randomUUID()}!`;
-await api("/api/auth/sign-up/email", {
-  email,
-  password,
-  name: "Selfhost smoke",
-  callbackURL: `${origin}/posts`,
-});
-await api("/api/auth/sign-in/email", { email, password }, 403);
-let captured;
-for (let attempt = 0; attempt < 60; attempt++) {
-  const messages = await (await fetch("http://localhost:8025/api/v1/messages")).json();
-  const message = messages.messages?.find((item) =>
-    item.To?.some((recipient) => recipient.Address === email),
-  );
-  if (message) {
-    captured = await (await fetch(`http://localhost:8025/api/v1/message/${message.ID}`)).json();
-    break;
-  }
-  await delay(500);
-}
-assert.ok(captured, "Registration email must reach the actual SMTP endpoint");
-const link = captured.Text.match(/https?:\/\/[^\s<>"']+\/api\/auth\/verify-email\?[^\s<>"']+/)?.[0];
-assert.ok(link, "SMTP email must contain an actual verification link");
-const verified = await fetch(link, { redirect: "manual" });
-assert.ok([200, 302, 303].includes(verified.status), "Email verification must succeed");
-const signIn = await fetch(`${origin}/api/auth/sign-in/email`, {
-  method: "POST",
-  headers: { origin, "content-type": "application/json" },
-  body: JSON.stringify({ email, password }),
-});
-assert.equal(signIn.status, 200);
-const cookie = signIn.headers
-  .getSetCookie()
-  .map((entry) => entry.split(";")[0])
-  .join("; ");
+const setupSecret = parseEnv(await readFile(".env.selfhost", "utf8")).AUTH_SETUP_SECRET;
+assert.equal(typeof setupSecret, "string");
+const cookie = await ownerBrowserSession({ origin, email, password, setupSecret });
 const minted = await fetch(`${origin}/api/auth/token`, { headers: { cookie, origin } });
 assert.equal(minted.status, 200);
 token = (await minted.json()).token;

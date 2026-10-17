@@ -20,7 +20,7 @@ import {
   pngFixture,
   type MediaFixture,
 } from "./media-fixtures";
-import { signUpIsolatedWorkspace, waitForWorkspace } from "./workspace-session";
+import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 
 test.use({ screenshot: "only-on-failure", trace: "retain-on-failure" });
 // Publication acceptance crosses the browser, the API, PostgreSQL, R2, a Cloudflare
@@ -439,7 +439,7 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
   page,
   request,
 }) => {
-  const { profileName } = await signUpIsolatedWorkspace(page);
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
   const channels = acceptanceChannels();
   await attachChannels(page, request, profileName, [channels.instagram, channels.threads]);
   // The Threads copy must fail its first attempt, so arm it before the Post is
@@ -562,7 +562,7 @@ test("shows the same Post and the same order in the list, grid, calendar, and de
   page,
   request,
 }) => {
-  const { profileName } = await signUpIsolatedWorkspace(page);
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
   const channels = acceptanceChannels();
   await attachChannels(page, request, profileName, [channels.instagram, channels.threads]);
   const captions = [
@@ -627,7 +627,7 @@ test("keeps separately created identical Posts distinct and publishes only the o
   page,
   request,
 }) => {
-  const { profileName } = await signUpIsolatedWorkspace(page);
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
   const channels = acceptanceChannels();
   await attachChannels(page, request, profileName, [channels.instagram, channels.threads]);
 
@@ -698,7 +698,7 @@ test("edits a pending target without touching published history and explains wha
   page,
   request,
 }) => {
-  const { profileName } = await signUpIsolatedWorkspace(page);
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
   const channels = acceptanceChannels();
   await attachChannels(page, request, profileName, [channels.instagram, channels.threads]);
 

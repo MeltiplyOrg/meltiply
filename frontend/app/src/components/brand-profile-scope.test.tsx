@@ -286,6 +286,15 @@ function renderChannels() {
   );
 }
 
+/**
+ * Opens the profile editor through its surviving entry point: the Channels
+ * directory card action. The toolbar Brand Profile picker is selection-only.
+ */
+function openProfileEditorFromDirectory(name: string) {
+  fireEvent.click(screen.getByRole("tab", { name: /Brand Profiles/ }));
+  fireEvent.click(screen.getByRole("button", { name: `Edit ${name}` }));
+}
+
 /** Opens the field-row builder and adds the supported channel filters through its visible chips. */
 function openChannelFilters() {
   fireEvent.click(screen.getByText("Filter").closest("summary")!);
@@ -636,11 +645,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
-    openChannelFilters();
-    fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
-    const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
-    fireEvent.pointerDown(editProfileButton);
-    fireEvent.click(editProfileButton);
+    openProfileEditorFromDirectory(alphaProfile.name);
 
     const dialog = screen.getByRole("dialog", { name: "Update Brand Profile" });
     expect(within(dialog).getByLabelText("Profile name")).toHaveValue(alphaProfile.name);
@@ -656,11 +661,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
-    openChannelFilters();
-    fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
-    const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
-    fireEvent.pointerDown(editProfileButton);
-    fireEvent.click(editProfileButton);
+    openProfileEditorFromDirectory(alphaProfile.name);
 
     const dialog = screen.getByRole("dialog", { name: "Update Brand Profile" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
@@ -685,11 +686,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
-    openChannelFilters();
-    fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
-    const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
-    fireEvent.pointerDown(editProfileButton);
-    fireEvent.click(editProfileButton);
+    openProfileEditorFromDirectory(alphaProfile.name);
 
     const dialog = screen.getByRole("dialog", { name: "Update Brand Profile" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
@@ -713,9 +710,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
-    openChannelFilters();
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    openProfileEditorFromDirectory("Alpha Brand");
 
     const dialog = screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ });
     expect(within(dialog).getByLabelText("Profile name")).toHaveValue("Alpha Brand");
@@ -749,9 +744,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
-    openChannelFilters();
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    openProfileEditorFromDirectory("Alpha Brand");
 
     const dialog = screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ });
     fireEvent.change(within(dialog).getByLabelText("Profile name"), {
@@ -771,59 +764,24 @@ describe("Channels table contract", () => {
   });
 
   /**
-   * Guards the admin-only edit affordance in the Channels toolbar: non-admin
-   * members get no edit callback, so profile rows render as plain selectable
-   * options that keep the standard selected checkmark instead of reserving
-   * space for a pencil that could never fire.
+   * Guards the selection-only contract of the toolbar Brand Profile picker:
+   * the list carries profiles and the aggregate row, nothing else — profile
+   * rows stay plain selectable options that keep the standard selected
+   * checkmark, and no editing affordance lives inside the dropdown.
    */
-  it("hides the profile edit pencil and keeps selection indicators for non-admins", () => {
-    workspace.isAdmin = false;
-    workspace.selectedBrandProfileId = alphaProfile.id;
+  it("keeps profile rows selection-only with the standard check indicator", () => {
     queryResults.platforms.data = [connectedAccount];
+    workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
     openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: "Alpha Brand" }));
 
     expect(screen.queryByRole("button", { name: "Edit profile" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
     const selectedOption = screen.getByRole("option", { name: "Alpha Brand" });
     expect(selectedOption).toHaveAttribute("data-state", "checked");
     expect(selectedOption.querySelector("svg")).not.toBeNull();
-  });
-
-  /**
-   * Guards the admin affordance in the Channels toolbar: admins receive the
-   * edit callback, so resolved profile rows expose the pencil that opens the
-   * in-place Brand Profile editor.
-   */
-  it("shows the profile edit pencil for admins", () => {
-    queryResults.platforms.data = [connectedAccount];
-    renderChannels();
-
-    openChannelFilters();
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-
-    expect(screen.getByRole("button", { name: "Edit profile" })).toBeVisible();
-  });
-
-  /**
-   * Guards the edit-affordance dismissal contract: the pencil sits outside the
-   * option element, so Radix never closes the menu on its own — the select must
-   * close its dropdown before the editor opens, leaving no listbox behind it.
-   */
-  it("closes the profile dropdown before opening the editor from the pencil", () => {
-    queryResults.platforms.data = [connectedAccount];
-    renderChannels();
-
-    openChannelFilters();
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-    expect(screen.getByRole("listbox")).toBeVisible();
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
-
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ })).toBeVisible();
-    expect(workspace.setSelectedBrandProfileId).not.toHaveBeenCalled();
   });
 
   /**
@@ -835,9 +793,7 @@ describe("Channels table contract", () => {
       queryResults.platforms.data = [connectedAccount];
       renderChannels();
 
-      openChannelFilters();
-      fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-      fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+      openProfileEditorFromDirectory("Alpha Brand");
 
       const dialog = screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ });
       fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));

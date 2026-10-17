@@ -318,6 +318,9 @@ html.theme-changing *::after {
   [data-menu-surface] {
     min-width: 200px;
     max-height: min(420px, 70vh);
+    /* `overflow-y: auto` would otherwise force horizontal scrolling too; menus
+       never scroll sideways — long rows truncate instead. */
+    overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: 4px;

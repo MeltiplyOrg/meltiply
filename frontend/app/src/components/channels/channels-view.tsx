@@ -774,7 +774,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                       onValueChange={(id) => setSelectedBrandProfileId(id === "all" ? null : id)}
                       brandProfiles={brandProfiles}
                       unresolvedProfileIds={accountProfileIds}
-                      onEditProfile={isAdmin ? openProfileEditor : undefined}
                       label={t("Brand Profile")}
                       trigger={<TopToolbarButton label={profileFilterLabel} className="w-full" />}
                     />

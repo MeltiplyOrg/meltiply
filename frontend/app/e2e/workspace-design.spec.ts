@@ -429,7 +429,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
 
   // One menu vocabulary: the filter panel, its select list, and the platform menu
   // must render the same surface and rows as the account menu above.
-  const postsFilterSummary = page.locator("summary").filter({ hasText: /^Filter/ });
   // A native disclosure shows its panel before React re-renders, so the surface
   // state must already be the entering one in the same task as the open — the
   // first painted frame otherwise runs the exit animation and the panel flashes.
@@ -472,13 +471,29 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("posts-filter-menu-desktop.png"),
     fullPage: true,
   });
-  await page.keyboard.press("Escape");
-  await expect(postsFilterPanel).toHaveAttribute("data-state", "closed");
+
+  // Choosing inside a nested list must not dismiss the builder: the user keeps
+  // picking field values instead of reopening the disclosure between choices.
+  await page.getByRole("option", { name: "Scheduled", exact: true }).click();
+  await expect(postsFilterPanel).toBeVisible();
+  const statusControl = postsFilterPanel.getByRole("button", { name: "Scheduled", exact: true });
+  await expect(statusControl).toBeVisible();
+  await statusControl.click();
+  await page.getByRole("option", { name: "Drafts", exact: true }).click();
+  await expect(postsFilterPanel).toBeVisible();
+  const draftsControl = postsFilterPanel.getByRole("button", { name: "Drafts", exact: true });
+  await draftsControl.click();
+  await page.getByRole("option", { name: "All statuses", exact: true }).click();
+  await expect(postsFilterPanel).toBeVisible();
+  await expect(
+    postsFilterPanel.getByRole("button", { name: "All statuses", exact: true }),
+  ).toBeVisible();
+
   await postsFilterPanel
     .getByRole("button", { name: "Remove Post status filter", exact: true })
     .click();
-  await postsFilterSummary.click();
-
+  await page.keyboard.press("Escape");
+  await expect(postsFilterPanel).toHaveAttribute("data-state", "closed");
   await expect(
     page.locator("aside").getByRole("button", { name: "Table", exact: true }),
   ).toHaveCount(0);

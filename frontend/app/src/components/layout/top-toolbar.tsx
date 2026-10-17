@@ -15,6 +15,15 @@ export { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
  */
 const MENU_EXIT_MS = 120;
 
+/**
+ * Portalled layers that belong to the disclosure even though the DOM puts them
+ * outside it: the shared menu surface, any Radix popper wrapper, and the
+ * fallback roles Radix uses for listboxes and menus. A pointer down inside one
+ * of these must not close the filter builder.
+ */
+const NESTED_LAYER_SELECTOR =
+  "[data-menu-surface], [data-radix-popper-content-wrapper], [role='menu'], [role='listbox']";
+
 /** Shared Gr8r collection control row; wrapping preserves mobile access without clipping overlays. */
 export function TopToolbar({ children, className }: { children: ReactNode; className?: string }) {
   return (
@@ -159,7 +168,10 @@ export function TopToolbarFilters({
       if (
         !(target instanceof Element) ||
         ref.current?.contains(target) ||
-        target.closest('[role="menu"], [role="listbox"]')
+        // Portalled nested layers (menu, listbox, popper) live outside the
+        // disclosure in the DOM, so containment cannot see them: choosing a
+        // field or value must keep the builder open.
+        target.closest(NESTED_LAYER_SELECTOR)
       )
         return;
       close();

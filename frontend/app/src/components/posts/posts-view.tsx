@@ -12,7 +12,6 @@ import { useSearchParams } from "@/lib/navigation";
 import { toast } from "@meltiply/ui/toast";
 import { Alert } from "@meltiply/ui/alert";
 import { useLatchedValue } from "@meltiply/ui/use-latched-value";
-import { BrandProfileDialog } from "@/components/workspace/brand-profile-dialog";
 import {
   CenterAlertDialog,
   CenterAlertDialogContent,
@@ -25,7 +24,6 @@ import {
 } from "@meltiply/ui/center-alert-dialog";
 import type { ChannelIntegration, MediaItem } from "@/api/types";
 import type {
-  BrandProfile,
   CalendarEvent,
   Distribution,
   Post,
@@ -275,7 +273,6 @@ export function PostsView({
     setSelectedBrandProfileId,
     selectedPlatforms,
     setSelectedPlatforms,
-    isAdmin,
   } = useWorkspace();
   const scope = useSessionScope();
   const { t } = useI18n();
@@ -285,8 +282,6 @@ export function PostsView({
   const [statusFilter, setStatusFilter] = useState<PostStatusFilter>(initialStatusFilter);
   const profileFilter = selectedBrandProfileId ?? "all";
   const [dateFilter, setDateFilter] = useState<string>("all");
-  const [editingProfile, setEditingProfile] = useState<BrandProfile | null>(null);
-  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortKey, setSortKey] = useState<PostSortKey>("date-desc");
   const [columns, setColumns] = useState<number>(4);
@@ -744,20 +739,6 @@ export function PostsView({
     setViewMode("composer");
   }, []);
 
-  /**
-   * Opens the in-place Brand Profile editor for the toolbar's edit affordance.
-   *
-   * Forwarded to {@link PostsToolbar} only for workspace admins, so the shared
-   * `BrandProfileSelect` renders its pencil solely when this callback exists;
-   * the latched `editingProfile` drives the dialog's edit mode.
-   *
-   * @param profile - Resolved Brand Profile whose edit affordance was activated.
-   */
-  const handleEditProfile = useCallback((profile: BrandProfile) => {
-    setEditingProfile(profile);
-    setProfileEditorOpen(true);
-  }, []);
-
   const handleBackToPosts = useCallback(() => {
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
@@ -1032,7 +1013,6 @@ export function PostsView({
           onSortChange={setSortKey}
           brandProfiles={brandProfiles}
           unresolvedProfileIds={postProfileIds}
-          onEditProfile={isAdmin ? handleEditProfile : undefined}
         />
       )}
 
@@ -1061,14 +1041,6 @@ export function PostsView({
         onRequestDelete={handleModalRequestDelete}
       />
 
-      <BrandProfileDialog
-        open={profileEditorOpen}
-        onOpenChange={(open) => {
-          setProfileEditorOpen(open);
-          if (!open) setEditingProfile(null);
-        }}
-        profile={editingProfile}
-      />
       <CenterAlertDialog
         open={Boolean(pendingAction)}
         onOpenChange={(open) => !open && setPendingAction(null)}

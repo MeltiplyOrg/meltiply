@@ -199,10 +199,9 @@ const SelectLabel = React.forwardRef<
 SelectLabel.displayName = SelectPrimitive.Label.displayName;
 
 /**
- * Selectable item option within {@link SelectContent}.
- *
- * Includes keyboard navigation support, focus highlighting (`focus:bg-accent`), disabled state
- * handling, and an absolute right-aligned checkmark indicator when selected.
+ * Selectable option row within {@link SelectContent}, styled by the shared
+ * `[data-menu-item]` menu vocabulary and finished with a right-aligned accent
+ * checkmark when selected.
  *
  * The item text is rendered through `ItemText asChild` onto a `block w-full flex-1` span:
  * Radix `SelectItemText` deliberately discards `className`/`style`, so styling the primitive
@@ -212,9 +211,6 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName;
  *
  * @param value - Unique string value assigned to this option.
  * @param disabled - Optional boolean to disable selection of this option.
- * @param hideIndicator - Opts out of the selected checkmark and its `pr-8` padding; reserved
- * for rows that pin their own accessories at the right edge (e.g. Brand Profile rows), where
- * the indicator would collide. Defaults to `false` so plain options keep the indicator.
  * @param className - Optional CSS classes.
  * @param children - Display label or custom JSX rendered inside the option.
  * @param props - Radix Item props.
@@ -223,24 +219,20 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName;
  */
 export const SelectItem = React.forwardRef<
   React.ComponentRef<typeof SelectPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
-    hideIndicator?: boolean;
-  }
->(({ className, children, hideIndicator = false, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
+>(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
     data-dropdown-item
     data-menu-item=""
-    className={cn("cursor-default select-none", !hideIndicator && "pr-8", className)}
+    className={cn("cursor-default select-none pr-8", className)}
     {...props}
   >
-    {!hideIndicator && (
-      <span data-menu-indicator="">
-        <SelectPrimitive.ItemIndicator>
-          <Check className="size-4" />
-        </SelectPrimitive.ItemIndicator>
-      </span>
-    )}
+    <span data-menu-indicator="">
+      <SelectPrimitive.ItemIndicator>
+        <Check className="size-4" />
+      </SelectPrimitive.ItemIndicator>
+    </span>
     <SelectPrimitive.ItemText asChild>
       <span className="block w-full min-w-0 flex-1">{children}</span>
     </SelectPrimitive.ItemText>

@@ -60,7 +60,6 @@ export interface PostsToolbarProps {
   onSortChange: (key: PostSortKey) => void;
   brandProfiles: BrandProfile[];
   unresolvedProfileIds: readonly string[];
-  onEditProfile?: (profile: BrandProfile) => void;
 }
 
 /** Gr8r Tasks controls composed from the reusable toolbar, filter, selector, and segment implementations. */
@@ -87,7 +86,6 @@ export const PostsToolbar = React.memo(function PostsToolbar({
   onSortChange,
   brandProfiles,
   unresolvedProfileIds,
-  onEditProfile,
 }: PostsToolbarProps) {
   const { t, tStatus } = useI18n();
   const columnOptions = [
@@ -153,7 +151,6 @@ export const PostsToolbar = React.memo(function PostsToolbar({
                   onValueChange={onProfileChange}
                   brandProfiles={brandProfiles}
                   unresolvedProfileIds={unresolvedProfileIds}
-                  onEditProfile={onEditProfile}
                   label={t("Brand Profile")}
                   trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
                 />

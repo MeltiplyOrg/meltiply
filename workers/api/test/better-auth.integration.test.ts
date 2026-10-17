@@ -220,7 +220,7 @@ function actionLink(message: EmailMessageBuilder): string {
   const match = message.text.match(/https?:\/\/\S+/);
   expect(match, "email text must carry the raw action URL").toBeTruthy();
   const link = match![0];
-  expect(message.html).toContain(`href="${link.replaceAll("&", "&amp;")}"`);
+  expect(message.html.includes(`href="${link.replaceAll("&", "&amp;")}"`)).toBe(true);
   return link;
 }
 
@@ -435,7 +435,7 @@ describe("password recovery through the shared sender", () => {
     expect(callback.status).toBe(302);
     const callbackLocation = new URL(callback.headers.get("location")!);
     expect(callbackLocation.origin).toBe("http://app.test");
-    expect(callbackLocation.searchParams.get("token")).toBe(token);
+    expect(callbackLocation.searchParams.get("token") === token).toBe(true);
 
     const reset = await authPost(auth, "/api/auth/reset-password", {
       newPassword: "second password value",
@@ -543,7 +543,7 @@ describe("password recovery through the shared sender", () => {
     expect(resetSubmissions()).toHaveLength(beforeReset + 1);
     const recovery = resetSubmissions().at(-1)!;
     expect(recovery.to).toBe(emails.enumeration);
-    expect(actionLink(recovery)).toContain("/reset-password/");
+    expect(new URL(actionLink(recovery)).pathname.startsWith("/api/auth/reset-password/")).toBe(true);
 
     const unknownSignIn = await authPost(auth, "/api/auth/sign-in/email", {
       email: unknown,
@@ -599,7 +599,7 @@ describe("session cookie, bearer JWT, and sign-out", () => {
       throw new Error("/api/auth/token must return a string token");
     }
     const jwt = tokenBody.token;
-    expect(jwt.split(".")).toHaveLength(3);
+    expect(jwt.split(".").length).toBe(3);
     const payload = recordOf(JSON.parse(Buffer.from(jwt.split(".")[1]!, "base64url").toString()));
     expect(payload.sub).toBe(sessionUserId);
     expect(payload.email).toBe(emails.session);
@@ -618,7 +618,7 @@ describe("session cookie, bearer JWT, and sign-out", () => {
     // Revocation is observed on both cookie reads and the protected API's
     // authoritative session lookup, including the already-minted bearer JWT.
     expect(await sessionRowsFor(sessionUserId)).toBe(0);
-    expect(await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()).toBeNull();
+    expect((await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null).toBe(true);
     await expect(activeOwnerIdentity(stagingEnv(mail), jwtClaims(payload))).rejects.toMatchObject({ status: 401 });
   });
 });
@@ -665,7 +665,7 @@ describe("single-owner bootstrap and security changes", () => {
     const nextPassword = crypto.randomUUID();
     expect((await authPost(auth, "/api/auth/change-password", { currentPassword: password, newPassword: nextPassword, revokeOtherSessions: true }, { Cookie: cookie, Origin: "http://app.test" })).status).toBe(200);
     await expect(activeOwnerIdentity(env, first)).rejects.toMatchObject({ status: 401 });
-    expect(await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()).toBeNull();
+    expect((await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null).toBe(true);
     cookie = sessionCookiePair(await authPost(auth, "/api/auth/sign-in/email", { email: emails.reset, password: nextPassword }));
     const second = await mintIdentity();
     await authPost(auth, "/api/auth/request-password-reset", { email: emails.reset, redirectTo: "http://app.test/sign-in" });
@@ -696,9 +696,10 @@ function enrollmentCode(uri: string): string {
 
 describe("optional authenticator lifecycle", () => {
   it("confirms enrollment, challenges sign-in, consumes backup codes once, regenerates and disables with password reauthentication", async () => {
-    const env = localTestEnv(recordingMailBinding());
+    const mail = recordingMailBinding();
+    const env = localTestEnv(mail);
     const auth = await betterAuthFor(env);
-    const password = crypto.randomUUID();
+    let password = crypto.randomUUID();
     const email = emails.session;
     const jar = new Map<string, string>();
     const capture = (response: Response) => {
@@ -726,9 +727,22 @@ describe("optional authenticator lifecycle", () => {
     const challenge = await post("sign-in/email", { email, password });
     expect(recordOf(await challenge.json()).twoFactorRedirect).toBe(true);
     const cookie = [...jar].map(([key, value]) => `${key}=${value}`).join("; ");
-    expect(await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()).toBeNull();
+    expect((await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null).toBe(true);
+    await post("request-password-reset", { email, redirectTo: "http://app.test/sign-in" });
+    const resetMail = mail.sent.find((entry) => entry.subject === "Reset your Meltiply password");
+    if (!resetMail) throw new Error("Expected reset delivery");
+    password = crypto.randomUUID();
+    const resetToken = new URL(actionLink(resetMail)).pathname.split("/").pop();
+    expect((await post("reset-password", { token: resetToken, newPassword: password })).status).toBe(200);
+    // A challenge issued before recovery cannot be upgraded into a fresh session.
+    expect((await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false })).status).toBe(401);
+    jar.clear();
+    expect(recordOf(await (await post("sign-in/email", { email, password })).json()).twoFactorRedirect).toBe(true);
     const recovered = await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false });
     expect(recovered.status).toBe(200);
+    jar.clear();
+    await post("sign-in/email", { email, password });
+    expect((await post("two-factor/verify-totp", { code: enrollmentCode(pending.totpURI), trustDevice: false })).status).toBe(200);
     const invalidPassword = await post("two-factor/generate-backup-codes", { password: crypto.randomUUID() });
     expect(invalidPassword.status).toBeGreaterThanOrEqual(400);
     jar.clear();
@@ -751,12 +765,12 @@ describe("optional authenticator lifecycle", () => {
   });
 });
 describe("shared credential and delivery budgets", () => {
-  it("shares normalized email limits across independent callers without permanent account lockout", async () => {
+  it("shares normalized credential and delivery budgets across independent callers", async () => {
     const env = localTestEnv(recordingMailBinding());
     const email = `${crypto.randomUUID()}@example.test`;
     const request = (index: number) => new Request(`${baseURL}/api/auth/sign-in/email`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "CF-Connecting-IP": `2001:db8::${index}` },
+      headers: { "Content-Type": "application/json", "CF-Connecting-IP": `2001:db8:${email.slice(0, 4)}::${index}` },
       body: JSON.stringify({ email: index % 2 ? email.toUpperCase() : email, password: crypto.randomUUID() }),
     });
     const admitted = await Promise.all(Array.from({ length: 10 }, (_, index) =>

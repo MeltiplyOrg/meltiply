@@ -3,7 +3,7 @@ import { CoreApiError } from "./core-types";
 import type { ApiWorkerEnv } from "./env";
 
 /** Reads only the installation's public initialized bit; never returns owner details. */
-export async function installationInitialized(env: ApiWorkerEnv): Promise<boolean> {
+async function installationInitialized(env: ApiWorkerEnv): Promise<boolean> {
   // Exception: pg cannot be loaded in workerd unit-test isolates.
   const { systemPoolFor } = await import("./database");
   const result = await systemPoolFor(env).query<{ initialized: boolean }>(

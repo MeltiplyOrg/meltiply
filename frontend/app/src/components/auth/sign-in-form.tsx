@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { ArrowRight, KeyRound, ShieldCheck } from "lucide-react";
 import { BrandMark } from "@meltiply/ui/brand-mark";
@@ -16,13 +16,13 @@ export interface SignInFormProps {
 type Mode = "loading" | "unavailable" | "setup" | "signin" | "recovery" | "reset" | "factor";
 
 /**
- * One installation-aware entry point for owner setup, sign-in, and recovery.
+ * Coordinates installation-aware owner setup, sign-in, and recovery state.
  * Server status selects setup; it never grants signup authority. Passwords and
  * setup/challenge secrets stay in component memory and support paste/autofill.
  * Deployed signup waits for email verification instead of claiming a session.
  * Async errors preserve inputs, announce recovery, and never expose account data.
  */
-export function SignInForm({ onSuccess, redirectTo = "/posts" }: SignInFormProps): React.ReactElement {
+function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -132,6 +132,29 @@ export function SignInForm({ onSuccess, redirectTo = "/posts" }: SignInFormProps
       : mode === "reset" ? "Choose a new password."
         : mode === "factor" ? "One more security check."
           : "Welcome back.";
+  return {
+    mode, setMode, email, setEmail, name, setName, password, setPassword,
+    setupSecret, setSetupSecret, code, setCode, backup, setBackup, error,
+    setError, notice, setNotice, busy, setAttempt, heading, submit, resend,
+  };
+}
+
+/**
+ * Renders the responsive owner-access surface from the private lifecycle hook.
+ * Shared controls own focus/disabled states; the page adds no decorative motion.
+ * Input state survives recoverable errors, and only server status exposes setup.
+ */
+export function SignInForm(props: SignInFormProps): React.ReactElement {
+  const { t } = useI18n();
+  const {
+    mode, setMode, email, setEmail, name, setName, password, setPassword,
+    setupSecret, setSetupSecret, code, setCode, backup, setBackup, error,
+    setError, notice, setNotice, busy, setAttempt, heading, submit, resend,
+  } = useOwnerEntry(props);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (mode !== "loading") headingRef.current?.focus({ preventScroll: true });
+  }, [mode]);
 
   return (
     <section className="grid w-full max-w-5xl overflow-hidden rounded-window border border-line bg-surface shadow-card lg:grid-cols-[0.95fr_1fr]">
@@ -139,7 +162,7 @@ export function SignInForm({ onSuccess, redirectTo = "/posts" }: SignInFormProps
         <div className="flex items-center gap-3 text-lg font-semibold tracking-tight text-ink"><BrandMark className="size-8" />Meltiply</div>
         <div className="max-w-sm space-y-5">
           <p className="text-xs font-medium uppercase tracking-widest text-ink-3">{t("Your private publishing workspace")}</p>
-          <h2 className="text-3xl font-semibold leading-tight tracking-tight text-ink sm:text-4xl">{t("One place to shape what’s next.")}</h2>
+          <p className="text-3xl font-semibold leading-tight tracking-tight text-ink sm:text-4xl">{t("One place to shape what’s next.")}</p>
           <p className="text-sm leading-relaxed text-ink-2">{t("Compose your posts, connect your channels, and publish on your terms.")}</p>
         </div>
         <div className="flex items-start gap-3 border-t border-line pt-6 text-xs leading-relaxed text-ink-2"><ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><p>{t("Self-hosted. Single owner. Your account is the only way into this installation.")}</p></div>
@@ -147,14 +170,14 @@ export function SignInForm({ onSuccess, redirectTo = "/posts" }: SignInFormProps
       <div className="flex flex-col justify-center p-8 sm:p-12">
         <div className="mb-8 space-y-3">
           <span className="inline-flex items-center gap-2 text-xs font-medium text-ink-3"><KeyRound className="size-3.5" aria-hidden="true" />{t(mode === "setup" ? "INITIAL SETUP" : "OWNER ACCESS")}</span>
-          <h1 className="text-3xl font-semibold tracking-tight text-ink">{t(heading)}</h1>
+          <h1 ref={headingRef} tabIndex={-1} className="text-3xl font-semibold tracking-tight text-ink">{t(heading)}</h1>
           <p className="text-sm leading-relaxed text-ink-2">{t(mode === "setup" ? "Create the only account for this installation. You’ll need the setup secret from your deployment configuration." : mode === "factor" ? "Enter a code from your authenticator, or use a saved backup code." : mode === "recovery" ? "We’ll send a reset link to the owner’s email address." : mode === "reset" ? "Use a unique password or a long passphrase. All previous sessions will be signed out." : "Sign in with the owner account to continue to your workspace.")}</p>
         </div>
-        {error && <Alert variant="destructive" className="mb-5">{error}</Alert>}
+        {error && <Alert id="auth-error" variant="destructive" className="mb-5">{t(error)}</Alert>}
         {notice && <p role="status" className="mb-5 text-sm leading-relaxed text-ink-2">{notice}</p>}
         {mode === "loading" ? <p role="status" className="text-sm text-ink-2">{t("Checking installation…")}</p>
           : mode === "unavailable" ? <Button onClick={() => { setMode("loading"); setAttempt((value) => value + 1); }}>{t("Try again")}</Button>
-            : <form onSubmit={submit} className="space-y-5" aria-busy={busy}>
+            : <form onSubmit={submit} className="space-y-5" aria-busy={busy} aria-describedby={error ? "auth-error" : undefined}>
               {mode === "setup" && <div className="space-y-2"><label htmlFor="auth-name" className="text-sm font-medium text-ink">{t("Your name")}</label><Input id="auth-name" autoComplete="name" required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} disabled={busy} /></div>}
               {(mode === "setup" || mode === "signin" || mode === "recovery") && <div className="space-y-2"><label htmlFor="auth-email" className="text-sm font-medium text-ink">{t("Email address")}</label><Input id="auth-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} /></div>}
               {(mode === "setup" || mode === "signin" || mode === "reset") && <div className="space-y-2"><label htmlFor="auth-password" className="text-sm font-medium text-ink">{t("Password")}</label><Input id="auth-password" type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} minLength={mode === "signin" ? undefined : 8} maxLength={128} required value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />{mode !== "signin" && <p className="text-xs text-ink-3">{t("8–128 characters. Passphrases and password managers welcome.")}</p>}</div>}

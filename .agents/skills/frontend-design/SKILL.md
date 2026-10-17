@@ -35,4 +35,4 @@ Every element in scope resolves to an owner before UI is written: each control, 
 
 - Every element in scope cites the owner it extends or the recorded gap it fills, so one control keeps one implementation; tokens, geometry, states, and copy resolve through the shared owners and existing localization.
 - Replaced code has no callers; supported data and actions remain reachable; hover, focus, busy, empty, failure, and recovery states work; nested scrolling and responsive layouts remain usable; instructions and public guides describe the shipped interface.
-- Report exact verification results and any environment blocker.
+- Report the owners you extended, the exact verification results, and any environment blocker.

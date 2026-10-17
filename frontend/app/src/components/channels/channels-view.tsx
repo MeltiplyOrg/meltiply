@@ -794,7 +794,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
             </span>
           </TopToolbar>
           {activeFilterCount > 0 && (
-            <TopToolbarFilterChips>
+            <TopToolbarFilterChips inset>
               {selectedPlatforms.length > 0 && (
                 <TopToolbarFilterChip
                   label={platformFilterText}

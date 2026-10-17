@@ -334,10 +334,29 @@ export function TopToolbarFilters({
   );
 }
 
-/** Active-filter row stays separate from the dense toolbar, matching the reference chip hierarchy. */
-export function TopToolbarFilterChips({ children }: { children: ReactNode }) {
+/**
+ * Active-filter row stays separate from the dense toolbar, matching the reference chip hierarchy.
+ *
+ * `inset` keeps the divider on a collection that owns an inset gutter (Channels'
+ * directory table): the row is margined by the route gutter instead of padded, so
+ * the line ends where the collection, tab underline, and search row end while the
+ * chips keep the same content x. Omitted, the divider bleeds to the surface edges
+ * like the full-width Post rows and toolbar above it.
+ */
+export function TopToolbarFilterChips({
+  children,
+  inset = false,
+}: {
+  children: ReactNode;
+  inset?: boolean;
+}) {
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-4 py-2 sm:px-6">
+    <div
+      className={cn(
+        "flex shrink-0 flex-wrap items-center gap-1.5 border-b border-line py-2",
+        inset ? "mx-4 sm:mx-6" : "px-4 sm:px-6",
+      )}
+    >
       {children}
     </div>
   );

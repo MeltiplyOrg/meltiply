@@ -5,27 +5,28 @@ and a single-host [Docker Compose deployment](../compose.selfhost.yml). Neither
 replaces the development stack (`make dev`). Both targets build the same API,
 automation handlers, state coordinator, reply workflow, and application frontend.
 
-Wrangler bundles production Workers with `deploy --dry-run --minify`; Vite and
-Astro build the production frontends. The runtime image executes those immutable
+Wrangler bundles production Workers with `deploy --dry-run --minify`; Vite builds
+the production app. The public marketing/documentation site is not built or
+included in these images. The runtime image executes immutable app and Worker
 artifacts with Cloudflare's workerd through Miniflare: no Wrangler dev server,
 watcher, HMR, or source compilation runs at startup. Miniflare is the binding
 host, not the Cloudflare managed service or an availability guarantee.
 
 ## Services and differences
 
-| Service                  | Self-hosted implementation                                                                                       |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| App, API, public website | Production assets and Workers; ports 8080 and 8081                                                               |
-| PostgreSQL / Hyperdrive  | PostgreSQL 18, canonical migrations, distinct system and RLS roles; request-scoped direct connections            |
-| R2                       | Persistent local R2 binding and authenticated SigV4 upload/download endpoint                                     |
-| Durable Objects          | SQLite-backed canonical OAuth coordinator                                                                        |
-| Workflows                | Persistent local binding running the canonical reply workflow                                                    |
-| Queues                   | SQLite WAL broker; commit-before-ack, delayed delivery, visibility leases, retries and dead-letter queues        |
-| Cron                     | Durable hourly/daily schedule ledger invoking canonical scheduled handlers; missed slots coalesce after downtime |
-| Email                    | Real SMTP transport; signup still requires email verification                                                    |
-| Operator authentication  | Private administrator-issued HMAC tokens, at most 15 minutes, instead of Cloudflare Access                       |
-| Media processing         | Existing FFmpeg/libvips processor in a private container; no Docker socket                                       |
-| TLS                      | Optional Caddy profile in the same Compose file                                                                  |
+| Service                 | Self-hosted implementation                                                                                       |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| App, API                | Production app assets and Workers; port 8080                                                                     |
+| PostgreSQL / Hyperdrive | PostgreSQL 18, canonical migrations, distinct system and RLS roles; request-scoped direct connections            |
+| R2                      | Persistent local R2 binding and authenticated SigV4 upload/download endpoint                                     |
+| Durable Objects         | SQLite-backed canonical OAuth coordinator                                                                        |
+| Workflows               | Persistent local binding running the canonical reply workflow                                                    |
+| Queues                  | SQLite WAL broker; commit-before-ack, delayed delivery, visibility leases, retries and dead-letter queues        |
+| Cron                    | Durable hourly/daily schedule ledger invoking canonical scheduled handlers; missed slots coalesce after downtime |
+| Email                   | Real SMTP transport; signup still requires email verification                                                    |
+| Operator authentication | Private administrator-issued HMAC tokens, at most 15 minutes, instead of Cloudflare Access                       |
+| Media processing        | Existing FFmpeg/libvips processor in a private container; no Docker socket                                       |
+| TLS                     | Optional Caddy profile in the same Compose file                                                                  |
 
 This is a **single-host** deployment, not a replacement for Cloudflare's global
 network, managed durability, autoscaling, Access, or service SLAs. Run one runtime
@@ -57,8 +58,8 @@ URL or a properly configured STARTTLS SMTP server; URL-encode credential
 characters. Startup verifies the SMTP connection. The `verification` profile
 contains a capture-only Mailpit service for CI, **not email delivery**.
 
-Open <http://localhost:8080> for the app and <http://localhost:8081> for the public
-site. Create a new account and follow its emailed verification link. Development
+Open <http://localhost:8080> for the app. Create a new account and follow its
+emailed verification link. Development
 fixtures and development passwords are not installed. PostgreSQL is not published
 to the host. Only loopback application ports are published by default.
 
@@ -69,13 +70,11 @@ the supervisor deliberately retains deployed security behavior.
 
 ## HTTPS and public callbacks
 
-Point two DNS names at the host, allow TCP 80/443 and optionally UDP 443, and add:
+Point the app's DNS name at the host, allow TCP 80/443 and optionally UDP 443, and add:
 
 ```dotenv
 SELFHOST_ORIGIN=https://app.example.com
-SELFHOST_PUBLIC_ORIGIN=https://www.example.com
 SELFHOST_APP_DOMAIN=app.example.com
-SELFHOST_PUBLIC_DOMAIN=www.example.com
 ```
 
 Then start the same file with its TLS profile:
@@ -84,11 +83,11 @@ Then start the same file with its TLS profile:
 docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls up -d --wait
 ```
 
-Caddy provisions certificates and forwards both surfaces. Origins must match
-browser-visible URLs because authentication, verification links, and signed
-storage capabilities depend on them. Register the application callback URLs with
+Caddy provisions certificates and forwards the app. Its origin must match the
+browser-visible URL because authentication, verification links, and signed
+storage capabilities depend on it. Register the application callback URLs with
 each Provider. An existing reverse proxy can replace the optional gateway; route
-the app to port 8080 and the public site to 8081. The runtime does not trust
+the app to port 8080. The runtime does not trust
 client-supplied forwarding headers. Behind a proxy, IP-based rate limits see the
 proxy address; this is intentionally conservative rather than accepting spoofed
 client IPs.

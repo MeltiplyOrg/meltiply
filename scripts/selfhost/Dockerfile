@@ -9,7 +9,7 @@ ENV WRANGLER_SEND_METRICS=false CI=true
 RUN bun install --frozen-lockfile
 RUN npm ci --prefix scripts/selfhost --ignore-scripts
 RUN bun x --no-install tsc --project scripts/selfhost/tsconfig.json
-RUN bun run --cwd frontend/app build:production && bun run --cwd frontend/public build
+RUN bun run --cwd frontend/app build:production
 RUN node scripts/selfhost/build.mjs && node scripts/selfhost/notices.mjs
 
 FROM node:24.18.0-bookworm-slim AS runtime
@@ -23,7 +23,7 @@ COPY scripts/selfhost/server.mjs scripts/selfhost/control.mjs scripts/selfhost/a
 COPY LICENSE* THIRD_PARTY_NOTICES.md ./
 RUN mkdir /data && chown node:node /data
 USER node
-EXPOSE 8080 8081
+EXPOSE 8080
 CMD ["node", "scripts/selfhost/server.mjs"]
 
 FROM postgres:18.6-alpine AS database

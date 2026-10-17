@@ -17,7 +17,6 @@ const config = z
   .object({
     SELFHOST_DATA: z.string().default("/data"),
     SELFHOST_ORIGIN: z.url().default("http://localhost:8080"),
-    SELFHOST_PUBLIC_ORIGIN: z.url().default("http://localhost:8081"),
     SELFHOST_DB_SYSTEM_PASSWORD: z.string().min(32),
     SELFHOST_DB_AUTHENTICATED_PASSWORD: z.string().min(32),
     BETTER_AUTH_SECRET: z.string().min(32),
@@ -253,20 +252,12 @@ const runtime = new Miniflare(
           },
         },
       },
-      {
-        name: "public",
-        modules: true,
-        script: "export default { fetch(request, env) { return env.ASSETS.fetch(request); } };",
-        compatibilityDate: metadata.frontend.compatibilityDate,
-        assets: { directory: resolve(dist, "public"), binding: "ASSETS" },
-      },
     ],
   }),
 );
 await runtime.ready;
 const frontend = await runtime.getWorker("frontend");
 const api = await runtime.getWorker("api");
-const publicSite = await runtime.getWorker("public");
 const automation = await runtime.getWorker("automation");
 const control = await startControl(runtime, jobs, queuePolicies, config.SELFHOST_OPERATOR_SECRET);
 let stopping = false;
@@ -303,10 +294,10 @@ async function dispatch() {
 }
 
 /** Streams requests/responses with backpressure; only signed S3 paths can enter runtime-internal routes. */
-function listener(isPublic) {
+function listener() {
   return createServer(async (incoming, outgoing) => {
     try {
-      const origin = isPublic ? config.SELFHOST_PUBLIC_ORIGIN : config.SELFHOST_ORIGIN;
+      const origin = config.SELFHOST_ORIGIN;
       const url = new URL(incoming.url ?? "/", origin);
       if (url.origin !== new URL(origin).origin) {
         outgoing.writeHead(400).end();
@@ -340,7 +331,7 @@ function listener(isPublic) {
       headers.set("cf-connecting-ip", incoming.socket.remoteAddress || "unknown");
       // The internal runtime transport must not replace SigV4's signed public authority.
       headers.set("host", url.host);
-      if (!isPublic && url.pathname.startsWith("/cdn-cgi/local/r2/s3/")) {
+      if (url.pathname.startsWith("/cdn-cgi/local/r2/s3/")) {
         headers.set("MF-Proxy-Shared-Secret", proxySecret);
       }
       const controller = new AbortController();
@@ -353,12 +344,11 @@ function listener(isPublic) {
         init.body = Readable.toWeb(incoming);
         init.duplex = "half";
       }
-      const response =
-        url.pathname.startsWith("/cdn-cgi/local/r2/s3/") && !isPublic
-          ? await runtime.dispatchFetch(url.href, init)
-          : await (
-              isPublic ? publicSite : url.pathname.startsWith("/operator/") ? api : frontend
-            ).fetch(new Request(url, init));
+      const response = url.pathname.startsWith("/cdn-cgi/local/r2/s3/")
+        ? await runtime.dispatchFetch(url.href, init)
+        : await (url.pathname.startsWith("/operator/") ? api : frontend).fetch(
+            new Request(url, init),
+          );
       const responseHeaders = Object.fromEntries(response.headers);
       const cookies = response.headers.getSetCookie();
       if (cookies.length) responseHeaders["set-cookie"] = cookies;
@@ -387,18 +377,11 @@ function listener(isPublic) {
     }
   });
 }
-const appServer = listener(false);
-const publicServer = listener(true);
-await Promise.all([
-  new Promise((resolve, reject) => {
-    appServer.once("error", reject);
-    appServer.listen(8080, "0.0.0.0", resolve);
-  }),
-  new Promise((resolve, reject) => {
-    publicServer.once("error", reject);
-    publicServer.listen(8081, "0.0.0.0", resolve);
-  }),
-]);
+const appServer = listener();
+const listening = Promise.withResolvers();
+appServer.once("error", listening.reject);
+appServer.listen(8080, "0.0.0.0", listening.resolve);
+await listening.promise;
 const dispatching = dispatch();
 dispatching.catch((error) => {
   console.error(error);
@@ -411,7 +394,6 @@ async function shutdown(code = 0) {
   if (stopping) return;
   stopping = true;
   appServer.close();
-  publicServer.close();
   control.close();
   await dispatching.catch(() => {});
   await runtime.dispose();

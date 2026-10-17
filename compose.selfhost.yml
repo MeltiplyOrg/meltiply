@@ -51,7 +51,6 @@ services:
         condition: service_completed_successfully
     ports:
       - "${SELFHOST_BIND_ADDRESS:-127.0.0.1}:8080:8080"
-      - "${SELFHOST_BIND_ADDRESS:-127.0.0.1}:8081:8081"
     volumes:
       - runtime:/data
     read_only: true
@@ -119,7 +118,6 @@ services:
         condition: service_healthy
     environment:
       SELFHOST_APP_DOMAIN: ${SELFHOST_APP_DOMAIN:-localhost}
-      SELFHOST_PUBLIC_DOMAIN: ${SELFHOST_PUBLIC_DOMAIN:-public.localhost}
     ports:
       - "80:80"
       - "443:443"
@@ -150,7 +148,4 @@ configs:
     content: |
       {$$SELFHOST_APP_DOMAIN} {
       	reverse_proxy runtime:8080
-      }
-      {$$SELFHOST_PUBLIC_DOMAIN} {
-      	reverse_proxy runtime:8081
       }

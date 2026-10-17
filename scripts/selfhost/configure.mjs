@@ -5,7 +5,6 @@ const ci = process.argv.includes("--ci");
 const path = process.env.SELFHOST_ENV_FILE || ".env.selfhost";
 const values = {
   SELFHOST_ORIGIN: "http://localhost:8080",
-  SELFHOST_PUBLIC_ORIGIN: "http://localhost:8081",
   SELFHOST_BIND_ADDRESS: "127.0.0.1",
   SELFHOST_IMAGE_PREFIX: "ghcr.io/meltiplyorg/meltiply",
   SELFHOST_IMAGE_TAG: "latest",

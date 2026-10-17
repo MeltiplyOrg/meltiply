@@ -5,6 +5,7 @@ import { parseJsonc } from "../lib/jsonc.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const output = resolve(root, "dist/selfhost");
+await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 const automation = parseJsonc(
   await readFile(resolve(root, "workers/automation/wrangler.jsonc"), "utf8"),
@@ -80,4 +81,3 @@ for (const [name, entry] of Object.entries({
 }
 await writeFile(resolve(output, "metadata.json"), JSON.stringify(metadata));
 await cp(resolve(root, "frontend/app/dist/client"), resolve(output, "app"), { recursive: true });
-await cp(resolve(root, "frontend/public/dist"), resolve(output, "public"), { recursive: true });

@@ -46,13 +46,11 @@ async function api(path, body, expected = 200) {
 }
 
 await api("/api/v1/ready");
-for (const url of [origin, "http://localhost:8081"]) {
-  const response = await fetch(url);
-  assert.equal(response.status, 200);
-  const html = await response.text();
-  assert.match(html, /<html/i);
-  assert.doesNotMatch(html, /\/@vite\/client/);
-}
+const response = await fetch(origin);
+assert.equal(response.status, 200);
+const html = await response.text();
+assert.match(html, /<html/i);
+assert.doesNotMatch(html, /\/@vite\/client/);
 for (const path of ["/cdn-cgi/local/explorer", "/cdn-cgi/handler/scheduled"]) {
   assert.equal((await fetch(`${origin}${path}`)).status, 404);
 }
@@ -71,7 +69,7 @@ assert.equal(
   (await fetch(operatorPath, { headers: { "Cf-Access-Jwt-Assertion": operator.token } })).status,
   404,
 );
-console.log("Production frontends, readiness, private routing, and operator authentication passed");
+console.log("Production app, readiness, private routing, and operator authentication passed");
 
 const email = `selfhost-${randomUUID()}@example.com`;
 const password = `Selfhost-${randomUUID()}!`;

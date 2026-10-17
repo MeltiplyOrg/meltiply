@@ -129,11 +129,9 @@ jobs:
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls up -d --no-deps gateway
           curl --retry 10 --retry-all-errors --retry-delay 1 --max-time 10 --insecure --fail --show-error --silent https://localhost/api/v1/ready
-          curl --retry 10 --retry-all-errors --retry-delay 1 --max-time 10 --resolve public.localhost:443:127.0.0.1 --insecure --fail --show-error --silent https://public.localhost/ --output /dev/null
       - uses: ./.github/actions/install-workspace
       - name: Check the complete existing Cloudflare deployment target
         run: |
-          npm ci --prefix scripts/selfhost --ignore-scripts
           bun run setup --skip-dependencies --skip-image-pull
           bun run cloudflare:check
           bun run docs:links

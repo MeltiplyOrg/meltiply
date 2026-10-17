@@ -28,6 +28,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -290,9 +291,7 @@ export function SidebarNav({ currentView, onNavigate, className }: SidebarNavPro
               {t("Account settings")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <div className="px-2 pb-1 pt-1.5 text-(length:--font-size-micro) font-medium uppercase tracking-wide text-ink-3">
-              {t("Theme")}
-            </div>
+            <DropdownMenuLabel>{t("Theme")}</DropdownMenuLabel>
             <DropdownMenuRadioGroup
               value={requestedTheme}
               onValueChange={(value) => {

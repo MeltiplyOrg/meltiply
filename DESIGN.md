@@ -144,6 +144,12 @@ Corners follow the chip/control/card/window scale in frontmatter. Compact toolti
 
 Canonical [Button](frontend/shared/src/components/ui/button.tsx) owns primary, destructive, outline, secondary, ghost, and link variants, with shared hover/active/disabled/focus states. Default controls are 30px, small controls 26px, and large controls 36px. [Input](frontend/shared/src/components/ui/input.tsx) owns field fill, strong boundary, accent focus, and native checkbox/radio exceptions. Keep visible labels and validation in the consuming feature.
 
+### Menus
+
+`DropdownMenu` and `Select` render one vocabulary carried by shared hooks in `frontend/shared/motion.css`: the surface (`[data-menu-surface]`: 200px floor, 4px padding, window radius, opaque surface, overlay elevation with a hairline ring), rows (`[data-menu-item]`: 30px minimum height, 9px gap, 8px inset, control radius, 13.5px text), right-aligned accent checks (`[data-menu-indicator]`), uppercase micro labels (`[data-menu-label]`), and bleeding separators (`[data-menu-separator]`). A page-composed disclosure panel marks itself with the same surface hook. `SlidingMenuHighlight` owns the hover pill inside a menu, as `SidebarGlideHighlight` does in a rail, so rows never paint their own fill.
+
+**The One Menu Surface Rule.** Every floating list — dropdown menu, select listbox, submenu, or page-composed filter panel — renders the shared menu vocabulary, and a menu that hand-writes its own surface, row geometry, or indicator is a defect.
+
 ### Cards and metadata
 
 [Card](frontend/shared/src/components/ui/card.tsx) supplies the shared opaque surface, quiet line, card corners, and restrained shadow. Metadata badges and status atoms use their existing variants; do not turn every label into an action or give inert metadata invented keyboard behavior.

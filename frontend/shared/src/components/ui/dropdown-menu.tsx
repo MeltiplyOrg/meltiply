@@ -1,6 +1,6 @@
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { Check, ChevronRight, Circle } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 import { SlidingMenuHighlight } from "../primitives/sliding-menu-highlight";
 /**
@@ -49,11 +49,10 @@ export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 export const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
 /**
- * Submenu trigger item that reveals a nested {@link DropdownMenuSubContent} on hover or arrow-right keypress.
+ * Submenu trigger item that reveals a nested {@link DropdownMenuSubContent} on
+ * hover or ArrowRight; styled by the shared `[data-menu-item]` vocabulary so a
+ * submenu row matches every other menu row.
  *
- * Renders an automatic trailing chevron icon indicating an expandable submenu.
- *
- * @param inset - When true, adds left padding (`pl-8`) to align text with items that have leading icons or indicators.
  * @param className - Optional CSS classes for custom styling.
  * @param children - Trigger label or content.
  * @param props - Radix SubTrigger props.
@@ -62,22 +61,17 @@ export const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
  */
 const DropdownMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
-    inset?: boolean;
-  }
->(({ className, inset, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger>
+>(({ className, children, ...props }, ref) => (
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     data-dropdown-item
-    className={cn(
-      "relative z-10 flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-transparent data-[state=open]:bg-transparent data-[highlighted]:bg-transparent hover:bg-transparent text-ink focus:text-ink",
-      inset && "pl-8",
-      className,
-    )}
+    data-menu-item=""
+    className={cn("cursor-default select-none pr-8", className)}
     {...props}
   >
     {children}
-    <ChevronRight className="ml-auto size-4" />
+    <ChevronRight className="size-4" />
   </DropdownMenuPrimitive.SubTrigger>
 ));
 DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
@@ -113,8 +107,9 @@ const DropdownMenuSubContent = React.forwardRef<
   return (
     <DropdownMenuPrimitive.SubContent
       ref={setRefs}
+      data-menu-surface=""
       className={cn(
-        "relative z-50 min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg select-none",
+        "relative z-50 select-none",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         className,
       )}
@@ -160,8 +155,9 @@ export const DropdownMenuContent = React.forwardRef<
       <DropdownMenuPrimitive.Content
         ref={setRefs}
         sideOffset={sideOffset}
+        data-menu-surface=""
         className={cn(
-          "relative z-50 min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md select-none",
+          "relative z-50 select-none",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
           className,
         )}
@@ -178,10 +174,11 @@ DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName;
 /**
  * Actionable item within a dropdown menu.
  *
- * Handles mouse click and keyboard selection, visual focus highlighting (`focus:bg-accent`),
- * disabled state opacity, and icon sizing constraints.
+ * Chrome (row geometry, tokens, and hover suppression for the shared
+ * `SlidingMenuHighlight` pill) comes from the `[data-menu-item]` hook, so every
+ * menu family — this one, `Select`, and page-composed panels — renders
+ * identically.
  *
- * @param inset - When true, indents the item (`pl-8`) to align with checkbox/radio items.
  * @param className - Optional CSS classes.
  * @param props - Radix Item props.
  * @param ref - Forwarded ref.
@@ -189,19 +186,13 @@ DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName;
  */
 export const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
-    inset?: boolean;
-  }
->(({ className, inset, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item>
+>(({ className, ...props }, ref) => (
   <DropdownMenuPrimitive.Item
     ref={ref}
     data-dropdown-item
-    className={cn(
-      "relative z-10 flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
-      "focus:bg-transparent data-[highlighted]:bg-transparent hover:bg-transparent text-ink focus:text-ink data-[highlighted]:text-ink",
-      inset && "pl-8",
-      className,
-    )}
+    data-menu-item=""
+    className={cn("cursor-default select-none", className)}
     {...props}
   />
 ));
@@ -210,7 +201,8 @@ DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName;
 /**
  * Toggleable checkbox item within a dropdown menu.
  *
- * Renders a left-aligned checkmark indicator icon when `checked` is true.
+ * Renders a right-aligned accent checkmark when `checked` is true, matching
+ * {@link DropdownMenuRadioItem} and the item indicator inside `Select`.
  *
  * @param checked - Checked state (boolean or 'indeterminate').
  * @param className - Optional CSS classes.
@@ -226,30 +218,30 @@ export const DropdownMenuCheckboxItem = React.forwardRef<
   <DropdownMenuPrimitive.CheckboxItem
     ref={ref}
     data-dropdown-item
-    className={cn(
-      "relative z-10 flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-transparent data-[highlighted]:bg-transparent hover:bg-transparent text-ink focus:text-ink data-[highlighted]:text-ink data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      className,
-    )}
+    data-menu-item=""
+    className={cn("cursor-default select-none pr-8", className)}
     checked={checked}
     {...props}
   >
-    <span className="absolute left-2 flex size-3.5 items-center justify-center">
+    {children}
+    <span data-menu-indicator="">
       <DropdownMenuPrimitive.ItemIndicator>
         <Check className="size-4" />
       </DropdownMenuPrimitive.ItemIndicator>
     </span>
-    {children}
   </DropdownMenuPrimitive.CheckboxItem>
 ));
 DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displayName;
 
 /**
  * Selectable radio option within a {@link DropdownMenuRadioGroup}. The default
- * layout uses a leading bullet; segment joins compact horizontal choices with
- * neutral selected styling. Radix retains menu arrow-key navigation and checked
- * semantics. Callers may prevent selection dismissal for immediate preferences.
+ * layout is a menu row with a right-aligned accent check; `segment` joins
+ * compact horizontal choices with neutral selected styling. Radix retains menu
+ * arrow-key navigation and checked semantics. Callers may prevent selection
+ * dismissal for immediate preferences.
  *
  * @param value - Value of this radio option.
+ * @param variant - `default` row or `segment` cell inside a segmented group.
  * @param className - Optional CSS classes.
  * @param children - Option label.
  * @param props - Radix RadioItem props.
@@ -265,55 +257,48 @@ export const DropdownMenuRadioItem = React.forwardRef<
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     data-dropdown-item
+    data-menu-item=""
     className={cn(
+      "cursor-default select-none",
       variant === "segment"
-        ? "relative z-10 flex h-6 flex-1 cursor-default select-none items-center justify-center gap-1 rounded-[5px] px-2 text-xs font-medium text-ink-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring data-[highlighted]:text-ink data-[state=checked]:bg-surface data-[state=checked]:text-ink data-[state=checked]:shadow-btn data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-        : "relative z-10 flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-transparent data-[highlighted]:bg-transparent hover:bg-transparent text-ink focus:text-ink data-[highlighted]:text-ink data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        ? "h-6 min-h-6 flex-1 justify-center gap-1 rounded-control px-2 text-xs font-medium text-ink-2 transition-colors focus-visible:ring-2 focus-visible:ring-ring data-[highlighted]:text-ink data-[state=checked]:bg-surface data-[state=checked]:text-ink data-[state=checked]:shadow-btn"
+        : "pr-8",
       className,
     )}
     {...props}
   >
+    {children}
     {variant === "default" && (
-      <span className="absolute left-2 flex size-3.5 items-center justify-center">
+      <span data-menu-indicator="">
         <DropdownMenuPrimitive.ItemIndicator>
-          <Circle className="size-2 fill-current" />
+          <Check className="size-4" />
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
     )}
-    {children}
   </DropdownMenuPrimitive.RadioItem>
 ));
 DropdownMenuRadioItem.displayName = DropdownMenuPrimitive.RadioItem.displayName;
 
 /**
- * Non-interactive category header label within a dropdown menu.
+ * Non-interactive category header label within a dropdown menu; styled by the
+ * shared `[data-menu-label]` menu vocabulary.
  *
- * @param inset - When true, indents the label (`pl-8`) to align with checkbox/radio items.
  * @param className - Optional CSS classes.
  * @param props - Radix Label props.
  * @param ref - Forwarded ref.
  * @returns Styled section label.
  */
-const DropdownMenuLabel = React.forwardRef<
+export const DropdownMenuLabel = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Label>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label> & {
-    inset?: boolean;
-  }
->(({ className, inset, ...props }, ref) => (
-  <DropdownMenuPrimitive.Label
-    ref={ref}
-    className={cn(
-      "px-2 py-1.5 text-xs font-semibold text-muted-foreground",
-      inset && "pl-8",
-      className,
-    )}
-    {...props}
-  />
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label>
+>(({ className, ...props }, ref) => (
+  <DropdownMenuPrimitive.Label ref={ref} data-menu-label="" className={className} {...props} />
 ));
 DropdownMenuLabel.displayName = DropdownMenuPrimitive.Label.displayName;
 
 /**
- * Visual separator dividing items or groups within a dropdown menu.
+ * Visual separator dividing items or groups within a dropdown menu; styled by
+ * the shared `[data-menu-separator]` menu vocabulary.
  *
  * @param className - Optional CSS classes.
  * @param props - Radix Separator props.
@@ -326,7 +311,8 @@ export const DropdownMenuSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DropdownMenuPrimitive.Separator
     ref={ref}
-    className={cn("-mx-1 my-1 h-px bg-muted", className)}
+    data-menu-separator=""
+    className={className}
     {...props}
   />
 ));

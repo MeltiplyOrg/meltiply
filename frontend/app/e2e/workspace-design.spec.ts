@@ -8,6 +8,33 @@ import {
 } from "./publication-fixtures";
 
 /**
+ * Computed chrome of one shared menu surface, so the account menu, filter
+ * panels, and select lists can be compared as rendered.
+ */
+const menuSurfaceChrome = (element: Element) => {
+  const style = getComputedStyle(element);
+  return {
+    radius: style.borderRadius,
+    background: style.backgroundColor,
+    shadow: style.boxShadow,
+    padding: style.paddingTop,
+  };
+};
+
+/** Computed chrome of one shared menu row; every menu family must render the same one. */
+const menuItemChrome = (element: Element) => {
+  const style = getComputedStyle(element);
+  return {
+    minHeight: style.minHeight,
+    radius: style.borderRadius,
+    paddingLeft: style.paddingLeft,
+    fontSize: style.fontSize,
+    gap: style.gap,
+    color: style.color,
+  };
+};
+
+/**
  * Exercises real owner-authenticated Posts, directory, Settings, keyboard search,
  * and mobile navigation. Screenshots cover the three toolbar-selected views:
  * Table, Grid, and Calendar, plus Brand Profiles and theme surfaces.
@@ -84,6 +111,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(
     accountMenu.getByRole("menuitem", { name: "Account settings", exact: true }),
   ).toBeVisible();
+  const accountMenuSurface = await accountMenu.evaluate(menuSurfaceChrome);
+  const accountMenuItem = await accountMenu
+    .locator("[data-menu-item]")
+    .first()
+    .evaluate(menuItemChrome);
   const quickTheme = accountMenu.getByRole("group", { name: "Theme", exact: true });
   await quickTheme.getByRole("menuitemradio", { name: "Dark", exact: true }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
@@ -264,6 +296,17 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const filterPanel = page.getByRole("group", { name: "Filters", exact: true });
   await filterPanel.getByRole("button", { name: "Add Platform filter", exact: true }).click();
   await filterPanel.getByRole("button", { name: "All platforms", exact: true }).click();
+  expect(
+    await page
+      .locator("[data-radix-popper-content-wrapper] [data-menu-surface]")
+      .evaluate(menuSurfaceChrome),
+  ).toEqual(accountMenuSurface);
+  expect(
+    await page
+      .locator("[data-radix-popper-content-wrapper] [data-menu-item]")
+      .first()
+      .evaluate(menuItemChrome),
+  ).toEqual(accountMenuItem);
   await page.getByRole("menuitemcheckbox", { name: "Instagram", exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("row").filter({ hasText: "Studio Threads" })).toHaveCount(0);
@@ -380,6 +423,33 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("posts-light-desktop.png"),
     fullPage: true,
   });
+
+  // One menu vocabulary: the filter panel, its select list, and the platform menu
+  // must render the same surface and rows as the account menu above.
+  const postsFilterSummary = page.locator("summary").filter({ hasText: /^Filter/ });
+  await postsFilterSummary.click();
+  const postsFilterPanel = page.getByRole("group", { name: "Filters", exact: true });
+  await postsFilterPanel
+    .getByRole("button", { name: "Add Post status filter", exact: true })
+    .click();
+  await postsFilterPanel.getByRole("button", { name: "All statuses", exact: true }).click();
+  const openMenuSurface = page.locator("[data-radix-popper-content-wrapper] [data-menu-surface]");
+  await expect(openMenuSurface).toBeVisible();
+  expect(await openMenuSurface.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
+  expect(
+    await openMenuSurface.locator("[data-menu-item]").first().evaluate(menuItemChrome),
+  ).toEqual(accountMenuItem);
+  expect(await postsFilterPanel.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("posts-filter-menu-desktop.png"),
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  await postsFilterPanel
+    .getByRole("button", { name: "Remove Post status filter", exact: true })
+    .click();
+  await postsFilterSummary.click();
 
   await expect(
     page.locator("aside").getByRole("button", { name: "Table", exact: true }),

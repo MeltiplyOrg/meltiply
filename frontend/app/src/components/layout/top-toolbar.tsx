@@ -137,10 +137,11 @@ export function TopToolbarFilters({
         <div
           role="group"
           aria-label={t("Filters")}
-          className="absolute left-0 top-full z-30 mt-1 w-140 max-w-[calc(100vw-32px)] overflow-hidden rounded-control border border-line bg-surface p-1 shadow-overlay"
+          data-menu-surface=""
+          className="absolute left-0 top-full z-30 mt-1 max-h-none w-140 max-w-[calc(100vw-32px)] overflow-hidden"
         >
           <div className="flex min-h-8 items-center justify-between px-2 py-1">
-            <h2 className="text-(length:--font-size-micro) font-medium uppercase tracking-wide text-ink-3">
+            <h2 data-menu-label="" className="flex-1">
               {t("Filter by")}
             </h2>
             {visibleFields.length > 0 && (

@@ -176,7 +176,10 @@ export function SlidingMenuHighlight({
   return (
     <motion.div
       aria-hidden
-      className={cn("pointer-events-none absolute z-0 rounded-[6px] border shadow-xs", className)}
+      className={cn(
+        "pointer-events-none absolute z-0 rounded-control border border-line-soft shadow-xs",
+        className,
+      )}
       style={{
         backgroundColor: "var(--hover)",
         borderColor: "var(--line-soft)",

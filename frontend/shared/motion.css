@@ -277,3 +277,87 @@ html.theme-changing *::after {
     0
   );
 }
+
+/*
+ * One menu vocabulary for every floating list. `dropdown-menu.tsx` (account
+ * menu, row actions, platform multi-select), `select.tsx` (filter field/value
+ * lists), and page-composed disclosure panels mark their surface, rows, labels,
+ * and separators with these hooks, so the chrome cannot drift between them.
+ * Values map the reference popover (`--shadow-pop`, `--r-lg`/`--r-sm`, 4px panel
+ * padding, 30px rows, `--surface-2` hover) onto semantic tokens; Tailwind
+ * utilities still override any of it.
+ */
+@layer components {
+  [data-menu-surface] {
+    min-width: 200px;
+    max-height: min(420px, 70vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 4px;
+    border-radius: var(--radius-window);
+    background-color: var(--surface);
+    color: var(--ink);
+    box-shadow:
+      var(--shadow-overlay),
+      0 0 0 1px var(--line);
+  }
+
+  /* A row never paints its own fill: `SlidingMenuHighlight` owns the hover pill,
+     and it tracks the same `data-dropdown-item` attribute this hook styles. */
+  [data-menu-item] {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    width: 100%;
+    min-height: var(--control-height);
+    align-items: center;
+    gap: 9px;
+    padding: 0 8px;
+    border-radius: var(--radius-control);
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    text-align: left;
+    outline: none;
+    transition: color 150ms ease;
+  }
+
+  [data-menu-item][data-disabled] {
+    pointer-events: none;
+    opacity: 0.45;
+  }
+
+  [data-menu-item] > svg {
+    pointer-events: none;
+    flex-shrink: 0;
+  }
+
+  [data-menu-item] > svg:not([class*="size-"]) {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  /* Right-aligned accent check, as the reference marks a chosen row. */
+  [data-menu-indicator] {
+    position: absolute;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-ink);
+  }
+
+  [data-menu-label] {
+    padding: 8px 8px 4px;
+    font-size: var(--font-size-micro);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  [data-menu-separator] {
+    height: 1px;
+    margin: 4px -4px;
+    background-color: var(--line);
+  }
+}

@@ -14,7 +14,7 @@ Posts and Channels are single destinations. The Posts toolbar orders Table, Cale
 
 The rail and the Settings section rail mark every row as a glide target and let `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`) own the hover background: one pill springs to the hovered row and fades out on leave, so rows do not paint their own hover fill. Rows stay above the pill, keyboard focus rings and the selected surface remain the row's own paint, and the public docs rail reuses the same component with its nested-scroll viewport.
 
-The Filter builder adds supported equality rows through field chips. Adding an empty row does not change results. Removing a row clears its value; Clear all resets the builder. Nested portalled controls stay inside the disclosure interaction and keyboard focus returns to a useful control.
+The Filter builder adds supported equality rows through field chips. Adding an empty row does not change results. Removing a row clears its value; Clear all resets the builder. Nested portalled controls stay inside the disclosure interaction and keyboard focus returns to a useful control. The panel, its field/value lists, and every other floating menu render the one shared menu vocabulary (`[data-menu-surface]`, `[data-menu-item]`, `[data-menu-label]`, `[data-menu-separator]`, `[data-menu-indicator]` in `frontend/shared/motion.css`), each keeping `SlidingMenuHighlight` as its only hover fill.
 
 Selection belongs to the feature, survives view/filter/group presentation changes, and excludes unloaded records. Select-all is visually checked only for a fully selected visible set. The shared pill reports the actual count; destructive actions confirm a fixed target snapshot and retain failed targets for retry.
 

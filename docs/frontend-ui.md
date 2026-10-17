@@ -49,6 +49,8 @@ The footer uses one compact avatar/name account trigger with trailing chevrons, 
 
 Shared tooltips use the reference-derived compact inverse treatment and timing. Radix owns focus, Escape, collision, and portals. Keyboard hints supplement accessible names, never replace them.
 
+`DropdownMenu` and `Select` render one menu vocabulary: the surface (`data-menu-surface`), rows (`[data-menu-item]`), right-aligned accent checks (`[data-menu-indicator]`), labels (`[data-menu-label]`), and separators (`[data-menu-separator]`) all come from `frontend/shared/motion.css`, so the account menu, row actions, filter panels, platform multi-select, and every listbox stay identical. `SlidingMenuHighlight` owns the hover pill inside a menu, exactly as `SidebarGlideHighlight` does in a rail. Extend these wrappers instead of restyling a surface; a page-composed panel marks itself with the same `data-menu-surface` hook.
+
 ## Collections and selection
 
 Posts orders **Table → Calendar → Grid**, with Table as default. All three share Post identity, owning Brand Profile, real outcomes, filtering, and supported actions. Table grouping/column visibility is presentation, not a different data model. Its rows open Details and have no trailing actions column. Calendar Month/Week uses actual dates, day lists, overflow, and explicit composer entry; it does not imply drag-rescheduling. Grid uses `PostCard` and real attachments.

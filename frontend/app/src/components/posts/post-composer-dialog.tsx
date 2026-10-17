@@ -45,6 +45,7 @@ export function PostComposerDialog({
       contentKey={`${sessionKey}:${initialPostId ?? "new"}`}
       closeLabel={t("Close")}
       bodyClassName="flex flex-col pb-0 sm:pb-0"
+      className="sm:max-w-260"
     >
       <Composer
         key={sessionKey}

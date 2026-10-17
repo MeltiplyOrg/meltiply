@@ -23,6 +23,8 @@ const spanishTranslations: Record<string, string> = {
   "Next week": "Semana siguiente",
   "View posts on {date}": "Ver publicaciones del {date}",
   "Schedule post on {date}": "Programar publicación para el {date}",
+  "Schedule Post": "Programar publicación",
+  "Date & time": "Fecha y hora",
   "+{count} more": "+{count} más",
   "No posts": "Sin publicaciones",
   "New Post": "Nueva publicación",
@@ -148,7 +150,6 @@ const spanishTranslations: Record<string, string> = {
   "{channel} scheduled for {date}": "{channel} programado para {date}",
   "Previous month": "Mes anterior",
   "Next month": "Mes siguiente",
-  "Scheduled for": "Programado para",
   "Sort by date": "Ordenar por fecha",
   "has no channels yet": "aún no tiene canales",
   "Optional context for this profile": "Contexto opcional para este perfil",
@@ -334,6 +335,8 @@ const spanishTranslations: Record<string, string> = {
     "Los cambios sin guardar se conservan en este navegador hasta que los guardes.",
   "Draft changes are saved to your workspace when you save.":
     "Los cambios del borrador se guardan en tu espacio de trabajo cuando los guardes.",
+  Draft: "Borrador",
+  Now: "Ahora",
   "Saves this post's text, attachments, and channel settings without publishing":
     "Guarda el texto, los archivos adjuntos y la configuración de canales de esta publicación sin publicar",
   "Your post text, attachments, and channel settings are stored.":

@@ -133,6 +133,21 @@ async function saveDraft(page: Page): Promise<void> {
 }
 
 /**
+ * Selects the publishing intent the composer's pinned action submits. The mode
+ * selector names the intent and the pinned bar names the action, so a test that
+ * publishes instead of saving picks the mode first.
+ *
+ * @param page - Playwright page bound to the app under test.
+ * @param mode - Publishing intent to select before submitting.
+ */
+async function choosePublishingMode(page: Page, mode: "Draft" | "Schedule" | "Now"): Promise<void> {
+  await page
+    .getByRole("group", { name: "Publishing", exact: true })
+    .getByRole("button", { name: mode, exact: true })
+    .click();
+}
+
+/**
  * Saves the composition and waits until the native processor has settled every
  * attachment into the phase each one is expected to reach.
  *
@@ -953,6 +968,7 @@ test("reports an actionable processing failure and blocks publishing", async ({
 
   // Publishing is refused with a per-Channel reason naming the unusable file.
   await composerTextarea(page).fill("Blocked by an unusable attachment");
+  await choosePublishingMode(page, "Now");
   await page.getByRole("button", { name: /publish now/i }).click();
   await expect(page.getByText(/Please fix the following before submitting/i)).toBeVisible({
     timeout: 30_000,
@@ -988,6 +1004,7 @@ test("identifies media-required channels before submitting text-only posts", asy
 
   const caption = "Text-only post attempting Instagram publish";
   await composerTextarea(page).fill(caption);
+  await choosePublishingMode(page, "Now");
 
   // Each click re-validates, so retrying the click until the Channel-scoped
   // violation renders absorbs any residual settle gap after the fetch lands.

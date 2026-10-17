@@ -699,7 +699,8 @@ test("keeps publishing work reachable through the redesigned workspace", async (
         .getByRole("button", { name: `Schedule post on ${dateLabel}`, exact: true })
         .click();
       const pad = (value: number) => String(value).padStart(2, "0");
-      await expect(page.getByLabel("Scheduled for", { exact: true })).toHaveValue(
+      // A calendar entry point seeds scheduling, so the date field is already there.
+      await expect(page.getByLabel("Date & time", { exact: true })).toHaveValue(
         `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T10:00`,
       );
       await closeComposer(page);

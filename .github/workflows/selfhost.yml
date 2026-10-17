@@ -1,0 +1,113 @@
+name: Self-hosted release images
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish verified multi-architecture images to GHCR
+        type: boolean
+        default: false
+      tag:
+        description: Image tag for a manual publication
+        type: string
+        default: manual
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selfhost-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'release' }}
+
+jobs:
+  images:
+    uses: ./.github/workflows/selfhost-ci.yml
+
+  cloudflare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Check the existing Cloudflare deployment target
+        run: |
+          bun run setup --skip-dependencies --skip-image-pull
+          bun run cloudflare:check
+          bun run docs:links
+          bunx --no-install vp fmt scripts/selfhost compose.selfhost.yml .github/workflows/selfhost.yml .github/workflows/selfhost-ci.yml knip.json README.md docs/self-hosting.md docs/public-ci.md --check
+
+  publish:
+    name: Publish verified image layers (${{ matrix.platform.arch }})
+    needs: [images, cloudflare]
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: selfhost-image-*-${{ matrix.platform.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/selfhost-images
+          merge-multiple: true
+      - name: Push exact verified images under architecture-specific commit tags
+        env:
+          IMAGE_DIRECTORY: ${{ runner.temp }}/selfhost-images
+          IMAGE_ARCH: ${{ matrix.platform.arch }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          if ! [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo 'Invalid image tag' >&2
+            exit 1
+          fi
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for component in runtime database processor; do
+            zstd --decompress --stdout "$IMAGE_DIRECTORY/selfhost-$component-$IMAGE_ARCH.tar.zst" | docker load
+            image="$prefix-$component"
+            docker tag "$image:ci" "$image:sha-$GITHUB_SHA-$IMAGE_ARCH"
+            docker push "$image:sha-$GITHUB_SHA-$IMAGE_ARCH"
+          done
+
+  manifests:
+    name: Publish multi-architecture release tags
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v4.4.1
+      - name: Publish amd64 and ARM64 manifests without rebuilding
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for component in runtime database processor; do
+            image="$prefix-$component"
+            tags=(--tag "$image:$RELEASE_TAG" --tag "$image:sha-$GITHUB_SHA")
+            if [ "$GITHUB_EVENT_NAME" = release ] && [ "$PRERELEASE" = false ]; then
+              tags+=(--tag "$image:latest")
+            fi
+            docker buildx imagetools create "${tags[@]}" \
+              "$image:sha-$GITHUB_SHA-amd64" "$image:sha-$GITHUB_SHA-arm64"
+          done

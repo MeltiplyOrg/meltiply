@@ -16,6 +16,8 @@ export interface AutomationEnv {
   ASSET_PROCESSING_QUEUE?: Queue<unknown>;
   CHANNEL_REVOCATION_QUEUE?: Queue<unknown>;
   COMMENTS_QUEUE?: Queue<unknown>;
+  /** Standalone workerd owns sockets per invocation; omitted retains the environment's existing pool policy. */
+  DATABASE_POOL_MODE?: "request";
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: string;
   LOG_SAMPLE_RATE?: string;

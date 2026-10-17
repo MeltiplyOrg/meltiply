@@ -31,6 +31,22 @@
       "vitest": {
         "config": ["vitest*.config.ts"]
       }
+    },
+    "scripts/selfhost": {
+      "entry": [
+        "api.ts",
+        "automation.ts",
+        "bindings.ts",
+        "diagnostics.ts",
+        "build.mjs",
+        "notices.mjs",
+        "configure.mjs",
+        "server.mjs",
+        "smoke.mjs",
+        "admin.mjs",
+        "jobs.test.mjs"
+      ],
+      "project": ["*.ts", "*.mjs"]
     }
   },
   "ignore": [".agents/**", "scripts/cloudflare-local/k6/**"],

@@ -14,7 +14,7 @@ import { AccessDenied, DatabaseError } from "@meltiply/domain";
 import type { ApiWorkerEnv } from "./env";
 
 // Deployed isolates retain pools per Hyperdrive connection string (AUD-044).
-// Local requests must not reuse another request's socket or queued checkout.
+// Local and explicitly request-owned invocations cannot share sockets or queued checkouts.
 let authenticatedPool: Pool | undefined;
 let authenticatedConnectionString: string | undefined;
 let systemPool: Pool | undefined;
@@ -24,9 +24,9 @@ let systemConnectionString: string | undefined;
  * Manages caching and instantiation of Hyperdrive connection pools for an isolate.
  *
  * Deployed isolates reuse a pool while the connection string is unchanged.
- * Local invocations get independent pools whose clients close on release:
- * workerd owns sockets and queued connects per request, so sharing a busy
- * pool can strand a later request even without an idle connection.
+ * Local invocations and DATABASE_POOL_MODE=request get independent pools whose
+ * clients close on release: standalone workerd owns sockets and queued connects
+ * per request, so sharing a busy pool can strand a later invocation.
  *
  * @param binding - Cloudflare Hyperdrive binding instance.
  * @param currentPool - Previously cached Pool instance in this isolate, if any.
@@ -44,7 +44,7 @@ function poolFor(
   env: ApiWorkerEnv,
 ): { connectionString: string; pool: Pool } {
   if (!binding) throw new Error(`${label} Hyperdrive binding is unavailable`);
-  if (env.ENVIRONMENT === "local") {
+  if (env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request") {
     return {
       connectionString: binding.connectionString,
       pool: destroyClientsOnRelease(createHyperdrivePool(binding)),
@@ -64,8 +64,8 @@ function poolFor(
  * Returns the PostgreSQL pool for tenant-authenticated queries.
  *
  * Connects via the `DB_AUTHENTICATED` Hyperdrive binding where Row Level Security (RLS) is
- * enforced based on session claims. Local calls create independent pools;
- * deployed calls reuse the isolate cache while the binding is unchanged.
+ * enforced based on session claims. Local and explicitly request-owned calls
+ * create independent pools; managed deployed calls reuse the isolate cache.
  *
  * @param env - Worker environment bindings containing `DB_AUTHENTICATED`.
  * @returns Cached or newly initialized `Pool` for authenticated transactions.
@@ -88,7 +88,7 @@ export function authenticatedPoolFor(env: ApiWorkerEnv): Pool {
  *
  * Connects via the `DB_SYSTEM` Hyperdrive binding for privileged background operations,
  * webhook processing, and tenant setup that bypass standard tenant RLS boundaries.
- * Local calls create independent pools; deployed calls reuse the isolate cache.
+ * Local and explicitly request-owned calls create independent pools; managed deployments reuse the isolate cache.
  *
  * @param env - Worker environment bindings containing `DB_SYSTEM`.
  * @returns Cached or newly initialized `Pool` for system transactions.

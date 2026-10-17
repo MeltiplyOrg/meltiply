@@ -19,3 +19,6 @@ runs:
     - name: Install locked workspace
       shell: bash
       run: bun install --frozen-lockfile
+    - name: Install locked self-hosted runtime dependencies
+      shell: bash
+      run: npm ci --prefix scripts/selfhost --ignore-scripts

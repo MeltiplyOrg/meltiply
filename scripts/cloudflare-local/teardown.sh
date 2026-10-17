@@ -12,7 +12,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-compose_file="$repo_root/docker-compose.cloudflare.yml"
+compose_file="$repo_root/compose.dev.yml"
 # The devcontainer injects a per-container COMPOSE_PROJECT_NAME so concurrent
 # stacks stay disjoint; host-native runs keep the baseline project. The label
 # filters below key on this same name, which is what keeps cleanup scoped.

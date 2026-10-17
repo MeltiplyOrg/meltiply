@@ -29,7 +29,7 @@ chmod +x \
   "$repo_fixture/scripts/cloudflare-local/teardown.sh" \
   "$repo_fixture/scripts/cloudflare-local/compose.sh"
 
-cat >"$repo_fixture/docker-compose.cloudflare.yml" <<'EOF'
+cat >"$repo_fixture/compose.dev.yml" <<'EOF'
 name: meltiply-cloudflare
 services:
   postgres:

@@ -1,6 +1,7 @@
 # Environment variables
 .env
 .env.local
+.env.selfhost
 .env.*.local
 .envrc.local
 .direnv/
@@ -74,7 +75,6 @@ workers/automation/processor/.smoke-tmp.*/
 .codegraph/
 
 # Docker
-.dockerignore
 !workers/automation/processor/.dockerignore
 docker-compose.override.yml
 

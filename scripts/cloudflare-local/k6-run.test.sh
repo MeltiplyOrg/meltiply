@@ -47,7 +47,7 @@ cp "$repo_root/scripts/cloudflare-local/compose.sh" \
   "$fixture/repo/scripts/cloudflare-local/compose.sh"
 cp "$fixture/scripts/cloudflare-local/k6/api-local.js" \
   "$fixture/repo/scripts/cloudflare-local/k6/api-local.js"
-printf 'services: {}\n' >"$fixture/repo/docker-compose.cloudflare.yml"
+printf 'services: {}\n' >"$fixture/repo/compose.dev.yml"
 chmod +x \
   "$fixture/repo/scripts/cloudflare-local/k6-run.sh" \
   "$fixture/repo/scripts/cloudflare-local/compose.sh"

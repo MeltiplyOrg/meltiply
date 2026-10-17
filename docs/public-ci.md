@@ -8,7 +8,7 @@ Actions use version tags, not commit-hash references.
 
 Automatic checks run in separate jobs:
 
-- `changes`: select frontend/backend lanes from changed paths.
+- `changes`: select application and image lanes from changed paths.
 - `baseline`: full-history secret scan, documentation checks, and routing
   regression tests; always runs.
 - `frontend-fast`: app formatting, types, bindings, lint, coverage, production
@@ -16,11 +16,18 @@ Automatic checks run in separate jobs:
 - `cloudflare-fast`: spelling, contracts, Worker bindings, package/Worker types,
   tests and builds, strict lint, dead code, formatting, drift/routing regressions,
   local-tooling and release regressions, supply-chain/SBOM policy, costs, and PostgreSQL integration tests.
-- `ci-gate`: require baseline and every selected lane to succeed; reject
-  failures, cancellations, and unexpectedly skipped jobs.
+- `selfhost-images`: when production image inputs change, build the three images
+  for both amd64 and ARM64 in six parallel native-runner jobs, then smoke the exact
+  artifacts on each architecture, including crash recovery and HTTPS. Nothing is
+  published.
+- `ci-gate`: require baseline and every selected lane to succeed; accept only
+  deliberate skips for unselected lanes and reject failures or cancellations.
 
-The application lanes run independently after routing. Documentation-only changes
-run baseline and the final gate without installing application dependencies.
+Application and image lanes run independently after routing. Documentation,
+PR-template, and agent-skill-only PRs run baseline and the final gate without
+installing dependencies or building images. Public-site source changes select
+frontend checks but not app-only image builds; its package manifest still affects
+the shared dependency installation and selects image checks.
 [The router](../scripts/ci/github-routing.mjs) reads the public CI-owned
 [path rules](../scripts/ci/github-paths.json). Workflow, routing, and development
 container changes select both application lanes.
@@ -28,7 +35,7 @@ container changes select both application lanes.
 Default-branch pushes compare the previous commit with the new HEAD. Feature
 branches and pull requests compare against their base merge point, retaining
 earlier unmerged changes. Renames and deletions count. Manual runs and unavailable
-ancestry conservatively select both lanes.
+ancestry conservatively select every lane.
 
 The jobs use Node 24.18.0 and Bun 1.4.2. The database is a disposable local Docker
 PostgreSQL instance with fixture-only credentials; cleanup runs after failures.
@@ -49,6 +56,25 @@ DevBox motion scenarios use a separate loopback development server on the
 adjacent port. Production tests never enable DevBox controls. The topology lane
 owns a separate backend process for load checks after the smoke process exits.
 
+## Self-hosted release images
+
+The normal [CI workflow](../.github/workflows/ci.yml) and the
+[release image workflow](../.github/workflows/selfhost.yml) share the
+[reusable image workflow](../.github/workflows/selfhost-ci.yml).
+It builds the app-only workerd runtime, migration image, and native media
+processor in parallel on native `ubuntu-24.04` and `ubuntu-24.04-arm` runners.
+Each image is exported directly to a compressed Docker archive with one-day
+artifact retention. Two downstream smoke jobs load these exact artifacts without
+rebuilding and exercise email verification, authenticated database access, signed
+storage, queue delivery, media processing, abrupt-restart recovery, and HTTPS.
+Archives use zstd once; artifact upload disables redundant compression.
+
+Ordinary CI has read-only repository permissions and no registry login or image
+push step. Only published releases and explicitly requested manual release runs
+can publish to GHCR with package-write `GITHUB_TOKEN` permissions, after the image
+checks and `cloudflare:check` pass. See [self-hosting](self-hosting.md#published-images-and-ci)
+for tags, configuration, and deployment.
+
 ## Caching
 
 [Workspace installation](../.github/actions/install-workspace/action.yml) caches
@@ -56,6 +82,14 @@ Bun's download store, keyed by runner OS/architecture, Bun version, lockfile,
 workspace configuration, and dependency patches. A compatible download-cache
 fallback avoids re-downloading unchanged packages; installation always uses
 `--frozen-lockfile`. Installed `node_modules` is not cached.
+
+Docker layer caches are isolated by component and architecture. The runtime
+Dockerfile installs workspace dependencies from manifests, lockfiles, and patches
+before copying application source, so source-only changes reuse dependency layers.
+Its audited production npm dependencies are installed once and reused by the
+builder and final runtime. Release checks reuse the image workflow and run the
+Cloudflare gate concurrently; publication loads verified artifacts and creates
+multi-architecture manifests without rebuilding.
 
 The backend lane persists Vite's content-addressed task store. Keys include the
 runtime, dependency fingerprint, commit, run ID, and attempt; dependency-matched

@@ -56,10 +56,13 @@ function packageLicense(pkg, manifestPath, corrections) {
  * follows workspace devDependencies, never third-party development dependencies.
  * Optional platform packages may be absent, but required edges and license
  * metadata must exist or match a reviewed, hash-pinned upstream license file.
+ * An optional synchronous onPackage visitor receives each resolved third-party
+ * manifest and its normalized license for artifact notice generation. It runs
+ * only for reachable packages; development-only dependencies remain excluded.
  */
 export function javascriptCatalog(
   root = repositoryRoot,
-  { includeDevelopment = false, licenseMetadata = [] } = {},
+  { includeDevelopment = false, licenseMetadata = [], onPackage } = {},
 ) {
   const rootManifest = join(root, "package.json");
   const metadata = JSON.parse(readFileSync(rootManifest, "utf8"));
@@ -106,6 +109,7 @@ export function javascriptCatalog(
         name: pkg.name,
         versions: [pkg.version],
       });
+      onPackage?.({ manifestPath: path, metadata: pkg, license });
     }
     const optional = pkg.optionalDependencies ?? {};
     const edges = new Map();

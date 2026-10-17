@@ -16,7 +16,7 @@ cp "$repo_root/scripts/cloudflare-local/doctor.sh" \
 # probe, so the fixture checkout ships the real helper and a baseline file.
 cp "$repo_root/scripts/cloudflare-local/compose.sh" \
   "$fixture/scripts/cloudflare-local/compose.sh"
-printf 'services: {}\n' >"$fixture/docker-compose.cloudflare.yml"
+printf 'services: {}\n' >"$fixture/compose.dev.yml"
 chmod +x \
   "$fixture/scripts/cloudflare-local/doctor.sh" \
   "$fixture/scripts/cloudflare-local/compose.sh"

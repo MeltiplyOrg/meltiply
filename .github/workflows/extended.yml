@@ -96,11 +96,12 @@ jobs:
         env:
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
           MELTIPLY_E2E_PUBLIC_URL: http://127.0.0.1:4321
+          MELTIPLY_E2E_ACCEPTANCE: "1"
         run: |
           bun run --cwd frontend/public preview --host 127.0.0.1 --port 4321 &
           public_pid=$!
           trap 'kill "$public_pid" 2>/dev/null || true' EXIT
-          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project chromium --trace on
+          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project workspace --trace on
       - name: Inspect UI design mechanics
         if: inputs.lane == 'frontend-ui'
         run: node .agents/skills/impeccable/scripts/detect.mjs --json frontend/app/src/components/layout frontend/app/src/components/primitives/sidebar-nav.tsx frontend/shared/tokens.css frontend/public/src/styles

@@ -143,7 +143,7 @@ export function TopToolbarFilters({
             <h2 className="text-(length:--font-size-micro) font-medium uppercase tracking-wide text-ink-3">
               {t("Filter by")}
             </h2>
-            {activeCount > 0 && (
+            {visibleFields.length > 0 && (
               <Button
                 variant="ghost"
                 size="sm"

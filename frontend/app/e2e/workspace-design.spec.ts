@@ -52,6 +52,22 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(
     accountMenu.getByRole("menuitem", { name: "Account settings", exact: true }),
   ).toBeVisible();
+  const quickTheme = accountMenu.getByRole("group", { name: "Theme", exact: true });
+  await quickTheme.getByRole("menuitemradio", { name: "Dark", exact: true }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(accountMenu).toBeVisible();
+  await expect(quickTheme.getByRole("menuitemradio", { name: "Dark", exact: true })).toBeChecked();
+  await quickTheme.getByRole("menuitemradio", { name: "System", exact: true }).click();
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(
+    quickTheme.getByRole("menuitemradio", { name: "System", exact: true }),
+  ).toBeChecked();
+  await quickTheme.getByRole("menuitemradio", { name: "Light", exact: true }).click();
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await page.emulateMedia({ colorScheme: "light" });
   await page.setViewportSize({ width: 1808, height: 984 });
   await page.screenshot({
     animations: "disabled",
@@ -404,6 +420,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await selectionPill.getByRole("button", { name: "Deselect", exact: true }).click();
   await inspectTrigger.click();
   await expect(inspector).toBeVisible();
+  await expect(inspector).toBeFocused();
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("post-drawer-mobile.png"),

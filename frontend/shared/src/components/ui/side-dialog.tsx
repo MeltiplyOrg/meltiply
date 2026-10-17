@@ -28,9 +28,10 @@ export interface SideDialogProps {
  * Ports Gr8r's 620px edge drawer, 46px record toolbar, and optional 980px expanded
  * inspector. The normal outside surface stays clear; expanded mode dims it.
  * Phones always use the full viewport. Radix retains modal focus/scroll ownership,
- * Escape and outside dismissal. Close receives initial focus; only a connected
- * opener is restored. Native body scrolling and the implemented opacity fade
- * avoid blank slide frames or duplicated page snapshots.
+ * Escape and outside dismissal. The inspection container receives initial focus
+ * so a toolbar tooltip cannot consume the first Escape. Only a connected opener
+ * is restored. Native body scrolling and the implemented opacity fade avoid
+ * blank slide frames or duplicated page snapshots.
  */
 export function SideDialog({
   open,
@@ -47,7 +48,7 @@ export function SideDialog({
 }: SideDialogProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false);
   const previousActiveElement = React.useRef<HTMLElement | null>(null);
-  const closeButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
   const hasDescription = description !== undefined && description !== null && description !== false;
   const hasBreadcrumb = breadcrumb !== undefined && breadcrumb !== null;
   const expandAction = expanded ? restoreLabel : expandLabel;
@@ -59,12 +60,13 @@ export function SideDialog({
           className={cn("fixed inset-0 z-50", expanded ? "bg-overlay/40" : "bg-transparent")}
         />
         <DialogPrimitive.Content
+          ref={contentRef}
           {...(!hasDescription ? { "aria-describedby": undefined } : {})}
           onOpenAutoFocus={(event) => {
             const active = document.activeElement;
             previousActiveElement.current = active instanceof HTMLElement ? active : null;
             event.preventDefault();
-            closeButtonRef.current?.focus();
+            contentRef.current?.focus();
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
@@ -125,7 +127,6 @@ export function SideDialog({
                   <DialogPrimitive.Close asChild>
                     <Button
                       type="button"
-                      ref={closeButtonRef}
                       variant="ghost"
                       size="icon"
                       className="size-7 shrink-0"

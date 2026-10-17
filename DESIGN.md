@@ -150,7 +150,7 @@ Canonical [Button](frontend/shared/src/components/ui/button.tsx) owns primary, d
 
 ### Navigation
 
-The rail uses quiet text and neutral selected rows, not accent-filled navigation. Its footer has one compact 36px avatar/name account trigger with trailing chevrons and an avatar-only collapsed state. A 260px menu contains real identity details, Account settings, Appearance, and Sign out. Routes reuse existing Settings sections; unsupported reference profile/presence/shortcut actions are absent.
+The rail uses quiet text and neutral selected rows, not accent-filled navigation. Its footer has one compact 36px avatar/name account trigger with trailing chevrons and an avatar-only collapsed state. A 260px menu contains real identity details, Account settings, inline Light/Dark/System theme segments with matching icons, and Sign out. Theme changes apply immediately without closing the menu and reuse the shared preference owner. Unsupported reference profile/presence/shortcut actions are absent.
 
 ### Filters and tooltips
 

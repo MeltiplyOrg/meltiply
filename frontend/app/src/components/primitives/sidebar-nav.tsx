@@ -3,6 +3,8 @@ import {
   CircleHelp,
   ChevronsUpDown,
   LogOut,
+  Monitor,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   PenSquare,
@@ -18,12 +20,15 @@ import { useWorkspaceSignOut } from "@/hooks/use-workspace-sign-out";
 import { cn } from "@meltiply/ui/utils";
 import { useWorkspace } from "@/context/workspace.context";
 import { useI18n } from "@/lib/i18n";
+import { useTheme } from "@/lib/theme";
 import { preloadDashboardRoute } from "@/lib/preload-routes";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@meltiply/ui/dropdown-menu";
@@ -98,6 +103,12 @@ export interface SidebarNavProps {
 const HEADING_CLASS =
   "mt-3.5 px-2 py-1.25 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3";
 
+const ACCOUNT_THEMES = [
+  { value: "light", icon: Sun },
+  { value: "dark", icon: Moon },
+  { value: "system", icon: Monitor },
+] as const;
+
 /** Shows the actual account image with the shared user-glyph fallback; caller sizing never changes identity. */
 function AccountAvatar({ src, className }: { src?: string | null; className?: string }) {
   return (
@@ -114,11 +125,13 @@ function AccountAvatar({ src, className }: { src?: string | null; className?: st
  * Gr8r's 252px/52px rail, rewritten in React/Tailwind. Posts and Channels are
  * single destinations; view selection and Brand Profile scope belong to their
  * page controls. Search lives in the top bar. The compact account row opens the
- * real identity/settings/sign-out menu; collapse preserves its accessible name.
+ * real identity/settings/sign-out menu with immediate shared theme preferences;
+ * collapse preserves its accessible name.
  */
 export function SidebarNav({ currentView, onNavigate, className }: SidebarNavProps) {
   const { user, workspaceName } = useWorkspace();
   const { t } = useI18n();
+  const { requestedTheme, setTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const name = workspaceName ?? "Meltiply Workspace";
   const handleSignOut = useWorkspaceSignOut();
@@ -258,12 +271,31 @@ export function SidebarNav({ currentView, onNavigate, className }: SidebarNavPro
               <Settings className="size-3.75" />
               {t("Account settings")}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => onNavigate("settings", { search: "section=appearance" })}
+            <DropdownMenuSeparator />
+            <div className="px-2 pb-1 pt-1.5 text-(length:--font-size-micro) font-medium uppercase tracking-wide text-ink-3">
+              {t("Theme")}
+            </div>
+            <DropdownMenuRadioGroup
+              value={requestedTheme}
+              onValueChange={(value) => {
+                const theme = ACCOUNT_THEMES.find((option) => option.value === value);
+                if (theme) setTheme(theme.value);
+              }}
+              aria-label={t("Theme")}
+              className="mx-1.5 mb-1.5 flex gap-0.5 rounded-control bg-hover-2 p-0.5"
             >
-              <Sun className="size-3.75" />
-              {t("Appearance")}
-            </DropdownMenuItem>
+              {ACCOUNT_THEMES.map(({ value, icon: Icon }) => (
+                <DropdownMenuRadioItem
+                  key={value}
+                  value={value}
+                  variant="segment"
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  <Icon className="size-3.25" aria-hidden="true" />
+                  {value === "light" ? t("Light") : value === "dark" ? t("Dark") : t("System")}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => void handleSignOut()}>
               <LogOut className="size-3.75" />

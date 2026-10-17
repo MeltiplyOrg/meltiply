@@ -46,6 +46,7 @@ export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
  *
  * Manages controlled (`value`, `onValueChange`) radio selection state.
  */
+export const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
 /**
  * Submenu trigger item that reveals a nested {@link DropdownMenuSubContent} on hover or arrow-right keypress.
@@ -243,9 +244,10 @@ export const DropdownMenuCheckboxItem = React.forwardRef<
 DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displayName;
 
 /**
- * Selectable radio option within a {@link DropdownMenuRadioGroup}.
- *
- * Renders a left-aligned bullet circle indicator when active.
+ * Selectable radio option within a {@link DropdownMenuRadioGroup}. The default
+ * layout uses a leading bullet; segment joins compact horizontal choices with
+ * neutral selected styling. Radix retains menu arrow-key navigation and checked
+ * semantics. Callers may prevent selection dismissal for immediate preferences.
  *
  * @param value - Value of this radio option.
  * @param className - Optional CSS classes.
@@ -254,24 +256,30 @@ DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displa
  * @param ref - Forwarded ref.
  * @returns Styled dropdown radio item with indicator.
  */
-const DropdownMenuRadioItem = React.forwardRef<
+export const DropdownMenuRadioItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem> & {
+    variant?: "default" | "segment";
+  }
+>(({ className, children, variant = "default", ...props }, ref) => (
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     data-dropdown-item
     className={cn(
-      "relative z-10 flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-transparent data-[highlighted]:bg-transparent hover:bg-transparent text-ink focus:text-ink data-[highlighted]:text-ink data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      variant === "segment"
+        ? "relative z-10 flex h-6 flex-1 cursor-default select-none items-center justify-center gap-1 rounded-[5px] px-2 text-xs font-medium text-ink-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring data-[highlighted]:text-ink data-[state=checked]:bg-surface data-[state=checked]:text-ink data-[state=checked]:shadow-btn data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+        : "relative z-10 flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-transparent data-[highlighted]:bg-transparent hover:bg-transparent text-ink focus:text-ink data-[highlighted]:text-ink data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}
   >
-    <span className="absolute left-2 flex size-3.5 items-center justify-center">
-      <DropdownMenuPrimitive.ItemIndicator>
-        <Circle className="size-2 fill-current" />
-      </DropdownMenuPrimitive.ItemIndicator>
-    </span>
+    {variant === "default" && (
+      <span className="absolute left-2 flex size-3.5 items-center justify-center">
+        <DropdownMenuPrimitive.ItemIndicator>
+          <Circle className="size-2 fill-current" />
+        </DropdownMenuPrimitive.ItemIndicator>
+      </span>
+    )}
     {children}
   </DropdownMenuPrimitive.RadioItem>
 ));

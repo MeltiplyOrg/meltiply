@@ -97,21 +97,33 @@ Keep Meltiply's faceted brand mark and real publishing terminology. Replace
 Gr8r's Projects with Brand Profiles and its task views with Posts; do not copy
 its seed content, branding, billing, notifications, or collaboration claims.
 
-The 252px sidebar collapses to 52px. A 46px top bar holds context and jump search.
-The sidebar groups Posts, Channels, and real Brand Profiles. Posts exposes List,
-Grid, and Calendar shortcuts. One 24px desktop gutter aligns page headings,
-actions, toolbars, and collection edges. Mobile keeps usable targets and a
-navigation drawer rather than squeezing the desktop rail.
+The 252px sidebar collapses to 52px; a 46px top bar holds workspace context,
+route title, and jump search. Posts exposes the reference's List, Board, and
+spreadsheet Table, alongside Meltiply's media Grid and Calendar. List and Table
+use counted, collapsible status/profile groups; Board uses real publication
+outcomes rather than pretending they can be dragged between statuses. All views
+retain real Post selection and supported inspect/edit/delete/create actions.
+Channel connections use a centered, compact directory with Accounts and Brand
+Profiles tabs; the profile grid displays counts from actual connected accounts.
+Task titles, statuses, seed records, and unsupported project-management actions
+are never represented as publishing capabilities.
 
-Settings is a focused dialog with Appearance, Account, and Security sections.
-Theme cards change the real light/dark palette; account identity is read-only;
-security uses the existing password-reauthenticated account controls. Settings
-does not imply a new administration route or billing capabilities.
+Route headings, toolbar rows, tables, cards, and directory own their reference
+gutters and scroll regions. List/Table reach the workspace edges with first-cell
+gutters; Board/Grid own their content padding; Channels remains centered to a
+1200px maximum. On phones, gutters are 16px, toolbar controls wrap, and directory
+tables may scroll horizontally without clipping available actions.
 
-Search/jump opens from the sidebar, top bar, or the platform-correct Command/Control
-shortcut. It searches navigation destinations and loaded Brand Profiles.
-Collection search stays on Posts and Channels, with no claim to search unloaded
-or inaccessible data.
+`/settings` is a full-height, reference-style Settings page with responsive
+section navigation. Appearance changes the real light/dark palette; Language
+uses the existing supported locales; account identity is read-only; Security
+uses the existing password-reauthenticated controls. This route adds no billing,
+team administration, notification, or unsupported preference capabilities.
+
+Search/jump opens from the sidebar or top bar using the platform-correct
+Command/Control shortcut. It searches supported destinations and loaded Brand
+Profiles. Collection search and filters stay with Posts and Channels, without
+claiming to search unloaded or inaccessible data.
 
 #### Calm Workbench
 

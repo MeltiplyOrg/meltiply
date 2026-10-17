@@ -28,12 +28,12 @@
 }
 
 /*
- * Meltiply's Gr8r-adapted visual system. Reference: gr8rstudio/gr8r-studio,
- * src/styles/tokens.css; source reuse authorized by the owner for this work.
+ * Gr8r's palette and visual tokens adapted for Meltiply.
  * Semantic names remain framework-neutral so React and Astro share one palette.
  * Light/dark geometry is identical; the host owns theme selection and consent.
  */
-:root {
+:root,
+[data-palette="light"] {
   color-scheme: light;
   background-color: var(--page);
   --font-sans:
@@ -43,6 +43,10 @@
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --text-title: 23px;
   --tracking-title: -0.02em;
+  --font-size-ui: 13.5px;
+  --font-size-control: 12.5px;
+  --font-size-micro: 11px;
+  --icon-stroke: 1.8;
 
   --page: #fbfaf8;
   --canvas: #f4f3f0;
@@ -104,6 +108,10 @@
   --workspace-topbar-height: 46px;
   --workspace-gutter: 24px;
   --control-height: 30px;
+  --control-height-sm: 26px;
+  --control-height-lg: 36px;
+  --workspace-sidebar-collapsed-width: 52px;
+  --board-column-width: 284px;
   --collection-row-height: 40px;
 
   --background: var(--page);
@@ -127,7 +135,8 @@
 }
 
 :root[data-theme="dark"],
-.dark {
+.dark,
+[data-palette="dark"] {
   color-scheme: dark;
   --page: #1a1a19;
   --canvas: #151514;

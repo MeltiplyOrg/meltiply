@@ -1,21 +1,25 @@
 ---
 title: Settings
-description: Appearance, account identity, and security in Meltiply's workspace settings.
+description: Appearance, language, account identity, and security in Meltiply's workspace settings.
 section: Workspace
 order: 11
 ---
 
-Open **Settings** from the sidebar footer or the top bar. Settings opens over your current work, so you can inspect preferences without leaving Posts or Channels. On a phone, use the top-bar Settings icon.
+Open **Settings** in the sidebar or mobile navigation to visit `/settings`. The full-height page keeps the compact workspace rail, title/search bar, and current account controls available. Settings section navigation is a vertical rail on desktop and a horizontal row on phones.
 
 ## Appearance
 
-Choose **Light** or **Dark** in the Appearance section. The selected card is marked, and the palette changes immediately without moving the page or resetting your work.
+Choose **Light** or **Dark**. The selected card is marked and the shared palette changes immediately without moving the page or resetting your work.
 
 Meltiply uses warm off-white pages, a stone sidebar, compact controls, and indigo primary actions. Dark mode keeps the same layout with warm charcoal surfaces and a periwinkle accent. The palette is shared by the application, landing page, and these guides.
 
 A current-page theme choice works without optional storage. Remembering it across visits requires **functional cookie consent**. See [Cookies and storage](/docs/cookies). Without an explicit choice, initial appearance follows your device's color scheme.
 
-The publishing workspace uses immediate navigation and reduced-motion presentation rather than a separate Low motion switch. The interface renders in English; Settings does not expose a language selector or custom accent/density controls.
+The publishing workspace uses immediate navigation and reduced-motion presentation rather than a separate Low motion switch. Theme and layout do not expose a custom accent or density control.
+
+## Language
+
+Select a supported interface language from **Language**. The current app supports English and Spanish; changing language applies immediately. Remembering it across visits requires functional cookie consent.
 
 ## Account
 
@@ -29,28 +33,27 @@ Open the Security section, then **Account security**, to change your password, e
 
 Security changes sign out previous sessions. The security dialog explains when a fresh sign-in is required. Keep passwords, setup keys, and recovery codes private.
 
-## Brand Profiles
+## Brand Profiles and connected accounts
 
-Brand Profiles are named scopes inside your workspace that own Channels and Posts. Select a profile in the sidebar or a collection's Brand Profile selector; **All Brand Profiles** returns to aggregate review. Profile selection is not workspace switching.
+Brand Profiles are named scopes inside your workspace that own Channels and Posts. Select a profile in the sidebar or a collection's Brand Profile filter; **All Brand Profiles** returns to aggregate review. Profile selection is not workspace switching.
 
-Workspace admins manage profiles through [Channels](/docs/channels) and [Publishing](/docs/publishing):
+Workspace admins manage profiles from the **Channels** page:
 
 - **Create Brand Profile** opens the profile form; saving a new profile opens the account connection flow.
-- **Edit profile** in the Brand Profile selector opens the existing profile.
-- The form includes name, optional description, and a profile color.
+- **Edit profile** in the Brand Profile filter opens the existing profile form.
+- The form includes a name, optional description, and profile color.
 - **Delete profile** requires confirmation and explains the consequences.
 
-## Connected accounts
-
-Use [Channels](/docs/channels) to connect, re-authenticate, or disconnect platform accounts. Provider-specific configuration remains beside the affected account or Post, not in a generic settings panel.
+Use the Accounts directory to connect, re-authenticate, or disconnect platform accounts. Provider-specific configuration remains beside the affected account or Post, not in a generic settings panel.
 
 ## Scope of Settings
 
-Settings is a dialog, not a separate `/settings` administration route. It does not include billing, team invitations, notifications configuration, API-key management, or self-service account identity editing. Reference-design examples do not imply these capabilities exist.
+Settings is a preference and account route, not an administration console. It does not include billing, team invitations, notification configuration, API-key management, or self-service account identity editing. Reference-design examples do not imply these capabilities.
 
 ## Related
 
 - [Getting started](/docs/getting-started) — workspace navigation and search.
 - [Workspaces & Brand Profiles](/docs/workspaces) — ownership and scope.
+- [Channels](/docs/channels) — connected accounts and Brand Profiles.
 - [Publishing](/docs/publishing) — composing and monitoring Posts.
 - [Resource limits](/docs/resource-limits) — workspace quotas.

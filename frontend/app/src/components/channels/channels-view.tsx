@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { PLATFORM_IDS } from "@meltiply/domain";
 import { useWorkspace } from "@/context/workspace.context";
@@ -19,7 +19,9 @@ import {
   type Platform,
   type PlatformAccount,
 } from "@/types";
-import { Card, CardContent } from "@meltiply/ui/card";
+import { Empty, EmptyIcon, EmptyTitle, EmptyDescription } from "@meltiply/ui/empty";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@meltiply/ui/tabs";
+import { BrandProfileDirectory } from "@/components/workspace/brand-profile-directory";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import {
@@ -71,12 +73,11 @@ import {
   TopToolbarSearch,
   TopToolbarReset,
   TopToolbarButton,
-  TopToolbarLabel,
-  TopToolbarFilterGroup,
-  TopToolbarFilterSlot,
+  TopToolbarFilters,
+  TopToolbarFilterChips,
+  TopToolbarFilterChip,
 } from "@/components/layout/top-toolbar";
 import { AlertCircle, Check, Plus, Search, Share2, UserPlus } from "lucide-react";
-import { motion } from "motion/react";
 import { useMotionPreference } from "@meltiply/ui/motion-preference";
 import { cn } from "@meltiply/ui/utils";
 
@@ -169,10 +170,11 @@ function isContractPlatform(id: string): id is Platform {
 }
 
 /**
- * Manages scoped channel discovery, explicit OAuth account selection, and confirmed disconnects.
- * Shared toolbar/dialog primitives preserve board transitions; table rows retain their profile owner.
- * `?tab=add|all` opens the connector. Facebook callback tickets open a chooser without saving a Page.
- * Query-result banners ignore unknown outcomes; profile edits never open the connector.
+ * Manages channel discovery, explicit OAuth account selection, profile
+ * directories, and confirmed disconnects. Shared toolbar/dialog primitives
+ * preserve filters across OAuth returns; table rows retain profile ownership.
+ * `?tab=add|all` opens the connector. Facebook callback tickets open a chooser
+ * without saving a Page. Profile edits never open the connector.
  */
 export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   const {
@@ -205,7 +207,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
       ? null
       : oauthOutcomeMessage(oauthOutcome, providerParam, language);
 
-  /** Removes only OAuth result fields, preserving the Channels board's other filters. */
   const removeOAuthSelectionParams = useCallback(() => {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete("oauth");
@@ -271,6 +272,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<BrandProfile | null>(null);
+  const [directoryTab, setDirectoryTab] = useState<"accounts" | "profiles">("accounts");
 
   /**
    * Bulk disconnect selection bound to the current mutation scope
@@ -321,6 +323,12 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     if (next.size !== selectedIds.size) setSelection({ ...selection, ids: next });
   }
   const accounts = useMemo(() => platformsQuery.data ?? [], [platformsQuery.data]);
+  const profileChannelCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const account of accounts)
+      counts.set(account.brand_profile_id, (counts.get(account.brand_profile_id) ?? 0) + 1);
+    return counts;
+  }, [accounts]);
   const integrationById = useMemo(
     () => new Map(integrations.map((i) => [i.id, i])),
     [integrations],
@@ -481,6 +489,10 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   const platformFilterText = platformFilterLabel(selectedPlatforms, t);
   const profileFilterLabel = brandProfileFilterLabel(selectedBrandProfileId, brandProfiles, t);
   const statusFilterLabel = statusFilter === "all" ? t("All statuses") : tStatus(statusFilter);
+  const activeFilterCount =
+    Number(selectedPlatforms.length > 0) +
+    Number(selectedBrandProfileId !== null) +
+    Number(statusFilter !== "all");
 
   /**
    * Resets every account-table filter back to its unfiltered default so the
@@ -649,53 +661,26 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   return (
     <WorkspaceSurface
       title={t("Channels")}
-      description={t("Manage social accounts and publishing channels organized by Brand Profile.")}
+      description={t("{count} connected accounts across {profiles} Brand Profiles.", {
+        count: accounts.length,
+        profiles: brandProfiles.length,
+      })}
+      className="mx-auto max-w-300 bg-page"
       actions={
         <>
-          <motion.div
-            layout={lowMotion ? false : "position"}
-            layoutId={lowMotion ? undefined : "workspace-primary-action"}
-            transition={{ layout: { duration: 0.22, ease: [0.16, 1, 0.3, 1] } }}
+          <Button
+            onClick={() => setAddAccountOpen(true)}
+            disabled={brandProfiles.length === 0}
+            aria-describedby={brandProfiles.length === 0 ? "add-account-disabled-note" : undefined}
           >
-            <Button
-              variant="default"
-              onClick={() => setAddAccountOpen(true)}
-              disabled={brandProfiles.length === 0}
-              aria-describedby={
-                !isLoading && accounts.length === 0 && brandProfiles.length === 0
-                  ? "add-account-disabled-note"
-                  : undefined
-              }
-              className="rounded-control font-medium"
-            >
-              <Plus className="size-4" />
-              <TopToolbarLabel label={t("Add account")} />
-            </Button>
-          </motion.div>
+            <Plus className="size-4" />
+            {t("Add account")}
+          </Button>
           {isAdmin && (
-            <motion.div
-              layout={lowMotion ? false : "position"}
-              layoutId={lowMotion ? undefined : "workspace-secondary-action"}
-              initial={false}
-              animate={{ opacity: 1, scale: 1, x: 0, filter: "blur(0px)" }}
-              transition={{
-                layout: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
-                opacity: { duration: 0.2 },
-                scale: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
-                x: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
-                filter: { duration: 0.2 },
-              }}
-              className="origin-left"
-            >
-              <Button
-                variant="outline"
-                onClick={() => openProfileEditor()}
-                className="rounded-control border-line bg-surface font-semibold text-ink shadow-hairline hover:bg-hover"
-              >
-                <UserPlus className="size-4" />
-                <span>{t("Create Brand Profile")}</span>
-              </Button>
-            </motion.div>
+            <Button variant="outline" onClick={() => openProfileEditor()}>
+              <UserPlus className="size-4" />
+              {t("Create Brand Profile")}
+            </Button>
           )}
         </>
       }
@@ -727,33 +712,48 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         </Alert>
       )}
 
-      {/* Keep the shared toolbar outside loading and empty-state branches. */}
-      <TopToolbar>
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <TopToolbarSearch
-            id="account-search"
-            ariaLabel={t("Search accounts")}
-            placeholder={t("Search accounts…")}
-            value={accountQuery}
-            onChange={setAccountQuery}
-          />
-          <TopToolbarFilterGroup>
-            <TopToolbarFilterSlot id="platform">
+      <Tabs
+        value={directoryTab}
+        onValueChange={(value) => {
+          if (value === "accounts" || value === "profiles") setDirectoryTab(value);
+        }}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <TabsList
+          variant="line"
+          aria-label={t("Channel directory sections")}
+          className="mx-4 sm:mx-6"
+        >
+          <TabsTrigger value="accounts">
+            {t("Accounts")}
+            <span className="rounded-chip bg-hover-2 px-1 text-micro text-ink-3">
+              {accounts.length}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value="profiles">
+            {t("Brand Profiles")}
+            <span className="rounded-chip bg-hover-2 px-1 text-micro text-ink-3">
+              {brandProfiles.length}
+            </span>
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="accounts" className="mt-0 flex min-h-0 flex-1 flex-col">
+          <TopToolbar className="border-0 py-3.5">
+            <TopToolbarSearch
+              id="account-search"
+              ariaLabel={t("Search accounts")}
+              placeholder={t("Search accounts…")}
+              value={accountQuery}
+              onChange={setAccountQuery}
+            />
+            <TopToolbarFilters activeCount={activeFilterCount}>
+              <span className="mt-1 text-micro text-ink-3">{t("Platform")}</span>
               <PlatformFilterSelect
                 value={selectedPlatforms}
                 onValueChange={setSelectedPlatforms}
-                trigger={
-                  <TopToolbarButton
-                    label={platformFilterText}
-                    isActive={selectedPlatforms.length > 0}
-                    width="w-36"
-                    className="capitalize"
-                  />
-                }
+                trigger={<TopToolbarButton label={platformFilterText} className="w-full" />}
               />
-            </TopToolbarFilterSlot>
-
-            <TopToolbarFilterSlot id="profile">
+              <span className="mt-1 text-micro text-ink-3">{t("Brand Profile")}</span>
               <BrandProfileSelect
                 value={selectedBrandProfileId ?? "all"}
                 onValueChange={(id) => setSelectedBrandProfileId(id === "all" ? null : id)}
@@ -761,129 +761,91 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 unresolvedProfileIds={accountProfileIds}
                 onEditProfile={isAdmin ? openProfileEditor : undefined}
                 label={t("Brand Profile")}
-                trigger={
-                  <TopToolbarButton
-                    label={profileFilterLabel}
-                    isActive={selectedBrandProfileId !== null}
-                    width="w-44"
-                  />
-                }
+                trigger={<TopToolbarButton label={profileFilterLabel} className="w-full" />}
               />
-            </TopToolbarFilterSlot>
-
-            <TopToolbarFilterSlot id="status">
+              <span className="mt-1 text-micro text-ink-3">{t("Connection status")}</span>
               <FilterSelect
                 value={statusFilter}
-                onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+                onValueChange={setStatusFilter}
                 aggregateOption={{ value: "all", label: t("All statuses") }}
                 options={CONNECTION_STATUS_OPTIONS.map((status) => ({
                   value: status,
                   label: tStatus(status),
                 }))}
                 ariaLabel={t("Connection status")}
-                contentClassName="w-40"
-                trigger={
-                  <TopToolbarButton
-                    label={statusFilterLabel}
-                    isActive={statusFilter !== "all"}
-                    width="w-36"
-                    className="capitalize"
-                  />
-                }
+                trigger={<TopToolbarButton label={statusFilterLabel} className="w-full" />}
               />
-            </TopToolbarFilterSlot>
-            {/* No date filter on this route: the collapsed slot renders the
-                    compact, negative-margin stand-in so the Posts date trigger
-                    keeps a morph partner without adding space before Reset. */}
-            <TopToolbarFilterSlot id="date" collapseWhenEmpty />
-            <TopToolbarFilterSlot id="reset">
-              <TopToolbarReset hasActiveFilters={hasActiveFilter} onReset={resetAccountFilters} />
-            </TopToolbarFilterSlot>
-          </TopToolbarFilterGroup>
-        </div>
-      </TopToolbar>
-      {/* Connected channel directory */}
-      {isLoading ? (
-        <div className="space-y-2 rounded-card border border-line bg-surface p-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 rounded-control bg-inset" />
-          ))}
-        </div>
-      ) : accounts.length === 0 && brandProfiles.length === 0 ? (
-        <Card className="border border-line bg-surface shadow-card">
-          <CardContent className="p-12 text-center flex flex-col items-center">
-            <div className="flex size-12 items-center justify-center rounded-full bg-line mb-4 text-ink-2">
-              <Share2 className="size-6" />
-            </div>
-            <h3 className="text-base font-bold text-ink">{t("No channels connected yet")}</h3>
-            <p className="text-sm text-ink-2 mt-1 max-w-sm">
-              {t(
-                "Connect your social accounts to start publishing and scheduling across platforms.",
+            </TopToolbarFilters>
+            <span className="ml-auto text-xs tabular-nums text-ink-3">
+              {t("{count} accounts", { count: totalMatchingAccounts })}
+            </span>
+          </TopToolbar>
+          {activeFilterCount > 0 && (
+            <TopToolbarFilterChips>
+              {selectedPlatforms.length > 0 && (
+                <TopToolbarFilterChip
+                  label={platformFilterText}
+                  onClear={() => setSelectedPlatforms([])}
+                />
               )}
-            </p>
-            {brandProfiles.length === 0 && (
-              <p id="add-account-disabled-note" className="mt-2 text-[12px] text-ink-3">
-                {isAdmin
-                  ? t("Create a Brand Profile before connecting accounts.")
-                  : t("Ask a workspace admin to create a Brand Profile.")}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-        <div
-          className={cn(
-            "min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1",
-            selectedIds.size > 0 && "pb-24",
+              {selectedBrandProfileId !== null && (
+                <TopToolbarFilterChip
+                  label={profileFilterLabel}
+                  onClear={() => setSelectedBrandProfileId(null)}
+                />
+              )}
+              {statusFilter !== "all" && (
+                <TopToolbarFilterChip
+                  label={statusFilterLabel}
+                  onClear={() => setStatusFilter("all")}
+                />
+              )}
+              <TopToolbarReset hasActiveFilters onReset={resetAccountFilters} className="ml-auto" />
+            </TopToolbarFilterChips>
           )}
-        >
-          {accounts.length === 0 ? (
-            <Card className="border border-line bg-surface shadow-card">
-              <CardContent className="flex flex-col items-center p-12 text-center">
-                <div
-                  className={cn(
-                    "mb-4 flex size-12 items-center justify-center rounded-full border border-line shadow-hairline",
-                    selectedBrandProfile
-                      ? brandProfileColorClass(selectedBrandProfile.color)
-                      : "bg-line text-ink-2",
+          <div
+            className={cn(
+              "min-h-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-6",
+              selectedIds.size > 0 && "pb-24",
+            )}
+          >
+            {isLoading ? (
+              <div className="space-y-2 rounded-card border border-line bg-surface p-3">
+                {[0, 1, 2].map((key) => (
+                  <Skeleton key={key} className="h-16 rounded-control" />
+                ))}
+              </div>
+            ) : accounts.length === 0 ? (
+              <Empty className="border-solid bg-surface">
+                <EmptyIcon>
+                  <Share2 className="size-5" />
+                </EmptyIcon>
+                <EmptyTitle>
+                  {selectedBrandProfile
+                    ? `${selectedBrandProfile.name} ${t("has no channels yet")}`
+                    : t("No channels connected yet")}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {t(
+                    "Connect your social accounts to start publishing and scheduling across platforms.",
                   )}
-                >
-                  <Share2
-                    className={cn(
-                      "size-6",
-                      selectedBrandProfile ? "text-ink-inverse" : "text-ink-2",
-                    )}
-                  />
-                </div>
-                <h3 className="text-base font-bold text-ink">
-                  {selectedBrandProfile ? (
-                    <>
-                      {selectedBrandProfile.name} {t("has no channels yet")}
-                    </>
-                  ) : (
-                    t("No channels connected yet")
-                  )}
-                </h3>
-                <p className="mt-1 max-w-sm text-sm text-ink-2">
-                  {selectedBrandProfile?.description ??
-                    t("Connect an account to start publishing and scheduling across platforms.")}
-                </p>
-              </CardContent>
-            </Card>
-          ) : hasActiveFilter && totalMatchingAccounts === 0 ? (
-            <div className="rounded-card border border-line bg-surface p-12 text-center shadow-card flex flex-col items-center">
-              <p className="text-sm text-ink-2">{t("No accounts match the active filters.")}</p>
-              <Button
-                type="button"
-                variant="link"
-                onClick={resetAccountFilters}
-                className="mt-2 text-[12.5px] font-medium text-accent hover:underline"
-              >
-                {t("Clear filters")}
-              </Button>
-            </div>
-          ) : (
-            <div className="pt-1">
+                </EmptyDescription>
+                {brandProfiles.length === 0 && (
+                  <p id="add-account-disabled-note" className="mt-2 text-xs text-ink-3">
+                    {isAdmin
+                      ? t("Create a Brand Profile before connecting accounts.")
+                      : t("Ask a workspace admin to create a Brand Profile.")}
+                  </p>
+                )}
+              </Empty>
+            ) : hasActiveFilter && totalMatchingAccounts === 0 ? (
+              <Empty className="border-solid bg-surface">
+                <EmptyDescription>{t("No accounts match the active filters.")}</EmptyDescription>
+                <Button variant="link" onClick={resetAccountFilters}>
+                  {t("Clear filters")}
+                </Button>
+              </Empty>
+            ) : (
               <ChannelTableView
                 channels={channelEntries}
                 selectedIds={selectedIds}
@@ -893,15 +855,28 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 onToggleSelection={handleToggleSelection}
                 selectionDisabled={bulkRunning}
                 lowMotion={lowMotion}
-                onReconnect={(acct) => void handleConnect(acct.platform, acct.brand_profile_id)}
-                onDisconnect={(acct) => setDisconnectTarget(acct)}
+                onReconnect={(account) =>
+                  void handleConnect(account.platform, account.brand_profile_id)
+                }
+                onDisconnect={setDisconnectTarget}
               />
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        </TabsContent>
+        <TabsContent value="profiles" className="min-h-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-6">
+          <BrandProfileDirectory
+            profiles={brandProfiles}
+            channelCounts={profileChannelCounts}
+            onViewChannels={(id) => {
+              setSelectedBrandProfileId(id);
+              setDirectoryTab("accounts");
+            }}
+            onEdit={isAdmin ? openProfileEditor : undefined}
+          />
+        </TabsContent>
+      </Tabs>
 
-      {/* In-place Brand Profile editor keeps profile management in the Channels board. */}
+      {/* In-place Brand Profile editor keeps profile management on the Channels page. */}
       <BrandProfileDialog
         open={profileEditorOpen}
         onOpenChange={(open) => {

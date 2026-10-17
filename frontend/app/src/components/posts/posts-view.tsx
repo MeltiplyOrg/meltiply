@@ -1,17 +1,14 @@
 import { lazy, Suspense, useState, useCallback, useMemo } from "react";
-import { motion, AnimatePresence } from "motion/react";
 import { useWorkspace } from "@/context/workspace.context";
 import { Button } from "@meltiply/ui/button";
 import { WorkspaceSurface } from "@/components/layout/workspace-surface";
 import { BulkSelectionBar } from "@/components/layout/bulk-selection-bar";
-import { TopToolbarLabel } from "@/components/layout/top-toolbar";
 import { AlertCircle, Plus, ArrowLeft } from "lucide-react";
 import { RouteFallback } from "@/components/layout/route-fallback";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useCalendar, useCancelDistribution, useDeletePost, usePosts } from "@/lib/queries";
 import { useI18n } from "@/lib/i18n";
 import { useSearchParams } from "@/lib/navigation";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
 import { toast } from "@meltiply/ui/toast";
 import { Alert } from "@meltiply/ui/alert";
 import { useLatchedValue } from "@meltiply/ui/use-latched-value";
@@ -39,6 +36,8 @@ import type {
 import { PostListTableView } from "./post-list-table-view";
 import { PostCalendarGridView } from "./post-calendar-grid-view";
 import { PostGridCardView } from "./post-grid-card-view";
+import { PostBoardView } from "./post-board-view";
+import type { PostGroupBy } from "./post-groups";
 import { CalendarDateDetailDialog } from "./calendar-date-detail-dialog";
 import { PostDetailDialog } from "./post-detail-dialog";
 import { PostsToolbar } from "./posts-toolbar";
@@ -66,7 +65,7 @@ import type {
   ChannelMediaItem,
 } from "./types";
 
-/** Keep editing and upload dependencies out of list, grid, and calendar startup. */
+/** Keep editing and upload dependencies out of List, Board, Table, Grid, and Calendar startup. */
 const Composer = lazy(async () => {
   const { Composer } = await import("@/components/composer/composer");
   return { default: Composer };
@@ -142,8 +141,8 @@ function toChannelEntry(
 }
 
 /**
- * Projects a durable Post into exactly one row, so list, grid, calendar, and
- * detail all agree on identity. Channel entries follow the Post's saved target
+ * Projects a durable Post into one collection row, so List, Board, Table, Grid,
+ * Calendar, and Details agree on identity. Channel entries follow the Post's saved target
  * order first and then any outcome without a target, and the row's display
  * status is aggregated from those outcomes only — never from `Post.status`,
  * which is a lifecycle marker rather than a global success flag.
@@ -243,43 +242,26 @@ function toCalendarRows(
 }
 
 /**
- * Unified Posts section component managing List, Calendar, Grid, and Composer views.
+ * Unified Posts page over one durable Post pipeline and five real collection
+ * views. `usePosts` supplies each Post, its ordered attachments, targets, and
+ * independent Channel outcomes; `useCalendar` folds events by Post identity
+ * without merging or splitting compositions. Status filters derive from those
+ * outcomes; provider status is observed, never locally edited.
  *
- * Data flows through the contract hooks only: `usePosts` feeds list/grid — one
- * row per durable `Post.id` carrying its ordered attachments, saved per-Channel
- * targets, and independent outcomes — and `useCalendar` feeds the month grid,
- * folding its events back onto `post_id` so the calendar never splits a Post
- * across days or regroups two Posts into one. `post.status === "draft"` scopes
- * the draft filter to stored draft Posts; the scheduled, published, and failed
- * buckets derive from each row's Channel outcomes. Destructive row actions
- * confirm through `CenterAlertDialog` and dispatch `useDeletePost` or
- * `useCancelDistribution`; creation uses the shared foreground primary action.
+ * List, Board, Table, and Grid share Post selection and action callbacks;
+ * Calendar day detail uses the same identity map. Selection snapshots each
+ * owner's `brand_profile_id`, survives view/filter/group changes within its
+ * scope, clears on scope changes, and is pruned when settled data no longer
+ * contains an entry. Bulk deletion confirms a fixed target snapshot, removes
+ * successes immediately, retains failures for retry, and reports real counts.
  *
- * Multi-select lives on every surface: the table's header/row checkboxes, the
- * grid's select-all strip and card checkboxes, and the calendar's day-detail
- * rows all toggle one identity map keyed by `Post.id`, so a selection survives
- * List/Grid/Calendar and filter changes in the same scope. Each selected entry
- * snapshots its owning `brand_profile_id`, which authorizes deletion even in
- * the aggregate view; scope switches clear the map and settled query data
- * prunes ids that no longer load. The shared `BulkSelectionBar` opens a
- * snapshot confirmation that deletes sequentially — successes drop out
- * immediately, failures stay selected, and the toast reports real counts.
- * `WorkspaceSurface` aligns the header, toolbar, and working area with other
- * operational routes so navigation can preserve their geometry.
+ * The view renders directly with no snapshot or route-transition layer.
+ * Composer code loads only when editing begins; its local Suspense boundary
+ * leaves navigation and collection controls usable while that chunk downloads.
  *
- * The working area is always wrapped in the same `AnimatePresence`/`motion.div` keyed by
- * `viewMode`, so toggling the low-motion preference (manual or OS) never remounts the
- * subtree: the Composer keeps its local draft state and focus in both directions. Low
- * motion disables movement through props instead of swapping element types — `initial`
- * is suppressed, the exit is opacity-only, and the transition duration is zero — so view
- * switches settle immediately with no lingering exit content, while normal motion keeps
- * the wait-mode crossfade.
- * Composer code loads only when editing begins; its local Suspense boundary keeps
- * the workspace navigation and Posts controls usable while that chunk downloads.
- *
- * @param props - Initial view mode, default status filter, the `Post.id` to edit,
- * and navigation callback.
- * @returns Complete unified Posts management view with responsive controls.
+ * @param props - Initial view mode, default status filter, Post id to edit,
+ * and workspace navigation callback.
+ * @returns Complete unified Posts page with responsive collection controls.
  */
 export function PostsView({
   initialViewMode = "list",
@@ -299,7 +281,6 @@ export function PostsView({
   const scope = useSessionScope();
   const { t } = useI18n();
   const searchParams = useSearchParams();
-  const { lowMotion } = useMotionPreference();
 
   const [viewMode, setViewMode] = useState<PostViewMode>(initialViewMode);
   const [statusFilter, setStatusFilter] = useState<PostStatusFilter>(initialStatusFilter);
@@ -310,6 +291,8 @@ export function PostsView({
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortKey, setSortKey] = useState<PostSortKey>("date-desc");
   const [columns, setColumns] = useState<number>(4);
+  const [groupBy, setGroupBy] = useState<PostGroupBy>("status");
+  const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<string>>(new Set());
   const [editingPostId, setEditingPostId] = useState<string | undefined>(initialPostId);
   const [schedulingDate, setSchedulingDate] = useState<Date | undefined>(undefined);
   const [composerKey, setComposerKey] = useState<number>(0);
@@ -424,7 +407,7 @@ export function PostsView({
 
   /**
    * Raw Post rows for the active mode: calendar events folded onto `post_id`
-   * for the month grid, or one row per loaded Post for list and grid. Drafts are
+   * for the month grid, or one row per loaded Post in List, Board, Table, and Grid. Drafts are
    * stored Posts, so the draft filter needs no client-side reconstruction of
    * "content without outcomes".
    */
@@ -938,6 +921,20 @@ export function PostsView({
         onCellClick={handleCalendarCellClick}
         selectionActive={selectedIds.size > 0}
       />
+    ) : viewMode === "board" ? (
+      <PostBoardView
+        posts={processedPosts}
+        isLoading={isLoading}
+        brandProfiles={brandProfiles}
+        canMutate={selectedBrandProfileId !== null}
+        onEdit={handleEditPost}
+        onDelete={handleDeletePostAction}
+        onCreatePost={handleCreatePost}
+        onViewDetails={handleViewDetails}
+        selectedIds={selectedIds}
+        onToggleSelection={handleTogglePostSelection}
+        selectionDisabled={bulkDeleteBusy}
+      />
     ) : viewMode === "grid" ? (
       <PostGridCardView
         posts={processedPosts}
@@ -960,6 +957,10 @@ export function PostsView({
         isLoading={isLoading}
         sortKey={sortKey}
         brandProfiles={brandProfiles}
+        groupBy={groupBy}
+        table={viewMode === "table"}
+        hiddenColumns={hiddenColumns}
+        onCreatePost={handleCreatePost}
         canMutate={selectedBrandProfileId !== null}
         onSortChange={setSortKey}
         onEdit={handleEditPost}
@@ -975,7 +976,9 @@ export function PostsView({
   return (
     <WorkspaceSurface
       title={t("Posts")}
-      description={t("Manage your drafts, scheduled posts, and publications in one place")}
+      description={t("Showing {count} posts across your Brand Profiles.", {
+        count: processedPosts.length,
+      })}
       actions={
         viewMode === "composer" ? (
           <Button
@@ -987,20 +990,10 @@ export function PostsView({
             {t("Back to posts")}
           </Button>
         ) : (
-          <motion.div
-            layout={lowMotion ? false : "position"}
-            layoutId={lowMotion ? undefined : "workspace-primary-action"}
-            transition={{ layout: { duration: 0.22, ease: [0.16, 1, 0.3, 1] } }}
-          >
-            <Button
-              variant="default"
-              onClick={handleCreatePost}
-              className="rounded-control font-medium"
-            >
-              <Plus className="size-4" />
-              <TopToolbarLabel label={t("Create post")} />
-            </Button>
-          </motion.div>
+          <Button variant="default" onClick={handleCreatePost}>
+            <Plus className="size-4" />
+            {t("Create post")}
+          </Button>
         )
       }
     >
@@ -1020,6 +1013,17 @@ export function PostsView({
           onSearchChange={setSearchQuery}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          groupBy={groupBy}
+          onGroupByChange={setGroupBy}
+          hiddenColumns={hiddenColumns}
+          onToggleColumn={(column) =>
+            setHiddenColumns((previous) => {
+              const next = new Set(previous);
+              if (next.has(column)) next.delete(column);
+              else next.add(column);
+              return next;
+            })
+          }
           columns={columns}
           onColumnsChange={setColumns}
           statusFilter={statusFilter}
@@ -1038,20 +1042,7 @@ export function PostsView({
         />
       )}
 
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col relative">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={viewMode}
-            initial={lowMotion ? false : { opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={lowMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
-            transition={{ duration: lowMotion ? 0 : 0.16, ease: [0.16, 1, 0.3, 1] }}
-            className="flex-1 min-h-0 flex flex-col overflow-hidden"
-          >
-            {viewModeContent}
-          </motion.div>
-        </AnimatePresence>
-      </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{viewModeContent}</div>
 
       <CalendarDateDetailDialog
         selectedDate={selectedCalendarDate}

@@ -83,10 +83,9 @@ export interface PostDetailItem {
 }
 
 /**
- * One durable Post rendered as a single row in the list, grid, calendar, and
- * detail surfaces. Rows are keyed by `Post.id`, so differing per-channel
- * publication times and content overrides never split one composition, while
- * two identically composed but separately created Posts stay distinct rows.
+ * One durable Post rendered in List, Board, Table, Grid, Calendar, and Details.
+ * Rows are keyed by `Post.id`, so per-channel publication times and content
+ * overrides never split a composition, while separate Posts stay distinct.
  */
 export interface PostRow {
   /** Stable `Post.id` — the single identity across every Posts surface. */
@@ -114,7 +113,7 @@ export interface PostRow {
 /**
  * View mode options for the unified Posts section.
  */
-export type PostViewMode = "list" | "calendar" | "grid" | "composer";
+export type PostViewMode = "list" | "board" | "table" | "calendar" | "grid" | "composer";
 
 /**
  * Status filter buckets for the Posts toolbar. `'draft'` matches the contract
@@ -214,7 +213,7 @@ export interface PostDestructiveRequest {
  * Props accepted by the unified `PostsView` workspace screen.
  */
 export interface PostsViewProps {
-  /** Initial view mode ('list', 'calendar', 'grid', 'composer'). Defaults to 'list'. */
+  /** Initial collection/composer mode. Defaults to the grouped Tasks-style List. */
   initialViewMode?: PostViewMode;
   /** Initial status filter ('all', 'scheduled', 'published', 'draft', 'failed'). Defaults to 'all'. */
   initialStatusFilter?: PostStatusFilter;

@@ -26,15 +26,22 @@ const TONE_BY_STATUS: Record<string, StatusPillTone> = {
 export const StatusBadge = React.memo(function StatusBadge({
   status,
   className,
+  compact = false,
 }: {
   /** Channel outcome status (contract `DistributionStatus`) or the Post's `'draft'` state. */
   status: string;
   className?: string;
+  /** Flat Tasks-row treatment; retains the shared status tone and text. */
+  compact?: boolean;
 }) {
   const { tStatus } = useI18n();
   const key = status.toLowerCase();
   return (
-    <StatusPill tone={TONE_BY_STATUS[key] ?? "accent"} className={className}>
+    <StatusPill
+      tone={TONE_BY_STATUS[key] ?? "accent"}
+      variant={compact ? "plain" : "badge"}
+      className={className}
+    >
       {tStatus(key)}
     </StatusPill>
   );

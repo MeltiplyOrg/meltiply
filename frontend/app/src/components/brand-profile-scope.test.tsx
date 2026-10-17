@@ -630,7 +630,7 @@ describe("Channels table contract", () => {
    * the selected profile's saved summary must orient the empty board while the
    * Posts-style filter toolbar remains available for the next connected account.
    */
-  it("shows selected profile context in the Channels empty board", () => {
+  it("shows selected profile context in the Channels empty directory", () => {
     workspace.selectedBrandProfile = alphaProfile;
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
@@ -642,11 +642,10 @@ describe("Channels table contract", () => {
   });
 
   /**
-   * Reproduces the empty-board profile-list edit path: the pencil must close
-   * the selector and open the same dialog that exposes both edit and deletion
-   * controls, even before any account has been connected.
+   * Reproduces the empty-directory profile edit path: the card action must open
+   * the same dialog exposing edit and deletion before any accounts are connected.
    */
-  it("opens the profile editor from the empty Channels board pencil", () => {
+  it("opens the profile editor from the empty Channels directory action", () => {
     workspace.selectedBrandProfile = alphaProfile;
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();

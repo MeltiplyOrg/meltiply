@@ -2,10 +2,9 @@ import { expect, test } from "@playwright/test";
 import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 
 /**
- * Exercises the adapted shell against real owner sessions and saved Posts.
- * Guards keyboard jump/focus restoration, real profile scoping, view shortcuts,
- * theme persistence, mobile Settings, and sign-out reachability. Screenshots are
- * attached as hosted review evidence; no mock API or seeded reference UI is used.
+ * Exercises real owner-authenticated Posts, directory, Settings, keyboard search,
+ * and mobile navigation. Screenshots are hosted visual evidence for List, Board,
+ * spreadsheet Table, media Grid, Calendar, Brand Profiles, and theme surfaces.
  */
 test("keeps publishing work reachable through the redesigned workspace", async ({
   page,
@@ -26,8 +25,9 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.getByRole("button", { name: /back to posts/i }).click();
   await expect(page.getByRole("row").filter({ hasText: "Studio update" })).toBeVisible();
 
-  const header = page.locator("header.workspace-topbar");
-  const searchTrigger = header.getByRole("button", { name: "Search and jump to", exact: true });
+  const searchTrigger = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Search and jump to", exact: true });
   await searchTrigger.click();
   const search = page.getByRole("dialog", { name: "Search and jump to", exact: true });
   await expect(search.getByRole("textbox")).toBeFocused();
@@ -47,55 +47,73 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(page).toHaveURL(/\/channels(?:\?|$)/);
   await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("channels-desktop.png"), fullPage: true });
+  await page.getByRole("tab", { name: /Brand Profiles/ }).click();
+  await expect(page.getByRole("button", { name: "View channels" })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("brand-profiles-desktop.png"),
+    fullPage: true,
+  });
+  await page.getByRole("tab", { name: /Accounts/ }).click();
 
   await page.locator("aside").getByRole("button", { name: "Posts", exact: true }).click();
   await waitForWorkspace(page);
-  await header.getByRole("button", { name: "Settings", exact: true }).click();
-  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
-  await settings.getByRole("button", { name: "Light", exact: true }).click();
+  await page.locator("aside").getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings(?:\?|$)/);
+  await page.getByRole("button", { name: "Light", exact: true }).click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await page.screenshot({
     path: testInfo.outputPath("settings-light-desktop.png"),
     fullPage: true,
   });
-  await page.keyboard.press("Escape");
+  await page.locator("aside").getByRole("button", { name: "Posts", exact: true }).click();
+  await waitForWorkspace(page);
   await page.screenshot({ path: testInfo.outputPath("posts-light-desktop.png"), fullPage: true });
-  for (const view of ["Grid", "Calendar", "List"] as const) {
+
+  for (const view of ["Grid", "Calendar", "Board", "Table", "List"] as const) {
     await page.locator("aside").getByRole("button", { name: view, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`view=${view.toLowerCase()}`));
+    if (view === "Board") await expect(page.getByRole("region", { name: "Draft" })).toBeVisible();
+    if (view === "Table") {
+      await expect(page.getByRole("columnheader", { name: "Status" })).toBeVisible();
+      await page.getByRole("button", { name: "Columns" }).click();
+      await page.getByRole("menuitemcheckbox", { name: "Status" }).click();
+      await expect(page.getByRole("columnheader", { name: "Status" })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+    }
     await page.screenshot({
       path: testInfo.outputPath(`posts-${view.toLowerCase()}-desktop.png`),
       fullPage: true,
     });
   }
-  await header.getByRole("button", { name: "Settings", exact: true }).click();
-  await settings.getByRole("button", { name: "Dark", exact: true }).click();
+  await page.locator("aside").getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Dark", exact: true }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.keyboard.press("Escape");
+  await page.locator("aside").getByRole("button", { name: "Posts", exact: true }).click();
+  await waitForWorkspace(page);
   await page.reload();
   await waitForWorkspace(page);
   await expect(page.locator("html")).toHaveClass(/dark/);
   await page.screenshot({ path: testInfo.outputPath("posts-dark-desktop.png"), fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(
-    page.getByRole("button", { name: "Open navigation menu", exact: true }),
-  ).toBeVisible();
+  const mobileMenu = page.getByRole("button", { name: "Open navigation menu", exact: true });
+  await expect(mobileMenu).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("posts-dark-mobile.png"), fullPage: true });
-  await page.getByRole("button", { name: "Open navigation menu", exact: true }).click();
-  await page
-    .getByRole("dialog", { name: "Workspace navigation", exact: true })
-    .getByRole("button", { name: "Channels", exact: true })
-    .click();
+  await mobileMenu.click();
+  const mobileNavigation = page.getByRole("dialog", { name: "Workspace navigation", exact: true });
+  await mobileNavigation.getByRole("button", { name: "Channels", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("channels-mobile.png"), fullPage: true });
-  await header.getByRole("button", { name: "Settings", exact: true }).click();
-  await settings.getByRole("tab", { name: "Account", exact: true }).click();
-  await expect(settings.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await mobileMenu.click();
+  await page
+    .getByRole("dialog", { name: "Workspace navigation", exact: true })
+    .getByRole("button", { name: "Settings", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("settings-mobile.png"), fullPage: true });
-  await settings.getByRole("tab", { name: "Appearance", exact: true }).click();
-  await settings.getByRole("button", { name: "Light", exact: true }).click();
-  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  await page.getByRole("button", { name: "Light", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);

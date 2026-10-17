@@ -19,36 +19,36 @@ Real Brand Profiles appear in the sidebar. Selecting one scopes Posts and Channe
 
 A **Brand Profile** is a named, color-labeled scope inside your workspace. Every channel connection, media asset, and post belongs to exactly one Brand Profile.
 
-Use Brand Profiles to separate things you manage independently — for example, one profile per client, brand, product line, or region. Because ownership is per-profile, you can filter every board to just the work for one brand and avoid cross-posting to the wrong audience.
+Use Brand Profiles to separate things you manage independently — for example, one profile per client, brand, product line, or region. Each profile scopes Posts and Channels, helping you avoid cross-posting to the wrong audience.
 
 Each profile has:
 
 - **Profile name** (required, up to 100 characters)
-- **Description** (optional, up to 280 characters — shown as a tooltip and in empty states)
-- **Color** — a swatch that identifies the profile's channels, posts, and assets across the app
+- **Description** (optional, up to 280 characters — shown on Brand Profile cards and in relevant empty states)
+- **Color** — a swatch that identifies the profile's channels and posts across the app
 
 ### Who can manage profiles
 
 - **Workspace admins** can create, edit, and delete Brand Profiles.
-- **Members** can view, select, and filter by the active profile using the Brand Profile dropdown on Channels or Posts, but cannot create, edit, or delete profiles. If you need a new profile, ask an admin — the Channels board indicates when an admin is needed.
+- **Members** can view, select, and filter profiles using the sidebar, Channels' Brand Profiles tab, or the Brand Profile filter on Channels and Posts. They cannot create, edit, or delete profiles; if you need a profile, ask an admin — the Channels page indicates when one is needed.
 
 ### Create a Brand Profile
 
-Workspace admins create Brand Profiles directly on the Channels board:
+Workspace admins create Brand Profiles directly on Channels:
 
-1. Select **Create Brand Profile** in the top action bar on **Channels**.
-2. Enter a **Profile name** (required), an optional **Description**, and choose a color swatch from the honeycomb color palette.
-3. Select **Create profile** to save.
+1. Open the **Brand Profiles** tab.
+2. Select **Create Brand Profile** in the Channels header.
+3. Enter a **Profile name** (required), an optional **Description**, and choose a color swatch.
+4. Select **Create profile** to save.
 
-Upon saving, Meltiply automatically selects the new profile and opens the account connection dialog so you can link a channel right away.
+After creation, Meltiply selects the new profile and opens the account connection dialog so you can link a channel.
 
 ### Edit a profile
 
-Admins can edit any Brand Profile from the toolbar:
+Admins can edit a Brand Profile from Channels or its filter:
 
-1. Open the **Brand Profile** filter dropdown on the **Channels** board or **Posts** toolbar.
-2. Select the pencil icon next to the profile name.
-3. Update the name, description, or color in the dialog, then save.
+1. Open the **Brand Profiles** tab on Channels and select its edit action, or open the **Brand Profile** filter on Channels/Posts.
+2. Update the name, description, or color in the editor, then save.
 
 Editing updates profile metadata immediately and does not alter connected channels or existing posts.
 
@@ -56,26 +56,25 @@ Editing updates profile metadata immediately and does not alter connected channe
 
 Deleting a Brand Profile permanently removes the profile and its associated channels, media assets, and posts:
 
-1. Open the profile editor dialog via the pencil icon in the Brand Profile filter on Channels or Posts.
+1. Open the profile editor from the Brand Profiles card on Channels, or its edit action in the Brand Profile filter on Posts.
 2. Select **Delete** and confirm the irreversible action.
 
 Deleting stops scheduled and queued posts on that profile's channels.
 
 ### Soft-deleted profiles
 
-The backend retains soft-deleted Brand Profiles for 7 days before permanent purge. Backend restore operations can restore profile records, but disconnected channels require re-authorization on the Channels board. Explicit deletion confirms permanent removal.
+The backend retains soft-deleted Brand Profiles for 7 days before permanent purge. Backend restore operations can restore profile records, but disconnected channels require re-authorization on the Channels page. Explicit deletion confirms permanent removal.
 
 ## The active Brand Profile selection
 
 Choose a Brand Profile in the sidebar or the toolbar on **Channels** and **Posts** to control which profile's work you see:
 
 - **All Brand Profiles** — the default aggregate view showing everything
-- A specific profile — the board filters to that profile's items, and several actions become profile-scoped
+- A specific profile — Posts and Channels collections show that profile's items, and profile-owned actions stay scoped to their owner.
 
 The selection matters because some actions only work with a profile chosen:
 
-- **Uploading media** requires an active profile in the composer.
-- **Creating or editing posts, scheduling, and channel-outcome changes** require an active profile.
+- **Publishing or scheduling** targets one explicitly selected profile. A channel's publication outcome comes from the provider and is not an editable profile setting.
 
 Channel disconnect and Post deletion, individually or in selected batches, use
 each item's owning Brand Profile and also work in **All Brand Profiles**. Deleting
@@ -97,4 +96,4 @@ If a channel or post still refers to a profile that no longer resolves in your w
 
 - [Channels](/docs/channels) — connect accounts under a profile
 - [Media](/docs/media) — attach media in the composer
-- [Settings](/docs/settings) — workspace organization and preference controls
+- [Settings](/docs/settings) — appearance, language, account identity, and security.

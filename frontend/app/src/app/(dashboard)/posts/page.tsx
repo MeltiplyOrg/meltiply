@@ -14,7 +14,11 @@ import { useSearchParams } from "@/lib/navigation";
  * @returns The initial `PostViewMode` for `PostsView` (`list` when absent/unknown).
  */
 function resolveViewMode(viewParam: string | null): PostViewMode {
-  return viewParam === "calendar" || viewParam === "composer" || viewParam === "grid"
+  return viewParam === "board" ||
+    viewParam === "table" ||
+    viewParam === "calendar" ||
+    viewParam === "composer" ||
+    viewParam === "grid"
     ? viewParam
     : "list";
 }

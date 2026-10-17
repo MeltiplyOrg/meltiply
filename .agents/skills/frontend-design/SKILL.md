@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Build or restyle Meltiply React or Astro interfaces with the Gr8r-adapted shared UI system. Use for components, layout, controls, styling, settings, search, and dialogs.
+description: Build or restyle Meltiply React or Astro interfaces with the Gr8r-adapted shared UI system. Use for components, layout, controls, settings, search, and dialogs.
 ---
 
 # Frontend Design
@@ -17,31 +17,19 @@ reference is not authority to invent capabilities.
 
 ## Workflow
 
-1. Read the relevant contracts, list `frontend/shared/package.json` exports, and
-   inspect the matching primitive and a real caller. Reuse the canonical module;
-   a differently named copy is still duplication.
-2. Extend an existing variant or compose it with local route data. Reusable React
-   controls belong in `frontend/shared/src/components/ui`; app navigation,
-   settings, search, labels, and data ownership stay in `frontend/app`.
-   New shared modules require approval and a reason existing interfaces cannot
-   express the behavior. Static public controls remain Astro, not hydrated React.
-3. Use semantic tokens from `frontend/shared/tokens.css`. [Visual reference](theme-gr8r.md)
-   explains their roles. Keep warm surfaces, indigo primary actions, Geist type,
-   compact geometry, and theme-independent layout. Provider marks use `PlatformIcon`.
-4. Follow [interaction guidance](clean-interactions.md): immediate navigation,
-   stable control identity, visible focus, actionable failures, and shared dialog
-   ownership. Preserve draft state, selection, auth boundaries, and recovery.
-5. Update every affected caller and user-facing guide. Run affected frontend
-   checks on GitHub-hosted runners unless local verification is explicitly
-   authorized. Exercise the actual changed desktop/mobile surface in both themes.
+1. Read relevant contracts, shared exports, the matching implementation, and a real caller. Trace exported references with the language server before changing an interface.
+2. Reuse canonical React controls and page compositions. Keep Post/Channel data, permission checks, async status, labels, and actions in the consuming feature.
+3. New or rewritten app React components use strict TypeScript/TSX and Tailwind utilities. Compose shared primitives; use `cn` for state/caller classes and semantic tokens from `frontend/shared/tokens.css`. Do not copy CSS-heavy markup, add page-specific CSS selectors, or duplicate a shared control. Shared CSS is reserved for palette tokens, global reset/focus, and unavoidable browser interop.
+4. Extend an existing shared primitive where possible: `Table` for Posts and Channels, `PostCard` for Board/Grid, shared toolbar/filter/chip patterns, tabs, and sidebar rows. Give a new shared component one clear reusable contract; never mirror an existing component under a new name.
+5. Preserve the Gr8r-adapted visual grammar: flat warm surfaces, indigo actions, Geist type, compact densities, restrained borders, aligned gutters, and neutral selected states. Keep Meltiply identity, real provider marks, and real product outcomes. [Theme reference](theme-gr8r.md) records semantic values.
+6. Follow [interaction guidance](clean-interactions.md): immediate navigation, stable control identity, visible focus, actionable failures, and canonical dialog ownership. Preserve drafts, selection, auth boundaries, and recoverable errors. Do not fake reference-only actions such as changing a publication outcome by dragging a card.
+7. Update every affected caller and user-facing guide. Run affected frontend checks on GitHub-hosted runners unless local verification is explicitly authorized. Exercise the actual changed desktop/mobile surface in both themes.
 
 ## Completion criteria
 
-- Existing primitives extended rather than copied; new shared files approved.
-- Every surface follows the shared palette and compact layout, including empty,
-  loading, disabled, hover, focus-visible, selected, and recoverable-error states.
-- Keyboard navigation, focus restoration, mobile reachability, and reduced motion
-  work without depending on decorative transitions.
-- Required frontend checks pass and browser evidence covers the changed behavior.
-- Product instructions and public guides describe the shipped interface, not the
-  retired striped canvas, theme reveal, or reference-only demo features.
+- Canonical primitives and compositions are reused; no parallel per-page CSS or duplicated controls remain.
+- Reference-derived List, Board, Table, directory, profile, navigation, search, and Settings compositions use real Meltiply data and supported behavior.
+- Empty, loading, disabled, hover, focus-visible, selected, and recoverable-error states remain reachable.
+- Keyboard navigation, focus restoration, mobile access, reduced-motion behavior, and horizontal table overflow work without relying on decorative transitions.
+- Required frontend checks pass and hosted browser evidence covers the changed behavior.
+- Product instructions and public guides describe the shipped interface, not retired themes, CSS structures, or reference-only demo features.

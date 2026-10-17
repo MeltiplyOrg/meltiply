@@ -54,14 +54,15 @@ only when the user requests it or an applicable skill explicitly requires it.
 
 ## Conditional guidance
 
-- **Frontend:** use the Gr8r-adapted warm workspace system in
+- **Frontend:** follow the Gr8r-adapted contracts in
   [PRODUCT.md](PRODUCT.md#modular-consistent-surfaces),
   [shared UI ownership](docs/frontend-ui.md), and [layout](docs/frontend-layout.md).
   Inspect `frontend/shared/package.json` exports and a real caller; extend the
-  canonical control. Keep compact Geist typography, flat warm surfaces, indigo
-  primary actions, and immediate navigation. Preserve publishing state, keyboard
+  canonical control. Rewritten app components use strict TypeScript/React and
+  Tailwind utilities; reuse shared compositions and keep page-specific CSS out
+  of feature components. Preserve actual publishing behavior, state, keyboard
   focus, mobile reachability, and reduced motion. Dialogs use
-  `CenterDialog`/`CenterAlertDialog` or `SideDialog`. Update UI guides when controls move.
+  `CenterDialog`/`CenterAlertDialog` or `SideDialog`. Update UI guides when flows move.
 - **Effect programs:** use the `effectv4` skill for services, layers, retries, and
   error mapping. Use `codebase-design` when shaping module interfaces.
 - **PRs:** use the [pr skill](.agents/skills/pr/SKILL.md) to author or revise a PR.

@@ -1333,7 +1333,6 @@ const spanishTranslations: Record<string, string> = {
   "Unknown profile": "Perfil desconocido",
   "another Brand Profile": "otro perfil de marca",
   "e.g. Acme Corp": "p. ej. Acme Corp",
-  "Channels Board": "Tablero de canales",
   "Manage social accounts and publishing channels organized by Brand Profile.":
     "Gestiona cuentas sociales y canales de publicación organizados por perfil de marca.",
   "Select Facebook Page": "Seleccionar página de Facebook",

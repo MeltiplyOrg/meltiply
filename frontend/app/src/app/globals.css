@@ -22,6 +22,16 @@
   --font-heading: var(--font-heading);
   --text-page-title: var(--text-title);
   --tracking-page-title: var(--tracking-title);
+  --text-ui: var(--font-size-ui);
+  --text-control: var(--font-size-control);
+  --text-micro: var(--font-size-micro);
+  --spacing-control: var(--control-height);
+  --spacing-control-sm: var(--control-height-sm);
+  --spacing-control-lg: var(--control-height-lg);
+  --spacing-sidebar: var(--workspace-sidebar-width);
+  --spacing-sidebar-collapsed: var(--workspace-sidebar-collapsed-width);
+  --spacing-topbar: var(--workspace-topbar-height);
+  --spacing-board-column: var(--board-column-width);
 
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -152,6 +162,10 @@
     scrollbar-width: thin;
     scrollbar-color: var(--line-strong) transparent;
   }
+
+  svg.lucide {
+    stroke-width: var(--icon-stroke);
+  }
 }
 
 /* Shared keyframes (--ease-*, fade-up, fade-in, pop-in, caret-blink,
@@ -179,20 +193,9 @@
   --dialog-start-y: calc(100dvh + 40px);
 }
 
-/* Shared selection actions stay outside transformed route surfaces and mobile safe areas. */
-@utility bulk-selection-dock {
-  position: fixed;
-  z-index: 40;
-  left: 50%;
-  bottom: max(12px, env(safe-area-inset-bottom));
-  translate: -50% 0;
-  width: max-content;
-  max-width: calc(100vw - 24px);
-}
-
-/* On narrow screens, bottom-right feedback clears the shared selection action pill. */
+/* Keep bottom-right feedback above the portal-based selection action on mobile. */
 @media (width < 768px) {
-  body:has(.bulk-selection-dock) [data-sileo-viewport][data-position="bottom-right"] {
+  body:has([data-selection-dock]) [data-sileo-viewport][data-position="bottom-right"] {
     bottom: calc(max(12px, env(safe-area-inset-bottom)) + 56px);
   }
 }
@@ -217,219 +220,4 @@
 }
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
-}
-
-@layer utilities {
-  .font-heading {
-    font-family: var(--font-heading);
-  }
-}
-
-/* The snapshot host owns route handoff visibility; Motion rewrites inline styles. */
-[data-workspace-slot-hidden] {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-}
-
-/* Gr8r workspace grammar: one rail, one chrome row, one aligned content edge. */
-.workspace-sidebar {
-  display: flex;
-  flex-direction: column;
-  width: var(--workspace-sidebar-width);
-  height: 100%;
-  background: var(--canvas);
-  border-right: 1px solid var(--line);
-}
-.workspace-sidebar-collapsed {
-  width: 52px;
-}
-.workspace-nav-row {
-  display: flex;
-  width: 100%;
-  height: 30px;
-  justify-content: flex-start;
-  gap: 9px;
-  padding: 0 8px;
-  font-size: 13.5px;
-  font-weight: 400;
-  text-align: left;
-}
-.workspace-nav-active {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 5%),
-    0 0 0 1px var(--line);
-  font-weight: 500;
-}
-.dark .workspace-nav-active {
-  background: var(--hover-2);
-  box-shadow: none;
-}
-.workspace-nav-active:hover {
-  background: var(--surface);
-}
-.dark .workspace-nav-active:hover {
-  background: var(--hover-2);
-}
-.workspace-nav-heading {
-  margin-top: 14px;
-  padding: 5px 8px;
-  color: var(--ink-3);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.workspace-sidebar-collapsed .workspace-nav-row {
-  justify-content: center;
-  padding: 0;
-}
-.workspace-sub-navigation {
-  margin: 4px 0 8px 16px;
-  padding-left: 9px;
-  border-left: 1px solid var(--line);
-}
-.workspace-sub-navigation .workspace-nav-row {
-  font-size: 12.5px;
-  height: 28px;
-}
-.workspace-topbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--workspace-topbar-height);
-  flex-shrink: 0;
-  padding-inline: var(--workspace-gutter);
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-}
-.workspace-topbar-search {
-  border-color: var(--line);
-  background: var(--inset);
-  color: var(--ink-3);
-  box-shadow: none;
-  font-weight: 400;
-}
-.workspace-main {
-  padding: 24px var(--workspace-gutter);
-}
-.workspace-skip-link {
-  position: fixed;
-  left: 12px;
-  top: 8px;
-  z-index: 100;
-  padding: 8px 12px;
-  background: var(--surface);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-control);
-  transform: translateY(-160%);
-}
-.workspace-skip-link:focus {
-  transform: none;
-}
-.workspace-settings {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  min-height: 340px;
-  max-height: 70dvh;
-}
-.workspace-settings-nav {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 2px;
-  height: auto;
-  padding: 12px 8px;
-  border-right: 1px solid var(--line);
-  border-radius: 0;
-  background: var(--canvas);
-}
-.workspace-settings-nav [role="tab"] {
-  justify-content: flex-start;
-  gap: 8px;
-  min-height: 32px;
-  padding-inline: 8px;
-  font-size: 12.5px;
-  border-radius: var(--radius-control);
-}
-.settings-details > div {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 16px;
-  padding-block: 14px;
-  border-bottom: 1px solid var(--line);
-  font-size: 13px;
-}
-.settings-details dt {
-  color: var(--ink-2);
-}
-.settings-details dd {
-  overflow-wrap: anywhere;
-}
-.theme-preview {
-  display: grid;
-  grid-template-columns: 28% 1fr;
-  height: 88px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-chip);
-}
-.theme-preview-light {
-  --preview-bg: #fbfaf8;
-  --preview-side: #f4f3f0;
-  --preview-line: #dad7d0;
-  --preview-accent: #4b5bd6;
-}
-.theme-preview-dark {
-  --preview-bg: #1a1a19;
-  --preview-side: #151514;
-  --preview-line: #3a3936;
-  --preview-accent: #8e9af3;
-}
-.theme-preview-sidebar,
-.theme-preview-main {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 8px;
-  background: var(--preview-side);
-}
-.theme-preview-main {
-  background: var(--preview-bg);
-}
-.theme-preview i {
-  display: block;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--preview-line);
-}
-.theme-preview i:nth-child(2) {
-  width: 70%;
-  background: var(--preview-accent);
-}
-@media (width < 640px) {
-  .workspace-topbar {
-    padding-inline: 12px;
-    height: 52px;
-  }
-  .workspace-main {
-    padding: 16px 12px;
-  }
-  .workspace-settings {
-    grid-template-columns: 1fr;
-  }
-  .workspace-settings-nav {
-    flex-direction: row;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .workspace-settings-nav [role="tab"] {
-    flex: 1;
-    justify-content: center;
-    min-height: 44px;
-    padding-inline: 4px;
-  }
 }

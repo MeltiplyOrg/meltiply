@@ -21,6 +21,7 @@
     "./skeleton": "./src/components/ui/skeleton.tsx",
     "./switch": "./src/components/ui/switch.tsx",
     "./tabs": "./src/components/ui/tabs.tsx",
+    "./table": "./src/components/ui/table.tsx",
     "./textarea": "./src/components/ui/textarea.tsx",
     "./tooltip": "./src/components/ui/tooltip.tsx",
     "./segmented-control": "./src/components/atoms/segmented-control.tsx",

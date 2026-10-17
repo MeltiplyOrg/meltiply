@@ -4,20 +4,38 @@ Meltiply uses the Gr8r-adapted warm workspace system. [Product UI conventions](.
 
 ## Ownership
 
-[`@meltiply/ui`](../frontend/shared/package.json) is the canonical UI workspace. Read its exports, implementation, and an existing caller before changing controls.
+[`@meltiply/ui`](../frontend/shared/package.json) is the canonical UI workspace.
+Read its explicit exports, implementation, and an existing caller before
+changing a control.
 
-| Responsibility                                                              | Owner                                                   |
-| --------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Warm light/dark palette, Geist fonts, radii, shadows                        | `frontend/shared/tokens.css`                            |
-| Buttons, inputs, menus, dialogs, feedback, and other generic React controls | `frontend/shared/src/components/ui`                     |
-| Shared composed patterns                                                    | `frontend/shared/src/components/atoms` and `primitives` |
-| Static Astro controls and brand mark                                        | `frontend/shared/src/components/public`                 |
-| Theme preference, consent, clipboard, notifications, motion infrastructure  | Existing modules in `frontend/shared`                   |
-| App navigation, jump search, settings composition, publishing state         | `frontend/app/src/components`                           |
-| Documentation tree, article search, reading navigation                      | `frontend/public/src/components`                        |
-| Marketing copy and explicitly labeled sample content                        | `frontend/public/src`                                   |
+| Responsibility                                                             | Owner                                                   |
+| -------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Shared palette, Geist fonts, compact type/space/radius/shadow tokens       | `frontend/shared/tokens.css`                            |
+| Buttons, inputs, menus, dialogs, feedback, cards, tables, tabs, and badges | `frontend/shared/src/components/ui`                     |
+| Shared selection, status, and navigation atoms                             | `frontend/shared/src/components/atoms` and `primitives` |
+| Static Astro controls and brand mark                                       | `frontend/shared/src/components/public`                 |
+| Theme preference, consent, clipboard, notifications, motion infrastructure | Existing modules in `frontend/shared`                   |
+| App navigation, jump search, Settings, Post/Channel data and behavior      | `frontend/app/src/components`                           |
+| Documentation tree, article search, reading navigation                     | `frontend/public/src/components`                        |
+| Marketing copy and explicitly labeled sample content                       | `frontend/public/src`                                   |
 
-Import explicit subpaths such as `@meltiply/ui/button`. Keep business state and labels in the consuming app; shared controls cannot import app internals. Static Astro controls stay static rather than hydrating React to render a link or icon. Extend an existing variant before adding a module or a local lookalike.
+Use explicit subpath imports such as `@meltiply/ui/button` and
+`@meltiply/ui/table`. Keep data, product semantics, and accessible labels in
+the consuming app; shared controls cannot import app internals. Static Astro
+controls stay static. Extend a canonical variant or build a route from shared
+primitives rather than duplicating one. The Posts List/Table and Channel
+directory share the same `Table`; Posts Board/Grid share `PostCard`; filter
+disclosures, search, chips, navigation rows, and view segments are reused.
+
+## React and styling
+
+New or rewritten app React components are TypeScript (`.tsx`) and Tailwind
+utilities. Use `cn` to combine caller and state variants; put finite style maps
+outside render functions. Shared CSS is reserved for global reset/focus rules,
+theme tokens, and browser interop that utility classes cannot express. Do not
+add page-specific component selectors, copy long CSS blocks between pages, or
+recreate shared controls locally. Public Astro/Fumadocs adapters remain within
+their framework and resolve the same shared palette tokens.
 
 ## Visual language
 
@@ -25,61 +43,100 @@ Import explicit subpaths such as `@meltiply/ui/button`. Keep business state and 
 - Indigo primary actions and focus, neutral navigation selections, labeled semantic status colors. Provider identity remains in `PlatformIcon`.
 - Self-hosted Geist for UI, Geist Mono for code and shortcut hints. Primary titles are compact semibold, not oversized display typography.
 - One border per surface. Use `rounded-chip/control/card/window` and named elevation tokens. Avoid rings stacked on an already bordered card.
-- Interface glyphs use `lucide-react` with consistent stroke and size across app, docs, and landing. Keep Meltiply's faceted brand mark; do not transplant Gr8r's logo or avatars.
+- Interface glyphs use `lucide-react` with a consistent 1.8px stroke and 16px default size. Keep Meltiply's faceted brand mark; do not transplant Gr8r's logo or avatars.
 
-Use semantic utilities: `bg-page`, `bg-canvas`, `bg-surface`, `text-ink`, `text-ink-2`, `text-ink-3`, `border-line`, `bg-primary`, and `text-primary-foreground`. Exact values belong in the shared tokens, not page-level utility palettes.
+Use semantic Tailwind utilities: `bg-page`, `bg-canvas`, `bg-surface`,
+`text-ink`, `text-ink-2`, `text-ink-3`, `border-line`, and the compact `text-ui`,
+`text-control`, and `text-micro` scales. Exact values belong in shared tokens,
+not inline CSS or page-specific values.
 
 ## Navigation and search
 
-`SidebarNav` owns the 252px/52px rail. `NavigationShell` owns the persistent top bar and responsive drawer. Their Posts/Channels destinations derive from `WORKSPACE_NAV_ITEMS`. Brand Profiles come from the real workspace context, not reference seed data. Workspace identity is read-only.
+`SidebarNav` owns the 252px/52px rail, including real workspace destinations,
+all five Post collection shortcuts, Brand Profiles, Settings, help, and the
+current account actions. `NavigationShell` owns the 46px top bar and responsive
+mobile drawer. Destinations derive from `WORKSPACE_NAV_ITEMS`; profile names
+and scope come from workspace context. Workspace identity stays read-only.
 
-`WorkspaceSearch` is a jump palette, not a global content index. The sidebar, top bar, and `hotkeys.commandMenu` open it. It finds supported destinations and loaded Brand Profiles. Route toolbars own collection text search and filters. Keep the shortcut and hint in `lib/hotkeys.ts` rather than hardcoding platform-specific key names.
+`WorkspaceSearch` is a jump palette, not a global content index. The sidebar,
+top bar, and `hotkeys.commandMenu` open it. It finds supported destinations and
+loaded Brand Profiles. Route toolbars own collection search and filters.
+
+## Reference page compositions
+
+Posts reproduces Gr8r Tasks' flush List, counted/collapsible Board, and
+spreadsheet Table. Media Grid and Calendar remain supported Meltiply views.
+Status/profile grouping preserves Post identity and sorted order; table column
+visibility hides metadata only. Board columns report publication outcomes and
+never offer fake drag-to-change-status behavior. List, Board, Table, and Grid
+share selection and the same real details/edit/delete/create callbacks.
+
+Channels adapts the Members directory to real connected accounts and adds an
+Accounts/Brand Profiles switch matching the reference's directory/team split.
+Rows retain platform identity, account and profile names, connection health,
+copy/reconnect/disconnect/settings actions, and filtered visible-selection
+semantics. Profile cards count loaded workspace connections. No seed member,
+team, billing, or role editor is copied.
 
 ## Settings
 
-`WorkspaceSettings` composes existing shared dialogs and tabs into Appearance, Account, and Security. Theme cards call the consent-aware theme provider. Account details are read-only. `AccountSecurity` retains password reauthentication, pending authenticator enrollment, recovery-code handling, and sign-out semantics. Both desktop and mobile expose Settings; no `/settings` administration route is implied.
-
-Do not restore demo billing, team management, notification preferences, or unsupported identity editing. [Capability inventory](frontend-capabilities.md) remains authoritative for feature availability.
+`WorkspaceSettings` renders the full `/settings` React route. Its reference-style
+section rail exposes only real Appearance, Language, Account, and Security
+workflows. Theme and language call existing consent-aware providers; account
+details stay read-only; `AccountSecurity` retains password reauthentication,
+authenticator enrollment, recovery-code handling, and sign-out behavior.
+Never advertise demo billing, team management, notifications, or identity
+editing.
 
 ## Dialogs and feedback
 
-| Purpose                                | Shared primitive    |
-| -------------------------------------- | ------------------- |
-| Focused form, settings, or jump search | `CenterDialog`      |
-| Destructive confirmation               | `CenterAlertDialog` |
-| Large Post inspection                  | `SideDialog`        |
+| Purpose                     | Shared primitive    |
+| --------------------------- | ------------------- |
+| Focused form or jump search | `CenterDialog`      |
+| Destructive confirmation    | `CenterAlertDialog` |
+| Large Post inspection       | `SideDialog`        |
 
-Primitives own accessible names, focus trapping, Escape, scroll lock, focus restoration, and transitions. Keep confirmation content stable; retain data through exits with `useLatchedValue` when a primitive needs it. Route code does not implement another dialog or add entrance choreography. Immediate navigation and palette updates are the publishing default; honor the effective reduced-motion state in retained animated surfaces.
+Primitives own accessible names, focus trapping, Escape, scroll lock, focus
+restoration, and transitions. Keep confirmation content stable; retain data
+through exits with `useLatchedValue` when necessary. Route code does not
+implement another dialog or add entrance choreography. Immediate navigation
+and preference changes are the default; retain reduced-motion support where
+the existing interface uses motion.
 
-Transient outcomes use `@meltiply/ui/toast`, rendered by `@meltiply/ui/sileo`. Pair a headline with the affected object and recovery action. Clipboard feedback includes the copied value. Inline validation and durable failures remain beside the controls they affect.
+Transient outcomes use `@meltiply/ui/toast`, rendered by `@meltiply/ui/sileo`.
+Pair a headline with the affected object and recovery action. Clipboard feedback
+includes the copied value. Inline validation and durable failures remain beside
+the controls they affect.
 
 ## Public surfaces
 
-Landing and docs import the same palette and fonts. Their layout serves persuasion and reading respectively; they do not pretend to be authenticated workspace screens. Public article search remains a documentation index. Native scrolling, keyboard navigation, fragments, and reduced-motion behavior must remain usable. Existing public scroll adapters must release state during Astro navigation.
+Landing and docs import the same palette and fonts. Their layout serves
+persuasion and reading respectively; public article search is not app-wide
+search. Native scrolling, keyboard navigation, fragments, and reduced-motion
+behavior must remain usable. Existing public scroll adapters release state
+during Astro navigation.
 
 ## Change workflow
 
-1. Read the product and layout contracts, shared exports, matching implementation, and a real caller.
-2. Extend the canonical primitive or compose it with route data. New shared modules require an explicit ownership decision and approval.
-3. Migrate all affected callers and remove replaced definitions, aliases, and stale instructions.
+1. Read product and layout contracts, shared exports, the matching implementation, and a real caller.
+2. Extend the canonical primitive or compose it with route data. New modules need a clear reuse need and canonical ownership.
+3. Migrate affected callers and remove replaced definitions, aliases, selectors, and stale instructions.
 4. Verify hover, focus-visible, active, disabled, loading, empty, and recoverable-error states, including keyboard use and mobile overflow.
 5. Run affected frontend checks and exercise the actual changed surface. Use GitHub-hosted runners unless local verification is explicitly authorized. Passing lint is not visual proof.
 
 ## Reference-to-product mapping
 
-| Reference family                                            | Meltiply adaptation                                                                               |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Workspace rail, top bar, breadcrumbs                        | `SidebarNav`, `NavigationShell`, real workspace/profile context                                   |
-| Projects and nested task views                              | Brand Profiles and Posts List/Grid/Calendar shortcuts                                             |
-| Command palette                                             | `WorkspaceSearch` over supported destinations and loaded profiles                                 |
-| Appearance/account settings                                 | `WorkspaceSettings` plus existing `AccountSecurity`                                               |
-| Buttons, text fields, selects, tabs, menus                  | Canonical shared Radix controls with compact tokens and accent intent                             |
-| Lists, tables, board cards, calendar cells                  | Existing Post and Channel collections; their API data and actions stay intact                     |
-| Task drawer and confirmation modals                         | Post `SideDialog`, focused `CenterDialog`, destructive `CenterAlertDialog`                        |
-| Auth screens and form states                                | Existing owner sign-in/setup/recovery with the warm palette and compact form language             |
-| Empty, loading, error, and notification states              | Shared Empty/Skeleton/Alert/Sileo with real pending/error semantics                               |
-| Lucide glyphs, type, colors, spacing, corners               | Shared Lucide system, self-hosted Geist, and reference-derived semantic tokens                    |
-| Files, timeline, teams, billing, and reference seed content | No copied product routes; composer attachments and scheduling remain in their supported workflows |
-
-The mapping transfers the complete applicable interface vocabulary without
-introducing nonfunctional copies of reference-only features.
+| Reference family                                        | Meltiply adaptation                                                                                  |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Workspace rail, top bar, breadcrumbs                    | `SidebarNav`, `NavigationShell`, real workspace/profile context                                      |
+| Tasks List, Board, Table, grouping, metadata controls   | Posts List/Board/Table built on shared `Table`, `PostCard`, toolbar, and Post-owned state            |
+| Grid and media previews                                 | Meltiply media Grid reuses the same `PostCard` and real attachments                                  |
+| Members and Teams directories                           | Connected-account `ChannelTableView` and actual Brand Profile `BrandProfileDirectory`                |
+| Command palette                                         | `WorkspaceSearch` over supported destinations and loaded profiles                                    |
+| Full Settings navigation                                | `/settings` section rail over Appearance, Language, read-only Account, and Security                  |
+| Buttons, fields, selects, tabs, menus                   | Canonical shared React controls and semantic Tailwind tokens                                         |
+| Task drawer and confirmation modals                     | Post `SideDialog`, focused `CenterDialog`, destructive `CenterAlertDialog`                           |
+| Auth screens and form states                            | Existing owner sign-in/setup/recovery with the warm palette and compact form language                |
+| Empty, loading, error, and notification states          | Shared Empty/Skeleton/Alert/Sileo with real pending/error semantics                                  |
+| Glyphs, type, colors, spacing, corners                  | Shared Lucide system, self-hosted Geist, and reference-derived semantic tokens                       |
+| Files, timeline, teams, billing, reference seed content | No copied product routes; composer attachments and scheduling stay in supported publishing workflows |

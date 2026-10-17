@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { Check, Copy, Pencil, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { Check, Copy, Ellipsis, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { copyText } from "@meltiply/ui/copy-text";
 import { Avatar, AvatarFallback, AvatarImage } from "@meltiply/ui/avatar";
 import { Button } from "@meltiply/ui/button";
@@ -30,7 +30,7 @@ import { cn } from "@meltiply/ui/utils";
  * Consistent icon-button chrome for the channel table's copy, health, and settings controls.
  */
 const channelActionClass =
-  "size-7 shrink-0 rounded-full text-ink-3 hover:bg-hover hover:text-ink [&_svg]:size-3.5";
+  "size-7 shrink-0 text-ink-3 hover:bg-hover hover:text-ink [&_svg]:size-3.5";
 
 /** Derives up to two uppercase initials; blank names use a neutral avatar fallback. */
 function getInitials(name: string): string {
@@ -253,7 +253,7 @@ export interface ChannelSettingsActionProps {
 }
 
 /**
- * Renders the channel table's pencil trigger and settings dialog.
+ * Renders the directory's overflow trigger and real channel settings dialog.
  * The dialog shows the owning Brand Profile and the real granted scopes, and
  * its destructive action closes the dialog before delegating to the board's
  * disconnect confirmation so exactly one CenterAlertDialog is ever active.
@@ -279,7 +279,7 @@ export function ChannelSettingsAction({
               aria-label={t("Channel settings")}
               className={channelActionClass}
             >
-              <Pencil aria-hidden="true" />
+              <Ellipsis aria-hidden="true" />
             </Button>
           </CenterDialogTrigger>
         </TooltipTrigger>

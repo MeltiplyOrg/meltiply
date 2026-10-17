@@ -1,32 +1,30 @@
-import { useState } from "react";
-import type { ComponentType } from "react";
+import { forwardRef, useState, type ComponentType } from "react";
 import {
-  CalendarDays,
   ChevronDown,
   CircleHelp,
   LayoutGrid,
-  List,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   PenSquare,
   Search,
+  Settings,
   Share2,
   UserRound,
 } from "lucide-react";
 import { BrandMark } from "@meltiply/ui/brand-mark";
 import { Avatar, AvatarFallback, AvatarImage } from "@meltiply/ui/avatar";
-import { Button } from "@meltiply/ui/button";
+import { Button, type ButtonProps } from "@meltiply/ui/button";
 import { toast } from "@meltiply/ui/toast";
 import { cn } from "@meltiply/ui/utils";
 import { useWorkspace } from "@/context/workspace.context";
 import { useI18n } from "@/lib/i18n";
 import { preloadDashboardRoute } from "@/lib/preload-routes";
-import { WorkspaceSettings } from "@/components/layout/workspace-settings";
+import { POST_COLLECTION_MODES, POST_VIEW_OPTIONS } from "@/components/posts/post-view-options";
 
-export type WorkspaceView = "posts" | "channels";
+export type WorkspaceView = "posts" | "channels" | "settings";
 
-/** Canonical destinations shared by the desktop rail, mobile drawer, and jump search. */
+/** Canonical real destinations shared by the rail, mobile drawer, and jump search. */
 export interface WorkspaceNavItem {
   id: WorkspaceView;
   path: `/${WorkspaceView}`;
@@ -35,22 +33,43 @@ export interface WorkspaceNavItem {
   mobileIcon: ComponentType<{ className?: string }>;
 }
 
-/** Only supported publishing surfaces belong in navigation; reference demo routes are not copied. */
+/** Reference demo routes are deliberately absent; every destination opens a real publishing surface. */
 export const WORKSPACE_NAV_ITEMS: readonly WorkspaceNavItem[] = [
   { id: "posts", path: "/posts", label: "Posts", icon: PenSquare, mobileIcon: PenSquare },
   { id: "channels", path: "/channels", label: "Channels", icon: Share2, mobileIcon: Share2 },
+  { id: "settings", path: "/settings", label: "Settings", icon: Settings, mobileIcon: Settings },
 ];
 
-/** Resolves the first canonical path segment; unknown paths use the Posts home. */
+/** Resolves the first canonical route segment; unknown paths use the Posts home. */
 export function resolveWorkspaceView(pathname: string): WorkspaceView {
   const segment = pathname.replace(/^\//, "").split("/")[0] ?? "";
   return WORKSPACE_NAV_ITEMS.find((item) => item.path === `/${segment}`)?.id ?? "posts";
 }
 
-/** Returns the canonical URL for a supported workspace view. */
+/** Returns the canonical URL for a supported workspace destination. */
 export function workspaceViewPath(view: WorkspaceView): string {
   return WORKSPACE_NAV_ITEMS.find((item) => item.id === view)?.path ?? "/posts";
 }
+
+/** Reference navigation row shared by the desktop rail and mobile drawer; native button/Slot semantics stay intact. */
+export const SidebarNavRow = forwardRef<
+  HTMLButtonElement,
+  ButtonProps & { collapsed?: boolean; active?: boolean }
+>(({ collapsed = false, active = false, className, ...props }, ref) => (
+  <Button
+    ref={ref}
+    variant="ghost"
+    className={cn(
+      "h-control w-full justify-start gap-2.25 px-2 text-left text-ui font-normal",
+      collapsed && "justify-center px-0",
+      active &&
+        "bg-surface font-medium text-ink shadow-btn hover:bg-surface dark:bg-hover-2 dark:shadow-none dark:hover:bg-hover-2",
+      className,
+    )}
+    {...props}
+  />
+));
+SidebarNavRow.displayName = "SidebarNavRow";
 
 export interface SidebarNavProps {
   currentView: WorkspaceView;
@@ -59,11 +78,13 @@ export interface SidebarNavProps {
   className?: string;
 }
 
+const HEADING_CLASS =
+  "mt-3.5 px-2 py-1.25 text-micro font-semibold uppercase tracking-wide text-ink-3";
+
 /**
- * Gr8r-style 252px workspace rail with a 52px collapsed mode. Real Brand Profiles
- * replace the reference's projects; selecting one scopes existing Posts/Channels
- * queries. Workspace identity stays read-only. Navigation is instant, labels stay
- * attached to their controls, and collapsed actions retain accessible names.
+ * Gr8r's 252px/52px rail, rewritten in React/Tailwind. Real profile selection
+ * scopes existing queries; all five collection shortcuts share toolbar metadata.
+ * Collapse preserves named controls, and navigation has no snapshot/morph layer.
  */
 export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }: SidebarNavProps) {
   const {
@@ -78,7 +99,7 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
   const [collapsed, setCollapsed] = useState(false);
   const [postsExpanded, setPostsExpanded] = useState(true);
   const name = workspaceName ?? "Meltiply Workspace";
-  /** Retains visible recovery when the server cannot end the current session. */
+  /** Keeps a failed server sign-out visible instead of silently losing session errors. */
   const handleSignOut = async () => {
     try {
       await logout();
@@ -91,59 +112,63 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
   };
   return (
     <aside
-      className={cn("workspace-sidebar", collapsed && "workspace-sidebar-collapsed", className)}
+      className={cn(
+        "flex h-full flex-col border-r border-line bg-canvas",
+        collapsed ? "w-sidebar-collapsed" : "w-sidebar",
+        className,
+      )}
       aria-label={t("Workspace navigation")}
     >
-      <div className="flex h-[46px] shrink-0 items-center gap-2 px-3">
-        <BrandMark className="size-[22px] shrink-0 text-ink" />
+      <div className="flex h-topbar shrink-0 items-center gap-2 px-3">
+        <BrandMark className="size-5.5 shrink-0 text-ink" />
         {!collapsed && (
-          <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold" title={name}>
-            {name}
-          </span>
-        )}
-        {!collapsed && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6 shrink-0"
-            onClick={() => setCollapsed(true)}
-            aria-label={t("Collapse sidebar")}
-            title={t("Collapse sidebar")}
-          >
-            <PanelLeftClose className="size-3.5" />
-          </Button>
+          <>
+            <span className="min-w-0 flex-1 truncate text-ui font-semibold" title={name}>
+              {name}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 shrink-0"
+              onClick={() => setCollapsed(true)}
+              aria-label={t("Collapse sidebar")}
+              title={t("Collapse sidebar")}
+            >
+              <PanelLeftClose className="size-3.5" />
+            </Button>
+          </>
         )}
       </div>
-      <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 hide-scrollbar">
+      <nav className="hide-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {collapsed && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="mb-1 w-full"
+          <SidebarNavRow
+            collapsed
+            className="mb-1"
             onClick={() => setCollapsed(false)}
             aria-label={t("Expand sidebar")}
             title={t("Expand sidebar")}
           >
             <PanelLeftOpen className="size-4" />
-          </Button>
+          </SidebarNavRow>
         )}
-        <Button
-          variant="ghost"
-          className="workspace-nav-row"
+        <SidebarNavRow
+          collapsed={collapsed}
           onClick={onOpenSearch}
           aria-label={t("Search and jump to")}
           title={collapsed ? t("Search") : undefined}
         >
-          <Search className="size-4 shrink-0" />
-          {!collapsed && <span>{t("Search")}</span>}
-        </Button>
-        {!collapsed && <div className="workspace-nav-heading">{t("Workspace")}</div>}
+          <Search className="size-4" />
+          {!collapsed && t("Search")}
+        </SidebarNavRow>
+        {!collapsed && <div className={HEADING_CLASS}>{t("Workspace")}</div>}
         {WORKSPACE_NAV_ITEMS.map((item) => {
+          if (item.id === "settings") return null;
           const Icon = item.icon;
           return (
             <div key={item.id} className="relative">
-              <Button
-                variant="ghost"
+              <SidebarNavRow
+                collapsed={collapsed}
+                active={currentView === item.id}
                 onClick={() => onNavigate(item.id)}
                 onMouseEnter={() => preloadDashboardRoute(item.id)}
                 onFocus={() => preloadDashboardRoute(item.id)}
@@ -151,19 +176,15 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
                 aria-current={currentView === item.id ? "page" : undefined}
                 aria-label={t(item.label)}
                 title={collapsed ? t(item.label) : undefined}
-                className={cn(
-                  "workspace-nav-row",
-                  currentView === item.id && "workspace-nav-active",
-                )}
               >
-                <Icon className="size-4 shrink-0" />
+                <Icon className="size-4" />
                 {!collapsed && <span>{t(item.label)}</span>}
-              </Button>
+              </SidebarNavRow>
               {!collapsed && item.id === "posts" && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="absolute right-1 top-1 size-[22px]"
+                  className="absolute right-1 top-1 size-5.5"
                   aria-label={t("Toggle {label} sub-navigation", { label: t("Posts") })}
                   aria-expanded={postsExpanded}
                   aria-controls="posts-sub-navigation"
@@ -173,73 +194,61 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
                 </Button>
               )}
               {!collapsed && item.id === "posts" && postsExpanded && (
-                <div id="posts-sub-navigation" className="workspace-sub-navigation">
-                  <Button
-                    variant="ghost"
-                    className="workspace-nav-row"
-                    onClick={() => onNavigate("posts", { search: "view=list" })}
-                  >
-                    <List className="size-3.5" />
-                    {t("List")}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="workspace-nav-row"
-                    onClick={() => onNavigate("posts", { search: "view=grid" })}
-                  >
-                    <LayoutGrid className="size-3.5" />
-                    {t("Grid")}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="workspace-nav-row"
-                    onClick={() => onNavigate("posts", { search: "view=calendar" })}
-                  >
-                    <CalendarDays className="size-3.5" />
-                    {t("Calendar")}
-                  </Button>
+                <div
+                  id="posts-sub-navigation"
+                  className="mb-2 ml-4 mt-1 border-l border-line pl-2.25"
+                >
+                  {POST_COLLECTION_MODES.map((mode) => {
+                    const ViewIcon = POST_VIEW_OPTIONS[mode].icon;
+                    return (
+                      <SidebarNavRow
+                        key={mode}
+                        className="h-7 text-control"
+                        onClick={() => onNavigate("posts", { search: `view=${mode}` })}
+                      >
+                        <ViewIcon className="size-3.5" />
+                        {t(POST_VIEW_OPTIONS[mode].label)}
+                      </SidebarNavRow>
+                    );
+                  })}
                 </div>
               )}
             </div>
           );
         })}
-        {!collapsed && <div className="workspace-nav-heading">{t("Brand Profiles")}</div>}
-        <Button
-          variant="ghost"
-          className={cn("workspace-nav-row", selectedBrandProfileId === null && "text-ink")}
+        {!collapsed && <div className={HEADING_CLASS}>{t("Brand Profiles")}</div>}
+        <SidebarNavRow
+          collapsed={collapsed}
           onClick={() => setSelectedBrandProfileId(null)}
           aria-pressed={selectedBrandProfileId === null}
           aria-label={t("All Brand Profiles")}
           title={collapsed ? t("All Brand Profiles") : undefined}
         >
-          <LayoutGrid className="size-4 shrink-0" />
-          {!collapsed && <span>{t("All Brand Profiles")}</span>}
-        </Button>
+          <LayoutGrid className="size-4" />
+          {!collapsed && t("All Brand Profiles")}
+        </SidebarNavRow>
         {brandProfiles.map((profile) => (
-          <Button
+          <SidebarNavRow
             key={profile.id}
-            variant="ghost"
-            className={cn(
-              "workspace-nav-row",
-              selectedBrandProfileId === profile.id && "workspace-nav-active",
-            )}
+            collapsed={collapsed}
+            active={selectedBrandProfileId === profile.id}
             onClick={() => setSelectedBrandProfileId(profile.id)}
             aria-pressed={selectedBrandProfileId === profile.id}
             aria-label={profile.name}
             title={collapsed ? profile.name : undefined}
           >
             <span
-              className="flex size-[18px] shrink-0 items-center justify-center rounded-chip bg-accent-tint text-[10px] font-semibold text-accent-ink"
+              className="flex size-4.5 shrink-0 items-center justify-center rounded-chip bg-accent-tint text-micro font-semibold text-accent-ink"
               aria-hidden="true"
             >
               {profile.name.slice(0, 1).toUpperCase()}
             </span>
             {!collapsed && <span className="truncate">{profile.name}</span>}
-          </Button>
+          </SidebarNavRow>
         ))}
       </nav>
       <div className="shrink-0 border-t border-line px-2 py-2">
-        <Button asChild variant="ghost" className="workspace-nav-row">
+        <SidebarNavRow asChild collapsed={collapsed}>
           <a
             href="https://meltiply.com/docs"
             target="_blank"
@@ -250,9 +259,26 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
             <CircleHelp className="size-4" />
             {!collapsed && t("Help and resources")}
           </a>
-        </Button>
-        <WorkspaceSettings compact={collapsed} />
-        <div className="mt-2 flex items-center gap-2 border-t border-line pt-2">
+        </SidebarNavRow>
+        <SidebarNavRow
+          collapsed={collapsed}
+          active={currentView === "settings"}
+          onClick={() => onNavigate("settings")}
+          onMouseEnter={() => preloadDashboardRoute("settings")}
+          onFocus={() => preloadDashboardRoute("settings")}
+          aria-label={t("Settings")}
+          aria-current={currentView === "settings" ? "page" : undefined}
+          title={collapsed ? t("Settings") : undefined}
+        >
+          <Settings className="size-4" />
+          {!collapsed && t("Settings")}
+        </SidebarNavRow>
+        <div
+          className={cn(
+            "mt-2 flex gap-2 border-t border-line pt-2",
+            collapsed ? "flex-col items-center" : "items-center",
+          )}
+        >
           <Avatar className="size-6 shrink-0">
             <AvatarImage src={user?.avatarUrl ?? undefined} alt="" />
             <AvatarFallback className="bg-accent-tint text-accent-ink">
@@ -262,38 +288,20 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-medium">{user?.name || t("Creator")}</div>
-              <div className="truncate text-[11px] text-ink-3">{user?.email}</div>
+              <div className="truncate text-micro text-ink-3">{user?.email}</div>
             </div>
           )}
-          {!collapsed && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 shrink-0"
-              onClick={() => {
-                void handleSignOut();
-              }}
-              aria-label={t("Sign out")}
-              title={t("Sign out")}
-            >
-              <LogOut className="size-3.5" />
-            </Button>
-          )}
-        </div>
-        {collapsed && (
           <Button
             variant="ghost"
             size="icon"
-            className="mt-1 w-full"
-            onClick={() => {
-              void handleSignOut();
-            }}
+            className="size-6 shrink-0"
+            onClick={() => void handleSignOut()}
             aria-label={t("Sign out")}
             title={t("Sign out")}
           >
-            <LogOut className="size-4" />
+            <LogOut className="size-3.5" />
           </Button>
-        )}
+        </div>
       </div>
     </aside>
   );

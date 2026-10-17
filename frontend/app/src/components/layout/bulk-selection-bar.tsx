@@ -1,7 +1,5 @@
 import { createPortal } from "react-dom";
 import { LoaderCircle, X } from "lucide-react";
-import { AnimatePresence, motion, useIsPresent } from "motion/react";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
 import { Button } from "@meltiply/ui/button";
 import { useI18n } from "@/lib/i18n";
 
@@ -15,25 +13,11 @@ export interface BulkSelectionBarProps {
 }
 
 /**
- * Portals the shared directory-selection pill outside clipped route surfaces.
- * Presence retains it for a short bottom-up entrance/downward exit; manual or OS
- * low motion settles instantly. Callers own selection and destructive confirmation.
+ * Portals a shared bulk-action pill outside clipped route surfaces. It exists
+ * only while callers own a selection; callers also own action behavior and
+ * pending state, including destructive confirmation.
  */
-export function BulkSelectionBar(props: BulkSelectionBarProps) {
-  return createPortal(
-    <AnimatePresence>
-      {props.count > 0 && <SelectionPill key="selection" {...props} />}
-    </AnimatePresence>,
-    document.body,
-  );
-}
-
-/**
- * Keeps count changes immediate while animating only the pill's presence.
- * Exiting controls become inert and hidden to assistive technology immediately;
- * the shared motion preference disables travel and duration without remounting.
- */
-function SelectionPill({
+export function BulkSelectionBar({
   count,
   actionLabel,
   busyLabel,
@@ -42,23 +26,15 @@ function SelectionPill({
   busy = false,
 }: BulkSelectionBarProps) {
   const { t } = useI18n();
-  const { lowMotion } = useMotionPreference();
-  const isPresent = useIsPresent();
 
-  return (
-    <motion.div
-      className="bulk-selection-dock"
+  if (count <= 0) return null;
+
+  return createPortal(
+    <div
+      className="fixed bottom-[max(12px,env(safe-area-inset-bottom))] left-1/2 z-40 w-max max-w-[calc(100vw-24px)] -translate-x-1/2"
+      data-selection-dock=""
       role="region"
       aria-label={t("Selection actions")}
-      aria-hidden={!isPresent || undefined}
-      inert={!isPresent}
-      initial={lowMotion ? false : { opacity: 0, transform: "translateY(16px) scale(0.97)" }}
-      animate={{ opacity: 1, transform: "translateY(0px) scale(1)" }}
-      exit={{
-        opacity: 0,
-        transform: lowMotion ? "translateY(0px) scale(1)" : "translateY(12px) scale(0.98)",
-      }}
-      transition={{ duration: lowMotion ? 0 : isPresent ? 0.22 : 0.15, ease: [0.23, 1, 0.32, 1] }}
     >
       <div className="flex min-w-0 items-center gap-2 rounded-full border border-line-strong bg-surface p-1.5 pl-4 shadow-overlay">
         <span
@@ -92,6 +68,7 @@ function SelectionPill({
           <span className="truncate">{busy ? busyLabel : actionLabel}</span>
         </Button>
       </div>
-    </motion.div>
+    </div>,
+    document.body,
   );
 }

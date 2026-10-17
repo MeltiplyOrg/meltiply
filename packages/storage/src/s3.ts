@@ -262,11 +262,17 @@ export class S3ObjectStore extends EffectObjectStore {
     });
     const headers = new Headers(signed.headers);
     headers.delete("host");
-    return this.#fetch(signed.url.toString(), {
-      headers,
-      method: input.method,
-      ...(input.body ? { body: input.body.slice().buffer } : {}),
-    });
+    try {
+      return await this.#fetch(signed.url.toString(), {
+        headers,
+        method: input.method,
+        ...(input.body ? { body: input.body.slice().buffer } : {}),
+      });
+    } catch (cause) {
+      // Fetch uses TypeError for transport failures; the shared classifier
+      // reserves that type for invalid caller input, not origin outages.
+      throw new Error("object storage transport failed", { cause });
+    }
   }
 
   /**
@@ -413,6 +419,7 @@ export class S3ObjectStore extends EffectObjectStore {
     const response = await this.#send({
       headers: {
         ...(options.contentType ? { "content-type": options.contentType } : {}),
+        ...(options.contentType ? { "x-amz-metadata-directive": "REPLACE" } : {}),
         ...(options.ifDestinationAbsent ? { "if-none-match": "*" } : {}),
         ...(options.ifSourceEtagMatches
           ? { "x-amz-copy-source-if-match": quoteEtag(options.ifSourceEtagMatches) }
@@ -427,7 +434,10 @@ export class S3ObjectStore extends EffectObjectStore {
       if (preconditionStatuses.has(response.status)) return null;
       throw new Error(`object copy failed with status ${response.status}`);
     }
-    await this.#discard(response);
+    const result = await response.text();
+    if (!result.includes("<CopyObjectResult") || xmlText(result, "Code")) {
+      throw new Error("object copy returned an S3 error or malformed result");
+    }
     return this.head(destinationKey);
   }
 
@@ -500,7 +510,10 @@ export class S3ObjectStore extends EffectObjectStore {
           query: { uploadId },
         });
         this.#expectOk(response, "multipart upload completion");
-        await this.#discard(response);
+        const result = await response.text();
+        if (!result.includes("<CompleteMultipartUploadResult") || xmlText(result, "Code")) {
+          throw new Error("multipart upload completion returned an S3 error or malformed result");
+        }
         const metadata = await this.head(key);
         if (!metadata) {
           throw new Error("completed multipart upload produced no object");

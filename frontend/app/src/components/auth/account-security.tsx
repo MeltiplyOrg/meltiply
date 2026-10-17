@@ -58,7 +58,7 @@ export function AccountSecurity(): React.ReactElement {
   };
 
   return (
-    <section aria-label={t("Account security")} className="w-full max-w-xl space-y-5">
+    <section aria-label={t("Account security")} className="space-y-5">
       <p className="text-sm text-ink-2">
         {t(
           "Protect the only account for this installation. Changes to your password or authenticator sign out previous sessions.",

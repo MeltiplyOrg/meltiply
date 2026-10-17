@@ -110,8 +110,8 @@ export default function WorkspaceSettings() {
           );
         })}
       </nav>
-      <div className="min-h-0 min-w-0 overflow-y-auto">
-        <div className="w-full px-4 pb-20 pt-6 sm:px-10 sm:pt-8">
+      <div className="min-h-0 min-w-0 overflow-y-auto px-4 pb-20 pt-6 sm:px-10 sm:pt-8">
+        <div className="w-full max-w-2xl">
           <h1 className="text-(length:--text-title) font-semibold leading-tight tracking-page-title">
             {current.label}
           </h1>

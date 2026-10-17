@@ -116,7 +116,7 @@ maximum. On phones, gutters are 16px, toolbar controls wrap, and directory
 tables may scroll horizontally without clipping available actions.
 
 `/settings` is a full-height, reference-style Settings page with responsive
-section navigation on the same surface as its full-width content. Appearance
+section navigation on the same surface as a consistently bounded content column. Appearance
 offers Light, Dark, and System; System follows live OS palette changes. Language
 uses supported locales; account identity is read-only; Security shows its
 password-reauthenticated controls directly, without another opener or dialog.

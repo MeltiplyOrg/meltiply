@@ -243,7 +243,7 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
           Meltiply
         </div>
         <div className="hidden max-w-sm space-y-5 lg:block">
-          <p className="text-[23px] font-semibold leading-8 tracking-tight text-ink">
+          <p className="text-page-title font-semibold leading-8 tracking-page-title text-ink">
             {t("One place to shape what’s next.")}
           </p>
           <p className="text-sm leading-relaxed text-ink-2">
@@ -262,7 +262,7 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
           <h1
             ref={headingRef}
             tabIndex={-1}
-            className="text-[23px] leading-8 font-semibold tracking-tight text-ink"
+            className="text-page-title leading-8 font-semibold tracking-page-title text-ink"
           >
             {heading}
           </h1>

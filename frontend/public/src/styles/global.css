@@ -1533,12 +1533,12 @@ h2 {
   }
 
   .auth-menu-link-primary {
-    background: var(--ink);
+    background: var(--primary);
     color: var(--primary-foreground);
   }
 
   .auth-menu-link-primary:hover {
-    background: color-mix(in srgb, var(--ink) 85%, var(--surface));
+    background: color-mix(in srgb, var(--primary) 88%, var(--ink));
   }
 
   .header-actions .button-small {

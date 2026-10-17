@@ -60,9 +60,8 @@ function captureSlots(root: HTMLElement): Map<string, SlotSnapshot> {
  * navigation takes over the painted rectangles/opacity before cancelling the
  * previous animations, so rapid reversal does not snap to resting geometry.
  *
- * The shared `motionAllowed` rule — manual OR OS low motion, or an active
- * `data-theme-ink` capture — short-circuits the whole handoff: starting while
- * suppressed paints the destination directly, and suppression arriving
+ * The shared root/OS motion policy short-circuits the whole handoff:
+ * starting while suppressed paints the destination directly, and suppression arriving
  * mid-flight lets the shared watcher cancel the active handoff — animations
  * cancelled, inert snapshots dropped, hidden live slots restored before the
  * next paint.

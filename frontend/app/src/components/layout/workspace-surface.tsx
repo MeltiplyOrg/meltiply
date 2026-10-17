@@ -28,7 +28,7 @@ export function WorkspaceSurface({
     <div className={cn("flex h-full min-h-0 w-full flex-col gap-5 overflow-hidden", className)}>
       <header className="flex shrink-0 flex-col justify-between gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0">
-          <h1 className="text-[23px] leading-8 font-semibold tracking-[-0.02em] text-ink">
+          <h1 className="text-page-title leading-8 font-semibold tracking-page-title text-ink">
             {title}
           </h1>
           <p className="mt-1 text-[13px] leading-5 text-ink-2">{description}</p>

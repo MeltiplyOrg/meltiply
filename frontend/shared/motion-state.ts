@@ -9,12 +9,11 @@ export function readSystemLowMotion(): boolean {
   }
 }
 
-/** Allows spatial effects only outside the root presentation policy, OS reduction, and ink capture. */
+/** Allows spatial effects only outside the root presentation policy and device reduction. */
 export function motionAllowed(): boolean {
   return (
     typeof document !== "undefined" &&
     !document.documentElement.hasAttribute("data-low-motion") &&
-    !readSystemLowMotion() &&
-    !document.documentElement.hasAttribute("data-theme-ink")
+    !readSystemLowMotion()
   );
 }

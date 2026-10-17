@@ -41,7 +41,7 @@ export interface EffectTiming {
   fill?: FillMode;
 }
 
-/** Every in-flight shared effect, so preference changes and ink capture can cancel them all. */
+/** Tracks shared effects so navigation or root/OS suppression can cancel them together. */
 const activeEffects = new Set<Animation>();
 
 /** Latest effect per element; a new effect on the same element replaces the previous one. */
@@ -51,9 +51,8 @@ let cancellingEffects = false;
 
 /**
  * Plays one bounded WAAPI effect on a mounted element, replacing any effect
- * already running on it. The shared `motionAllowed` rule — manual root
- * low-motion OR live OS `prefers-reduced-motion` OR an active `data-theme-ink`
- * capture — is evaluated at call time: when disallowed, the previous effect is
+ * already running on it. The shared root/OS motion policy is evaluated at call
+ * time: when disallowed, the previous effect is
  * still cancelled but no new one starts, so underlying styles are the final
  * state and cancellation never hides content or leaves a fixed height behind.
  * Completion and cancellation both release tracking.
@@ -87,9 +86,9 @@ export function playEffect(
 
 /**
  * Cancels tracked effects and synchronously restores their owners' live DOM.
- * Ink capture calls this before cloning, including held toolbar snapshots that
- * have not started WAAPI yet. The reentry guard permits an owner to register
- * cancelEffects itself without recursively flushing the same cancellation.
+ * Public navigation and policy changes flush held effects and snapshots.
+ * The reentry guard permits an owner to register cancelEffects itself
+ * without recursively flushing the same cancellation.
  */
 export function cancelEffects(): void {
   if (cancellingEffects) return;
@@ -140,10 +139,9 @@ export function riseEffect(element: Element, delay = 0): Animation | null {
 
 /**
  * Calls the owner's cleanup when root/OS policy suppresses spatial motion.
- * Explicit cancelEffects also flushes registered owners synchronously before
- * ink capture, so temporary snapshots and hidden live controls cannot leak
- * into the captured document. Returns a disposer for both policy observation
- * and the cancellation registration.
+ * Explicit cancellation also flushes registered owners synchronously so
+ * temporary snapshots and hidden controls cannot outlive their page.
+ * Returns a disposer for policy observation and cancellation registration.
  */
 export function watchMotionSuppression(onSuppressed: () => void): () => void {
   suppressionCleanups.add(onSuppressed);
@@ -153,7 +151,7 @@ export function watchMotionSuppression(onSuppressed: () => void): () => void {
   const observer = new MutationObserver(check);
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["data-low-motion", "data-theme-ink"],
+    attributeFilter: ["data-low-motion"],
   });
   let media: MediaQueryList | null = null;
   try {

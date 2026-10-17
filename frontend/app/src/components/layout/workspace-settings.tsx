@@ -45,7 +45,7 @@ export function WorkspaceSettings({ compact = false }: { compact?: boolean }) {
           size={compact ? "icon" : "default"}
           aria-label={t("Settings")}
           title={t("Settings")}
-          className={cn("workspace-settings-trigger", !compact && "w-full justify-start")}
+          className={cn(!compact && "w-full justify-start")}
         >
           <Settings className="size-4" aria-hidden="true" />
           {!compact && t("Settings")}

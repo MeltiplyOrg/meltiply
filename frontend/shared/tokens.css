@@ -41,6 +41,8 @@
     Arial, sans-serif;
   --font-heading: var(--font-sans);
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-title: 23px;
+  --tracking-title: -0.02em;
 
   --page: #fbfaf8;
   --canvas: #f4f3f0;

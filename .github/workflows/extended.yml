@@ -58,7 +58,7 @@ jobs:
         if: inputs.lane == 'frontend-ui'
         run: |
           cd frontend/app
-          npx --yes react-doctor@latest --verbose --scope changed
+          npx --yes react-doctor@latest --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
           cd ../..
           bun run --filter frontend-app check
           bun run --filter frontend-public check

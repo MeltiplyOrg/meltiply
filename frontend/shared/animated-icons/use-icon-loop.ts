@@ -16,15 +16,12 @@ import { useMotionPreference, useMotionAllowed } from "../motion-preference";
  *    timeout is cancelled immediately and the runner is marked idle.
  * 4. **Safety & Teardown**: Component unmounting clears pending timeouts and suppresses downstream animation promises
  *    via ref-tracked mount state. A generation stamp invalidates in-flight `controls.start()` promise chains whenever
- *    a cycle is cancelled (low motion, ink freeze, or unmount), so stale resolutions can never restart an old loop.
+ *    a cycle is cancelled (policy suppression or unmount), so stale resolutions cannot restart an old loop.
  *    Teardown resets idle flags so StrictMode's effect replay can restart an initially active icon.
- * 5. **Low Motion**: When {@link useMotionPreference} reports effective low motion (manual toggle or OS
- *    `prefers-reduced-motion`, including a live OS change), any running cycle is stopped, the icon snaps back to
- *    `normal`, the rest timer is cancelled, and no new cycle starts — hover input is ignored until motion resumes.
- * 6. **Ink Freeze**: While {@link useMotionAllowed} reports `false` only because the shared theme-ink snapshot is
- *    capturing (`data-theme-ink` without low motion), in-flight cycles are stopped *in place* — the icon keeps its
- *    current pose so the ink clone matches the live source — and loops resume from hover state once ink clears.
- *    Provider-free landing islands observe the same root attributes via the shared subscription.
+ * 5. **Motion policy**: Root presentation policy or OS reduction stops each cycle,
+ *    restores `normal`, and clears its timer. Provider-free landing islands observe
+ *    the same root through the shared subscription.
+ * 6. **Suppression**: Other disallowed states stop playback until the shared policy permits it.
  *
  * @param active - Boolean indicating whether hover/active state is engaged (either internally or via external props).
  * @param restMs - Rest duration in milliseconds spent at rest between successive animation cycles while hovered (default: 2000ms).
@@ -76,8 +73,7 @@ export function useIconLoop(active: boolean, restMs: number = 2000) {
       return;
     }
 
-    // During ink capture, freeze the current pose without resetting to `normal` so the
-    // cloned snapshot stays pixel-aligned; cycles resume from the persisted hover state.
+    // Stop in place while the shared effect policy disallows playback.
     if (!allowed) {
       runningRef.current = false;
       generationRef.current += 1;

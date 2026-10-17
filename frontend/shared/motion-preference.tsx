@@ -16,7 +16,7 @@ function subscribe(subscriber: () => void): () => void {
     const observer = new MutationObserver(notifySubscribers);
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-low-motion", "data-theme-ink"],
+      attributeFilter: ["data-low-motion"],
     });
     let query: MediaQueryList | undefined;
     try {

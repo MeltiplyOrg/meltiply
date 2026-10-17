@@ -48,7 +48,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
   };
 
   return (
-    <div className="workspace-shell flex h-screen h-dvh w-full overflow-hidden bg-page text-ink antialiased">
+    <div className="flex h-screen h-dvh w-full overflow-hidden bg-page text-ink antialiased">
       <a href="#workspace-content" className="workspace-skip-link">
         {t("Skip to content")}
       </a>

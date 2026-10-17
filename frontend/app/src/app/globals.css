@@ -20,6 +20,8 @@
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
   --font-heading: var(--font-heading);
+  --text-page-title: var(--text-title);
+  --tracking-page-title: var(--tracking-title);
 
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);

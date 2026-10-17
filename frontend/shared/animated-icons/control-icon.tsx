@@ -27,8 +27,8 @@ const defaultControlSelector = "a, button, [role='tab'], .feature-card";
  * pointer and keyboard focus, so leaving with the pointer does not cancel a
  * still-focused control. A first-frame check also covers interaction before
  * lazy hydration. Wrapping the icon keeps the parent's
- * semantics, labels, and focus order untouched; `useIconLoop` still gates playback on the shared
- * low-motion and ink flags, so nothing extra is needed here.
+ * semantics, labels, and focus order untouched; `useIconLoop` gates playback on
+ * the shared root/OS motion policy.
  *
  * The bound control is captured once per mount; Astro islands never reparent without remounting.
  *

@@ -45,7 +45,7 @@ function loadPage() {
   preferenceObserver.disconnect();
   preferenceObserver.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["data-low-motion", "data-theme-ink"],
+    attributeFilter: ["data-low-motion"],
   });
   syncMotion();
 }

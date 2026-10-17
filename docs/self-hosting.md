@@ -111,8 +111,8 @@ for a single-use, expiring reset link. Recovery responses do not disclose whethe
 an address is registered. Mailpit proves SMTP submission and link handling in CI,
 not delivery to an external inbox.
 
-Open **Account security** from desktop or mobile navigation to change the password
-or configure an authenticator. Enrollment provides a manual setup key and backup
+Open **Settings → Security** on desktop or mobile to see password and authenticator
+controls directly. Enrollment provides a manual setup key and backup
 codes, then requires a live authenticator code before activation. Save backup
 codes offline: each works once; generating replacements invalidates the old set.
 Password reauthentication protects enrollment, replacement, and disabling the

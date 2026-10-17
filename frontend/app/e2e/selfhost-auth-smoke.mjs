@@ -112,8 +112,8 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await signIn(password);
     await page.waitForURL(/\/posts/);
     phase = "password change";
-    await page.getByRole("button", { name: "Account security", exact: true }).click();
-    let dialog = page.getByRole("dialog", { name: "Account security" });
+    await page.goto(`${origin}/settings?section=security`);
+    let dialog = page.getByRole("region", { name: "Account security" });
     await dialog.getByLabel("Current password", { exact: true }).fill(password);
     const changedPassword = randomUUID() + randomUUID();
     await dialog.getByLabel("New password", { exact: true }).fill(changedPassword);
@@ -154,8 +154,8 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await signIn(recoveredPassword);
     await page.waitForURL(/\/posts/);
     phase = "authenticator enrollment";
-    await page.getByRole("button", { name: "Account security", exact: true }).click();
-    dialog = page.getByRole("dialog", { name: "Account security" });
+    await page.goto(`${origin}/settings?section=security`);
+    dialog = page.getByRole("region", { name: "Account security" });
     await dialog.getByLabel("Current password", { exact: true }).fill(recoveredPassword);
     await dialog.getByRole("button", { name: "Set up authenticator", exact: true }).click();
     const setupKey = await dialog
@@ -179,8 +179,8 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
     await page.waitForURL(/\/posts/);
     phase = "authenticator removal";
-    await page.getByRole("button", { name: "Account security", exact: true }).click();
-    dialog = page.getByRole("dialog", { name: "Account security" });
+    await page.goto(`${origin}/settings?section=security`);
+    dialog = page.getByRole("region", { name: "Account security" });
     await dialog.getByLabel("Current password", { exact: true }).fill(recoveredPassword);
     await dialog.getByRole("button", { name: "Disable two-factor", exact: true }).click();
     await page.waitForURL(/\/sign-in/);

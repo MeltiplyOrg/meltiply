@@ -144,6 +144,23 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("settings-light-desktop.png"),
     fullPage: true,
   });
+  await page.getByRole("button", { name: "Security", exact: true }).click();
+  const security = page.getByRole("region", { name: "Account security", exact: true });
+  await expect(security.getByLabel("Current password", { exact: true })).toBeVisible();
+  await expect(security.getByLabel("New password", { exact: true })).toBeVisible();
+  await expect(
+    security.getByRole("button", { name: "Set up authenticator", exact: true }),
+  ).toBeVisible();
+  await security.getByRole("button", { name: "Set up authenticator", exact: true }).click();
+  await expect(security.getByRole("alert")).toContainText(
+    "Enter your current password to continue.",
+  );
+  await page.setViewportSize({ width: 1808, height: 984 });
+  await page.screenshot({
+    path: testInfo.outputPath("settings-security-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.locator("aside").getByRole("button", { name: "Posts", exact: true }).click();
   await waitForWorkspace(page);
   await page.screenshot({ path: testInfo.outputPath("posts-light-desktop.png"), fullPage: true });
@@ -209,6 +226,13 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("settings-mobile.png"), fullPage: true });
+  await page.getByRole("button", { name: "Security", exact: true }).click();
+  await expect(security.getByLabel("Current password", { exact: true })).toBeVisible();
+  await expect(security.getByLabel("New password", { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("settings-security-mobile.png"),
+    fullPage: true,
+  });
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.getByRole("button", { name: "Light", exact: true }).click();
   await expect

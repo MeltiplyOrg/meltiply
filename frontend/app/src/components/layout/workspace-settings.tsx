@@ -195,14 +195,7 @@ export default function WorkspaceSettings() {
               </Button>
             </section>
           )}
-          {section === "security" && (
-            <section className="flex items-center gap-3 rounded-control border border-line bg-surface p-3">
-              <AccountSecurity />
-              <span className="text-(length:--font-size-control)">
-                {t("Open account security")}
-              </span>
-            </section>
-          )}
+          {section === "security" && <AccountSecurity />}
         </div>
       </div>
     </div>

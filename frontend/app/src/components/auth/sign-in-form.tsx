@@ -36,7 +36,8 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
   const [code, setCode] = useState("");
   const [backup, setBackup] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(() =>
+    params.has("verified") && !linkError ? t("Email verified. Sign in to continue.") : null);
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
@@ -127,11 +128,11 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
     finally { setBusy(false); }
   };
 
-  const heading = mode === "setup" ? "Make this workspace yours."
-    : mode === "recovery" ? "Recover your access."
-      : mode === "reset" ? "Choose a new password."
-        : mode === "factor" ? "One more security check."
-          : "Welcome back.";
+  const heading = mode === "setup" ? t("Make this workspace yours.")
+    : mode === "recovery" ? t("Recover your access.")
+      : mode === "reset" ? t("Choose a new password.")
+        : mode === "factor" ? t("One more security check.")
+          : t("Welcome back.");
   return {
     mode, setMode, email, setEmail, name, setName, password, setPassword,
     setupSecret, setSetupSecret, code, setCode, backup, setBackup, error,
@@ -169,9 +170,9 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
       </aside>
       <div className="flex flex-col justify-center p-8 sm:p-12">
         <div className="mb-8 space-y-3">
-          <span className="inline-flex items-center gap-2 text-xs font-medium text-ink-3"><KeyRound className="size-3.5" aria-hidden="true" />{t(mode === "setup" ? "INITIAL SETUP" : "OWNER ACCESS")}</span>
-          <h1 ref={headingRef} tabIndex={-1} className="text-3xl font-semibold tracking-tight text-ink">{t(heading)}</h1>
-          <p className="text-sm leading-relaxed text-ink-2">{t(mode === "setup" ? "Create the only account for this installation. You’ll need the setup secret from your deployment configuration." : mode === "factor" ? "Enter a code from your authenticator, or use a saved backup code." : mode === "recovery" ? "We’ll send a reset link to the owner’s email address." : mode === "reset" ? "Use a unique password or a long passphrase. All previous sessions will be signed out." : "Sign in with the owner account to continue to your workspace.")}</p>
+          <span className="inline-flex items-center gap-2 text-xs font-medium text-ink-3"><KeyRound className="size-3.5" aria-hidden="true" />{(mode === "setup" ? t("INITIAL SETUP") : t("OWNER ACCESS"))}</span>
+          <h1 ref={headingRef} tabIndex={-1} className="text-3xl font-semibold tracking-tight text-ink">{heading}</h1>
+          <p className="text-sm leading-relaxed text-ink-2">{(mode === "setup" ? t("Create the only account for this installation. You’ll need the setup secret from your deployment configuration.") : (mode === "factor" ? t("Enter a code from your authenticator, or use a saved backup code.") : (mode === "recovery" ? t("We’ll send a reset link to the owner’s email address.") : (mode === "reset" ? t("Use a unique password or a long passphrase. All previous sessions will be signed out.") : t("Sign in with the owner account to continue to your workspace.")))))}</p>
         </div>
         {error && <Alert id="auth-error" variant="destructive" className="mb-5">{t(error)}</Alert>}
         {notice && <p role="status" className="mb-5 text-sm leading-relaxed text-ink-2">{notice}</p>}
@@ -182,10 +183,10 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
               {(mode === "setup" || mode === "signin" || mode === "recovery") && <div className="space-y-2"><label htmlFor="auth-email" className="text-sm font-medium text-ink">{t("Email address")}</label><Input id="auth-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} /></div>}
               {(mode === "setup" || mode === "signin" || mode === "reset") && <div className="space-y-2"><label htmlFor="auth-password" className="text-sm font-medium text-ink">{t("Password")}</label><Input id="auth-password" type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} minLength={mode === "signin" ? undefined : 8} maxLength={128} required value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />{mode !== "signin" && <p className="text-xs text-ink-3">{t("8–128 characters. Passphrases and password managers welcome.")}</p>}</div>}
               {mode === "setup" && <div className="space-y-2"><label htmlFor="auth-setup" className="text-sm font-medium text-ink">{t("Setup secret")}</label><Input id="auth-setup" type="password" autoComplete="off" required minLength={32} value={setupSecret} onChange={(event) => setSetupSecret(event.target.value)} disabled={busy} aria-describedby="setup-help" /><p id="setup-help" className="text-xs leading-relaxed text-ink-3">{t("Use AUTH_SETUP_SECRET from your private deployment environment. It is not your account password.")}</p></div>}
-              {mode === "factor" && <div className="space-y-2"><label htmlFor="auth-code" className="text-sm font-medium text-ink">{t(backup ? "Backup code" : "Authenticator code")}</label><Input id="auth-code" autoComplete="one-time-code" inputMode={backup ? "text" : "numeric"} required value={code} onChange={(event) => setCode(event.target.value)} disabled={busy} /></div>}
-              <Button type="submit" className="w-full" disabled={busy}>{t(busy ? "Please wait…" : mode === "setup" ? "Create owner account" : mode === "recovery" ? "Send reset link" : mode === "reset" ? "Update password" : mode === "factor" ? "Verify and sign in" : "Sign in")}<ArrowRight className="size-4" aria-hidden="true" /></Button>
+              {mode === "factor" && <div className="space-y-2"><label htmlFor="auth-code" className="text-sm font-medium text-ink">{(backup ? t("Backup code") : t("Authenticator code"))}</label><Input id="auth-code" autoComplete="one-time-code" inputMode={backup ? "text" : "numeric"} required value={code} onChange={(event) => setCode(event.target.value)} disabled={busy} /></div>}
+              <Button type="submit" className="w-full" disabled={busy}>{(busy ? t("Please wait…") : (mode === "setup" ? t("Create owner account") : (mode === "recovery" ? t("Send reset link") : (mode === "reset" ? t("Update password") : (mode === "factor" ? t("Verify and sign in") : t("Sign in"))))))}<ArrowRight className="size-4" aria-hidden="true" /></Button>
               {mode === "signin" && <div className="flex flex-wrap justify-between gap-2"><Button type="button" variant="link" className="h-auto p-0 text-xs" disabled={busy} onClick={() => { setMode("recovery"); setError(null); setNotice(null); }}>{t("Forgot password?")}</Button><Button type="button" variant="link" className="h-auto p-0 text-xs" disabled={busy} onClick={resend}>{t("Resend verification")}</Button></div>}
-              {mode === "factor" && <Button type="button" variant="link" disabled={busy} onClick={() => { setBackup(!backup); setCode(""); setError(null); }}>{t(backup ? "Use authenticator instead" : "Use a backup code")}</Button>}
+              {mode === "factor" && <Button type="button" variant="link" disabled={busy} onClick={() => { setBackup(!backup); setCode(""); setError(null); }}>{(backup ? t("Use authenticator instead") : t("Use a backup code"))}</Button>}
               {(mode === "recovery" || mode === "factor" || mode === "reset") && <Button type="button" variant="ghost" className="w-full" disabled={busy} onClick={() => { setMode("signin"); setCode(""); setError(null); setNotice(null); }}>{t("Back to sign in")}</Button>}
             </form>}
       </div>

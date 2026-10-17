@@ -193,7 +193,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: false
-                required: [totpURI, backupCodes]
+                required: [method, totpURI, backupCodes]
                 properties:
                   method:
                     type: string
@@ -286,26 +286,19 @@ paths:
                 trustDevice:
                   type: boolean
                   default: false
-      responses: &factorVerifyResponses
+      responses:
         "200":
           description: Factor accepted and session established or enrollment confirmed.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: boolean
-                  token:
-                    type: string
-                  user:
-                    $ref: "#/components/schemas/AuthUser"
+                $ref: "#/components/schemas/AuthTokenResult"
         "400":
           $ref: "#/components/responses/AuthError"
         "401":
           $ref: "#/components/responses/AuthError"
         "429":
-          $ref: "#/components/responses/RateLimited"
+          $ref: "#/components/responses/AuthRateLimited"
   /api/auth/two-factor/verify-backup-code:
     servers: *authServers
     post:
@@ -315,7 +308,21 @@ paths:
       summary: Consume a backup code to complete a pending sign-in
       description: Requires the signed pending-factor cookie. A consumed code cannot be reused.
       requestBody: *factorCodeBody
-      responses: *factorVerifyResponses
+      responses:
+        "200":
+          description: Backup code consumed and a session established.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenResult"
+        "400":
+          $ref: "#/components/responses/AuthError"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "409":
+          $ref: "#/components/responses/AuthError"
+        "429":
+          $ref: "#/components/responses/AuthRateLimited"
   /api/auth/sign-in/email:
     servers:
       - url: http://localhost:8787
@@ -2392,6 +2399,17 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    AuthRateLimited:
+      description: Authentication attempt budget or temporary factor lockout is exhausted.
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/ErrorEnvelope"
+              - $ref: "#/components/schemas/AuthError"
     UpstreamError:
       description: Required synchronous upstream failed.
       content:
@@ -2636,7 +2654,9 @@ components:
         status:
           type: boolean
         user:
-          $ref: "#/components/schemas/AuthUser"
+          oneOf:
+            - $ref: "#/components/schemas/AuthUser"
+            - type: "null"
     AuthError:
       type: object
       additionalProperties: false

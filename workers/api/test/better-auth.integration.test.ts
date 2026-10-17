@@ -3,7 +3,8 @@ import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import { createHyperdrivePool } from "@meltiply/database";
 import { activeOwnerIdentity } from "../src/auth-policy";
-import { jwtClaims } from "@meltiply/auth";
+import { createJwtVerifier, jwtClaims } from "@meltiply/auth";
+import { createApiApp } from "../src/app";
 
 import { betterAuthFor, checkAuthRateLimit } from "../src/better-auth";
 import { systemPoolFor } from "../src/database";
@@ -620,6 +621,28 @@ describe("session cookie, bearer JWT, and sign-out", () => {
     expect(await sessionRowsFor(sessionUserId)).toBe(0);
     expect((await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null).toBe(true);
     await expect(activeOwnerIdentity(stagingEnv(mail), jwtClaims(payload))).rejects.toMatchObject({ status: 401 });
+    const published = recordOf(await (await auth.handler(new Request(`${baseURL}/api/auth/jwks`))).json());
+    if (!Array.isArray(published.keys)) throw new Error("Expected published verification keys");
+    const publicKey = recordOf(published.keys[0]);
+    if (publicKey.kty !== "OKP" || publicKey.crv !== "Ed25519" || typeof publicKey.x !== "string") throw new Error("Unexpected auth signing algorithm");
+    const key = await crypto.subtle.importKey("jwk", { kty: publicKey.kty, crv: publicKey.crv, x: publicKey.x }, { name: "Ed25519" }, false, ["verify"]);
+    const verifier = createJwtVerifier({ audience: baseURL, issuer: baseURL }, async () => key);
+    let relays = 0;
+    const app = createApiApp({
+      verifyJwtToken: async (env, token) => activeOwnerIdentity(env, await verifier(token)),
+      resolveActor: async () => { throw new Error("Revoked authority reached actor resolution"); },
+    });
+    const denied = await app.request("/api/v1/posts", {
+      method: "POST", headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }, body: "{}",
+    }, {
+      ...stagingEnv(mail),
+      AUTOMATION: {
+        relayOutbox: async () => { relays++; return { claimed: 0, dead: 0, failed: 0, published: 0 }; },
+        requestCommentsSync: async () => 0,
+      },
+    });
+    expect(denied.status).toBe(401);
+    expect(relays).toBe(0);
   });
 });
 

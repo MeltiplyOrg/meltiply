@@ -336,7 +336,7 @@ operations:
     request: { password: contract-placeholder-not-a-credential }
     success:
       status: 200
-      body: { totpURI: "otpauth://totp/contract-placeholder", backupCodes: [contract-placeholder] }
+      body: { method: totp, totpURI: "otpauth://totp/contract-placeholder", backupCodes: [contract-placeholder] }
     errors:
       - status: 401
         body: *auth_error
@@ -362,7 +362,7 @@ operations:
     request: { code: contract-placeholder, trustDevice: false }
     success:
       status: 200
-      body: { status: true }
+      body: { token: contract-placeholder, user: *auth_user }
     errors:
       - status: 401
         body: *auth_error

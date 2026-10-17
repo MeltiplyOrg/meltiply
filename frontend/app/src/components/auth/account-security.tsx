@@ -193,11 +193,7 @@ export function AccountSecurity(): React.ReactElement {
               <section className="space-y-3 border-t border-line pt-4">
                 <h3 className="text-sm font-medium text-ink">{t("Two-factor authentication")}</h3>
                 <p className="text-sm text-ink-2">
-                  {t(
-                    user?.twoFactorEnabled
-                      ? "An authenticator code is required at sign-in. Use a backup code if you lose your authenticator."
-                      : "Add an authenticator app and save recovery codes before enabling this extra sign-in check.",
-                  )}
+                  {(user?.twoFactorEnabled ? t("An authenticator code is required at sign-in. Use a backup code if you lose your authenticator.") : t("Add an authenticator app and save recovery codes before enabling this extra sign-in check."))}
                 </p>
                 {user?.twoFactorEnabled ? (
                   <div className="flex flex-wrap gap-2">

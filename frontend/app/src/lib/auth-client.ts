@@ -134,7 +134,7 @@ async function signInEmail(credentials: SignInCredentials): Promise<AuthTokenRes
 async function signUpEmail({ setupSecret, ...credentials }: SignUpCredentials): Promise<AuthTokenResult> {
   const baseUrl = getApiBaseUrl();
   const response = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
-    body: JSON.stringify(credentials),
+    body: JSON.stringify({ ...credentials, callbackURL: `${window.location.origin}/sign-in?verified=1` }),
     credentials: "include",
     headers: {
       "Content-Type": "application/json",

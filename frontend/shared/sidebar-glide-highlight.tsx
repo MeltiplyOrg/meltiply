@@ -8,13 +8,14 @@ import {
   type RefObject,
 } from "react";
 import {
+  LazyMotion,
   animate,
   domAnimation,
-  LazyMotion,
   m,
   useMotionValue,
   type MotionValue,
 } from "motion/react";
+import { useLatchedValue } from "./use-latched-value";
 
 /** Avoids React's server-render warning; commit-time FLIP needs a layout effect on the client. */
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
@@ -359,6 +360,12 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
   const { className, viewportSelector } = props;
 
   const { target, clip, scrollOffsetX, scrollOffsetY } = useGlideTracking(props);
+  /**
+   * Geometry stays latched for the exit: clearing the target starts the opacity
+   * fade, and resetting the box at the same commit would collapse the pill to a
+   * point and read as an instant disappearance instead of a fade.
+   */
+  const box = useLatchedValue(target);
 
   const x = useMotionValue(0);
   const y = useMotionValue(0);
@@ -420,11 +427,11 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
    * style keys straight to `style.setProperty`.
    */
   const pillVars = {
-    "--glide-top": `${target?.top ?? 0}px`,
-    "--glide-left": `${target?.left ?? 0}px`,
-    "--glide-width": `${target?.width ?? 0}px`,
-    "--glide-height": `${target?.height ?? 0}px`,
-    "--glide-radius": target?.borderRadius ?? "7px",
+    "--glide-top": `${box?.top ?? 0}px`,
+    "--glide-left": `${box?.left ?? 0}px`,
+    "--glide-width": `${box?.width ?? 0}px`,
+    "--glide-height": `${box?.height ?? 0}px`,
+    "--glide-radius": box?.borderRadius ?? "7px",
     "--glide-x": x,
     "--glide-y": y,
     "--glide-scale-x": scaleX,

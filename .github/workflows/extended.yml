@@ -24,7 +24,6 @@ concurrency:
 env:
   CI: "true"
   WRANGLER_SEND_METRICS: "false"
-  MELTIPLY_DEV_TUNNEL: "0"
 
 jobs:
   check:

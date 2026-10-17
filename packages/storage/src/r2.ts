@@ -142,13 +142,14 @@ export class R2ObjectStore extends EffectObjectStore {
    * destination write directly. `ifSourceEtagMatches` pins the source
    * generation so a staging key rewritten by a still-valid upload grant cannot
    * be promoted, and `ifDestinationAbsent` makes a replayed copy adopt the
-   * destination a crashed attempt already wrote.
+   * destination a crashed attempt already wrote. R2 answers a failed
+   * precondition with the object metadata and no body, so a bodyless response
+   * declines the copy exactly like an absent source.
    *
    * @param sourceKey - Existing source object key.
    * @param destinationKey - Destination object key; left untouched when it already exists.
    * @param options - `ifSourceEtagMatches` required source ETag guard, `contentType` written metadata, `ifDestinationAbsent` destination guard.
-   * @returns Metadata of the copy, or `null` when the source is absent/Etag-mismatched or the destination already exists.
-   * @throws {TypeError} If the matched object exposes no readable body stream.
+   * @returns Metadata of the copy, or `null` when the source is absent, its pinned ETag no longer matches, or the destination already exists.
    */
   async copyObject(
     sourceKey: string,
@@ -163,9 +164,9 @@ export class R2ObjectStore extends EffectObjectStore {
       onlyIf: { etagMatches: options.ifSourceEtagMatches },
     });
     if (!source) return null;
-    if (!source.body) {
-      throw new TypeError("source object body is unavailable");
-    }
+    // A conditional get whose precondition failed still returns the object, just
+    // without a body, so the pinned source generation is gone: decline the copy.
+    if (!source.body) return null;
     const copied = await this.bucket.put(destinationKey, source.body, {
       ...(options.contentType ? { httpMetadata: { contentType: options.contentType } } : {}),
       ...(options.ifDestinationAbsent ? { onlyIf: { etagDoesNotMatch: "*" } } : {}),

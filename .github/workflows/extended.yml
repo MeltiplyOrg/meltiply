@@ -55,11 +55,19 @@ jobs:
           go build -C "$RUNNER_TEMP/minio" -o "$RUNNER_TEMP/minio-server" .
           MINIO_ROOT_USER=s3-check-access-key MINIO_ROOT_PASSWORD=s3-check-secret-key \
             "$RUNNER_TEMP/minio-server" server "$RUNNER_TEMP/storage-check" >"$RUNNER_TEMP/minio.log" 2>&1 &
-          echo "$!" >"$RUNNER_TEMP/storage-check.pid"
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then break; fi
+          minio_pid=$!
+          echo "$minio_pid" >"$RUNNER_TEMP/storage-check.pid"
+          minio_ready=false
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then minio_ready=true; break; fi
+            if ! kill -0 "$minio_pid" 2>/dev/null; then break; fi
             sleep 1
           done
+          if [ "$minio_ready" != true ]; then
+            echo "MinIO did not report healthy within 60s" >&2
+            cat "$RUNNER_TEMP/minio.log" >&2
+            exit 1
+          fi
           bun run storage:s3:check
       - name: Validate complete application gate
         if: inputs.lane == 'object-storage'
@@ -81,10 +89,17 @@ jobs:
           node workers/automation/processor/engine/server.mjs >"$RUNNER_TEMP/processor.log" 2>&1 &
           processor_pid=$!
           trap 'kill "$processor_pid"; rm -f scripts/selfhost/.storage-pipeline-check.mjs' EXIT
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:8082/healthz; then break; fi
+          processor_ready=false
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8082/healthz; then processor_ready=true; break; fi
+            if ! kill -0 "$processor_pid" 2>/dev/null; then break; fi
             sleep 1
           done
+          if [ "$processor_ready" != true ]; then
+            echo "Processor did not report healthy within 60s" >&2
+            cat "$RUNNER_TEMP/processor.log" >&2
+            exit 1
+          fi
           # Miniflare transfers R2 body streams between threads; this needs Node, not Bun.
           bun build scripts/selfhost/storage-pipeline-check.ts --target=node \
             --external miniflare --external pg --external effect --external zod \
@@ -140,11 +155,17 @@ jobs:
           setsid bun run --no-install vp preview --host 127.0.0.1 --port 3000 --strictPort >/tmp/meltiply-preview.log 2>&1 &
           preview_pid=$!
           trap 'kill -TERM -- "-$preview_pid" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:3000/posts >/dev/null; then break; fi
-            kill -0 "$preview_pid"
+          preview_ready=false
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/posts >/dev/null; then preview_ready=true; break; fi
+            if ! kill -0 "$preview_pid" 2>/dev/null; then break; fi
             sleep 1
           done
+          if [ "$preview_ready" != true ]; then
+            echo "Preview did not report ready within 60s" >&2
+            cat /tmp/meltiply-preview.log >&2
+            exit 1
+          fi
           ../../scripts/ci/lighthouse.sh http://127.0.0.1:3000/posts ../../artifacts/performance/lighthouse.json
           bun run --cwd ../public check
       - name: Stop owned local services

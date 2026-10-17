@@ -187,6 +187,33 @@ describe("R2ObjectStore", () => {
     expect(put).not.toHaveBeenCalled();
   });
 
+  it("declines a copy whose source R2 answered without a body", async () => {
+    // R2 answers a failed conditional get with the object metadata and no body,
+    // so the pinned source generation is gone and nothing may be promoted.
+    const put = vi.fn();
+    const store = new R2ObjectStore({
+      createMultipartUpload: vi.fn(),
+      delete: vi.fn(),
+      get: vi.fn().mockResolvedValue({
+        etag: "etag-staged",
+        key: "staging/org/asset/session/clip.mp4",
+        size: 42,
+        uploaded: new Date("2026-01-01T00:00:00Z"),
+      }),
+      head: vi.fn(),
+      put,
+      resumeMultipartUpload: vi.fn(),
+    });
+
+    await expect(
+      store.copyObject("staging/org/asset/session/clip.mp4", "org/asset/original", {
+        ifDestinationAbsent: true,
+        ifSourceEtagMatches: "etag-rewritten-away",
+      }),
+    ).resolves.toBeNull();
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it("adopts an existing destination instead of duplicating a replayed copy", async () => {
     const put = vi.fn().mockResolvedValue(null);
     const store = new R2ObjectStore({

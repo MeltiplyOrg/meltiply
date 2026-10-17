@@ -47,6 +47,21 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     )
     .toBe(true);
   const accountTrigger = page.getByRole("button", { name: "Account menu", exact: true });
+  const footerSlots = await Promise.all(
+    [
+      page.locator("aside").getByRole("link", { name: "Help and resources", exact: true }),
+      page.locator("aside").getByRole("button", { name: "Settings", exact: true }),
+      accountTrigger,
+    ].map(async (row) => {
+      const box = await row.locator(":scope > :first-child").boundingBox();
+      if (!box) throw new Error("Footer row is missing its leading icon slot");
+      return box;
+    }),
+  );
+  for (const slot of footerSlots) {
+    expect(slot.width).toBeCloseTo(16, 0);
+    expect(slot.x).toBeCloseTo(footerSlots[0].x, 0);
+  }
   await accountTrigger.click();
   const accountMenu = page.getByRole("menu", { name: "Account menu", exact: true });
   await expect(

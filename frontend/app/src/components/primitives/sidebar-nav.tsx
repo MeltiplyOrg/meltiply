@@ -237,7 +237,12 @@ export function SidebarNav({ currentView, onNavigate, className }: SidebarNavPro
               aria-label={t("Account menu")}
               title={collapsed ? t("Account menu") : undefined}
             >
-              <AccountAvatar src={user?.avatarUrl} />
+              {/* The 24px identity avatar stays centered in the same 16px leading
+                  column as every other row icon, so footer glyphs and labels share
+                  one axis instead of the avatar pushing the name 8px right. */}
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                <AccountAvatar src={user?.avatarUrl} />
+              </span>
               {!collapsed && (
                 <>
                   <span className="min-w-0 flex-1 truncate font-medium text-ink">

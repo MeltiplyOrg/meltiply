@@ -1071,6 +1071,14 @@ describe("Posts surfaces", () => {
       </MemoryRouter>,
     );
 
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Select post" })[0]!);
+    expect(screen.getByRole("checkbox", { name: "Select all visible posts" })).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Select all visible posts" }),
+    ).not.toBePartiallyChecked();
+    expect(await screen.findByRole("region", { name: "Selection actions" })).toHaveTextContent(
+      "1 selected",
+    );
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all visible posts" }));
     const pill = await screen.findByRole("region", { name: "Selection actions" });
     fireEvent.click(within(pill).getByRole("button", { name: "Delete" }));

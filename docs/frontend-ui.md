@@ -93,6 +93,13 @@ filters retain real scope; no member/role editor is invented. `WorkspaceSurface`
 and shell main share Posts' `bg-surface`; shared Card, Table, and control tokens
 keep the palette consistent without erasing the directory composition.
 
+`BulkSelectionBar` uses the reference's inverse-ink, 10px-corner floating pill,
+24px safe-area-aware offset, compact icon action, separators, and icon-only
+Deselect control. Callers supply the real action icon, labels, pending state,
+and confirmation flow. Select-all controls are checked only for a fully selected
+visible collection; partial selection stays visually unchecked and the live pill
+reports the actual count. Table, Grid, day lists, and Channels use this rule.
+
 ## Settings
 
 `WorkspaceSettings` renders the full `/settings` React route. Its reference-style

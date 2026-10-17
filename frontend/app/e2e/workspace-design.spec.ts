@@ -34,20 +34,57 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.reload();
   await waitForWorkspace(page);
   await activeBrandProfileName(page);
-  await page
-    .locator("main header")
-    .getByRole("button", { name: "Create post", exact: true })
-    .click();
-  await page
-    .getByPlaceholder(/what do you want to publish/i)
-    .fill("Studio update — ready for the next publishing window.");
-  await page
-    .getByRole("button", { name: /save( draft)?$/i })
-    .first()
-    .click();
-  await expect(page.getByText(/Saved to your workspace at/i)).toBeVisible({ timeout: 30_000 });
-  await page.screenshot({ path: testInfo.outputPath("composer-desktop.png"), fullPage: true });
-  await page.getByRole("button", { name: /back to posts/i }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const faces = await Promise.all(
+          ["400 13px Geist", "500 13px Geist", "600 13px Geist", "400 13px 'Geist Mono'"].map(
+            (font) => document.fonts.load(font),
+          ),
+        );
+        return faces.every((family) => family.some((face) => face.status === "loaded"));
+      }),
+    )
+    .toBe(true);
+  for (const [index, caption] of [
+    "Studio update — ready for the next publishing window.",
+    "Second draft — selection review.",
+  ].entries()) {
+    await page
+      .locator("main header")
+      .getByRole("button", { name: "Create post", exact: true })
+      .click();
+    await page.getByPlaceholder(/what do you want to publish/i).fill(caption);
+    await page
+      .getByRole("button", { name: /save( draft)?$/i })
+      .first()
+      .click();
+    await expect(page.getByText(/Saved to your workspace at/i)).toBeVisible({ timeout: 30_000 });
+    if (index === 0)
+      await page.screenshot({ path: testInfo.outputPath("composer-desktop.png"), fullPage: true });
+    await page.getByRole("button", { name: /back to posts/i }).click();
+  }
+  const firstPost = page.getByRole("row").filter({ hasText: "Studio update" });
+  await firstPost.getByRole("checkbox", { name: "Select post", exact: true }).check();
+  const selectAllPosts = page.getByRole("checkbox", {
+    name: "Select all visible posts",
+    exact: true,
+  });
+  await expect(selectAllPosts).not.toBeChecked();
+  await expect(selectAllPosts).toHaveJSProperty("indeterminate", false);
+  const selectionPill = page.getByRole("region", { name: "Selection actions", exact: true });
+  await expect(selectionPill).toContainText("1 selected");
+  await page.setViewportSize({ width: 1808, height: 984 });
+  await page.screenshot({
+    path: testInfo.outputPath("posts-selection-pill-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await selectAllPosts.check();
+  await expect(selectionPill).toContainText("2 selected");
+  await expect(selectAllPosts).toBeChecked();
+  await selectionPill.getByRole("button", { name: "Deselect", exact: true }).click();
+  await expect(selectionPill).toBeHidden();
   await expect(page.getByRole("row").filter({ hasText: "Studio update" })).toBeVisible();
   const inspectTrigger = page
     .getByRole("row")
@@ -286,6 +323,13 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const mobileMenu = page.getByRole("button", { name: "Open navigation menu", exact: true });
   await expect(mobileMenu).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("posts-dark-mobile.png"), fullPage: true });
+  await firstPost.getByRole("checkbox", { name: "Select post", exact: true }).check();
+  await expect(selectionPill).toContainText("1 selected");
+  await page.screenshot({
+    path: testInfo.outputPath("posts-selection-pill-dark-mobile.png"),
+    fullPage: true,
+  });
+  await selectionPill.getByRole("button", { name: "Deselect", exact: true }).click();
   await inspectTrigger.click();
   await expect(inspector).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("post-drawer-mobile.png"), fullPage: true });
@@ -333,6 +377,9 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page).toHaveURL(/\/sign-in/);
 
   const publicUrl = process.env.MELTIPLY_E2E_PUBLIC_URL;
   if (publicUrl) {

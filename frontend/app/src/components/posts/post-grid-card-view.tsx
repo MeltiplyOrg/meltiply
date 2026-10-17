@@ -90,9 +90,6 @@ export const PostGridCardView = React.memo(function PostGridCardView({
           aria-label={t("Select all visible posts")}
           checked={allSelected}
           disabled={selectionDisabled}
-          ref={(element) => {
-            if (element) element.indeterminate = selectedCount > 0 && !allSelected;
-          }}
           onChange={() => onSetSelection(visibleIds, !allSelected)}
         />
         {t("Select all posts")}

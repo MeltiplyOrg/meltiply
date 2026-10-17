@@ -3,28 +3,28 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("./fonts/geist-400.ttf") format("truetype");
+  src: url("@meltiply/ui/fonts/geist-400.ttf") format("truetype");
 }
 @font-face {
   font-family: "Geist";
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url("./fonts/geist-500.ttf") format("truetype");
+  src: url("@meltiply/ui/fonts/geist-500.ttf") format("truetype");
 }
 @font-face {
   font-family: "Geist";
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url("./fonts/geist-600.ttf") format("truetype");
+  src: url("@meltiply/ui/fonts/geist-600.ttf") format("truetype");
 }
 @font-face {
   font-family: "Geist Mono";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("./fonts/geist-mono-400.ttf") format("truetype");
+  src: url("@meltiply/ui/fonts/geist-mono-400.ttf") format("truetype");
 }
 
 /*
@@ -163,6 +163,7 @@
   --rose: #e68aab;
   --gray: #8f8b84;
   --overlay: #000000;
+  --ink-inverse: var(--canvas);
   --tooltip-bg: var(--ink);
   --tooltip-fg: var(--canvas);
   --tooltip-muted: var(--ink-2);

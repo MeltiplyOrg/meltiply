@@ -1,8 +1,7 @@
 import { useContext, useSyncExternalStore, type ReactElement } from "react";
-import { Search as SearchIcon } from "lucide-react";
-import { useSearchContext } from "fumadocs-ui/contexts/search";
 import { ThemeIcon } from "@meltiply/ui/preference-icons";
 import { DocsThemeContext, DocsThemeProvider } from "./docs-theme";
+import { DocumentationSearchTrigger } from "./search";
 
 /** Keeps preference labels server-neutral until the browser palette is available. */
 function useMounted(): boolean {
@@ -10,22 +9,6 @@ function useMounted(): boolean {
     () => () => {},
     () => true,
     () => false,
-  );
-}
-
-/** Opens Fumadocs' real article index; this is separate from workspace jump search. */
-function SearchPrefButton(): ReactElement {
-  const { setOpenSearch } = useSearchContext();
-  return (
-    <button
-      type="button"
-      className="docs-pref-button"
-      aria-label="Search documentation"
-      title="Search documentation"
-      onClick={() => setOpenSearch(true)}
-    >
-      <SearchIcon className="docs-pref-button-icon" aria-hidden="true" size={16} />
-    </button>
   );
 }
 
@@ -47,7 +30,7 @@ export function DocsPreferences({
   const action = mounted ? `Switch to ${dark ? "light" : "dark"} theme` : "Switch theme";
   return (
     <div className="docs-prefs">
-      {includeSearch && <SearchPrefButton />}
+      {includeSearch && <DocumentationSearchTrigger />}
       <button
         type="button"
         className="docs-pref-button"

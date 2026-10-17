@@ -89,9 +89,6 @@ export const PostTableView = React.memo(function PostTableView({
                 aria-label={t("Select all visible posts")}
                 checked={allSelected}
                 disabled={selectionDisabled || visibleIds.length === 0}
-                ref={(element) => {
-                  if (element) element.indeterminate = selectedCount > 0 && !allSelected;
-                }}
                 onChange={() => onSetSelection(visibleIds, !allSelected)}
               />
             </TableHead>

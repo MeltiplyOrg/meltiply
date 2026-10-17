@@ -46,6 +46,7 @@
     "./effects": "./effects.ts",
     "./utils": "./utils.ts",
     "./copy-text": "./copy-text.ts",
+    "./fonts/*": "./fonts/*",
     "./tokens.css": "./tokens.css",
     "./motion.css": "./motion.css",
     "./public.css": "./public.css",

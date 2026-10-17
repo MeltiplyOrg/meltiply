@@ -30,7 +30,6 @@ export interface ChannelTableViewProps {
   channels: ChannelTableEntry[];
   selectedIds: ReadonlySet<string>;
   allVisibleSelected: boolean;
-  visibleSelectionIndeterminate: boolean;
   onToggleVisibleSelection: () => void;
   onToggleSelection: (id: string) => void;
   selectionDisabled?: boolean;
@@ -48,7 +47,6 @@ export function ChannelTableView({
   channels,
   selectedIds,
   allVisibleSelected,
-  visibleSelectionIndeterminate,
   onToggleVisibleSelection,
   onToggleSelection,
   selectionDisabled = false,
@@ -77,9 +75,6 @@ export function ChannelTableView({
                   checked={allVisibleSelected}
                   disabled={selectionDisabled || channels.length === 0}
                   aria-label={t("Select all visible channels")}
-                  ref={(element) => {
-                    if (element) element.indeterminate = visibleSelectionIndeterminate;
-                  }}
                   onChange={onToggleVisibleSelection}
                 />
               </TableHead>

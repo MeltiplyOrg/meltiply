@@ -20,8 +20,8 @@ import { navigate } from "astro:transitions/client";
 import { Search } from "lucide-react";
 import { useRef } from "react";
 
-/** Opens the canonical docs dialog from a compact homepage search icon. */
-function HomeSearchTrigger() {
+/** Opens the canonical article-index dialog from either public search entrypoint. */
+export function DocumentationSearchTrigger() {
   const { setOpenSearch } = useSearchContext();
   return (
     <button
@@ -50,7 +50,7 @@ export function HomeSearch() {
       theme={{ enabled: false }}
       search={{ SearchDialog: DefaultSearchDialog }}
     >
-      <HomeSearchTrigger />
+      <DocumentationSearchTrigger />
     </RootProvider>
   );
 }

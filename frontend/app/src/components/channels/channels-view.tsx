@@ -71,7 +71,7 @@ import {
   TopToolbarFilterChips,
   TopToolbarFilterChip,
 } from "@/components/layout/top-toolbar";
-import { AlertCircle, Check, Plus, Search, Share2, UserPlus } from "lucide-react";
+import { AlertCircle, Check, Plus, Search, Share2, Unplug, UserPlus } from "lucide-react";
 import { useMotionPreference } from "@meltiply/ui/motion-preference";
 import { cn } from "@meltiply/ui/utils";
 
@@ -444,7 +444,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   );
   const allVisibleSelected =
     channelEntries.length > 0 && visibleSelectedCount === channelEntries.length;
-  const visibleSelectionIndeterminate = visibleSelectedCount > 0 && !allVisibleSelected;
 
   /**
    * Toggles every currently visible row at once: a fully-selected visible set
@@ -867,7 +866,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 channels={channelEntries}
                 selectedIds={selectedIds}
                 allVisibleSelected={allVisibleSelected}
-                visibleSelectionIndeterminate={visibleSelectionIndeterminate}
                 onToggleVisibleSelection={handleToggleVisibleSelection}
                 onToggleSelection={handleToggleSelection}
                 selectionDisabled={bulkRunning}
@@ -1164,6 +1162,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
       <BulkSelectionBar
         count={selectedIds.size}
         actionLabel={t("Disconnect")}
+        actionIcon={Unplug}
         busyLabel={t("Disconnecting…")}
         busy={bulkRunning}
         onClear={() => setSelection((prev) => ({ ...prev, ids: new Set<string>() }))}

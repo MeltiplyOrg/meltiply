@@ -100,11 +100,6 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
                 aria-label={t("Select all posts for this day")}
                 checked={allDaySelected}
                 disabled={selectionDisabled}
-                ref={(el) => {
-                  if (el) {
-                    el.indeterminate = !allDaySelected && dayIds.some((id) => selectedIds.has(id));
-                  }
-                }}
                 onChange={() => onSetSelection(dayIds, !allDaySelected)}
               />
               <span className="text-xs font-medium text-ink-2 select-none">

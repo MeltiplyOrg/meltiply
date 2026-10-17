@@ -12,7 +12,7 @@ import {
 import { BrandMark } from "@meltiply/ui/brand-mark";
 import { Avatar, AvatarFallback, AvatarImage } from "@meltiply/ui/avatar";
 import { Button, type ButtonProps } from "@meltiply/ui/button";
-import { toast } from "@meltiply/ui/toast";
+import { useWorkspaceSignOut } from "@/hooks/use-workspace-sign-out";
 import { cn } from "@meltiply/ui/utils";
 import { useWorkspace } from "@/context/workspace.context";
 import { useI18n } from "@/lib/i18n";
@@ -95,21 +95,11 @@ const HEADING_CLASS =
  * page controls. Search lives in the top bar. Collapse preserves named controls.
  */
 export function SidebarNav({ currentView, onNavigate, className }: SidebarNavProps) {
-  const { user, workspaceName, logout } = useWorkspace();
+  const { user, workspaceName } = useWorkspace();
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
   const name = workspaceName ?? "Meltiply Workspace";
-  /** Keeps a failed server sign-out visible instead of silently losing session errors. */
-  const handleSignOut = async () => {
-    try {
-      await logout();
-    } catch {
-      toast(t("Could not sign out"), {
-        description: t("Try again to end your session."),
-        variant: "error",
-      });
-    }
-  };
+  const handleSignOut = useWorkspaceSignOut();
   return (
     <aside
       className={cn(

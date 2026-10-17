@@ -249,10 +249,6 @@ export function WorkspaceProvider({
     await queryClient.invalidateQueries();
   }, [queryClient]);
 
-  const logout = useCallback(async () => {
-    await signOut();
-  }, [signOut]);
-
   const isLoading =
     !isLoaded || (isSignedIn === true && (userQuery.isPending || brandProfilesQuery.isPending));
   const error =
@@ -281,7 +277,7 @@ export function WorkspaceProvider({
       toggleChannelSelection,
       setSelectedChannelIds: setSelectedChannelIdsTracked,
       refreshWorkspace,
-      logout,
+      logout: signOut,
       selectedPlatforms,
       setSelectedPlatforms,
     }),
@@ -301,7 +297,7 @@ export function WorkspaceProvider({
       toggleChannelSelection,
       setSelectedChannelIdsTracked,
       refreshWorkspace,
-      logout,
+      signOut,
       selectedPlatforms,
       setSelectedPlatforms,
     ],

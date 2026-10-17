@@ -12,7 +12,7 @@ import { useSearchParams } from "react-router";
 import { Button } from "@meltiply/ui/button";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { cn } from "@meltiply/ui/utils";
-import { toast } from "@meltiply/ui/toast";
+import { useWorkspaceSignOut } from "@/hooks/use-workspace-sign-out";
 import { useWorkspace } from "@/context/workspace.context";
 import { useTheme } from "@/lib/theme";
 import { supportedLanguages, useI18n } from "@/lib/i18n";
@@ -40,7 +40,7 @@ function PreviewLines() {
  */
 export default function WorkspaceSettings() {
   const { requestedTheme, setTheme } = useTheme();
-  const { user, workspaceName, logout } = useWorkspace();
+  const { user, workspaceName } = useWorkspace();
   const { t, language, setLanguage } = useI18n();
   const sections = {
     appearance: {
@@ -74,17 +74,7 @@ export default function WorkspaceSettings() {
   const requestedSection = searchParams.get("section");
   const section = SECTION_IDS.find((id) => id === requestedSection) ?? "appearance";
   const current = sections[section];
-  /** Reports a failed server sign-out instead of discarding session errors. */
-  const handleSignOut = async () => {
-    try {
-      await logout();
-    } catch {
-      toast(t("Could not sign out"), {
-        description: t("Try again to end your session."),
-        variant: "error",
-      });
-    }
-  };
+  const handleSignOut = useWorkspaceSignOut();
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-surface md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
       <nav

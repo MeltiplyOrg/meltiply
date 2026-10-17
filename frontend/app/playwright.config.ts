@@ -125,6 +125,9 @@ export default defineConfig({
             WRANGLER_DEV_PUBLIC_API_URL: localApiOrigin,
           },
           reuseExistingServer: reuseExistingServers,
+          // Let the gateway forward shutdown to its detached Wrangler group;
+          // killing only the gateway leaves inherited output pipes open.
+          gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
           // An acceptance boot may have to build the media-processor Container
           // image on first use, which the production local stack also needs but
           // has already paid for in a warm Docker cache.

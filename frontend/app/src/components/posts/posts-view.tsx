@@ -3,7 +3,7 @@ import { useWorkspace } from "@/context/workspace.context";
 import { Button } from "@meltiply/ui/button";
 import { WorkspaceSurface } from "@/components/layout/workspace-surface";
 import { BulkSelectionBar } from "@/components/layout/bulk-selection-bar";
-import { AlertCircle, Plus, ArrowLeft } from "lucide-react";
+import { AlertCircle, Plus, ArrowLeft, Trash2 } from "lucide-react";
 import { RouteFallback } from "@/components/layout/route-fallback";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useCalendar, useCancelDistribution, useDeletePost, usePosts } from "@/lib/queries";
@@ -1102,6 +1102,7 @@ export function PostsView({
       <BulkSelectionBar
         count={selectedIds.size}
         actionLabel={t("Delete")}
+        actionIcon={Trash2}
         busyLabel={t("Deleting…")}
         onClear={handleClearPostSelection}
         onAction={openBulkDelete}

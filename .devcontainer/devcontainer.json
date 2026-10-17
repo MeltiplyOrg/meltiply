@@ -1,26 +1,58 @@
 {
   "name": "meltiply",
+  // The image bakes in docker-outside-of-docker, mounts the host socket, and
+  // includes the project toolchain. No features: no per-worktree derived image.
   "image": "ghcr.io/tmih06/herdr-devcontainer-vibecode-essential:latest",
+  // Match daemon-host paths so Compose and docker run bind mounts resolve.
   "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
   "workspaceFolder": "${localWorkspaceFolder}",
   "remoteUser": "dev",
-  "updateRemoteUserUID": true,
   "containerEnv": {
     "MELTIPLY_DEV_TUNNEL": "1",
+    "TUNNEL_TRANSPORT_PROTOCOL": "http2",
+    "LANG": "C.utf8",
+    "USER": "dev",
+    "LOGNAME": "dev",
+    "GH_CONFIG_DIR": "/home/dev/.config/gh",
+    "OASDIFF_BIN": "/usr/local/bin/oasdiff",
     "BUN_INSTALL_CACHE_DIR": "/home/dev/.bun/install/cache",
+    "DOCKER_HOST": "unix:///var/run/docker.sock",
     "MELTIPLY_DEVCONTAINER": "1",
     "COMPOSE_PROJECT_NAME": "meltiply-${devcontainerId}",
     "MELTIPLY_DEVCONTAINER_WORKSPACE": "${localWorkspaceFolder}",
     "MELTIPLY_DEVCONTAINER_CONFIG": "/opt/meltiply-devcontainer",
-    "MELTIPLY_DEVCONTAINER_HOST_CONFIG": "${localWorkspaceFolder}/.devcontainer"
+    "MELTIPLY_DEVCONTAINER_HOST_CONFIG": "${localWorkspaceFolder}/.devcontainer",
+    "MELTIPLY_CLOUDFLARED_BIN": "/usr/local/bin/cloudflared"
   },
+  "updateRemoteUserUID": true,
   "runArgs": [
     "--network=bridge",
     "--label=meltiply.devcontainer.project=meltiply-${devcontainerId}"
   ],
-  "postCreateCommand": "sudo mkdir -p /home/dev/.bun/install/cache && sudo chown -R dev:dev /home/dev/.bun",
+  // Create the host-side Wrangler config directory before the CLI bind-mounts it.
+  "initializeCommand": [
+    "bash",
+    "${localWorkspaceFolder}/.devcontainer/initialize.sh"
+  ],
+  // Prepare the Bun cache and derive GitHub-backed Git identity from mounted gh auth.
+  "postCreateCommand": [
+    "bash",
+    "-lc",
+    "sudo chown \"$(id -u):$(id -g)\" \"$BUN_INSTALL_CACHE_DIR\" && gh auth setup-git && gh api user --jq '\"git config --global user.name \" + (if (.name // \"\" | length) > 0 then .name else .login end | @sh), \"git config --global user.email \" + ((.id|tostring) + \"+\" + .login + \"@users.noreply.github.com\" | @sh)' | sh && sudo chown dev:dev /home/dev/.config && sudo mkdir -p \"${localEnv:HOME}/.local\" && if [ ! -e \"${localEnv:HOME}/.local/bin\" ]; then sudo ln -s /usr/local/bin \"${localEnv:HOME}/.local/bin\"; fi"
+  ],
+  "postStartCommand": [
+    "bash",
+    "/opt/meltiply-devcontainer/container-network.sh",
+    "start"
+  ],
+  // OMP and Wrangler configs are shared read-write for state and OAuth refreshes.
+  // GitHub login and WakaTime configuration are shared read-only.
   "mounts": [
     "source=meltiply-bun-cache,target=/home/dev/.bun/install/cache,type=volume",
-    "source=${localWorkspaceFolder}/.devcontainer,target=/opt/meltiply-devcontainer,type=bind,readonly"
+    "source=${localWorkspaceFolder}/.devcontainer,target=/opt/meltiply-devcontainer,type=bind,readonly",
+    "source=${localEnv:HOME}/.omp,target=/home/dev/.omp,type=bind",
+    "source=${localEnv:HOME}/.config/gh,target=/home/dev/.config/gh,type=bind,readonly",
+    "source=${localEnv:HOME}/.config/.wrangler,target=/home/dev/.config/.wrangler,type=bind",
+    "source=${localEnv:HOME}/.wakatime.cfg,target=/home/dev/.wakatime.cfg,type=bind,readonly"
   ]
 }

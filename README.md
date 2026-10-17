@@ -14,7 +14,7 @@ The current app focuses on **Posts** and **Channels**. Analytics, inbox, team ad
 
 ## Get started
 
-The devcontainer uses the VibeCode Essential image declared in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) for the full coding toolchain. For manual setup, use the Node.js version in [`.node-version`](.node-version) and Bun version declared in [`package.json`](package.json); Docker Compose and Make are also required.
+The devcontainer uses the VibeCode Essential image declared in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) for the full coding toolchain. That config also mounts host OMP and Wrangler state plus GitHub and WakaTime config. For manual setup, use the Node.js version in [`.node-version`](.node-version) and Bun version declared in [`package.json`](package.json); Docker Compose and Make are also required.
 
 ```bash
 make setup

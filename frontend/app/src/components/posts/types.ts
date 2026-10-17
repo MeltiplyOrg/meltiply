@@ -83,7 +83,7 @@ export interface PostDetailItem {
 }
 
 /**
- * One durable Post rendered in List, Board, Table, Grid, Calendar, and Details.
+ * One durable Post rendered in Table, Grid, Calendar, and Details.
  * Rows are keyed by `Post.id`, so per-channel publication times and content
  * overrides never split a composition, while separate Posts stay distinct.
  */
@@ -113,7 +113,7 @@ export interface PostRow {
 /**
  * View mode options for the unified Posts section.
  */
-export type PostViewMode = "list" | "board" | "table" | "calendar" | "grid" | "composer";
+export type PostViewMode = "table" | "calendar" | "grid" | "composer";
 
 /**
  * Status filter buckets for the Posts toolbar. `'draft'` matches the contract

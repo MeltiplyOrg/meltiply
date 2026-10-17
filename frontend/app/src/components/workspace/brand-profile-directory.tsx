@@ -52,7 +52,7 @@ export function BrandProfileDirectory({
                   brandProfileColorClass(profile.color),
                 )}
               >
-                <Users className="size-4 text-white" />
+                <Users className="size-4 text-ink-inverse" />
               </span>
               {onEdit && (
                 <Button
@@ -66,8 +66,10 @@ export function BrandProfileDirectory({
               )}
             </div>
             <div>
-              <CardTitle className="text-ui font-semibold">{profile.name}</CardTitle>
-              <CardDescription className="mt-1 line-clamp-2 text-control">
+              <CardTitle className="text-(length:--font-size-ui) font-semibold">
+                {profile.name}
+              </CardTitle>
+              <CardDescription className="mt-1 line-clamp-2 text-(length:--font-size-control)">
                 {profile.description || t("Publishing identity and connected accounts.")}
               </CardDescription>
             </div>
@@ -76,7 +78,9 @@ export function BrandProfileDirectory({
             {t("{count} connected accounts", { count: channelCounts.get(profile.id) ?? 0 })}
           </CardContent>
           <CardFooter className="justify-between border-t border-line-soft px-4 py-2">
-            <span className="font-mono text-micro text-ink-3">{profile.id.slice(0, 8)}</span>
+            <span className="font-mono text-(length:--font-size-micro) text-ink-3">
+              {profile.id.slice(0, 8)}
+            </span>
             <Button variant="ghost" size="sm" onClick={() => onViewChannels(profile.id)}>
               {t("View channels")}
               <ArrowRight className="size-3" />

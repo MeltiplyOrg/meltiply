@@ -111,7 +111,7 @@ export function TopToolbarFilters({
         <ListFilter className="size-3.5" />
         {t("Filter")}
         {activeCount > 0 && (
-          <span className="rounded-chip bg-accent-tint px-1 text-micro text-accent-ink">
+          <span className="rounded-chip bg-accent-tint px-1 text-(length:--font-size-micro) text-accent-ink">
             {activeCount}
           </span>
         )}
@@ -150,11 +150,6 @@ export function TopToolbarFilterChip({ label, onClear }: { label: string; onClea
       <X className="size-3" />
     </Button>
   );
-}
-
-/** Stable labels are plain text; changing a filter never duplicates accessible names. */
-export function TopToolbarLabel({ label, className }: { label: string; className?: string }) {
-  return <span className={className}>{label}</span>;
 }
 
 /** Renders the shared reset action only while filters are active. */

@@ -3,8 +3,8 @@ import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-sessio
 
 /**
  * Exercises real owner-authenticated Posts, directory, Settings, keyboard search,
- * and mobile navigation. Screenshots are hosted visual evidence for List, Board,
- * spreadsheet Table, media Grid, Calendar, Brand Profiles, and theme surfaces.
+ * and mobile navigation. Screenshots cover the three toolbar-selected views:
+ * Table, Grid, and Calendar, plus Brand Profiles and theme surfaces.
  */
 test("keeps publishing work reachable through the redesigned workspace", async ({
   page,
@@ -69,10 +69,21 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await waitForWorkspace(page);
   await page.screenshot({ path: testInfo.outputPath("posts-light-desktop.png"), fullPage: true });
 
-  for (const view of ["Grid", "Calendar", "Board", "Table", "List"] as const) {
-    await page.locator("aside").getByRole("button", { name: view, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`view=${view.toLowerCase()}`));
-    if (view === "Board") await expect(page.getByRole("region", { name: "Draft" })).toBeVisible();
+  await expect(
+    page.locator("aside").getByRole("button", { name: "Table", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.locator("aside").getByRole("button", { name: "Grid", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.locator("aside").getByRole("button", { name: "Calendar", exact: true }),
+  ).toHaveCount(0);
+  const viewSelector = page.getByRole("group", { name: "Post view", exact: true });
+  await expect(viewSelector.getByRole("button")).toHaveCount(3);
+  for (const view of ["Grid", "Calendar", "Table"] as const) {
+    const viewButton = viewSelector.getByRole("button", { name: view, exact: true });
+    await viewButton.click();
+    await expect(viewButton).toHaveAttribute("aria-pressed", "true");
     if (view === "Table") {
       await expect(page.getByRole("columnheader", { name: "Status" })).toBeVisible();
       await page.getByRole("button", { name: "Columns" }).click();

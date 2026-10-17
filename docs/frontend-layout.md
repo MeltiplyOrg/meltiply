@@ -5,9 +5,9 @@ The Gr8r-adapted workspace uses compact chrome, warm flat surfaces, and route-ow
 ## Page geometry
 
 - `NavigationShell` owns the 252px desktop rail, 52px collapsed rail, 46px desktop top bar, and a shrinkable route column. The top bar contains workspace/profile context, route title, and jump search. Settings is a full route, not a dialog.
-- The shell has no global page padding. Page headers and toolbars own their 24px desktop gutters; mobile uses 16px. List/Table rows reach the working edges and inset the leading cell. Board/Grid own their viewport gutter.
+- The shell has no global page padding. Headers and toolbars own 24px desktop gutters; mobile uses 16px. Table rows reach working edges and inset the leading cell. Grid owns its viewport gutter. Posts has one sidebar entry, without nested views.
 - `WorkspaceSurface` is a full-bleed flex column. Its header uses 24px top and 12px bottom padding, 23px semibold title, and 13.5px description. Actions wrap without creating a second card.
-- Posts reproduces the Tasks grammar: sticky-header grouped List, counted collapsible outcome Board, and spreadsheet Table with visible-column controls. Its media Grid and Calendar retain Meltiply-specific presentation and data.
+- Posts supports Table (default), Grid, and Calendar, selected only from its page toolbar. Table adopts the Tasks spreadsheet grammar with counted collapsible groups and column controls; Grid and Calendar retain publishing-specific data and behavior.
 - Channels is a centered directory capped at 1200px, with Accounts/Brand Profiles tabs, compact search/filter controls, a shared semantic table, and actual profile cards. Its table may scroll horizontally rather than hiding platform, ownership, health, or actions.
 - Cards represent Posts or genuinely independent objects. Use spacing and separators for page hierarchy; avoid nested decorative cards.
 
@@ -17,7 +17,7 @@ The Gr8r-adapted workspace uses compact chrome, warm flat surfaces, and route-ow
 | -------------------------------------- | ---------------------------------------------------------- |
 | Standard / small / large button        | 30px / 26px / 36px                                         |
 | Standard input                         | 30px; a task may explicitly request a larger editing field |
-| Sidebar row                            | 30px; nested Posts view shortcut 28px                      |
+| Sidebar row                            | 30px; Posts is one destination without view shortcuts      |
 | Working / control / micro text         | 13.5px / 12.5px / 11px                                     |
 | Radius: chip / control / card / dialog | 4px / 6px / 8px / 10px                                     |
 
@@ -26,8 +26,8 @@ Use the shared semantic tokens and Tailwind utilities. Rewritten app React compo
 ## Shared compositions
 
 - `TopToolbar` composes search, filter disclosure, active chips, sort/group/column menus, and view controls. It wraps on small screens; filters stay reachable.
-- Shared `Table` owns row density, header stickiness, dividers, and hover/selection. List/Table and Channel directory supply columns/data, not a second table style system.
-- Posts Board and Grid reuse `PostCard`; Post actions/selection and brand context do not fork per view.
+- Shared `Table` owns row density, header stickiness, dividers, and hover/selection. Posts Table and Channel directory supply columns/data, not a second style system.
+- Posts Grid uses `PostCard`; Post actions/selection and brand context do not fork per view.
 - `Tabs` owns accessible section switching and shared segment/underline/navigation treatments. Route panels own their actual content and scroll region.
 - Empty/loading/error states use canonical shared primitives and actual query state.
 
@@ -38,8 +38,8 @@ Use the shared semantic tokens and Tailwind utilities. Rewritten app React compo
 | Document frame                    | `NavigationShell`                        | Viewport-bound, no document horizontal overflow       |
 | Route working column              | `NavigationShell` main                   | Vertical overflow fallback                            |
 | Sidebar destinations and profiles | Sidebar nav                              | Independent vertical scroll; footer remains reachable |
-| Posts List/Table                  | Shared table viewport                    | Bounded vertical and horizontal overflow              |
-| Board/Grid/Calendar               | Route-specific collection viewport       | Bounded scrolling with route-owned gutters            |
+| Posts Table                       | Shared table viewport                    | Bounded vertical and horizontal overflow              |
+| Grid/Calendar                     | Route-specific collection viewport       | Bounded scrolling with route-owned gutters            |
 | Channel directory                 | Channel tab panel and directory viewport | Horizontal table overflow stays inside centered page  |
 | Settings sections                 | Full-height route                        | Responsive section rail; content owns vertical scroll |
 | Composer/dialog body              | Composer/shared dialog content           | Bounded scroll; dialogs preserve `data-lenis-prevent` |
@@ -51,7 +51,7 @@ Every flex/grid ancestor of a bounded scroller needs `min-h-0` and/or `min-w-0`.
 - Below the desktop rail breakpoint, use the navigation drawer and persistent 52px top bar. Search remains in the top bar; Settings remains reachable from mobile navigation.
 - Below 640px, gutters are 16px, page actions wrap, and toolbar search/filter/view controls remain visible and keyboard-operable.
 - Settings section navigation becomes a horizontal scrollable row. Content scrolls inside the viewport-bound route.
-- Channel and spreadsheet tables scroll horizontally rather than clipping actions. Board columns snap horizontally; cards and profile grids reflow naturally.
+- Channel and spreadsheet tables scroll horizontally rather than clipping actions. Post and profile grids reflow naturally.
 - Verify desktop and phone widths, keyboard traversal, long profile names, empty collections, loading, failures, and both palettes. No unintended document horizontal overflow.
 
 ## State and motion

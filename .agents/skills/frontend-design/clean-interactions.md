@@ -20,8 +20,8 @@ honor reduced motion and cannot delay access to the task.
 ## Navigation and search
 
 Navigation rows use an immediate neutral hover/selected surface. The sidebar is
-252px or a 52px icon rail; collapsed actions retain accessible labels. A separate
-chevron controls Posts sub-navigation, never a button nested in a route button.
+252px or a 52px icon rail; collapsed actions retain accessible labels. Posts is
+one destination; Table, Grid, and Calendar live only in its page toolbar.
 The top bar and sidebar open the same jump palette. Shortcut definitions and
 platform-correct hints come from `lib/hotkeys.ts`.
 

@@ -79,14 +79,16 @@ export function WorkspaceSearch({
         <div className="max-h-[55dvh] overflow-y-auto p-2" data-lenis-prevent>
           {destinations.length > 0 && (
             <section aria-label={t("Workspace")}>
-              <h2 className="px-2 pb-1 pt-2 text-micro font-medium text-ink-3">{t("Workspace")}</h2>
+              <h2 className="px-2 pb-1 pt-2 text-(length:--font-size-micro) font-medium text-ink-3">
+                {t("Workspace")}
+              </h2>
               {destinations.map((item) => {
                 const Icon = item.icon;
                 return (
                   <Button
                     key={item.id}
                     variant="ghost"
-                    className="h-10 w-full justify-start text-ui"
+                    className="h-10 w-full justify-start text-(length:--font-size-ui)"
                     onClick={() => {
                       onNavigate(item.id);
                       onOpenChange(false);
@@ -103,14 +105,14 @@ export function WorkspaceSearch({
           )}
           {profiles.length > 0 && (
             <section aria-label={t("Brand Profiles")}>
-              <h2 className="px-2 pb-1 pt-3 text-micro font-medium text-ink-3">
+              <h2 className="px-2 pb-1 pt-3 text-(length:--font-size-micro) font-medium text-ink-3">
                 {t("Brand Profiles")}
               </h2>
               {profiles.map((profile) => (
                 <Button
                   key={profile.id}
                   variant="ghost"
-                  className="h-10 w-full justify-start text-ui"
+                  className="h-10 w-full justify-start text-(length:--font-size-ui)"
                   onClick={() => {
                     setSelectedBrandProfileId(profile.id);
                     onOpenChange(false);
@@ -124,12 +126,15 @@ export function WorkspaceSearch({
             </section>
           )}
           {destinations.length === 0 && profiles.length === 0 && (
-            <p role="status" className="px-3 py-10 text-center text-ui text-ink-2">
+            <p
+              role="status"
+              className="px-3 py-10 text-center text-(length:--font-size-ui) text-ink-2"
+            >
               {t("No matching pages or Brand Profiles.")}
             </p>
           )}
         </div>
-        <p className="border-t border-line bg-inset px-4 py-2 text-micro text-ink-3">
+        <p className="border-t border-line bg-inset px-4 py-2 text-(length:--font-size-micro) text-ink-3">
           {t("Tab to move · Enter to open · Esc to close")}
         </p>
       </CenterDialogContent>

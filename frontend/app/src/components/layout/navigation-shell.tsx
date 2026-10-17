@@ -86,7 +86,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
             >
               <Search className="size-3.5" />
               <span className="hidden sm:inline">{t("Search or jump to…")}</span>
-              <kbd className="ml-3 hidden font-mono text-micro sm:inline">
+              <kbd className="ml-3 hidden font-mono text-(length:--font-size-micro) sm:inline">
                 {formatHotkey(hotkeys.commandMenu)}
               </kbd>
             </Button>

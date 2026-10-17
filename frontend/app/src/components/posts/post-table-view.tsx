@@ -20,14 +20,13 @@ import {
   type PostSortKey,
 } from "./types";
 
-export interface PostListTableViewProps extends PostSelectionProps {
+export interface PostTableViewProps extends PostSelectionProps {
   posts: PostRow[];
   isLoading: boolean;
   sortKey: PostSortKey;
   brandProfiles: BrandProfile[];
   canMutate: boolean;
   groupBy: PostGroupBy;
-  table: boolean;
   hiddenColumns: ReadonlySet<string>;
   onSortChange: (key: PostSortKey) => void;
   onEdit: (postId: string) => void;
@@ -37,18 +36,17 @@ export interface PostListTableViewProps extends PostSelectionProps {
 }
 
 /**
- * Gr8r Tasks' flush grouped List and spreadsheet Table share semantic primitives
- * with the channel directory. Selection includes collapsed filtered rows, not
- * unloaded records; grouping never changes Post identity or publication status.
+ * Gr8r Tasks' grouped spreadsheet Table shares semantic primitives with the
+ * channel directory. Selection includes collapsed filtered rows, not unloaded
+ * records; grouping never changes Post identity or publication status.
  */
-export const PostListTableView = React.memo(function PostListTableView({
+export const PostTableView = React.memo(function PostTableView({
   posts,
   isLoading,
   sortKey,
   brandProfiles,
   canMutate,
   groupBy,
-  table,
   hiddenColumns,
   onSortChange,
   onEdit,
@@ -59,7 +57,7 @@ export const PostListTableView = React.memo(function PostListTableView({
   onToggleSelection,
   onSetSelection,
   selectionDisabled,
-}: PostListTableViewProps) {
+}: PostTableViewProps) {
   const { t, tStatus } = useI18n();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const groups = useMemo(
@@ -73,19 +71,15 @@ export const PostListTableView = React.memo(function PostListTableView({
   const visibleIds = posts.map((post) => post.id);
   const selectedCount = visibleIds.reduce((count, id) => count + Number(selectedIds.has(id)), 0);
   const allSelected = visibleIds.length > 0 && selectedCount === visibleIds.length;
-  const showStatus = !table || !hiddenColumns.has("status");
-  const showChannels = !table || !hiddenColumns.has("channels");
-  const showDate = !table || !hiddenColumns.has("date");
-  const showProfile = !table || !hiddenColumns.has("profile");
+  const showStatus = !hiddenColumns.has("status");
+  const showChannels = !hiddenColumns.has("channels");
+  const showDate = !hiddenColumns.has("date");
+  const showProfile = !hiddenColumns.has("profile");
   const columnCount =
     3 + Number(showStatus) + Number(showChannels) + Number(showDate) + Number(showProfile);
   return (
     <div className={cn("min-h-0 flex-1 overflow-auto pb-24", selectedIds.size > 0 && "pb-32")}>
-      <Table
-        variant={table ? "spreadsheet" : "list"}
-        className="min-w-215 sm:min-w-245"
-        aria-label={t(table ? "Posts table" : "Posts list")}
-      >
+      <Table variant="spreadsheet" className="min-w-215 sm:min-w-245" aria-label={t("Posts table")}>
         <colgroup>
           <col className="w-12" />
           <col />
@@ -172,7 +166,7 @@ export const PostListTableView = React.memo(function PostListTableView({
                       >
                         <Button
                           variant="ghost"
-                          className="h-9 justify-start gap-2 p-0 text-control font-semibold text-ink hover:bg-transparent"
+                          className="h-9 justify-start gap-2 p-0 text-(length:--font-size-control) font-semibold text-ink hover:bg-transparent"
                           aria-expanded={!isCollapsed}
                           aria-label={t("Toggle {label} group", { label })}
                           onClick={() =>
@@ -228,13 +222,13 @@ export const PostListTableView = React.memo(function PostListTableView({
                           </TableCell>
                           <TableCell>
                             <div className="flex min-w-0 items-center gap-2">
-                              <span className="shrink-0 font-mono text-micro text-ink-3">
+                              <span className="shrink-0 font-mono text-(length:--font-size-micro) text-ink-3">
                                 {post.id.slice(0, 8)}
                               </span>
                               <Button
                                 data-post-details
                                 variant="ghost"
-                                className="block h-auto min-w-0 truncate p-0 text-left text-ui font-normal text-ink hover:bg-transparent hover:underline"
+                                className="block h-auto min-w-0 truncate p-0 text-left text-(length:--font-size-ui) font-normal text-ink hover:bg-transparent hover:underline"
                                 title={t("View details")}
                                 onClick={(event) => {
                                   event.stopPropagation();
@@ -244,7 +238,7 @@ export const PostListTableView = React.memo(function PostListTableView({
                                 {resolveRowCaption(post) || t("Untitled post")}
                               </Button>
                               {(post.post?.attachments.length ?? 0) > 0 && (
-                                <span className="inline-flex shrink-0 items-center gap-1 text-micro text-ink-3">
+                                <span className="inline-flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-ink-3">
                                   <Paperclip className="size-3" />
                                   {post.post?.attachments.length}
                                 </span>
@@ -278,7 +272,7 @@ export const PostListTableView = React.memo(function PostListTableView({
                                   day: "numeric",
                                 })}
                               </time>
-                              <span className="ml-1.5 text-micro text-ink-3">
+                              <span className="ml-1.5 text-(length:--font-size-micro) text-ink-3">
                                 {publishDate.toLocaleTimeString("en-US", {
                                   hour: "2-digit",
                                   minute: "2-digit",
@@ -316,7 +310,7 @@ export const PostListTableView = React.memo(function PostListTableView({
               <TableCell colSpan={columnCount}>
                 <Button
                   variant="ghost"
-                  className="h-8.5 w-full justify-start gap-2 px-0 text-control font-normal text-ink-3"
+                  className="h-8.5 w-full justify-start gap-2 px-0 text-(length:--font-size-control) font-normal text-ink-3"
                   onClick={onCreatePost}
                 >
                   <Plus className="size-3.5" />

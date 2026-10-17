@@ -11,16 +11,15 @@ import { useSearchParams } from "@/lib/navigation";
  * Resolves the posts hub's initial view mode from the `?view=` deep-link param.
  *
  * @param viewParam - Parsed `?view=` query value, if present.
- * @returns The initial `PostViewMode` for `PostsView` (`list` when absent/unknown).
+ * @returns The initial `PostViewMode` for `PostsView` (`table` when absent/unknown).
  */
 function resolveViewMode(viewParam: string | null): PostViewMode {
-  return viewParam === "board" ||
-    viewParam === "table" ||
+  return viewParam === "table" ||
     viewParam === "calendar" ||
     viewParam === "composer" ||
     viewParam === "grid"
     ? viewParam
-    : "list";
+    : "table";
 }
 
 /**

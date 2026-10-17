@@ -98,20 +98,19 @@ Gr8r's Projects with Brand Profiles and its task views with Posts; do not copy
 its seed content, branding, billing, notifications, or collaboration claims.
 
 The 252px sidebar collapses to 52px; a 46px top bar holds workspace context,
-route title, and jump search. Posts exposes the reference's List, Board, and
-spreadsheet Table, alongside Meltiply's media Grid and Calendar. List and Table
-use counted, collapsible status/profile groups; Board uses real publication
-outcomes rather than pretending they can be dragged between statuses. All views
-retain real Post selection and supported inspect/edit/delete/create actions.
-Channel connections use a centered, compact directory with Accounts and Brand
-Profiles tabs; the profile grid displays counts from actual connected accounts.
-Task titles, statuses, seed records, and unsupported project-management actions
-are never represented as publishing capabilities.
+route title, and jump search. Posts is one sidebar destination without nested
+view shortcuts. Its page toolbar offers exactly Table, Grid, and Calendar;
+Table is the default. Table uses counted, collapsible status/profile groups and
+metadata visibility controls. All views retain real Post selection and supported
+inspect/edit/delete/create actions. Channel connections use a centered compact
+directory with Accounts and Brand Profiles tabs and actual connection counts.
+Reference task seed records and unsupported project-management actions never
+become publishing capabilities.
 
 Route headings, toolbar rows, tables, cards, and directory own their reference
-gutters and scroll regions. List/Table reach the workspace edges with first-cell
-gutters; Board/Grid own their content padding; Channels remains centered to a
-1200px maximum. On phones, gutters are 16px, toolbar controls wrap, and directory
+gutters and scroll regions. Table reaches workspace edges with first-cell
+gutters; Grid owns its content padding; Channels remains centered to a 1200px
+maximum. On phones, gutters are 16px, toolbar controls wrap, and directory
 tables may scroll horizontally without clipping available actions.
 
 `/settings` is a full-height, reference-style Settings page with responsive

@@ -28,8 +28,9 @@ contrast with arbitrary opacity.
 - Desktop rail 252px, collapsed rail 52px, desktop top bar 46px, page gutters
   24px. Mobile uses 16px content gutters and a 52px top bar.
 - WorkspaceSurface headings own their padding; the shell does not add outer page
-  gutters. List/Table reach the working edges with an inset first-cell gutter;
-  Board/Grid own padding. Channels is a centered 1200px directory.
+  gutters. Table reaches working edges with an inset first-cell gutter; Grid
+  owns padding. Channels is a centered 1200px directory. Posts has no sidebar
+  sub-navigation and only Table, Grid, and Calendar toolbar views.
 - Settings is a full-height page with a 220px desktop section rail and content
   limited to 720px; on phones, section choices become a horizontal row.
 - Controls 30px, small controls 26px, large controls 36px. Mobile navigation and
@@ -59,5 +60,5 @@ and existing publication semantics. Gr8r project/task seed content, its logo,
 member photos, billing, notifications, and collaboration features do not ship as
 Meltiply capabilities. Settings exposes supported Appearance/Language
 preferences, read-only account data, and existing security. Jump search covers
-pages and loaded Brand Profiles; route filters own content search. Board columns
-show outcomes and cannot pretend that drag-and-drop changes provider state.
+pages and loaded Brand Profiles; route filters own content search. Publication
+outcomes cannot be manually changed.

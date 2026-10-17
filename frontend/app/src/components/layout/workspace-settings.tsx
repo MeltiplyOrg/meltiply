@@ -77,7 +77,7 @@ export default function WorkspaceSettings() {
         aria-label={t("Settings sections")}
         className="flex gap-1 overflow-x-auto border-b border-line bg-canvas px-3 py-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-2.5 md:py-5"
       >
-        <span className="hidden px-2 pb-2 text-micro font-semibold uppercase tracking-wide text-ink-3 md:block">
+        <span className="hidden px-2 pb-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 md:block">
           {t("Settings")}
         </span>
         {SECTION_IDS.map((id) => {
@@ -86,7 +86,7 @@ export default function WorkspaceSettings() {
             <Button
               key={id}
               variant={section === id ? "secondary" : "ghost"}
-              className="h-8 shrink-0 justify-start px-2 text-control font-normal"
+              className="h-8 shrink-0 justify-start px-2 text-(length:--font-size-control) font-normal"
               aria-current={section === id ? "page" : undefined}
               onClick={() => setSearchParams({ section: id })}
             >
@@ -100,13 +100,15 @@ export default function WorkspaceSettings() {
       </nav>
       <div className="min-h-0 min-w-0 overflow-y-auto">
         <div className="max-w-180 px-4 pb-20 pt-6 sm:px-10 sm:pt-8">
-          <h1 className="text-page-title font-semibold leading-tight tracking-page-title">
+          <h1 className="text-(length:--text-title) font-semibold leading-tight tracking-page-title">
             {t(current.label)}
           </h1>
-          <p className="mb-6 mt-1 text-ui text-ink-2">{t(current.description)}</p>
+          <p className="mb-6 mt-1 text-(length:--font-size-ui) text-ink-2">
+            {t(current.description)}
+          </p>
           {section === "appearance" && (
             <section aria-label={t("Theme")} className="space-y-4">
-              <h2 className="text-ui font-semibold">{t("Theme")}</h2>
+              <h2 className="text-(length:--font-size-ui) font-semibold">{t("Theme")}</h2>
               <div className="grid grid-cols-2 gap-3">
                 {(["light", "dark"] as const).map((theme) => {
                   const Icon = theme === "light" ? Sun : Moon;
@@ -150,7 +152,9 @@ export default function WorkspaceSettings() {
           )}
           {section === "language" && (
             <section className="space-y-4">
-              <h2 className="text-ui font-semibold">{t("Interface language")}</h2>
+              <h2 className="text-(length:--font-size-ui) font-semibold">
+                {t("Interface language")}
+              </h2>
               <SegmentedControl
                 options={LANGUAGE_CODES}
                 value={language}
@@ -177,7 +181,7 @@ export default function WorkspaceSettings() {
                 ].map((field) => (
                   <div
                     key={field.label}
-                    className="grid grid-cols-[96px_minmax(0,1fr)] gap-4 border-b border-line py-3.5 text-control"
+                    className="grid grid-cols-[96px_minmax(0,1fr)] gap-4 border-b border-line py-3.5 text-(length:--font-size-control)"
                   >
                     <dt className="text-ink-2">{t(field.label)}</dt>
                     <dd className="wrap-anywhere">{field.value ?? "—"}</dd>
@@ -193,7 +197,9 @@ export default function WorkspaceSettings() {
           {section === "security" && (
             <section className="flex items-center gap-3 rounded-control border border-line bg-surface p-3">
               <AccountSecurity />
-              <span className="text-control">{t("Open account security")}</span>
+              <span className="text-(length:--font-size-control)">
+                {t("Open account security")}
+              </span>
             </section>
           )}
         </div>

@@ -2,20 +2,20 @@ import type { ComponentProps } from "react";
 import { cn } from "@meltiply/ui/utils";
 
 /**
- * Shared semantic table for flat lists, spreadsheet views, and directories.
+ * Shared semantic table for spreadsheet views and account directories.
  * Callers own data, columns, grouping, selection, and the scroll viewport;
  * variants centralize density/dividers without copying table styling per route.
  */
 export function Table({
-  variant = "list",
+  variant = "spreadsheet",
   className,
   ...props
-}: ComponentProps<"table"> & { variant?: "list" | "spreadsheet" | "directory" }) {
+}: ComponentProps<"table"> & { variant?: "spreadsheet" | "directory" }) {
   return (
     <table
       data-variant={variant}
       className={cn(
-        "group/table w-full table-fixed border-separate border-spacing-0 text-control",
+        "group/table w-full table-fixed border-separate border-spacing-0 text-(length:--font-size-control)",
         variant === "spreadsheet" && "[&_th]:border-r [&_td]:border-r [&_td]:border-line-soft",
         className,
       )}

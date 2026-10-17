@@ -1,6 +1,5 @@
 import { forwardRef, useState, type ComponentType } from "react";
 import {
-  ChevronDown,
   CircleHelp,
   LayoutGrid,
   LogOut,
@@ -20,7 +19,6 @@ import { cn } from "@meltiply/ui/utils";
 import { useWorkspace } from "@/context/workspace.context";
 import { useI18n } from "@/lib/i18n";
 import { preloadDashboardRoute } from "@/lib/preload-routes";
-import { POST_COLLECTION_MODES, POST_VIEW_OPTIONS } from "@/components/posts/post-view-options";
 
 export type WorkspaceView = "posts" | "channels" | "settings";
 
@@ -60,7 +58,7 @@ export const SidebarNavRow = forwardRef<
     ref={ref}
     variant="ghost"
     className={cn(
-      "h-control w-full justify-start gap-2.25 px-2 text-left text-ui font-normal",
+      "h-control w-full justify-start gap-2.25 px-2 text-left text-(length:--font-size-ui) font-normal",
       collapsed && "justify-center px-0",
       active &&
         "bg-surface font-medium text-ink shadow-btn hover:bg-surface dark:bg-hover-2 dark:shadow-none dark:hover:bg-hover-2",
@@ -79,12 +77,12 @@ export interface SidebarNavProps {
 }
 
 const HEADING_CLASS =
-  "mt-3.5 px-2 py-1.25 text-micro font-semibold uppercase tracking-wide text-ink-3";
+  "mt-3.5 px-2 py-1.25 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3";
 
 /**
  * Gr8r's 252px/52px rail, rewritten in React/Tailwind. Real profile selection
- * scopes existing queries; all five collection shortcuts share toolbar metadata.
- * Collapse preserves named controls, and navigation has no snapshot/morph layer.
+ * scopes existing queries. Posts is one destination; its view selector lives
+ * within the page. Collapse preserves named controls without a morph layer.
  */
 export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }: SidebarNavProps) {
   const {
@@ -97,7 +95,6 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
   } = useWorkspace();
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
-  const [postsExpanded, setPostsExpanded] = useState(true);
   const name = workspaceName ?? "Meltiply Workspace";
   /** Keeps a failed server sign-out visible instead of silently losing session errors. */
   const handleSignOut = async () => {
@@ -123,7 +120,10 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
         <BrandMark className="size-5.5 shrink-0 text-ink" />
         {!collapsed && (
           <>
-            <span className="min-w-0 flex-1 truncate text-ui font-semibold" title={name}>
+            <span
+              className="min-w-0 flex-1 truncate text-(length:--font-size-ui) font-semibold"
+              title={name}
+            >
               {name}
             </span>
             <Button
@@ -180,39 +180,6 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
                 <Icon className="size-4" />
                 {!collapsed && <span>{t(item.label)}</span>}
               </SidebarNavRow>
-              {!collapsed && item.id === "posts" && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-1 top-1 size-5.5"
-                  aria-label={t("Toggle {label} sub-navigation", { label: t("Posts") })}
-                  aria-expanded={postsExpanded}
-                  aria-controls="posts-sub-navigation"
-                  onClick={() => setPostsExpanded(!postsExpanded)}
-                >
-                  <ChevronDown className={cn("size-3", !postsExpanded && "-rotate-90")} />
-                </Button>
-              )}
-              {!collapsed && item.id === "posts" && postsExpanded && (
-                <div
-                  id="posts-sub-navigation"
-                  className="mb-2 ml-4 mt-1 border-l border-line pl-2.25"
-                >
-                  {POST_COLLECTION_MODES.map((mode) => {
-                    const ViewIcon = POST_VIEW_OPTIONS[mode].icon;
-                    return (
-                      <SidebarNavRow
-                        key={mode}
-                        className="h-7 text-control"
-                        onClick={() => onNavigate("posts", { search: `view=${mode}` })}
-                      >
-                        <ViewIcon className="size-3.5" />
-                        {t(POST_VIEW_OPTIONS[mode].label)}
-                      </SidebarNavRow>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           );
         })}
@@ -238,7 +205,7 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
             title={collapsed ? profile.name : undefined}
           >
             <span
-              className="flex size-4.5 shrink-0 items-center justify-center rounded-chip bg-accent-tint text-micro font-semibold text-accent-ink"
+              className="flex size-4.5 shrink-0 items-center justify-center rounded-chip bg-accent-tint text-(length:--font-size-micro) font-semibold text-accent-ink"
               aria-hidden="true"
             >
               {profile.name.slice(0, 1).toUpperCase()}
@@ -288,7 +255,9 @@ export function SidebarNav({ currentView, onNavigate, onOpenSearch, className }:
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-medium">{user?.name || t("Creator")}</div>
-              <div className="truncate text-micro text-ink-3">{user?.email}</div>
+              <div className="truncate text-(length:--font-size-micro) text-ink-3">
+                {user?.email}
+              </div>
             </div>
           )}
           <Button

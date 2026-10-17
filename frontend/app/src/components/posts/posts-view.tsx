@@ -33,10 +33,9 @@ import type {
   PostTarget,
 } from "@/types";
 
-import { PostListTableView } from "./post-list-table-view";
+import { PostTableView } from "./post-table-view";
 import { PostCalendarGridView } from "./post-calendar-grid-view";
 import { PostGridCardView } from "./post-grid-card-view";
-import { PostBoardView } from "./post-board-view";
 import type { PostGroupBy } from "./post-groups";
 import { CalendarDateDetailDialog } from "./calendar-date-detail-dialog";
 import { PostDetailDialog } from "./post-detail-dialog";
@@ -65,7 +64,7 @@ import type {
   ChannelMediaItem,
 } from "./types";
 
-/** Keep editing and upload dependencies out of List, Board, Table, Grid, and Calendar startup. */
+/** Keep editing and upload dependencies out of Table, Grid, and Calendar startup. */
 const Composer = lazy(async () => {
   const { Composer } = await import("@/components/composer/composer");
   return { default: Composer };
@@ -141,8 +140,8 @@ function toChannelEntry(
 }
 
 /**
- * Projects a durable Post into one collection row, so List, Board, Table, Grid,
- * Calendar, and Details agree on identity. Channel entries follow the Post's saved target
+ * Projects a durable Post into one collection row, so Table, Grid, Calendar,
+ * and Details agree on identity. Channel entries follow the Post's saved target
  * order first and then any outcome without a target, and the row's display
  * status is aggregated from those outcomes only — never from `Post.status`,
  * which is a lifecycle marker rather than a global success flag.
@@ -242,13 +241,13 @@ function toCalendarRows(
 }
 
 /**
- * Unified Posts page over one durable Post pipeline and five real collection
+ * Unified Posts page over one durable Post pipeline and three real collection
  * views. `usePosts` supplies each Post, its ordered attachments, targets, and
  * independent Channel outcomes; `useCalendar` folds events by Post identity
  * without merging or splitting compositions. Status filters derive from those
  * outcomes; provider status is observed, never locally edited.
  *
- * List, Board, Table, and Grid share Post selection and action callbacks;
+ * Table and Grid share Post selection and action callbacks;
  * Calendar day detail uses the same identity map. Selection snapshots each
  * owner's `brand_profile_id`, survives view/filter/group changes within its
  * scope, clears on scope changes, and is pruned when settled data no longer
@@ -264,7 +263,7 @@ function toCalendarRows(
  * @returns Complete unified Posts page with responsive collection controls.
  */
 export function PostsView({
-  initialViewMode = "list",
+  initialViewMode = "table",
   initialStatusFilter = "all",
   initialPostId,
   onNavigate,
@@ -407,7 +406,7 @@ export function PostsView({
 
   /**
    * Raw Post rows for the active mode: calendar events folded onto `post_id`
-   * for the month grid, or one row per loaded Post in List, Board, Table, and Grid. Drafts are
+   * for the month grid, or one row per loaded Post in Table and Grid. Drafts are
    * stored Posts, so the draft filter needs no client-side reconstruction of
    * "content without outcomes".
    */
@@ -762,13 +761,13 @@ export function PostsView({
   const handleBackToPosts = useCallback(() => {
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
-    setViewMode("list");
+    setViewMode("table");
   }, []);
 
   const handlePostSuccess = useCallback(() => {
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
-    setViewMode("list");
+    setViewMode("table");
     refetchActive().catch(() => {});
   }, [refetchActive]);
 
@@ -921,20 +920,6 @@ export function PostsView({
         onCellClick={handleCalendarCellClick}
         selectionActive={selectedIds.size > 0}
       />
-    ) : viewMode === "board" ? (
-      <PostBoardView
-        posts={processedPosts}
-        isLoading={isLoading}
-        brandProfiles={brandProfiles}
-        canMutate={selectedBrandProfileId !== null}
-        onEdit={handleEditPost}
-        onDelete={handleDeletePostAction}
-        onCreatePost={handleCreatePost}
-        onViewDetails={handleViewDetails}
-        selectedIds={selectedIds}
-        onToggleSelection={handleTogglePostSelection}
-        selectionDisabled={bulkDeleteBusy}
-      />
     ) : viewMode === "grid" ? (
       <PostGridCardView
         posts={processedPosts}
@@ -952,13 +937,12 @@ export function PostsView({
         selectionDisabled={bulkDeleteBusy}
       />
     ) : (
-      <PostListTableView
+      <PostTableView
         posts={processedPosts}
         isLoading={isLoading}
         sortKey={sortKey}
         brandProfiles={brandProfiles}
         groupBy={groupBy}
-        table={viewMode === "table"}
         hiddenColumns={hiddenColumns}
         onCreatePost={handleCreatePost}
         canMutate={selectedBrandProfileId !== null}

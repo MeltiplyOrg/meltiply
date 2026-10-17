@@ -119,7 +119,10 @@ export function ChannelTableView({
                         picture={picture}
                       />
                       <div className="min-w-0">
-                        <div className="truncate text-ui font-medium text-ink" title={channelName}>
+                        <div
+                          className="truncate text-(length:--font-size-ui) font-medium text-ink"
+                          title={channelName}
+                        >
                           {channelName}
                         </div>
                         <ChannelCopyRows account={account} />

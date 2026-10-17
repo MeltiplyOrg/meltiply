@@ -33,6 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.1.0
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
       - name: Validate release, infrastructure, and dependency policies

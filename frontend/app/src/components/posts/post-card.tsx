@@ -52,14 +52,14 @@ export function PostCard({
         actions.onViewDetails(postId);
       }}
     >
-      <div className="flex min-w-0 max-w-[calc(100%-24px)] items-center gap-1.5 truncate text-micro text-ink-3">
+      <div className="flex min-w-0 max-w-[calc(100%-24px)] items-center gap-1.5 truncate text-(length:--font-size-micro) text-ink-3">
         <span className="size-1.75 shrink-0 rounded-chip bg-accent" />
         <span>{profileName}</span>
       </div>
       <Button
         variant="ghost"
         data-post-details
-        className="h-auto justify-start whitespace-normal p-0 text-left text-ui font-normal leading-snug text-ink hover:bg-transparent"
+        className="h-auto justify-start whitespace-normal p-0 text-left text-(length:--font-size-ui) font-normal leading-snug text-ink hover:bg-transparent"
         title={t("View details")}
         onClick={(event) => {
           event.stopPropagation();
@@ -83,7 +83,7 @@ export function PostCard({
         </div>
       )}
       {showPreview && <StatusBadge status={normalizePostStatus(post)} compact />}
-      <div className="flex min-h-4.5 flex-wrap items-center gap-2 text-micro text-ink-3">
+      <div className="flex min-h-4.5 flex-wrap items-center gap-2 text-(length:--font-size-micro) text-ink-3">
         <span className="shrink-0 font-mono">{postId.slice(0, 8)}</span>
         <span className="flex items-center gap-1">
           {providers.map((provider) => (

@@ -23,9 +23,9 @@ Use explicit subpath imports such as `@meltiply/ui/button` and
 `@meltiply/ui/table`. Keep data, product semantics, and accessible labels in
 the consuming app; shared controls cannot import app internals. Static Astro
 controls stay static. Extend a canonical variant or build a route from shared
-primitives rather than duplicating one. The Posts List/Table and Channel
-directory share the same `Table`; Posts Board/Grid share `PostCard`; filter
-disclosures, search, chips, navigation rows, and view segments are reused.
+primitives rather than duplicating one. Posts and Channels share the same
+`Table`; media Grid uses `PostCard`; filter disclosures, search, chips,
+navigation rows, and view segments are reused.
 
 ## React and styling
 
@@ -46,17 +46,17 @@ their framework and resolve the same shared palette tokens.
 - Interface glyphs use `lucide-react` with a consistent 1.8px stroke and 16px default size. Keep Meltiply's faceted brand mark; do not transplant Gr8r's logo or avatars.
 
 Use semantic Tailwind utilities: `bg-page`, `bg-canvas`, `bg-surface`,
-`text-ink`, `text-ink-2`, `text-ink-3`, `border-line`, and the compact `text-ui`,
-`text-control`, and `text-micro` scales. Exact values belong in shared tokens,
-not inline CSS or page-specific values.
+`text-ink`, `text-ink-2`, `text-ink-3`, and `border-line`. Use typed length
+utilities such as `text-(length:--font-size-ui)` for the shared compact scale.
+Exact values belong in shared tokens, not inline CSS or page-specific values.
 
 ## Navigation and search
 
-`SidebarNav` owns the 252px/52px rail, including real workspace destinations,
-all five Post collection shortcuts, Brand Profiles, Settings, help, and the
-current account actions. `NavigationShell` owns the 46px top bar and responsive
-mobile drawer. Destinations derive from `WORKSPACE_NAV_ITEMS`; profile names
-and scope come from workspace context. Workspace identity stays read-only.
+`SidebarNav` owns the 252px/52px rail, real workspace destinations, Brand
+Profiles, Settings, help, and account actions. Posts is one entry with no nested
+views. `NavigationShell` owns the 46px top bar and mobile drawer. Destinations
+derive from `WORKSPACE_NAV_ITEMS`; profile names and scope come from workspace
+context. Workspace identity stays read-only.
 
 `WorkspaceSearch` is a jump palette, not a global content index. The sidebar,
 top bar, and `hotkeys.commandMenu` open it. It finds supported destinations and
@@ -64,12 +64,11 @@ loaded Brand Profiles. Route toolbars own collection search and filters.
 
 ## Reference page compositions
 
-Posts reproduces Gr8r Tasks' flush List, counted/collapsible Board, and
-spreadsheet Table. Media Grid and Calendar remain supported Meltiply views.
-Status/profile grouping preserves Post identity and sorted order; table column
-visibility hides metadata only. Board columns report publication outcomes and
-never offer fake drag-to-change-status behavior. List, Board, Table, and Grid
-share selection and the same real details/edit/delete/create callbacks.
+Posts supports exactly Table, Grid, and Calendar. The page toolbar owns view
+selection; Table is the default and adopts Gr8r Tasks' grouped spreadsheet
+density. Status/profile grouping preserves Post identity and sorted order;
+column visibility hides metadata only. Grid retains real attachments and
+Calendar retains scheduling. All three share real Post identity and actions.
 
 Channels adapts the Members directory to real connected accounts and adds an
 Accounts/Brand Profiles switch matching the reference's directory/team split.
@@ -129,8 +128,8 @@ during Astro navigation.
 | Reference family                                        | Meltiply adaptation                                                                                  |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Workspace rail, top bar, breadcrumbs                    | `SidebarNav`, `NavigationShell`, real workspace/profile context                                      |
-| Tasks List, Board, Table, grouping, metadata controls   | Posts List/Board/Table built on shared `Table`, `PostCard`, toolbar, and Post-owned state            |
-| Grid and media previews                                 | Meltiply media Grid reuses the same `PostCard` and real attachments                                  |
+| Tasks Table, grouping, metadata controls                | Posts Table built on shared `Table`, toolbar, and Post-owned state                                   |
+| Grid and media previews                                 | Meltiply media Grid uses `PostCard` and real attachments                                             |
 | Members and Teams directories                           | Connected-account `ChannelTableView` and actual Brand Profile `BrandProfileDirectory`                |
 | Command palette                                         | `WorkspaceSearch` over supported destinations and loaded profiles                                    |
 | Full Settings navigation                                | `/settings` section rail over Appearance, Language, read-only Account, and Security                  |

@@ -195,7 +195,7 @@ export function resolveRowPreviewAttachment(row: PostRow): PostAttachment | null
 }
 
 /**
- * Resolves a row's caption preview for List, Board, Table, Grid, Calendar, and Details.
+ * Resolves a row's caption preview for Table, Grid, Calendar, and Details.
  *
  * A frozen publication supplies its own caption, so a published Channel
  * displays what it delivered rather than text reconstructed from the edited

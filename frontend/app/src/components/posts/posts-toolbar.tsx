@@ -126,13 +126,15 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           placeholder={t("Search posts...")}
         />
         <TopToolbarFilters activeCount={activeCount}>
-          <span className="mt-1 text-micro text-ink-3">{t("Platform")}</span>
+          <span className="mt-1 text-(length:--font-size-micro) text-ink-3">{t("Platform")}</span>
           <PlatformFilterSelect
             value={platformFilter}
             onValueChange={onPlatformChange}
             trigger={<TopToolbarButton label={platformLabel} className="w-full" />}
           />
-          <span className="mt-1 text-micro text-ink-3">{t("Brand Profile")}</span>
+          <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
+            {t("Brand Profile")}
+          </span>
           <BrandProfileSelect
             value={profileFilter}
             onValueChange={onProfileChange}
@@ -142,7 +144,9 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             label={t("Brand Profile")}
             trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
           />
-          <span className="mt-1 text-micro text-ink-3">{t("Post status")}</span>
+          <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
+            {t("Post status")}
+          </span>
           <FilterSelect
             value={statusFilter}
             onValueChange={onStatusChange}
@@ -161,7 +165,9 @@ export const PostsToolbar = React.memo(function PostsToolbar({
               />
             }
           />
-          <span className="mt-1 text-micro text-ink-3">{t("Publish date")}</span>
+          <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
+            {t("Publish date")}
+          </span>
           <FilterSelect
             value={dateFilter}
             onValueChange={onDateChange}
@@ -191,7 +197,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {(viewMode === "list" || viewMode === "table") && (
+        {viewMode === "table" && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm">
@@ -258,7 +264,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           }}
         />
         {viewMode === "grid" && (
-          <div className="flex items-center text-micro tabular-nums">
+          <div className="flex items-center text-(length:--font-size-micro) tabular-nums">
             <Button
               variant="ghost"
               size="icon"

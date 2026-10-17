@@ -726,13 +726,13 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         >
           <TabsTrigger value="accounts">
             {t("Accounts")}
-            <span className="rounded-chip bg-hover-2 px-1 text-micro text-ink-3">
+            <span className="rounded-chip bg-hover-2 px-1 text-(length:--font-size-micro) text-ink-3">
               {accounts.length}
             </span>
           </TabsTrigger>
           <TabsTrigger value="profiles">
             {t("Brand Profiles")}
-            <span className="rounded-chip bg-hover-2 px-1 text-micro text-ink-3">
+            <span className="rounded-chip bg-hover-2 px-1 text-(length:--font-size-micro) text-ink-3">
               {brandProfiles.length}
             </span>
           </TabsTrigger>
@@ -747,13 +747,17 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
               onChange={setAccountQuery}
             />
             <TopToolbarFilters activeCount={activeFilterCount}>
-              <span className="mt-1 text-micro text-ink-3">{t("Platform")}</span>
+              <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
+                {t("Platform")}
+              </span>
               <PlatformFilterSelect
                 value={selectedPlatforms}
                 onValueChange={setSelectedPlatforms}
                 trigger={<TopToolbarButton label={platformFilterText} className="w-full" />}
               />
-              <span className="mt-1 text-micro text-ink-3">{t("Brand Profile")}</span>
+              <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
+                {t("Brand Profile")}
+              </span>
               <BrandProfileSelect
                 value={selectedBrandProfileId ?? "all"}
                 onValueChange={(id) => setSelectedBrandProfileId(id === "all" ? null : id)}
@@ -763,7 +767,9 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 label={t("Brand Profile")}
                 trigger={<TopToolbarButton label={profileFilterLabel} className="w-full" />}
               />
-              <span className="mt-1 text-micro text-ink-3">{t("Connection status")}</span>
+              <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
+                {t("Connection status")}
+              </span>
               <FilterSelect
                 value={statusFilter}
                 onValueChange={setStatusFilter}

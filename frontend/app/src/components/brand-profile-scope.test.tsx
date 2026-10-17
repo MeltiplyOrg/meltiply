@@ -290,7 +290,7 @@ function renderChannels() {
  * Renders the posts view inside a router context at the requested mode, with a
  * profile selected so channel mutations stay affordanced.
  */
-function renderPosts(initialViewMode: "list" | "grid" | "calendar" = "list") {
+function renderPosts(initialViewMode: "table" | "grid" | "calendar" = "table") {
   workspace.selectedBrandProfile = alphaProfile;
   workspace.selectedBrandProfileId = alphaProfile.id;
   return render(
@@ -448,11 +448,8 @@ describe("Channels table contract", () => {
     expect(screen.getByText("No channels connected yet")).toBeVisible();
     const search = screen.getByLabelText("Search accounts");
     expect(search).toBeVisible();
-    expect(screen.getByRole("button", { name: "All platforms" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "All Brand Profiles" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Connection status" })).toBeVisible();
     fireEvent.change(search, { target: { value: "nothing connected" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
     expect(search).toHaveValue("");
     const header = within(screen.getByRole("banner"));
     expect(header.getByRole("button", { name: "Add account" })).toBeDisabled();
@@ -626,22 +623,6 @@ describe("Channels table contract", () => {
   });
 
   /**
-   * Keeps the normal Channels workspace chrome when a profile has no accounts:
-   * the selected profile's saved summary must orient the empty board while the
-   * Posts-style filter toolbar remains available for the next connected account.
-   */
-  it("shows selected profile context in the Channels empty directory", () => {
-    workspace.selectedBrandProfile = alphaProfile;
-    workspace.selectedBrandProfileId = alphaProfile.id;
-    renderChannels();
-
-    expect(screen.getByText(alphaProfile.description!)).toBeVisible();
-    expect(screen.getByLabelText("Search accounts")).toBeVisible();
-    expect(screen.getByRole("combobox", { name: alphaProfile.name })).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Add account" })).toHaveLength(1);
-  });
-
-  /**
    * Reproduces the empty-directory profile edit path: the card action must open
    * the same dialog exposing edit and deletion before any accounts are connected.
    */
@@ -650,6 +631,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
     fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
     const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
     fireEvent.pointerDown(editProfileButton);
@@ -669,6 +651,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
     fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
     const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
     fireEvent.pointerDown(editProfileButton);
@@ -697,6 +680,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
     fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
     const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
     fireEvent.pointerDown(editProfileButton);
@@ -719,28 +703,12 @@ describe("Channels table contract", () => {
     );
   });
 
-  /**
-   * Keeps the profile description discoverable without making the context icon
-   * another selectable or destructive control in the profile list.
-   */
-  it("shows the selected profile description from the static info indicator", async () => {
-    workspace.selectedBrandProfile = alphaProfile;
-    workspace.selectedBrandProfileId = alphaProfile.id;
-    renderChannels();
-
-    fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
-    const info = screen.getByLabelText("Profile description");
-    expect(info.tagName).toBe("SPAN");
-    fireEvent.pointerEnter(info);
-
-    expect(await screen.findByText(alphaProfile.description!)).toBeVisible();
-  });
-
   /** Toolbar editing preserves the selected profile while saving its changed name. */
   it("edits a profile from the toolbar editor", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
     fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
 
@@ -776,6 +744,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
     fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
 
@@ -808,6 +777,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
     fireEvent.click(screen.getByRole("combobox", { name: "Alpha Brand" }));
 
     expect(screen.queryByRole("button", { name: "Edit profile" })).not.toBeInTheDocument();
@@ -825,6 +795,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
     fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
 
     expect(screen.getByRole("button", { name: "Edit profile" })).toBeVisible();
@@ -839,6 +810,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
+    fireEvent.click(screen.getByText("Filter").closest("summary")!);
     fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
     expect(screen.getByRole("listbox")).toBeVisible();
 

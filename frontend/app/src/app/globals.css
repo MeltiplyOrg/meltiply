@@ -20,18 +20,13 @@
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
   --font-heading: var(--font-heading);
-  --text-page-title: var(--text-title);
   --tracking-page-title: var(--tracking-title);
-  --text-ui: var(--font-size-ui);
-  --text-control: var(--font-size-control);
-  --text-micro: var(--font-size-micro);
   --spacing-control: var(--control-height);
   --spacing-control-sm: var(--control-height-sm);
   --spacing-control-lg: var(--control-height-lg);
   --spacing-sidebar: var(--workspace-sidebar-width);
   --spacing-sidebar-collapsed: var(--workspace-sidebar-collapsed-width);
   --spacing-topbar: var(--workspace-topbar-height);
-  --spacing-board-column: var(--board-column-width);
 
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);

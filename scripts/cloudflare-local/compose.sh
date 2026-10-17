@@ -2,7 +2,7 @@
 # Single Compose boundary for the Cloudflare-local stack.
 #
 # Every caller runs the same command line: the baseline
-# docker-compose.cloudflare.yml, plus the devcontainer overlay when
+# compose.dev.yml, plus the devcontainer overlay when
 # MELTIPLY_DEVCONTAINER=1. The overlay (default .devcontainer/compose.yml,
 # overridable through MELTIPLY_DEVCONTAINER_CONFIG so launcher-staged config
 # works outside the checkout) moves every service into the owning
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-base_file="$repo_root/docker-compose.cloudflare.yml"
+base_file="$repo_root/compose.dev.yml"
 
 compose=(-f "$base_file")
 

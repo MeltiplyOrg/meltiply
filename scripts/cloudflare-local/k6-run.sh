@@ -99,7 +99,7 @@ ensure_prometheus() {
   if curl --fail --silent --max-time 2 http://127.0.0.1:9090/-/ready >/dev/null 2>&1; then
     return 0
   fi
-  if [[ -f "$repo_root/docker-compose.cloudflare.yml" ]]; then
+  if [[ -f "$repo_root/compose.dev.yml" ]]; then
     "${compose[@]}" up -d prometheus >/dev/null
     local i
     for i in $(seq 1 45); do

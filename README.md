@@ -37,6 +37,10 @@ PostgreSQL, persistent workerd bindings, durable queues, SMTP delivery, native
 media processing, and optional TLS. Its GitHub Actions workflow builds and verifies
 three GHCR release images; it does not require remote Cloudflare Workers.
 
+[`compose.dev.yml`](compose.dev.yml) provides only the development database and
+optional observability services used by `make dev`; it is not the self-hosted
+production deployment.
+
 ## Common commands
 
 | Task                             | Command               |

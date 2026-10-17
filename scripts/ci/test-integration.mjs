@@ -19,7 +19,7 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const seedSqlPath = join(repositoryRoot, "scripts/cloudflare-local/postgres/seed.sql");
 
 // Defaults match the PostgreSQL service provisioned by `bun run db:start`
-// (docker-compose.cloudflare.yml plus scripts/cloudflare-local/postgres);
+// (compose.dev.yml plus scripts/cloudflare-local/postgres);
 // the optional observability profile is not needed for integration tests.
 const defaultTestUrl =
   "postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable";

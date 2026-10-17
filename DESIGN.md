@@ -146,9 +146,9 @@ Canonical [Button](frontend/shared/src/components/ui/button.tsx) owns primary, d
 
 ### Menus
 
-`DropdownMenu` and `Select` render one vocabulary carried by shared hooks in `frontend/shared/motion.css`: the surface (`[data-menu-surface]`: 200px floor, 4px padding, window radius, opaque surface, overlay elevation with a hairline ring), rows (`[data-menu-item]`: 30px minimum height, 9px gap, 8px inset, control radius, 13.5px text), right-aligned accent checks (`[data-menu-indicator]`), uppercase micro labels (`[data-menu-label]`), and bleeding separators (`[data-menu-separator]`). A page-composed disclosure panel marks itself with the same surface hook. `SlidingMenuHighlight` owns the hover pill inside a menu, as `SidebarGlideHighlight` does in a rail, so rows never paint their own fill.
+`DropdownMenu` and `Select` render one vocabulary carried by shared hooks in `frontend/shared/motion.css`: the surface (`[data-menu-surface]`: 200px floor, 4px padding, window radius, opaque surface, overlay elevation with a hairline ring), rows (`[data-menu-item]`: 30px minimum height, 9px gap, 8px inset, control radius, 13.5px text), right-aligned accent checks (`[data-menu-indicator]`), uppercase micro labels (`[data-menu-label]`), and bleeding separators (`[data-menu-separator]`). A page-composed disclosure panel marks itself with the same surface hook. `data-state` animates every surface alike — `menu-surface-in` (160ms settle, 0.97 scale) and `menu-surface-out` (120ms) — with `scale`/`opacity` only, because Radix owns the popper's `transform` and `transform-origin` follows the popper's anchor. `SlidingMenuHighlight` owns the hover pill inside a menu, as `SidebarGlideHighlight` does in a rail, so rows never paint their own fill.
 
-**The One Menu Surface Rule.** Every floating list — dropdown menu, select listbox, submenu, or page-composed filter panel — renders the shared menu vocabulary, and a menu that hand-writes its own surface, row geometry, or indicator is a defect.
+**The One Menu Surface Rule.** Every floating list — dropdown menu, select listbox, submenu, or page-composed filter panel — renders the shared menu vocabulary, surface animation included, and a menu that hand-writes its own surface, row geometry, indicator, or motion is a defect.
 
 ### Cards and metadata
 

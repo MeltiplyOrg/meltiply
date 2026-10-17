@@ -284,9 +284,36 @@ html.theme-changing *::after {
  * lists), and page-composed disclosure panels mark their surface, rows, labels,
  * and separators with these hooks, so the chrome cannot drift between them.
  * Values map the reference popover (`--shadow-pop`, `--r-lg`/`--r-sm`, 4px panel
- * padding, 30px rows, `--surface-2` hover) onto semantic tokens; Tailwind
- * utilities still override any of it.
+ * padding, 30px rows, `--surface-2` hover, the `popIn` entrance) onto semantic
+ * tokens; Tailwind utilities still override any of it.
+ *
+ * `data-state` drives the shared entrance and exit for every surface: Radix
+ * writes it on its poppers, and a non-Radix disclosure sets it while it stays
+ * mounted for the exit. `scale`/`opacity` only — Radix owns the popper's
+ * `transform`, and `transform-origin` follows the popper's anchor.
  */
+@keyframes menu-surface-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes menu-surface-out {
+  from {
+    opacity: 1;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
 @layer components {
   [data-menu-surface] {
     min-width: 200px;
@@ -297,9 +324,18 @@ html.theme-changing *::after {
     border-radius: var(--radius-window);
     background-color: var(--surface);
     color: var(--ink);
+    transform-origin: var(--radix-popper-transform-origin, top left);
     box-shadow:
       var(--shadow-overlay),
       0 0 0 1px var(--line);
+  }
+
+  [data-menu-surface][data-state="open"] {
+    animation: menu-surface-in 160ms var(--ease-enter) both;
+  }
+
+  [data-menu-surface][data-state="closed"] {
+    animation: menu-surface-out 120ms var(--ease-exit) both;
   }
 
   /* A row never paints its own fill: `SlidingMenuHighlight` owns the hover pill,

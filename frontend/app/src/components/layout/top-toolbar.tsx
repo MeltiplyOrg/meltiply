@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ListFilter, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
@@ -7,6 +7,13 @@ import { useI18n } from "@/lib/i18n";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 
 export { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
+
+/**
+ * Exit duration of the shared menu surface animation (`menu-surface-out` in
+ * `@meltiply/ui/motion.css`); the native disclosure stays mounted this long so
+ * the panel leaves like every other menu. Keep the two values in sync.
+ */
+const MENU_EXIT_MS = 120;
 
 /** Shared Gr8r collection control row; wrapping preserves mobile access without clipping overlays. */
 export function TopToolbar({ children, className }: { children: ReactNode; className?: string }) {
@@ -80,6 +87,10 @@ export interface CollectionFilterField {
  * into the existing real equality filters. Added rows do not apply a filter until
  * their value changes. Route state owns the predicate; this component never
  * invents backend operators. Escape restores focus and nested menus stay open.
+ *
+ * The panel is a native disclosure, so it stays mounted through the shared menu
+ * exit before the browser hides it; its surface, rows, and animation come from
+ * the same `[data-menu-surface]` vocabulary as every Radix menu.
  */
 export function TopToolbarFilters({
   activeCount,
@@ -94,9 +105,32 @@ export function TopToolbarFilters({
   const ref = useRef<HTMLDetailsElement>(null);
   const pendingFocusField = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef<number | null>(null);
   const [addedFields, setAddedFields] = useState<ReadonlySet<string>>(new Set());
   const visibleFields = fields.filter((field) => field.active || addedFields.has(field.id));
   const availableFields = fields.filter((field) => !field.active && !addedFields.has(field.id));
+  /**
+   * Holds the native disclosure open for the shared exit animation so the panel
+   * leaves exactly like a Radix menu, then closes it for real. Every close path
+   * (Escape, outside pointer, summary toggle) routes through here.
+   */
+  const close = useCallback(() => {
+    const details = ref.current;
+    if (!details?.open || closeTimer.current !== null) return;
+    setClosing(true);
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      details.open = false;
+      setClosing(false);
+    }, MENU_EXIT_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    },
+    [],
+  );
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
@@ -107,11 +141,11 @@ export function TopToolbarFilters({
         target.closest('[role="menu"], [role="listbox"]')
       )
         return;
-      if (ref.current) ref.current.open = false;
+      close();
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
+  }, [close, open]);
   return (
     <TooltipProvider>
       <details
@@ -120,12 +154,19 @@ export function TopToolbarFilters({
         onToggle={(event) => setOpen(event.currentTarget.open)}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
-            event.currentTarget.open = false;
+            close();
             event.currentTarget.querySelector("summary")?.focus();
           }
         }}
       >
-        <summary className="flex h-control-sm cursor-pointer list-none items-center gap-1.5 rounded-control px-2 text-xs text-ink-2 hover:bg-hover group-open/filter:bg-hover [&::-webkit-details-marker]:hidden">
+        <summary
+          className="flex h-control-sm cursor-pointer list-none items-center gap-1.5 rounded-control px-2 text-xs text-ink-2 hover:bg-hover group-open/filter:bg-hover [&::-webkit-details-marker]:hidden"
+          onClick={(event) => {
+            if (!open) return;
+            event.preventDefault();
+            close();
+          }}
+        >
           <ListFilter className="size-3.5" />
           {t("Filter")}
           {activeCount > 0 && (
@@ -138,6 +179,7 @@ export function TopToolbarFilters({
           role="group"
           aria-label={t("Filters")}
           data-menu-surface=""
+          data-state={open && !closing ? "open" : "closed"}
           className="absolute left-0 top-full z-30 mt-1 max-h-none w-140 max-w-[calc(100vw-32px)] overflow-hidden"
         >
           <div className="flex min-h-8 items-center justify-between px-2 py-1">

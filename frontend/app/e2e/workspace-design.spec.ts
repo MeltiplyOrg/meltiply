@@ -116,6 +116,10 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     .locator("[data-menu-item]")
     .first()
     .evaluate(menuItemChrome);
+  const accountMenuAnimation = await accountMenu.evaluate(
+    (element) => getComputedStyle(element).animationName,
+  );
+  expect(accountMenuAnimation).toBe("menu-surface-in");
   const quickTheme = accountMenu.getByRole("group", { name: "Theme", exact: true });
   await quickTheme.getByRole("menuitemradio", { name: "Dark", exact: true }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
@@ -296,16 +300,15 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const filterPanel = page.getByRole("group", { name: "Filters", exact: true });
   await filterPanel.getByRole("button", { name: "Add Platform filter", exact: true }).click();
   await filterPanel.getByRole("button", { name: "All platforms", exact: true }).click();
+  const platformMenuSurface = page.locator(
+    "[data-radix-popper-content-wrapper] [data-menu-surface]",
+  );
   expect(
-    await page
-      .locator("[data-radix-popper-content-wrapper] [data-menu-surface]")
-      .evaluate(menuSurfaceChrome),
-  ).toEqual(accountMenuSurface);
+    await platformMenuSurface.evaluate((element) => getComputedStyle(element).animationName),
+  ).toBe("menu-surface-in");
+  expect(await platformMenuSurface.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   expect(
-    await page
-      .locator("[data-radix-popper-content-wrapper] [data-menu-item]")
-      .first()
-      .evaluate(menuItemChrome),
+    await platformMenuSurface.locator("[data-menu-item]").first().evaluate(menuItemChrome),
   ).toEqual(accountMenuItem);
   await page.getByRole("menuitemcheckbox", { name: "Instagram", exact: true }).click();
   await page.keyboard.press("Escape");
@@ -440,12 +443,19 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     await openMenuSurface.locator("[data-menu-item]").first().evaluate(menuItemChrome),
   ).toEqual(accountMenuItem);
   expect(await postsFilterPanel.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
+  await expect(postsFilterPanel).toHaveAttribute("data-state", "open");
+  for (const surface of [postsFilterPanel, openMenuSurface]) {
+    expect(await surface.evaluate((element) => getComputedStyle(element).animationName)).toBe(
+      "menu-surface-in",
+    );
+  }
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("posts-filter-menu-desktop.png"),
     fullPage: true,
   });
   await page.keyboard.press("Escape");
+  await expect(postsFilterPanel).toHaveAttribute("data-state", "closed");
   await postsFilterPanel
     .getByRole("button", { name: "Remove Post status filter", exact: true })
     .click();

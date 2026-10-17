@@ -108,11 +108,7 @@ const DropdownMenuSubContent = React.forwardRef<
     <DropdownMenuPrimitive.SubContent
       ref={setRefs}
       data-menu-surface=""
-      className={cn(
-        "relative z-50 select-none",
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-        className,
-      )}
+      className={cn("relative z-50 select-none", className)}
       {...props}
     >
       <SlidingMenuHighlight containerRef={subContentRef} itemSelector="[data-dropdown-item]" />
@@ -156,11 +152,7 @@ export const DropdownMenuContent = React.forwardRef<
         ref={setRefs}
         sideOffset={sideOffset}
         data-menu-surface=""
-        className={cn(
-          "relative z-50 select-none",
-          "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-          className,
-        )}
+        className={cn("relative z-50 select-none", className)}
         {...props}
       >
         <SlidingMenuHighlight containerRef={contentRef} itemSelector="[data-dropdown-item]" />

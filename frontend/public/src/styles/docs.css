@@ -3,7 +3,7 @@
 @import "fumadocs-ui/css/preset.css";
 
 /*
- * Shared design source: the exact OKLCH ramp, radii, and shadow scale the app
+ * Shared design source: the warm Gr8r-adapted palette, radii, and shadows
  * and landing use lives in @meltiply/ui — no palette values are copied into
  * docs. `tokens.css` serves both host conventions (`.dark` class and
  * `data-theme` attribute); docs toggles `.dark` like the app. `motion.css`
@@ -66,8 +66,8 @@ html::-webkit-scrollbar {
   --color-fd-card: var(--surface);
   --color-fd-card-foreground: var(--ink);
   --color-fd-border: var(--line);
-  --color-fd-primary: var(--ink);
-  --color-fd-primary-foreground: var(--page);
+  --color-fd-primary: var(--accent);
+  --color-fd-primary-foreground: var(--on-accent);
   --color-fd-secondary: var(--canvas);
   --color-fd-secondary-foreground: var(--ink);
   --color-fd-accent: var(--hover);
@@ -85,7 +85,7 @@ html::-webkit-scrollbar {
   --color-fd-diff-remove: var(--red-tint);
   --color-fd-diff-remove-symbol: var(--red);
 
-  /* Shared control radii: 6px chip → 14px window (mirrors the app @theme map). */
+  /* Shared control radii: 4px chip to 10px window. */
   --radius-sm: var(--radius-chip);
   --radius-md: var(--radius-chip);
   --radius-lg: var(--radius-control);
@@ -117,8 +117,8 @@ html::-webkit-scrollbar {
   --color-fd-card: var(--surface);
   --color-fd-card-foreground: var(--ink);
   --color-fd-border: var(--line);
-  --color-fd-primary: var(--ink);
-  --color-fd-primary-foreground: var(--page);
+  --color-fd-primary: var(--accent);
+  --color-fd-primary-foreground: var(--on-accent);
   --color-fd-secondary: var(--canvas);
   --color-fd-secondary-foreground: var(--ink);
   --color-fd-accent: var(--hover);
@@ -160,15 +160,7 @@ html::-webkit-scrollbar {
   }
 
   body {
-    background-color: var(--stripe-bg);
-    background-image: repeating-linear-gradient(
-      -45deg,
-      transparent 0,
-      transparent 7px,
-      var(--stripe) 7px,
-      var(--stripe) 8px
-    );
-    background-attachment: fixed;
+    background-color: var(--page);
     font-family: var(--font-sans);
     font-feature-settings:
       "cv11",
@@ -227,13 +219,14 @@ html > body[data-scroll-locked] {
    the same --surface treatment so it never reads as a stray panel. */
 #nd-sidebar,
 #nd-sidebar-mobile {
-  font-size: 0.8125rem;
+  font-size: 13.5px;
 }
 
 /* Hairline separation from the article column; the drawer needs an explicit
    edge because it floats over dimmed content. */
 #nd-sidebar {
   border-inline-end-color: var(--line);
+  background-color: var(--canvas);
 }
 
 /* Keep the expanded desktop rail anchored to the viewport, not the sticky
@@ -251,9 +244,7 @@ html > body[data-scroll-locked] {
   border-inline-start-color: var(--line-strong);
 }
 
-/* Use the app's 240px rail and 8px inner gutters, not Fumadocs' 16px
-   inset blocks. Stretching children also prevents the border from pushing
-   a full-width header one pixel outside the sidebar. */
+/* Match the workspace's compact rail and 8px inner gutters. */
 #nd-sidebar {
   align-items: stretch;
 }
@@ -285,7 +276,7 @@ html > body[data-scroll-locked] {
 
 /* Mobile drawer keeps the desktop surface and dims the page behind it. */
 #nd-sidebar-mobile {
-  background-color: var(--surface);
+  background-color: var(--canvas);
 }
 
 div:has(+ aside#nd-sidebar-mobile) {
@@ -350,9 +341,9 @@ div:has(+ aside#nd-sidebar-mobile) {
 /* Match the app's neutral selected row instead of a docs-only blue wash. */
 #nd-sidebar [data-radix-scroll-area-viewport] a[data-active="true"],
 #nd-sidebar-mobile [data-radix-scroll-area-viewport] a[data-active="true"] {
-  background-color: var(--hover-2);
+  background-color: var(--surface);
   color: var(--ink);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 #nd-sidebar [data-radix-scroll-area-viewport] a[data-active="true"]::before,
@@ -397,7 +388,7 @@ div:has(+ aside#nd-sidebar-mobile) {
 
 @media (min-width: 48rem) {
   .docs-shell {
-    --fd-sidebar-width: 240px;
+    --fd-sidebar-width: 252px;
   }
 }
 
@@ -442,13 +433,8 @@ div:has(+ aside#nd-sidebar-mobile) {
   flex-shrink: 0;
 }
 
-/* — Sidebar footer preferences ———————————————————————————————
-   DocsPreferences renders the same two-button toolbar at the bottom of the
-   desktop aside and the mobile drawer via the `sidebar.footer` slot — a
-   compact strip mirroring the app's footer controls, not a card. Each
-   button keeps a ≥40px hit target (44px on touch-width drawers) so it stays
-   usable on touch; the pressed state borrows the app's low-motion toggle
-   tint so "on" reads enabled, not selected-page. */
+/* Public footer controls share the theme owner and keep a touch-sized target.
+   Motion is a presentation policy, not an interactive preference. */
 .docs-prefs {
   display: flex;
   align-items: center;
@@ -602,9 +588,8 @@ body > [role="dialog"] {
   }
 }
 
-/* The readable content card: shared surface, hairline, and card elevation so
-   it lifts just off the striped canvas like an app panel. Padding breathes
-   up on desktop and tightens on phones. */
+/* Reading surfaces share the workspace palette and compact corner language;
+   article padding expands without narrowing the mobile reading column. */
 .docs-prose {
   width: 100%;
   max-width: none;

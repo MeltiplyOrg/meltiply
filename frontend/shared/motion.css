@@ -37,26 +37,6 @@ html.theme-changing *::after {
   transition-duration: 0ms !important;
 }
 
-/*
- * The live SVG mask has visible, connected ink-drop lobes and finer ripples.
- * Its contour morphs with travel, retraces on reversal and follows document
- * scrolling without a texture filter, image decoding or opacity feather.
- */
-.theme-ink-layer {
-  mask-image: var(--theme-ink-mask);
-  mask-mode: alpha;
-  mask-repeat: no-repeat;
-}
-
-/* Snapshot artwork must not run a second entrance or swallow live input. */
-.theme-ink-layer,
-.theme-ink-layer *,
-.theme-ink-layer *::before,
-.theme-ink-layer *::after {
-  pointer-events: none !important;
-  animation: none !important;
-  transition: none !important;
-}
 /* Every BrandMark surface resolves its accent diamond from the same token;
    sizing stays surface-owned (`public.css` defaults, Tailwind utilities). */
 [data-brand-mark] [data-brand-accent] {
@@ -75,40 +55,15 @@ html.theme-changing *::after {
   height: 1em;
 }
 [data-preference-icon="theme"] > [data-preference-glyph="moon"],
-[data-preference-icon="motion"] > [data-preference-glyph="pause"],
-:root:is(.dark, [data-theme="dark"]) [data-preference-icon="theme"] > [data-preference-glyph="sun"],
-html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="play"] {
+:root:is(.dark, [data-theme="dark"])
+  [data-preference-icon="theme"]
+  > [data-preference-glyph="sun"] {
   display: none;
 }
 :root:is(.dark, [data-theme="dark"])
   [data-preference-icon="theme"]
-  > [data-preference-glyph="moon"],
-html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="pause"] {
-  display: block;
-}
-
-/* The masked copy uses its target glyph without changing the live source control. */
-:root [data-theme-ink-layer="dark"] [data-preference-icon="theme"] > [data-preference-glyph="sun"],
-:root
-  [data-theme-ink-layer="light"]
-  [data-preference-icon="theme"]
   > [data-preference-glyph="moon"] {
-  display: none;
-}
-:root [data-theme-ink-layer="dark"] [data-preference-icon="theme"] > [data-preference-glyph="moon"],
-:root
-  [data-theme-ink-layer="light"]
-  [data-preference-icon="theme"]
-  > [data-preference-glyph="sun"] {
   display: block;
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-preference-icon="motion"] > [data-preference-glyph="play"] {
-    display: none;
-  }
-  [data-preference-icon="motion"] > [data-preference-glyph="pause"] {
-    display: block;
-  }
 }
 
 /*

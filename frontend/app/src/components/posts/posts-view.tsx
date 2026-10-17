@@ -995,7 +995,7 @@ export function PostsView({
             <Button
               variant="default"
               onClick={handleCreatePost}
-              className="rounded-control bg-foreground text-background font-semibold shadow-btn"
+              className="rounded-control font-medium"
             >
               <Plus className="size-4" />
               <TopToolbarLabel label={t("Create post")} />

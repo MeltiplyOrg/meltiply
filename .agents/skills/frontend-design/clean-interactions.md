@@ -1,40 +1,49 @@
-# Clean Interactions & Motion
+# Workspace interactions
 
-Motion in this design system confirms actions without layout shift. Everything
-below maps to components that exist; inventing a new interaction component goes
-through the new-shared-component gate in `SKILL.md`.
+Use the Gr8r-adapted compact control vocabulary without adding choreography to
+publishing tasks. Shared primitives own interaction details; route code supplies
+real state and actions.
 
-## Speed and tactility
+## Control states
 
-- Durations 150–300ms on `cubic-bezier(0.16, 1, 0.3, 1)` (enter) or
-  `cubic-bezier(0.23, 1, 0.32, 1)` (exit); keyframes live in `frontend/shared/motion.css`.
-- Looping animation only for loaders; everything else plays once.
-- Every interactive control carries five states: idle (`border-line bg-surface`),
-  hover (`hover:bg-hover`), focus-visible (`ring-1 ring-line-strong`), active
-  (`active:scale-[0.98]`), disabled (`opacity-40`).
+- Idle: semantic field/surface colors and one boundary.
+- Hover and active: bounded neutral or accent color feedback.
+- Focus-visible: a clear accent ring/outline; icon-only buttons have names.
+- Disabled/busy: prevent duplicate actions and retain useful labels.
+- Empty/error: name the missing state or failure and offer the next safe action.
 
-## Sliding hover highlight
+Keep buttons, inputs, and filters mounted across label changes. Preserve focus,
+selection, and unsaved content; do not split or stagger page-heading words.
+Navigation and theme selection update immediately. Any retained transition must
+honor reduced motion and cannot delay access to the task.
 
-`SlidingMenuHighlight` / `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`)
-renders one floating pill that glides between items in a container instead of
-flashing per-row backgrounds:
+## Navigation and search
 
-```tsx
-<SidebarGlideHighlight containerRef={navRef} itemSelector="[data-nav-row]" />
-```
+Navigation rows use an immediate neutral hover/selected surface. The sidebar is
+252px or a 52px icon rail; collapsed actions retain accessible labels. A separate
+chevron controls Posts sub-navigation, never a button nested in a route button.
+The top bar and sidebar open the same jump palette. Shortcut definitions and
+platform-correct hints come from `lib/hotkeys.ts`.
 
-## Spatial continuity
+Jump search filters supported pages and loaded Brand Profiles. Native Tab/Enter
+navigation and Escape dismissal remain available. Search Posts and Channels
+through their collection toolbar; never imply a global content index.
 
-When state changes a control's label or size, keep the control mounted and morph
-its geometry with `layout`/`LayoutGroup` (installed `motion` package); crossfade
-the label through a keyed `motion.span` in `AnimatePresence mode="popLayout"`.
-Unmount-and-remount resets focus, breaks screen-reader identity, and reads as a
-glitch. Use plain state changes — no motion — when geometry does not move.
+## Dialogs
 
-## Dialog exit stability
+Use `CenterDialog` for focused tasks, `CenterAlertDialog` for destructive
+confirmation, and `SideDialog` for large Post inspection. Shared primitives own
+focus trapping, Escape, scroll lock, focus restoration, and any retained exit
+lifecycle. Keep data stable through an exit with `useLatchedValue` when needed;
+clear secrets according to the account-security lifecycle, not cosmetic timing.
 
-Dialogs stay mounted through their exit animation, so content that depends on
-the value that opened them must hold that value: render from
-`useLatchedValue(value)` (`@meltiply/ui/use-latched-value`) while `open` tracks
-the live value. Example: a post panel keeps showing the post after `post`
-becomes `null` on close, instead of blanking mid-slide.
+Settings composes the same controls into Appearance, Account, and Security. Theme
+cards call the existing consent-aware provider. Identity is read-only; account
+security keeps its password, authenticator, and recovery-code requirements.
+
+## Feedback
+
+Use the shared `@meltiply/ui/toast` store and Sileo renderer. Confirm actual
+outcomes, name the affected object, and include a recovery action when useful.
+Clipboard feedback includes the copied value. Inline validation stays beside its
+input. A pending provider operation must not masquerade as published success.

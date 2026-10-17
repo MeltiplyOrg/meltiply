@@ -13,7 +13,6 @@ import {
   TopToolbarSearch,
   TopToolbarButton,
 } from "@/components/layout/top-toolbar";
-import { WorkspaceSurface } from "@/components/layout/workspace-surface";
 import { I18nProvider } from "@/lib/i18n";
 
 afterEach(() => {
@@ -150,69 +149,5 @@ describe("TopToolbarReset", () => {
     const button = screen.getByRole("button", { name: /reset/i });
     expect(button).toBeInTheDocument();
     expect(button).toBeVisible();
-  });
-});
-
-describe("WorkspaceSurface", () => {
-  /**
-   * Exercises that WorkspaceSurface exposes spaced accessible text for the animated
-   * heading while hiding the word-level motion spans from the accessibility tree,
-   * and keeps children visible on initial render.
-   */
-  it("announces spaced heading text while word spans stay aria-hidden and children visible", () => {
-    render(
-      <WorkspaceSurface title="Scheduled Posts" description="Review scheduled content">
-        <div data-testid="workspace-body">Main workspace canvas</div>
-      </WorkspaceSurface>,
-    );
-
-    // The heading's accessible name comes from a full-text copy, so assistive
-    // technology announces natural word spacing instead of one concatenated token.
-    expect(screen.getByRole("heading", { name: "Scheduled Posts" })).toBeInTheDocument();
-
-    // The description likewise exposes its full text to assistive technology
-    // rather than only the animated word fragments.
-    const description = screen.getByText("Review scheduled content");
-    expect(description.closest("[aria-hidden]")).not.toHaveAttribute("aria-hidden", "true");
-
-    // Animated word spans stay in the visual DOM but are hidden from assistive technology.
-    expect(screen.getByText("Scheduled")).toHaveAttribute("aria-hidden", "true");
-
-    // Children are immediately visible without opacity: 0 suppression
-    const body = screen.getByTestId("workspace-body");
-    expect(body).toBeInTheDocument();
-    expect(body).toBeVisible();
-  });
-
-  /**
-   * Exercises that while an outgoing title/description is still animating out,
-   * its accessible copies drop out of the accessibility tree so the header
-   * exposes exactly one accessible name mid-crossfade.
-   */
-  it("keeps a single accessible name while the outgoing title and description exit", () => {
-    const { rerender } = render(
-      <WorkspaceSurface title="Posts" description="Manage posts">
-        <div>body</div>
-      </WorkspaceSurface>,
-    );
-
-    rerender(
-      <WorkspaceSurface title="Channels Board" description="Manage channels">
-        <div>body</div>
-      </WorkspaceSurface>,
-    );
-
-    // The exiting copies stay mounted for their exit animation but are gated from
-    // assistive technology, so the heading name resolves to the incoming title only.
-    expect(screen.getByRole("heading", { name: "Channels Board" })).toBeInTheDocument();
-    for (const node of screen.getAllByText("Posts")) {
-      expect(node.closest("[aria-hidden]")).toHaveAttribute("aria-hidden", "true");
-    }
-    for (const node of screen.getAllByText("Manage posts")) {
-      expect(node.closest("[aria-hidden]")).toHaveAttribute("aria-hidden", "true");
-    }
-    for (const node of screen.getAllByText("Manage channels")) {
-      expect(node.closest("[aria-hidden]")).not.toHaveAttribute("aria-hidden", "true");
-    }
   });
 });

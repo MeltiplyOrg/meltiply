@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Switch } from "@meltiply/ui/switch";
 import { useTheme, type Theme } from "@/lib/theme";
-import { themeOriginFromEvent } from "@meltiply/ui/theme-transition";
 import { cn } from "@meltiply/ui/utils";
 
 import { type DevBoxLatency } from "./devbox-state";
@@ -123,11 +122,8 @@ export function SkeletonsTab({
   };
 
   /** Anchors the theme wave to the selected segment's button for pointer and keyboard activation. */
-  const selectTheme = (next: Theme, control: HTMLButtonElement) => {
-    setTheme(
-      next,
-      themeOriginFromEvent({ clientX: 0, clientY: 0, detail: 0, currentTarget: control }),
-    );
+  const selectTheme = (next: Theme) => {
+    setTheme(next);
   };
 
   return (

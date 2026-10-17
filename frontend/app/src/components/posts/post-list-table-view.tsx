@@ -85,13 +85,13 @@ export const PostListTableView = React.memo(function PostListTableView({
   return (
     <div
       className={cn(
-        "rounded-card border border-line bg-surface overflow-auto flex-1 min-h-0 shadow-card",
+        "rounded-card border border-line bg-surface overflow-auto flex-1 min-h-0",
         selectedIds.size > 0 && "pb-24",
       )}
     >
       <div className="overflow-x-auto min-w-full">
         <table className="w-full text-left text-xs text-ink">
-          <thead className="sticky top-0 z-10 border-b border-line bg-page text-[11px] uppercase tracking-wider text-ink-2 font-semibold select-none shadow-hairline">
+          <thead className="sticky top-0 z-10 border-b border-line bg-surface text-xs text-ink-3 font-medium select-none">
             <tr>
               <th className="w-10 py-3 pl-4 pr-1">
                 <Input
@@ -117,7 +117,7 @@ export const PostListTableView = React.memo(function PostListTableView({
                   variant="ghost"
                   onClick={() => onSortChange(sortKey === "date-desc" ? "date-asc" : "date-desc")}
                   aria-label={t("Sort by date")}
-                  className="h-auto justify-start gap-1 rounded-sm p-0 text-[11px] font-semibold uppercase tracking-wider cursor-pointer hover:bg-transparent hover:text-ink"
+                  className="h-auto justify-start gap-1 rounded-sm p-0 text-xs font-medium cursor-pointer hover:bg-transparent hover:text-ink"
                 >
                   <span>{t("Date")}</span>
                   <ArrowUpDown className="size-3" />

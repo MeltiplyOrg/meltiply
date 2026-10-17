@@ -58,17 +58,10 @@ export interface TopToolbarFilterSlotProps {
 export { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
 
 /**
- * Top horizontal toolbar card anchoring operational view filters, search, and view switchers.
- *
- * Provides the shared navigation card geometry with identical dimensions and layout across
- * workspace views, keeping filters and search controls anchored without route-transition scaling.
- * Marks the scroll viewport so route snapshots preserve its clipping on narrow screens.
- * The persistent `layoutId`/`layout` morph is disabled under the shared low-motion
- * preference so the card lands at its resting geometry with no projection or travel.
- *
- * @param props.children - Toolbar content (search bar, filter clusters, mode switchers).
- * @param props.className - Optional outer styling overrides.
- * @returns Solid interactive toolbar card adhering to the Beautiful UI design tokens.
+ * Shared collection toolbar aligned to the workspace gutter. A flat separator
+ * replaces the retired floating toolbar card; horizontal scrolling keeps every
+ * filter available on narrow screens. Existing route-slot identities preserve
+ * mounted controls during navigation, with projection disabled in low motion.
  */
 export function TopToolbar({ children, className }: TopToolbarProps) {
   const { lowMotion } = useMotionPreference();
@@ -81,7 +74,7 @@ export function TopToolbar({ children, className }: TopToolbarProps) {
       transition={{ layout: transition }}
       data-workspace-toolbar=""
       className={cn(
-        "flex h-[3.375rem] min-h-[3.375rem] shrink-0 items-center justify-between gap-3 overflow-x-auto rounded-card border border-line bg-surface p-2.5 hide-scrollbar select-none",
+        "flex min-h-11 shrink-0 items-center justify-between gap-3 overflow-x-auto border-b border-line pb-3 hide-scrollbar select-none",
         className,
       )}
     >
@@ -148,7 +141,7 @@ export function TopToolbarSearch({
         aria-label={ariaLabel ?? placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 w-full rounded-control border border-line bg-page pl-8 pr-7 text-xs text-ink placeholder:text-transparent focus:border-line-strong focus:outline-none select-text transition-colors"
+        className="h-[30px] w-full rounded-control border border-line bg-surface pl-8 pr-7 text-[12.5px] text-ink placeholder:text-transparent focus:border-accent focus:outline-none select-text transition-colors"
       />
       {/* Animated placeholder overlay */}
       {!value && (

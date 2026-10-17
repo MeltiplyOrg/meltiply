@@ -8,15 +8,11 @@
 /* Shared React primitives need the same utility generation as app-local ones. */
 @source "../../../shared";
 
-@custom-variant dark (&:is(.dark *:not([data-theme-ink-layer="light"] *)));
+@custom-variant dark (&:is(.dark *));
 
 /*
- * Design tokens for Meltiply. The token declarations live in
- * `frontend/shared/tokens.css` (imported above) so the app and the landing page
- * share one monochrome OKLCH ramp; `.dark` there matches the class this file's
- * `dark` custom variant applies. `@theme inline` maps utility names to those
- * variables without re-emitting them, so light/dark switching stays driven by
- * :root/.dark.
+ * Gr8r-adapted tokens are shared by the application, landing, and docs.
+ * Semantic utilities resolve through the host's light/dark root state.
  */
 @theme inline {
   --color-background: var(--background);
@@ -128,15 +124,7 @@
   }
 
   body {
-    background-color: var(--stripe-bg);
-    background-image: repeating-linear-gradient(
-      -45deg,
-      transparent 0,
-      transparent 7px,
-      var(--stripe) 7px,
-      var(--stripe) 8px
-    );
-    background-attachment: fixed;
+    background-color: var(--page);
     color: var(--ink);
     font-feature-settings:
       "cv11",
@@ -145,10 +133,22 @@
       "calt" 1;
     min-height: 100vh;
     font-family: var(--font-sans);
+    font-size: 13.5px;
+    caret-color: var(--accent);
   }
 
   html {
     @apply font-sans;
+  }
+
+  ::selection {
+    background: var(--accent-tint);
+    color: var(--ink);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
   }
 }
 
@@ -228,4 +228,206 @@
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;
+}
+
+/* Gr8r workspace grammar: one rail, one chrome row, one aligned content edge. */
+.workspace-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--workspace-sidebar-width);
+  height: 100%;
+  background: var(--canvas);
+  border-right: 1px solid var(--line);
+}
+.workspace-sidebar-collapsed {
+  width: 52px;
+}
+.workspace-nav-row {
+  display: flex;
+  width: 100%;
+  height: 30px;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 0 8px;
+  font-size: 13.5px;
+  font-weight: 400;
+  text-align: left;
+}
+.workspace-nav-active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 5%),
+    0 0 0 1px var(--line);
+  font-weight: 500;
+}
+.dark .workspace-nav-active {
+  background: var(--hover-2);
+  box-shadow: none;
+}
+.workspace-nav-active:hover {
+  background: var(--surface);
+}
+.dark .workspace-nav-active:hover {
+  background: var(--hover-2);
+}
+.workspace-nav-heading {
+  margin-top: 14px;
+  padding: 5px 8px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.workspace-sidebar-collapsed .workspace-nav-row {
+  justify-content: center;
+  padding: 0;
+}
+.workspace-sub-navigation {
+  margin: 4px 0 8px 16px;
+  padding-left: 9px;
+  border-left: 1px solid var(--line);
+}
+.workspace-sub-navigation .workspace-nav-row {
+  font-size: 12.5px;
+  height: 28px;
+}
+.workspace-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--workspace-topbar-height);
+  flex-shrink: 0;
+  padding-inline: var(--workspace-gutter);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.workspace-topbar-search {
+  border-color: var(--line);
+  background: var(--inset);
+  color: var(--ink-3);
+  box-shadow: none;
+  font-weight: 400;
+}
+.workspace-main {
+  padding: 24px var(--workspace-gutter);
+}
+.workspace-skip-link {
+  position: fixed;
+  left: 12px;
+  top: 8px;
+  z-index: 100;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  transform: translateY(-160%);
+}
+.workspace-skip-link:focus {
+  transform: none;
+}
+.workspace-settings {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  min-height: 340px;
+  max-height: 70dvh;
+}
+.workspace-settings-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
+  height: auto;
+  padding: 12px 8px;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--canvas);
+}
+.workspace-settings-nav [role="tab"] {
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 32px;
+  padding-inline: 8px;
+  font-size: 12.5px;
+  border-radius: var(--radius-control);
+}
+.settings-details > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 16px;
+  padding-block: 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.settings-details dt {
+  color: var(--ink-2);
+}
+.settings-details dd {
+  overflow-wrap: anywhere;
+}
+.theme-preview {
+  display: grid;
+  grid-template-columns: 28% 1fr;
+  height: 88px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-chip);
+}
+.theme-preview-light {
+  --preview-bg: #fbfaf8;
+  --preview-side: #f4f3f0;
+  --preview-line: #dad7d0;
+  --preview-accent: #4b5bd6;
+}
+.theme-preview-dark {
+  --preview-bg: #1a1a19;
+  --preview-side: #151514;
+  --preview-line: #3a3936;
+  --preview-accent: #8e9af3;
+}
+.theme-preview-sidebar,
+.theme-preview-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 8px;
+  background: var(--preview-side);
+}
+.theme-preview-main {
+  background: var(--preview-bg);
+}
+.theme-preview i {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--preview-line);
+}
+.theme-preview i:nth-child(2) {
+  width: 70%;
+  background: var(--preview-accent);
+}
+@media (width < 640px) {
+  .workspace-topbar {
+    padding-inline: 12px;
+    height: 52px;
+  }
+  .workspace-main {
+    padding: 16px 12px;
+  }
+  .workspace-settings {
+    grid-template-columns: 1fr;
+  }
+  .workspace-settings-nav {
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .workspace-settings-nav [role="tab"] {
+    flex: 1;
+    justify-content: center;
+    min-height: 44px;
+    padding-inline: 4px;
+  }
 }

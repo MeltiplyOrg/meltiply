@@ -1,53 +1,56 @@
 ---
 title: Settings
-description: Account identity display, sidebar appearance preferences, and Brand Profile management in Meltiply.
+description: Appearance, account identity, and security in Meltiply's workspace settings.
 section: Workspace
 order: 11
 ---
 
-Meltiply does not host a dedicated `/settings` page or sidebar Settings navigation item. Account identity, sidebar preferences, and Brand Profile administration are handled directly through surviving controls in the sidebar, [Channels](/docs/channels), and [Publishing](/docs/publishing).
+Open **Settings** from the sidebar footer or the top bar. Settings opens over your current work, so you can inspect preferences without leaving Posts or Channels. On a phone, use the top-bar Settings icon.
 
-## Account and workspace
+## Appearance
 
-### Profile display
+Choose **Light** or **Dark** in the Appearance section. The selected card is marked, and the palette changes immediately without moving the page or resetting your work.
 
-The sidebar footer displays your account initials avatar, display name, and registered email address, alongside a **Sign out** button. Account profile details are read-only; self-service editing of profile identity is not available in the web interface.
+Meltiply uses warm off-white pages, a stone sidebar, compact controls, and indigo primary actions. Dark mode keeps the same layout with warm charcoal surfaces and a periwinkle accent. The palette is shared by the application, landing page, and these guides.
 
-### Workspace identity
+A current-page theme choice works without optional storage. Remembering it across visits requires **functional cookie consent**. See [Cookies and storage](/docs/cookies). Without an explicit choice, initial appearance follows your device's color scheme.
 
-The workspace name at the top of the sidebar displays the name of the active organization and your current plan tier (such as Free Plan, Creator Plan, or Agency Plan) as a static label; there is no in-app workspace switcher.
+The publishing workspace uses immediate navigation and reduced-motion presentation rather than a separate Low motion switch. The interface renders in English; Settings does not expose a language selector or custom accent/density controls.
 
-## Appearance and motion
+## Account
 
-Interface display controls live directly in the sidebar footer:
+The Account section displays your name, email, and workspace as read-only details. It also provides **Sign out**, including on smaller screens. The sidebar shows your account avatar when one is supplied, or a user-icon fallback; it does not invent an avatar from your email.
 
-- **Theme** — toggle between Light mode and Dark mode. Preferences apply immediately and are stored locally in your browser.
-- **Low motion** — toggle reduced motion transitions on or off. The control indicates when your device or operating system requests reduced motion.
+The workspace name at the top of the rail is an identity label, not a workspace switcher. No plan tier is shown or implied.
 
-The sidebar does not include a language selector. Meltiply renders in English by default.
+## Security
+
+Open the Security section, then **Account security**, to change your password, enroll an authenticator, or replace recovery codes. These actions require your current password. Enabling an authenticator requires verification before enrollment is complete; save recovery codes before finishing. Replacing codes invalidates the old set.
+
+Security changes sign out previous sessions. The security dialog explains when a fresh sign-in is required. Keep passwords, setup keys, and recovery codes private.
 
 ## Brand Profiles
 
-Brand Profiles are named, color-labeled scopes inside your workspace that own channels, media assets, and posts — useful for separating distinct brands or clients.
+Brand Profiles are named scopes inside your workspace that own Channels and Posts. Select a profile in the sidebar or a collection's Brand Profile selector; **All Brand Profiles** returns to aggregate review. Profile selection is not workspace switching.
 
-Management controls live in the [Channels](/docs/channels) board and the [Publishing](/docs/publishing) toolbar:
+Workspace admins manage profiles through [Channels](/docs/channels) and [Publishing](/docs/publishing):
 
-- **Create Brand Profile** — Workspace admins can select **Create Brand Profile** in the header of the Channels board. Saving a new profile opens the account connection flow.
-- **Edit Brand Profile** — Admins can click the pencil icon (**Edit profile**) on any profile row in the Brand Profile selector dropdown on either Channels or Publishing.
-- **Profile dialog** — The dialog provides inputs for **Profile name**, **Profile description** (up to 280 characters), and **Choose a profile color** (a beehive palette of 51 accessible contract colors).
-- **Updating or deleting** — When modifying an existing profile, admins can apply changes with **Update profile** or delete the profile via **Delete profile**, which asks for confirmation in a **Delete Brand Profile** dialog. Creating a profile uses **Create profile**.
-- **Switching profiles** — Anyone can switch the active Brand Profile scope using the Brand Profile selector dropdown in Channels or Publishing, or choose "All Brand Profiles" for aggregate review.
+- **Create Brand Profile** opens the profile form; saving a new profile opens the account connection flow.
+- **Edit profile** in the Brand Profile selector opens the existing profile.
+- The form includes name, optional description, and a profile color.
+- **Delete profile** requires confirmation and explains the consequences.
 
 ## Connected accounts
 
-Connected social channels are managed exclusively on the [Channels](/docs/channels) board, where accounts can be connected, re-authenticated, or disconnected.
+Use [Channels](/docs/channels) to connect, re-authenticate, or disconnect platform accounts. Provider-specific configuration remains beside the affected account or Post, not in a generic settings panel.
 
-## Unavailable settings surfaces
+## Scope of Settings
 
-The former `/settings` route and its preview tabs — Team Members, Signatures, Notifications, and API & Keys — are not available in the application.
+Settings is a dialog, not a separate `/settings` administration route. It does not include billing, team invitations, notifications configuration, API-key management, or self-service account identity editing. Reference-design examples do not imply these capabilities exist.
 
 ## Related
 
-- [Channels](/docs/channels) — connect and manage social accounts.
-- [Publishing](/docs/publishing) — compose, schedule, and filter posts by Brand Profile.
+- [Getting started](/docs/getting-started) — workspace navigation and search.
+- [Workspaces & Brand Profiles](/docs/workspaces) — ownership and scope.
+- [Publishing](/docs/publishing) — composing and monitoring Posts.
 - [Resource limits](/docs/resource-limits) — workspace quotas.

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
 import { LayoutGroup } from "motion/react";
+import { ChevronRight, Menu, Search } from "lucide-react";
 import { startWorkspaceSlotTransition } from "@/components/layout/workspace-slot-transition";
 import { useWorkspace } from "@/context/workspace.context";
 import {
@@ -8,12 +9,15 @@ import {
   type WorkspaceView,
 } from "@/components/primitives/sidebar-nav";
 import { Button } from "@meltiply/ui/button";
+import { BrandMark } from "@meltiply/ui/brand-mark";
 import { CenterDialog, CenterDialogContent, CenterDialogTitle } from "@meltiply/ui/center-dialog";
 import { Toaster } from "@meltiply/ui/sileo";
-import { LogOut, Menu } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 import { preloadDashboardRoute } from "@/lib/preload-routes";
-import { AccountSecurity } from "@/components/auth/account-security";
+import { formatHotkey, hotkeys, useHotkey } from "@/lib/hotkeys";
+import { useI18n } from "@/lib/i18n";
+import { WorkspaceSearch } from "./workspace-search";
+import { WorkspaceSettings } from "./workspace-settings";
 export type { WorkspaceView };
 
 interface NavigationShellProps {
@@ -23,42 +27,20 @@ interface NavigationShellProps {
 }
 
 /**
- * Top-level responsive navigation shell providing the main application frame,
- * desktop collapsible sidebar, mobile navigation header and drawer, and view outlet.
- *
- * Both navigation surfaces derive from the canonical `WORKSPACE_NAV_ITEMS`
- * descriptor: the desktop `SidebarNav` renders the animated icon treatment and
- * the mobile drawer renders the same destinations with their static Lucide
- * icons, so labels and routes can never diverge. Before a cross-view sidebar
- * navigation, the persistent shell snapshots marked toolbar slots and projects
- * them into the destination toolbar, so shared controls morph without retaining
- * the full routed tree.
- * Mobile destinations warm on hover, focus, or pointer press, not on shell mount.
- *
- * Invariants:
- * - Automatically closes mobile menu drawer upon navigating to any view.
- * - Renders desktop sidebar on large breakpoints (`lg:flex`) and switches to mobile
- *   header/drawer overlay on smaller viewports.
- * - The mobile drawer uses the shared bottom-up dialog motion with edge-anchored
- *   geometry. Radix owns focus trapping, Escape dismissal, and scroll lock.
- *
- * @param props.currentView - Active workspace tab identifier controlling highlighted nav items.
- * @param props.onNavigate - Callback invoked with selected view id when navigation links are clicked.
- * @param props.children - Main view content rendered inside the animated, scrollable content canvas.
+ * Persistent Gr8r-adapted frame: warm sidebar, 46px breadcrumb/search bar,
+ * aligned working area, and a mobile navigation drawer. Routes retain their
+ * real publishing state. Shared dialogs own focus trapping/restoration; the
+ * canonical shortcut opens the same jump palette from either navigation size.
  */
 export function NavigationShell({ currentView, onNavigate, children }: NavigationShellProps) {
-  const { user, logout } = useWorkspace();
+  const { selectedBrandProfile } = useWorkspace();
+  const { t } = useI18n();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const workspaceContentRef = useRef<HTMLElement>(null);
+  useHotkey(hotkeys.commandMenu, () => setSearchOpen((open) => !open));
 
-  /**
-   * Captures route-shared toolbar slots before changing workspace views, then
-   * delegates navigation and closes the mobile drawer. Same-view query changes
-   * skip the snapshot because their controls remain mounted in the current route.
-   *
-   * @param view - Requested destination workspace view.
-   * @param options - Optional canonical route query string.
-   */
+  /** Snapshots route-shared toolbar slots before navigation; query-only changes retain live controls. */
   const handleNavClick = (view: WorkspaceView, options?: { search?: string }) => {
     if (view !== currentView) startWorkspaceSlotTransition(workspaceContentRef.current);
     onNavigate(view, options);
@@ -66,99 +48,97 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
   };
 
   return (
-    <div className="flex h-screen h-dvh w-screen overflow-hidden bg-transparent text-ink antialiased">
-      {/* Desktop Collapsible Sidebar */}
+    <div className="workspace-shell flex h-screen h-dvh w-full overflow-hidden bg-page text-ink antialiased">
+      <a href="#workspace-content" className="workspace-skip-link">
+        {t("Skip to content")}
+      </a>
       <div className="hidden lg:flex shrink-0 h-full">
-        <SidebarNav currentView={currentView} onNavigate={handleNavClick} />
+        <SidebarNav
+          currentView={currentView}
+          onNavigate={handleNavClick}
+          onOpenSearch={() => setSearchOpen(true)}
+        />
       </div>
-
-      {/* Main Column */}
-      <div className="flex flex-1 flex-col overflow-hidden min-w-0 h-full">
-        {/* Mobile Header */}
-        <header className="lg:hidden flex h-14 items-center justify-between border-b border-line bg-surface/90 backdrop-blur-md px-4 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="size-7 rounded-control bg-foreground flex items-center justify-center text-background font-black text-xs">
-              M
-            </div>
-            <span className="font-bold text-sm tracking-tight text-ink">MELTIPLY</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <AccountSecurity />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="workspace-topbar">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden shrink-0"
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label={t("Open navigation menu")}
+          >
+            <Menu className="size-4" />
+          </Button>
+          <BrandMark className="size-5 shrink-0 lg:hidden" />
+          <nav aria-label={t("Breadcrumb")} className="flex min-w-0 items-center gap-2 text-xs">
+            <span className="truncate text-ink-3 hidden sm:inline">
+              {selectedBrandProfile?.name ?? t("Workspace")}
+            </span>
+            <ChevronRight className="hidden size-3 shrink-0 text-ink-3 sm:block" />
+            <span className="font-medium">{t(currentView === "posts" ? "Posts" : "Channels")}</span>
+          </nav>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <Button
               variant="outline"
-              size="icon"
-              className="size-8 rounded-control border-line"
-              onClick={() => setMobileMenuOpen(true)}
-              aria-label="Open navigation menu"
+              size="sm"
+              className="workspace-topbar-search"
+              onClick={() => setSearchOpen(true)}
+              aria-label={t("Search and jump to")}
             >
-              <Menu className="size-4" />
+              <Search className="size-3.5" />
+              <span className="hidden sm:inline">{t("Search or jump to…")}</span>
+              <kbd className="ml-3 hidden font-mono text-[10px] sm:inline">
+                {formatHotkey(hotkeys.commandMenu)}
+              </kbd>
             </Button>
+            <WorkspaceSettings compact />
           </div>
         </header>
-
-        {/* Mobile Navigation Drawer — CenterDialog owns focus trap, Escape, scroll lock */}
         <CenterDialog open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
           <CenterDialogContent
-            className="dialog-edge-panel lg:hidden fixed top-0 left-0 right-0 translate-x-0 translate-y-0 max-w-none w-full rounded-none rounded-b-window border-b border-line bg-surface p-4 flex flex-col gap-3 shadow-overlay sm:left-0 sm:top-0"
+            className="dialog-edge-panel lg:hidden fixed top-0 left-0 right-0 translate-x-0 translate-y-0 max-w-none w-full rounded-none rounded-b-window border-b border-line bg-canvas p-4 shadow-overlay sm:left-0 sm:top-0"
             aria-describedby={undefined}
           >
-            <CenterDialogTitle className="sr-only">Navigation</CenterDialogTitle>
-            <nav className="grid grid-cols-2 gap-1.5">
+            <CenterDialogTitle className="text-sm font-semibold">
+              {t("Workspace navigation")}
+            </CenterDialogTitle>
+            <nav className="grid grid-cols-2 gap-2 pt-3">
               {WORKSPACE_NAV_ITEMS.map((item) => {
                 const Icon = item.mobileIcon;
-                const isActive = currentView === item.id;
                 return (
                   <Button
                     key={item.id}
-                    type="button"
                     variant="ghost"
                     onClick={() => handleNavClick(item.id)}
                     onMouseEnter={() => preloadDashboardRoute(item.id)}
                     onFocus={() => preloadDashboardRoute(item.id)}
-                    onPointerDown={() => preloadDashboardRoute(item.id)}
+                    aria-current={currentView === item.id ? "page" : undefined}
                     className={cn(
-                      "flex items-center justify-start gap-2 rounded-control px-2.5 py-2 text-[13px] font-medium transition-colors text-left",
-                      // Active items pin hover colors so the ghost variant's
-                      // default hover cannot repaint the active state.
-                      isActive
-                        ? "bg-foreground text-background font-semibold hover:bg-foreground hover:text-background"
-                        : "text-ink-2 hover:bg-hover hover:text-ink",
+                      "h-11 justify-start",
+                      currentView === item.id && "workspace-nav-active",
                     )}
                   >
-                    <Icon className="size-4 shrink-0" />
-                    <span className="truncate">{item.label}</span>
+                    <Icon className="size-4" />
+                    {t(item.label)}
                   </Button>
                 );
               })}
             </nav>
-            <div className="pt-2 flex items-center justify-between border-t border-line-soft">
-              <span className="text-xs text-ink-3 truncate">{user?.email}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  logout().catch(() => {});
-                }}
-                className="text-xs text-red hover:bg-red-tint hover:text-red"
-              >
-                <LogOut className="size-3.5 mr-1" /> Log out
-              </Button>
-            </div>
           </CenterDialogContent>
         </CenterDialog>
-
-        {/* Main Content Area: persistent layout group coordinates route-surface morphs. */}
         <main
+          id="workspace-content"
+          tabIndex={-1}
           ref={workspaceContentRef}
-          className="flex-1 overflow-y-auto min-h-0 min-w-0 overscroll-contain p-3 sm:p-5 lg:p-6 flex flex-col"
+          className="workspace-main flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain"
         >
           <LayoutGroup id="workspace-route-layout">
-            <div className="w-full h-full flex flex-col min-h-0 min-w-0">{children}</div>
+            <div className="flex h-full min-h-0 min-w-0 w-full flex-col">{children}</div>
           </LayoutGroup>
         </main>
       </div>
-
+      <WorkspaceSearch open={searchOpen} onOpenChange={setSearchOpen} onNavigate={handleNavClick} />
       <Toaster />
     </div>
   );

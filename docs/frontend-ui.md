@@ -1,120 +1,85 @@
 # Shared UI ownership and reuse
 
-See also [frontend-layout.md](frontend-layout.md) for the workspace alignment, density, responsive, and scroll-ownership contract.
-
-## Review findings
-
-The UI had a shared visual system but incomplete component ownership:
-
-- [`frontend/shared`](../frontend/shared) already owned tokens, animated icons,
-  motion and theme preferences, consent, clipboard handling, and notification
-  state. Most reusable React controls still lived under
-  `frontend/app/src/components/ui`, limiting discovery to the app.
-- The app's shadcn configuration generated controls into its local UI directory.
-  Repeated requests to add UI therefore had a sanctioned path for new local
-  implementations rather than a shared-library destination.
-- The raw-control lint rule exempted every local `components/ui` file. Naming a
-  new local wrapper as a primitive bypassed the reuse requirement.
-- Root Oxlint excluded landing and docs. Astro type/build checks validate code,
-  but do not establish shared component ownership or prevent copied controls.
-- Public surfaces already shared [`public.css`](../frontend/shared/public.css),
-  but repeating markup still left semantics, labels, attributes, and behavior
-  vulnerable to drift. Shared CSS alone is not a component contract.
-- Several components duplicated a purpose already covered by a shared one. They
-  were removed: `HoldButton` (destructive confirmation, now `AlertDialog`),
-  `QueryError` (now `Alert` with a retry `Button`), the app toaster wrapper (now
-  `@meltiply/ui/toast`), the unmounted `QuotaWarning` banner, and the local
-  `BrandMark.astro` adapter. `StatusBadge` now renders `StatusPill`.
+Meltiply uses the Gr8r-adapted warm workspace system. [Product UI conventions](../PRODUCT.md#modular-consistent-surfaces) define behavior; [layout conventions](frontend-layout.md) define geometry. The reference is [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio), inspected at `904205c626918ee96054eb35495c394a60c0c601`. Source reuse was authorized for this redesign; its public repository has no general-purpose license grant. Do not treat that authorization as a license for unrelated third-party reuse.
 
 ## Ownership
 
-[`@meltiply/ui`](../frontend/shared/package.json) is the canonical shared UI
-workspace. Import its explicit subpaths; inspect its implementation and a real
-caller before changing UI.
+[`@meltiply/ui`](../frontend/shared/package.json) is the canonical UI workspace. Read its exports, implementation, and an existing caller before changing controls.
 
-| UI responsibility                                                                   | Owner                                                   |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Reusable React controls and feedback surfaces                                       | `frontend/shared/src/components/ui`                     |
-| Generic composed React patterns                                                     | `frontend/shared/src/components/atoms` and `primitives` |
-| Static public-site controls and compositions                                        | `frontend/shared/src/components/public`                 |
-| Tokens, public styles, icons, motion, theme, consent, clipboard, notification state | Existing modules in `frontend/shared`                   |
-| App data, routing, translations, provider identity, workflow compositions           | `frontend/app/src/components`                           |
-| Documentation navigation, search, article transitions and reading rail              | `frontend/public/src/components`                        |
-| Marketing content and product demonstrations                                        | `frontend/public/src`                                   |
+| Responsibility                                                              | Owner                                                   |
+| --------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Warm light/dark palette, Geist fonts, radii, shadows                        | `frontend/shared/tokens.css`                            |
+| Buttons, inputs, menus, dialogs, feedback, and other generic React controls | `frontend/shared/src/components/ui`                     |
+| Shared composed patterns                                                    | `frontend/shared/src/components/atoms` and `primitives` |
+| Static Astro controls and brand mark                                        | `frontend/shared/src/components/public`                 |
+| Theme preference, consent, clipboard, notifications, motion infrastructure  | Existing modules in `frontend/shared`                   |
+| App navigation, jump search, settings composition, publishing state         | `frontend/app/src/components`                           |
+| Documentation tree, article search, reading navigation                      | `frontend/public/src/components`                        |
+| Marketing copy and explicitly labeled sample content                        | `frontend/public/src`                                   |
 
-Sharing does not mean making every page a generic template. Keep business state
-and route-specific content local. Share controls and genuine repeated compositions
-whose semantics and behavior are the same. An app-bound wrapper may translate
-labels or bind queries while composing the shared primitive; it must not copy the
-primitive's implementation.
+Import explicit subpaths such as `@meltiply/ui/button`. Keep business state and labels in the consuming app; shared controls cannot import app internals. Static Astro controls stay static rather than hydrating React to render a link or icon. Extend an existing variant before adding a module or a local lookalike.
 
-React controls use imports such as `@meltiply/ui/button`, not the retired
-app-local primitive paths. Static Astro public controls use
-`@meltiply/ui/public/<component>`. Shared implementations cannot import app or
-public-site internals. Public Astro markup stays static; reuse is not a reason to add
-React hydration to links, buttons, brand marks, or structural chrome.
+## Visual language
 
-The public shell owns one Lenis document controller in
-[`public-scroll.ts`](../frontend/public/src/scripts/public-scroll.ts), shared by
-landing and docs. Wheel inertia carries a longer coast; TOC links use a bounded 320ms
-heading pull while Astro retains fragment history. Touch, keyboard and nested
-overflow remain native. Manual/OS low motion disables smoothing immediately,
-and route preparation releases inertia before Astro restores scroll positions.
+- Flat warm page and stone rail, white light-theme surfaces, layered warm charcoal in dark mode. No striped background or separate marketing palette.
+- Indigo primary actions and focus, neutral navigation selections, labeled semantic status colors. Provider identity remains in `PlatformIcon`.
+- Self-hosted Geist for UI, Geist Mono for code and shortcut hints. Primary titles are compact semibold, not oversized display typography.
+- One border per surface. Use `rounded-chip/control/card/window` and named elevation tokens. Avoid rings stacked on an already bordered card.
+- Interface glyphs use `lucide-react` with consistent stroke and size across app, docs, and landing. Keep Meltiply's faceted brand mark; do not transplant Gr8r's logo or avatars.
 
-Interface glyphs use `lucide-react` across the app, docs, and landing; Astro
-renders static glyphs without client hydration. Shared animated icons preserve
-the same Lucide-derived geometry and two-pixel default stroke. Provider logos
-and the reading-rail artwork are identity/progress illustrations, not a second
-interface icon pack; app provider logos stay in `PlatformIcon`.
+Use semantic utilities: `bg-page`, `bg-canvas`, `bg-surface`, `text-ink`, `text-ink-2`, `text-ink-3`, `border-line`, `bg-primary`, and `text-primary-foreground`. Exact values belong in the shared tokens, not page-level utility palettes.
 
-Docs heading-copy controls publish success or failure through the shared
-`@meltiply/ui/toast` store. Success details include the exact copied section URL;
-failure retains selected manual-copy recovery. The persistent docs shell mounts
-the canonical `Toaster`, stacked above cookie consent so its actions stay usable.
+## Navigation and search
 
-### Dialogs
+`SidebarNav` owns the 252px/52px rail. `NavigationShell` owns the persistent top bar and responsive drawer. Their Posts/Channels destinations derive from `WORKSPACE_NAV_ITEMS`. Brand Profiles come from the real workspace context, not reference seed data. Workspace identity is read-only.
 
-There are exactly two dialog types. Pick by size and purpose; never add a third.
+`WorkspaceSearch` is a jump palette, not a global content index. The sidebar, top bar, and `hotkeys.commandMenu` open it. It finds supported destinations and loaded Brand Profiles. Route toolbars own collection text search and filters. Keep the shortcut and hint in `lib/hotkeys.ts` rather than hardcoding platform-specific key names.
 
-| Type                  | Import                                                       | Use for                                                                                                       |
-| --------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Centered              | `CenterDialog*` from `@meltiply/ui/center-dialog`            | Compact forms and short focused tasks, shown in the middle of the screen                                      |
-| Centered confirmation | `CenterAlertDialog*` from `@meltiply/ui/center-alert-dialog` | Destructive or irreversible confirmations; same placement and motion, cannot be dismissed by clicking outside |
-| Side                  | `SideDialog` from `@meltiply/ui/side-dialog`                 | Large inspection panels that slide in from the right edge, such as Post details                               |
+## Settings
 
-Centered dialogs own their motion: the first of a sequence pops up from the bottom
-edge and the last one to leave pops out to it, while a handoff between two centered
-dialogs morphs one opaque box from the currently visible size into the next in
-place. Only the contents crossfade and slide sideways; covered forms remain
-mounted, and cancelling a confirmation morphs back without losing input.
-The backdrop stays steady across handoffs. Callers get that handoff for free — do not add entrance or exit
-animations, and do not read or write `data-dialog-motion` from feature code.
+`WorkspaceSettings` composes existing shared dialogs and tabs into Appearance, Account, and Security. Theme cards call the consent-aware theme provider. Account details are read-only. `AccountSecurity` retains password reauthentication, pending authenticator enrollment, recovery-code handling, and sign-out semantics. Both desktop and mobile expose Settings; no `/settings` administration route is implied.
 
-## Agent workflow
+Do not restore demo billing, team management, notification preferences, or unsupported identity editing. [Capability inventory](frontend-capabilities.md) remains authoritative for feature availability.
 
-1. Read [the product UI contracts](../PRODUCT.md#modular-consistent-surfaces),
-   the shared package exports, the matching implementation, and an existing caller.
-2. Choose an installed primitive, then an existing composition. Use its variants,
-   focus, feedback, and motion contracts. Page code supplies content and layout.
-3. When an actual capability is missing, extend the canonical implementation.
-   Create a new shared module only after identifying why existing interfaces cannot
-   express the behavior. Document that decision in the change description.
-4. Keep genuinely domain-specific compositions beside their domain consumers.
-   Repeated generic interaction or styling belongs in the shared workspace.
-5. Migrate every affected caller and remove replaced definitions. Preserve keyboard
-   behavior, accessible names, focus identity, reduced motion, and static rendering.
-6. Run the affected workspace checks and the shared ownership gate; exercise the
-   changed surface in a browser. Lint is an ownership guard, not visual proof.
+## Dialogs and feedback
 
-The app and shared shadcn configurations resolve UI generation into the shared
-workspace. Run `bunx --bun shadcn@latest info --json` from `frontend/app` to inspect
-`resolvedPaths.ui` before installing; generated source needs review and the same
-reuse and verification rules as handwritten source.
+| Purpose                                | Shared primitive    |
+| -------------------------------------- | ------------------- |
+| Focused form, settings, or jump search | `CenterDialog`      |
+| Destructive confirmation               | `CenterAlertDialog` |
+| Large Post inspection                  | `SideDialog`        |
 
-## Enforcement limits
+Primitives own accessible names, focus trapping, Escape, scroll lock, focus restoration, and transitions. Keep confirmation content stable; retain data through exits with `useLatchedValue` when a primitive needs it. Route code does not implement another dialog or add entrance choreography. Immediate navigation and palette updates are the publishing default; honor the effective reduced-motion state in retained animated surfaces.
 
-Hard checks can enforce canonical ownership, import restrictions, and known
-control contracts. They cannot prove that two arbitrarily named compositions are
-semantically identical. Review must still compare existing shared modules before
-accepting a new abstraction. Avoid similarity thresholds or growing exception
-baselines: they hide duplication instead of resolving its ownership.
+Transient outcomes use `@meltiply/ui/toast`, rendered by `@meltiply/ui/sileo`. Pair a headline with the affected object and recovery action. Clipboard feedback includes the copied value. Inline validation and durable failures remain beside the controls they affect.
+
+## Public surfaces
+
+Landing and docs import the same palette and fonts. Their layout serves persuasion and reading respectively; they do not pretend to be authenticated workspace screens. Public article search remains a documentation index. Native scrolling, keyboard navigation, fragments, and reduced-motion behavior must remain usable. Existing public scroll adapters must release state during Astro navigation.
+
+## Change workflow
+
+1. Read the product and layout contracts, shared exports, matching implementation, and a real caller.
+2. Extend the canonical primitive or compose it with route data. New shared modules require an explicit ownership decision and approval.
+3. Migrate all affected callers and remove replaced definitions, aliases, and stale instructions.
+4. Verify hover, focus-visible, active, disabled, loading, empty, and recoverable-error states, including keyboard use and mobile overflow.
+5. Run affected frontend checks and exercise the actual changed surface. Use GitHub-hosted runners unless local verification is explicitly authorized. Passing lint is not visual proof.
+
+## Reference-to-product mapping
+
+| Reference family                                            | Meltiply adaptation                                                                               |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Workspace rail, top bar, breadcrumbs                        | `SidebarNav`, `NavigationShell`, real workspace/profile context                                   |
+| Projects and nested task views                              | Brand Profiles and Posts List/Grid/Calendar shortcuts                                             |
+| Command palette                                             | `WorkspaceSearch` over supported destinations and loaded profiles                                 |
+| Appearance/account settings                                 | `WorkspaceSettings` plus existing `AccountSecurity`                                               |
+| Buttons, text fields, selects, tabs, menus                  | Canonical shared Radix controls with compact tokens and accent intent                             |
+| Lists, tables, board cards, calendar cells                  | Existing Post and Channel collections; their API data and actions stay intact                     |
+| Task drawer and confirmation modals                         | Post `SideDialog`, focused `CenterDialog`, destructive `CenterAlertDialog`                        |
+| Auth screens and form states                                | Existing owner sign-in/setup/recovery with the warm palette and compact form language             |
+| Empty, loading, error, and notification states              | Shared Empty/Skeleton/Alert/Sileo with real pending/error semantics                               |
+| Lucide glyphs, type, colors, spacing, corners               | Shared Lucide system, self-hosted Geist, and reference-derived semantic tokens                    |
+| Files, timeline, teams, billing, and reference seed content | No copied product routes; composer attachments and scheduling remain in their supported workflows |
+
+The mapping transfers the complete applicable interface vocabulary without
+introducing nonfunctional copies of reference-only features.

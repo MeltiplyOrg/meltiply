@@ -12,7 +12,7 @@ export type InputProps = React.InputHTMLAttributes<HTMLInputElement>;
 /**
  * Standard form input field styled with consistent borders, typography, and focus rings.
  *
- * Wraps a native HTML `<input>` element with standardized sizing (`h-9`), theme-aware border and background tokens,
+ * Wraps a native HTML input with compact 30px sizing, opaque field fill,
  * custom file upload button styling (`file:border-0 file:bg-transparent`), placeholder colors, and accessible
  * keyboard focus ring styling (`focus-visible:ring-1 focus-visible:ring-ring`).
  *
@@ -39,7 +39,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         className={cn(
           type === "checkbox" || type === "radio"
             ? "size-4 shrink-0 accent-primary transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-            : "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+            : "flex h-[30px] w-full rounded-control border border-line-strong bg-field px-2.5 py-1 text-[13px] transition-colors duration-150 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-ink-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45",
           className,
         )}
         ref={ref}

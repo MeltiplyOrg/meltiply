@@ -1,43 +1,52 @@
 # Frontend layout contract
 
-This document records the alignment, density, responsive, and scroll-ownership conventions for the authenticated publishing workspace. It is the companion to `docs/frontend-ui.md` and `PRODUCT.md`.
+The Gr8r-adapted workspace uses compact chrome, warm flat surfaces, and one content edge. Read alongside [shared UI ownership](frontend-ui.md) and [product conventions](../PRODUCT.md#modular-consistent-surfaces).
 
 ## Page geometry
 
-- The workspace shell (`NavigationShell`) owns the outer frame. Its `<main>` element is the single vertical scroll owner for workspace content; inner regions must not introduce a competing page-level scrollbar.
-- Route content is wrapped in `WorkspaceSurface`, which fixes the page header (title, description, actions) at `shrink-0` and reserves a `gap-4` between the header and the working area. All operational routes (Posts, Channels, composer) use this surface so headings and content edges stay aligned when switching views.
-- Horizontal padding lives on `<main>` only (`p-3 sm:p-5 lg:p-6`). Route surfaces and toolbars must not add their own outer horizontal padding; inner cards/panels may pad their own content.
-- Browsing collections (tables, grids, channel lists) take the available width intentionally and are not wrapped in an arbitrary `max-w-*`. Readable limits (`max-w-sm`, `max-w-xl`, etc.) are reserved for prose, empty-state copy, and forms/dialogs.
-- Page-level sections are separated by spacing or dividers (`border-t`, `gap-*`), not by nested cards. A card denotes an independent object (a Post row, a Channel, a dialog), not a page section.
+- `NavigationShell` owns the frame: 252px desktop sidebar, 52px collapsed rail, 46px top bar, and a working column that can shrink with `min-width: 0`.
+- The top bar contains workspace/Brand Profile context, the current route, jump search, and Settings. It stays mounted across Posts and Channels navigation.
+- The desktop content gutter is 24px. `workspace-main` owns outer padding; route headers, toolbars, grids, and tables align to it rather than adding independent outer insets.
+- `WorkspaceSurface` orders title/context and actions, then the collection toolbar and working area. Titles are 23px semibold with a 32px line height; descriptions are 13px with a 20px line height.
+- Toolbars are flat filter rows with a lower separator, not floating cards. Their horizontal overflow keeps all filters reachable on narrow screens.
+- Collections use available width. Limit prose, forms, and empty-state copy rather than wrapping every collection in an arbitrary maximum width.
+- A card represents a Post or independent panel. Page sections use spacing and dividers; avoid nested decorative cards.
 
 ## Density
 
-- Control heights: icon buttons `size-8`/`size-9`, standard buttons `h-8`/`h-9`, toolbar `h-[3.375rem]`, inputs `h-9`/`h-10`. Comparable controls use the same height unless a task requires a documented exception.
-- Spacing vocabulary: `gap-1.5`, `gap-2`, `gap-3`, `gap-4`, `p-2.5`, `p-3`, `p-4`, `p-6`, `p-12` for empty states. Avoid ad-hoc values.
-- Typography: page title `text-2xl sm:text-3xl`, section heading `text-base`, body `text-sm`, metadata `text-xs`/`text-[12px]`.
-- Touch targets on phones aim for 44px for primary navigation/actions; desktop compactness is not carried onto small viewports.
+| Element                                | Desktop contract                                           |
+| -------------------------------------- | ---------------------------------------------------------- |
+| Standard / small / large button        | 30px / 26px / 36px                                         |
+| Standard input                         | 30px; a task may explicitly request a larger editing field |
+| Sidebar row                            | 30px; nested Posts view shortcut 28px                      |
+| Working text                           | About 13.5px                                               |
+| Secondary labels / metadata            | 12px / 11–12px                                             |
+| Radius: chip / control / card / dialog | 4px / 6px / 8px / 10px                                     |
+
+Use the 4pt spacing vocabulary, with 8–12px between related controls and 20–24px between major groups. Compact desktop density is not permission to shrink mobile navigation: use 44px targets for primary touch actions.
 
 ## Scroll ownership
 
-| Region | Owner | Overflow |
-| --- | --- | --- |
-| Workspace page | `<main>` in `NavigationShell` | `overflow-y-auto` |
-| Toolbar | `TopToolbar` | `overflow-x-auto` (horizontal only) |
-| Composer editing area | composer container | `overflow-y-auto` (inner) |
-| Dialog body | `CenterDialogContent`/`SideDialog` | `overflow-y-auto` with `data-lenis-prevent` |
-| Tables/collections | their own scroll container | `overflow-y-auto`/`overflow-x-auto` only when needed |
+| Region                            | Owner                        | Behavior                                              |
+| --------------------------------- | ---------------------------- | ----------------------------------------------------- |
+| Document frame                    | `NavigationShell`            | Viewport-bound, no document horizontal overflow       |
+| Route working column              | `workspace-main`             | Vertical overflow fallback                            |
+| Sidebar destinations and profiles | Sidebar nav                  | Independent vertical scroll; footer remains reachable |
+| Collection                        | Table/grid/calendar viewport | Bounded vertical or horizontal overflow as needed     |
+| Toolbar                           | `TopToolbar`                 | Horizontal overflow only                              |
+| Composer editing area             | Composer container           | Bounded internal vertical scroll                      |
+| Dialog body                       | Shared dialog content        | Bounded vertical scroll with `data-lenis-prevent`     |
 
-Inner scroll containers must use `min-h-0` and never become the page scroll owner.
+Every flex/grid ancestor of a bounded scroller needs `min-h-0` and/or `min-w-0`. Do not give both the entire page and an unbounded child ownership of the same vertical content.
 
 ## Responsive behavior
 
-- Breakpoints follow Tailwind defaults: `sm` 640, `md` 768, `lg` 1024, `xl` 1280, `2xl` 1536. Representative verification widths: 320, 390, 768, 1024, 1440, 1920.
-- Toolbars reflow horizontally with `overflow-x-auto` rather than clipping; active filter state stays visible.
-- Collection metadata stacks when a row no longer fits; row actions stay attached to their object.
-- No unintended document horizontal overflow.
+- Below the desktop rail breakpoint, use the menu drawer and persistent top bar. Search and Settings remain available without the rail.
+- Below 640px, the working gutter is 12px and top bar is 52px. Page actions wrap beneath context; essential labels remain readable.
+- Settings navigation becomes a horizontal tab row on phones. The content scrolls inside the viewport-bounded dialog.
+- Tables may scroll horizontally; controls and status information must not be silently clipped. Cards reflow through the route's existing responsive grid.
+- Verify desktop and phone widths, keyboard traversal, long profile names, empty collections, loading, failures, and both palettes. No unintended document horizontal overflow.
 
-## Motion and loading
+## State and motion
 
-- Motion is minimal: prefer instant state changes. Entrance motion is reserved for preserving focus or spatial continuity, not decoration. Low motion disables travel but does not remount.
-- Loading placeholders match destination geometry (shared `Skeleton`).
-- Background refresh keeps usable content visible; full-page loading only for initial load.
+Navigation, headings, and palette changes are immediate. Keep controls mounted when state or labels change so input and focus survive. Retained shared transitions honor reduced motion; loading placeholders match the final geometry. Background refresh keeps usable data visible rather than replacing it with a full-page spinner.

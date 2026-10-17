@@ -83,11 +83,11 @@ export const PostGridCardView = React.memo(function PostGridCardView({
   if (isLoading) {
     return (
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
-        <div className={cn("grid gap-4", gridColumnClass)}>
+        <div className={cn("grid gap-3", gridColumnClass)}>
           {SKELETON_CARD_KEYS.map((key) => (
             <div
               key={key}
-              className="h-56 rounded-card border border-line bg-surface p-4 flex flex-col justify-between"
+              className="h-48 rounded-card border border-line bg-surface p-3 flex flex-col justify-between"
             >
               <Skeleton className="h-4 w-3/4" />
               <Skeleton className="h-16 w-full" />
@@ -138,7 +138,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
         <span className="text-xs font-medium text-ink-2 select-none">{t("Select all posts")}</span>
       </div>
       <div className={cn("flex-1 min-h-0 overflow-y-auto pr-1", selectedIds.size > 0 && "pb-24")}>
-        <div className={cn("grid gap-4", gridColumnClass)}>
+        <div className={cn("grid gap-3", gridColumnClass)}>
           {posts.map((row) => {
             const preview = resolveRowPreviewAttachment(row);
             const primaryImage =
@@ -170,7 +170,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
                     ?.focus();
                   onViewDetails(row.id);
                 }}
-                className="flex flex-col justify-between rounded-card border border-line bg-surface p-3.5 shadow-card hover:shadow-raised hover:border-line-strong transition-all duration-200 cursor-pointer"
+                className="flex flex-col justify-between gap-3 rounded-card border border-line bg-surface p-3 shadow-card hover:border-line-strong transition-colors duration-150 cursor-pointer"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0 flex flex-col gap-1.5">

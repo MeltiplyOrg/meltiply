@@ -299,7 +299,7 @@ function FacebookPageSelectionDialogContent({
               !selection ||
               selection.accounts.length === 0
             }
-            className="rounded-control bg-foreground text-background font-semibold shadow-btn text-xs"
+            className="rounded-control font-medium text-xs"
           >
             {confirmMutation.isPending ? (
               <span className="flex items-center gap-1.5">

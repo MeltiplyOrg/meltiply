@@ -648,7 +648,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
 
   return (
     <WorkspaceSurface
-      title={t("Channels Board")}
+      title={t("Channels")}
       description={t("Manage social accounts and publishing channels organized by Brand Profile.")}
       actions={
         <>
@@ -666,7 +666,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                   ? "add-account-disabled-note"
                   : undefined
               }
-              className="rounded-control bg-foreground text-background font-semibold shadow-btn"
+              className="rounded-control font-medium"
             >
               <Plus className="size-4" />
               <TopToolbarLabel label={t("Add account")} />
@@ -831,7 +831,12 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
           </CardContent>
         </Card>
       ) : (
-        <div className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1", selectedIds.size > 0 && "pb-24")}>
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1",
+            selectedIds.size > 0 && "pb-24",
+          )}
+        >
           {accounts.length === 0 ? (
             <Card className="border border-line bg-surface shadow-card">
               <CardContent className="flex flex-col items-center p-12 text-center">
@@ -1073,7 +1078,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                                 "rounded-control text-xs font-semibold h-8 px-3.5",
                                 isAlreadyConnected
                                   ? "border-line text-ink-2"
-                                  : "bg-foreground text-background shadow-btn hover:opacity-90",
+                                  : "bg-primary text-primary-foreground shadow-btn hover:bg-primary/90",
                               )}
                             >
                               {connectUnavailable

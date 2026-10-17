@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - frontend-full
+          - frontend-ui
           - cloudflare-integration
           - cloudflare-extended
 
@@ -53,6 +54,20 @@ jobs:
           backend_pid=$!
           trap 'kill -TERM -- "-$backend_pid" 2>/dev/null || true' EXIT
           bun run local:k6:ci
+      - name: Review changed UI and required frontend gates
+        if: inputs.lane == 'frontend-ui'
+        run: |
+          cd frontend/app
+          npx --yes react-doctor@latest --verbose --scope changed
+          cd ../..
+          bun run --filter frontend-app check
+          bun run --filter frontend-public check
+          bun run docs:links
+      - name: Prepare focused UI browser journey
+        if: inputs.lane == 'frontend-ui'
+        run: |
+          bun run setup --skip-dependencies --skip-image-pull
+          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
       - name: Validate frontend and install Chromium
         if: inputs.lane == 'frontend-full'
         working-directory: frontend/app
@@ -71,6 +86,19 @@ jobs:
         env:
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
         run: bun run test:e2e --trace on
+      - name: Exercise redesigned workspace and public pages
+        if: inputs.lane == 'frontend-ui'
+        env:
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+          MELTIPLY_E2E_PUBLIC_URL: http://127.0.0.1:4321
+        run: |
+          bun run --cwd frontend/public preview --host 127.0.0.1 --port 4321 &
+          public_pid=$!
+          trap 'kill "$public_pid" 2>/dev/null || true' EXIT
+          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project chromium --trace on
+      - name: Inspect UI design mechanics
+        if: inputs.lane == 'frontend-ui'
+        run: node .agents/skills/impeccable/scripts/detect.mjs --json frontend/app/src/components/layout frontend/app/src/components/primitives/sidebar-nav.tsx frontend/shared/tokens.css frontend/public/src/styles
       - name: Check production performance without rebuilding
         if: inputs.lane == 'frontend-full'
         working-directory: frontend/app

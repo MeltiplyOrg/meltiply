@@ -70,9 +70,9 @@ export function ChannelTableView({
   const { t, tStatus } = useI18n();
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="overflow-x-auto rounded-card border border-line bg-surface shadow-card">
+      <div className="overflow-x-auto rounded-card border border-line bg-surface">
         <table className="w-full min-w-[720px] text-left text-xs text-ink">
-          <thead className="border-b border-line bg-page text-[11px] font-semibold uppercase tracking-wider text-ink-2 select-none">
+          <thead className="border-b border-line bg-surface text-xs font-medium text-ink-3 select-none">
             <tr>
               <th className="w-12 py-2.5 pl-4 pr-2">
                 <Input

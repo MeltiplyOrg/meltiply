@@ -1,7 +1,3 @@
-import { readFunctionalStorage, writeFunctionalStorage } from "./cookie-consent";
-
-/** Shared browser-local manual preference; only the literal "on" enables it. */
-export const motionPreferenceStorageKey = "meltiply.low-motion";
 export const reducedMotionQuery = "(prefers-reduced-motion: reduce)";
 
 /** Reads the live OS accessibility preference; unavailable media queries mean normal motion. */
@@ -13,17 +9,7 @@ export function readSystemLowMotion(): boolean {
   }
 }
 
-/** Reads a consented manual choice; missing consent or inaccessible storage means no persisted override. */
-export function readStoredManualLowMotion(): boolean {
-  return readFunctionalStorage(motionPreferenceStorageKey) === "on";
-}
-
-/** Saves manual motion only with functional consent; current-page control state works without persistence. */
-export function writeStoredManualLowMotion(enabled: boolean): void {
-  writeFunctionalStorage(motionPreferenceStorageKey, enabled ? "on" : null);
-}
-
-/** Allows spatial effects only outside manual/OS low motion and an active ink capture; SSR stays static. */
+/** Allows spatial effects only outside the root presentation policy, OS reduction, and ink capture. */
 export function motionAllowed(): boolean {
   return (
     typeof document !== "undefined" &&

@@ -54,9 +54,9 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
         selectionActive && "pb-24",
       )}
     >
-      <div className="shrink-0 flex items-center justify-between rounded-card border border-line bg-surface px-4 py-3 shadow-card">
+      <div className="shrink-0 flex items-center justify-between border-b border-line pb-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-bold text-ink">
+          <h2 className="text-base font-semibold text-ink">
             {calendarMonth.toLocaleString("en-US", { month: "long", year: "numeric" })}
           </h2>
           <Button
@@ -90,7 +90,7 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
         </div>
       </div>
 
-      <div className="rounded-card border border-line bg-surface overflow-hidden shadow-card">
+      <div className="rounded-card border border-line bg-surface overflow-hidden">
         <div className="grid grid-cols-7 border-b border-line bg-page text-center text-xs font-semibold text-ink-2 py-2">
           <span>{t("Sun")}</span>
           <span>{t("Mon")}</span>
@@ -124,7 +124,7 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                     className={cn(
                       "text-xs font-medium size-6 flex items-center justify-center rounded-full",
                       isToday
-                        ? "bg-foreground text-background font-bold"
+                        ? "bg-accent text-accent-foreground font-semibold"
                         : cell.isCurrentMonth
                           ? "text-ink"
                           : "text-ink-3",

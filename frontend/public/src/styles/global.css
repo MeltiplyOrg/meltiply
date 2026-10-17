@@ -1,5 +1,5 @@
 /*
- * Landing entry stylesheet. The monochrome OKLCH palette and shadcn-aligned
+ * Landing entry stylesheet. The Gr8r-adapted warm palette and shared
  * aliases come from `frontend/shared/tokens.css`, the same source the app
  * loads — the public site uses the shared `.dark` class theme convention.
  * Skip-link, site-header, [data-brand-mark], and button/icon controls
@@ -61,12 +61,12 @@
 }
 
 .auth-menu-link-primary {
-  background: var(--ink);
+  background: var(--primary);
   color: var(--primary-foreground);
 }
 
 .auth-menu-link-primary:hover {
-  background: color-mix(in srgb, var(--ink) 85%, var(--surface));
+  background: color-mix(in srgb, var(--primary) 88%, var(--ink));
 }
 
 .public-docs-search {

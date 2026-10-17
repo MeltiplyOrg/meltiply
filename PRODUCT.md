@@ -67,135 +67,94 @@ do next.
 
 ### Palette
 
-The current application design system is authoritative for all Meltiply surfaces,
-including the landing page. Use the semantic OKLCH tokens in
-[`frontend/shared/tokens.css`](frontend/shared/tokens.css) — imported by both
-`frontend/app/src/app/globals.css` and `frontend/public/src/styles/global.css` —
-not a separate marketing palette. That stylesheet owns the exact light/dark
-values, texture, radii, elevation, and the shadcn-aligned aliases that the app's
-`@theme inline` block maps onto Tailwind utilities.
+Adopt [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio)'s warm, compact
+workspace language across the application, landing, and documentation. Source
+reuse was authorized for this redesign. The reference's project-management demo
+is visual material, not a source of Meltiply product capabilities.
 
-| Token family                                            | Role                                                                  |
-| ------------------------------------------------------- | --------------------------------------------------------------------- |
-| `--page`, `--canvas`, `--surface`, `--inset`, `--field` | Cool neutral backgrounds and layered surfaces                         |
-| `--ink`, `--ink-2`, `--ink-3`                           | Primary text, secondary copy, and subdued metadata                    |
-| `--line`, `--line-strong`, `--line-soft`                | Hairline boundaries and structural separators                         |
-| `--accent`, `--accent-ink`, `--accent-tint`             | Restrained blue accent, readable accent text, and selected-state tint |
-| `--green*`, `--orange*`, `--red*`                       | Semantic success, warning, and error states                           |
-| `--stripe-bg`, `--stripe`                               | Fixed diagonal canvas texture                                         |
+[`frontend/shared/tokens.css`](frontend/shared/tokens.css) owns all palette,
+font, radius, and elevation values. React utilities and static Astro styles
+resolve through these semantic tokens; pages do not maintain separate palettes.
 
-Light mode uses a cool near-white canvas and white surfaces; dark mode uses
-layered neutral surfaces with the same geometry. Primary filled controls use the
-neutral ink/surface pairing. Blue supports focus and intentional accents; orange
-is a semantic warning color, not a primary brand or CTA color. Provider colors
-identify external platforms, never product state.
+| Role         | Light                    | Dark                    |
+| ------------ | ------------------------ | ----------------------- |
+| Page         | Warm off-white `#fbfaf8` | Warm charcoal `#1a1a19` |
+| Sidebar      | Stone `#f4f3f0`          | Deep charcoal `#151514` |
+| Surface      | White `#ffffff`          | Charcoal `#1d1d1c`      |
+| Primary text | `#1d1c1a`                | `#eceae5`               |
+| Accent       | Indigo `#4b5bd6`         | Periwinkle `#8e9af3`    |
+
+Primary actions use the accent with the theme's contrasting `--on-accent`.
+Green means confirmed success, amber means attention, and red means failure or
+destruction. State always includes a label or icon. Platform colors identify
+external providers only.
 
 ### Design Direction
 
-Follow the installed application UI rather than the retired industrial palette
-or a separate brand concept. The visual references are the
-[`@meltiply/ui` shared workspace](frontend/shared) and its application callers in
-[`frontend/app/src/components`](frontend/app/src/components). Follow the
-[shared UI ownership workflow](docs/frontend-ui.md) and reuse its component vocabulary and interaction
-patterns. Preserve the faceted Meltiply logo geometry: the main mark uses
-`--ink` and the small center diamond uses `--accent`, adapting to light and dark
-themes. The logo does not retain the retired industrial palette.
+The visual contract is a calm, warm workbench: Geist typography, thin stone
+separators, compact controls, quiet selected rows, and aligned working surfaces.
+Keep Meltiply's faceted brand mark and real publishing terminology. Replace
+Gr8r's Projects with Brand Profiles and its task views with Posts; do not copy
+its seed content, branding, billing, notifications, or collaboration claims.
 
-Theme changes share a masked ink reveal across the app and landing. Light to
-dark expands in 1.2 seconds; every shrink toward light takes 0.6 seconds,
-including reversal of an unfinished expansion. Each retarget starts from the
-current coverage without replacing the mask or jumping its edge.
-The theme button's center anchors both pointer and keyboard activation.
-Withdrawal begins at the visible viewport boundary, not the document's bottom.
-The round ink silhouette retains fluid lobes, with stronger lower ripples on
-withdrawal, no directional stretching, feathering, or palette interpolation.
-One inert, target-themed full-document copy follows window and nested scrolling;
-fixed and sticky controls stay aligned. The mask's origin and silhouette remain
-document-anchored, so scrolling reveals real below-fold content rather than a
-stretched viewport snapshot. Repeated activation reverses or continues the same
-mask. Live controls retain identity, focus, and input; the palette commits only
-at the final endpoint, without staggered component color delays. Manual or
-device-requested low motion uses a 200ms opacity blink with a 100ms theme commit.
+The 252px sidebar collapses to 52px. A 46px top bar holds context and jump search.
+The sidebar groups Posts, Channels, and real Brand Profiles. Posts exposes List,
+Grid, and Calendar shortcuts. One 24px desktop gutter aligns page headings,
+actions, toolbars, and collection edges. Mobile keeps usable targets and a
+navigation drawer rather than squeezing the desktop rail.
 
-`frontend/shared/` owns the tokens, animated SVG icons, motion preferences, effect
-timings, and theme transition. React controls and native landing controls reuse
-these implementations rather than maintaining parallel animations. Landing
-content remains static HTML; decorative icon islands hydrate only when idle or
-visible, with their geometry reserved before JavaScript runs.
+Settings is a focused dialog with Appearance, Account, and Security sections.
+Theme cards change the real light/dark palette; account identity is read-only;
+security uses the existing password-reauthenticated account controls. Settings
+does not imply a new administration route or billing capabilities.
+
+Search/jump opens from the sidebar, top bar, or the platform-correct Command/Control
+shortcut. It searches navigation destinations and loaded Brand Profiles.
+Collection search stays on Posts and Channels, with no claim to search unloaded
+or inaccessible data.
 
 #### Calm Workbench
 
-- Lead with the user's posts, schedule, distribution state, and next safe action.
-- Prefer one clear primary action over a field of competing buttons.
-- Use whitespace, alignment, and hierarchy to reduce cognitive load; do not use
-  decorative cards, gradients, or motion to manufacture importance.
-- Keep product language concise, concrete, and honest about partial or pending
-  work.
-- The UI is agent-first: a human may rarely touch it. Prioritize load time,
-  accessibility, and deterministic behavior over visual richness; every
-  animation must earn its keep.
+- Lead with posts, schedules, channel health, and the next safe action.
+- Use one accent-filled primary action; secondary controls are outlined or quiet.
+- Separate page sections with alignment, whitespace, or hairlines. Cards represent
+  objects and independent panels, not layers of decorative containers.
+- Show actual pending and failed outcomes. Saving a draft is not publication.
+- Preserve user input, selection, and focus through navigation and recoverable errors.
 
 #### Modular, Consistent Surfaces
 
-- Treat posts, distributions, comments, platform accounts, and usage records as
-  consistent content units with predictable states and actions.
-- Reuse the same spacing, control shapes, status treatment, and interaction rules
-  across routes. Consistency is more valuable than novelty.
-- Prefer existing primitives and composed patterns over one-off route-specific
-  widgets.
-- **Modal motion:** centered dialogs and confirmations pop up from the bottom edge and
-  pop out to it; when one hands off to another centered dialog, the box morphs between
-  the two sizes in place while the contents slide sideways, so the pair reads as one
-  surface reshaping. The side dialog slides in from and out to the right edge.
-  Preserve each surface's resting geometry, and honor the shared low-motion preference.
-- **Action feedback:** use the shared Sileo notification store (`@meltiply/ui/toast`,
-  rendered by `@meltiply/ui/sileo`). All transient notifications appear bottom-right and expand upward.
-  Pair an outcome headline with meaningful expandable detail: the affected object,
-  copied value, or recovery action. Clipboard confirmations explicitly name the
-  completed copy action and include the exact value, rather than bare profile text.
-
-#### Progressive Disclosure
-
-- Show the essential state and next action first; reveal provider constraints,
-  technical detail, and secondary controls when they become relevant.
-- Keep advanced options available without making first-use screens feel like
-  configuration panels.
-- Use inline expansion, contextual panels, and focused dialogs before sending a
-  user away from the work they are doing.
-
-#### Context and Flow
-
-- Actions should be placed beside the object they affect and labeled with their
-  real outcome.
-- Preserve filters, selections, drafts, and user intent across recoverable
-  errors and navigation within a workflow.
-- Keep related work in one workspace so users do not need to reconstruct context
-  across disconnected screens.
-- Use fast, reversible interactions for small changes; reserve confirmation for
-  destructive or externally consequential actions.
+- [`@meltiply/ui`](frontend/shared) owns reusable controls, theme tokens, icons,
+  consent, and notifications. Extend its canonical implementation instead of
+  cloning a primitive in route code. Follow [shared UI ownership](docs/frontend-ui.md).
+- Use the same compact control shapes, typography, status treatment, and focus
+  rules on every route. Geometry is theme-independent.
+- Dialogs use `CenterDialog`, destructive confirmations use `CenterAlertDialog`,
+  and large inspection surfaces use `SideDialog`. Shared primitives own focus,
+  dismissal, scroll lock, and content retention.
+- Feedback uses the shared `@meltiply/ui/toast` store and `@meltiply/ui/sileo`
+  renderer. Include the affected object and a useful recovery action; clipboard
+  feedback includes the exact copied value.
+- Keep provider-specific settings beside the Channel or Post they affect.
+  Progressive disclosure must not hide the primary state or recovery action.
 
 #### Visual System
 
-- Use the app's system sans-serif hierarchy and three-step ink ramp. Create
-  emphasis with contrast, weight, and spacing rather than ornamental typography.
-- Use cool neutral surfaces, crisp hairline boundaries, and restrained layered
-  shadows. The fixed diagonal stripe texture belongs on the background canvas,
-  not inside controls or content.
-- Preserve the application radius scale: 6px chips, 8px controls, 10px cards,
-  and 14px windows. Use the named shadow tokens for elevation.
-- Reuse installed shared shadcn/Radix controls and generic patterns from
-  `@meltiply/ui` before introducing custom equivalents. Public-site components
-  share static Astro implementations without shipping the React application runtime.
-- Match light and dark themes without changing geometry. Keep semantic status
-  colors distinct from the blue accent and pair status with text or icons.
-- Keep focusable controls mounted during state changes. When label changes
-  resize adjacent controls, use the installed Motion layout and label transitions
-  to preserve spatial continuity and keyboard focus.
-- Motion is a last resort, not a feature: prefer instant state changes and
-  static feedback. Keep transitions under 150ms, disable entrance/exit
-  animation unless it preserves focus or spatial continuity, and honor reduced
-  motion fully. The UI is agent-first: optimize for speed, load time, and
-  accessibility over visual richness.
+- Geist is the interface face; Geist Mono is for code, identifiers, and shortcut
+  hints. Both are self-hosted through the shared workspace.
+- Titles are 23px semibold; working text is around 13.5px; secondary labels are
+  12px. Use the three-step ink ramp, not arbitrary opacity for essential copy.
+- Desktop controls use the reference's 30px standard height and 26px small
+  variant. Mobile navigation and important touch controls stay comfortably tappable.
+- Radii: 4px chips, 6px controls, 8px cards, 10px dialogs. Use a border or the
+  named elevation treatment without stacking duplicate hairline rings.
+- Backgrounds are flat warm surfaces. The retired diagonal stripe canvas is not
+  part of this system.
+- Navigation, page titles, and theme selection update immediately. Keep retained
+  transitions bounded and reduced-motion-safe; do not add staggered text,
+  decorative icon travel, or theme ink reveals to the publishing workflow.
+- Light/dark preferences share the consent-aware owner across app and public
+  surfaces. A current-page choice works without optional persistence.
 
 #### Responsive and Accessible by Default
 

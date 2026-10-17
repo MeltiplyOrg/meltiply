@@ -44,17 +44,19 @@ deployment secrets are supplied. Do not execute contributor code through
 `pull_request_target` or persistent self-hosted runners.
 
 The [extended workflow](../.github/workflows/extended.yml) preserves manually
-selected `frontend-full`, `cloudflare-integration`, and `cloudflare-extended`
-lanes for real browser/Lighthouse journeys, live-local topology/load, and
-release/staging/IaC checks. These run on GitHub-hosted machines without deployment
+selected `frontend-full`, `frontend-ui`, `cloudflare-integration`, and
+`cloudflare-extended` lanes for full browser/Lighthouse journeys, focused UI
+review, live-local topology/load, and release/staging/IaC checks.
+These run on GitHub-hosted machines without deployment
 secrets; a passing automatic `ci-gate` does not imply the manual lanes ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
 `frontend-full` provisions local signing/storage configuration before browser
-journeys. User-facing journeys and screenshots use the production build; the
-DevBox motion scenarios use a separate loopback development server on the
-adjacent port. Production tests never enable DevBox controls. The topology lane
-owns a separate backend process for load checks after the smoke process exits.
+journeys. User-facing journeys and screenshots use production assets without
+DevBox chrome. The `frontend-ui` lane runs
+both frontend checks, documentation links, React review, and the focused
+workspace/public-site browser journey with desktop/mobile screenshot artifacts.
+The topology lane owns a separate backend process for load checks after smoke exits.
 
 The existing self-hosted image smoke includes Chromium owner journeys: first-run
 creation, SMTP-captured verification/reset links, closed registration, password

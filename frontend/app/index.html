@@ -98,12 +98,10 @@
       }
 
       var prefersDark = false;
-      var reduceMotion = false;
       try {
         prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-        reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       } catch (error) {
-        // Unsupported media queries use the light palette and normal motion.
+        // Unsupported media queries use the light palette.
       }
       root.classList.toggle(
         "dark",
@@ -113,20 +111,18 @@
       if (storedTheme === "light" || storedTheme === "dark" || storedTheme === "system") {
         root.setAttribute("data-theme-preference", storedTheme);
       }
-      var lowMotion = false;
-      if (functional) {
-        try {
-          lowMotion = window.localStorage.getItem("meltiply.low-motion") === "on";
-        } catch (error) {
-          // Manual preference storage can be blocked; the OS preference still applies.
-        }
-      }
-      root.toggleAttribute("data-low-motion", lowMotion || reduceMotion);
+      root.setAttribute("data-low-motion", "");
     </script>
     <link rel="stylesheet" href="/src/app/globals.css" />
     <title>Meltiply</title>
   </head>
   <body class="flex min-h-full flex-col">
+    <!-- THESIS: Gr8r's calm workspace adapted to real publishing work.
+         OWN-WORLD: Warm stone, indigo actions, Geist, compact controls.
+         STORY: Find a Brand Profile, compose, schedule, and inspect outcomes.
+         FIRST VIEWPORT: 252px rail, 46px top bar, aligned title/toolbar/collection.
+         FORM: User-pinned Gr8r Studio 904205c626918ee96054eb35495c394a60c0c601.
+         FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance -->
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

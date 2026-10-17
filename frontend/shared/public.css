@@ -106,11 +106,11 @@
 }
 .button-dark {
   color: var(--primary-foreground);
-  background: var(--ink);
-  border-color: var(--ink);
+  background: var(--primary);
+  border-color: var(--primary);
 }
 .button-dark:hover {
-  background: color-mix(in srgb, var(--ink) 85%, var(--surface));
+  background: color-mix(in srgb, var(--primary) 88%, var(--ink));
 }
 .button-light {
   background: var(--surface);

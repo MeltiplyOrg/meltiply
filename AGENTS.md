@@ -54,12 +54,14 @@ only when the user requests it or an applicable skill explicitly requires it.
 
 ## Conditional guidance
 
-- **Frontend:** read [UI conventions](PRODUCT.md#modular-consistent-surfaces) and
-  [shared UI ownership](docs/frontend-ui.md) before editing components. Inspect
-  `frontend/shared/package.json` exports and an existing caller; extend canonical
-  shared controls instead of copying primitives or adding local re-exports. Verify
-  feedback, motion, focus, and reduced-motion behavior. Dialogs use
-  `CenterDialog`/`CenterAlertDialog` or `SideDialog`.
+- **Frontend:** use the Gr8r-adapted warm workspace system in
+  [PRODUCT.md](PRODUCT.md#modular-consistent-surfaces),
+  [shared UI ownership](docs/frontend-ui.md), and [layout](docs/frontend-layout.md).
+  Inspect `frontend/shared/package.json` exports and a real caller; extend the
+  canonical control. Keep compact Geist typography, flat warm surfaces, indigo
+  primary actions, and immediate navigation. Preserve publishing state, keyboard
+  focus, mobile reachability, and reduced motion. Dialogs use
+  `CenterDialog`/`CenterAlertDialog` or `SideDialog`. Update UI guides when controls move.
 - **Effect programs:** use the `effectv4` skill for services, layers, retries, and
   error mapping. Use `codebase-design` when shaping module interfaces.
 - **PRs:** use the [pr skill](.agents/skills/pr/SKILL.md) to author or revise a PR.

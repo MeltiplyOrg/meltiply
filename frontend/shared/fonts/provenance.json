@@ -1,0 +1,38 @@
+{
+  "upstream": "https://github.com/vercel/geist-font",
+  "license": "../../../LICENSES/geist.txt",
+  "fonts": [
+    {
+      "file": "geist-400.ttf",
+      "family": "Geist",
+      "weight": 400,
+      "source": "https://fonts.gstatic.com/s/geist/v5/gyBhhwUxId8gMGYQMKR3pzfaWI_RnOM4nQ.ttf",
+      "sha256": "ccce59465ae5c61930ada5453834f60500fbd95084d85db63e0e65fad0125455",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "geist-500.ttf",
+      "family": "Geist",
+      "weight": 500,
+      "source": "https://fonts.gstatic.com/s/geist/v5/gyBhhwUxId8gMGYQMKR3pzfaWI_RruM4nQ.ttf",
+      "sha256": "a8eefb873ba9c9020665f8a98302697ce1f3b79ab2deef6ee508c0ca6a82e876",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "geist-600.ttf",
+      "family": "Geist",
+      "weight": 600,
+      "source": "https://fonts.gstatic.com/s/geist/v5/gyBhhwUxId8gMGYQMKR3pzfaWI_RQuQ4nQ.ttf",
+      "sha256": "7171f481b121803d007f5c6c76cd9988c0d41cce4202db9a18dff9945505d36d",
+      "license": "OFL-1.1"
+    },
+    {
+      "file": "geist-mono-400.ttf",
+      "family": "Geist Mono",
+      "weight": 400,
+      "source": "https://fonts.gstatic.com/s/geistmono/v6/or3yQ6H-1_WfwkMZI_qYPLs1a-t7PU0AbeE9KJ5T.ttf",
+      "sha256": "7022da390e9b401ea35b722f8ed2376948e70add10954bc798839b4bfe17ef3f",
+      "license": "OFL-1.1"
+    }
+  ]
+}

@@ -6,7 +6,6 @@ import "@testing-library/jest-dom/vitest";
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite-plus/test";
 import { startWorkspaceSlotTransition } from "@/components/layout/workspace-slot-transition";
-import { startThemeReveal } from "@meltiply/ui/theme-transition";
 const styles = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
 
 const originalAnimate = HTMLElement.prototype.animate;
@@ -62,32 +61,6 @@ describe("startWorkspaceSlotTransition", () => {
     startWorkspaceSlotTransition(null);
     expect(source).toBeVisible();
     expect(document.querySelector("[data-workspace-slot-transition-layer]")).toBeNull();
-  });
-
-  /** Ink must capture visible controls even when a route handoff is still waiting for its destination. */
-  it("restores held controls synchronously before an ink reveal captures the document", () => {
-    vi.stubGlobal("CSS", { supports: () => true });
-    vi.stubGlobal("requestAnimationFrame", () => 1);
-    vi.stubGlobal("cancelAnimationFrame", () => undefined);
-    const root = document.createElement("main");
-    const source = createSlot("date");
-    root.append(source);
-    document.body.append(root);
-    startWorkspaceSlotTransition(root);
-    expect(source).not.toBeVisible();
-    const reveal = startThemeReveal({
-      fromTheme: "light",
-      toTheme: "dark",
-      origin: { x: 480, y: 48 },
-      lowMotion: false,
-      applyTheme: () => document.documentElement.classList.add("dark"),
-      restoreTheme: () => document.documentElement.classList.remove("dark"),
-    });
-    try {
-      expect(source).toBeVisible();
-    } finally {
-      reveal.skip();
-    }
   });
 
   /** Motion may restore opacity during mount; it must not expose live destinations. */

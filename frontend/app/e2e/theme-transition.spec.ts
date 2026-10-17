@@ -387,7 +387,7 @@ test.describe("masked theme wave", () => {
    * the very same live elements — no leftover layer, flags or inline paint.
    */
   test("reveals a masked copy over live DOM and cleans up at the endpoint", async ({ page }) => {
-    await page.goto("/sign-up");
+    await page.goto("/sign-in");
     await openDevBox(page);
     const darkTab = themeTab(page, "dark");
     const box = await darkTab.boundingBox();
@@ -474,7 +474,7 @@ test.describe("masked theme wave", () => {
   test("rolls the running wave back when the second activation picks the source theme", async ({
     page,
   }) => {
-    await page.goto("/sign-up");
+    await page.goto("/sign-in");
     await openDevBox(page);
     const darkTab = themeTab(page, "dark");
     const lightTab = themeTab(page, "light");
@@ -537,7 +537,7 @@ test.describe("masked theme wave", () => {
    * `data-theme-ink` into a second interval and mounts a second copy.
    */
   test("continues the same wave forward when the target is re-selected", async ({ page }) => {
-    await page.goto("/sign-up");
+    await page.goto("/sign-in");
     await openDevBox(page);
     const darkTab = themeTab(page, "dark");
     const lightTab = themeTab(page, "light");
@@ -586,7 +586,7 @@ test.describe("masked theme wave", () => {
    * intermediate commits.
    */
   test("honors parity for activation bursts that land before the first frame", async ({ page }) => {
-    await page.goto("/sign-up");
+    await page.goto("/sign-in");
     await openDevBox(page);
     const box = await themeTab(page, "dark").boundingBox();
     if (!box) throw new Error("devbox theme tab has no bounding box");
@@ -641,7 +641,7 @@ test.describe("masked theme wave", () => {
    */
   test("keeps the masked copy aligned through document and nested scroll", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 420 });
-    await page.goto("/sign-up");
+    await page.goto("/sign-in");
     await openDevBox(page);
 
     // Test surfaces appended inside the live document — one scrolled to
@@ -797,7 +797,7 @@ test.describe("reduced motion", () => {
       (key) => window.localStorage.setItem(key, "on"),
       LOW_MOTION_STORAGE_KEY,
     );
-    await page.goto("/sign-up");
+    await page.goto("/sign-in");
     await openDevBox(page);
     const box = await themeTab(page, "dark").boundingBox();
     if (!box) throw new Error("devbox theme tab has no bounding box");
@@ -834,7 +834,7 @@ test.describe("reduced motion", () => {
    */
   test("blinks when the OS requests reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto("/sign-up");
+    await page.goto("/sign-in");
     await openDevBox(page);
     const box = await themeTab(page, "dark").boundingBox();
     if (!box) throw new Error("devbox theme tab has no bounding box");

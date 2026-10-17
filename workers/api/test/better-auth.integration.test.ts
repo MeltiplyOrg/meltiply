@@ -627,6 +627,7 @@ describe("session cookie, bearer JWT, and sign-out", () => {
     if (publicKey.kty !== "OKP" || publicKey.crv !== "Ed25519" || typeof publicKey.x !== "string") throw new Error("Unexpected auth signing algorithm");
     const key = await crypto.subtle.importKey("jwk", { kty: publicKey.kty, crv: publicKey.crv, x: publicKey.x }, { name: "Ed25519" }, false, ["verify"]);
     const verifier = createJwtVerifier({ audience: baseURL, issuer: baseURL }, async () => key);
+    expect(typeof (await verifier(jwt)).sessionId).toBe("string");
     let relays = 0;
     const app = createApiApp({
       verifyJwtToken: async (env, token) => activeOwnerIdentity(env, await verifier(token)),
@@ -774,6 +775,9 @@ describe("optional authenticator lifecycle", () => {
     expect((await post("two-factor/verify-backup-code", { code: backups[1], trustDevice: false })).status).toBe(200);
     const regenerated = await post("two-factor/generate-backup-codes", { password });
     expect(regenerated.status).toBe(200);
+    const currentCookie = [...jar].map(([key, value]) => `${key}=${value}`).join("; ");
+    const currentSession = await (await authGetWithCookie(auth, "/api/auth/get-session", currentCookie)).json();
+    expect(currentSession !== null).toBe(true);
     jar.clear();
     await post("sign-in/email", { email, password });
     expect((await post("two-factor/verify-backup-code", { code: backups[2], trustDevice: false })).status).toBeGreaterThanOrEqual(400);

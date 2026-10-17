@@ -47,6 +47,14 @@ jobs:
       - name: Check changed React surfaces
         if: inputs.lane == 'auth-acceptance'
         run: npx --yes react-doctor@latest --verbose --scope changed
+      - name: Exercise real authentication database boundaries
+        if: inputs.lane == 'auth-acceptance'
+        env:
+          MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: |
+          bun run db:start
+          bun run --cwd workers/api --no-install vp test run --config vitest.integration.config.ts test/better-auth.integration.test.ts
       - name: Run comprehensive application gate
         if: inputs.lane == 'auth-acceptance'
         run: |

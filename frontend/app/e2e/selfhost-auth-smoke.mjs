@@ -125,6 +125,10 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     phase = "backup recovery";
     await signIn(recoveredPassword);
     await expect(page.getByRole("heading", { name: "One more security check." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "One more security check." })).toBeFocused();
+    await page.getByLabel("Authenticator code", { exact: true }).fill("invalid-code");
+    await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
+    await expect(page.getByRole("alert")).toBeVisible();
     await page.getByRole("button", { name: "Use a backup code", exact: true }).click();
     await page.getByLabel("Backup code", { exact: true }).fill(backupCodes[0]);
     await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();

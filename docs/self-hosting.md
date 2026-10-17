@@ -69,6 +69,11 @@ then sign in. Once the owner exists, registration closes, including direct API
 requests. Development fixtures and passwords are not installed. PostgreSQL is
 not published to the host. Only loopback application ports are published by default.
 
+Signed storage URLs support a path prefix of at most 128 characters after
+boundary slashes are removed. Prefix normalization scans boundary slashes in
+linear time, including oversized input; interior empty or traversal segments
+remain invalid.
+
 Set optional Provider/billing variables in `.env.selfhost` using the names in
 [`.env.example`](../.env.example). Self-hosting does not bypass Provider live-mode
 checks or account permissions. Do not change `ENVIRONMENT` to disable verification;

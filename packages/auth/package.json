@@ -13,7 +13,7 @@
   "dependencies": {
     "@meltiply/domain": "workspace:*",
     "better-auth": "^1.7.5",
-    "effect": "4.0.0-rc.115",
+    "effect": "4.0.5",
     "jose": "6.2.3",
     "pg": "8.22.0"
   },

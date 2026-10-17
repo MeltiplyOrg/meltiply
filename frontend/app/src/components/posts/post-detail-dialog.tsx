@@ -461,93 +461,90 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
         </>
       }
     >
-      <div>
-        <h2 className="text-(length:--text-title) font-semibold leading-snug tracking-tight text-ink">
-          {post.post?.title || t("Post details")}
-        </h2>
-        <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-(length:--font-size-control)">
-          <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-            <CircleDot className="size-3.5 text-ink-3" />
-            {t("Status")}
-          </dt>
-          <dd>
-            <StatusBadge status={status} compact />
-          </dd>
-          <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-            <Share2 className="size-3.5 text-ink-3" />
-            {t("Channels")}
-          </dt>
-          <dd className="text-ink">{post.channels.length}</dd>
-          {dateLabel && (
-            <>
-              <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-                <CalendarDays className="size-3.5 text-ink-3" />
-                {isDraft ? t("Created") : t("Publish date")}
-              </dt>
-              <dd className="text-ink">{dateLabel}</dd>
-            </>
-          )}
-        </dl>
-        <section className="mt-6.5">
-          <h3 className="mb-2 text-(length:--font-size-ui) font-semibold">{t("Caption")}</h3>
-          <p className="whitespace-pre-wrap break-words text-(length:--font-size-ui) leading-relaxed text-ink-2">
-            {caption || t("No caption")}
-          </p>
-        </section>
-
-        {attachments.length > 0 && (
-          <section className="mt-6.5">
-            <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
-              {t("Attachments")}
-              <span className="text-xs font-normal text-ink-3">{attachments.length}</span>
-            </h3>
-            <div className="flex items-center gap-2 overflow-x-auto">
-              {attachments.map((attachment) => {
-                const path =
-                  attachment.asset.thumbnail_url ?? attachment.asset.download_url ?? null;
-                return (
-                  <div
-                    key={attachment.asset_id}
-                    className="size-12 shrink-0 overflow-hidden rounded-control border border-line bg-page flex items-center justify-center"
-                  >
-                    {path ? (
-                      <img src={path} alt="" className="size-full object-cover" />
-                    ) : (
-                      <Images className="size-4 text-ink-3" />
-                    )}
-                  </div>
-                );
-              })}
-              <span className="text-[11px] text-ink-3 shrink-0">
-                {t("{count} ordered attachment(s)", { count: attachments.length })}
-              </span>
-            </div>
-          </section>
+      <h2 className="text-(length:--text-title) font-semibold leading-snug tracking-tight text-ink">
+        {post.post?.title || t("Post details")}
+      </h2>
+      <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-(length:--font-size-control)">
+        <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+          <CircleDot className="size-3.5 text-ink-3" />
+          {t("Status")}
+        </dt>
+        <dd>
+          <StatusBadge status={status} compact />
+        </dd>
+        <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+          <Share2 className="size-3.5 text-ink-3" />
+          {t("Channels")}
+        </dt>
+        <dd className="text-ink">{post.channels.length}</dd>
+        {dateLabel && (
+          <>
+            <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+              <CalendarDays className="size-3.5 text-ink-3" />
+              {isDraft ? t("Created") : t("Publish date")}
+            </dt>
+            <dd className="text-ink">{dateLabel}</dd>
+          </>
         )}
+      </dl>
+      <section className="mt-6.5">
+        <h3 className="mb-2 text-(length:--font-size-ui) font-semibold">{t("Caption")}</h3>
+        <p className="whitespace-pre-wrap break-words text-(length:--font-size-ui) leading-relaxed text-ink-2">
+          {caption || t("No caption")}
+        </p>
+      </section>
 
+      {attachments.length > 0 && (
         <section className="mt-6.5">
           <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
-            {t("Channels")}
-            <span className="text-xs font-normal text-ink-3">{post.channels.length}</span>
+            {t("Attachments")}
+            <span className="text-xs font-normal text-ink-3">{attachments.length}</span>
           </h3>
-          {post.channels.map((item) => (
-            <ChannelOutcomeRow
-              key={item.id}
-              item={item}
-              postAttachments={attachments.length}
-              canMutate={canMutate}
-              onRequestDelete={(ids) =>
-                onRequestDelete({
-                  kind: "cancel-channels",
-                  postId: post.id,
-                  brandProfileId: post.brandProfileId,
-                  distributionIds: ids,
-                })
-              }
-            />
-          ))}
+          <div className="flex items-center gap-2 overflow-x-auto">
+            {attachments.map((attachment) => {
+              const path = attachment.asset.thumbnail_url ?? attachment.asset.download_url ?? null;
+              return (
+                <div
+                  key={attachment.asset_id}
+                  className="size-12 shrink-0 overflow-hidden rounded-control border border-line bg-page flex items-center justify-center"
+                >
+                  {path ? (
+                    <img src={path} alt="" className="size-full object-cover" />
+                  ) : (
+                    <Images className="size-4 text-ink-3" />
+                  )}
+                </div>
+              );
+            })}
+            <span className="text-[11px] text-ink-3 shrink-0">
+              {t("{count} ordered attachment(s)", { count: attachments.length })}
+            </span>
+          </div>
         </section>
-      </div>
+      )}
+
+      <section className="mt-6.5">
+        <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
+          {t("Channels")}
+          <span className="text-xs font-normal text-ink-3">{post.channels.length}</span>
+        </h3>
+        {post.channels.map((item) => (
+          <ChannelOutcomeRow
+            key={item.id}
+            item={item}
+            postAttachments={attachments.length}
+            canMutate={canMutate}
+            onRequestDelete={(ids) =>
+              onRequestDelete({
+                kind: "cancel-channels",
+                postId: post.id,
+                brandProfileId: post.brandProfileId,
+                distributionIds: ids,
+              })
+            }
+          />
+        ))}
+      </section>
     </SideDialog>
   );
 });

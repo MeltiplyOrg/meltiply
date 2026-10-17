@@ -2,10 +2,20 @@ import * as React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { cn } from "@meltiply/ui/utils";
 
-/**
- * Global provider wrapping the application or subtree to manage tooltip delay timing and coordination.
- */
-export const TooltipProvider = TooltipPrimitive.Provider;
+/** Coordinates Gr8r's 350ms hover hints; keyboard focus and Escape stay owned by Radix. */
+export function TooltipProvider({
+  delayDuration = 350,
+  skipDelayDuration = 0,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
+  return (
+    <TooltipPrimitive.Provider
+      delayDuration={delayDuration}
+      skipDelayDuration={skipDelayDuration}
+      {...props}
+    />
+  );
+}
 
 /**
  * Root state wrapper managing open/closed lifecycle for an individual tooltip.
@@ -20,10 +30,10 @@ export const TooltipTrigger = TooltipPrimitive.Trigger;
 /**
  * Portaled popup content element rendered when the tooltip is active.
  *
- * Uses the dedicated tooltip ramp in both themes and portals into `document.body`,
- * retaining the shared zoom/fade animation and side-aware positioning.
- *
- * @param props - Radix TooltipContent props with default `sideOffset = 4`, forwarding element ref.
+ * Ports Gr8r's compact inverse-ink hint: 11px medium text, 5px corners,
+ * 5px/7px padding, 6px offset, and a short opacity-only reveal. Radix supplies
+ * portal positioning, collision handling, keyboard access, and dismissal.
+ * Long operational reasons wrap inside the viewport; reduced motion disables the fade.
  * @returns The portaled tooltip content bubble.
  *
  * @example
@@ -37,13 +47,14 @@ export const TooltipTrigger = TooltipPrimitive.Trigger;
 export const TooltipContent = React.forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
+>(({ className, side = "bottom", sideOffset = 6, ...props }, ref) => (
   <TooltipPrimitive.Portal>
     <TooltipPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
+      side={side}
       className={cn(
-        "z-50 overflow-hidden rounded-md border border-tooltip-border bg-tooltip-bg px-3 py-1.5 text-xs text-tooltip-fg animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "pointer-events-none z-200 max-w-[min(320px,calc(100vw-16px))] rounded-(--tooltip-radius) bg-tooltip-bg px-1.75 py-1.25 text-(length:--font-size-micro) font-medium leading-none text-tooltip-fg animate-in fade-in-0 duration-120 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 motion-reduce:animate-none",
         className,
       )}
       {...props}

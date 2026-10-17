@@ -286,6 +286,15 @@ function renderChannels() {
   );
 }
 
+/** Opens the field-row builder and adds the supported channel filters through its visible chips. */
+function openChannelFilters() {
+  fireEvent.click(screen.getByText("Filter").closest("summary")!);
+  for (const label of ["Platform", "Brand Profile"]) {
+    const add = screen.queryByRole("button", { name: `Add ${label} filter` });
+    if (add) fireEvent.click(add);
+  }
+}
+
 /**
  * Renders the posts view inside a router context at the requested mode, with a
  * profile selected so channel mutations stay affordanced.
@@ -631,7 +640,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
     const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
     fireEvent.pointerDown(editProfileButton);
@@ -651,7 +660,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
     const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
     fireEvent.pointerDown(editProfileButton);
@@ -680,7 +689,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
     const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
     fireEvent.pointerDown(editProfileButton);
@@ -708,7 +717,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
 
@@ -744,7 +753,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
 
@@ -777,7 +786,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: "Alpha Brand" }));
 
     expect(screen.queryByRole("button", { name: "Edit profile" })).not.toBeInTheDocument();
@@ -795,7 +804,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
 
     expect(screen.getByRole("button", { name: "Edit profile" })).toBeVisible();
@@ -810,7 +819,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
     expect(screen.getByRole("listbox")).toBeVisible();
 
@@ -902,7 +911,7 @@ describe("Channels table contract", () => {
     workspace.brandProfiles = [alphaProfile, betaProfile];
     queryResults.platforms.data = [connectedAccount, expiredAccount, betaAccount];
     renderChannels();
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
 
     expect(screen.getByLabelText("Search accounts")).toBeVisible();
     const platformControl = screen.getByRole("button", { name: "All platforms" });
@@ -977,7 +986,7 @@ describe("Channels table contract", () => {
   it("keeps checkbox-menu semantics in the platform multi-select", () => {
     queryResults.platforms.data = [connectedAccount, betaAccount];
     renderChannels();
-    fireEvent.click(screen.getByText("Filter").closest("summary")!);
+    openChannelFilters();
 
     const platformFilter = screen.getByRole("button", { name: "All platforms" });
     fireEvent.pointerDown(platformFilter);

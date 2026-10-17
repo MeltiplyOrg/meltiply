@@ -58,7 +58,7 @@ export function ChannelTableView({
 }: ChannelTableViewProps): React.ReactElement {
   const { t } = useI18n();
   return (
-    <TooltipProvider delayDuration={250}>
+    <TooltipProvider>
       <div className="overflow-x-auto rounded-card border border-line bg-surface">
         <Table variant="directory" className="min-w-220" aria-label={t("Connected accounts")}>
           <colgroup>

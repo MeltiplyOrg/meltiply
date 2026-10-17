@@ -94,6 +94,7 @@
   --tooltip-fg: var(--surface);
   --tooltip-muted: var(--line-strong);
   --tooltip-border: var(--ink-2);
+  --tooltip-radius: 5px;
   --shadow-hairline: 0 0 0 1px var(--line);
   --shadow-btn: 0 1px 2px rgb(28 25 20 / 5%);
   --shadow-card: 0 1px 2px rgb(28 25 20 / 4%);
@@ -162,8 +163,8 @@
   --rose: #e68aab;
   --gray: #8f8b84;
   --overlay: #000000;
-  --tooltip-bg: var(--hover-2);
-  --tooltip-fg: var(--ink);
+  --tooltip-bg: var(--ink);
+  --tooltip-fg: var(--canvas);
   --tooltip-muted: var(--ink-2);
   --tooltip-border: var(--line-strong);
   --shadow-btn: 0 1px 2px rgb(0 0 0 / 30%);

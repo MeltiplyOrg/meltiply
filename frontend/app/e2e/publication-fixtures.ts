@@ -129,6 +129,8 @@ export async function activeBrandProfileName(page: Page): Promise<string> {
   if (!(await disclosure.locator("..").evaluate((element) => element.hasAttribute("open")))) {
     await disclosure.click();
   }
+  const addProfile = page.getByRole("button", { name: "Add Brand Profile filter", exact: true });
+  if (await addProfile.isVisible()) await addProfile.click();
   const combobox = page
     .getByRole("group", { name: "Filters", exact: true })
     .getByRole("combobox")

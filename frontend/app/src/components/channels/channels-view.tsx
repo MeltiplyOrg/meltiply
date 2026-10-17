@@ -744,6 +744,47 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
               value={accountQuery}
               onChange={setAccountQuery}
             />
+            <TopToolbarFilters
+              activeCount={
+                Number(selectedPlatforms.length > 0) + Number(selectedBrandProfileId !== null)
+              }
+              onClearAll={() => {
+                setSelectedPlatforms([]);
+                setSelectedBrandProfileId(null);
+              }}
+              fields={[
+                {
+                  id: "platform",
+                  label: t("Platform"),
+                  active: selectedPlatforms.length > 0,
+                  onClear: () => setSelectedPlatforms([]),
+                  control: (
+                    <PlatformFilterSelect
+                      value={selectedPlatforms}
+                      onValueChange={setSelectedPlatforms}
+                      trigger={<TopToolbarButton label={platformFilterText} className="w-full" />}
+                    />
+                  ),
+                },
+                {
+                  id: "profile",
+                  label: t("Brand Profile"),
+                  active: selectedBrandProfileId !== null,
+                  onClear: () => setSelectedBrandProfileId(null),
+                  control: (
+                    <BrandProfileSelect
+                      value={selectedBrandProfileId ?? "all"}
+                      onValueChange={(id) => setSelectedBrandProfileId(id === "all" ? null : id)}
+                      brandProfiles={brandProfiles}
+                      unresolvedProfileIds={accountProfileIds}
+                      onEditProfile={isAdmin ? openProfileEditor : undefined}
+                      label={t("Brand Profile")}
+                      trigger={<TopToolbarButton label={profileFilterLabel} className="w-full" />}
+                    />
+                  ),
+                },
+              ]}
+            />
             <SegmentedControl
               options={CONNECTION_FILTER_OPTIONS}
               value={statusFilter}
@@ -752,28 +793,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
               className="max-w-full overflow-x-auto"
               renderOption={(status) => (status === "all" ? t("All statuses") : tStatus(status))}
             />
-            <TopToolbarFilters activeCount={activeFilterCount}>
-              <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
-                {t("Platform")}
-              </span>
-              <PlatformFilterSelect
-                value={selectedPlatforms}
-                onValueChange={setSelectedPlatforms}
-                trigger={<TopToolbarButton label={platformFilterText} className="w-full" />}
-              />
-              <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
-                {t("Brand Profile")}
-              </span>
-              <BrandProfileSelect
-                value={selectedBrandProfileId ?? "all"}
-                onValueChange={(id) => setSelectedBrandProfileId(id === "all" ? null : id)}
-                brandProfiles={brandProfiles}
-                unresolvedProfileIds={accountProfileIds}
-                onEditProfile={isAdmin ? openProfileEditor : undefined}
-                label={t("Brand Profile")}
-                trigger={<TopToolbarButton label={profileFilterLabel} className="w-full" />}
-              />
-            </TopToolbarFilters>
             <span className="ml-auto text-xs tabular-nums text-ink-3">
               {t("{count} accounts", { count: totalMatchingAccounts })}
             </span>

@@ -73,7 +73,7 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
   const selectedCount = selectedChannelIds.length;
 
   return (
-    <TooltipProvider delayDuration={200}>
+    <TooltipProvider>
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

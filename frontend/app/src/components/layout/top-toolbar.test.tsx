@@ -28,9 +28,19 @@ describe("collection toolbar interactions", () => {
     render(
       <I18nProvider>
         <TopToolbarSearch value="meltiply" onChange={onChange} placeholder="Search posts" />
-        <TopToolbarFilters activeCount={1}>
-          <button type="button">Status choices</button>
-        </TopToolbarFilters>
+        <TopToolbarFilters
+          activeCount={1}
+          onClearAll={vi.fn()}
+          fields={[
+            {
+              id: "status",
+              label: "Status",
+              active: true,
+              onClear: vi.fn(),
+              control: <button type="button">Status choices</button>,
+            },
+          ]}
+        />
       </I18nProvider>,
     );
 

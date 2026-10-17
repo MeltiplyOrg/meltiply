@@ -276,6 +276,8 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
 async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
   const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
   await disclosure.click();
+  const addStatus = page.getByRole("button", { name: "Add Post status filter", exact: true });
+  if (await addStatus.isVisible()) await addStatus.click();
   const combobox = page.getByRole("combobox", { name: /post status/i });
   await expect(combobox).toBeVisible({ timeout: 30_000 });
   await combobox.click();

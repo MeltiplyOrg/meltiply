@@ -125,62 +125,88 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           onChange={onSearchChange}
           placeholder={t("Search posts...")}
         />
-        <TopToolbarFilters activeCount={activeCount}>
-          <span className="mt-1 text-(length:--font-size-micro) text-ink-3">{t("Platform")}</span>
-          <PlatformFilterSelect
-            value={platformFilter}
-            onValueChange={onPlatformChange}
-            trigger={<TopToolbarButton label={platformLabel} className="w-full" />}
-          />
-          <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
-            {t("Brand Profile")}
-          </span>
-          <BrandProfileSelect
-            value={profileFilter}
-            onValueChange={onProfileChange}
-            brandProfiles={brandProfiles}
-            unresolvedProfileIds={unresolvedProfileIds}
-            onEditProfile={onEditProfile}
-            label={t("Brand Profile")}
-            trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
-          />
-          <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
-            {t("Post status")}
-          </span>
-          <FilterSelect
-            value={statusFilter}
-            onValueChange={onStatusChange}
-            aggregateOption={{ value: "all", label: t("All statuses") }}
-            options={[
-              { value: "scheduled", label: t("Scheduled") },
-              { value: "published", label: t("Published") },
-              { value: "draft", label: t("Drafts") },
-              { value: "failed", label: t("Failed") },
-            ]}
-            ariaLabel={t("Post status")}
-            trigger={
-              <TopToolbarButton
-                label={statusFilter === "all" ? t("All statuses") : tStatus(statusFilter)}
-                className="w-full"
-              />
-            }
-          />
-          <span className="mt-1 text-(length:--font-size-micro) text-ink-3">
-            {t("Publish date")}
-          </span>
-          <FilterSelect
-            value={dateFilter}
-            onValueChange={onDateChange}
-            aggregateOption={{ value: "all", label: t("All dates") }}
-            options={[
-              { value: "today", label: t("Today") },
-              { value: "next7", label: t("Next 7 days") },
-              { value: "past30", label: t("Past 30 days") },
-            ]}
-            ariaLabel={t("Publish date")}
-            trigger={<TopToolbarButton label={dateLabel} className="w-full" />}
-          />
-        </TopToolbarFilters>
+        <TopToolbarFilters
+          activeCount={activeCount}
+          onClearAll={reset}
+          fields={[
+            {
+              id: "platform",
+              label: t("Platform"),
+              active: platformFilter.length > 0,
+              onClear: () => onPlatformChange([]),
+              control: (
+                <PlatformFilterSelect
+                  value={platformFilter}
+                  onValueChange={onPlatformChange}
+                  trigger={<TopToolbarButton label={platformLabel} className="w-full" />}
+                />
+              ),
+            },
+            {
+              id: "profile",
+              label: t("Brand Profile"),
+              active: profileFilter !== "all",
+              onClear: () => onProfileChange("all"),
+              control: (
+                <BrandProfileSelect
+                  value={profileFilter}
+                  onValueChange={onProfileChange}
+                  brandProfiles={brandProfiles}
+                  unresolvedProfileIds={unresolvedProfileIds}
+                  onEditProfile={onEditProfile}
+                  label={t("Brand Profile")}
+                  trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
+                />
+              ),
+            },
+            {
+              id: "status",
+              label: t("Post status"),
+              active: statusFilter !== "all",
+              onClear: () => onStatusChange("all"),
+              control: (
+                <FilterSelect
+                  value={statusFilter}
+                  onValueChange={onStatusChange}
+                  aggregateOption={{ value: "all", label: t("All statuses") }}
+                  options={[
+                    { value: "scheduled", label: t("Scheduled") },
+                    { value: "published", label: t("Published") },
+                    { value: "draft", label: t("Drafts") },
+                    { value: "failed", label: t("Failed") },
+                  ]}
+                  ariaLabel={t("Post status")}
+                  trigger={
+                    <TopToolbarButton
+                      label={statusFilter === "all" ? t("All statuses") : tStatus(statusFilter)}
+                      className="w-full"
+                    />
+                  }
+                />
+              ),
+            },
+            {
+              id: "date",
+              label: t("Publish date"),
+              active: dateFilter !== "all",
+              onClear: () => onDateChange("all"),
+              control: (
+                <FilterSelect
+                  value={dateFilter}
+                  onValueChange={onDateChange}
+                  aggregateOption={{ value: "all", label: t("All dates") }}
+                  options={[
+                    { value: "today", label: t("Today") },
+                    { value: "next7", label: t("Next 7 days") },
+                    { value: "past30", label: t("Past 30 days") },
+                  ]}
+                  ariaLabel={t("Publish date")}
+                  trigger={<TopToolbarButton label={dateLabel} className="w-full" />}
+                />
+              ),
+            },
+          ]}
+        />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm">

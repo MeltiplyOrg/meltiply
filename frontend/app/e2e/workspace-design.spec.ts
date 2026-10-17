@@ -101,6 +101,30 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.screenshot({ path: testInfo.outputPath("channels-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 1808, height: 984 });
   await page.screenshot({ path: testInfo.outputPath("channels-user-1808.png"), fullPage: true });
+  const filterSummary = page.locator("summary").filter({ hasText: /^Filter/ });
+  await filterSummary.click();
+  const filterPanel = page.getByRole("group", { name: "Filters", exact: true });
+  await filterPanel.getByRole("button", { name: "Add Platform filter", exact: true }).click();
+  await filterPanel.getByRole("button", { name: "All platforms", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Instagram", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("row").filter({ hasText: "Studio Threads" })).toHaveCount(0);
+  if (!(await filterSummary.locator("..").evaluate((element) => element.hasAttribute("open"))))
+    await filterSummary.click();
+  await page.screenshot({
+    path: testInfo.outputPath("channels-filter-builder.png"),
+    fullPage: true,
+  });
+  await filterPanel.getByRole("button", { name: "Remove Platform filter", exact: true }).click();
+  await expect(page.getByRole("row").filter({ hasText: "Studio Threads" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await connectionCell.getByRole("button", { name: "Connected", exact: true }).hover();
+  await expect(page.getByRole("tooltip")).toContainText("Connected");
+  await page.screenshot({
+    path: testInfo.outputPath("channels-health-tooltip.png"),
+    fullPage: true,
+  });
+  await page.getByRole("heading", { name: "Channels", exact: true }).hover();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("tab", { name: /Brand Profiles/ }).click();
   await expect(page.getByRole("button", { name: "View channels" })).toBeVisible();

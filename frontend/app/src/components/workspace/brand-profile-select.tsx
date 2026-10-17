@@ -282,7 +282,7 @@ export function BrandProfileSelect({
   }, [brandProfiles, unresolvedProfileIds, t]);
 
   return (
-    <TooltipProvider delayDuration={300}>
+    <TooltipProvider>
       <Select value={value} onValueChange={onValueChange} open={open} onOpenChange={setOpen}>
         <SelectTrigger asChild aria-label={trigger.props.label ?? label}>
           {trigger}

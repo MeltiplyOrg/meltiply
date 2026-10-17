@@ -17,6 +17,7 @@ import { cn } from "@meltiply/ui/utils";
 import { useWorkspace } from "@/context/workspace.context";
 import { useI18n } from "@/lib/i18n";
 import { preloadDashboardRoute } from "@/lib/preload-routes";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 
 export type WorkspaceView = "posts" | "channels" | "settings";
 
@@ -51,20 +52,32 @@ export function workspaceViewPath(view: WorkspaceView): string {
 export const SidebarNavRow = forwardRef<
   HTMLButtonElement,
   ButtonProps & { collapsed?: boolean; active?: boolean }
->(({ collapsed = false, active = false, className, ...props }, ref) => (
-  <Button
-    ref={ref}
-    variant="ghost"
-    className={cn(
-      "h-control w-full justify-start gap-2.25 px-2 text-left text-(length:--font-size-ui) font-normal",
-      collapsed && "justify-center px-0",
-      active &&
-        "bg-surface font-medium text-ink shadow-btn hover:bg-surface dark:bg-hover-2 dark:shadow-none dark:hover:bg-hover-2",
-      className,
-    )}
-    {...props}
-  />
-));
+>(({ collapsed = false, active = false, title, className, ...props }, ref) => {
+  const row = (
+    <Button
+      ref={ref}
+      variant="ghost"
+      className={cn(
+        "h-control w-full justify-start gap-2.25 px-2 text-left text-(length:--font-size-ui) font-normal",
+        collapsed && "justify-center px-0",
+        active &&
+          "bg-surface font-medium text-ink shadow-btn hover:bg-surface dark:bg-hover-2 dark:shadow-none dark:hover:bg-hover-2",
+        className,
+      )}
+      {...props}
+    />
+  );
+  return title ? (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{row}</TooltipTrigger>
+        <TooltipContent side={collapsed ? "right" : "bottom"}>{title}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  ) : (
+    row
+  );
+});
 SidebarNavRow.displayName = "SidebarNavRow";
 
 export interface SidebarNavProps {

@@ -62,6 +62,18 @@ identity stays read-only.
 bar and `hotkeys.commandMenu` open it. It finds supported destinations and
 loaded profiles. Route toolbars own collection search and Brand Profile filters.
 
+`TopToolbarFilters` ports the reference field-row builder: Filter by heading,
+Where/and rows, Add filter chips, per-row removal, and Clear all. Routes supply
+localized field metadata, real value controls, and reset callbacks; adding an
+empty row does not change data. Existing predicates combine by equality/AND,
+not unsupported task-specific operators. Add/remove restores useful keyboard
+focus; portalled menus remain part of the disclosure interaction.
+
+Shared `TooltipProvider` uses the reference's 350ms hover delay. `TooltipContent`
+uses compact inverse-ink styling, 11px medium text, 5px corners, a 6px offset, and
+opacity-only motion; Radix retains focus, Escape, collision, and portal behavior.
+Keyboard hints never substitute for accessible control names.
+
 ## Reference page compositions
 
 Posts supports exactly Table, Grid, and Calendar. The page toolbar owns view

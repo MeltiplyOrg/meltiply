@@ -132,6 +132,15 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     ).toBeVisible();
     phase = "password reset SMTP delivery";
     const resetLink = await mailLink(email, "Reset your Meltiply password", new Set());
+    const callback = await context.request.get(resetLink, { maxRedirects: 0 });
+    assert.equal(
+      callback.status(),
+      302,
+      "Recovery callback must return its redirect to the browser",
+    );
+    const destination = new URL(callback.headers().location);
+    assert.equal(destination.pathname, "/sign-in");
+    assert.equal(destination.searchParams.has("token"), true);
     const resetResponse = await page.goto(resetLink);
     phase = "password reset form";
     assert.equal(resetResponse?.status(), 200, "Recovery callback must reach the application");

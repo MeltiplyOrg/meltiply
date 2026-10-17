@@ -341,7 +341,14 @@ function listener() {
       outgoing.on("close", () => {
         if (!outgoing.writableFinished) controller.abort();
       });
-      const init = { method: incoming.method, headers, signal: controller.signal };
+      // Preserve HTTP redirects for the browser, including recovery credentials
+      // in callback locations; internal fetch must not consume those redirects.
+      const init = {
+        method: incoming.method,
+        headers,
+        signal: controller.signal,
+        redirect: "manual",
+      };
       if (incoming.method !== "GET" && incoming.method !== "HEAD") {
         init.body = Readable.toWeb(incoming);
         init.duplex = "half";

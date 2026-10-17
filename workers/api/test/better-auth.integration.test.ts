@@ -60,8 +60,6 @@ beforeAll(async () => {
       FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
     CREATE TRIGGER revoke_account_sessions AFTER UPDATE OF "twoFactorEnabled", email, "emailVerified", "installationOwner" ON auth_lifecycle."user"
       FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
-    CREATE TRIGGER revoke_backup_sessions AFTER UPDATE OF secret, "backupCodes" ON auth_lifecycle."twoFactor"
-      FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
   `);
 });
 

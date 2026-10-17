@@ -252,6 +252,14 @@ html.theme-changing *::after {
   animation: side-dialog-enter 340ms var(--ease-drawer) both;
 }
 
+/* One panel can present more than one surface: when the surface inside it
+ * changes, the panel keeps its identity and its width is interpolated to the new
+ * surface's width instead of one drawer replacing another. A single-surface
+ * drawer never changes width, so this only shows up as the morph. */
+[data-side-dialog] {
+  transition: max-width 320ms var(--ease-drawer);
+}
+
 /* Dismissal is shorter than the entrance and carries no lingering translucency. */
 [data-side-dialog][data-state="closed"] {
   animation: side-dialog-exit 180ms var(--ease-exit) both;

@@ -30,8 +30,9 @@ import { PostCalendarGridView } from "./post-calendar-grid-view";
 import { PostGridCardView } from "./post-grid-card-view";
 import type { PostGroupBy } from "./post-groups";
 import { CalendarDateDetailDialog } from "./calendar-date-detail-dialog";
-import { PostComposerDialog } from "./post-composer-dialog";
-import { PostDetailDialog } from "./post-detail-dialog";
+import { PostsDrawer } from "./posts-drawer";
+import { usePostComposerSurface } from "./post-composer-surface";
+import { usePostDetailSurface } from "./post-detail-surface";
 import { PostsToolbar } from "./posts-toolbar";
 import {
   filterAndSortPosts,
@@ -789,8 +790,28 @@ export function PostsView({
   /** Selected `Post.id`s projected for the checkbox surfaces; the entry map stays the source of truth. */
   const selectedIds = useMemo(() => new Set(selectedPosts.keys()), [selectedPosts]);
 
-  /** Post row currently shown in the detail dialog, resolved live so mutations refresh it. */
+  /** Post row currently shown in the inspector surface, resolved live so mutations refresh it. */
   const detailPost = detailPostId ? (rowByPostId.get(detailPostId) ?? null) : null;
+
+  // The panel presents one surface at a time: composing and inspecting share it,
+  // so a click that asks for the other swaps content in place. Handlers declared
+  // below are called through closures so the descriptors stay declaration-ordered.
+  const detailSurface = usePostDetailSurface({
+    post: detailPost,
+    canMutate: selectedBrandProfileId !== null,
+    onClose: () => handleCloseDetail(),
+    onEdit: handleEditPost,
+    onRequestDelete: handleModalRequestDelete,
+  });
+  const composerSurface = usePostComposerSurface({
+    open: composerOpen,
+    initialPostId: editingPostId,
+    initialDate: schedulingDate,
+    sessionKey: composerKey,
+    onClose: () => handleComposerOpenChange(false),
+    onPostSuccess: handlePostSuccess,
+    onNavigate,
+  });
 
   /**
    * Post rows matching the selected calendar day, derived from the processed list
@@ -824,8 +845,14 @@ export function PostsView({
     if (selectedCalendarDate) handleScheduleCalendarDate(selectedCalendarDate);
   }, [selectedCalendarDate, handleScheduleCalendarDate]);
 
-  /** Opens the right-side post detail dialog for a Post row/card click. */
+  /**
+   * Opens the inspector surface. The panel shows one surface at a time, so an
+   * in-progress composition steps aside rather than stacking a second drawer;
+   * its target, session key, and recoverable draft are kept, so returning to it
+   * resumes the same composition.
+   */
   const handleViewDetails = useCallback((postId: string) => {
+    setComposerOpen(false);
     setDetailPostId(postId);
   }, []);
 
@@ -1005,23 +1032,7 @@ export function PostsView({
         selectionDisabled={bulkDeleteBusy}
       />
 
-      <PostDetailDialog
-        post={detailPost}
-        canMutate={selectedBrandProfileId !== null}
-        onClose={handleCloseDetail}
-        onEdit={handleEditPost}
-        onRequestDelete={handleModalRequestDelete}
-      />
-
-      <PostComposerDialog
-        open={composerOpen}
-        onOpenChange={handleComposerOpenChange}
-        initialPostId={editingPostId}
-        initialDate={schedulingDate}
-        sessionKey={composerKey}
-        onPostSuccess={handlePostSuccess}
-        onNavigate={onNavigate}
-      />
+      <PostsDrawer detail={detailSurface} composer={composerSurface} />
 
       <CenterAlertDialog
         open={Boolean(pendingAction)}

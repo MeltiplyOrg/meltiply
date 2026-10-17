@@ -360,6 +360,59 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   );
   await closeComposer(page);
 
+  // Composing and inspecting share one panel: asking for the other surface swaps
+  // its content and width in place, so no second drawer appears and the panel
+  // never exits between them.
+  await editPostFromRow(page, page.getByRole("row").filter({ hasText: "Studio update" }));
+  await expect(page.getByPlaceholder(/what do you want to publish/i)).toBeVisible();
+  await page.evaluate(() => {
+    const exits: string[] = [];
+    Reflect.set(window, "__surfaceSwapExits", exits);
+    document.addEventListener(
+      "animationstart",
+      (event) => {
+        const { animationName } = event as AnimationEvent;
+        if (animationName.startsWith("side-dialog-exit")) exits.push(animationName);
+      },
+      true,
+    );
+  });
+  const composerPanel = await page.evaluate(() => ({
+    panels: document.querySelectorAll("[data-side-dialog]").length,
+    width: Math.round(document.querySelector("[data-side-dialog]")!.getBoundingClientRect().width),
+  }));
+  expect(composerPanel.panels).toBe(1);
+  await page
+    .getByRole("row")
+    .filter({ hasText: "Second draft — selection review." })
+    .click({ position: { x: 220, y: 20 } });
+  await expect(
+    inspector.getByText("Second draft — selection review.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByPlaceholder(/what do you want to publish/i)).toBeHidden();
+  // The panel keeps its identity and interpolates to the inspector's width: the
+  // composer is the wide surface, the inspector the narrow one.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const panel = document.querySelector("[data-side-dialog]");
+        return {
+          panels: document.querySelectorAll("[data-side-dialog]").length,
+          state: panel?.getAttribute("data-state") ?? null,
+          width: panel ? Math.round(panel.getBoundingClientRect().width) : 0,
+          transition: panel ? getComputedStyle(panel).transitionProperty : "",
+        };
+      }),
+    )
+    .toEqual({ panels: 1, state: "open", width: 620, transition: "max-width" });
+  expect(composerPanel.width).toBeGreaterThan(620);
+  const swapExits = await page.evaluate(
+    () => Reflect.get(window, "__surfaceSwapExits") as string[],
+  );
+  expect(swapExits).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(inspector).toBeHidden();
+
   const searchTrigger = page
     .getByRole("banner")
     .getByRole("button", { name: "Search and jump to", exact: true });

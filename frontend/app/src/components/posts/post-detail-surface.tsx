@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CalendarDays,
   Edit3,
@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
-import { SideDialog } from "@meltiply/ui/side-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +35,7 @@ import {
   normalizePostStatus,
 } from "./posts-helpers";
 import type { PostDestructiveRequest, PostDetailItem, PostRow } from "./types";
+import type { PostDrawerSurface } from "./posts-drawer";
 
 export interface PostDetailDialogProps {
   /** Post row to inspect; `null` closes the dialog. */
@@ -364,34 +364,66 @@ function ChannelOutcomeRow({
  * platform. `post === null` closes the panel; the last post stays rendered
  * through dismissal so content never blanks during the shared fade.
  */
-export const PostDetailDialog = React.memo(function PostDetailDialog({
+export interface PostDetailSurfaceProps {
+  /** Post row to inspect; `null` closes the surface. */
+  post: PostRow | null;
+  /**
+   * Whether scope-owned mutations are allowed; `false` in the aggregate
+   * "All Brand Profiles" view. Post deletion no longer consumes this flag —
+   * the Post's own `brand_profile_id` authorizes it — so only edit, retry,
+   * reschedule, and channel cancels stay gated.
+   */
+  canMutate: boolean;
+  onClose: () => void;
+  /** Opens the composer for a Post that still has an editable surface. */
+  onEdit: (postId: string) => void;
+  /** Routes a destructive cancel/delete request to the view-level CenterAlertDialog. */
+  onRequestDelete: (request: PostDestructiveRequest) => void;
+}
+
+/**
+ * Describes the Post inspector as the shared Posts panel presents it. Inspecting
+ * and composing are alternatives in one panel rather than two drawers, so this
+ * returns chrome and body for whichever panel presents it. The last Post stays
+ * described through dismissal, so a closing panel keeps its content instead of
+ * emptying first.
+ *
+ * Every action keeps the Post identity, so editing or retrying one Channel never
+ * rewrites another's result. Compact breadcrumb/action chrome frames flat
+ * property rows, the full caption, ordered attachments, and real per-channel
+ * outcomes; no task-only properties or editable publication status are copied
+ * from the reference.
+ *
+ * @param props - Inspected row, mutation scope, and the view's edit/delete routing.
+ * @returns The inspector surface, or null before any row has been inspected.
+ */
+export function usePostDetailSurface({
   post: livePost,
   canMutate,
   onClose,
   onEdit,
   onRequestDelete,
-}: PostDetailDialogProps) {
+}: PostDetailSurfaceProps): PostDrawerSurface | null {
   const { t } = useI18n();
   const post = useLatchedValue(livePost);
-  if (!post) return null;
 
-  const caption = resolveRowCaption(post);
-  const dateLabel = formatPostDate(post.date);
-  const attachments = post.post?.attachments ?? [];
-  const isDraft = post.post?.status === "draft";
-  const cancellableIds = resolveCancellableDistributionIds(post);
-  const editable = Boolean(isDraft || cancellableIds.length > 0);
+  const surface = useMemo(() => {
+    if (!post) return null;
 
-  const status = normalizePostStatus(post);
+    const caption = resolveRowCaption(post);
+    const dateLabel = formatPostDate(post.date);
+    const attachments = post.post?.attachments ?? [];
+    const isDraft = post.post?.status === "draft";
+    const cancellableIds = resolveCancellableDistributionIds(post);
+    const editable = Boolean(isDraft || cancellableIds.length > 0);
 
-  return (
-    <SideDialog
-      closeLabel={t("Close")}
-      open={livePost !== null}
-      onOpenChange={(open) => !open && onClose()}
-      title={t("Post details")}
-      contentKey={post.id}
-      breadcrumb={
+    const status = normalizePostStatus(post);
+
+    return {
+      open: livePost !== null,
+      contentKey: `post:${post.id}`,
+      title: t("Post details"),
+      breadcrumb: (
         <span className="flex min-w-0 items-center gap-2">
           <span>{t("Posts")}</span>
           <span className="text-ink-3">/</span>
@@ -401,13 +433,11 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
             {post.id}
           </code>
         </span>
-      }
-      description={
-        dateLabel
-          ? t("{count} channel(s) · {date}", { count: post.channels.length, date: dateLabel })
-          : t("{count} channel(s)", { count: post.channels.length })
-      }
-      actions={
+      ),
+      description: dateLabel
+        ? t("{count} channel(s) · {date}", { count: post.channels.length, date: dateLabel })
+        : t("{count} channel(s)", { count: post.channels.length }),
+      actions: (
         <>
           {canMutate && editable && (
             <Button
@@ -460,92 +490,99 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
             </DropdownMenuContent>
           </DropdownMenu>
         </>
-      }
-    >
-      <h2 className="text-(length:--text-title) font-semibold leading-snug tracking-tight text-ink">
-        {post.post?.title || t("Post details")}
-      </h2>
-      <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-(length:--font-size-control)">
-        <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-          <CircleDot className="size-3.5 text-ink-3" />
-          {t("Status")}
-        </dt>
-        <dd>
-          <StatusBadge status={status} compact />
-        </dd>
-        <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-          <Share2 className="size-3.5 text-ink-3" />
-          {t("Channels")}
-        </dt>
-        <dd className="text-ink">{post.channels.length}</dd>
-        {dateLabel && (
-          <>
+      ),
+      onClose,
+      body: (
+        <>
+          <h2 className="text-(length:--text-title) font-semibold leading-snug tracking-tight text-ink">
+            {post.post?.title || t("Post details")}
+          </h2>
+          <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-(length:--font-size-control)">
             <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-              <CalendarDays className="size-3.5 text-ink-3" />
-              {isDraft ? t("Created") : t("Publish date")}
+              <CircleDot className="size-3.5 text-ink-3" />
+              {t("Status")}
             </dt>
-            <dd className="text-ink">{dateLabel}</dd>
-          </>
-        )}
-      </dl>
-      <section className="mt-6.5">
-        <h3 className="mb-2 text-(length:--font-size-ui) font-semibold">{t("Caption")}</h3>
-        <p className="whitespace-pre-wrap break-words text-(length:--font-size-ui) leading-relaxed text-ink-2">
-          {caption || t("No caption")}
-        </p>
-      </section>
+            <dd>
+              <StatusBadge status={status} compact />
+            </dd>
+            <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+              <Share2 className="size-3.5 text-ink-3" />
+              {t("Channels")}
+            </dt>
+            <dd className="text-ink">{post.channels.length}</dd>
+            {dateLabel && (
+              <>
+                <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+                  <CalendarDays className="size-3.5 text-ink-3" />
+                  {isDraft ? t("Created") : t("Publish date")}
+                </dt>
+                <dd className="text-ink">{dateLabel}</dd>
+              </>
+            )}
+          </dl>
+          <section className="mt-6.5">
+            <h3 className="mb-2 text-(length:--font-size-ui) font-semibold">{t("Caption")}</h3>
+            <p className="whitespace-pre-wrap break-words text-(length:--font-size-ui) leading-relaxed text-ink-2">
+              {caption || t("No caption")}
+            </p>
+          </section>
 
-      {attachments.length > 0 && (
-        <section className="mt-6.5">
-          <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
-            {t("Attachments")}
-            <span className="text-xs font-normal text-ink-3">{attachments.length}</span>
-          </h3>
-          <div className="flex items-center gap-2 overflow-x-auto">
-            {attachments.map((attachment) => {
-              const path = attachment.asset.thumbnail_url ?? attachment.asset.download_url ?? null;
-              return (
-                <div
-                  key={attachment.asset_id}
-                  className="size-12 shrink-0 overflow-hidden rounded-control border border-line bg-page flex items-center justify-center"
-                >
-                  {path ? (
-                    <img src={path} alt="" className="size-full object-cover" />
-                  ) : (
-                    <Images className="size-4 text-ink-3" />
-                  )}
-                </div>
-              );
-            })}
-            <span className="text-[11px] text-ink-3 shrink-0">
-              {t("{count} ordered attachment(s)", { count: attachments.length })}
-            </span>
-          </div>
-        </section>
-      )}
+          {attachments.length > 0 && (
+            <section className="mt-6.5">
+              <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
+                {t("Attachments")}
+                <span className="text-xs font-normal text-ink-3">{attachments.length}</span>
+              </h3>
+              <div className="flex items-center gap-2 overflow-x-auto">
+                {attachments.map((attachment) => {
+                  const path =
+                    attachment.asset.thumbnail_url ?? attachment.asset.download_url ?? null;
+                  return (
+                    <div
+                      key={attachment.asset_id}
+                      className="size-12 shrink-0 overflow-hidden rounded-control border border-line bg-page flex items-center justify-center"
+                    >
+                      {path ? (
+                        <img src={path} alt="" className="size-full object-cover" />
+                      ) : (
+                        <Images className="size-4 text-ink-3" />
+                      )}
+                    </div>
+                  );
+                })}
+                <span className="text-[11px] text-ink-3 shrink-0">
+                  {t("{count} ordered attachment(s)", { count: attachments.length })}
+                </span>
+              </div>
+            </section>
+          )}
 
-      <section className="mt-6.5">
-        <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
-          {t("Channels")}
-          <span className="text-xs font-normal text-ink-3">{post.channels.length}</span>
-        </h3>
-        {post.channels.map((item) => (
-          <ChannelOutcomeRow
-            key={item.id}
-            item={item}
-            postAttachments={attachments.length}
-            canMutate={canMutate}
-            onRequestDelete={(ids) =>
-              onRequestDelete({
-                kind: "cancel-channels",
-                postId: post.id,
-                brandProfileId: post.brandProfileId,
-                distributionIds: ids,
-              })
-            }
-          />
-        ))}
-      </section>
-    </SideDialog>
-  );
-});
+          <section className="mt-6.5">
+            <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
+              {t("Channels")}
+              <span className="text-xs font-normal text-ink-3">{post.channels.length}</span>
+            </h3>
+            {post.channels.map((item) => (
+              <ChannelOutcomeRow
+                key={item.id}
+                item={item}
+                postAttachments={attachments.length}
+                canMutate={canMutate}
+                onRequestDelete={(ids) =>
+                  onRequestDelete({
+                    kind: "cancel-channels",
+                    postId: post.id,
+                    brandProfileId: post.brandProfileId,
+                    distributionIds: ids,
+                  })
+                }
+              />
+            ))}
+          </section>
+        </>
+      ),
+    };
+  }, [post, livePost, canMutate, onClose, onEdit, onRequestDelete, t]);
+
+  return surface;
+}

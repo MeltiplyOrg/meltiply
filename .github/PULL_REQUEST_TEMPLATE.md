@@ -2,14 +2,14 @@
 
 Describe what changed and why. Keep this scoped to the shipping diff.
 
-## Diff summary
+### Added / removed
 
-<!-- Replace the counts with git diff --shortstat <base>...HEAD output. -->
+<!-- Describe previous behavior with - and its replacement with +.
+     Use standalone lines for genuinely one-sided changes; omit numeric diff stats. -->
 
 ```diff
-@@ FILES files changed @@
-+ ADDITIONS lines added
-- DELETIONS lines removed
+- Previous behavior or capability
++ Replacement behavior or capability
 ```
 
 ## Verification

@@ -462,7 +462,7 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
       }
     >
       <div>
-        <h2 className="text-[22px] font-semibold leading-snug tracking-tight text-ink">
+        <h2 className="text-(length:--text-title) font-semibold leading-snug tracking-tight text-ink">
           {post.post?.title || t("Post details")}
         </h2>
         <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-(length:--font-size-control)">

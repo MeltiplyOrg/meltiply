@@ -203,7 +203,7 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                           : "size-7 text-xl font-semibold tracking-tight",
                         isToday &&
                           (mode === "month"
-                            ? "bg-accent text-accent-foreground hover:bg-accent-hover"
+                            ? "bg-accent text-accent-foreground hover:bg-accent/90"
                             : "text-accent"),
                         !cell.isCurrentMonth && mode === "month" && "text-ink-3",
                       )}
@@ -263,7 +263,7 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                               className={cn(
                                 "min-w-0 justify-start text-left font-normal",
                                 mode === "month"
-                                  ? "h-5.5 gap-1.25 rounded-[5px] border border-accent/20 bg-accent-tint px-1.5 py-0 text-xs hover:bg-accent-tint/70"
+                                  ? "h-5.5 gap-1.25 rounded-control border border-accent/20 bg-accent-tint px-1.5 py-0 text-xs hover:bg-accent-tint/70"
                                   : "h-auto flex-col items-stretch gap-1.25 whitespace-normal rounded-control border border-line bg-surface px-2 py-1.75 hover:border-line-strong",
                                 published &&
                                   mode === "month" &&

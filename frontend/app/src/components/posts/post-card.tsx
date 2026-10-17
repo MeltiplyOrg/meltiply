@@ -4,6 +4,7 @@ import { Input } from "@meltiply/ui/input";
 import { Card } from "@meltiply/ui/card";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { useI18n } from "@/lib/i18n";
+import { abbreviateRecordId } from "@/lib/format";
 import { PostActions, type PostActionsProps } from "./post-actions";
 import { StatusBadge } from "./status-badge";
 import {
@@ -77,7 +78,7 @@ export function PostCard({
       </div>
       <StatusBadge status={normalizePostStatus(post)} compact />
       <div className="flex min-h-4.5 flex-wrap items-center gap-2 text-(length:--font-size-micro) text-ink-3">
-        <span className="shrink-0 font-mono">{postId.slice(0, 8)}</span>
+        <span className="shrink-0 font-mono">{abbreviateRecordId(postId)}</span>
         <span className="flex items-center gap-1">
           {providers.map((provider) => (
             <PlatformIcon key={provider} provider={provider} className="size-3" />

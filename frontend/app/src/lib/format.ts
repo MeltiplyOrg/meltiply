@@ -25,3 +25,18 @@ export function formatDuration(seconds: number): string {
   const remainder = totalSeconds % 60;
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
+
+/**
+ * Abbreviates a record UUID for a dense surface such as a table cell or card
+ * footer. The tail is the distinguishing part for every id shape in use: random
+ * v4, time-ordered v7 (whose leading characters are a timestamp), and the local
+ * fixtures, whose prefixes are constant across seeded rows. Prefixes therefore
+ * render the same characters for different records, which is why this abbreviates
+ * from the end. Full ids stay reachable through the element's `title`.
+ *
+ * @param id - Record UUID.
+ * @returns Ellipsis plus the last eight characters, or the id when already short.
+ */
+export function abbreviateRecordId(id: string): string {
+  return id.length <= 8 ? id : `…${id.slice(-8)}`;
+}

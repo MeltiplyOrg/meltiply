@@ -11,6 +11,7 @@ import {
 import { Empty, EmptyDescription } from "@meltiply/ui/empty";
 import { cn } from "@meltiply/ui/utils";
 import { useI18n } from "@/lib/i18n";
+import { abbreviateRecordId } from "@/lib/format";
 import { brandProfileColorClass, type BrandProfile } from "@/types";
 
 /**
@@ -77,7 +78,7 @@ export function BrandProfileDirectory({
           </CardContent>
           <CardFooter className="justify-between border-t border-line-soft px-3 py-2">
             <span className="font-mono text-(length:--font-size-micro) text-ink-3">
-              {profile.id.slice(0, 8)}
+              {abbreviateRecordId(profile.id)}
             </span>
             <Button variant="ghost" size="sm" onClick={() => onViewChannels(profile.id)}>
               {t("View channels")}

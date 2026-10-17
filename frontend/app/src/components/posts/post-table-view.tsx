@@ -8,6 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { StatusBadge } from "./status-badge";
 import { useI18n } from "@/lib/i18n";
+import { abbreviateRecordId } from "@/lib/format";
 import { cn } from "@meltiply/ui/utils";
 import { normalizePostStatus, resolveRowCaption, resolveRowProviders } from "./posts-helpers";
 import { groupPostRows, type PostGroupBy } from "./post-groups";
@@ -209,7 +210,7 @@ export const PostTableView = React.memo(function PostTableView({
                           <TableCell>
                             <div className="flex min-w-0 items-center gap-2">
                               <span className="shrink-0 font-mono text-(length:--font-size-micro) text-ink-3">
-                                {post.id.slice(0, 8)}
+                                {abbreviateRecordId(post.id)}
                               </span>
                               <Button
                                 data-post-details

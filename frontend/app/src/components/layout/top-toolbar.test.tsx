@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe("collection toolbar interactions", () => {
-  it("clears a localized search and restores filter disclosure focus on Escape", () => {
+  it("clears a localized search, restores filter disclosure focus, and animates the close", async () => {
     writeCookieConsent({ functional: true, analytics: false, marketing: false });
     window.localStorage.setItem("meltiply.language", "es");
     const onChange = vi.fn();
@@ -51,8 +51,11 @@ describe("collection toolbar interactions", () => {
     fireEvent.click(filter!);
     expect(screen.getByText("Status choices")).toBeVisible();
     fireEvent.keyDown(filter!.parentElement!, { key: "Escape" });
-    expect(filter!.parentElement).not.toHaveAttribute("open");
+    // Focus returns immediately; the disclosure itself stays mounted through the
+    // shared menu exit animation and closes when it finishes.
     expect(filter).toHaveFocus();
+    expect(filter!.parentElement).toHaveAttribute("data-state", "closed");
+    await vi.waitFor(() => expect(filter!.parentElement).not.toHaveAttribute("open"));
   });
 
   it("removes a single active chip and resets all filters only when requested", () => {

@@ -158,7 +158,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     page.locator("aside").getByRole("button", { name: "Calendar", exact: true }),
   ).toHaveCount(0);
   const viewSelector = page.getByRole("group", { name: "Post view", exact: true });
-  await expect(viewSelector.getByRole("button")).toHaveCount(3);
+  await expect(viewSelector.getByRole("button")).toHaveText(["Table", "Calendar", "Grid"]);
   for (const view of ["Grid", "Calendar", "Table"] as const) {
     const viewButton = viewSelector.getByRole("button", { name: view, exact: true });
     await viewButton.click();

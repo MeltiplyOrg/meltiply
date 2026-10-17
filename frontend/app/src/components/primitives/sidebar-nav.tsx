@@ -1,12 +1,14 @@
 import { forwardRef, useState, type ComponentType } from "react";
 import {
   CircleHelp,
+  ChevronsUpDown,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   PenSquare,
   Settings,
   Share2,
+  Sun,
   UserRound,
 } from "lucide-react";
 import { BrandMark } from "@meltiply/ui/brand-mark";
@@ -18,6 +20,13 @@ import { useWorkspace } from "@/context/workspace.context";
 import { useI18n } from "@/lib/i18n";
 import { preloadDashboardRoute } from "@/lib/preload-routes";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@meltiply/ui/dropdown-menu";
 
 export type WorkspaceView = "posts" | "channels" | "settings";
 
@@ -89,10 +98,23 @@ export interface SidebarNavProps {
 const HEADING_CLASS =
   "mt-3.5 px-2 py-1.25 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3";
 
+/** Shows the actual account image with the shared user-glyph fallback; caller sizing never changes identity. */
+function AccountAvatar({ src, className }: { src?: string | null; className?: string }) {
+  return (
+    <Avatar className={cn("size-6 shrink-0", className)} aria-hidden="true">
+      <AvatarImage src={src ?? undefined} alt="" />
+      <AvatarFallback className="bg-accent-tint text-accent-ink">
+        <UserRound className="size-3.5" />
+      </AvatarFallback>
+    </Avatar>
+  );
+}
+
 /**
  * Gr8r's 252px/52px rail, rewritten in React/Tailwind. Posts and Channels are
  * single destinations; view selection and Brand Profile scope belong to their
- * page controls. Search lives in the top bar. Collapse preserves named controls.
+ * page controls. Search lives in the top bar. The compact account row opens the
+ * real identity/settings/sign-out menu; collapse preserves its accessible name.
  */
 export function SidebarNav({ currentView, onNavigate, className }: SidebarNavProps) {
   const { user, workspaceName } = useWorkspace();
@@ -194,37 +216,61 @@ export function SidebarNav({ currentView, onNavigate, className }: SidebarNavPro
           <Settings className="size-4" />
           {!collapsed && t("Settings")}
         </SidebarNavRow>
-        <div
-          className={cn(
-            "mt-2 flex gap-2 border-t border-line pt-2",
-            collapsed ? "flex-col items-center" : "items-center",
-          )}
-        >
-          <Avatar className="size-6 shrink-0">
-            <AvatarImage src={user?.avatarUrl ?? undefined} alt="" />
-            <AvatarFallback className="bg-accent-tint text-accent-ink">
-              <UserRound className="size-3.5" />
-            </AvatarFallback>
-          </Avatar>
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-medium">{user?.name || t("Creator")}</div>
-              <div className="truncate text-(length:--font-size-micro) text-ink-3">
-                {user?.email}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarNavRow
+              collapsed={collapsed}
+              className="h-9"
+              aria-label={t("Account menu")}
+              title={collapsed ? t("Account menu") : undefined}
+            >
+              <AccountAvatar src={user?.avatarUrl} />
+              {!collapsed && (
+                <>
+                  <span className="min-w-0 flex-1 truncate font-medium text-ink">
+                    {user?.name || t("Creator")}
+                  </span>
+                  <ChevronsUpDown className="size-3.25 shrink-0 text-ink-3" />
+                </>
+              )}
+            </SidebarNavRow>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="top"
+            align="start"
+            sideOffset={8}
+            className="w-65"
+            aria-label={t("Account menu")}
+          >
+            <div className="flex min-w-0 items-center gap-2.5 px-2 pb-2.5 pt-2">
+              <AccountAvatar src={user?.avatarUrl} className="size-8" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-(length:--font-size-ui) font-semibold">
+                  {user?.name || t("Creator")}
+                </div>
+                <div className="truncate text-xs text-ink-3">{user?.email}</div>
               </div>
             </div>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6 shrink-0"
-            onClick={() => void handleSignOut()}
-            aria-label={t("Sign out")}
-            title={t("Sign out")}
-          >
-            <LogOut className="size-3.5" />
-          </Button>
-        </div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => onNavigate("settings", { search: "section=account" })}
+            >
+              <Settings className="size-3.75" />
+              {t("Account settings")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => onNavigate("settings", { search: "section=appearance" })}
+            >
+              <Sun className="size-3.75" />
+              {t("Appearance")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void handleSignOut()}>
+              <LogOut className="size-3.75" />
+              {t("Sign out")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </aside>
   );

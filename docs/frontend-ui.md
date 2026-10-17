@@ -39,6 +39,8 @@ Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. I
 
 `SidebarNav` and `NavigationShell` own the rail, header, mobile navigation, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations. Posts and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
 
+The footer uses one compact avatar/name account trigger with trailing chevrons, including an avatar-only collapsed state. Its account menu holds the actual name/email, Account settings, Appearance, and Sign out. Settings destinations reuse the existing route; signing out uses the shared session cleanup. Do not add demo profile, presence, or shortcut actions that Meltiply does not implement.
+
 `WorkspaceSearch` is a jump palette over supported pages and loaded profiles, opened from the top bar or `hotkeys.commandMenu`. It is not a global Post index. Route toolbars own collection search and the current Brand Profile filter.
 
 `TopToolbarFilters` owns the shared field-row disclosure: Where/and rows, Add filter chips, equality controls, per-row removal, Clear all, and active-value chips. Routes supply localized field metadata, real predicates, and reset callbacks. Empty added rows do not filter data. Removing/adding rows restores useful focus; nested portalled menus remain part of the disclosure.

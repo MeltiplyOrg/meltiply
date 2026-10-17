@@ -46,6 +46,37 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       }),
     )
     .toBe(true);
+  const accountTrigger = page.getByRole("button", { name: "Account menu", exact: true });
+  await accountTrigger.click();
+  const accountMenu = page.getByRole("menu", { name: "Account menu", exact: true });
+  await expect(
+    accountMenu.getByRole("menuitem", { name: "Account settings", exact: true }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 1808, height: 984 });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("sidebar-account-menu-desktop.png"),
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  await expect(accountTrigger).toBeFocused();
+  await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
+  await accountTrigger.click();
+  await expect(accountMenu.getByRole("menuitem", { name: "Sign out", exact: true })).toBeVisible();
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("sidebar-account-menu-collapsed.png"),
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Expand sidebar", exact: true }).click();
+  await accountTrigger.click();
+  await accountMenu.getByRole("menuitem", { name: "Account settings", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\?section=account/);
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await page.locator("aside").getByRole("button", { name: "Posts", exact: true }).click();
+  await waitForWorkspace(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   for (const [index, caption] of [
     "Studio update — ready for the next publishing window.",
     "Second draft — selection review.",
@@ -287,6 +318,8 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   ).toHaveCount(0);
   const viewSelector = page.getByRole("group", { name: "Post view", exact: true });
   await expect(viewSelector.getByRole("button")).toHaveText(["Table", "Calendar", "Grid"]);
+  // Directory filter reset returned to aggregate scope; scheduling needs one real owner.
+  await activeBrandProfileName(page);
   for (const view of ["Grid", "Calendar", "Table"] as const) {
     const viewButton = viewSelector.getByRole("button", { name: view, exact: true });
     await viewButton.click();
@@ -434,8 +467,9 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
-  await page.getByRole("button", { name: "Account", exact: true }).click();
-  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await accountTrigger.click();
+  await accountMenu.getByRole("menuitem", { name: "Sign out", exact: true }).click();
   await expect(page).toHaveURL(/\/sign-in/);
 
   const publicUrl = process.env.MELTIPLY_E2E_PUBLIC_URL;

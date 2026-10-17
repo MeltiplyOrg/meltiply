@@ -58,6 +58,8 @@ const spanishTranslations: Record<string, string> = {
   "Search and jump to": "Buscar e ir a",
   "Help and resources": "Ayuda y recursos",
   Creator: "Creador",
+  "Account menu": "Menú de la cuenta",
+  "Account settings": "Configuración de la cuenta",
   "Post actions": "Acciones de publicación",
   "Showing {count} posts across your Brand Profiles.":
     "Mostrando {count} publicaciones de tus perfiles de marca.",

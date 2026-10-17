@@ -3,7 +3,11 @@ import { z } from "zod";
 // Imported relatively, like the sibling self-host entrypoints: bun's isolated
 // linker scopes workspace packages to their declaring workspace, so only a
 // workspace-internal module may name `@meltiply/storage`.
-import { createObjectStoreFromEnv, type ObjectStorageEnv } from "../../packages/storage/src/index";
+import {
+  createObjectStoreFromEnv,
+  type ConfiguredObjectStore,
+  type ObjectStorageEnv,
+} from "../../packages/storage/src/index";
 import type { ApiWorkerEnv } from "../../workers/api/src/env";
 import type { AutomationEnv } from "../../workers/automation/src/env";
 
@@ -25,10 +29,7 @@ const commandSchema = z
  * @param store - Store for the configured object storage provider.
  * @param key - Diagnostic object key, reused as the uploaded content.
  */
-async function writeMarker(
-  store: ReturnType<typeof createObjectStoreFromEnv>,
-  key: string,
-): Promise<void> {
+async function writeMarker(store: ConfiguredObjectStore, key: string): Promise<void> {
   const upload = await store.createMultipartUpload(key, "application/octet-stream");
   await upload.complete([await upload.uploadPart(1, new TextEncoder().encode(key))]);
 }

@@ -101,12 +101,7 @@ service that fetches signed URLs.
 
 Leaving `OBJECT_STORAGE_PROVIDER` unset keeps R2, so an existing installation
 is unaffected. The runtime refuses to start when the `s3` provider is selected
-without its required settings. `S3_ENDPOINT` must additionally be an origin
-with no path and must use HTTPS: `/api/v1/ready` reports either as an
-unavailable storage component rather than letting a green probe sit over a
-deployment whose asset requests would fail. The origin must also be reachable
-from the runtime container and from any machine or service that fetches signed
-URLs.
+without its required settings.
 
 Both providers offer identical behavior: uploads and multipart uploads, media
 processing, retention and brand-profile purges, and private media delivery all
@@ -117,6 +112,26 @@ an unusable provider or endpoint as unavailable, but it never contacts the
 origin, so a container stays healthy while an S3 service is down. Watch the
 runtime logs and the first asset upload for that failure; `admin.mjs probe-write`
 / `probe-read` also exercises the configured provider's storage.
+
+The S3 service must implement conditional `CopyObject` (`If-None-Match: *`
+for the destination and `x-amz-copy-source-if-match` for the source), conditional
+PUT, and multipart uploads. These guards preserve immutable ready objects and
+create-only processor outputs; an S3-like service without them is not supported.
+Configure bucket CORS to allow browser PUTs from the application origin, including
+`content-type` and the signed headers, and expose `ETag` for multipart uploads.
+Provider selection changes where new requests go; it does not migrate existing
+objects. Copy all retained object keys to the new bucket before switching both
+Workers, and retain the old endpoint until previously issued signed URLs expire.
+
+The hosted `object-storage` lane in the
+[extended workflow](../.github/workflows/extended.yml) verifies switching through
+the application lifecycle with a disposable PostgreSQL database, real native
+media processing, R2, and MinIO. `bun run storage:s3:check` checks signatures
+against the bundled gateway locally; that gateway does not support server-side
+copy. For full copy coverage, run the same command with `S3_CHECK_ENDPOINT`,
+`S3_CHECK_ACCESS_KEY`, `S3_CHECK_SECRET_KEY`, and optional `S3_CHECK_BUCKET`
+against a **disposable empty bucket**: the check creates the bucket and writes
+and deletes fixture objects. Never use production credentials or a real bucket.
 
 ## HTTPS and public callbacks
 

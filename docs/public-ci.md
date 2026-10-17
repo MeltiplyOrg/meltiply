@@ -44,10 +44,14 @@ deployment secrets are supplied. Do not execute contributor code through
 `pull_request_target` or persistent self-hosted runners.
 
 The [extended workflow](../.github/workflows/extended.yml) preserves manually
-selected `frontend-full`, `cloudflare-integration`, and `cloudflare-extended`
-lanes for real browser/Lighthouse journeys, live-local topology/load, and
-release/staging/IaC checks. These run on GitHub-hosted machines without deployment
-secrets; a passing automatic `ci-gate` does not imply the manual lanes ran.
+selected `frontend-full`, `cloudflare-integration`, `cloudflare-extended`, and
+`object-storage` lanes for browser/Lighthouse journeys, live-local topology/load,
+release/staging/IaC checks, and provider switching. The storage lane builds a
+pinned MinIO release from source, checks live S3 operations, runs
+`bun run cloudflare:check`, then exercises application uploads, native media
+processing, private delivery, and retention against R2 and MinIO. These run on
+GitHub-hosted machines without deployment secrets; a passing automatic
+`ci-gate` does not imply the manual lanes ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
 `frontend-full` provisions local signing/storage configuration before browser

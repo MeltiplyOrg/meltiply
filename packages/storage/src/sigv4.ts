@@ -409,9 +409,9 @@ export class SigV4Signer {
    * non-conformant, and dropping the slash to satisfy one would break every
    * conforming origin.
    *
-   * Note: this primitive is not covered by `bun run storage:s3:check` because
-   * workerd's local S3 gateway reports `NoSuchBucket` for every copy-source
-   * shape it is given.
+   * The bundled gateway does not implement server-side copy. The external
+   * `S3_CHECK_ENDPOINT` mode of `bun run storage:s3:check` verifies this against
+   * MinIO, including source-ETag and destination-absence guards.
    *
    * @param key - Source object key.
    * @returns Encoded, bucket-qualified source path.
@@ -432,14 +432,50 @@ export class SigV4Signer {
    * @param input - Method, object key, query map, extra headers, and optional raw body.
    * @returns Absolute request URL plus the complete signed header set.
    */
-  async prepareRequest(input: {
+  prepareRequest(input: {
     body?: Uint8Array | null;
     headers?: Readonly<Record<string, string>>;
     key: string;
     method: string;
     query?: ReadonlyMap<string, string>;
   }): Promise<SignedRequest> {
-    const url = this.objectUrl(input.key, input.query);
+    return this.#sign(this.objectUrl(input.key, input.query), input);
+  }
+
+  /**
+   * Signs a request addressed at the bucket itself rather than an object, which
+   * is what CreateBucket and HeadBucket require.
+   *
+   * Kept separate from {@link prepareRequest} because the bucket path is not an
+   * object key and must not be run through key validation.
+   *
+   * @param method - HTTP method, normally `PUT` for CreateBucket.
+   * @returns Absolute bucket URL plus the complete signed header set.
+   */
+  prepareBucketRequest(method: string): Promise<SignedRequest> {
+    // Path-style naming keeps the bucket in the path; virtual-hosted addressing
+    // has already moved it into the host, leaving the bare prefix.
+    const segment = this.#target.addressing === "virtual" ? "" : `/${encode(this.#target.bucket)}`;
+    return this.#sign(new URL(`${this.#target.origin}${this.#target.pathPrefix}${segment}`), {
+      method,
+    });
+  }
+
+  /**
+   * Signs the supplied URL and headers, deriving every SigV4 input from them.
+   *
+   * @param url - Absolute request URL, whose query is canonicalized as given.
+   * @param input - Method, extra headers, and optional raw body.
+   * @returns Absolute request URL plus the complete signed header set.
+   */
+  async #sign(
+    url: URL,
+    input: {
+      body?: Uint8Array | null;
+      headers?: Readonly<Record<string, string>>;
+      method: string;
+    },
+  ): Promise<SignedRequest> {
     const now = timestamp(this.#now());
     const payloadHash = input.body
       ? await sha256Bytes(input.body.slice().buffer)

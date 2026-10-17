@@ -23,13 +23,7 @@ import {
   CenterAlertDialogCancel,
 } from "@meltiply/ui/center-alert-dialog";
 import type { ChannelIntegration, MediaItem } from "@/api/types";
-import type {
-  CalendarEvent,
-  Distribution,
-  Post,
-  PostQueryParams,
-  PostTarget,
-} from "@/types";
+import type { CalendarEvent, Distribution, Post, PostQueryParams, PostTarget } from "@/types";
 
 import { PostTableView } from "./post-table-view";
 import { PostCalendarGridView } from "./post-calendar-grid-view";

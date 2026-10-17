@@ -164,13 +164,15 @@ export function TopToolbarFilters({
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
+      // While a nested list is open, Radix owns the press: its modal layer sets
+      // pointer-events on the rest of the page, so the press can surface here
+      // as a target outside the disclosure. The list closes itself; the
+      // builder stays open so the next field can be chosen immediately.
+      if (document.querySelector("[data-radix-popper-content-wrapper]")) return;
       const target = event.target;
       if (
         !(target instanceof Element) ||
         ref.current?.contains(target) ||
-        // Portalled nested layers (menu, listbox, popper) live outside the
-        // disclosure in the DOM, so containment cannot see them: choosing a
-        // field or value must keep the builder open.
         target.closest(NESTED_LAYER_SELECTOR)
       )
         return;

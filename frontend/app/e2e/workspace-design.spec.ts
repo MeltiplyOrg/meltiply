@@ -454,6 +454,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     .click();
   await postsFilterPanel.getByRole("button", { name: "All statuses", exact: true }).click();
   const openMenuSurface = page.locator("[data-radix-popper-content-wrapper] [data-menu-surface]");
+  const statusControl = postsFilterPanel.getByRole("button", { name: "All statuses", exact: true });
   await expect(openMenuSurface).toBeVisible();
   expect(await openMenuSurface.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   expect(
@@ -472,12 +473,12 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     fullPage: true,
   });
 
-  // Choosing inside a nested list must not dismiss the builder: the user keeps
-  // picking field values instead of reopening the disclosure between choices.
-  await page.getByRole("option", { name: "Scheduled", exact: true }).click();
+  // Choosing inside a nested list must not dismiss the builder, and a press
+  // that lands back in the builder while a list is open must not either: the
+  // user keeps picking field values instead of reopening the disclosure.
+  await statusControl.click();
+  await postsFilterPanel.getByRole("heading", { name: "Filter by", exact: true }).click();
   await expect(postsFilterPanel).toBeVisible();
-  const statusControl = postsFilterPanel.getByRole("button", { name: "Scheduled", exact: true });
-  await expect(statusControl).toBeVisible();
   await statusControl.click();
   await page.getByRole("option", { name: "Drafts", exact: true }).click();
   await expect(postsFilterPanel).toBeVisible();

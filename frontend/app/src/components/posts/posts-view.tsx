@@ -4,6 +4,7 @@ import { Button } from "@meltiply/ui/button";
 import { WorkspaceSurface } from "@/components/layout/workspace-surface";
 import { BulkSelectionBar } from "@/components/layout/bulk-selection-bar";
 import { AlertCircle, Plus, Trash2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@meltiply/ui/tooltip";
 
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useCalendar, useCancelDistribution, useDeletePost, usePosts } from "@/lib/queries";
@@ -1032,7 +1033,32 @@ export function PostsView({
         selectionDisabled={bulkDeleteBusy}
       />
 
-      <PostsDrawer detail={detailSurface} composer={composerSurface} />
+      {/* The open panel covers the page's create action, so the drawer carries it
+          in its own toolbar: an icon-only control beside the record actions, which
+          leaves the breadcrumb intact. While composing, the panel is already
+          creating, so the affordance steps aside. */}
+      <PostsDrawer
+        detail={detailSurface}
+        composer={composerSurface}
+        headerAction={
+          composerOpen ? undefined : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  aria-label={t("New Post")}
+                  onClick={handleCreatePost}
+                >
+                  <Plus className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("New Post")}</TooltipContent>
+            </Tooltip>
+          )
+        }
+      />
 
       <CenterAlertDialog
         open={Boolean(pendingAction)}

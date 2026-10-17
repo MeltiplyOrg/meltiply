@@ -413,6 +413,29 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.keyboard.press("Escape");
   await expect(inspector).toBeHidden();
 
+  // While the panel is open it covers the page's own create action at this
+  // viewport, so the drawer carries a create affordance at its head's left edge:
+  // it is the first thing in the header and it starts a fresh composition.
+  await inspectTrigger.click();
+  const drawerCreate = inspector.getByRole("button", { name: "New Post", exact: true });
+  await expect(drawerCreate).toBeVisible();
+  // It rides the toolbar's action cluster, so the record context keeps its room.
+  const createSlot = await page.evaluate(() => {
+    const header = document.querySelector("[data-side-dialog] header");
+    const cluster = header?.querySelector(":scope > div:nth-child(2)");
+    return {
+      firstAction: cluster?.querySelector("button")?.getAttribute("aria-label") ?? null,
+      breadcrumbIntact:
+        header?.querySelector(":scope > div")?.textContent.includes("Posts") ?? false,
+    };
+  });
+  expect(createSlot).toEqual({ firstAction: "New Post", breadcrumbIntact: true });
+  await drawerCreate.click();
+  await expect(page.getByPlaceholder(/what do you want to publish/i)).toBeVisible();
+  await expect(page.locator("[data-side-dialog]")).toHaveCount(1);
+  await expect(drawerCreate).toBeHidden();
+  await closeComposer(page);
+
   const searchTrigger = page
     .getByRole("banner")
     .getByRole("button", { name: "Search and jump to", exact: true });

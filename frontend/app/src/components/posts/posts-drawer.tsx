@@ -38,6 +38,12 @@ export interface PostsDrawerProps {
   detail: PostDrawerSurface | null;
   /** Composer surface for the composition in progress. */
   composer: PostDrawerSurface;
+  /**
+   * Action rendered in the header's action cluster, ahead of the presented
+   * surface's own actions. The open panel covers the page's create action, so
+   * the view supplies its replacement here rather than leaving it unreachable.
+   */
+  headerAction?: React.ReactNode;
 }
 
 /**
@@ -50,7 +56,11 @@ export interface PostsDrawerProps {
  * @param props - The two alternative surfaces, each reporting whether it is open.
  * @returns The shared drawer, or null until a surface has been presented.
  */
-export function PostsDrawer({ detail, composer }: PostsDrawerProps): React.ReactElement | null {
+export function PostsDrawer({
+  detail,
+  composer,
+  headerAction,
+}: PostsDrawerProps): React.ReactElement | null {
   const { t } = useI18n();
   // The latched value is which surface is shown, not the surface object itself:
   // descriptors are rebuilt as their data changes, and latching one would fight
@@ -67,7 +77,12 @@ export function PostsDrawer({ detail, composer }: PostsDrawerProps): React.React
       title={surface.title}
       description={surface.description}
       breadcrumb={surface.breadcrumb}
-      actions={surface.actions}
+      actions={
+        <>
+          {headerAction}
+          {surface.actions}
+        </>
+      }
       contentKey={surface.contentKey}
       closeLabel={t("Close")}
       className={surface.wide ? "sm:max-w-260" : undefined}

@@ -775,8 +775,7 @@ test("edits a pending target without touching published history and explains wha
 
   // The delete confirmation states the consequence before it happens.
   const deleteDetail = await openPostDetails(page, pendingEditCaption);
-  await deleteDetail.getByRole("button", { name: "Post actions", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Delete post", exact: true }).click();
+  await deleteDetail.getByRole("button", { name: "Delete post", exact: true }).click();
   const confirmation = page.getByRole("alertdialog");
   await expect(confirmation.getByText(/delete this post\?/i)).toBeVisible();
   await expect(
@@ -789,8 +788,7 @@ test("edits a pending target without touching published history and explains wha
   await expect(deleteDetail).toBeVisible({ timeout: 30_000 });
 
   // --- Deleting for real: the pending Post stops, the live copy does not move.
-  await deleteDetail.getByRole("button", { name: "Post actions", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Delete post", exact: true }).click();
+  await deleteDetail.getByRole("button", { name: "Delete post", exact: true }).click();
   await page
     .getByRole("alertdialog")
     .getByRole("button", { name: /^delete post$/i })

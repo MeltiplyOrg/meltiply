@@ -8,18 +8,13 @@ import {
   Clock,
   TriangleAlert,
   Images,
-  Ellipsis,
   CircleDot,
   Share2,
+  Ban,
 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { Input } from "@meltiply/ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@meltiply/ui/dropdown-menu";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { StatusBadge } from "./status-badge";
 import { toast } from "@meltiply/ui/toast";
@@ -37,22 +32,6 @@ import {
 import type { PostDestructiveRequest, PostDetailItem, PostRow } from "./types";
 import type { PostDrawerSurface } from "./posts-drawer";
 
-export interface PostDetailDialogProps {
-  /** Post row to inspect; `null` closes the dialog. */
-  post: PostRow | null;
-  /**
-   * Whether scope-owned mutations are allowed; `false` in the aggregate
-   * "All Brand Profiles" view. Post deletion no longer consumes this flag —
-   * the Post's own `brand_profile_id` authorizes it — so only edit, retry,
-   * reschedule, and channel cancels stay gated.
-   */
-  canMutate: boolean;
-  onClose: () => void;
-  /** Opens the composer for a Post that still has an editable surface. */
-  onEdit: (postId: string) => void;
-  /** Routes a destructive cancel/delete request to the view-level CenterAlertDialog. */
-  onRequestDelete: (request: PostDestructiveRequest) => void;
-}
 /**
  * Formats an ISO timestamp into the source views' `en-US` display form
  * (e.g. 'Sep 14, 2026, 02:30 PM'). Returns null for missing/invalid input so
@@ -450,32 +429,35 @@ export function usePostDetailSurface({
               {t("Edit post")}
             </Button>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-7" aria-label={t("Post actions")}>
-                <Ellipsis className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {canMutate && cancellableIds.length > 0 && (
-                <DropdownMenuItem
-                  className="text-red focus:text-red"
-                  onSelect={() =>
-                    onRequestDelete({
-                      kind: "cancel-channels",
-                      postId: post.id,
-                      brandProfileId: post.brandProfileId,
-                      distributionIds: cancellableIds,
-                    })
-                  }
-                >
-                  <Trash2 className="size-3.5" />
-                  {t("Cancel all pending")}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                className="text-red focus:text-red"
-                onSelect={() =>
+          {canMutate && cancellableIds.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 text-(length:--font-size-control)"
+              onClick={() =>
+                onRequestDelete({
+                  kind: "cancel-channels",
+                  postId: post.id,
+                  brandProfileId: post.brandProfileId,
+                  distributionIds: cancellableIds,
+                })
+              }
+            >
+              <Ban className="size-3.5" />
+              {t("Cancel all pending")}
+            </Button>
+          )}
+          {/* Delete is the only remaining action, so it is its own control: a menu
+              holding one item would only add a step to a destructive intent. The
+              confirmation still owns the consequence. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-ink-3 hover:text-red"
+                aria-label={isDraft ? t("Delete draft") : t("Delete post")}
+                onClick={() =>
                   onRequestDelete({
                     kind: "delete-post",
                     postId: post.id,
@@ -484,11 +466,11 @@ export function usePostDetailSurface({
                   })
                 }
               >
-                <Trash2 className="size-3.5" />
-                {isDraft ? t("Delete draft") : t("Delete post")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <Trash2 className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{isDraft ? t("Delete draft") : t("Delete post")}</TooltipContent>
+          </Tooltip>
         </>
       ),
       onClose,

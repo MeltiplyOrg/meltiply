@@ -29,9 +29,9 @@ export interface PostGridCardViewProps extends PostSelectionProps {
 const GRID_VIEWPORT_CLASS = "min-h-0 flex-1 overflow-y-auto px-4 pb-24 pt-3.5 sm:px-6";
 
 /**
- * Media-oriented Grid using the same Gr8r-derived card as Board, with attachment
- * previews retained. Selection covers exactly the rendered filtered page and
- * remains owned by PostsView across view changes; no reference demo data is used.
+ * Media Grid composed from canonical Post cards with real attachment previews.
+ * Selection covers the rendered filtered page and remains owned by PostsView
+ * across Table, Grid, and Calendar changes; no reference demo data is used.
  */
 export const PostGridCardView = React.memo(function PostGridCardView({
   posts,
@@ -111,7 +111,6 @@ export const PostGridCardView = React.memo(function PostGridCardView({
             onViewDetails={onViewDetails}
             onEdit={onEdit}
             onDelete={onDelete}
-            showPreview
           />
         ))}
       </div>

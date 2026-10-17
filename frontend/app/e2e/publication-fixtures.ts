@@ -115,20 +115,24 @@ export function controlledProviderAccountId(platform: ControlledPlatform): strin
 /**
  * Selects the workspace's active Brand Profile and reports its display name.
  *
- * The Posts toolbar's Brand Profile combobox is the control that both filters
- * the list and sets the workspace's active scope, so choosing an option here is
- * what makes the composer treat that profile as selected. `profile_name` — not a
- * profile id — is then enough for the fixture to attach Channels, which keeps
- * this helper free of any API shape the acceptance run does not already use.
- * The existing profile toolbar slot identifies the control independently of its
- * accessible name, which becomes the selected profile's display name.
+ * Opens the Posts Filter disclosure and selects a real Brand Profile. Choosing
+ * the profile scopes the composer; its name lets controlled fixture provisioning
+ * attach Channels without introducing another API shape. The disclosure closes
+ * afterward so subsequent page actions are not obscured by its floating panel.
  *
  * @param page - Playwright page bound to the signed-in `/posts` view.
  * @returns The active Brand Profile's display name.
  * @throws {Error} When the workspace exposes no selectable Brand Profile.
  */
 export async function activeBrandProfileName(page: Page): Promise<string> {
-  const combobox = page.locator('[data-workspace-transition-slot="profile"]').getByRole("combobox");
+  const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
+  if (!(await disclosure.locator("..").evaluate((element) => element.hasAttribute("open")))) {
+    await disclosure.click();
+  }
+  const combobox = page
+    .getByRole("group", { name: "Filters", exact: true })
+    .getByRole("combobox")
+    .first();
   await expect(combobox).toBeVisible({ timeout: 30_000 });
   await combobox.click();
   const options = page.getByRole("option");
@@ -139,6 +143,7 @@ export async function activeBrandProfileName(page: Page): Promise<string> {
     throw new Error(`workspace has no selectable Brand Profile; options were ${names.join(", ")}`);
   }
   await page.getByRole("option", { name, exact: true }).click();
+  await disclosure.click();
   return name;
 }
 

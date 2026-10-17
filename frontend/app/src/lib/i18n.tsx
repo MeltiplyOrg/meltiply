@@ -16,6 +16,12 @@ export type TranslationValues = Record<string, number | string>;
 const languageStorageKey = "meltiply.language";
 
 const spanishTranslations: Record<string, string> = {
+  "Connected accounts": "Cuentas conectadas",
+  "{count} connected accounts across {profiles} Brand Profiles.":
+    "{count} cuentas conectadas en {profiles} perfiles de marca.",
+  "Channel directory sections": "Secciones del directorio de canales",
+  Accounts: "Cuentas",
+  "{count} accounts": "{count} cuentas",
   "No Brand Profiles yet. Ask a workspace admin to create one, or use Create Brand Profile if you are an admin.":
     "Aún no hay perfiles de marca. Pide a un administrador que cree uno o usa Crear perfil de marca si eres administrador.",
   "Edit {name}": "Editar {name}",

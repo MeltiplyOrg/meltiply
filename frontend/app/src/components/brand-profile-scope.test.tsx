@@ -1110,7 +1110,6 @@ describe("Posts surfaces", () => {
     }
     expect(within(row).getByRole("button", { name: "Edit post" })).toBeVisible();
     expect(within(row).getByRole("button", { name: "Delete post" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Create post" })).toBeVisible();
   });
 
   /**

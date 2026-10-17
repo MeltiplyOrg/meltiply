@@ -108,7 +108,7 @@ function attachmentPreview(page: Page, fileName: string) {
  * @param page - Playwright page bound to the app under test.
  */
 async function openComposer(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Create post" }).click();
+  await page.locator("main header").getByRole("button", { name: "Create post" }).click();
   await expect(composerTextarea(page)).toBeVisible();
 }
 

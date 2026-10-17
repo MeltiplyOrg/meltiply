@@ -100,7 +100,10 @@ async function attachChannels(
 
 /** Opens the composer for a brand new Post. */
 async function openComposer(page: Page): Promise<void> {
-  await page.getByRole("button", { name: /create post/i }).click();
+  await page
+    .locator("main header")
+    .getByRole("button", { name: /create post/i })
+    .click();
   await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
     timeout: 30_000,
   });
@@ -268,20 +271,21 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
     );
 }
 
-/** Applies a status bucket and waits for its selected label before sampling rows. */
+/** Applies a status bucket through the filter disclosure, then restores the collection viewport. */
 async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
+  const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
+  await disclosure.click();
   const combobox = page.getByRole("combobox", { name: /post status/i });
   await expect(combobox).toBeVisible({ timeout: 30_000 });
   await combobox.click();
   await page.getByRole("option", { name: status }).click();
   await expect(combobox).toHaveText(status);
+  await disclosure.click();
 }
 
-/** Restores the unfiltered Posts list. */
+/** Restores all status buckets using the same user-visible filtering flow. */
 async function clearPostStatusFilter(page: Page): Promise<void> {
-  const combobox = page.getByRole("combobox", { name: /post status/i });
-  await combobox.click();
-  await page.getByRole("option", { name: /^all statuses$/i }).click();
+  await filterPostsByStatus(page, /^all statuses$/i);
 }
 
 /**
@@ -383,9 +387,8 @@ async function closePostDetails(page: Page): Promise<void> {
  * Grid and calendar both lay their cards out in CSS grid flow, so top-to-bottom
  * then left-to-right is the reading order in every view. Comparing the resulting
  * sequence across views is what proves they render one identity in one order
- * rather than three independent lists.
- * View switches crossfade outgoing content; measure only visible captions and
- * wait for a complete set rather than accepting an element about to unmount.
+ * rather than three independent collections. View changes are immediate;
+ * query refreshes must settle before sampling the complete set of captions.
  *
  * @param page - Posts page or expanded calendar-day dialog to measure.
  * @param captions - Captions whose relative order is under test.
@@ -556,9 +559,9 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
  * creates a real scoped profile, and controlled channels publish through the
  * normal scheduling API rather than inserting calendar fixtures.
  * Calendar cells preview only two Posts; expanding the day exposes all three
- * for the same complete identity/order assertion used by list and grid.
+ * for the same complete identity/order assertion used by Table and Grid.
  */
-test("shows the same Post and the same order in the list, grid, calendar, and detail surfaces", async ({
+test("shows the same Post and order in Table, Grid, Calendar, and Details", async ({
   page,
   request,
 }) => {
@@ -583,7 +586,7 @@ test("shows the same Post and the same order in the list, grid, calendar, and de
   await expect(page.getByText(captions[0]!, { exact: true })).toBeVisible({
     timeout: 60_000,
   });
-  await page.getByRole("button", { name: /^time:/i }).click();
+  await page.getByRole("button", { name: /^sort:/i }).click();
   await page.getByRole("menuitem", { name: "Time: Oldest first", exact: true }).click();
   expect(await captionsInReadingOrder(page, captions)).toEqual(captions);
 
@@ -598,7 +601,10 @@ test("shows the same Post and the same order in the list, grid, calendar, and de
   expect(await captionsInReadingOrder(calendarDay, captions)).toEqual(captions);
   await closePostDetails(page);
 
-  await page.getByRole("button", { name: /^list$/i }).click();
+  await page
+    .getByRole("group", { name: "Post view", exact: true })
+    .getByRole("button", { name: /^table$/i })
+    .click();
   await expect(page.getByText(captions[0]!, { exact: true })).toBeVisible();
   expect(await captionsInReadingOrder(page, captions)).toEqual(captions);
 

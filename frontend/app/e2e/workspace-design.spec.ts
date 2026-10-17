@@ -12,7 +12,10 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1440, height: 1000 });
   const workspace = await openIsolatedOwnerWorkspace(page);
-  await page.getByRole("button", { name: "Create post", exact: true }).click();
+  await page
+    .locator("main header")
+    .getByRole("button", { name: "Create post", exact: true })
+    .click();
   await page
     .getByPlaceholder(/what do you want to publish/i)
     .fill("Studio update — ready for the next publishing window.");

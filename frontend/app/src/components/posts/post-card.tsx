@@ -19,7 +19,6 @@ export interface PostCardProps extends PostActionsProps {
   selected: boolean;
   selectionDisabled?: boolean;
   onToggleSelection: (postId: string) => void;
-  showPreview?: boolean;
 }
 
 /**
@@ -34,12 +33,11 @@ export function PostCard({
   selected,
   selectionDisabled,
   onToggleSelection,
-  showPreview = false,
   ...actions
 }: PostCardProps) {
   const { t } = useI18n();
   const providers = resolveRowProviders(post);
-  const preview = showPreview ? resolveRowPreviewAttachment(post) : null;
+  const preview = resolveRowPreviewAttachment(post);
   const image = preview?.asset.thumbnail_url ?? preview?.asset.download_url;
   const attachments = post.post?.attachments.length ?? 0;
   return (
@@ -63,21 +61,19 @@ export function PostCard({
       >
         {resolveRowCaption(post) || t("Untitled post")}
       </Button>
-      {showPreview && (
-        <div className="relative flex h-35 items-center justify-center overflow-hidden rounded-chip bg-inset">
-          {image ? (
-            <>
-              <img src={image} alt="" className="size-full object-cover" />
-              {preview?.asset.asset_type === "video" && (
-                <Play className="absolute size-5.5 text-ink-inverse" />
-              )}
-            </>
-          ) : (
-            <FileText className="size-6 text-ink-3" />
-          )}
-        </div>
-      )}
-      {showPreview && <StatusBadge status={normalizePostStatus(post)} compact />}
+      <div className="relative flex h-35 items-center justify-center overflow-hidden rounded-chip bg-inset">
+        {image ? (
+          <>
+            <img src={image} alt="" className="size-full object-cover" />
+            {preview?.asset.asset_type === "video" && (
+              <Play className="absolute size-5.5 text-ink-inverse" />
+            )}
+          </>
+        ) : (
+          <FileText className="size-6 text-ink-3" />
+        )}
+      </div>
+      <StatusBadge status={normalizePostStatus(post)} compact />
       <div className="flex min-h-4.5 flex-wrap items-center gap-2 text-(length:--font-size-micro) text-ink-3">
         <span className="shrink-0 font-mono">{postId.slice(0, 8)}</span>
         <span className="flex items-center gap-1">

@@ -92,13 +92,13 @@ async function getSession(): Promise<AuthSessionResult | null> {
 
 /**
  * Authenticates a user using email and password via Better Auth.
- * Issues `POST /api/auth/sign-in/email`, which establishes the internal
- * `/api/auth` session through the HttpOnly cookie on success. The JWT plugin
- * emits `set-auth-jwt` only on get-session, so the bearer credential is
- * minted by the auth provider's `getSession` call after sign-in navigation.
+ * Issues `POST /api/auth/sign-in/email`, which either establishes the internal
+ * HttpOnly session or returns a pending second-factor challenge. A successful
+ * factor verification completes that session. The auth provider obtains the
+ * application bearer credential from `getSession` after authentication.
  *
  * @param credentials User email and password.
- * @returns The authenticated session and user details.
+ * @returns The authenticated user/token result or a second-factor challenge.
  * @throws {Error} When authentication fails or credentials are invalid.
  */
 async function signInEmail(credentials: SignInCredentials): Promise<AuthTokenResult> {
@@ -120,15 +120,14 @@ async function signInEmail(credentials: SignInCredentials): Promise<AuthTokenRes
 }
 
 /**
- * Registers a new creator account using name, email, and password via Better Auth.
- * Issues `POST /api/auth/sign-up/email`, which creates the user and
- * establishes the internal `/api/auth` session through the HttpOnly cookie
- * on success. The JWT plugin emits `set-auth-jwt` only on get-session, so
- * the bearer credential is minted by the auth provider's `getSession` call
- * after sign-up navigation.
+ * Creates the installation owner using the private bootstrap secret.
+ * The API rejects registration after an owner exists. Deployed signup returns
+ * a null token until email verification; only local/test policy can establish
+ * an immediate session. The auth provider obtains the bearer from get-session,
+ * never from this response.
  *
- * @param credentials New user registration details.
- * @returns The created user and initial session details.
+ * @param credentials Owner details and API-only setup secret.
+ * @returns The created user with a nullable initial token.
  * @throws {Error} When registration fails or inputs are rejected.
  */
 async function signUpEmail({ setupSecret, ...credentials }: SignUpCredentials): Promise<AuthTokenResult> {

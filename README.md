@@ -26,7 +26,7 @@ make dev
 
 Development stays on loopback by default. Set `MELTIPLY_DEV_TUNNEL=1 make dev` only when OAuth or webhook callbacks need a public URL. Tunnel settings and an explicit network-host override are documented in [`.env.example`](.env.example).
 
-Seeded local accounts: `alpha@meltiply.local` (populated workspace) and `beta@meltiply.local` (near-empty workspace); both use `MeltiplyLocal1!`. These credentials are for local development only.
+The single local login is `alpha@meltiply.local` / `MeltiplyLocal1!` (populated workspace). `beta@meltiply.local` remains a database-only isolation fixture and cannot sign in. These credentials are for local development only. Production installations create their own owner through the protected first-run setup described in [self-hosting](docs/self-hosting.md#authentication-and-owner-recovery).
 
 ## Deployment targets
 

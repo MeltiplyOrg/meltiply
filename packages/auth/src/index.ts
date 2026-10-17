@@ -107,12 +107,12 @@ export function bearerToken(authorization: string | undefined): string | undefin
 
 /**
  * Validates and extracts tenant identity claims from a verified Better Auth JWT payload.
- * The JWT plugin mints a minimized payload (`sub`, `email`, optional `name`); this
- * parser enforces that contract so a structurally valid but identity-less token
- * can never reach actor resolution.
+ * The plugin mints `sub`, `email`, `sid`, and optional `name`. This parser
+ * validates identity and extracts the session ID; protected API authorization
+ * separately requires that ID to reference a live owner session.
  *
  * @param payload - Decoded JWT payload from a signature/issuer/audience-verified token.
- * @returns Validated JwtIdentity with lowercase email and optional display name.
+ * @returns Validated JwtIdentity with lowercase email and optional display name/session ID.
  * @throws {TypeError} When subject or email is missing or empty.
  */
 export function jwtClaims(payload: JWTPayload): JwtIdentity {

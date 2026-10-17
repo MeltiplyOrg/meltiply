@@ -44,10 +44,11 @@ deployment secrets are supplied. Do not execute contributor code through
 `pull_request_target` or persistent self-hosted runners.
 
 The [extended workflow](../.github/workflows/extended.yml) preserves manually
-selected `frontend-full`, `cloudflare-integration`, and `cloudflare-extended`
-lanes for real browser/Lighthouse journeys, live-local topology/load, and
-release/staging/IaC checks. These run on GitHub-hosted machines without deployment
-secrets; a passing automatic `ci-gate` does not imply the manual lanes ran.
+selected `frontend-full`, `cloudflare-integration`, `cloudflare-extended`, and
+`auth-acceptance` lanes for real browser/Lighthouse journeys, live-local
+topology/load, release/staging/IaC checks, and single-owner lifecycle acceptance.
+These run on GitHub-hosted machines without deployment secrets; a passing
+automatic `ci-gate` does not imply the manual lanes ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
 `frontend-full` provisions local signing/storage configuration before browser
@@ -55,6 +56,14 @@ journeys. User-facing journeys and screenshots use the production build; the
 DevBox motion scenarios use a separate loopback development server on the
 adjacent port. Production tests never enable DevBox controls. The topology lane
 owns a separate backend process for load checks after the smoke process exits.
+
+`auth-acceptance` generates contracts, checks changed React surfaces, exercises
+the real PostgreSQL authentication boundaries, and runs `cloudflare:check` before
+building the production self-hosted deployment. Chromium then exercises first-run
+owner creation, SMTP-captured verification/reset links, closed registration,
+password changes, and optional authenticator recovery. Artifacts contain only
+blank-form desktop/mobile/light/dark screenshots, not credentials or browser traces.
+These checks do not prove external inbox delivery or a managed Cloudflare rollout.
 
 ## Self-hosted release images
 

@@ -41,9 +41,10 @@ jobs:
         run: |
           bun run contract:generate
           bun run contract:readiness:generate
-          bunx --no-install vp fmt frontend/app packages/auth packages/contracts workers/api scripts/selfhost .github/workflows/extended.yml .github/workflows/selfhost-ci.yml
+          bunx --no-install vp fmt frontend/app packages/auth packages/contracts workers/api scripts/selfhost .github/workflows/extended.yml .github/workflows/selfhost-ci.yml README.md docs/self-hosting.md docs/frontend-capabilities.md docs/public-ci.md infra/cloudflare/README.md frontend/public/content/docs/getting-started.mdx frontend/public/src/pages/index.astro
           mkdir -p artifacts/auth-prepared
           git diff --name-only -z --diff-filter=ACM HEAD | tar --null -T - -czf artifacts/auth-prepared/prepared.tar.gz
+          bun run docs:links
       - name: Check changed React surfaces
         if: inputs.lane == 'auth-acceptance'
         run: npx --yes react-doctor@latest --verbose --scope changed

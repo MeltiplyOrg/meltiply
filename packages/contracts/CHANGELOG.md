@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add `GET /api/auth/setup-status` and require `X-Setup-Secret` for initial
+  `POST /api/auth/sign-up/email`. Registration closes after the installation's
+  sole owner exists; document closed-registration and missing-configuration errors.
+- Add verification resend and authenticator enrollment, confirmation, backup-code
+  verification/replacement, and disabling contracts. Sign-in can return a pending
+  factor challenge instead of an authenticated token; deployed signup can return
+  a null token until email verification. Align factor responses with Better Auth.
+- Bind application bearer JWTs to live owner sessions. Revoked, expired, and
+  superseded sessions no longer authorize protected application operations.
+
 - Remove `/billing/webhook`, `/billing/plan`, `/billing/usage`,
   `/billing/checkout-sessions`, and `/billing/portal-sessions`, plus their
   payment requests, responses, status, and paid-plan schemas. Remove `plan`

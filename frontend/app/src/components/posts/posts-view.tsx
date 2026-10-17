@@ -783,6 +783,14 @@ export function PostsView({
     setCalendarMonth(new Date());
   }, []);
 
+  /** Moves the query anchor by local calendar weeks, including DST and month boundaries. */
+  const handleWeekNavigate = useCallback((offset: number) => {
+    setCalendarMonth(
+      (previous) =>
+        new Date(previous.getFullYear(), previous.getMonth(), previous.getDate() + offset * 7),
+    );
+  }, []);
+
   const processedPosts = useMemo(() => {
     return filterAndSortPosts(posts, {
       statusFilter,
@@ -824,19 +832,19 @@ export function PostsView({
     setSelectedCalendarDate(null);
   }, []);
 
-  /**
-   * Opens a fresh composition seeded with a clicked calendar date slot.
-   * Increments the composer session key to ensure clean initial composer state.
-   */
-  const handleScheduleNewFromCalendar = useCallback(() => {
-    if (selectedCalendarDate) {
-      setSchedulingDate(selectedCalendarDate);
-    }
+  /** Opens a fresh composition seeded with a calendar slot and discards the prior editor session. */
+  const handleScheduleCalendarDate = useCallback((date: Date) => {
+    setSchedulingDate(date);
     setSelectedCalendarDate(null);
     setEditingPostId(undefined);
-    setComposerKey((k) => k + 1);
+    setComposerKey((key) => key + 1);
     setViewMode("composer");
-  }, [selectedCalendarDate]);
+  }, []);
+
+  /** Uses the same calendar composer entrypoint from the selectable day-detail list. */
+  const handleScheduleNewFromCalendar = useCallback(() => {
+    if (selectedCalendarDate) handleScheduleCalendarDate(selectedCalendarDate);
+  }, [selectedCalendarDate, handleScheduleCalendarDate]);
 
   /** Opens the right-side post detail dialog for a Post row/card click. */
   const handleViewDetails = useCallback((postId: string) => {
@@ -848,10 +856,11 @@ export function PostsView({
     setDetailPostId(null);
   }, []);
 
+  /** Builds Monday-first 35/42-day month rows, including the reference's inset adjacent dates. */
   const calendarDays = useMemo(() => {
     const year = calendarMonth.getFullYear();
     const month = calendarMonth.getMonth();
-    const firstDayIndex = new Date(year, month, 1).getDay();
+    const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7;
     const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
     const totalDaysInPrevMonth = new Date(year, month, 0).getDate();
 
@@ -873,7 +882,7 @@ export function PostsView({
       });
     }
 
-    const remainingDays = (7 - (days.length % 7)) % 7;
+    const remainingDays = Math.max(35, Math.ceil(days.length / 7) * 7) - days.length;
     for (let i = 1; i <= remainingDays; i++) {
       days.push({
         date: new Date(year, month + 1, i),
@@ -918,6 +927,10 @@ export function PostsView({
         onNextMonth={handleNextMonth}
         onToday={handleToday}
         onCellClick={handleCalendarCellClick}
+        onWeekNavigate={handleWeekNavigate}
+        onScheduleDate={handleScheduleCalendarDate}
+        onViewDetails={handleViewDetails}
+        canSchedule={selectedBrandProfileId !== null}
         selectionActive={selectedIds.size > 0}
       />
     ) : viewMode === "grid" ? (

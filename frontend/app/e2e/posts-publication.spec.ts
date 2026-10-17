@@ -561,8 +561,8 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
  * have no calendar date and cannot prove this contract. The shared signup helper
  * creates a real scoped profile, and controlled channels publish through the
  * normal scheduling API rather than inserting calendar fixtures.
- * Calendar cells preview only two Posts; expanding the day exposes all three
- * for the same complete identity/order assertion used by Table and Grid.
+ * Calendar date controls expose the complete day's Posts for the same
+ * identity/order assertion used by Table and Grid.
  */
 test("shows the same Post and order in Table, Grid, Calendar, and Details", async ({
   page,
@@ -598,7 +598,11 @@ test("shows the same Post and order in Table, Grid, Calendar, and Details", asyn
   expect(await captionsInReadingOrder(page, captions)).toEqual(captions);
 
   await page.getByRole("button", { name: /^calendar$/i }).click();
-  await page.getByText("+1 more...", { exact: true }).click();
+  await page
+    .getByRole("group")
+    .filter({ has: page.getByText(captions[0]!, { exact: true }) })
+    .getByRole("button", { name: /^View posts on / })
+    .click();
   const calendarDay = page.getByRole("dialog");
   await expect(calendarDay).toBeVisible();
   expect(await captionsInReadingOrder(calendarDay, captions)).toEqual(captions);

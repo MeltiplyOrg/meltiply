@@ -215,6 +215,33 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       path: testInfo.outputPath(`posts-${view.toLowerCase()}-desktop.png`),
       fullPage: true,
     });
+    if (view === "Calendar") {
+      const calendar = page.getByRole("region", { name: "Publishing calendar", exact: true });
+      const period = calendar.getByRole("group", { name: "Calendar period", exact: true });
+      await period.getByRole("button", { name: "Week", exact: true }).click();
+      const currentWeek = await calendar.getByRole("heading").innerText();
+      await calendar.getByRole("button", { name: "Next week", exact: true }).click();
+      await expect(calendar.getByRole("heading")).not.toHaveText(currentWeek);
+      await calendar.getByRole("button", { name: "Previous week", exact: true }).click();
+      await expect(calendar.getByRole("heading")).toHaveText(currentWeek);
+      await page.screenshot({
+        path: testInfo.outputPath("posts-calendar-week-desktop.png"),
+        fullPage: true,
+      });
+      await period.getByRole("button", { name: "Month", exact: true }).click();
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const dateLabel = new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(tomorrow);
+      await calendar.getByRole("group", { name: dateLabel, exact: true }).hover();
+      await calendar
+        .getByRole("button", { name: `Schedule post on ${dateLabel}`, exact: true })
+        .click();
+      const pad = (value: number) => String(value).padStart(2, "0");
+      await expect(page.getByLabel("Schedule date and time", { exact: true })).toHaveValue(
+        `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T10:00`,
+      );
+      await page.getByRole("button", { name: /back to posts/i }).click();
+    }
   }
   await page.locator("aside").getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Dark", exact: true }).click();
@@ -230,6 +257,23 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const mobileMenu = page.getByRole("button", { name: "Open navigation menu", exact: true });
   await expect(mobileMenu).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("posts-dark-mobile.png"), fullPage: true });
+  await viewSelector.getByRole("button", { name: "Calendar", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "Publishing calendar", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("posts-calendar-mobile.png"), fullPage: true });
+  await page
+    .getByRole("group", { name: "Calendar period", exact: true })
+    .getByRole("button", { name: "Week", exact: true })
+    .click();
+  await page.screenshot({
+    path: testInfo.outputPath("posts-calendar-week-mobile.png"),
+    fullPage: true,
+  });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true);
+  await viewSelector.getByRole("button", { name: "Table", exact: true }).click();
   await mobileMenu.click();
   const mobileNavigation = page.getByRole("dialog", { name: "Workspace navigation", exact: true });
   await mobileNavigation.getByRole("button", { name: "Channels", exact: true }).click();

@@ -1140,7 +1140,11 @@ describe("Posts surfaces", () => {
     seedPublishedPost();
     renderPosts("calendar");
 
-    fireEvent.click(screen.getByText("Launch note"));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `View posts on ${new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(new Date())}`,
+      }),
+    );
 
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Launch note")).toBeVisible();

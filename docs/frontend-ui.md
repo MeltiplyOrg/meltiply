@@ -80,7 +80,11 @@ Posts supports exactly Table, Grid, and Calendar. The page toolbar owns view
 selection; Table is the default and adopts Gr8r Tasks' grouped spreadsheet
 density. Status/profile grouping preserves Post identity and sorted order;
 column visibility hides metadata only. Grid retains real attachments and
-Calendar retains scheduling. All three share real Post identity and actions.
+Calendar ports the reference's flat Month grid and Week columns: Today/date
+navigation, three-chip month previews, overflow/day lists, and explicit per-day
+scheduling. Chips open real Post inspection; plus controls seed the composer.
+No task-only events or drag-rescheduling are implied. All three views share
+real Post identity, filters, selection, and supported actions.
 
 Channels uses Gr8r Members' centered directory: underlined Accounts/Brand
 Profiles tabs, compact search and status segments, and an inset table with avatar,

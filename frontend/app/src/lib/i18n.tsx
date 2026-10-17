@@ -16,6 +16,13 @@ export type TranslationValues = Record<string, number | string>;
 const languageStorageKey = "meltiply.language";
 
 const spanishTranslations: Record<string, string> = {
+  "Calendar period": "Período del calendario",
+  "Previous week": "Semana anterior",
+  "Next week": "Semana siguiente",
+  "View posts on {date}": "Ver publicaciones del {date}",
+  "Schedule post on {date}": "Programar publicación para el {date}",
+  "+{count} more": "+{count} más",
+  "No posts": "Sin publicaciones",
   System: "Sistema",
   "Filter by": "Filtrar por",
   "No filters applied. Add a filter to narrow this collection.":

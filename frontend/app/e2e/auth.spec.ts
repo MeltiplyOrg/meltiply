@@ -1,14 +1,14 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { generatedCredentials, signIn, signUp } from "./workspace-session";
+import { ownerCredentials, signIn, openOwnerWorkspace } from "./workspace-session";
 
 test.use({ screenshot: "off", trace: "off" });
 test.setTimeout(90_000);
 
-test("signs up, signs out, and signs in through the Better Auth forms", async ({ page }) => {
-  const credentials = generatedCredentials();
+test("signs the owner out and back in through the Better Auth forms", async ({ page }) => {
+  const credentials = ownerCredentials();
 
-  await signUp(page, credentials);
+  await openOwnerWorkspace(page, credentials);
   await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
   await expect(page.getByRole("main")).toBeVisible();
 
@@ -99,7 +99,7 @@ async function expectInactiveChrome(control: Locator, mutedInk: string) {
  * contract is not confused with a legitimate hover fill after activation.
  */
 test("keeps inactive posts view modes muted in dark mode", async ({ page }) => {
-  await signUp(page, generatedCredentials());
+  await openOwnerWorkspace(page, ownerCredentials());
   await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
 

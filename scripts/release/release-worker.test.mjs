@@ -201,11 +201,13 @@ test("stdin secret bundles require exact worker-specific names without recording
     api: {
       ...common,
       BETTER_AUTH_SECRET: "better-auth-secret",
+      AUTH_SETUP_SECRET: "bootstrap-placeholder-not-a-real-secret",
     },
     automation: common,
   });
   const result = validateSecretBundle(source, spec, "api");
   assert.deepEqual(result.names, [
+    "AUTH_SETUP_SECRET",
     "BETTER_AUTH_SECRET",
     "R2_ACCESS_KEY_ID",
     "R2_SECRET_ACCESS_KEY",
@@ -354,6 +356,7 @@ test("Automation update uploads code, creates a stdin secret version, and activa
       api: {
         ...common,
         BETTER_AUTH_SECRET: "better-auth-secret",
+        AUTH_SETUP_SECRET: "bootstrap-placeholder-not-a-real-secret",
       },
       automation: common,
     }),

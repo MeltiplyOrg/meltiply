@@ -108,8 +108,20 @@ jobs:
         run: |
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification config --quiet
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification up -d --no-build --wait --wait-timeout 240
+      - uses: ./.github/actions/install-workspace
+      - name: Install Chromium for real owner journeys
+        working-directory: frontend/app
+        run: bun run --no-install playwright install --with-deps chromium
       - name: Exercise application, email, storage, jobs, workflows, and crash recovery
         run: node scripts/selfhost/smoke.mjs
+      - name: Preserve credential-free login screenshots
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: owner-login-${{ matrix.platform.arch }}
+          path: artifacts/selfhost/*.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Validate and exercise optional TLS ingress
         run: |
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile

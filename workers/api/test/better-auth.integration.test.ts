@@ -1,8 +1,12 @@
 import { createHmac } from "node:crypto";
 
-import { afterAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import { createHyperdrivePool } from "@meltiply/database";
+import { activeOwnerIdentity } from "../src/auth-policy";
+import { createJwtVerifier, jwtClaims } from "@meltiply/auth";
+import { createApiApp } from "../src/app";
 
-import { betterAuthFor } from "../src/better-auth";
+import { betterAuthFor, checkAuthRateLimit } from "../src/better-auth";
 import { systemPoolFor } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 
@@ -29,8 +33,46 @@ if (!connectionString) {
  * system-only), so `DB_SYSTEM` must reach the privileged local role rather
  * than the authenticated fixture URL.
  */
-const systemConnectionString =
+const baseSystemConnectionString =
   "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const isolatedDatabase = new URL(baseSystemConnectionString);
+isolatedDatabase.searchParams.set("options", "-c search_path=auth_lifecycle,public");
+const systemConnectionString = isolatedDatabase.href;
+const setupSecret = crypto.randomUUID() + crypto.randomUUID();
+const adminConnectionString =
+  process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL ??
+  "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable";
+const adminPool = createHyperdrivePool({ connectionString: adminConnectionString });
+
+// Exercise the actual migrated auth tables and indexes without taking ownership
+// of the shared RLS fixtures. No production or external database is accepted.
+beforeAll(async () => {
+  for (const connection of [systemConnectionString, adminConnectionString]) {
+    const url = new URL(connection);
+    if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply")
+      throw new Error("Auth tests require the isolated local database.");
+  }
+  await adminPool.query(`DROP SCHEMA IF EXISTS auth_lifecycle CASCADE`);
+  await adminPool.query(`CREATE SCHEMA auth_lifecycle AUTHORIZATION meltiply_system`);
+  for (const table of ["user", "session", "account", "verification", "jwks", "twoFactor"]) {
+    await adminPool.query(
+      `CREATE TABLE auth_lifecycle."${table}" (LIKE public."${table}" INCLUDING ALL)`,
+    );
+    await adminPool.query(`GRANT ALL ON auth_lifecycle."${table}" TO meltiply_system`);
+  }
+  await adminPool.query(`
+    CREATE TRIGGER revoke_password_sessions AFTER UPDATE OF password ON auth_lifecycle."account"
+      FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
+    CREATE TRIGGER revoke_account_sessions AFTER UPDATE OF "twoFactorEnabled", email, "emailVerified", "installationOwner" ON auth_lifecycle."user"
+      FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
+  `);
+});
+
+beforeEach(async () => {
+  await systemPoolFor(systemEnv()).query(
+    `TRUNCATE "user", "session", "account", "verification", "twoFactor"`,
+  );
+});
 
 /**
  * One fixture secret for every environment this suite builds. Better Auth
@@ -78,6 +120,7 @@ function localTestEnv(mail: RecordingMail) {
   return {
     ALLOWED_ORIGINS: "http://app.test",
     BETTER_AUTH_SECRET: authSecret,
+    AUTH_SETUP_SECRET: setupSecret,
     BETTER_AUTH_URL: "http://auth.test",
     DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
     ENVIRONMENT: "test",
@@ -96,6 +139,7 @@ function stagingEnv(mail: RecordingMail) {
   return {
     ALLOWED_ORIGINS: "http://app.test",
     BETTER_AUTH_SECRET: authSecret,
+    AUTH_SETUP_SECRET: setupSecret,
     BETTER_AUTH_URL: "http://auth.test",
     DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
     ENVIRONMENT: "staging",
@@ -132,7 +176,7 @@ function authPost(
   return auth.handler(
     new Request(`${baseURL}${path}`, {
       body: JSON.stringify(body),
-      headers: { "Content-Type": "application/json", ...headers },
+      headers: { "Content-Type": "application/json", "X-Setup-Secret": setupSecret, ...headers },
       method: "POST",
     }),
   );
@@ -182,7 +226,7 @@ function actionLink(message: EmailMessageBuilder): string {
   const match = message.text.match(/https?:\/\/\S+/);
   expect(match, "email text must carry the raw action URL").toBeTruthy();
   const link = match![0];
-  expect(message.html).toContain(`href="${link.replaceAll("&", "&amp;")}"`);
+  expect(message.html.includes(`href="${link.replaceAll("&", "&amp;")}"`)).toBe(true);
   return link;
 }
 
@@ -254,6 +298,8 @@ async function cleanupDatabase() {
 afterAll(async () => {
   await cleanupDatabase();
   await systemPoolFor(systemEnv()).end();
+  await adminPool.query(`DROP SCHEMA auth_lifecycle CASCADE`);
+  await adminPool.end();
 });
 
 describe("betterAuthFor local/test policy", () => {
@@ -395,7 +441,7 @@ describe("password recovery through the shared sender", () => {
     expect(callback.status).toBe(302);
     const callbackLocation = new URL(callback.headers.get("location")!);
     expect(callbackLocation.origin).toBe("http://app.test");
-    expect(callbackLocation.searchParams.get("token")).toBe(token);
+    expect(callbackLocation.searchParams.get("token") === token).toBe(true);
 
     const reset = await authPost(auth, "/api/auth/reset-password", {
       newPassword: "second password value",
@@ -503,7 +549,9 @@ describe("password recovery through the shared sender", () => {
     expect(resetSubmissions()).toHaveLength(beforeReset + 1);
     const recovery = resetSubmissions().at(-1)!;
     expect(recovery.to).toBe(emails.enumeration);
-    expect(actionLink(recovery)).toContain("/reset-password/");
+    expect(new URL(actionLink(recovery)).pathname.startsWith("/api/auth/reset-password/")).toBe(
+      true,
+    );
 
     const unknownSignIn = await authPost(auth, "/api/auth/sign-in/email", {
       email: unknown,
@@ -559,7 +607,7 @@ describe("session cookie, bearer JWT, and sign-out", () => {
       throw new Error("/api/auth/token must return a string token");
     }
     const jwt = tokenBody.token;
-    expect(jwt.split(".")).toHaveLength(3);
+    expect(jwt.split(".").length).toBe(3);
     const payload = recordOf(JSON.parse(Buffer.from(jwt.split(".")[1]!, "base64url").toString()));
     expect(payload.sub).toBe(sessionUserId);
     expect(payload.email).toBe(emails.session);
@@ -575,53 +623,317 @@ describe("session cookie, bearer JWT, and sign-out", () => {
     );
     expect(signOut.status).toBe(200);
 
-    // Sign-out deletes the durable session; the 5-minute JWT cookie cache stays
-    // valid by design, so revocation is proven against stored state.
+    // Revocation is observed on both cookie reads and the protected API's
+    // authoritative session lookup, including the already-minted bearer JWT.
     expect(await sessionRowsFor(sessionUserId)).toBe(0);
+    expect(
+      (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
+    ).toBe(true);
+    await expect(activeOwnerIdentity(stagingEnv(mail), jwtClaims(payload))).rejects.toMatchObject({
+      status: 401,
+    });
+    const published = recordOf(
+      await (await auth.handler(new Request(`${baseURL}/api/auth/jwks`))).json(),
+    );
+    if (!Array.isArray(published.keys)) throw new Error("Expected published verification keys");
+    const publicKey = recordOf(published.keys[0]);
+    if (publicKey.kty !== "OKP" || publicKey.crv !== "Ed25519" || typeof publicKey.x !== "string")
+      throw new Error("Unexpected auth signing algorithm");
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      { kty: publicKey.kty, crv: publicKey.crv, x: publicKey.x },
+      { name: "Ed25519" },
+      false,
+      ["verify"],
+    );
+    const verifier = createJwtVerifier({ audience: baseURL, issuer: baseURL }, async () => key);
+    expect(typeof (await verifier(jwt)).sessionId).toBe("string");
+    let relays = 0;
+    const app = createApiApp({
+      verifyJwtToken: async (env, token) => activeOwnerIdentity(env, await verifier(token)),
+      resolveActor: async () => {
+        throw new Error("Revoked authority reached actor resolution");
+      },
+    });
+    const denied = await app.request(
+      "/api/v1/posts",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
+        body: "{}",
+      },
+      {
+        ...stagingEnv(mail),
+        AUTOMATION: {
+          relayOutbox: async () => {
+            relays++;
+            return { claimed: 0, dead: 0, failed: 0, published: 0 };
+          },
+          requestCommentsSync: async () => 0,
+        },
+      },
+    );
+    expect(denied.status).toBe(401);
+    expect(relays).toBe(0);
   });
 });
 
-describe("auth instance cache identity", () => {
-  it("reuses the instance for an unchanged env and rebuilds when the MAIL binding identity changes", async () => {
-    const mailA = recordingMailBinding();
-    const mailB = recordingMailBinding();
-    const envA = localTestEnv(mailA);
-    const envB = { ...envA, MAIL: mailB.binding };
-
-    const first = await betterAuthFor(envA);
-    expect(await betterAuthFor(envA)).toBe(first);
-
-    const second = await betterAuthFor(envB);
-    expect(second).not.toBe(first);
-    // envB is now the cache entry; switching back must rebuild rather than
-    // leak binding B into env A requests.
-    const third = await betterAuthFor(envA);
-    expect(third).not.toBe(second);
-
-    await authPost(third, "/api/auth/sign-up/email", {
-      email: emails.cacheA,
-      name: "Cache A",
-      password: "correct horse battery staple",
+describe("single-owner bootstrap and security changes", () => {
+  it("requires the setup secret, rejects invalid profile data, and admits exactly one racing registration", async () => {
+    const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
+    const body = { email: emails.localUnverified, name: "Owner", password: crypto.randomUUID() };
+    const noSecret = await authPost(auth, "/api/auth/sign-up/email", body, {
+      "X-Setup-Secret": "",
     });
-    await authPost(second, "/api/auth/sign-up/email", {
-      email: emails.cacheB,
-      name: "Cache B",
-      password: "correct horse battery staple",
+    expect(noSecret.status).toBe(403);
+    const invalid = await authPost(auth, "/api/auth/sign-up/email", { ...body, name: "\u0000" });
+    expect(invalid.status).toBe(400);
+    const responses = await Promise.all([
+      authPost(auth, "/api/auth/sign-up/email", body),
+      authPost(auth, "/api/auth/sign-up/email", { ...body, email: emails.stagingVerified }),
+    ]);
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    const count = await systemPoolFor(systemEnv()).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "user" WHERE "installationOwner"`,
+    );
+    expect(count.rows[0]?.count).toBe("1");
+    expect(
+      (await authPost(auth, "/api/auth/sign-up/email", { ...body, email: emails.reset })).status,
+    ).toBe(403);
+    const status = await auth.handler(new Request(`${baseURL}/api/auth/setup-status`));
+    expect(await status.json()).toEqual({ initialized: true });
+    const stored = await systemPoolFor(systemEnv()).query<{ plaintext: boolean; stored: boolean }>(
+      `SELECT password = $1 AS plaintext, password IS NOT NULL AS stored FROM "account" WHERE "providerId" = 'credential'`,
+      [body.password],
+    );
+    expect(stored.rows).toEqual([{ plaintext: false, stored: true }]);
+  });
+
+  it("revokes old bearer and cookie authority on password change and password reset", async () => {
+    const mail = recordingMailBinding();
+    const env = localTestEnv(mail);
+    const auth = await betterAuthFor(env);
+    const password = crypto.randomUUID();
+    const registered = await authPost(auth, "/api/auth/sign-up/email", {
+      email: emails.reset,
+      name: "Owner",
+      password,
     });
-
-    expect(mailA.sent.some((m) => m.to === emails.cacheA)).toBe(true);
-    expect(mailA.sent.some((m) => m.to === emails.cacheB)).toBe(false);
-    expect(mailB.sent.some((m) => m.to === emails.cacheB)).toBe(true);
-    expect(mailB.sent.some((m) => m.to === emails.cacheA)).toBe(false);
-
-    // The normalized sender participates in the key: an untrimmed variant of
-    // the same address keeps the cached instance, a different sender rebuilds.
-    const envSameSender = {
-      ...envA,
-      MAIL_FROM_ADDRESS: "  no-reply@meltiply.test  ",
+    let cookie = sessionCookiePair(registered);
+    const mintIdentity = async () => {
+      const minted = recordOf(
+        await (await authGetWithCookie(auth, "/api/auth/token", cookie)).json(),
+      );
+      if (typeof minted.token !== "string") throw new Error("Expected access token");
+      return jwtClaims(
+        recordOf(JSON.parse(Buffer.from(minted.token.split(".")[1]!, "base64url").toString())),
+      );
     };
-    expect(await betterAuthFor(envSameSender)).toBe(third);
-    const envNewSender = { ...envA, MAIL_FROM_NAME: "Renamed Sender" };
-    expect(await betterAuthFor(envNewSender)).not.toBe(third);
+    const first = await mintIdentity();
+    await activeOwnerIdentity(env, first);
+    const nextPassword = crypto.randomUUID();
+    expect(
+      (
+        await authPost(
+          auth,
+          "/api/auth/change-password",
+          { currentPassword: password, newPassword: nextPassword, revokeOtherSessions: true },
+          { Cookie: cookie, Origin: "http://app.test" },
+        )
+      ).status,
+    ).toBe(200);
+    await expect(activeOwnerIdentity(env, first)).rejects.toMatchObject({ status: 401 });
+    expect(
+      (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
+    ).toBe(true);
+    cookie = sessionCookiePair(
+      await authPost(auth, "/api/auth/sign-in/email", {
+        email: emails.reset,
+        password: nextPassword,
+      }),
+    );
+    const second = await mintIdentity();
+    await authPost(auth, "/api/auth/request-password-reset", {
+      email: emails.reset,
+      redirectTo: "http://app.test/sign-in",
+    });
+    const message = mail.sent.find((entry) => entry.subject === "Reset your Meltiply password");
+    if (!message) throw new Error("Expected reset delivery");
+    const token = new URL(actionLink(message)).pathname.split("/").pop();
+    expect(
+      (
+        await authPost(auth, "/api/auth/reset-password", {
+          token,
+          newPassword: crypto.randomUUID(),
+        })
+      ).status,
+    ).toBe(200);
+    await expect(activeOwnerIdentity(env, second)).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+/** Computes the current six-digit TOTP from a real enrollment URI without logging its secret. */
+function enrollmentCode(uri: string): string {
+  const secret = new URL(uri).searchParams.get("secret");
+  if (!secret) throw new Error("Enrollment secret is missing");
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const character of secret.toUpperCase().replace(/=+$/, "")) {
+    bits += alphabet.indexOf(character).toString(2).padStart(5, "0");
+  }
+  const key = Buffer.from(bits.match(/.{8}/g)?.map((byte) => Number.parseInt(byte, 2)) ?? []);
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)));
+  const digest = createHmac("sha1", key).update(counter).digest();
+  const offset = digest[digest.length - 1]! & 15;
+  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+describe("optional authenticator lifecycle", () => {
+  it("confirms enrollment, challenges sign-in, consumes backup codes once, regenerates and disables with password reauthentication", async () => {
+    const mail = recordingMailBinding();
+    const env = localTestEnv(mail);
+    const auth = await betterAuthFor(env);
+    let password = crypto.randomUUID();
+    const email = emails.session;
+    const jar = new Map<string, string>();
+    const capture = (response: Response) => {
+      for (const entry of response.headers.getSetCookie()) {
+        const pair = entry.split(";")[0]!;
+        const index = pair.indexOf("=");
+        jar.set(pair.slice(0, index), pair.slice(index + 1));
+      }
+    };
+    const post = async (path: string, body: Record<string, unknown>) => {
+      const response = await authPost(auth, `/api/auth/${path}`, body, {
+        Cookie: [...jar].map(([key, value]) => `${key}=${value}`).join("; "),
+        Origin: "http://app.test",
+      });
+      capture(response);
+      return response;
+    };
+    const signedUp = await post("sign-up/email", { email, name: "Owner", password });
+    expect(signedUp.status).toBe(200);
+    const pending = recordOf(await (await post("two-factor/enable", { password })).json());
+    if (typeof pending.totpURI !== "string" || !Array.isArray(pending.backupCodes))
+      throw new Error("Expected real enrollment");
+    const backups = pending.backupCodes;
+    const before = await systemPoolFor(systemEnv()).query<{ enabled: boolean }>(
+      `SELECT "twoFactorEnabled" AS enabled FROM "user"`,
+    );
+    expect(before.rows[0]?.enabled).toBe(false);
+    const confirmed = await post("two-factor/verify-totp", {
+      code: enrollmentCode(pending.totpURI),
+      trustDevice: false,
+    });
+    expect(confirmed.status).toBe(200);
+    jar.clear();
+    const challenge = await post("sign-in/email", { email, password });
+    expect(recordOf(await challenge.json()).twoFactorRedirect).toBe(true);
+    const cookie = [...jar].map(([key, value]) => `${key}=${value}`).join("; ");
+    expect(
+      (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
+    ).toBe(true);
+    await post("request-password-reset", { email, redirectTo: "http://app.test/sign-in" });
+    const resetMail = mail.sent.find((entry) => entry.subject === "Reset your Meltiply password");
+    if (!resetMail) throw new Error("Expected reset delivery");
+    password = crypto.randomUUID();
+    const resetToken = new URL(actionLink(resetMail)).pathname.split("/").pop();
+    expect(
+      (await post("reset-password", { token: resetToken, newPassword: password })).status,
+    ).toBe(200);
+    // A challenge issued before recovery cannot be upgraded into a fresh session.
+    expect(
+      (await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false }))
+        .status,
+    ).toBe(401);
+    jar.clear();
+    expect(
+      recordOf(await (await post("sign-in/email", { email, password })).json()).twoFactorRedirect,
+    ).toBe(true);
+    const recovered = await post("two-factor/verify-backup-code", {
+      code: backups[0],
+      trustDevice: false,
+    });
+    expect(recovered.status).toBe(200);
+    jar.clear();
+    await post("sign-in/email", { email, password });
+    expect(
+      (
+        await post("two-factor/verify-totp", {
+          code: enrollmentCode(pending.totpURI),
+          trustDevice: false,
+        })
+      ).status,
+    ).toBe(200);
+    const invalidPassword = await post("two-factor/generate-backup-codes", {
+      password: crypto.randomUUID(),
+    });
+    expect(invalidPassword.status).toBeGreaterThanOrEqual(400);
+    jar.clear();
+    await post("sign-in/email", { email, password });
+    expect(
+      (await post("two-factor/verify-backup-code", { code: backups[0], trustDevice: false }))
+        .status,
+    ).toBeGreaterThanOrEqual(400);
+    expect(
+      (await post("two-factor/verify-backup-code", { code: backups[1], trustDevice: false }))
+        .status,
+    ).toBe(200);
+    const regenerated = await post("two-factor/generate-backup-codes", { password });
+    expect(regenerated.status).toBe(200);
+    const currentCookie = [...jar].map(([key, value]) => `${key}=${value}`).join("; ");
+    const currentSession = await (
+      await authGetWithCookie(auth, "/api/auth/get-session", currentCookie)
+    ).json();
+    expect(currentSession !== null).toBe(true);
+    jar.clear();
+    await post("sign-in/email", { email, password });
+    expect(
+      (await post("two-factor/verify-backup-code", { code: backups[2], trustDevice: false }))
+        .status,
+    ).toBeGreaterThanOrEqual(400);
+    const replacement = recordOf(await regenerated.json()).backupCodes;
+    if (!Array.isArray(replacement)) throw new Error("Expected replacement codes");
+    expect(
+      (await post("two-factor/verify-backup-code", { code: replacement[0], trustDevice: false }))
+        .status,
+    ).toBe(200);
+    expect((await post("two-factor/disable", { password })).status).toBe(200);
+    jar.clear();
+    const signedIn = await post("sign-in/email", { email, password });
+    expect(recordOf(await signedIn.json()).twoFactorRedirect).toBeUndefined();
+    expect(signedIn.status).toBe(200);
+  });
+});
+describe("shared credential and delivery budgets", () => {
+  it("shares normalized credential and delivery budgets across independent callers", async () => {
+    const env = localTestEnv(recordingMailBinding());
+    const email = `${crypto.randomUUID()}@example.test`;
+    const request = (index: number) =>
+      new Request(`${baseURL}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": `2001:db8:${email.slice(0, 4)}::${index}`,
+        },
+        body: JSON.stringify({
+          email: index % 2 ? email.toUpperCase() : email,
+          password: crypto.randomUUID(),
+        }),
+      });
+    const admitted = await Promise.all(
+      Array.from({ length: 10 }, (_, index) =>
+        checkAuthRateLimit({ ...env }, "sign-in", request(index)),
+      ),
+    );
+    expect(admitted.every((result) => result.status === "ok")).toBe(true);
+    const blocked = await checkAuthRateLimit({ ...env }, "sign-in", request(11));
+    expect(blocked.status).toBe("limited");
+    expect(blocked.retryAfterSeconds! > 0 && blocked.retryAfterSeconds! <= 600).toBe(true);
+    const sends = [];
+    for (let index = 20; index < 26; index++)
+      sends.push(await checkAuthRateLimit({ ...env }, "send-verification-email", request(index)));
+    expect(sends.map((result) => result.status)).toEqual(["ok", "ok", "ok", "ok", "ok", "limited"]);
   });
 });

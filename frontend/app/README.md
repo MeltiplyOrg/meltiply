@@ -44,8 +44,16 @@ For a built Worker preview, run `make frontend-build` followed by
 
 Better Auth keeps the HttpOnly session cookie on `/api/auth`. The app exchanges
 it for an in-memory bearer JWT used on `/api/v1`; the session cookie is not an
-API credential. The API resolves `x-workspace-id` through workspace membership,
-or selects the personal workspace when the header is absent.
+API credential. Each protected request also checks that the JWT's session is
+live and belongs to the installation owner. The API resolves `x-workspace-id`
+through workspace membership, or selects the personal workspace when absent.
+
+`/sign-in` owns first-run setup, owner sign-in, email verification recovery,
+password reset, and optional authenticator challenges. Setup requires the
+API-only `AUTH_SETUP_SECRET` and closes permanently when the single owner exists.
+There is no separate public registration route. Account security in desktop and
+mobile navigation provides password changes and complete authenticator enrollment,
+backup-code replacement, and disabling with password reauthentication.
 
 The [cookie policy](https://meltiply.com/docs/cookies) governs optional
 functional preferences and browser-local draft/upload recovery. Until functional
@@ -86,6 +94,14 @@ make frontend-test-e2e
 The default Playwright run uses a production frontend build with the real local
 API and PostgreSQL. Keep Playwright and its browser image/cache revisions aligned;
 reinstall the browser after upgrading Playwright.
+
+Local journeys sign in as the seeded owner rather than registering more users.
+The isolated-workspace helper resets that owner's domain fixtures only on the
+guarded loopback test database; never point it at shared or production data.
+Set `MELTIPLY_DATABASE_TEST_ADMIN_URL` explicitly to that disposable database's
+admin connection URL before running local journeys; there is no reset fallback.
+The [production-image owner journey](e2e/selfhost-auth-smoke.mjs) instead exercises
+an empty installation, real SMTP capture, verification, recovery, and 2FA.
 
 Publication and channel-scoped composer journeys require the controlled-Provider
 acceptance backend and are excluded from the default run:

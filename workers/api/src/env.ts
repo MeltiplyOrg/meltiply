@@ -27,6 +27,8 @@ export interface ApiWorkerEnv {
   ASSETS?: R2Bucket;
   AUTOMATION?: AutomationRelayStub;
   BETTER_AUTH_SECRET?: string;
+  /** Private deployment bootstrap secret, at least 32 random characters; required before first signup. */
+  AUTH_SETUP_SECRET?: string;
   BETTER_AUTH_URL?: string;
   /** Standalone workerd owns sockets per request; omitted keeps the environment's existing pool policy. */
   DATABASE_POOL_MODE?: "request";
@@ -109,7 +111,7 @@ const requiredBindings: (keyof ApiWorkerEnv)[] = [
 
 const stagingAutomationBindings: (keyof ApiWorkerEnv)[] = ["AUTOMATION"];
 
-const stagingAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET"];
+const stagingAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET", "AUTH_SETUP_SECRET"];
 
 // Check mail capability and normalized sender configuration, not mere presence.
 const stagingMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
@@ -149,7 +151,7 @@ function objectStorageStatuses(env: ApiWorkerEnv): BindingStatus[] {
  */
 export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
   const bindings =
-    env.ENVIRONMENT === "staging"
+    env.ENVIRONMENT === "staging" || env.ENVIRONMENT === "preview"
       ? [
           ...requiredBindings,
           ...stagingAuthBindings,
@@ -169,7 +171,9 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
           ? typeof env.MAIL?.send === "function"
           : name === "MAIL_FROM_ADDRESS"
             ? mailSenderConfiguration(env) !== undefined
-            : Boolean(env[name]);
+            : name === "AUTH_SETUP_SECRET"
+              ? typeof env[name] === "string" && env[name].length >= 32
+              : Boolean(env[name]);
       return { name, status: ready ? ("ready" as const) : ("unavailable" as const) };
     }),
     ...objectStorageStatuses(env),

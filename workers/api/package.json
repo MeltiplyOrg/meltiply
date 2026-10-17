@@ -21,7 +21,7 @@
     "@meltiply/providers": "workspace:*",
     "@meltiply/secrets": "workspace:*",
     "@meltiply/storage": "workspace:*",
-    "effect": "4.0.0-rc.115",
+    "effect": "4.0.5",
     "hono": "4.13.7"
   },
   "devDependencies": {

@@ -20,6 +20,7 @@ const config = z
     SELFHOST_DB_SYSTEM_PASSWORD: z.string().min(32),
     SELFHOST_DB_AUTHENTICATED_PASSWORD: z.string().min(32),
     BETTER_AUTH_SECRET: z.string().min(32),
+    AUTH_SETUP_SECRET: z.string().min(32),
     TOKEN_ENCRYPTION_KEY: z.string().min(32),
     SELFHOST_OPERATOR_SECRET: z.string().min(32),
     PROCESSOR_JOB_TOKEN: z.string().min(32),
@@ -111,6 +112,7 @@ const bindings = {
   ALLOWED_ORIGINS: new URL(config.SELFHOST_ORIGIN).origin,
   OPERATOR_HOSTNAME: new URL(config.SELFHOST_ORIGIN).hostname,
   BETTER_AUTH_SECRET: config.BETTER_AUTH_SECRET,
+  AUTH_SETUP_SECRET: config.AUTH_SETUP_SECRET,
   TOKEN_ENCRYPTION_KEY: config.TOKEN_ENCRYPTION_KEY,
   SELFHOST_OPERATOR_SECRET: config.SELFHOST_OPERATOR_SECRET,
   PROCESSOR_JOB_TOKEN: config.PROCESSOR_JOB_TOKEN,
@@ -403,7 +405,14 @@ function listener() {
       outgoing.on("close", () => {
         if (!outgoing.writableFinished) controller.abort();
       });
-      const init = { method: incoming.method, headers, signal: controller.signal };
+      // Preserve HTTP redirects for the browser, including recovery credentials
+      // in callback locations; internal fetch must not consume those redirects.
+      const init = {
+        method: incoming.method,
+        headers,
+        signal: controller.signal,
+        redirect: "manual",
+      };
       if (incoming.method !== "GET" && incoming.method !== "HEAD") {
         init.body = Readable.toWeb(incoming);
         init.duplex = "half";

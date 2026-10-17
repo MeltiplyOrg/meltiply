@@ -1,14 +1,15 @@
 ---
 name: code-review
-description: 'Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo''s documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to "review since X".'
+description: "Review a branch, PR, work-in-progress changes, or changes since a commit, tag, or merge-base. Run parallel Standards, Spec, and Simplification reviewers to check conventions, requirements, and opportunities to simplify or reuse existing code."
 ---
 
-Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
+Three-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 - **Standards**: does the code conform to this repo's documented coding standards?
 - **Spec**: does the code faithfully implement the originating issue / spec?
+- **Simplification**: can the change stay correct with less complexity, duplication, or reimplementation of existing code?
 
-Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
+Each axis runs as a **parallel sub-agent** so they don't pollute each other's context, then this skill aggregates their findings.
 
 Use the repository's configured Git remote to identify its issue tracker.
 
@@ -20,7 +21,7 @@ Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents.
+Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside parallel sub-agents.
 
 ### 2. Identify the spec source
 
@@ -55,7 +56,9 @@ Each smell reads _what it is_ → _how to fix_; match it against the diff:
 - **Middle Man**: a class or function that mostly just delegates onward. → cut it, call the real target direct.
 - **Refused Bequest**: a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-### 4. Spawn both sub-agents in parallel
+### 4. Spawn the sub-agents in parallel
+
+Dispatch Standards, Spec, and Simplification together in one batch; omit only Spec when no spec is available. All reviewers are read-only: inspect source and return findings without edits or build, lint, test, or formatter runs.
 
 **Standards sub-agent prompt** should include:
 
@@ -71,17 +74,27 @@ Each smell reads _what it is_ → _how to fix_; match it against the diff:
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report.
 
+**Simplification sub-agent prompt** should include:
+
+- The diff command and commit list, standards-source files, and spec path or contents when available.
+- The brief: "Review the changed code for concrete, behaviour-preserving simplification and refactoring opportunities. Apply KISS (simplest sufficient design), YAGNI (only current requirements), and DRY (one source of truth for shared logic). Inspect every changed implementation and search the codebase beyond the diff for existing helpers, components, services, types, and shared modules before recommending new code or an extraction. Read candidate implementations and representative callers to verify compatible semantics, errors, effects, and module boundaries.
+  - **Reuse first:** identify code that reimplements an existing capability; cite the existing symbol and path and explain how the changed code can use it.
+  - **De-duplicate:** identify repeated domain logic or parallel implementations; prefer an existing canonical owner, or justify shared code with concrete current callers and the repository's ownership rules.
+  - **Simplify:** identify unnecessary branches, indirection, wrappers, abstractions, configuration, and unused extension points; propose the smallest refactor or deletion that preserves required behaviour.
+    Report only actionable opportunities introduced or exposed by the diff, not unrelated repository-wide cleanup. Keep abstractions proportional to current needs: visual similarity alone does not justify sharing code with different semantics or coupling independent modules. For each finding, cite changed file/lines, supporting existing code/callers, the concrete replacement or refactor, and the benefit and compatibility risks. If no compatible reuse candidate exists, state the search scope for any proposed extraction. Treat opportunities as judgement calls unless backed by a documented rule; omit style-only preferences and tooling-enforced findings. Return findings under 400 words, or explicitly report none."
+
 ### 5. Aggregate
 
-Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings, because the two axes are deliberately separate (see _Why two axes_).
+Present the reports under `## Standards`, `## Spec`, and `## Simplification` headings, verbatim or lightly cleaned. Keep the axes separate: standards compliance, requirements coverage, and simplification are distinct judgements. When reviewers identify the same issue, keep its detail under the most relevant axis and cross-reference it from the other; count it once.
 
-End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
+End with a one-line summary: finding counts per axis, noting a skipped Spec review, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes.
 
-## Why two axes
+## Why three axes
 
-A change can pass one axis and fail the other:
+A change can pass one axis while raising findings on another:
 
 - Code that follows every standard but implements the wrong thing → **Standards pass, Spec fail.**
 - Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
+- Code that meets standards and requirements but duplicates an existing capability → **Standards and Spec pass, Simplification opportunity.**
 
 Reporting them separately stops one axis from masking the other.

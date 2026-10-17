@@ -902,7 +902,7 @@ export function validateDatabaseEnvironment(environment) {
 
 /**
  * Computes the remote secret names each Worker requires for a release: selected
- * object storage credentials, encryption keys, and the API Better Auth secret,
+ * object storage credentials, encryption keys, and the API session and first-owner bootstrap secrets,
  * provider-specific credentials enabled in provider acceptance. Mail delivery uses the native
  * send_email binding, so no delivery credential is required.
  *
@@ -915,7 +915,7 @@ function requiredRemoteSecrets(spec) {
       ? ["S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]
       : ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"];
   const common = [...storage, "TOKEN_ENCRYPTION_KEY"];
-  const api = [...common, "BETTER_AUTH_SECRET"];
+  const api = [...common, "AUTH_SETUP_SECRET", "BETTER_AUTH_SECRET"];
   const automation = [...common];
   for (const [provider, fields] of Object.entries(providerVariables)) {
     if (spec.provider_acceptance[provider]) {

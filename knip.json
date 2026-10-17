@@ -40,13 +40,10 @@
         "diagnostics.ts",
         "build.mjs",
         "notices.mjs",
-        "configure.mjs",
         "server.mjs",
         "s3-check.ts",
         "storage-pipeline-check.ts",
-        "smoke.mjs",
-        "admin.mjs",
-        "jobs.test.mjs"
+        "admin.mjs"
       ],
       "project": ["*.ts", "*.mjs"]
     }

@@ -11,9 +11,12 @@ description: "Author, create, or revise a pull request using Markdown and the na
 2. **Evidence:** follow [the completion gate](../../../AGENTS.md#completion-gate).
    Reuse passing checks for unchanged code. Record exact commands and observed
    results; report failures or unavailable checks as blockers, never as passes.
-3. **Diff summary:** run `git diff --shortstat <base>...HEAD` for the final pushed
-   commit. Populate the template's `diff` block with those file/addition/deletion
-   counts; GitHub highlights `+` additions green and `-` removals red.
+3. **Added / removed:** populate the template's `### Added / removed` section with
+   a fenced `diff` block describing the shipping change in plain language. Pair
+   each `-` line describing removed or previous behavior with a `+` line describing
+   its replacement. Use standalone `+` or `-` lines for genuinely one-sided changes;
+   do not invent prior behavior. Summarize behavior or capabilities, not file counts,
+   line counts, or raw code hunks. GitHub highlights additions green and removals red.
 4. **Body:** follow the [template](../../../.github/PULL_REQUEST_TEMPLATE.md).
    Explain the change, verification, and relevant risks/rollback. Add manual QA
    with expected outcomes only when useful. Record the actual agent tool and exact

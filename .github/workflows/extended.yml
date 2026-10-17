@@ -33,7 +33,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6.1.0
         with:
-          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
       - uses: actions/setup-go@v6
@@ -131,6 +130,8 @@ jobs:
       - name: Exercise real browser journeys
         if: inputs.lane == 'frontend-full'
         working-directory: frontend/app
+        env:
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
         run: bun run test:e2e --trace on
       - name: Check production performance without rebuilding
         if: inputs.lane == 'frontend-full'

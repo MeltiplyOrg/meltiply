@@ -77,28 +77,95 @@ const spanishTranslations: Record<string, string> = {
     "Nombra, describe y etiqueta con color el ámbito de propiedad de canales, recursos y publicaciones.",
   "Profile description": "Descripción del perfil",
   "No profile description": "Sin descripción del perfil",
-  "Already have an account?": "¿Ya tienes una cuenta?",
   "Authentication failed. Please try again.":
     "La autenticación falló. Por favor, inténtalo de nuevo.",
-  "Create Account": "Crear cuenta",
-  "Create your Meltiply account": "Crea tu cuenta de Meltiply",
-  "Creating account...": "Creando cuenta...",
-  "Don't have an account?": "¿No tienes una cuenta?",
   "Email address": "Correo electrónico",
   Password: "Contraseña",
-  "Password must be at least 8 characters long.": "La contraseña debe tener al menos 8 caracteres.",
-  "Please fill out all required fields.": "Por favor, completa todos los campos requeridos.",
-  "Please provide both email and password.": "Por favor, introduce el correo y la contraseña.",
-  "Registration failed. Please try again.": "El registro falló. Por favor, inténtalo de nuevo.",
-  "Sign In": "Iniciar sesión",
-  "Sign in to Meltiply": "Iniciar sesión en Meltiply",
-  "Sign up": "Registrarse",
-  "Signing in...": "Iniciando sesión...",
-  "Start scheduling and distributing your content across all platforms.":
-    "Empieza a programar y distribuir tu contenido en todas las plataformas.",
-  "Welcome back! Enter your details to access your workspace.":
-    "¡Bienvenido de nuevo! Introduce tus datos para acceder a tu espacio de trabajo.",
   "Your name": "Tu nombre",
+  "Make this workspace yours.": "Haz tuyo este espacio de trabajo.",
+  "Email verified. Sign in to continue.": "Correo verificado. Inicia sesión para continuar.",
+  "Welcome back.": "Te damos la bienvenida de nuevo.",
+  "Recover your access.": "Recupera tu acceso.",
+  "Choose a new password.": "Elige una contraseña nueva.",
+  "One more security check.": "Una comprobación de seguridad más.",
+  "Your private publishing workspace": "Tu espacio privado de publicación",
+  "One place to shape what’s next.": "Un lugar para crear lo que viene.",
+  "Compose your posts, connect your channels, and publish on your terms.":
+    "Crea tus publicaciones, conecta tus canales y publica a tu manera.",
+  "Self-hosted. Single owner. Your account is the only way into this installation.":
+    "Alojamiento propio. Un único propietario. Tu cuenta es la única forma de acceder a esta instalación.",
+  "INITIAL SETUP": "CONFIGURACIÓN INICIAL",
+  "OWNER ACCESS": "ACCESO DEL PROPIETARIO",
+  "Create the only account for this installation. You’ll need the setup secret from your deployment configuration.":
+    "Crea la única cuenta de esta instalación. Necesitarás el secreto de configuración de tu despliegue.",
+  "Enter a code from your authenticator, or use a saved backup code.":
+    "Introduce un código de tu autenticador o un código de recuperación guardado.",
+  "We’ll send a reset link to the owner’s email address.":
+    "Enviaremos un enlace de restablecimiento al correo del propietario.",
+  "Use a unique password or a long passphrase. All previous sessions will be signed out.":
+    "Usa una contraseña única o una frase larga. Se cerrarán todas las sesiones anteriores.",
+  "Sign in with the owner account to continue to your workspace.":
+    "Inicia sesión con la cuenta del propietario para acceder a tu espacio de trabajo.",
+  "Checking installation…": "Comprobando la instalación…",
+  "Could not check installation status.": "No se pudo comprobar el estado de la instalación.",
+  "This link is invalid or expired. Request a new verification or password reset link.":
+    "Este enlace no es válido o ha caducado. Solicita otro enlace de verificación o de restablecimiento.",
+  "Owner account created. Check your email to verify your address, then sign in.":
+    "Cuenta del propietario creada. Verifica tu dirección desde el correo recibido e inicia sesión.",
+  "This installation now has an owner. Sign in, or resend verification if this is your account.":
+    "Esta instalación ya tiene propietario. Inicia sesión o reenvía la verificación si es tu cuenta.",
+  "If this address belongs to the owner, a password reset link will arrive by email.":
+    "Si esta dirección pertenece al propietario, recibirá un enlace de restablecimiento por correo.",
+  "Password updated. Sign in again with your new password.":
+    "Contraseña actualizada. Inicia sesión con tu nueva contraseña.",
+  "Enter your email address first.": "Introduce primero tu dirección de correo.",
+  "If verification is needed, a new link will arrive by email.":
+    "Si se necesita verificación, recibirás un enlace nuevo por correo.",
+  "Could not send a verification link.": "No se pudo enviar el enlace de verificación.",
+  "8–128 characters. Passphrases and password managers welcome.":
+    "Entre 8 y 128 caracteres. Puedes usar frases de contraseña y gestores de contraseñas.",
+  "Setup secret": "Secreto de configuración",
+  "Use AUTH_SETUP_SECRET from your private deployment environment. It is not your account password.":
+    "Usa AUTH_SETUP_SECRET de tu entorno privado de despliegue. No es la contraseña de tu cuenta.",
+  "Backup code": "Código de recuperación",
+  "Authenticator code": "Código del autenticador",
+  "Please wait…": "Espera…",
+  "Create owner account": "Crear cuenta del propietario",
+  "Send reset link": "Enviar enlace de restablecimiento",
+  "Update password": "Actualizar contraseña",
+  "Verify and sign in": "Verificar e iniciar sesión",
+  "Forgot password?": "¿Olvidaste tu contraseña?",
+  "Resend verification": "Reenviar verificación",
+  "Use authenticator instead": "Usar el autenticador",
+  "Use a backup code": "Usar un código de recuperación",
+  "Back to sign in": "Volver al inicio de sesión",
+  "Account security": "Seguridad de la cuenta",
+  "Protect the only account for this installation. Changes to your password or authenticator sign out previous sessions.":
+    "Protege la única cuenta de esta instalación. Los cambios de contraseña o autenticador cierran las sesiones anteriores.",
+  "Current password": "Contraseña actual",
+  "New password": "Contraseña nueva",
+  "Enter your current password to continue.": "Introduce tu contraseña actual para continuar.",
+  "Could not update account security.": "No se pudo actualizar la seguridad de la cuenta.",
+  "Authenticator setup key": "Clave de configuración del autenticador",
+  "Add a time-based account named Meltiply in your authenticator using this key. Keep it secret.":
+    "Añade una cuenta basada en tiempo llamada Meltiply en tu autenticador con esta clave. Mantenla en secreto.",
+  "Save your backup codes": "Guarda tus códigos de recuperación",
+  "Store these somewhere safe before continuing. Each code works once. New codes invalidate the previous set.":
+    "Guárdalos en un lugar seguro antes de continuar. Cada código funciona una vez. Los nuevos códigos invalidan los anteriores.",
+  "I saved my codes — verify": "He guardado mis códigos: verificar",
+  "Cancel enrollment": "Cancelar configuración",
+  "I saved my codes": "He guardado mis códigos",
+  "Could not confirm server sign-out. Sign in again to check your sessions.":
+    "No se pudo confirmar el cierre de sesión en el servidor. Inicia sesión para comprobar tus sesiones.",
+  "Two-factor authentication": "Autenticación en dos pasos",
+  "An authenticator code is required at sign-in. Use a backup code if you lose your authenticator.":
+    "Se requiere un código al iniciar sesión. Usa un código de recuperación si pierdes tu autenticador.",
+  "Add an authenticator app and save recovery codes before enabling this extra sign-in check.":
+    "Añade una aplicación de autenticación y guarda los códigos de recuperación antes de activar esta comprobación.",
+  "Replace backup codes": "Reemplazar códigos de recuperación",
+  "Disable two-factor": "Desactivar autenticación en dos pasos",
+  "Set up authenticator": "Configurar autenticador",
+  "Change password and sign out": "Cambiar contraseña y cerrar sesión",
   Access: "Acceso",
   "Account access": "Acceso a la cuenta",
   "Account menu": "Menú de cuenta",

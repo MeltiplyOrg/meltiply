@@ -64,6 +64,15 @@ planning/apply, Worker deployment, and protected secret injection. Grant only
 the required resource permissions; keep the secret-writing capability confined
 to the injection step.
 
+The API secret bundle requires `AUTH_SETUP_SECRET` (random, at least 32 characters)
+alongside `BETTER_AUTH_SECRET`, encryption keys, and the existing mail configuration.
+First-run owner setup at `/sign-in` requires that secret; registration closes
+once the sole owner exists. Deployed email verification is not optional.
+See [authentication and owner recovery](../../docs/self-hosting.md#authentication-and-owner-recovery)
+for migration, password, and authenticator policies. Managed Workers trust
+Cloudflare's `CF-Connecting-IP` for shared rate limits, not caller-supplied
+`X-Forwarded-For`; the self-hosted ingress instead uses its socket peer.
+
 ## Object storage selection
 
 Releases default to the IaC-managed R2 bucket. To select an S3-compatible service,

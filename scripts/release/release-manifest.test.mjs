@@ -309,6 +309,7 @@ function updateEvidenceSet(spec) {
       ...baseWith(digests.initial, foundation),
       based_on_version_id: candidateVersionId,
       secret_names: [
+        "AUTH_SETUP_SECRET",
         "BETTER_AUTH_SECRET",
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",
@@ -756,6 +757,7 @@ function bootstrapEvidenceSet(spec) {
       ...baseWith(digests.initial, foundation),
       based_on_version_id: candidateVersionId,
       secret_names: [
+        "AUTH_SETUP_SECRET",
         "BETTER_AUTH_SECRET",
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",

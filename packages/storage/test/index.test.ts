@@ -494,38 +494,47 @@ describe("R2SigV4Signer", () => {
     ).toThrow("must not include");
   });
 
-  it("signs a path-prefixed S3 origin and binds required write headers", async () => {
-    // A local runtime serves the same bucket at `/cdn-cgi/local/r2/s3/<bucket>`.
-    // The prefix is part of the canonical URI (otherwise the signature could not
-    // be verified), while `host` stays the configured origin so the browser and
-    // a processor container receive byte-identical signed URLs.
-    const localSigner = new R2SigV4Signer({
-      accessKeyId: "local-r2-access-key",
-      accountId: "local",
-      allowInsecureEndpoint: true,
-      bucket: "meltiply-assets-local",
-      endpoint: "http://172.18.0.1:8787",
-      endpointPathPrefix: "/cdn-cgi/local/r2/s3/",
-      now: () => new Date("2026-07-18T12:34:56Z"),
-      secretAccessKey: "local-r2-secret-key",
-    });
+  it.each([
+    { boundary: "single", prefix: "/cdn-cgi/local/r2/s3/" },
+    {
+      boundary: "large",
+      prefix: `${"/".repeat(100_000)}cdn-cgi/local/r2/s3${"/".repeat(100_000)}`,
+    },
+  ])(
+    "signs a path-prefixed S3 origin with $boundary boundary slashes and binds required write headers",
+    async ({ prefix }) => {
+      // A local runtime serves the same bucket at `/cdn-cgi/local/r2/s3/<bucket>`.
+      // The prefix is part of the canonical URI (otherwise the signature could not
+      // be verified), while `host` stays the configured origin so the browser and
+      // a processor container receive byte-identical signed URLs.
+      const localSigner = new R2SigV4Signer({
+        accessKeyId: "local-r2-access-key",
+        accountId: "local",
+        allowInsecureEndpoint: true,
+        bucket: "meltiply-assets-local",
+        endpoint: "http://172.18.0.1:8787",
+        endpointPathPrefix: prefix,
+        now: () => new Date("2026-07-18T12:34:56Z"),
+        secretAccessKey: "local-r2-secret-key",
+      });
 
-    const signed = new URL(
-      await localSigner.signObjectWrite({
-        expiresInSeconds: 900,
-        key: "staging/org/asset/processing-image_jpeg_webp_4096_long_edge",
-        requiredHeaders: { "If-None-Match": "*" },
-      }),
-    );
+      const signed = new URL(
+        await localSigner.signObjectWrite({
+          expiresInSeconds: 900,
+          key: "staging/org/asset/processing-image_jpeg_webp_4096_long_edge",
+          requiredHeaders: { "If-None-Match": "*" },
+        }),
+      );
 
-    expect(signed.origin).toBe("http://172.18.0.1:8787");
-    expect(signed.pathname).toBe(
-      "/cdn-cgi/local/r2/s3/meltiply-assets-local/staging/org/asset/processing-image_jpeg_webp_4096_long_edge",
-    );
-    // The header is inside the signature, so an engine that omits it is rejected
-    // by the origin instead of overwriting an earlier attempt's output.
-    expect(signed.searchParams.get("X-Amz-SignedHeaders")).toBe("host;if-none-match");
-  });
+      expect(signed.origin).toBe("http://172.18.0.1:8787");
+      expect(signed.pathname).toBe(
+        "/cdn-cgi/local/r2/s3/meltiply-assets-local/staging/org/asset/processing-image_jpeg_webp_4096_long_edge",
+      );
+      // The header is inside the signature, so an engine that omits it is rejected
+      // by the origin instead of overwriting an earlier attempt's output.
+      expect(signed.searchParams.get("X-Amz-SignedHeaders")).toBe("host;if-none-match");
+    },
+  );
 
   it("rejects an insecure origin unless it is explicitly allowed", () => {
     const insecure = {

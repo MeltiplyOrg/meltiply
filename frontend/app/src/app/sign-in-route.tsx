@@ -11,7 +11,7 @@ import { SignInForm } from "@/components/auth/sign-in-form";
 export default function SignInRoute(): React.ReactElement {
   return (
     <AuthBoundary>
-      <main className="flex min-h-screen items-center justify-center bg-page px-6 py-12">
+      <main className="flex min-h-screen items-center justify-center bg-canvas px-4 py-8 sm:px-8 sm:py-12">
         <SignInForm />
       </main>
     </AuthBoundary>

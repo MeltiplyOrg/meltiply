@@ -28,10 +28,11 @@ Keep strict types, zero-warning lint, and dead-code checks. Fix introduced findi
 directly rather than weakening rules or baselines. Report exact commands and
 outcomes; failures, timeouts, and environment errors mean verification is blocked.
 
-Run one resource-intensive check at a time. Use GitHub-hosted runners for builds,
-tests, container smoke runs, and required verification unless local execution is
-explicitly requested.
-Stop heavy operations on OOM, timeout, or system slowdown. Work inline; delegate
+Serialize only resource-intensive checks you start manually; leave automatic CI
+scheduling unchanged. Cancel, rerun, or alter CI runs only when the user explicitly
+requests it. Use GitHub-hosted runners for builds, tests, container smoke runs, and
+required verification unless local execution is explicitly requested.
+Stop manually started heavy operations on OOM, timeout, or system slowdown. Work inline; delegate
 only when the user requests it or an applicable skill explicitly requires it.
 
 ## Implementation invariants

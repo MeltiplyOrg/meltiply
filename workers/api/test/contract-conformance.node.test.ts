@@ -74,6 +74,21 @@ const parityManifest = JSON.parse(
 const cases: ConformanceCase[] = [
   { method: "GET", operationId: "getHealth", path: "/api/v1/health" },
   { method: "GET", operationId: "getReadiness", path: "/api/v1/ready" },
+  { method: "GET", operationId: "getSetupStatus", path: "/api/auth/setup-status" },
+  { method: "POST", operationId: "resendVerification", path: "/api/auth/send-verification-email" },
+  { method: "POST", operationId: "enableTwoFactor", path: "/api/auth/two-factor/enable" },
+  { method: "POST", operationId: "disableTwoFactor", path: "/api/auth/two-factor/disable" },
+  {
+    method: "POST",
+    operationId: "generateBackupCodes",
+    path: "/api/auth/two-factor/generate-backup-codes",
+  },
+  { method: "POST", operationId: "verifyTotp", path: "/api/auth/two-factor/verify-totp" },
+  {
+    method: "POST",
+    operationId: "verifyBackupCode",
+    path: "/api/auth/two-factor/verify-backup-code",
+  },
   {
     method: "POST",
     operationId: "signInWithEmail",
@@ -593,6 +608,13 @@ let contractFailureStatus: number | undefined;
  */
 function authOperationId(request: Request): string {
   const operationByPath: Record<string, string> = {
+    "/api/auth/setup-status": "getSetupStatus",
+    "/api/auth/send-verification-email": "resendVerification",
+    "/api/auth/two-factor/enable": "enableTwoFactor",
+    "/api/auth/two-factor/disable": "disableTwoFactor",
+    "/api/auth/two-factor/generate-backup-codes": "generateBackupCodes",
+    "/api/auth/two-factor/verify-totp": "verifyTotp",
+    "/api/auth/two-factor/verify-backup-code": "verifyBackupCode",
     "/api/auth/change-password": "changePassword",
     "/api/auth/get-session": "getAuthSession",
     "/api/auth/request-password-reset": "requestPasswordReset",

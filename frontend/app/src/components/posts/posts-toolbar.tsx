@@ -27,7 +27,7 @@ import {
   PlatformFilterSelect,
   platformFilterLabel,
 } from "@/components/workspace/platform-filter-select";
-import { playEffect } from "@meltiply/ui/effects";
+import { effectMoveEasing, playEffect } from "@meltiply/ui/effects";
 import { useI18n } from "@/lib/i18n";
 import type { PostGroupBy } from "./post-groups";
 import type { PostViewMode, PostStatusFilter, PostSortKey, BrandProfile } from "./types";
@@ -384,14 +384,21 @@ function MorphingControl({ open, children }: { open: boolean; children: React.Re
     let inner = 0;
     const outer = requestAnimationFrame(() => {
       inner = requestAnimationFrame(() => {
+        // Hiding the box also drops the row gap before it, so the travel has to give
+        // that width back: the closing animation ends exactly where the row sits with
+        // no box at all, and the opening one starts there.
+        const gap = Number.parseFloat(getComputedStyle(box.parentElement ?? box).columnGap) || 0;
+        const closedEdge = { width: "0px", marginLeft: `-${gap}px` };
+
         if (open) {
           // The box is rendered before it is measured — hidden content has no width —
-          // and the effect starts from nothing in that same frame.
+          // and the effect starts from the row's closed edge in that same frame.
           box.dataset.morph = "open";
           const width = content.getBoundingClientRect().width;
           if (width > 0) {
-            playEffect(box, [{ width: "0px" }, { width: `${width}px` }], 0, {
+            playEffect(box, [closedEdge, { width: `${width}px`, marginLeft: "0px" }], 0, {
               duration: VIEW_CONTROL_MORPH_MS,
+              easing: effectMoveEasing,
             });
           }
           return;
@@ -402,8 +409,9 @@ function MorphingControl({ open, children }: { open: boolean; children: React.Re
         const width = content.getBoundingClientRect().width;
         const effect =
           width > 0
-            ? playEffect(box, [{ width: `${width}px` }, { width: "0px" }], 0, {
+            ? playEffect(box, [{ width: `${width}px`, marginLeft: "0px" }, closedEdge], 0, {
                 duration: VIEW_CONTROL_MORPH_MS,
+                easing: effectMoveEasing,
                 fill: "forwards",
               })
             : null;

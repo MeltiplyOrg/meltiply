@@ -10,6 +10,15 @@
 /** Emphatic entrance settle; mirrors `--ease-enter` in `motion.css`. */
 export const effectEasing = "cubic-bezier(0.16, 1, 0.3, 1)";
 
+/**
+ * The reference drawer curve (`--ease-drawer` in `motion.css`), mirrored for the
+ * same reason as `effectEasing`: a soft pull that settles decisively, for an
+ * effect that moves or resizes something the user is already watching. The
+ * entrance curve above spends most of its travel in its first frames, which reads
+ * as a jump on a move.
+ */
+export const effectMoveEasing = "cubic-bezier(0.32, 0.72, 0, 1)";
+
 /** Default bounded duration for one shared effect, in milliseconds. */
 export const effectDurationMs = 240;
 

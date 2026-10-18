@@ -229,16 +229,6 @@ async function reloadWithScopedProfile(page: Page): Promise<string> {
   return activeBrandProfileName(page);
 }
 
-/**
- * Switches the composer back to its shared tab. Only the active tab panel is
- * mounted, so the attachment strips are only reachable from here.
- *
- * @param page - Playwright page bound to the app under test.
- */
-async function openSharedTab(page: Page): Promise<void> {
-  await page.getByRole("tab", { name: /shared content/i }).click();
-}
-
 /** The saved-target fields these acceptance runs read off a recorded mutation. */
 interface SavedTargetFields {
   attachment_ids?: string[] | null;
@@ -657,19 +647,17 @@ test("replaces one attachment without changing the count, order, or channel sele
 
   // The first Channel publishes the middle attachment and nothing else: text
   // only, then that one row, so its saved target names a single Asset.
-  const textOnly = page.getByRole("tabpanel").getByRole("button", { name: /text only/i });
-  await page.getByRole("tab", { name: narrow }).click();
-  await textOnly.click();
-  const narrowRow = page.getByRole("tabpanel").getByRole("button", {
+  const narrowPanel = page.getByRole("region", { name: narrow, exact: true });
+  const silentPanel = page.getByRole("region", { name: silent, exact: true });
+  await narrowPanel.getByRole("button", { name: /text only/i }).click();
+  const narrowRow = narrowPanel.getByRole("button", {
     name: attachmentControlName("2. ", gif.name),
   });
   await expect(narrowRow).toBeVisible({ timeout: 60_000 });
   await narrowRow.click();
   await expect(narrowRow).toHaveAttribute("aria-pressed", "true");
   // The second Channel publishes no media at all, and a swap must not disturb it.
-  await page.getByRole("tab", { name: silent }).click();
-  await textOnly.click();
-  await openSharedTab(page);
+  await silentPanel.getByRole("button", { name: /text only/i }).click();
 
   await page.getByRole("button", { name: "Replace attachment 2" }).click();
   await composerFileInput(page).setInputFiles({
@@ -691,8 +679,6 @@ test("replaces one attachment without changing the count, order, or channel sele
 
   // The Channel that selected the replaced Asset now selects its replacement,
   // and the other Channels' own selections are untouched.
-  await page.getByRole("tab", { name: narrow }).click();
-  const narrowPanel = page.getByRole("tabpanel");
   await expect(
     narrowPanel.getByRole("button", {
       name: attachmentControlName("2. ", camera.name),
@@ -703,10 +689,11 @@ test("replaces one attachment without changing the count, order, or channel sele
       name: attachmentControlName("1. ", png.name),
     }),
   ).toHaveAttribute("aria-pressed", "false");
-  await page.getByRole("tab", { name: silent }).click();
-  await expect(textOnly).toHaveAttribute("aria-pressed", "true");
+  await expect(silentPanel.getByRole("button", { name: /text only/i })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 
-  await openSharedTab(page);
   await saveAndSettle(page, [
     [png.name, "Ready"],
     [camera.name, "Ready"],
@@ -723,8 +710,7 @@ test("replaces one attachment without changing the count, order, or channel sele
     [clip.name, "3. "],
   ]);
   await expect(page.getByText(gif.name)).toHaveCount(0);
-  await page.getByRole("tab", { name: narrow }).click();
-  const reopenedPanel = page.getByRole("tabpanel");
+  const reopenedPanel = page.getByRole("region", { name: narrow, exact: true });
   await expect(
     reopenedPanel.getByRole("button", {
       name: attachmentControlName("2. ", camera.name),
@@ -735,8 +721,10 @@ test("replaces one attachment without changing the count, order, or channel sele
       name: attachmentControlName("1. ", png.name),
     }),
   ).toHaveAttribute("aria-pressed", "false");
-  await page.getByRole("tab", { name: silent }).click();
-  await expect(textOnly).toHaveAttribute("aria-pressed", "true");
+  await expect(silentPanel.getByRole("button", { name: /text only/i })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 });
 
 /**
@@ -1107,14 +1095,10 @@ test("reopens one Post with its ordered attachments and channel targets", async 
 
   // Per-Channel target settings: one Channel publishes text only, the other
   // overrides the caption and still inherits the whole ordered attachment set.
-  await page.getByRole("tab", { name: instagram }).click();
-  await page
-    .getByRole("tabpanel")
-    .getByRole("button", { name: /text only/i })
-    .click();
-  await page.getByRole("tab", { name: threads }).click();
-  await page.getByRole("button", { name: /customize for this channel/i }).click();
-  await page.getByRole("tabpanel").getByRole("textbox").fill("Threads-only caption");
+  const instagramPanel = page.getByRole("region", { name: instagram, exact: true });
+  const threadsPanel = page.getByRole("region", { name: threads, exact: true });
+  await instagramPanel.getByRole("button", { name: /text only/i }).click();
+  await threadsPanel.getByRole("textbox").fill("Threads-only caption");
   await saveDraft(page);
   const savedPreview = new RegExp(`${caption}|Threads-only caption`);
 
@@ -1128,12 +1112,11 @@ test("reopens one Post with its ordered attachments and channel targets", async 
     [gif.name, "1. "],
     [png.name, "2. "],
   ]);
-  await page.getByRole("tab", { name: instagram }).click();
-  await expect(
-    page.getByRole("tabpanel").getByRole("button", { name: /text only/i }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("tab", { name: threads }).click();
-  await expect(page.getByRole("tabpanel").getByRole("textbox")).toHaveValue("Threads-only caption");
+  await expect(instagramPanel.getByRole("button", { name: /text only/i })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(threadsPanel.getByRole("textbox")).toHaveValue("Threads-only caption");
 
   // A separate authenticated session must rebuild the same Post from the server,
   // after selecting the same profile scope a returning user would pick.
@@ -1148,10 +1131,9 @@ test("reopens one Post with its ordered attachments and channel targets", async 
     [gif.name, "1. "],
     [png.name, "2. "],
   ]);
-  await secondPage.getByRole("tab", { name: threads }).click();
-  await expect(secondPage.getByRole("tabpanel").getByRole("textbox")).toHaveValue(
-    "Threads-only caption",
-  );
+  await expect(
+    secondPage.getByRole("region", { name: threads, exact: true }).getByRole("textbox"),
+  ).toHaveValue("Threads-only caption");
   await second.close();
 });
 
@@ -1161,8 +1143,8 @@ test("reopens one Post with its ordered attachments and channel targets", async 
  * nothing but the workspace's Channel list can name its platform. The controls
  * must come back filled and the next save must carry them again, instead of
  * rebuilding the panel empty and quietly erasing the Post's own options.
- * Provider fields are edited in the channel tab; shared caption entry explicitly
- * returns to Shared Content instead of targeting its unmounted textarea.
+ * Provider fields and shared caption remain mounted in the same scrolling
+ * editor; changing one must not discard the other's unsaved values.
  * Reopening uses the API-returned Post identity, not its title-first preview.
  */
 test("reopens a draft whose provider options have no distribution", async ({ page, request }) => {
@@ -1176,17 +1158,10 @@ test("reopens a draft whose provider options have no distribution", async ({ pag
   const mutations = await watchPostMutations(page);
   const title = "Title without a distribution";
   const tags = "alpha, beta";
-  await page.getByRole("tab", { name: channel }).click();
-  await page
-    .getByRole("tabpanel")
-    .getByPlaceholder(/enter youtube title/i)
-    .fill(title);
-  await page
-    .getByRole("tabpanel")
-    .getByPlaceholder(/tech, tutorial/i)
-    .fill(tags);
+  const channelPanel = page.getByRole("region", { name: channel, exact: true });
+  await channelPanel.getByPlaceholder(/enter youtube title/i).fill(title);
+  await channelPanel.getByPlaceholder(/tech, tutorial/i).fill(tags);
   const caption = "Provider options without a distribution";
-  await openSharedTab(page);
   await composerTextarea(page).fill(caption);
   await saveDraft(page);
 
@@ -1211,11 +1186,8 @@ test("reopens a draft whose provider options have no distribution", async ({ pag
     page.getByRole("row").filter({ hasText: created.response.id.slice(-6) }),
   );
   await expect(composerTextarea(page)).toHaveValue(caption);
-  await page.getByRole("tab", { name: channel }).click();
-  await expect(page.getByRole("tabpanel").getByPlaceholder(/enter youtube title/i)).toHaveValue(
-    title,
-  );
-  await expect(page.getByRole("tabpanel").getByPlaceholder(/tech, tutorial/i)).toHaveValue(tags);
+  await expect(channelPanel.getByPlaceholder(/enter youtube title/i)).toHaveValue(title);
+  await expect(channelPanel.getByPlaceholder(/tech, tutorial/i)).toHaveValue(tags);
 
   // Those options are still the Post's own, so saving again carries them on.
   const beforeSave = mutations.length;
@@ -1247,9 +1219,8 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
   const mutations = await watchPostMutations(page);
   const caption = "Blank override journey";
   await composerTextarea(page).fill(caption);
-  await page.getByRole("tab", { name: channel }).click();
-  await page.getByRole("button", { name: /customize for this channel/i }).click();
-  const override = page.getByRole("tabpanel").getByRole("textbox");
+  const channelPanel = page.getByRole("region", { name: channel, exact: true });
+  const override = channelPanel.getByRole("textbox");
   await expect(override).toHaveValue(caption);
   await override.fill("");
   await saveDraft(page);
@@ -1265,9 +1236,8 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
     page.getByRole("row").filter({ hasText: saved.response.id.slice(-6) }),
   );
   await expect(composerTextarea(page)).toHaveValue(caption);
-  await page.getByRole("tab", { name: channel }).click();
-  await expect(page.getByRole("button", { name: /remove custom override/i })).toBeVisible();
-  await expect(page.getByRole("tabpanel").getByRole("textbox")).toHaveValue("");
+  await expect(channelPanel.getByRole("button", { name: /remove custom override/i })).toBeVisible();
+  await expect(override).toHaveValue("");
 
   // Saving the reopened draft keeps the blank caption blank.
   const beforeSave = mutations.length;

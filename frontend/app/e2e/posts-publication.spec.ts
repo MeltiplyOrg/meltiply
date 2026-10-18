@@ -159,8 +159,8 @@ async function reloadPostsWorkspace(page: Page): Promise<string> {
  * Instagram refuses a text-only publish, so a Post carrying no attachment cannot
  * target it. Selecting one destination explicitly is how a test meets that real
  * platform rule instead of working around it.
- * Tab presence identifies each selected Channel; a count of one alone cannot
- * distinguish the intended destination from an already-selected sibling.
+ * Destination pressed state identifies each selected Channel; a count of one
+ * alone cannot distinguish the intended destination from a selected sibling.
  *
  * @param page - Playwright page bound to the open composer.
  * @param keep - Display name of the one Channel that stays selected.
@@ -170,18 +170,19 @@ async function targetOnlyChannel(page: Page, keep: string, drop: string): Promis
   const destinations = page.getByText(/^\d+ selected$/).locator("../../..");
   const selectedBadge = destinations.getByText(/^\d+ selected$/);
   await expect(selectedBadge).toBeVisible({ timeout: 30_000 });
-  const keepTab = page.getByRole("tab", { name: keep });
-  const dropTab = page.getByRole("tab", { name: drop });
-  const pill = (displayName: string) =>
-    destinations.getByRole("button", { name: new RegExp(displayName) });
-  if ((await keepTab.count()) === 0) await pill(keep).click();
-  await expect(keepTab).toBeVisible();
-  if ((await dropTab.count()) > 0) await pill(drop).click();
+  const keepDestination = destinations.getByRole("button", { name: new RegExp(keep) });
+  const dropDestination = destinations.getByRole("button", { name: new RegExp(drop) });
+  if ((await keepDestination.getAttribute("aria-pressed")) !== "true") {
+    await keepDestination.click();
+  }
+  if ((await dropDestination.getAttribute("aria-pressed")) === "true") {
+    await dropDestination.click();
+  }
   await expect(destinations.getByText(/^1 selected$/)).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.getByRole("tab", { name: keep })).toBeVisible();
-  await expect(page.getByRole("tab", { name: drop })).toHaveCount(0);
+  await expect(keepDestination).toHaveAttribute("aria-pressed", "true");
+  await expect(dropDestination).toHaveAttribute("aria-pressed", "false");
 }
 
 /**
@@ -218,7 +219,7 @@ async function attachMedia(page: Page, files: readonly MediaFixture[]): Promise<
  * Toggles one attachment in one Channel's own media selection.
  *
  * @param page - Playwright page bound to the open composer.
- * @param channelName - Display name of the Channel whose tab to open.
+ * @param channelName - Display name of the Channel whose editor to use.
  * @param attachmentIndex - 1-based position of the attachment in the Post.
  * @param attachmentName - Input filename matched across local and persisted titles.
  */
@@ -228,8 +229,8 @@ async function toggleChannelAttachment(
   attachmentIndex: number,
   attachmentName: string,
 ): Promise<void> {
-  await page.getByRole("tab", { name: channelName }).click();
   await page
+    .getByRole("region", { name: channelName, exact: true })
     .getByRole("button", {
       name: attachmentControlName(`${attachmentIndex}. `, attachmentName),
     })
@@ -248,9 +249,8 @@ async function overrideChannelCaption(
   channelName: string,
   caption: string,
 ): Promise<void> {
-  await page.getByRole("tab", { name: channelName }).click();
-  await page.getByRole("button", { name: /customize for this channel/i }).click();
-  await page
+  const editor = page.getByRole("region", { name: channelName, exact: true });
+  await editor
     .getByText(/custom text for/i)
     .locator("..")
     .getByRole("textbox")

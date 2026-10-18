@@ -5,10 +5,10 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { useI18n } from "@/lib/i18n";
 import { platformDisplayName } from "@/lib/platforms";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
+import { ChannelAvatar } from "@/components/channels/channel-avatar";
 import { brandProfileColorClass, type BrandProfile, type PlatformAccount } from "@/types";
 import { cn } from "@meltiply/ui/utils";
 import {
-  ChannelAvatar,
   ChannelCopyRows,
   ChannelHealthControl,
   ChannelSelectionCheckbox,
@@ -115,9 +115,9 @@ export function ChannelTableView({
                   <TableCell>
                     <div className="flex min-w-0 items-center gap-2.5">
                       <ChannelAvatar
-                        account={account}
+                        provider={account.platform}
                         channelName={channelName}
-                        picture={picture}
+                        picture={picture ?? account.avatar_url}
                       />
                       <div className="min-w-0">
                         <div

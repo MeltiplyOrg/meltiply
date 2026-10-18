@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { AppAuthProvider, useMeltiplyAuth } from "@/components/auth/auth-provider";
 import { WorkspaceProvider } from "@/context/workspace.context";
 import { createAssetUpload, type AssetUploadTask } from "@/lib/upload";
-import type { Asset, PlatformAccount, Post } from "@/types";
+import type { Asset, BrandProfile, PlatformAccount, Post } from "@/types";
 
 import { Composer } from "./composer";
 import { authClient } from "@/lib/auth-client";
@@ -61,6 +61,8 @@ function renderComposer(
     accounts?: PlatformAccount[];
     /** Published platform capabilities, keyed by platform like the API response. */
     capabilities?: ReturnType<typeof platformCapability>[];
+    /** Ordered real profile records used to exercise default owner selection. */
+    brandProfiles?: BrandProfile[];
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -72,6 +74,10 @@ function renderComposer(
   queryClient.setQueryDefaults(queryKeys.platformCapabilities(), { staleTime: Infinity });
   queryClient.setQueryData(queryKeys.platforms(), options.accounts ?? []);
   queryClient.setQueryData(queryKeys.platformCapabilities(), options.capabilities ?? []);
+  if (options.brandProfiles) {
+    queryClient.setQueryDefaults(queryKeys.brandProfiles(), { staleTime: Infinity });
+    queryClient.setQueryData(queryKeys.brandProfiles(), options.brandProfiles);
+  }
   if (options.post) queryClient.setQueryData(queryKeys.post(options.post.id), options.post);
   return render(
     <QueryClientProvider client={queryClient}>
@@ -167,6 +173,44 @@ const instagramAccount: PlatformAccount = {
   token_expires_at: null,
   updated_at: "2026-01-01T00:00:00.000Z",
 };
+
+/** Two ordered owners make default selection distinguishable from saved ownership. */
+const composerProfiles: BrandProfile[] = ["profile-a", "profile-b"].map((id, index) => ({
+  id,
+  name: index === 0 ? "Alpha Brand" : "Beta Brand",
+  org_id: "org-1",
+  description: null,
+  color: "#b91c1c",
+  deleted_at: null,
+  purge_at: null,
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z",
+}));
+
+describe("Composer default ownership", () => {
+  it("selects the first profile for a new Post without replacing a later choice", async () => {
+    renderComposer({ brandProfiles: composerProfiles });
+    await screen.findByRole("combobox", { name: "Alpha Brand" });
+
+    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
+    await screen.findByRole("combobox", { name: "Beta Brand" });
+    await waitFor(() => expect(composerTextarea()).toBeEnabled());
+    fireEvent.change(composerTextarea(), { target: { value: "Draft for Beta" } });
+    expect(screen.getByRole("combobox", { name: "Beta Brand" })).toBeInTheDocument();
+    expect(composerTextarea()).toHaveValue("Draft for Beta");
+  });
+
+  it("uses a reopened Post's owner rather than assigning the first profile", async () => {
+    renderComposer({
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      post: { ...hydratedPost, brand_profile_id: "profile-b" },
+    });
+    await screen.findByRole("combobox", { name: "Beta Brand" });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    expect(screen.queryByRole("combobox", { name: "Alpha Brand" })).not.toBeInTheDocument();
+  });
+});
 
 describe("Composer recovery consent", () => {
   /**
@@ -275,6 +319,32 @@ describe("Composer identity switching", () => {
   });
 });
 
+/** Inline captions inherit live shared text until edited, including intentional blanks. */
+describe("Composer channel captions", () => {
+  it("keeps blank channel edits independent and restores live inheritance on reset", async () => {
+    renderComposer({
+      brandProfiles: [composerProfiles[1]!],
+      accounts: [instagramAccount],
+      capabilities: [platformCapability("instagram", 12)],
+    });
+    const channelCaption = await screen.findByLabelText("Custom Text for Alpha Instagram");
+    const sharedCaption = composerTextarea();
+    await waitFor(() => expect(sharedCaption).toBeEnabled());
+
+    fireEvent.change(sharedCaption, { target: { value: "Shared" } });
+    expect(channelCaption).toHaveValue("Shared");
+    fireEvent.change(channelCaption, { target: { value: "" } });
+    fireEvent.change(sharedCaption, { target: { value: "Changed" } });
+    expect(channelCaption).toHaveValue("");
+    expect(sharedCaption).toHaveValue("Changed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Custom Override" }));
+    expect(channelCaption).toHaveValue("Changed");
+    fireEvent.change(sharedCaption, { target: { value: "Next" } });
+    expect(channelCaption).toHaveValue("Next");
+  });
+});
+
 describe("Composer caption bound", () => {
   /**
    * The shared caption reaches every selected Channel, so the field locks at the
@@ -293,15 +363,10 @@ describe("Composer caption bound", () => {
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
     await waitFor(() => expect(textarea).toBeEnabled());
 
-    // The switched profile's Channel is a selected destination, named by its
-    // social provider rather than the account handle...
-    expect(await screen.findByRole("tab", { name: /Instagram/ })).toBeInTheDocument();
-    // ...and that platform's published limit is the bound the field states.
-    expect(await screen.findByText(/^0\/12 characters$/)).toBeInTheDocument();
+    await screen.findByLabelText("Custom Text for Alpha Instagram");
 
     fireEvent.change(textarea, { target: { value: "x".repeat(20) } });
     expect(textarea).toHaveValue("x".repeat(12));
-    expect(screen.getByText(/^12\/12 characters$/)).toHaveClass("text-red");
   });
 
   /**
@@ -318,13 +383,12 @@ describe("Composer caption bound", () => {
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
     await waitFor(() => expect(textarea).toBeEnabled());
-    await screen.findByText(/^0\/12 characters$/);
+    await screen.findByLabelText("Custom Text for Alpha Instagram");
 
     fireEvent.change(textarea, { target: { value: "🎉".repeat(15) } });
     const value = (textarea as HTMLTextAreaElement).value;
     expect([...value]).toHaveLength(12);
     expect(value.length).toBe(24);
-    expect(screen.getByText(/^12\/12 characters$/)).toBeInTheDocument();
   });
 
   /**
@@ -341,10 +405,8 @@ describe("Composer caption bound", () => {
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
     await waitFor(() => expect(textarea).toBeEnabled());
-    await screen.findByRole("tab", { name: /Instagram/ });
 
     fireEvent.change(textarea, { target: { value: "x".repeat(20) } });
     expect(textarea).toHaveValue("x".repeat(20));
-    expect(screen.getByText(/^20 characters$/)).toBeInTheDocument();
   });
 });

@@ -14,10 +14,9 @@ import { MediaPreview } from "@/components/media/media-preview";
 import { Button } from "@meltiply/ui/button";
 import { Textarea } from "@meltiply/ui/textarea";
 import { Input } from "@meltiply/ui/input";
-import { Badge } from "@meltiply/ui/badge";
+import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { Alert } from "@meltiply/ui/alert";
 
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@meltiply/ui/tabs";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { cn } from "@meltiply/ui/utils";
 import { toast } from "@meltiply/ui/toast";
@@ -61,7 +60,6 @@ import {
 } from "@/lib/queries";
 import { createAssetUpload, type AssetUploadStatus, type AssetUploadTask } from "@/lib/upload";
 import { RollingCount } from "@meltiply/ui/rolling-count";
-import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { platformDisplayName } from "@/lib/platforms";
 import { Trans, useI18n } from "@/lib/i18n";
 import { ApiError } from "@/lib/api";
@@ -488,7 +486,7 @@ function restoredAttachmentRows(
  * owns the same header shape inside `DestinationSelector`, which is why this
  * renderer mirrors its type scale rather than introducing a second convention.
  *
- * @param props.icon - Optional leading Lucide icon, sized and muted by the renderer.
+ * @param props.icon - Optional Lucide icon or provider id, sized by the renderer.
  * @param props.title - Localized section title.
  * @param props.action - Optional right-aligned action cluster (counts, buttons).
  * @param props.className - Extra classes for the section wrapper.
@@ -502,17 +500,21 @@ function ComposerSection({
   className,
   children,
 }: {
-  icon?: LucideIcon;
+  icon?: LucideIcon | string;
   title: string;
   action?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className={cn("flex min-w-0 flex-col gap-3", className)}>
+    <section className={cn("flex min-w-0 shrink-0 flex-col gap-3", className)}>
       <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          {Icon && <Icon className="size-3.5 shrink-0 text-ink-3" aria-hidden="true" />}
+          {typeof Icon === "string" ? (
+            <PlatformIcon provider={Icon} className="size-4 shrink-0" />
+          ) : Icon ? (
+            <Icon className="size-3.5 shrink-0 text-ink-3" aria-hidden="true" />
+          ) : null}
           <h3 className="min-w-0 truncate text-(length:--font-size-ui) font-semibold text-ink">
             {title}
           </h3>
@@ -580,6 +582,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     selectedChannelIds,
     selectedBrandProfileId,
     setSelectedChannelIds,
+    setSelectedBrandProfileId,
     refreshWorkspace,
   } = useWorkspace();
   const scope = useSessionScope();
@@ -593,7 +596,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [attachments, setAttachments] = useState<AttachmentEntry[]>([]);
   const [channelOverrides, setChannelOverrides] = useState<Record<string, ChannelOverride>>({});
   const [attachmentOverrides, setAttachmentOverrides] = useState<Record<string, string[]>>({});
-  const [activeTab, setActiveTab] = useState<string>("shared");
   /**
    * Publishing intent the composer submits: a calendar entry point seeds
    * `schedule` so the seeded slot is editable on arrival, and everything else
@@ -667,6 +669,23 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
   const postQuery = usePost(scope, postId ?? "", postId !== null);
   const capabilitiesQuery = usePlatformCapabilities(scope);
+
+  // After sign-in settles, new compositions start under the first available
+  // profile; reopening from aggregate scope adopts the Post's actual owner.
+  // A concrete choice is never replaced, including after a query refresh.
+  useEffect(() => {
+    if (!scope.isSignedIn || selectedBrandProfileId !== null) return;
+    const profileId =
+      initialPostId !== undefined ? postQuery.data?.brand_profile_id : brandProfiles[0]?.id;
+    if (profileId) setSelectedBrandProfileId(profileId);
+  }, [
+    brandProfiles,
+    initialPostId,
+    postQuery.data?.brand_profile_id,
+    scope.isSignedIn,
+    selectedBrandProfileId,
+    setSelectedBrandProfileId,
+  ]);
   const createPost = useCreatePost(scope);
   const updatePost = useUpdatePost(scope);
   const schedulePost = useSchedulePost(scope);
@@ -869,12 +888,20 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     writeRecovery,
   ]);
 
-  // Hydrate shared text, Channel selection, per-channel settings, attachment
-  // selection, and schedule slot from the authoritative Post exactly once per
-  // identity, so later polling never overwrites creator input.
+  // Hydrate shared text, Channel selection, settings, attachments, and schedule
+  // only after sign-in and profile selection settle. Aggregate-scope hydration
+  // could otherwise commit just before the owner switch clears composer state.
+  // Each Post hydrates once so later polling never overwrites creator input.
   useEffect(() => {
     const post = postQuery.data;
-    if (!post || !postId || hydratedPostId === postId) return;
+    if (
+      !scope.isSignedIn ||
+      selectedBrandProfileId === null ||
+      !post ||
+      !postId ||
+      hydratedPostId === postId
+    )
+      return;
     // Provider settings are rebuilt per saved target, and a draft that has never
     // been scheduled names no platform of its own, so hydration waits for the
     // Channel list instead of rebuilding every provider panel empty.
@@ -908,6 +935,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     platformsQuery.isPending,
     postId,
     postQuery.data,
+    scope.isSignedIn,
+    selectedBrandProfileId,
     setSelectedChannelIds,
   ]);
 
@@ -2020,7 +2049,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     <fieldset
       disabled={isInitializing}
       aria-busy={isInitializing}
-      className="@container flex min-h-0 min-w-0 grow flex-col gap-5"
+      className="@container flex min-h-0 min-w-0 grow flex-col gap-5 @4xl:overflow-hidden"
     >
       <div className="flex flex-col gap-3 empty:hidden">
         {selectedBrandProfileId === null && (
@@ -2103,531 +2132,498 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           one reading order instead. The compose half scrolls on its own, so a
           long draft, its media, and its provider settings move while the
           destinations and publishing half stays in view. */}
-      <div className="flex min-w-0 grow flex-col gap-6 @4xl:min-h-0 @4xl:flex-row @4xl:items-stretch @4xl:gap-8">
-        <div className="flex min-w-0 flex-1 flex-col gap-4 @4xl:min-h-0 @4xl:overflow-y-auto @4xl:pr-2">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col gap-4">
-            <TabsList
-              variant="line"
-              className="hide-scrollbar w-full overflow-x-auto"
-              aria-label={t("Composer sections")}
-            >
-              <TabsTrigger value="shared" className="text-xs font-semibold">
-                <Layers className="size-3.5 mr-1.5" />
-                {t("Shared Content")}
-              </TabsTrigger>
-              {selectedChannels.map((channel: ChannelIntegration) => (
-                <TabsTrigger
-                  key={channel.id}
-                  value={channel.id}
-                  className="text-xs font-medium flex items-center gap-1.5"
-                >
-                  <PlatformIcon provider={channel.providerIdentifier} className="size-3.5" />
-                  <span>{targetLabelFor(channel)}</span>
-                  {channelOverrides[channel.id]?.hasOverride && (
-                    <span className="size-1.5 rounded-full bg-foreground" />
-                  )}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-
-            {/* The writing area grows with its own text between a comfortable
-                minimum and a readable maximum, so a long caption never squeezes
-                the media section and a short one never reserves empty rows. */}
+      <div className="flex min-w-0 grow flex-col gap-6 @4xl:min-h-0 @4xl:flex-1 @4xl:flex-row @4xl:items-stretch @4xl:gap-8">
+        <div
+          aria-label={t("Post content")}
+          tabIndex={0}
+          className="hide-scrollbar flex min-w-0 flex-1 flex-col gap-6 @4xl:min-h-0 @4xl:overflow-y-auto @4xl:overscroll-contain @4xl:pr-2"
+        >
+          <ComposerSection icon={Layers} title={t("Shared Content")}>
             <div className="flex flex-col gap-4">
-              <TabsContent value="shared" className="mt-0 flex flex-col gap-4">
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-2">
-                    <Textarea
-                      placeholder={t("What do you want to publish?")}
-                      aria-label={t("Shared Content")}
-                      value={sharedContent}
-                      onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
-                        setSharedContent(clampCaption(event.target.value, sharedCaptionLimit));
-                        markDirty();
-                      }}
-                      autoGrow
-                      className="min-h-36 max-h-72 resize-none text-base font-normal bg-field"
-                    />
-                    {/* The destination count only means something once the Post
+              <div className="flex flex-col gap-2">
+                <Textarea
+                  placeholder={t("What do you want to publish?")}
+                  aria-label={t("Shared Content")}
+                  value={sharedContent}
+                  onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
+                    setSharedContent(clampCaption(event.target.value, sharedCaptionLimit));
+                    markDirty();
+                  }}
+                  autoGrow
+                  className="min-h-36 max-h-72 resize-none text-base font-normal bg-field"
+                />
+                {/* The destination count only means something once the Post
                         has an owning Brand Profile: in the aggregate view the
                         banner above already says what is missing, and the
                         Destinations block shows the accounts as unavailable. */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-(length:--font-size-micro) text-ink-3">
-                      <span>
-                        {selectedBrandProfileId !== null && (
-                          <Trans
-                            message="Targeting {count} channel(s)"
-                            values={{ count: <RollingCount value={selectedChannels.length} /> }}
-                          />
-                        )}
-                      </span>
-                      <span className={cn("font-mono", isAtSharedCaptionLimit && "text-red")}>
-                        {sharedCaptionLimit === null
-                          ? t("{count} characters", { count: captionLength(sharedContent) })
-                          : t("{count}/{limit} characters", {
-                              count: captionLength(sharedContent),
-                              limit: sharedCaptionLimit,
-                            })}
-                      </span>
-                    </div>
-                  </div>
-
-                  <ComposerSection
-                    icon={ImageIcon}
-                    title={t("Attached Media ({count})", { count: attachments.length })}
-                    action={
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            replaceTargetRef.current = null;
-                            fileInputRef.current?.click();
-                          }}
-                          disabled={selectedBrandProfileId === null || !scope.isSignedIn}
-                          className="h-7 gap-1.5 px-2 text-(length:--font-size-control)"
-                        >
-                          <ImageIcon className="size-3.5" />
-                          {t("Add Media")}
-                        </Button>
-                        <Input
-                          ref={fileInputRef}
-                          type="file"
-                          multiple
-                          accept="image/*,video/*"
-                          className="hidden"
-                          aria-label={t("Add Media")}
-                          onChange={handleFilesSelected}
-                        />
-                      </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-(length:--font-size-micro) text-ink-3">
+                  <span>
+                    {selectedBrandProfileId !== null && (
+                      <Trans
+                        message="Targeting {count} channel(s)"
+                        values={{ count: <RollingCount value={selectedChannels.length} /> }}
+                      />
+                    )}
+                  </span>
+                  <span
+                    className={cn("font-mono", isAtSharedCaptionLimit && "text-red")}
+                    title={
+                      sharedCaptionLimit === null ? t("Character limit unavailable") : undefined
                     }
                   >
-                    <div
-                      onDragOver={(event: React.DragEvent<HTMLDivElement>) => {
-                        event.preventDefault();
-                        setDragActive(true);
+                    {t("{count}/{limit} characters", {
+                      count: captionLength(sharedContent),
+                      limit: sharedCaptionLimit ?? "—",
+                    })}
+                  </span>
+                </div>
+              </div>
+
+              <ComposerSection
+                icon={ImageIcon}
+                title={t("Attached Media ({count})", { count: attachments.length })}
+                action={
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        replaceTargetRef.current = null;
+                        fileInputRef.current?.click();
                       }}
-                      onDragLeave={() => setDragActive(false)}
-                      onDrop={handleDrop}
-                      className={`rounded-control border border-dashed p-3 transition-colors ${
-                        isDragActive ? "border-foreground bg-inset" : "border-line"
-                      }`}
+                      disabled={selectedBrandProfileId === null || !scope.isSignedIn}
+                      className="h-7 gap-1.5 px-2 text-(length:--font-size-control)"
                     >
-                      {attachments.length > 0 && (
-                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                          {attachments.map((attachment, index) => {
-                            const phase = attachmentPhase(attachment, t);
-                            const isActive =
-                              attachment.uploadStatus !== null &&
-                              activeUploadStatuses.has(attachment.uploadStatus);
-                            const isPaused = attachment.uploadStatus === "paused";
-                            return (
-                              <div
-                                key={attachment.key}
-                                className="relative group aspect-square rounded-control border border-line overflow-hidden bg-hover"
-                              >
-                                {attachment.assetId !== null && postId === null && (
-                                  <AttachmentStatusPoller
-                                    assetId={attachment.assetId}
-                                    assetStatus={attachment.assetStatus}
-                                    onAssetUpdate={handleAssetUpdate}
-                                  />
-                                )}
-                                <MediaPreview
-                                  assetId={attachment.assetId ?? ""}
-                                  assetType={attachment.assetType ?? undefined}
-                                  hintPath={attachment.mimeType ?? attachment.name}
-                                  fallbackSrc={attachment.previewUrl}
-                                  enabled={
-                                    attachment.assetId !== null &&
-                                    attachment.assetStatus === "ready"
-                                  }
-                                  alt={attachment.name || t("media")}
-                                  className="size-full object-cover"
-                                  empty={
-                                    <div className="size-full flex items-center justify-center text-ink-3">
-                                      {!phase.ready && !phase.failed ? (
-                                        <Loader2 className="size-5 animate-spin" />
-                                      ) : (
-                                        <ImageIcon className="size-5" />
-                                      )}
-                                    </div>
-                                  }
-                                />
-                                <div
-                                  className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-surface/85 px-1 py-0.5 text-(length:--font-size-micro) text-ink"
-                                  role="status"
-                                >
-                                  <span className="truncate">
-                                    {index + 1}. {attachment.name}
-                                  </span>
-                                  <span
-                                    className={
-                                      phase.failed
-                                        ? "text-red"
-                                        : phase.ready
-                                          ? "text-green"
-                                          : "text-ink-3"
-                                    }
-                                  >
-                                    {phase.label}
-                                  </span>
-                                </div>
-                                {isActive && attachment.percent < 100 && (
-                                  <div
-                                    className="absolute inset-x-0 top-0 h-1 bg-surface/60"
-                                    role="progressbar"
-                                    aria-valuemin={0}
-                                    aria-valuemax={100}
-                                    aria-valuenow={attachment.percent}
-                                    aria-label={t("Upload progress for {name}", {
-                                      name: attachment.name,
-                                    })}
-                                  >
-                                    <div
-                                      data-attachment-progress
-                                      className="h-1 bg-accent w-[var(--attachment-progress)]"
-                                      style={
-                                        {
-                                          "--attachment-progress": `${attachment.percent}%`,
-                                        } as React.CSSProperties
-                                      }
-                                    />
-                                  </div>
-                                )}
-                                {phase.message && (
-                                  <p className="absolute inset-x-0 top-1 px-1 text-(length:--font-size-micro) leading-tight text-red">
-                                    {phase.message}
-                                  </p>
-                                )}
-                                <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100">
-                                  <Button
-                                    type="button"
-                                    variant="default"
-                                    size="icon"
-                                    aria-label={t("Move attachment {index} earlier", {
-                                      index: index + 1,
-                                    })}
-                                    disabled={index === 0}
-                                    onClick={() => handleMoveAttachment(index, -1)}
-                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                  >
-                                    <ChevronUp className="size-3" />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="default"
-                                    size="icon"
-                                    aria-label={t("Move attachment {index} later", {
-                                      index: index + 1,
-                                    })}
-                                    disabled={index === attachments.length - 1}
-                                    onClick={() => handleMoveAttachment(index, 1)}
-                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                  >
-                                    <ChevronDown className="size-3" />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="default"
-                                    size="icon"
-                                    aria-label={t("Replace attachment {index}", {
-                                      index: index + 1,
-                                    })}
-                                    disabled={selectedBrandProfileId === null}
-                                    onClick={() => {
-                                      replaceTargetRef.current = attachment.key;
-                                      fileInputRef.current?.click();
-                                    }}
-                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                  >
-                                    <Replace className="size-3" />
-                                  </Button>
-                                  {attachment.uploadStatus === "failed" &&
-                                    attachment.hasLocalFile && (
-                                      <Button
-                                        type="button"
-                                        variant="default"
-                                        size="icon"
-                                        aria-label={t("Retry upload of {name}", {
-                                          name: attachment.name,
-                                        })}
-                                        onClick={() => handleRetryUpload(attachment.key)}
-                                        className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                      >
-                                        <Upload className="size-3" />
-                                      </Button>
-                                    )}
-                                  {isActive &&
-                                    (isPaused ? (
-                                      <Button
-                                        type="button"
-                                        variant="default"
-                                        size="icon"
-                                        aria-label={t("Resume upload of {name}", {
-                                          name: attachment.name,
-                                        })}
-                                        onClick={() => attachment.task?.resume()}
-                                        className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                      >
-                                        <Play className="size-3" />
-                                      </Button>
-                                    ) : (
-                                      <Button
-                                        type="button"
-                                        variant="default"
-                                        size="icon"
-                                        aria-label={t("Pause upload of {name}", {
-                                          name: attachment.name,
-                                        })}
-                                        onClick={() => attachment.task?.pause()}
-                                        className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                      >
-                                        <Pause className="size-3" />
-                                      </Button>
-                                    ))}
-                                  {/* An unfinished upload is stopped by the same action that
-                                  removes it, so the row shows exactly one destructive
-                                  control whose label states the real effect. */}
-                                  {attachment.uploadStatus !== null &&
-                                  !terminalUploadStatuses.has(attachment.uploadStatus) ? (
-                                    <Button
-                                      type="button"
-                                      variant="default"
-                                      size="icon"
-                                      aria-label={t("Cancel upload of {name}", {
-                                        name: attachment.name,
-                                      })}
-                                      onClick={() => handleRemoveAttachment(attachment.key)}
-                                      className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
-                                    >
-                                      <X className="size-3" />
-                                    </Button>
+                      <ImageIcon className="size-3.5" />
+                      {t("Add Media")}
+                    </Button>
+                    <Input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/*,video/*"
+                      className="hidden"
+                      aria-label={t("Add Media")}
+                      onChange={handleFilesSelected}
+                    />
+                  </div>
+                }
+              >
+                <div
+                  onDragOver={(event: React.DragEvent<HTMLDivElement>) => {
+                    event.preventDefault();
+                    setDragActive(true);
+                  }}
+                  onDragLeave={() => setDragActive(false)}
+                  onDrop={handleDrop}
+                  className={`rounded-control border border-dashed p-3 transition-colors ${
+                    isDragActive ? "border-foreground bg-inset" : "border-line"
+                  }`}
+                >
+                  {attachments.length > 0 && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                      {attachments.map((attachment, index) => {
+                        const phase = attachmentPhase(attachment, t);
+                        const isActive =
+                          attachment.uploadStatus !== null &&
+                          activeUploadStatuses.has(attachment.uploadStatus);
+                        const isPaused = attachment.uploadStatus === "paused";
+                        return (
+                          <div
+                            key={attachment.key}
+                            className="relative group aspect-square rounded-control border border-line overflow-hidden bg-hover"
+                          >
+                            {attachment.assetId !== null && postId === null && (
+                              <AttachmentStatusPoller
+                                assetId={attachment.assetId}
+                                assetStatus={attachment.assetStatus}
+                                onAssetUpdate={handleAssetUpdate}
+                              />
+                            )}
+                            <MediaPreview
+                              assetId={attachment.assetId ?? ""}
+                              assetType={attachment.assetType ?? undefined}
+                              hintPath={attachment.mimeType ?? attachment.name}
+                              fallbackSrc={attachment.previewUrl}
+                              enabled={
+                                attachment.assetId !== null && attachment.assetStatus === "ready"
+                              }
+                              alt={attachment.name || t("media")}
+                              className="size-full object-cover"
+                              empty={
+                                <div className="size-full flex items-center justify-center text-ink-3">
+                                  {!phase.ready && !phase.failed ? (
+                                    <Loader2 className="size-5 animate-spin" />
                                   ) : (
-                                    <Button
-                                      type="button"
-                                      variant="default"
-                                      size="icon"
-                                      aria-label={t("Remove attachment {index}", {
-                                        index: index + 1,
-                                      })}
-                                      onClick={() => handleRemoveAttachment(attachment.key)}
-                                      className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
-                                    >
-                                      <X className="size-3" />
-                                    </Button>
+                                    <ImageIcon className="size-5" />
                                   )}
                                 </div>
+                              }
+                            />
+                            <div
+                              className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-surface/85 px-1 py-0.5 text-(length:--font-size-micro) text-ink"
+                              role="status"
+                            >
+                              <span className="truncate">
+                                {index + 1}. {attachment.name}
+                              </span>
+                              <span
+                                className={
+                                  phase.failed
+                                    ? "text-red"
+                                    : phase.ready
+                                      ? "text-green"
+                                      : "text-ink-3"
+                                }
+                              >
+                                {phase.label}
+                              </span>
+                            </div>
+                            {isActive && attachment.percent < 100 && (
+                              <div
+                                className="absolute inset-x-0 top-0 h-1 bg-surface/60"
+                                role="progressbar"
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                aria-valuenow={attachment.percent}
+                                aria-label={t("Upload progress for {name}", {
+                                  name: attachment.name,
+                                })}
+                              >
+                                <div
+                                  data-attachment-progress
+                                  className="h-1 bg-accent w-[var(--attachment-progress)]"
+                                  style={
+                                    {
+                                      "--attachment-progress": `${attachment.percent}%`,
+                                    } as React.CSSProperties
+                                  }
+                                />
                               </div>
-                            );
-                          })}
-                          {/* Once a Post has media, the picker stays inside the
+                            )}
+                            {phase.message && (
+                              <p className="absolute inset-x-0 top-1 px-1 text-(length:--font-size-micro) leading-tight text-red">
+                                {phase.message}
+                              </p>
+                            )}
+                            <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100">
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="icon"
+                                aria-label={t("Move attachment {index} earlier", {
+                                  index: index + 1,
+                                })}
+                                disabled={index === 0}
+                                onClick={() => handleMoveAttachment(index, -1)}
+                                className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                              >
+                                <ChevronUp className="size-3" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="icon"
+                                aria-label={t("Move attachment {index} later", {
+                                  index: index + 1,
+                                })}
+                                disabled={index === attachments.length - 1}
+                                onClick={() => handleMoveAttachment(index, 1)}
+                                className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                              >
+                                <ChevronDown className="size-3" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="icon"
+                                aria-label={t("Replace attachment {index}", {
+                                  index: index + 1,
+                                })}
+                                disabled={selectedBrandProfileId === null}
+                                onClick={() => {
+                                  replaceTargetRef.current = attachment.key;
+                                  fileInputRef.current?.click();
+                                }}
+                                className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                              >
+                                <Replace className="size-3" />
+                              </Button>
+                              {attachment.uploadStatus === "failed" && attachment.hasLocalFile && (
+                                <Button
+                                  type="button"
+                                  variant="default"
+                                  size="icon"
+                                  aria-label={t("Retry upload of {name}", {
+                                    name: attachment.name,
+                                  })}
+                                  onClick={() => handleRetryUpload(attachment.key)}
+                                  className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                >
+                                  <Upload className="size-3" />
+                                </Button>
+                              )}
+                              {isActive &&
+                                (isPaused ? (
+                                  <Button
+                                    type="button"
+                                    variant="default"
+                                    size="icon"
+                                    aria-label={t("Resume upload of {name}", {
+                                      name: attachment.name,
+                                    })}
+                                    onClick={() => attachment.task?.resume()}
+                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                  >
+                                    <Play className="size-3" />
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    type="button"
+                                    variant="default"
+                                    size="icon"
+                                    aria-label={t("Pause upload of {name}", {
+                                      name: attachment.name,
+                                    })}
+                                    onClick={() => attachment.task?.pause()}
+                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                  >
+                                    <Pause className="size-3" />
+                                  </Button>
+                                ))}
+                              {/* An unfinished upload is stopped by the same action that
+                                  removes it, so the row shows exactly one destructive
+                                  control whose label states the real effect. */}
+                              {attachment.uploadStatus !== null &&
+                              !terminalUploadStatuses.has(attachment.uploadStatus) ? (
+                                <Button
+                                  type="button"
+                                  variant="default"
+                                  size="icon"
+                                  aria-label={t("Cancel upload of {name}", {
+                                    name: attachment.name,
+                                  })}
+                                  onClick={() => handleRemoveAttachment(attachment.key)}
+                                  className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
+                                >
+                                  <X className="size-3" />
+                                </Button>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="default"
+                                  size="icon"
+                                  aria-label={t("Remove attachment {index}", {
+                                    index: index + 1,
+                                  })}
+                                  onClick={() => handleRemoveAttachment(attachment.key)}
+                                  className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
+                                >
+                                  <X className="size-3" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {/* Once a Post has media, the picker stays inside the
                               grid as a dashed tile so adding one more is the
                               same gesture as the first; the dropzone wrapper
                               remains the drag target for the whole area. */}
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => {
-                              replaceTargetRef.current = null;
-                              fileInputRef.current?.click();
-                            }}
-                            disabled={selectedBrandProfileId === null || !scope.isSignedIn}
-                            className="aspect-square h-auto w-full flex-col gap-1.5 rounded-control border-dashed font-normal text-ink-3 hover:text-ink"
-                          >
-                            <Plus className="size-4" />
-                            <span className="text-(length:--font-size-micro)">
-                              {t("Add Media")}
-                            </span>
-                          </Button>
-                        </div>
-                      )}
-                      {attachments.length === 0 && (
-                        <div className="flex flex-col items-center gap-2 py-5 text-center">
-                          <ImageIcon className="size-4 text-ink-3" aria-hidden="true" />
-                          <p className="text-(length:--font-size-micro) text-ink-3">
-                            {t(
-                              "Drag images or videos here, or use Add Media. Attachments keep their order.",
-                            )}
-                          </p>
-                        </div>
-                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          replaceTargetRef.current = null;
+                          fileInputRef.current?.click();
+                        }}
+                        disabled={selectedBrandProfileId === null || !scope.isSignedIn}
+                        className="aspect-square h-auto w-full flex-col gap-1.5 rounded-control border-dashed font-normal text-ink-3 hover:text-ink"
+                      >
+                        <Plus className="size-4" />
+                        <span className="text-(length:--font-size-micro)">{t("Add Media")}</span>
+                      </Button>
                     </div>
-                  </ComposerSection>
+                  )}
+                  {attachments.length === 0 && (
+                    <div className="flex flex-col items-center gap-2 py-5 text-center">
+                      <ImageIcon className="size-4 text-ink-3" aria-hidden="true" />
+                      <p className="text-(length:--font-size-micro) text-ink-3">
+                        {t(
+                          "Drag images or videos here, or use Add Media. Attachments keep their order.",
+                        )}
+                      </p>
+                    </div>
+                  )}
                 </div>
-              </TabsContent>
-
-              {selectedChannels.map((channel: ChannelIntegration) => {
-                const override = channelOverrides[channel.id] ?? {
-                  content: sharedContent,
-                  hasOverride: false,
-                  settings: {},
-                };
-                const distribution = postQuery.data?.distributions.find(
-                  (item) => item.platform_account_id === channel.id,
-                );
-                const channelAttachments = attachmentsForChannel(channel.id);
-                const inheritsAttachments = !attachmentOverrides[channel.id];
-                const channelCaptionLimit = captionLimitFor(channel);
-
-                return (
-                  <TabsContent key={channel.id} value={channel.id} className="mt-0">
-                    <div className="flex flex-col gap-6">
-                      <ComposerSection
-                        title={targetLabelFor(channel)}
-                        action={
-                          <Button
-                            type="button"
-                            variant={override.hasOverride ? "secondary" : "outline"}
-                            size="sm"
-                            onClick={() =>
-                              handleChannelOverrideChange(channel.id, {
-                                hasOverride: !override.hasOverride,
-                                content: override.hasOverride ? sharedContent : override.content,
-                              })
-                            }
-                            className="text-xs"
-                          >
-                            {override.hasOverride
-                              ? t("Remove Custom Override")
-                              : t("Customize for This Channel")}
-                          </Button>
-                        }
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className="text-xs font-normal">
-                            {channel.name}
-                          </Badge>
-                          {distribution && (
-                            <Badge
-                              variant="outline"
-                              className="text-(length:--font-size-micro) uppercase"
-                            >
-                              {tStatus(distribution.status)}
-                            </Badge>
-                          )}
-                        </div>
-
-                        {override.hasOverride && (
-                          <div className="flex flex-col gap-2">
-                            <label
-                              htmlFor={`channel-override-text-${channel.id}`}
-                              className="text-xs font-medium text-ink-3"
-                            >
-                              {t("Custom Text for {name}", { name: channel.name })}
-                            </label>
-                            <Textarea
-                              id={`channel-override-text-${channel.id}`}
-                              value={override.content}
-                              onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
-                                handleChannelOverrideChange(channel.id, {
-                                  content: clampCaption(event.target.value, channelCaptionLimit),
-                                })
-                              }
-                              autoGrow
-                              className="min-h-36 max-h-72 resize-none text-sm"
-                            />
-                            <span
-                              className={cn(
-                                "text-(length:--font-size-micro) text-ink-3 self-end font-mono",
-                                channelCaptionLimit !== null &&
-                                  captionLength(override.content) >= channelCaptionLimit &&
-                                  "text-red",
-                              )}
-                            >
-                              {channelCaptionLimit === null
-                                ? t("{count} characters", {
-                                    count: captionLength(override.content),
-                                  })
-                                : t("{count}/{limit} characters", {
-                                    count: captionLength(override.content),
-                                    limit: channelCaptionLimit,
-                                  })}
-                            </span>
-                          </div>
-                        )}
-                      </ComposerSection>
-
-                      <ComposerSection
-                        icon={ImageIcon}
-                        title={t("Attachments for {name}", { name: channel.name })}
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            variant={inheritsAttachments ? "secondary" : "outline"}
-                            size="sm"
-                            className="text-xs"
-                            aria-pressed={inheritsAttachments}
-                            onClick={() => handleSetChannelAttachments(channel.id, null)}
-                          >
-                            {t("Use all post attachments")}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={
-                              !inheritsAttachments && channelAttachments.length === 0
-                                ? "secondary"
-                                : "outline"
-                            }
-                            size="sm"
-                            className="text-xs"
-                            aria-pressed={!inheritsAttachments && channelAttachments.length === 0}
-                            onClick={() => handleSetChannelAttachments(channel.id, [])}
-                          >
-                            {t("Text only")}
-                          </Button>
-                        </div>
-                        {attachments.length > 0 && (
-                          <div className="flex flex-wrap gap-2">
-                            {attachments.map((attachment, index) => {
-                              const assetId = attachment.assetId;
-                              if (!assetId) return null;
-                              const selected = channelAttachments.some(
-                                (item) => item.assetId === assetId,
-                              );
-                              return (
-                                <Button
-                                  key={attachment.key}
-                                  type="button"
-                                  variant={selected ? "secondary" : "outline"}
-                                  size="sm"
-                                  aria-pressed={selected}
-                                  className="text-xs h-8 gap-1.5 max-w-[12rem]"
-                                  onClick={() => handleToggleChannelAttachment(channel.id, assetId)}
-                                >
-                                  {selected ? (
-                                    <Check className="size-3.5 shrink-0" />
-                                  ) : (
-                                    <ImageIcon className="size-3.5 shrink-0" />
-                                  )}
-                                  <span className="truncate">
-                                    {index + 1}. {attachment.name}
-                                  </span>
-                                </Button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </ComposerSection>
-
-                      <PlatformSettings
-                        provider={channel.providerIdentifier}
-                        channelName={channel.name}
-                        channelId={channel.id}
-                        settings={override.settings}
-                        onChange={(newSettings) =>
-                          handleChannelOverrideChange(channel.id, { settings: newSettings })
-                        }
-                        onRequirementsChange={handleRequirementsChange}
-                      />
-                    </div>
-                  </TabsContent>
-                );
-              })}
+              </ComposerSection>
             </div>
-          </Tabs>
+          </ComposerSection>
+
+          {selectedChannels.map((channel: ChannelIntegration) => {
+            const override = channelOverrides[channel.id] ?? {
+              content: sharedContent,
+              hasOverride: false,
+              settings: {},
+            };
+            const distribution = postQuery.data?.distributions.find(
+              (item) => item.platform_account_id === channel.id,
+            );
+            const channelAttachments = attachmentsForChannel(channel.id);
+            const inheritsAttachments = !attachmentOverrides[channel.id];
+            const channelCaptionLimit = captionLimitFor(channel);
+            const channelContent = resolvedContentFor(channel.id);
+
+            return (
+              <section
+                key={channel.id}
+                aria-label={channel.name}
+                className="shrink-0 border-t border-line pt-6"
+              >
+                <div className="flex flex-col gap-6">
+                  <ComposerSection
+                    icon={channel.providerIdentifier}
+                    title={targetLabelFor(channel)}
+                  >
+                    {distribution && (
+                      <p className="text-(length:--font-size-micro) text-ink-3">
+                        {tStatus(distribution.status)}
+                      </p>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      <label
+                        htmlFor={`channel-override-text-${channel.id}`}
+                        className="text-xs font-medium text-ink-3"
+                      >
+                        {t("Custom Text for {name}", { name: channel.name })}
+                      </label>
+                      <Textarea
+                        id={`channel-override-text-${channel.id}`}
+                        value={channelContent}
+                        onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
+                          handleChannelOverrideChange(channel.id, {
+                            hasOverride: true,
+                            content: clampCaption(event.target.value, channelCaptionLimit),
+                          })
+                        }
+                        autoGrow
+                        className="min-h-36 max-h-72 resize-none text-sm"
+                      />
+                      <span
+                        className={cn(
+                          "text-(length:--font-size-micro) text-ink-3 self-end font-mono",
+                          channelCaptionLimit !== null &&
+                            captionLength(channelContent) >= channelCaptionLimit &&
+                            "text-red",
+                        )}
+                        title={
+                          channelCaptionLimit === null
+                            ? t("Character limit unavailable")
+                            : undefined
+                        }
+                      >
+                        {t("{count}/{limit} characters", {
+                          count: captionLength(channelContent),
+                          limit: channelCaptionLimit ?? "—",
+                        })}
+                      </span>
+                    </div>
+                    {override.hasOverride && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="self-start text-xs"
+                        onClick={() =>
+                          handleChannelOverrideChange(channel.id, {
+                            hasOverride: false,
+                            content: sharedContent,
+                          })
+                        }
+                      >
+                        {t("Remove Custom Override")}
+                      </Button>
+                    )}
+                  </ComposerSection>
+
+                  <ComposerSection
+                    icon={ImageIcon}
+                    title={t("Attachments for {name}", { name: channel.name })}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant={inheritsAttachments ? "secondary" : "outline"}
+                        size="sm"
+                        className="text-xs"
+                        aria-pressed={inheritsAttachments}
+                        onClick={() => handleSetChannelAttachments(channel.id, null)}
+                      >
+                        {t("Use all post attachments")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={
+                          !inheritsAttachments && channelAttachments.length === 0
+                            ? "secondary"
+                            : "outline"
+                        }
+                        size="sm"
+                        className="text-xs"
+                        aria-pressed={!inheritsAttachments && channelAttachments.length === 0}
+                        onClick={() => handleSetChannelAttachments(channel.id, [])}
+                      >
+                        {t("Text only")}
+                      </Button>
+                    </div>
+                    {attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {attachments.map((attachment, index) => {
+                          const assetId = attachment.assetId;
+                          if (!assetId) return null;
+                          const selected = channelAttachments.some(
+                            (item) => item.assetId === assetId,
+                          );
+                          return (
+                            <Button
+                              key={attachment.key}
+                              type="button"
+                              variant={selected ? "secondary" : "outline"}
+                              size="sm"
+                              aria-pressed={selected}
+                              className="text-xs h-8 gap-1.5 max-w-[12rem]"
+                              onClick={() => handleToggleChannelAttachment(channel.id, assetId)}
+                            >
+                              {selected ? (
+                                <Check className="size-3.5 shrink-0" />
+                              ) : (
+                                <ImageIcon className="size-3.5 shrink-0" />
+                              )}
+                              <span className="truncate">
+                                {index + 1}. {attachment.name}
+                              </span>
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </ComposerSection>
+
+                  <PlatformSettings
+                    provider={channel.providerIdentifier}
+                    channelName={channel.name}
+                    channelId={channel.id}
+                    settings={override.settings}
+                    onChange={(newSettings) =>
+                      handleChannelOverrideChange(channel.id, { settings: newSettings })
+                    }
+                    onRequirementsChange={handleRequirementsChange}
+                  />
+                </div>
+              </section>
+            );
+          })}
         </div>
 
         {/* Where and when: the destinations block and the publishing controls the

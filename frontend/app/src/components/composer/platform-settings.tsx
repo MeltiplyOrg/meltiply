@@ -2,7 +2,6 @@ import React, { useEffect, useId } from "react";
 import { Input } from "@meltiply/ui/input";
 import { Switch } from "@meltiply/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
-import { Badge } from "@meltiply/ui/badge";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { usePlatformPublishingRequirements } from "@/lib/queries";
 import { useI18n, type TranslationValues } from "@/lib/i18n";
@@ -161,15 +160,13 @@ const FALLBACK_TIKTOK_PRIVACY_LEVELS: TikTokPrivacyLevel[] = [
 
 /**
  * Shared panel chrome for a provider settings editor: the bordered card with
- * the provider badge and "{name} Configuration" heading.
+ * the "{name} Configuration" heading. The enclosing section identifies its provider.
  */
 function ProviderPanel({
-  providerLabel,
   channelName,
   t,
   children,
 }: {
-  providerLabel: string;
   channelName: string;
   t: Translate;
   children: React.ReactNode;
@@ -178,9 +175,6 @@ function ProviderPanel({
     <div className="flex flex-col gap-4 rounded-control border border-line bg-surface p-4">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-ink flex items-center gap-2">
-          <Badge variant="outline" className="font-mono text-(length:--font-size-micro) uppercase">
-            {providerLabel}
-          </Badge>
           {t("{name} Configuration", { name: channelName })}
         </span>
       </div>
@@ -218,7 +212,7 @@ function YoutubeEditor({
   };
 
   return (
-    <ProviderPanel providerLabel="YouTube" channelName={channelName} t={t}>
+    <ProviderPanel channelName={channelName} t={t}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5 sm:col-span-2">
           <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-ink-3">
@@ -280,7 +274,7 @@ function TikTokEditor({
   };
 
   return (
-    <ProviderPanel providerLabel="TikTok" channelName={channelName} t={t}>
+    <ProviderPanel channelName={channelName} t={t}>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-ink-3">
           {t("Post Title (optional, max 90 characters)")}
@@ -399,9 +393,6 @@ function ThreadsEditor({ t }: ProviderEditorProps<Record<string, never>>): React
   return (
     <div className="rounded-control border border-line bg-surface p-4 text-xs text-ink-3 flex items-center justify-between">
       <div className="flex items-center gap-2">
-        <Badge variant="outline" className="font-mono text-(length:--font-size-micro) uppercase">
-          Threads
-        </Badge>
         <span>{t("Uses standard text and attached media.")}</span>
       </div>
     </div>

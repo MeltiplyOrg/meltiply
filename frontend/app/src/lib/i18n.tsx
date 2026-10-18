@@ -470,7 +470,7 @@ const spanishTranslations: Record<string, string> = {
   "Clear filters": "Limpiar filtros",
   "Clear search": "Limpiar búsqueda",
   "Connect a channel": "Conectar un canal",
-  "Composer sections": "Secciones del redactor",
+  "Post content": "Contenido de la publicación",
   "What do you want to publish?": "¿Qué quieres publicar?",
   "Connect social account": "Conectar cuenta social",
   "Connect your social accounts to start publishing and scheduling across platforms.":
@@ -482,7 +482,6 @@ const spanishTranslations: Record<string, string> = {
   "Could not retry this post": "No se pudo reintentar esta publicación",
   "Create post": "Crear publicación",
   "Custom Text for {name}": "Texto personalizado para {name}",
-  "Customize for This Channel": "Personalizar para este canal",
   "Decrease grid columns": "Reducir columnas de cuadrícula",
   "Delete draft": "Eliminar borrador",
   "Delete this post?": "¿Eliminar esta publicación?",
@@ -602,7 +601,7 @@ const spanishTranslations: Record<string, string> = {
   "tech, tutorial, social media": "tecnología, tutorial, redes sociales",
   "{count} channel(s)": "{count} canal(es)",
   "{count} channel(s) · {date}": "{count} canal(es) · {date}",
-  "{count} characters": "{count} caracteres",
+  "Character limit unavailable": "Límite de caracteres no disponible",
   "{count}/{limit} characters": "{count}/{limit} caracteres",
   "{count} platforms": "{count} plataformas",
   "{count} post(s) scheduled or published on this date.":

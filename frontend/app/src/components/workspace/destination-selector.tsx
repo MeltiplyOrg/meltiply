@@ -9,10 +9,10 @@ import {
 import { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
 
 import { Button } from "@meltiply/ui/button";
+import { ChannelAvatar } from "@/components/channels/channel-avatar";
 import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { Check, Share2, Plus } from "lucide-react";
-import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { platformDisplayName } from "@/lib/platforms";
 import { cn } from "@meltiply/ui/utils";
 import { Trans, useI18n } from "@/lib/i18n";
@@ -38,9 +38,9 @@ export interface DestinationSelectorProps {
  * Owns the composer's own Brand Profile picker: publishing targets exactly one
  * profile, so the block leads with the canonical `BrandProfileSelect` (without
  * the aggregate row, which cannot publish) and the profile choice lands in the
- * shared workspace selection the rest of the drawer already reads. Each
- * destination is one row led by the platform's logo, since these accounts
- * publish without avatars and the provider is what a creator recognizes.
+ * shared workspace selection the rest of the drawer already reads. Every
+ * profile-owned destination shows its account photo or initials, with a small
+ * provider badge, account name, and explicit selection or connection state.
  *
  * Filters connected integrations to the channels owned by the currently selected
  * Brand Profile (the aggregate "All Brand Profiles" view lists every channel but
@@ -180,6 +180,15 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
               const isAvailable = statusInfo?.isAvailable ?? true;
               const isSelected = selectedChannelIdSet.has(channel.id);
               const isUngrouped = channel.brandProfileId == null;
+              const avatar = (
+                <span aria-hidden="true" className="shrink-0">
+                  <ChannelAvatar
+                    provider={channel.providerIdentifier}
+                    channelName={channel.name}
+                    picture={channel.picture}
+                  />
+                </span>
+              );
 
               // Unavailable accounts and the aggregate view share one
               // treatment: the row states the account's identity, and the
@@ -189,13 +198,13 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                   <Tooltip key={channel.id}>
                     <TooltipTrigger asChild>
                       <div className="flex cursor-not-allowed select-none items-center gap-2 rounded-control border border-line bg-inset px-2 py-1.5 text-(length:--font-size-control) text-ink-3">
-                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface">
-                          <PlatformIcon
-                            provider={channel.providerIdentifier}
-                            className="size-3.5"
-                          />
+                        {avatar}
+                        <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                          <span className="w-full truncate font-medium">{channel.name}</span>
+                          <span className="text-(length:--font-size-micro)">
+                            {platformDisplayName(channel.providerIdentifier)}
+                          </span>
                         </span>
-                        <span className="min-w-0 flex-1 truncate font-medium">{channel.name}</span>
                         {(channel.disabled || channel.refreshNeeded || channel.inBetweenSteps) && (
                           <span className="flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-red">
                             {channel.disabled
@@ -235,26 +244,23 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                       : "border-line bg-surface text-ink-2 hover:bg-hover hover:text-ink",
                   )}
                 >
-                  {/* The platform logo stands in for both the avatar these
-                      accounts publish without and the slug a creator had to
-                      read before. */}
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface">
-                    <PlatformIcon provider={channel.providerIdentifier} className="size-3.5" />
+                  {avatar}
+                  <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                    <span className="w-full truncate text-left font-medium">{channel.name}</span>
+                    <span
+                      className={cn(
+                        "text-(length:--font-size-micro)",
+                        isSelected ? "text-accent-ink/70" : "text-ink-3",
+                      )}
+                    >
+                      {platformDisplayName(channel.providerIdentifier)}
+                    </span>
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-left">{channel.name}</span>
                   {isUngrouped && (
                     <span className="shrink-0 text-(length:--font-size-micro) text-ink-3">
                       {t("(ungrouped)")}
                     </span>
                   )}
-                  <span
-                    className={cn(
-                      "shrink-0 text-(length:--font-size-micro)",
-                      isSelected ? "text-accent-ink/70" : "text-ink-3",
-                    )}
-                  >
-                    {platformDisplayName(channel.providerIdentifier)}
-                  </span>
                   <span
                     aria-hidden="true"
                     className={cn(

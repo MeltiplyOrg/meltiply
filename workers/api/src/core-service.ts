@@ -499,13 +499,12 @@ export function createCoreApiService(
     /**
      * Queries pending and completed publication events across a given time window via Effect.
      *
-     * Joins each Distribution to its Post so calendar entries carry the durable
-     * Post identity and title rather than reconstructing a composition from an
-     * Asset, filtering by `event_at` within `[start, end]`. Publications of
-     * soft-deleted Posts stay visible so a deleted Post's history is never
-     * rewritten by editing another target. When `brandProfileId` is provided
-     * the result is restricted to that Brand Profile's publications; omitted
-     * returns the workspace-wide aggregate.
+     * Joins each Distribution to its retained Post so calendar entries carry
+     * the durable Post identity and title. Soft-deleted Posts are excluded just
+     * like the Post list; retained Distribution history remains available to
+     * analytics and reconciliation without resurrecting deleted compositions.
+     * Filters `event_at` within `[start, end]` and, when `brandProfileId` is
+     * supplied, restricts results to that Brand Profile's publications.
      *
      * @param env - Worker environment bindings.
      * @param session - Authenticated user session claims.
@@ -526,6 +525,7 @@ export function createCoreApiService(
              FROM distributions d
              JOIN posts p ON p.id = d.post_id AND p.org_id = d.org_id
              WHERE d.event_at >= $1 AND d.event_at <= $2
+               AND p.deleted_at IS NULL
                AND ($4::uuid IS NULL OR d.brand_profile_id = $4)
                AND ${activeBrandProfilePredicate("d.brand_profile_id")}
              ORDER BY d.event_at ASC, d.id ASC

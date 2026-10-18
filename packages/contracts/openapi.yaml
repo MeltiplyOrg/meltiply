@@ -3769,6 +3769,7 @@ components:
           attachments,
           targets,
           distributions,
+          analytics,
           created_at,
           updated_at,
         ]
@@ -3827,12 +3828,55 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Distribution"
+        analytics:
+          oneOf:
+            - $ref: "#/components/schemas/PostAnalytics"
+            - type: "null"
+          description: |
+            Sum of each published Distribution's latest analytics snapshot,
+            read in the same scoped Post batch. Null when no published Channel
+            has measurements. Missing measurements do not become zero; an
+            explicitly measured zero remains zero. Unsupported metrics are null.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    PostAnalytics:
+      type: object
+      additionalProperties: false
+      required: [likes, comments, shares, saves, clicks, views, impressions, reach]
+      description: |
+        Latest measured counters summed across a Post's published Channels.
+        Channels without snapshots do not contribute; these are not
+        deduplicated cross-platform audience counts. Saves and clicks are
+        currently untracked and returned as null.
+      properties:
+        likes:
+          type: [integer, "null"]
+          minimum: 0
+        comments:
+          type: [integer, "null"]
+          minimum: 0
+        shares:
+          type: [integer, "null"]
+          minimum: 0
+        saves:
+          type: [integer, "null"]
+          minimum: 0
+        clicks:
+          type: [integer, "null"]
+          minimum: 0
+        views:
+          type: [integer, "null"]
+          minimum: 0
+        impressions:
+          type: [integer, "null"]
+          minimum: 0
+        reach:
+          type: [integer, "null"]
+          minimum: 0
     PostListResponse:
       type: object
       additionalProperties: false

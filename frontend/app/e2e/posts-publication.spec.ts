@@ -267,10 +267,21 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
   const when = new Date(Date.now() + minutesFromNow * 60_000);
   const pad = (value: number) => String(value).padStart(2, "0");
   await page
-    .locator('input[type="datetime-local"]')
-    .fill(
-      `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T${pad(when.getHours())}:${pad(when.getMinutes())}`,
-    );
+    .getByRole("group", { name: "Publishing", exact: true })
+    .getByRole("button", { name: "Schedule", exact: true })
+    .click();
+  const picker = page.getByRole("group", { name: "Date & time", exact: true });
+  await picker.getByRole("button", { name: /^Date / }).click();
+  await picker
+    .getByRole("button", {
+      name: new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(when),
+      exact: true,
+    })
+    .click();
+  await picker.getByRole("combobox", { name: "Hour", exact: true }).click();
+  await page.getByRole("option", { name: pad(when.getHours()), exact: true }).click();
+  await picker.getByRole("combobox", { name: "Minute", exact: true }).click();
+  await page.getByRole("option", { name: pad(when.getMinutes()), exact: true }).click();
 }
 
 /** Applies a status bucket through the filter disclosure, then restores the collection viewport. */
@@ -583,7 +594,7 @@ test("shows the same Post and order in Table, Grid, Calendar, and Details", asyn
     await composerTextarea(page).fill(caption);
     await targetOnlyChannel(page, "Acceptance Threads", "Acceptance Reels");
     await scheduleInMinutes(page, 30 + index);
-    await page.getByRole("button", { name: /^schedule$/i }).click();
+    await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
     await returnToPosts(page);
   }
 
@@ -743,7 +754,7 @@ test("edits a pending target without touching published history and explains wha
   await targetOnlyChannel(page, channelNames.threads, channelNames.instagram);
   await composerTextarea(page).fill(pendingCaption);
   await scheduleInMinutes(page, 180);
-  await page.getByRole("button", { name: /^schedule$/i }).click();
+  await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
   await returnToPosts(page);
 
   await waitForPostUnderStatus(page, pendingCaption, /^scheduled$/i);

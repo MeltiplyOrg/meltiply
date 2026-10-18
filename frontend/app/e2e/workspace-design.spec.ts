@@ -774,11 +774,16 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       await calendar
         .getByRole("button", { name: `Schedule post on ${dateLabel}`, exact: true })
         .click();
-      const pad = (value: number) => String(value).padStart(2, "0");
-      // A calendar entry point seeds scheduling, so the date field is already there.
-      await expect(page.getByLabel("Date & time", { exact: true })).toHaveValue(
-        `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T10:00`,
-      );
+      // Calendar entry points seed the same local date and 10:00 time in the redesigned picker.
+      const picker = page.getByRole("group", { name: "Date & time", exact: true });
+      await picker.getByRole("button", { name: /^Date / }).click();
+      await expect(
+        picker
+          .getByRole("gridcell", { selected: true })
+          .getByRole("button", { name: dateLabel, exact: true }),
+      ).toBeVisible();
+      await expect(picker.getByRole("combobox", { name: "Hour", exact: true })).toHaveText("10");
+      await expect(picker.getByRole("combobox", { name: "Minute", exact: true })).toHaveText("00");
       await closeComposer(page);
     }
   }

@@ -10,6 +10,7 @@ import { useWorkspace } from "@/context/workspace.context";
 import { DestinationSelector } from "@/components/workspace/destination-selector";
 import type { WorkspaceView } from "@/components/layout/navigation-shell";
 import { PlatformSettings, providerDescriptorFor, type PostTargetDraft } from "./platform-settings";
+import { ScheduleDateTime } from "./schedule-date-time";
 import { MediaPreview } from "@/components/media/media-preview";
 import { Button } from "@meltiply/ui/button";
 import { Textarea } from "@meltiply/ui/textarea";
@@ -249,7 +250,7 @@ function isUploadCancellation(error: unknown): boolean {
 }
 
 /**
- * Formats a Date or ISO string into a local HTML datetime-local value
+ * Formats a Date or ISO string into the composer's local minute-precision value
  * ('YYYY-MM-DDTHH:mm'). Midnight on the supplied day becomes 10:00 local so a
  * calendar click offers a realistic daytime slot instead of the past.
  *
@@ -2654,24 +2655,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             />
 
             {publishMode === "schedule" && (
-              <div className="flex flex-col gap-1.5">
-                <label
-                  htmlFor="composer-schedule-date"
-                  className="text-(length:--font-size-micro) font-medium text-ink-3"
-                >
-                  {t("Date & time")}
-                </label>
-                <Input
-                  id="composer-schedule-date"
-                  type="datetime-local"
-                  value={scheduleDate}
-                  onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-                    setScheduleDate(event.target.value);
-                    markDirty();
-                  }}
-                  className="h-9 bg-field"
-                />
-              </div>
+              <ScheduleDateTime
+                value={scheduleDate}
+                onChange={(value) => {
+                  setScheduleDate(value);
+                  markDirty();
+                }}
+              />
             )}
 
             {/* What the selected mode will do, in the mode's own words: the

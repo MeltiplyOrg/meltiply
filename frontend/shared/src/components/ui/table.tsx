@@ -50,7 +50,12 @@ export function TableHead({ className, ...props }: ComponentProps<"th">) {
     <th
       scope="col"
       className={cn(
-        "sticky top-0 z-10 h-8 border-b border-line bg-surface px-2 text-left text-xs font-medium text-ink-3 first:pl-4 sm:first:pl-6 group-data-[variant=directory]/table:h-10",
+        // The spreadsheet header sits directly under the toolbar's rule, so it
+        // needs a bottom edge only. A directory header lives inside a bordered
+        // card: the card's own top border scrolls away with the content, so the
+        // pinned header carries the top edge itself
+        // (the caller drops the card's top border to avoid doubling it).
+        "sticky top-0 z-10 h-8 border-b border-line bg-surface px-2 text-left text-xs font-medium text-ink-3 first:pl-4 sm:first:pl-6 group-data-[variant=directory]/table:h-10 group-data-[variant=directory]/table:border-t",
         className,
       )}
       {...props}

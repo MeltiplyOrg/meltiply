@@ -57,8 +57,13 @@ export function ChannelTableView({
     <TooltipProvider>
       {/* No scroll container of its own: an `overflow` here would capture the
           table's `sticky` header, so the viewport above owns both axes and the
-          header row stays pinned while the directory scrolls. */}
-      <div className="rounded-card border border-line bg-surface">
+          header row stays pinned while the directory scrolls. The card keeps
+          both side borders and its rounded bottom, but its top edge and top
+          corners belong to the pinned header's own top border: the card's top
+          border would scroll away with the content and leave the header edgeless,
+          and clipping the corners instead would stop the table scrolling sideways
+          on phones. */}
+      <div className="rounded-b-card border border-line border-t-0 bg-surface">
         <Table variant="directory" className="min-w-220" aria-label={t("Connected accounts")}>
           <colgroup>
             <col className="w-12" />

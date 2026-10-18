@@ -1,6 +1,6 @@
 ---
 title: Analytics
-description: Analytics availability and preserved backend metrics capabilities in Meltiply.
+description: Published Post counters, aggregation, and measurement availability.
 section: Publishing
 order: 7
 ---
@@ -11,15 +11,22 @@ All mock preview panels — including illustrative Link Clicks, Net Growth cards
 
 ## Current availability
 
-The app does not expose engagement metrics. Posts Table, Calendar, and Grid show
-publication outcomes, dates, captions, and attachments—not engagement analytics.
+The Posts **Table** shows **Likes**, **Cmts** (Comments), **Shrs** (Shares),
+**Saves**, **Clicks**, **Views**, **Impr.** (Impressions), and **Reach**. Use the
+**Columns** menu to hide or restore individual counters. Wide tables scroll
+horizontally on desktop and phone.
 
-To review Likes, Comments, Shares, Saves, Clicks, Views, Impressions, or Reach,
-use the native platform's reporting tools. Publishing status in Meltiply is not
-an engagement measurement.
+Only published Channels contribute measurements. Each Post sums the latest
+stored snapshot for each measured published Channel; it never adds historical
+snapshots together. Channels without snapshots contribute no invented values.
+Drafts, unpublished Posts, missing snapshots, and unsupported/untracked counters
+show `-`. A measured zero remains `0`. **Saves** and **Clicks** are currently
+untracked, so those columns show `-`.
 
-Restoring metrics requires a real frontend data path, defined aggregation and
-freshness semantics, loading/error/empty states, and end-to-end verification.
+These are the latest stored provider measurements, not guaranteed live counters.
+They refresh with Post data after the backend synchronizes. Reach is summed per
+Channel, not deduplicated across audiences or platforms. For metrics the
+connected provider does not supply, use its native reporting tools.
 
 ## Backend analytics capabilities
 

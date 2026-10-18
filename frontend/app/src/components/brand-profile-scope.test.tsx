@@ -1032,23 +1032,58 @@ describe("Posts surfaces", () => {
     expect(rows.filter((row) => (row as HTMLInputElement).checked)).toHaveLength(1);
   });
 
-  /**
-   * Guards the published Post projection: caption, status, and actions remain
-   * usable without inventing engagement data that has no supported data path.
-   */
-  it("renders the published Post without unsupported metrics", () => {
+  /** Measured zero is data; drafts, missing snapshots, and unsupported metrics are not. */
+  it("shows published measurements and keeps untracked metrics as dashes", () => {
     seedPublishedPost();
+    const source = queryResults.posts.data.posts[0]!;
+    const published = {
+      ...source,
+      distributions: source.distributions.map((distribution) => ({
+        ...distribution,
+        publication: null,
+      })),
+    };
+    queryResults.posts.data.posts = [
+      {
+        ...published,
+        default_text: "Measured Post",
+        analytics: {
+          likes: 0,
+          comments: 2,
+          shares: 3,
+          saves: null,
+          clicks: null,
+          views: 210,
+          impressions: 320,
+          reach: 108,
+        },
+      },
+      { ...published, id: "unmeasured-post", default_text: "Unmeasured Post", analytics: null },
+      {
+        ...published,
+        id: "draft-post",
+        default_text: "Draft Post",
+        status: "draft",
+        distributions: [],
+        analytics: null,
+      },
+    ];
     renderPosts();
-
-    const row = screen.getByRole("row", { name: /Launch note/ });
-    expect(within(row).getByText("published")).toBeVisible();
-    expect(screen.getByRole("columnheader", { name: "Status" })).toBeVisible();
-    for (const label of METRIC_LABELS) {
+    const measured = screen.getByRole("row", { name: /Measured Post/ });
+    expect(
+      within(measured)
+        .getAllByRole("cell")
+        .slice(-8)
+        .map((cell) => cell.textContent),
+    ).toEqual(["0", "2", "3", "-", "-", "210", "320", "108"]);
+    for (const name of [/Unmeasured Post/, /Draft Post/]) {
+      const row = screen.getByRole("row", { name });
       expect(
-        screen.queryByRole("columnheader", { name: label }),
-        `${label} column must not render`,
-      ).not.toBeInTheDocument();
-      expect(screen.queryByText(label), `${label} must not render`).not.toBeInTheDocument();
+        within(row)
+          .getAllByRole("cell")
+          .slice(-8)
+          .map((cell) => cell.textContent),
+      ).toEqual(["-", "-", "-", "-", "-", "-", "-", "-"]);
     }
   });
 

@@ -14,6 +14,7 @@ import { abbreviateRecordId } from "@/lib/format";
 import { cn } from "@meltiply/ui/utils";
 import { normalizePostStatus, resolveRowCaption, resolveRowProviders } from "./posts-helpers";
 import { groupPostRows, type PostGroupBy } from "./post-groups";
+import { postAnalyticsColumns, type PostAnalyticsColumn } from "./post-view-options";
 import {
   SKELETON_TABLE_KEYS,
   type BrandProfile,
@@ -80,6 +81,8 @@ const PUBLISH_TIME_FORMAT = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
   hour12: true,
 });
+const METRIC_FORMAT = new Intl.NumberFormat("en-US");
+type AnalyticsColumn = PostAnalyticsColumn;
 
 /**
  * One resolved Post row of the Posts table.
@@ -99,6 +102,7 @@ const PUBLISH_TIME_FORMAT = new Intl.DateTimeFormat("en-US", {
  * @param props.showChannels - Whether the Channels column is visible.
  * @param props.showDate - Whether the Publish date column is visible.
  * @param props.showProfile - Whether the Brand Profile column is visible.
+ * @param props.analyticsColumns - Visible measured-counter columns in toolbar order.
  * @param props.onToggleSelection - Toggles this row's selection.
  * @param props.onViewDetails - Opens the Post drawer for this row.
  * @returns The row's table cells.
@@ -113,6 +117,7 @@ const PostTableRow = React.memo(function PostTableRow({
   showChannels,
   showDate,
   showProfile,
+  analyticsColumns,
   onToggleSelection,
   onViewDetails,
 }: {
@@ -125,6 +130,7 @@ const PostTableRow = React.memo(function PostTableRow({
   showChannels: boolean;
   showDate: boolean;
   showProfile: boolean;
+  analyticsColumns: readonly AnalyticsColumn[];
   onToggleSelection: (postId: string) => void;
   onViewDetails: (postId: string) => void;
 }) {
@@ -132,6 +138,10 @@ const PostTableRow = React.memo(function PostTableRow({
   const providers = resolveRowProviders(post);
   const publishDate = new Date(post.date);
   const attachments = post.post?.attachments.length ?? 0;
+  const analytics =
+    post.post?.status !== "draft" && post.channels.some((channel) => channel.status === "published")
+      ? post.post?.analytics
+      : null;
 
   return (
     <TableRow
@@ -208,6 +218,14 @@ const PostTableRow = React.memo(function PostTableRow({
           </span>
         </PostRowCell>
       )}
+      {analyticsColumns.map((column) => {
+        const value = analytics?.[column.id];
+        return (
+          <PostRowCell key={column.id} className="justify-end px-3 font-mono tabular-nums">
+            {value == null ? <span className="text-ink-3">-</span> : METRIC_FORMAT.format(value)}
+          </PostRowCell>
+        );
+      })}
     </TableRow>
   );
 });
@@ -225,6 +243,7 @@ const PostTableRow = React.memo(function PostTableRow({
  * @param props.showChannels - Whether the Channels column is visible.
  * @param props.showDate - Whether the Publish date column is visible.
  * @param props.showProfile - Whether the Brand Profile column is visible.
+ * @param props.analyticsColumns - Visible analytics slots matching resolved rows.
  * @returns A single 36px placeholder row.
  */
 function PostRowSkeleton({
@@ -232,11 +251,13 @@ function PostRowSkeleton({
   showChannels,
   showDate,
   showProfile,
+  analyticsColumns,
 }: {
   showStatus: boolean;
   showChannels: boolean;
   showDate: boolean;
   showProfile: boolean;
+  analyticsColumns: readonly AnalyticsColumn[];
 }) {
   return (
     <TableRow data-post-row="" aria-hidden="true">
@@ -269,6 +290,11 @@ function PostRowSkeleton({
           <Skeleton className="h-3.5 w-24" />
         </PostRowCell>
       )}
+      {analyticsColumns.map((column) => (
+        <PostRowCell key={column.id} className="justify-end px-3">
+          <Skeleton className="h-3.5 w-8" />
+        </PostRowCell>
+      ))}
     </TableRow>
   );
 }
@@ -317,14 +343,30 @@ export const PostTableView = React.memo(function PostTableView({
   const showChannels = !hiddenColumns.has("channels");
   const showDate = !hiddenColumns.has("date");
   const showProfile = !hiddenColumns.has("profile");
+  const analyticsColumns = useMemo(
+    () => postAnalyticsColumns(t).filter((column) => !hiddenColumns.has(column.id)),
+    [hiddenColumns, t],
+  );
   const columnCount =
-    2 + Number(showStatus) + Number(showChannels) + Number(showDate) + Number(showProfile);
+    2 +
+    Number(showStatus) +
+    Number(showChannels) +
+    Number(showDate) +
+    Number(showProfile) +
+    analyticsColumns.length;
   return (
     <div
       ref={scrollRef}
       className={cn("min-h-0 flex-1 overflow-auto pb-24", selectedIds.size > 0 && "pb-32")}
     >
-      <Table variant="spreadsheet" className="min-w-191 sm:min-w-221" aria-label={t("Posts table")}>
+      <Table
+        variant="spreadsheet"
+        className="min-w-[calc(47.75rem+var(--post-metrics-width))] sm:min-w-[calc(55.25rem+var(--post-metrics-width))]"
+        style={
+          { "--post-metrics-width": `${analyticsColumns.length * 72}px` } as React.CSSProperties
+        }
+        aria-label={t("Posts table")}
+      >
         <colgroup>
           <col className="w-12" />
           <col />
@@ -332,6 +374,9 @@ export const PostTableView = React.memo(function PostTableView({
           {showChannels && <col className="w-27.5" />}
           {showDate && <col className="w-38.5" />}
           {showProfile && <col className="w-40" />}
+          {analyticsColumns.map((column) => (
+            <col key={column.id} className="w-18" />
+          ))}
         </colgroup>
         <TableHeader>
           <TableRow>
@@ -361,6 +406,16 @@ export const PostTableView = React.memo(function PostTableView({
               </TableHead>
             )}
             {showProfile && <TableHead>{t("Brand Profile")}</TableHead>}
+            {analyticsColumns.map((column) => (
+              <TableHead
+                key={column.id}
+                className="text-right"
+                aria-label={column.name}
+                title={column.name}
+              >
+                {column.label}
+              </TableHead>
+            ))}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -372,6 +427,7 @@ export const PostTableView = React.memo(function PostTableView({
                 showChannels={showChannels}
                 showDate={showDate}
                 showProfile={showProfile}
+                analyticsColumns={analyticsColumns}
               />
             ))
           ) : posts.length === 0 ? (
@@ -446,6 +502,7 @@ export const PostTableView = React.memo(function PostTableView({
                       showChannels={showChannels}
                       showDate={showDate}
                       showProfile={showProfile}
+                      analyticsColumns={analyticsColumns}
                       onToggleSelection={onToggleSelection}
                       onViewDetails={onViewDetails}
                     />

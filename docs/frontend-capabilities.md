@@ -16,10 +16,12 @@ This document records the current creator-facing interface. Backend endpoints an
 ## Collection behavior
 
 - Table, Calendar, and Grid share Post identity and real publishing state. Table grouping/columns change presentation; Calendar uses real dates and explicit scheduling entry. There is no drag-rescheduling contract.
+- Posts Table includes Likes, Cmts, Shrs, Saves, Clicks, Views, Impr., and Reach in the Columns menu. Published Channel snapshots are summed once per Post using each Channel's latest stored measurement; measured zeros stay zero. Drafts, unpublished Posts, absent snapshots, and untracked metrics show `-`. Saves and Clicks are currently untracked. There is no engagement dashboard or cross-platform audience deduplication.
 - Profile selection lives in collection filters or jump search, not sidebar sections. All Brand Profiles is aggregate review; composition/publishing requires one owning profile.
 - Field-row filters use supported equality predicates. Top-bar jump search covers pages and loaded profiles; route search covers the current collection, not a global index.
 - Selection belongs to loaded authorized records and survives view/filter/group presentation changes. Select-all is visually checked only for the whole visible set. The shared pill reports the real count; confirmed batches remove successes and retain failures.
 - Post inspection uses the canonical edge/phone drawer and real properties, caption, attachments, and Channel outcomes. Composing and editing open the same drawer, whose footer pins Save, Schedule, and Publish Now in view. Deleting a stored Post or disconnecting a Channel does not remove published platform copies.
+- Successful Post deletion removes the composition from Table, Calendar, and Grid, including after switching views or reloading. Retained Distribution history does not put deleted Posts back into Calendar.
 - One animation implementation is retained. There is no separate motion mode, preference provider, root flag, or alternate-mode branch.
 
 ## Public surfaces
@@ -34,7 +36,7 @@ Public article search uses its build-time documentation index and a canonical sh
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Workspace switching                      | Identity is read-only; the active session resolves the workspace.                                                                                  |
 | Time-slot Queues                         | Manual Schedule/Publish Now only. Queued is a delivery state, not membership in a recurring named schedule.                                        |
-| Engagement analytics                     | No Post engagement fields or app analytics dashboard; inspect native platform metrics. Backend analytics APIs are not a UI.                        |
+| Analytics dashboard                      | Post counters are available in Table; there is no dedicated dashboard, charts, or audience reporting interface.                                    |
 | Inbox/replies                            | No in-app comment reader or reply workflow; use the native platform. Backend syncing does not create an app route.                                 |
 | AI Studio/Plugs                          | No simulated assistant, recommendation, integration directory, or automation configuration screen.                                                 |
 | Team/admin/billing                       | No invitations, membership administration, checkout, portal, payment integration, or notification configuration. Settings is not an admin console. |

@@ -35,6 +35,7 @@ import type { PostViewMode, PostStatusFilter, PostSortKey, BrandProfile } from "
 import {
   POST_COLLECTION_MODES,
   POST_VIEW_OPTIONS,
+  postAnalyticsColumns,
   type PostCollectionMode,
 } from "./post-view-options";
 
@@ -102,6 +103,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
     { id: "channels", label: t("Channels") },
     { id: "date", label: t("Publish date") },
     { id: "profile", label: t("Brand Profile") },
+    ...postAnalyticsColumns(t).map((column) => ({ id: column.id, label: column.name })),
   ];
   const activeCount =
     Number(statusFilter !== "all") +

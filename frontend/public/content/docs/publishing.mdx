@@ -11,7 +11,7 @@ The **Posts** screen is the publishing hub. It lists everything you have drafted
 
 The page toolbar orders **Table → Calendar → Grid**. **Table** is the default; Posts remains a single sidebar destination. Creating or editing a Post opens the composer workflow, not another collection view.
 
-- **Table** — a spreadsheet-density collection with a sticky metadata header and collapsible counted groups. Group by publication **Status**, **Brand Profile**, or **None**. Use **Columns** to show or hide Status, Channels, Publish date, and Brand Profile without changing Post data.
+- **Table** — a spreadsheet-density collection with a sticky metadata header and collapsible counted groups. Group by publication **Status**, **Brand Profile**, or **None**. Use **Columns** to show or hide Status, Channels, Publish date, Brand Profile, and the analytics columns **Likes**, **Cmts**, **Shrs**, **Saves**, **Clicks**, **Views**, **Impr.**, and **Reach**. Published Posts show stored measured values; drafts, unpublished Posts, missing measurements, and untracked metrics show `-`. See [Analytics](/docs/analytics) for aggregation and availability.
 - **Calendar** — Gr8r-style **Month** and **Week** layouts for actual publishing dates. Use **Today** or previous/next controls to navigate. Month shows up to three compact Post chips per day; **+N more** or the day number opens that day's selectable Post list. Week shows all Posts in seven date columns. Select a Post chip to inspect it; a day's **+** opens the composer with that date pre-filled when a Brand Profile is selected. Calendar does not drag-reschedule existing Posts.
 - **Grid** — a media-card gallery of the same Posts with an adjustable column count.
 
@@ -27,7 +27,9 @@ Posts remain selected for retry.
 
 Deletion uses each Post's owning Brand Profile, so individual and bulk deletion
 also work in **All Brand Profiles**. Changing the active Brand Profile clears
-selection. Deleting a stored Post never removes its published platform copies.
+selection. A successful deletion removes the Post from Table, Calendar, and Grid,
+including after switching views or reloading. It never removes published platform
+copies; retained publication history does not bring the Post back into Calendar.
 
 ## Before you publish
 

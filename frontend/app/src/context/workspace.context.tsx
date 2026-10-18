@@ -42,7 +42,12 @@ export interface WorkspaceContextValue {
   /** Selects the active Brand Profile; `null` returns to the aggregate view. */
   setSelectedBrandProfileId: (id: string | null) => void;
   toggleChannelSelection: (channelId: string) => void;
-  setSelectedChannelIds: (ids: string[]) => void;
+  /**
+   * Replaces the selected destination set. `null` restores the eligible-default
+   * selection a fresh workspace starts from; `[]` stays an intentional empty
+   * selection the creator asked for, so the two are never collapsed.
+   */
+  setSelectedChannelIds: (ids: string[] | null) => void;
   refreshWorkspace: () => Promise<void>;
   logout: () => Promise<void>;
   /** Selected platform filter across the workspace (`[]` means all platforms). */
@@ -240,8 +245,12 @@ export function WorkspaceProvider({
     [defaultSelectedChannelIds],
   );
 
-  /** Stores an explicit channel set, including [] instead of restoring defaults. */
-  const setSelectedChannelIdsTracked = useCallback((ids: string[]) => {
+  /**
+   * Stores a channel set verbatim: an explicit list (including `[]`) replaces the
+   * selection, while `null` returns to the eligible defaults — the state a fresh
+   * workspace starts from, which is what abandoning a composition restores.
+   */
+  const setSelectedChannelIdsTracked = useCallback((ids: string[] | null) => {
     setSelectedChannelIds(ids);
   }, []);
 

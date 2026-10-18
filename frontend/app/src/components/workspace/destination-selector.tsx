@@ -2,11 +2,16 @@ import { useCallback } from "react";
 import { useWorkspace, type ChannelStatusInfo } from "@/context/workspace.context";
 import type { ChannelIntegration } from "@/api/types";
 import type { WorkspaceView } from "@/components/layout/navigation-shell";
+import {
+  BrandProfileSelect,
+  brandProfileFilterLabel,
+} from "@/components/workspace/brand-profile-select";
+import { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
 
 import { Button } from "@meltiply/ui/button";
 import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
-import { Check, AlertCircle, Share2, Layers, Plus } from "lucide-react";
+import { Check, AlertCircle, Share2, Plus } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 import { Trans, useI18n } from "@/lib/i18n";
 
@@ -28,6 +33,11 @@ export interface DestinationSelectorProps {
 /**
  * Destination channel selector toolbar for choosing target social media accounts.
  *
+ * Owns the composer's own Brand Profile picker: publishing targets exactly one
+ * profile, so the block leads with the canonical `BrandProfileSelect` (without
+ * the aggregate row, which cannot publish) and the profile choice lands in the
+ * shared workspace selection the rest of the drawer already reads.
+ *
  * Filters connected integrations to the channels owned by the currently selected
  * Brand Profile (the aggregate "All Brand Profiles" view lists every channel but
  * is read-only for publishing), displays real-time connection status badges
@@ -37,12 +47,14 @@ export interface DestinationSelectorProps {
  * connecting new social channels.
  *
  * @param props - Navigation and channel addition action handlers.
- * @returns The rendered destination toolbar with selection pills and quick-add actions.
+ * @returns The rendered destination toolbar with the profile picker, selection pills, and quick-add actions.
  */
 export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSelectorProps = {}) {
   const {
+    brandProfiles,
     integrations,
     selectedBrandProfileId,
+    setSelectedBrandProfileId,
     selectedChannelIds,
     channelStatuses,
     toggleChannelSelection,
@@ -91,6 +103,17 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
     selectedChannelIdSet.has(ch.id),
   ).length;
 
+  /**
+   * Trigger text for the profile picker. The aggregate sentinels are reported as
+   * a missing choice rather than "All Brand Profiles", because publishing always
+   * needs one owning profile; a concrete id resolves through the shared filter
+   * label so the drawer, the Channels directory, and the Posts toolbar name the
+   * same profile identically.
+   */
+  const profileLabel = selectedBrandProfileId
+    ? brandProfileFilterLabel(selectedBrandProfileId, brandProfiles, t)
+    : t("Choose a Brand Profile");
+
   return (
     <TooltipProvider>
       <div className="flex flex-col gap-3">
@@ -107,30 +130,28 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
               />
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            {canPublish && (
-              <span className="hidden items-center gap-1 text-(length:--font-size-micro) text-ink-3 sm:flex">
-                <Layers className="size-3" aria-hidden="true" /> {t("Filtered by active profile")}
-              </span>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleAddChannel}
-              className="h-7 gap-1.5 px-2 text-(length:--font-size-control)"
-            >
-              <Plus className="size-3.5" />
-              <span>{t("Add Channel")}</span>
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleAddChannel}
+            className="h-7 gap-1.5 px-2 text-(length:--font-size-control)"
+          >
+            <Plus className="size-3.5" />
+            <span>{t("Add Channel")}</span>
+          </Button>
         </div>
 
-        {!canPublish && (
-          <p className="text-(length:--font-size-micro) text-ink-3">
-            {t("Choose a Brand Profile to pick publish destinations.")}
-          </p>
-        )}
+        {/* The profile is the destination's own first choice: the list below can
+            only offer selectable channels once one profile owns the post. */}
+        <BrandProfileSelect
+          value={selectedBrandProfileId ?? ""}
+          onValueChange={(id) => setSelectedBrandProfileId(id === "" ? null : id)}
+          brandProfiles={brandProfiles}
+          label={t("Brand Profile")}
+          includeAggregate={false}
+          trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
+        />
 
         {displayedChannels.length === 0 ? (
           <div className="flex flex-col items-center gap-2.5 rounded-control border border-dashed border-line px-3 py-4 text-center">

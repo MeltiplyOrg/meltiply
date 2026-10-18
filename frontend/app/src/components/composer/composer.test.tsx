@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { AppAuthProvider, useMeltiplyAuth } from "@/components/auth/auth-provider";
 import { WorkspaceProvider } from "@/context/workspace.context";
 import { createAssetUpload, type AssetUploadTask } from "@/lib/upload";
-import type { Asset, Post } from "@/types";
+import type { Asset, PlatformAccount, Post } from "@/types";
 
 import { Composer } from "./composer";
 import { authClient } from "@/lib/auth-client";
@@ -53,13 +53,25 @@ function composerTextarea() {
 }
 
 /** Mounts the composer inside the real auth, workspace, i18n, and query providers. */
-function renderComposer(options: { initialPostId?: string; post?: Post } = {}) {
+function renderComposer(
+  options: {
+    initialPostId?: string;
+    post?: Post;
+    /** Connected accounts the workspace sees; the composer selects eligible ones. */
+    accounts?: PlatformAccount[];
+    /** Published platform capabilities, keyed by platform like the API response. */
+    capabilities?: ReturnType<typeof platformCapability>[];
+  } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   // Seeded data stays fresh so focused tests never hit the network for it.
   queryClient.setQueryDefaults(queryKeys.posts(), { staleTime: Infinity });
-  queryClient.setQueryData(queryKeys.platforms(), []);
+  queryClient.setQueryDefaults(queryKeys.platforms(), { staleTime: Infinity });
+  queryClient.setQueryDefaults(queryKeys.platformCapabilities(), { staleTime: Infinity });
+  queryClient.setQueryData(queryKeys.platforms(), options.accounts ?? []);
+  queryClient.setQueryData(queryKeys.platformCapabilities(), options.capabilities ?? []);
   if (options.post) queryClient.setQueryData(queryKeys.post(options.post.id), options.post);
   return render(
     <QueryClientProvider client={queryClient}>
@@ -106,6 +118,54 @@ const hydratedPost: Post = {
   distributions: [],
   created_at: "2026-10-01T10:00:00.000Z",
   updated_at: "2026-10-01T10:00:00.000Z",
+};
+
+/**
+ * One published capability record as the API sends it, with the caption bound
+ * under test. Everything else is inert so a caption assertion reads one number.
+ */
+function platformCapability(
+  platform: PlatformAccount["platform"],
+  maxCaptionLength: number | null,
+) {
+  return {
+    accepted_mime_types: [],
+    analytics: false,
+    asset_types: [],
+    comments: false,
+    connect_available: true,
+    max_caption_length: maxCaptionLength,
+    max_file_size: null,
+    max_hashtags: null,
+    max_media_count: null,
+    max_video_duration_sec: null,
+    min_media_count: 0,
+    multi_asset_types: [],
+    notes: [],
+    platform,
+    publish: true,
+    reply: false,
+  };
+}
+
+/** Connected Instagram account owned by the switched identity (`profile-b`). */
+const instagramAccount: PlatformAccount = {
+  avatar_url: null,
+  username: null,
+  brand_profile_id: "profile-b",
+  capabilities: platformCapability("instagram", 12),
+  connection_status: "connected",
+  created_at: "2026-01-01T00:00:00.000Z",
+  display_name: "Alpha Instagram",
+  id: "00000000-0000-4000-8000-000000000021",
+  last_synced_at: null,
+  org_id: "org-1",
+  platform: "instagram",
+  platform_user_id: "alpha-instagram",
+  rate_limit_budget: null,
+  scopes: [],
+  token_expires_at: null,
+  updated_at: "2026-01-01T00:00:00.000Z",
 };
 
 describe("Composer recovery consent", () => {
@@ -212,5 +272,78 @@ describe("Composer identity switching", () => {
     fireEvent.click(screen.getByRole("button", { name: "switch-all" }));
     await waitFor(() => expect(task.cancel).toHaveBeenCalled());
     expect(screen.queryByText(/clip\.mp4/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Composer caption bound", () => {
+  /**
+   * The shared caption reaches every selected Channel, so the field locks at the
+   * tightest selected platform's limit and states it beside the count instead of
+   * letting the creator write text the API will reject per Channel.
+   */
+  it("locks the shared caption at the tightest selected platform limit", async () => {
+    renderComposer({
+      accounts: [instagramAccount],
+      capabilities: [platformCapability("instagram", 12)],
+    });
+    const textarea = composerTextarea();
+    // The probe switches the identity the composer composes under; wait for the
+    // providers to settle first, or the switch is dropped while auth loads.
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
+    await waitFor(() => expect(textarea).toBeEnabled());
+
+    // The switched profile's Channel is a selected destination...
+    expect(await screen.findByRole("tab", { name: /Alpha Instagram/ })).toBeInTheDocument();
+    // ...and that platform's published limit is the bound the field states.
+    expect(await screen.findByText(/^0\/12 characters$/)).toBeInTheDocument();
+
+    fireEvent.change(textarea, { target: { value: "x".repeat(20) } });
+    expect(textarea).toHaveValue("x".repeat(12));
+    expect(screen.getByText(/^12\/12 characters$/)).toHaveClass("text-red");
+  });
+
+  /**
+   * Regression: the lock counts code points, exactly like the provider
+   * validator, so a caption of emoji is not cut at half its real limit — and the
+   * field reports one character per emoji rather than two.
+   */
+  it("counts an emoji as one character when locking the caption", async () => {
+    renderComposer({
+      accounts: [instagramAccount],
+      capabilities: [platformCapability("instagram", 12)],
+    });
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
+    await waitFor(() => expect(textarea).toBeEnabled());
+    await screen.findByText(/^0\/12 characters$/);
+
+    fireEvent.change(textarea, { target: { value: "🎉".repeat(15) } });
+    const value = (textarea as HTMLTextAreaElement).value;
+    expect([...value]).toHaveLength(12);
+    expect(value.length).toBe(24);
+    expect(screen.getByText(/^12\/12 characters$/)).toBeInTheDocument();
+  });
+
+  /**
+   * A platform that publishes no caption bound leaves the field unbounded: the
+   * counter drops the limit and the caption keeps every character the creator
+   * types.
+   */
+  it("leaves the caption unbounded when the platform publishes no limit", async () => {
+    renderComposer({
+      accounts: [instagramAccount],
+      capabilities: [platformCapability("instagram", null)],
+    });
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
+    await waitFor(() => expect(textarea).toBeEnabled());
+    await screen.findByRole("tab", { name: /Alpha Instagram/ });
+
+    fireEvent.change(textarea, { target: { value: "x".repeat(20) } });
+    expect(textarea).toHaveValue("x".repeat(20));
+    expect(screen.getByText(/^20 characters$/)).toBeInTheDocument();
   });
 });

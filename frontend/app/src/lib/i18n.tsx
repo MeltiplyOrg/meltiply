@@ -502,7 +502,6 @@ const spanishTranslations: Record<string, string> = {
   "Enter YouTube title...": "Introduce el título de YouTube...",
   Facebook: "Facebook",
   Failed: "Fallido",
-  "Filtered by active profile": "Filtrado por perfil activo",
   "Friends Only": "Solo amigos",
   Grid: "Cuadrícula",
   "Increase grid columns": "Aumentar columnas de cuadrícula",
@@ -572,8 +571,9 @@ const spanishTranslations: Record<string, string> = {
   "Tags (comma separated, max 500 chars combined)":
     "Etiquetas (separadas por comas, máx. 500 caracteres combinados)",
   "Targeting {count} channel(s)": "Destinado a {count} canal(es)",
-  "Choose a Brand Profile in the Posts filters to compose, schedule, or publish.":
-    "Elige un perfil de marca en los filtros de publicaciones para redactar, programar o publicar.",
+  "Choose a Brand Profile to compose, schedule, or publish.":
+    "Elige un perfil de marca para redactar, programar o publicar.",
+  "Choose a Brand Profile": "Elige un perfil de marca",
   "Choose a Brand Profile to pick publish destinations.":
     "Elige un perfil de marca para elegir destinos de publicación.",
   "Queues this post to {count} channel(s) at the selected time.":
@@ -603,6 +603,7 @@ const spanishTranslations: Record<string, string> = {
   "{count} channel(s)": "{count} canal(es)",
   "{count} channel(s) · {date}": "{count} canal(es) · {date}",
   "{count} characters": "{count} caracteres",
+  "{count}/{limit} characters": "{count}/{limit} caracteres",
   "{count} platforms": "{count} plataformas",
   "{count} post(s) scheduled or published on this date.":
     "{count} publicación(es) programada(s) o publicada(s) en esta fecha.",

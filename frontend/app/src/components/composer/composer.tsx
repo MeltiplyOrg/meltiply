@@ -60,7 +60,8 @@ import {
   useUpdatePost,
 } from "@/lib/queries";
 import { createAssetUpload, type AssetUploadStatus, type AssetUploadTask } from "@/lib/upload";
-import { useI18n } from "@/lib/i18n";
+import { RollingCount } from "@meltiply/ui/rolling-count";
+import { Trans, useI18n } from "@/lib/i18n";
 import { ApiError } from "@/lib/api";
 import { userFacingErrorMessage } from "@/lib/frontend-errors";
 
@@ -120,6 +121,33 @@ function publishModeAction(
 
 /** Icon per publishing mode, matching the action the pinned bar performs. */
 const PUBLISH_MODE_ICONS = { draft: Save, schedule: Calendar, now: Send } as const;
+
+/**
+ * Number of characters a platform counts a caption by: code points, matching
+ * `captionLength` in `@meltiply/providers`, so one emoji costs one character
+ * here exactly as it does when the API validates the published text.
+ *
+ * @param text - Caption text as typed.
+ * @returns Character count in code points.
+ */
+function captionLength(text: string): number {
+  return [...text].length;
+}
+
+/**
+ * Locks a caption being typed to a platform limit. Only an incoming value is
+ * clamped: text restored from a saved draft or a switched Channel override stays
+ * intact, so nothing the creator wrote is destroyed silently. An over-limit
+ * restore is reported by the field's own counter and by submit validation.
+ *
+ * @param text - Value the input event produced.
+ * @param limit - Maximum length in code points, or null when the platform publishes none.
+ * @returns The caption to store.
+ */
+function clampCaption(text: string, limit: number | null): string {
+  if (limit === null || captionLength(text) <= limit) return text;
+  return [...text].slice(0, limit).join("");
+}
 
 /**
  * One composer attachment row: a durable Asset reference plus, while the file
@@ -700,7 +728,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setAttachments([]);
     setChannelOverrides({});
     setAttachmentOverrides({});
-    setSelectedChannelIds([]);
+    // Back to the eligible defaults rather than an empty set: abandoning a
+    // composition (or finishing one) must not leave the next one with no
+    // destinations, which is what the previous explicit [] produced after a
+    // Brand Profile switch.
+    setSelectedChannelIds(null);
     setSavedAt(null);
     setHydratedPostId(null);
     setErrorMessage(null);
@@ -1052,6 +1084,52 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         channel.brandProfileId === selectedBrandProfileId && selectedIds.has(channel.id),
     );
   }, [integrations, selectedBrandProfileId, selectedChannelIds]);
+
+  /**
+   * Real caption limit per platform from the published capabilities, indexed
+   * once per result: the shared field and every Channel override read it while
+   * rendering, and the submit-time check reads the same entries.
+   */
+  const captionLimitByPlatform = useMemo(() => {
+    const byPlatform = new Map<string, number | null>();
+    for (const capability of capabilitiesQuery.data ?? []) {
+      const platform = capability.platform.toLowerCase();
+      if (!byPlatform.has(platform)) byPlatform.set(platform, capability.max_caption_length);
+    }
+    return byPlatform;
+  }, [capabilitiesQuery.data]);
+
+  /**
+   * Caption limit for one Channel, or null when its platform publishes none.
+   *
+   * @param channel - Target Channel whose platform limit is being read.
+   * @returns Maximum caption length in code points, else null.
+   */
+  const captionLimitFor = useCallback(
+    (channel: ChannelIntegration): number | null =>
+      captionLimitByPlatform.get(channel.providerIdentifier.toLowerCase()) ?? null,
+    [captionLimitByPlatform],
+  );
+
+  /**
+   * Tightest caption limit across the selected Channels, or null when none of
+   * their platforms publishes one. The shared field's text reaches every
+   * selected Channel, so the strictest limit is the one that keeps the post
+   * publishable everywhere it targets.
+   */
+  const sharedCaptionLimit = useMemo(() => {
+    let limit: number | null = null;
+    for (const channel of selectedChannels) {
+      const channelLimit = captionLimitFor(channel);
+      if (channelLimit === null) continue;
+      limit = limit === null ? channelLimit : Math.min(limit, channelLimit);
+    }
+    return limit;
+  }, [captionLimitFor, selectedChannels]);
+
+  /** Whether the shared caption has reached its tightest platform limit. */
+  const isAtSharedCaptionLimit =
+    sharedCaptionLimit !== null && captionLength(sharedContent) >= sharedCaptionLimit;
 
   /**
    * Receives live TikTok publishing requirements from a Channel's settings panel
@@ -1614,7 +1692,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           errors.push(t("{name}: post text is empty for this channel.", { name }));
         }
         const maxCaption = capability?.max_caption_length;
-        if (maxCaption !== null && maxCaption !== undefined && content.length > maxCaption) {
+        if (
+          maxCaption !== null &&
+          maxCaption !== undefined &&
+          captionLength(content) > maxCaption
+        ) {
           errors.push(
             t("{name}: text exceeds the {limit}-character limit for this platform.", {
               name,
@@ -1907,7 +1989,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           <Alert variant="info" className="items-center">
             <AlertCircle className="size-4 shrink-0" />
             <div className="flex-1">
-              {t("Choose a Brand Profile in the Posts filters to compose, schedule, or publish.")}
+              {t("Choose a Brand Profile to compose, schedule, or publish.")}
             </div>
           </Alert>
         )}
@@ -2010,9 +2092,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               ))}
             </TabsList>
 
-            {/* The compose panel owns the column's leftover height so the
-                writing area fills the drawer instead of leaving it empty under
-                a fixed-height textarea; the media section stays beneath it. */}
+            {/* The writing area grows with its own text between a comfortable
+                minimum and a readable maximum, so a long caption never squeezes
+                the media section and a short one never reserves empty rows. */}
             <div className="flex min-h-0 grow flex-col gap-4">
               <TabsContent value="shared" className="mt-0 flex min-h-0 grow flex-col gap-4">
                 <div className="flex min-h-0 grow flex-col gap-4">
@@ -2022,10 +2104,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                       aria-label={t("Shared Content")}
                       value={sharedContent}
                       onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
-                        setSharedContent(event.target.value);
+                        setSharedContent(clampCaption(event.target.value, sharedCaptionLimit));
                         markDirty();
                       }}
-                      className="min-h-[140px] grow resize-none text-base font-normal bg-field"
+                      autoGrow
+                      className="min-h-36 max-h-72 resize-none text-base font-normal bg-field"
                     />
                     {/* The destination count only means something once the Post
                         has an owning Brand Profile: in the aggregate view the
@@ -2033,11 +2116,20 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         Destinations block shows the accounts as unavailable. */}
                     <div className="flex flex-wrap items-center justify-between gap-2 text-(length:--font-size-micro) text-ink-3">
                       <span>
-                        {selectedBrandProfileId !== null &&
-                          t("Targeting {count} channel(s)", { count: selectedChannels.length })}
+                        {selectedBrandProfileId !== null && (
+                          <Trans
+                            message="Targeting {count} channel(s)"
+                            values={{ count: <RollingCount value={selectedChannels.length} /> }}
+                          />
+                        )}
                       </span>
-                      <span className="font-mono">
-                        {t("{count} characters", { count: sharedContent.length })}
+                      <span className={cn("font-mono", isAtSharedCaptionLimit && "text-red")}>
+                        {sharedCaptionLimit === null
+                          ? t("{count} characters", { count: captionLength(sharedContent) })
+                          : t("{count}/{limit} characters", {
+                              count: captionLength(sharedContent),
+                              limit: sharedCaptionLimit,
+                            })}
                       </span>
                     </div>
                   </div>
@@ -2339,6 +2431,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                 );
                 const channelAttachments = attachmentsForChannel(channel.id);
                 const inheritsAttachments = !attachmentOverrides[channel.id];
+                const channelCaptionLimit = captionLimitFor(channel);
 
                 return (
                   <TabsContent key={channel.id} value={channel.id} className="mt-0">
@@ -2391,13 +2484,28 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                               value={override.content}
                               onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
                                 handleChannelOverrideChange(channel.id, {
-                                  content: event.target.value,
+                                  content: clampCaption(event.target.value, channelCaptionLimit),
                                 })
                               }
-                              className="min-h-[120px] text-sm resize-y"
+                              autoGrow
+                              className="min-h-36 max-h-72 resize-none text-sm"
                             />
-                            <span className="text-(length:--font-size-micro) text-ink-3 self-end font-mono">
-                              {t("{count} characters", { count: override.content.length })}
+                            <span
+                              className={cn(
+                                "text-(length:--font-size-micro) text-ink-3 self-end font-mono",
+                                channelCaptionLimit !== null &&
+                                  captionLength(override.content) >= channelCaptionLimit &&
+                                  "text-red",
+                              )}
+                            >
+                              {channelCaptionLimit === null
+                                ? t("{count} characters", {
+                                    count: captionLength(override.content),
+                                  })
+                                : t("{count}/{limit} characters", {
+                                    count: captionLength(override.content),
+                                    limit: channelCaptionLimit,
+                                  })}
                             </span>
                           </div>
                         )}
@@ -2497,6 +2605,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               value={publishMode}
               onChange={setPublishMode}
               label={t("Publishing")}
+              fill
               className="w-full"
               renderOption={(mode) => {
                 const Icon = PUBLISH_MODE_ICONS[mode];

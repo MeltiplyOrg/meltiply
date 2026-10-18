@@ -45,6 +45,13 @@ export interface BrandProfileSelectProps {
    * `label` prop.
    */
   label: string;
+  /**
+   * Whether the aggregate "All Brand Profiles" row stays in the list. Filters
+   * keep it so a view can show every profile at once; surfaces that must act on
+   * one profile (composing or publishing) pass `false` and let the trigger
+   * state the profile instead.
+   */
+  includeAggregate?: boolean;
 }
 
 /**
@@ -104,6 +111,7 @@ export function BrandProfileSelect({
   unresolvedProfileIds,
   trigger,
   label,
+  includeAggregate = true,
 }: BrandProfileSelectProps) {
   const { t } = useI18n();
 
@@ -129,10 +137,14 @@ export function BrandProfileSelect({
         {trigger}
       </SelectTrigger>
       <SelectContent align="start" className="w-max max-w-80" aria-label={label}>
-        <SelectItem value="all">
-          <span className="block truncate text-left">{t("All Brand Profiles")}</span>
-        </SelectItem>
-        <SelectSeparator />
+        {includeAggregate && (
+          <>
+            <SelectItem value="all">
+              <span className="block truncate text-left">{t("All Brand Profiles")}</span>
+            </SelectItem>
+            <SelectSeparator />
+          </>
+        )}
         {options.map((option) => (
           <SelectItem key={option.id} value={option.id}>
             <span className="block truncate text-left">{option.name}</span>

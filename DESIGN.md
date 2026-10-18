@@ -142,7 +142,7 @@ Corners follow the chip/control/card/window scale in frontmatter. Compact toolti
 
 ### Buttons and fields
 
-Canonical [Button](frontend/shared/src/components/ui/button.tsx) owns primary, destructive, outline, secondary, ghost, and link variants, with shared hover/active/disabled/focus states. Default controls are 30px, small controls 26px, and large controls 36px. [Input](frontend/shared/src/components/ui/input.tsx) owns field fill, strong boundary, accent focus, and native checkbox/radio exceptions. Keep visible labels and validation in the consuming feature.
+Canonical [Button](frontend/shared/src/components/ui/button.tsx) owns primary, destructive, outline, secondary, ghost, and link variants, with shared hover/active/disabled/focus states. Default controls are 30px, small controls 26px, and large controls 36px. [Input](frontend/shared/src/components/ui/input.tsx) owns field fill, strong boundary, accent focus, and native checkbox/radio exceptions; [Textarea](frontend/shared/src/components/ui/textarea.tsx) adds `autoGrow` for fields whose own content sets their height — the caller keeps both bounds through `min-h`/`max-h` classes, so a caption grows as it is written, stops at its maximum, and scrolls internally past it. Keep visible labels and validation in the consuming feature.
 
 ### Menus
 

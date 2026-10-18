@@ -1,5 +1,6 @@
 import { ArrowRight, Pencil, Users } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
+import { RollingCount } from "@meltiply/ui/rolling-count";
 import {
   Card,
   CardContent,
@@ -10,7 +11,7 @@ import {
 } from "@meltiply/ui/card";
 import { Empty, EmptyDescription } from "@meltiply/ui/empty";
 import { cn } from "@meltiply/ui/utils";
-import { useI18n } from "@/lib/i18n";
+import { Trans, useI18n } from "@/lib/i18n";
 import { abbreviateRecordId } from "@/lib/format";
 import { brandProfileColorClass, type BrandProfile } from "@/types";
 
@@ -74,7 +75,10 @@ export function BrandProfileDirectory({
             </CardDescription>
           </CardHeader>
           <CardContent className="px-3 pb-2.5 text-xs text-ink-3">
-            {t("{count} connected accounts", { count: channelCounts.get(profile.id) ?? 0 })}
+            <Trans
+              message="{count} connected accounts"
+              values={{ count: <RollingCount value={channelCounts.get(profile.id) ?? 0} /> }}
+            />
           </CardContent>
           <CardFooter className="justify-between border-t border-line-soft px-3 py-2">
             <span className="font-mono text-(length:--font-size-micro) text-ink-3">

@@ -662,10 +662,15 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   return (
     <WorkspaceSurface
       title={t("Channels")}
-      description={t("{count} connected accounts across {profiles} Brand Profiles.", {
-        count: accounts.length,
-        profiles: brandProfiles.length,
-      })}
+      description={
+        <Trans
+          message="{count} connected accounts across {profiles} Brand Profiles."
+          values={{
+            count: <RollingCount value={accounts.length} />,
+            profiles: <RollingCount value={brandProfiles.length} />,
+          }}
+        />
+      }
       className="mx-auto max-w-300"
       actions={
         <>

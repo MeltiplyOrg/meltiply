@@ -4,10 +4,11 @@ import type { ChannelIntegration } from "@/api/types";
 import type { WorkspaceView } from "@/components/layout/navigation-shell";
 
 import { Button } from "@meltiply/ui/button";
+import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { Check, AlertCircle, Share2, Layers, Plus } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
-import { useI18n } from "@/lib/i18n";
+import { Trans, useI18n } from "@/lib/i18n";
 
 /**
  * Optional callback configuration for the DestinationSelector toolbar.
@@ -100,7 +101,10 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
               {t("Destinations")}
             </h3>
             <span className="rounded-chip bg-hover-2 px-1.5 text-(length:--font-size-micro) text-ink-3">
-              {t("{count} selected", { count: selectedCount })}
+              <Trans
+                message="{count} selected"
+                values={{ count: <RollingCount value={selectedCount} /> }}
+              />
             </span>
           </div>
           <div className="flex items-center gap-2">

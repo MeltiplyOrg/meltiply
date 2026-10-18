@@ -8,7 +8,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@meltiply/ui/tooltip";
 
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useCalendar, useCancelDistribution, useDeletePost, usePosts } from "@/lib/queries";
-import { useI18n } from "@/lib/i18n";
+import { RollingCount } from "@meltiply/ui/rolling-count";
+import { Trans, useI18n } from "@/lib/i18n";
 import { useSearchParams } from "@/lib/navigation";
 import { toast } from "@meltiply/ui/toast";
 import { Alert } from "@meltiply/ui/alert";
@@ -975,9 +976,10 @@ export function PostsView({
         isLoading ? (
           <span role="status">{t("Loading posts…")}</span>
         ) : (
-          t("Showing {count} posts across your Brand Profiles.", {
-            count: processedPosts.length,
-          })
+          <Trans
+            message="Showing {count} posts across your Brand Profiles."
+            values={{ count: <RollingCount value={processedPosts.length} /> }}
+          />
         )
       }
       actions={

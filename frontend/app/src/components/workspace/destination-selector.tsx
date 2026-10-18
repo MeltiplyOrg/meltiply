@@ -11,7 +11,9 @@ import { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
 import { Button } from "@meltiply/ui/button";
 import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
-import { Check, AlertCircle, Share2, Plus } from "lucide-react";
+import { Check, Share2, Plus } from "lucide-react";
+import { PlatformIcon } from "@/components/primitives/platform-icon";
+import { platformDisplayName } from "@/lib/platforms";
 import { cn } from "@meltiply/ui/utils";
 import { Trans, useI18n } from "@/lib/i18n";
 
@@ -36,7 +38,9 @@ export interface DestinationSelectorProps {
  * Owns the composer's own Brand Profile picker: publishing targets exactly one
  * profile, so the block leads with the canonical `BrandProfileSelect` (without
  * the aggregate row, which cannot publish) and the profile choice lands in the
- * shared workspace selection the rest of the drawer already reads.
+ * shared workspace selection the rest of the drawer already reads. Each
+ * destination is one row led by the platform's logo, since these accounts
+ * publish without avatars and the provider is what a creator recognizes.
  *
  * Filters connected integrations to the channels owned by the currently selected
  * Brand Profile (the aggregate "All Brand Profiles" view lists every channel but
@@ -170,7 +174,7 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
             </Button>
           </div>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-col gap-1.5">
             {displayedChannels.map((channel: ChannelIntegration) => {
               const statusInfo = statusByChannelId.get(channel.id);
               const isAvailable = statusInfo?.isAvailable ?? true;
@@ -184,24 +188,22 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                 return (
                   <Tooltip key={channel.id}>
                     <TooltipTrigger asChild>
-                      <div className="flex h-7 cursor-not-allowed items-center gap-1.5 rounded-control border border-line bg-inset px-2 text-(length:--font-size-control) text-ink-3 select-none">
-                        <AlertCircle className="size-3.5" aria-hidden="true" />
-                        <span className="font-medium">{channel.name}</span>
-                        <span className="font-mono text-(length:--font-size-micro) uppercase">
-                          {channel.providerIdentifier}
+                      <div className="flex cursor-not-allowed select-none items-center gap-2 rounded-control border border-line bg-inset px-2 py-1.5 text-(length:--font-size-control) text-ink-3">
+                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+                          <PlatformIcon
+                            provider={channel.providerIdentifier}
+                            className="size-3.5"
+                          />
                         </span>
-                        {channel.disabled && (
-                          <span className="text-(length:--font-size-micro) text-red">
-                            {t("Disabled")}
+                        <span className="min-w-0 flex-1 truncate font-medium">{channel.name}</span>
+                        {(channel.disabled || channel.refreshNeeded || channel.inBetweenSteps) && (
+                          <span className="flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-red">
+                            {channel.disabled
+                              ? t("Disabled")
+                              : channel.refreshNeeded
+                                ? t("Expired")
+                                : t("Incomplete")}
                           </span>
-                        )}
-                        {channel.refreshNeeded && (
-                          <span className="text-(length:--font-size-micro) text-red">
-                            {t("Expired")}
-                          </span>
-                        )}
-                        {channel.inBetweenSteps && (
-                          <span className="text-(length:--font-size-micro)">{t("Incomplete")}</span>
                         )}
                       </div>
                     </TooltipTrigger>
@@ -225,29 +227,43 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                   aria-pressed={isSelected}
                   onClick={() => toggleChannelSelection(channel.id)}
                   className={cn(
-                    "h-7 max-w-full gap-1.5 rounded-control border px-2 text-(length:--font-size-control) font-normal",
-                    // Selected chips pin their own hover colors so the ghost
+                    "h-auto w-full justify-start gap-2 rounded-control border px-2 py-1.5 text-(length:--font-size-control) font-normal",
+                    // Selected rows pin their own hover colors so the ghost
                     // variant's default hover cannot repaint the active state.
                     isSelected
                       ? "border-accent bg-accent-tint text-accent-ink hover:bg-accent-tint hover:text-accent-ink"
                       : "border-line bg-surface text-ink-2 hover:bg-hover hover:text-ink",
                   )}
                 >
-                  {isSelected && <Check className="size-3 shrink-0" aria-hidden="true" />}
-                  <span className="truncate">{channel.name}</span>
-                  <span
-                    className={cn(
-                      "font-mono text-(length:--font-size-micro) uppercase",
-                      isSelected ? "text-accent-ink/70" : "text-ink-3",
-                    )}
-                  >
-                    {channel.providerIdentifier}
+                  {/* The platform logo stands in for both the avatar these
+                      accounts publish without and the slug a creator had to
+                      read before. */}
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+                    <PlatformIcon provider={channel.providerIdentifier} className="size-3.5" />
                   </span>
+                  <span className="min-w-0 flex-1 truncate text-left">{channel.name}</span>
                   {isUngrouped && (
-                    <span className="text-(length:--font-size-micro) text-ink-3">
+                    <span className="shrink-0 text-(length:--font-size-micro) text-ink-3">
                       {t("(ungrouped)")}
                     </span>
                   )}
+                  <span
+                    className={cn(
+                      "shrink-0 text-(length:--font-size-micro)",
+                      isSelected ? "text-accent-ink/70" : "text-ink-3",
+                    )}
+                  >
+                    {platformDisplayName(channel.providerIdentifier)}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "flex size-3.5 shrink-0 items-center justify-center",
+                      isSelected ? "text-accent-ink" : "text-ink-3",
+                    )}
+                  >
+                    {isSelected && <Check className="size-3.5" />}
+                  </span>
                 </Button>
               );
             })}

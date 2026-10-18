@@ -293,8 +293,9 @@ describe("Composer caption bound", () => {
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
     await waitFor(() => expect(textarea).toBeEnabled());
 
-    // The switched profile's Channel is a selected destination...
-    expect(await screen.findByRole("tab", { name: /Alpha Instagram/ })).toBeInTheDocument();
+    // The switched profile's Channel is a selected destination, named by its
+    // social provider rather than the account handle...
+    expect(await screen.findByRole("tab", { name: /Instagram/ })).toBeInTheDocument();
     // ...and that platform's published limit is the bound the field states.
     expect(await screen.findByText(/^0\/12 characters$/)).toBeInTheDocument();
 
@@ -340,7 +341,7 @@ describe("Composer caption bound", () => {
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
     await waitFor(() => expect(textarea).toBeEnabled());
-    await screen.findByRole("tab", { name: /Alpha Instagram/ });
+    await screen.findByRole("tab", { name: /Instagram/ });
 
     fireEvent.change(textarea, { target: { value: "x".repeat(20) } });
     expect(textarea).toHaveValue("x".repeat(20));

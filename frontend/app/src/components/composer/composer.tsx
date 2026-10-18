@@ -61,6 +61,8 @@ import {
 } from "@/lib/queries";
 import { createAssetUpload, type AssetUploadStatus, type AssetUploadTask } from "@/lib/upload";
 import { RollingCount } from "@meltiply/ui/rolling-count";
+import { PlatformIcon } from "@/components/primitives/platform-icon";
+import { platformDisplayName } from "@/lib/platforms";
 import { Trans, useI18n } from "@/lib/i18n";
 import { ApiError } from "@/lib/api";
 import { userFacingErrorMessage } from "@/lib/frontend-errors";
@@ -1086,6 +1088,42 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   }, [integrations, selectedBrandProfileId, selectedChannelIds]);
 
   /**
+   * Label for one target Channel inside the composer. Customization is per social
+   * provider, so a Channel is named by its platform — and the account handle is
+   * appended only when the same provider appears more than once in the selection,
+   * where the platform alone would name two different targets identically.
+   */
+  const targetLabels = useMemo(() => {
+    const perProvider = new Map<string, number>();
+    for (const channel of selectedChannels) {
+      const provider = channel.providerIdentifier.toLowerCase();
+      perProvider.set(provider, (perProvider.get(provider) ?? 0) + 1);
+    }
+    const labels = new Map<string, string>();
+    for (const channel of selectedChannels) {
+      const provider = channel.providerIdentifier.toLowerCase();
+      const platformName = platformDisplayName(channel.providerIdentifier);
+      labels.set(
+        channel.id,
+        (perProvider.get(provider) ?? 0) > 1 ? `${platformName} · ${channel.name}` : platformName,
+      );
+    }
+    return labels;
+  }, [selectedChannels]);
+
+  /**
+   * Provider-first label of one target Channel.
+   *
+   * @param channel - Target Channel being labelled.
+   * @returns The platform's display name, with the account handle when it has to disambiguate.
+   */
+  const targetLabelFor = useCallback(
+    (channel: ChannelIntegration): string =>
+      targetLabels.get(channel.id) ?? platformDisplayName(channel.providerIdentifier),
+    [targetLabels],
+  );
+
+  /**
    * Real caption limit per platform from the published capabilities, indexed
    * once per result: the shared field and every Channel override read it while
    * rendering, and the submit-time check reads the same entries.
@@ -1982,7 +2020,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     <fieldset
       disabled={isInitializing}
       aria-busy={isInitializing}
-      className="@container flex min-w-0 shrink-0 grow flex-col gap-5"
+      className="@container flex min-h-0 min-w-0 grow flex-col gap-5"
     >
       <div className="flex flex-col gap-3 empty:hidden">
         {selectedBrandProfileId === null && (
@@ -2057,18 +2095,17 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         )}
       </div>
 
-      {/* Reference layout, adapted: what gets published fills the panel and
-          where and when stays beside it as a fixed-width rail. The split
+      {/* Reference layout, adapted: what gets published and where it goes share
+          the panel equally — a fixed-width rail left the destinations and
+          publishing controls cramped while the writing area stretched. The split
           follows the panel's own width (`@container`), never the viewport:
-          composing always happens inside the drawer, so a narrow panel has to
-          stack in one reading order rather than squeeze two columns. */}
-      <div className="flex min-w-0 grow flex-col gap-6 @4xl:flex-row @4xl:items-stretch @4xl:gap-8">
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <Tabs
-            value={activeTab}
-            onValueChange={setActiveTab}
-            className="flex shrink-0 grow flex-col gap-4"
-          >
+          composing always happens inside the drawer, so a narrow panel stacks in
+          one reading order instead. The compose half scrolls on its own, so a
+          long draft, its media, and its provider settings move while the
+          destinations and publishing half stays in view. */}
+      <div className="flex min-w-0 grow flex-col gap-6 @4xl:min-h-0 @4xl:flex-row @4xl:items-stretch @4xl:gap-8">
+        <div className="flex min-w-0 flex-1 flex-col gap-4 @4xl:min-h-0 @4xl:overflow-y-auto @4xl:pr-2">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col gap-4">
             <TabsList
               variant="line"
               className="hide-scrollbar w-full overflow-x-auto"
@@ -2084,7 +2121,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                   value={channel.id}
                   className="text-xs font-medium flex items-center gap-1.5"
                 >
-                  <span>{channel.name}</span>
+                  <PlatformIcon provider={channel.providerIdentifier} className="size-3.5" />
+                  <span>{targetLabelFor(channel)}</span>
                   {channelOverrides[channel.id]?.hasOverride && (
                     <span className="size-1.5 rounded-full bg-foreground" />
                   )}
@@ -2095,10 +2133,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             {/* The writing area grows with its own text between a comfortable
                 minimum and a readable maximum, so a long caption never squeezes
                 the media section and a short one never reserves empty rows. */}
-            <div className="flex min-h-0 grow flex-col gap-4">
-              <TabsContent value="shared" className="mt-0 flex min-h-0 grow flex-col gap-4">
-                <div className="flex min-h-0 grow flex-col gap-4">
-                  <div className="flex min-h-0 grow flex-col gap-2">
+            <div className="flex flex-col gap-4">
+              <TabsContent value="shared" className="mt-0 flex flex-col gap-4">
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
                     <Textarea
                       placeholder={t("What do you want to publish?")}
                       aria-label={t("Shared Content")}
@@ -2437,7 +2475,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                   <TabsContent key={channel.id} value={channel.id} className="mt-0">
                     <div className="flex flex-col gap-6">
                       <ComposerSection
-                        title={channel.name}
+                        title={targetLabelFor(channel)}
                         action={
                           <Button
                             type="button"
@@ -2458,8 +2496,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         }
                       >
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className="font-mono text-xs uppercase">
-                            {channel.providerIdentifier}
+                          <Badge variant="outline" className="text-xs font-normal">
+                            {channel.name}
                           </Badge>
                           {distribution && (
                             <Badge
@@ -2594,9 +2632,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
         {/* Where and when: the destinations block and the publishing controls the
             reference keeps beside the editor, so nothing about targeting or timing
-            hides behind a tab. The rail only appears once the panel is wide enough
-            for it; below that the same blocks stack under the compose column. */}
-        <div className="flex min-w-0 flex-col gap-6 @4xl:w-76 @4xl:shrink-0 @4xl:border-l @4xl:border-line @4xl:pl-8">
+            hides behind a tab. It takes the panel's other half, separated by the
+            shared line; below the split width the same blocks stack under the
+            compose column. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-6 @4xl:min-h-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:pl-8">
           <DestinationSelector onNavigate={onNavigate} />
 
           <ComposerSection icon={Send} title={t("Publishing")}>

@@ -26,6 +26,9 @@ export interface RollingCountProps {
  * The previous value is a clone this owner appends and removes when its effect
  * ends, which keeps the change out of React's state: nothing re-renders the
  * surrounding list to play it, and a count that is merely mounted never rolls.
+ * The clone also stands in for the frames between the change and the roll, which
+ * starts once the view around it has settled: a filter re-renders a collection in
+ * the same commit, and an effect created there would be over before it was drawn.
  *
  * @param props.value - The count to display.
  * @param props.className - Layout classes for the window.
@@ -55,36 +58,51 @@ export function RollingCount({ value, className }: RollingCountProps) {
     // A grown count rolls up, a shrunk one rolls down: the arriving value comes
     // from the side the count moved from and the previous leaves the other way.
     const travel = value > previous ? 1 : -1;
-    playEffect(
-      entering,
-      [
-        { transform: `translateY(${travel * 100}%)`, opacity: 0 },
-        { transform: "translateY(0)", opacity: 1 },
-      ],
-      0,
-      { duration: ROLL_MS, easing: effectMoveEasing },
-    );
-
     const leaving = document.createElement("span");
     leaving.dataset.valueRoll = "out";
     leaving.setAttribute("aria-hidden", "true");
     leaving.textContent = String(previous);
     window.appendChild(leaving);
+    // The previous value stands in until the roll starts: a filter can re-render a
+    // whole collection in this commit, and an effect created here would spend its
+    // entire duration inside that work and never be seen.
+    window.dataset.rollState = "pending";
 
-    const effect = playEffect(
-      leaving,
-      [
-        { transform: "translateY(0)", opacity: 1 },
-        { transform: `translateY(${travel * -100}%)`, opacity: 0 },
-      ],
-      0,
-      { duration: ROLL_MS, easing: effectMoveEasing, fill: "forwards" },
-    );
-    const removeLeaving = () => leaving.remove();
-    if (effect) effect.finished.then(removeLeaving, removeLeaving);
-    else removeLeaving();
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        delete window.dataset.rollState;
+        playEffect(
+          entering,
+          [
+            { transform: `translateY(${travel * 100}%)`, opacity: 0 },
+            { transform: "translateY(0)", opacity: 1 },
+          ],
+          0,
+          { duration: ROLL_MS, easing: effectMoveEasing },
+        );
 
-    return () => leaving.remove();
+        const effect = playEffect(
+          leaving,
+          [
+            { transform: "translateY(0)", opacity: 1 },
+            { transform: `translateY(${travel * -100}%)`, opacity: 0 },
+          ],
+          0,
+          { duration: ROLL_MS, easing: effectMoveEasing, fill: "forwards" },
+        );
+        const removeLeaving = () => leaving.remove();
+        if (effect) effect.finished.then(removeLeaving, removeLeaving);
+        else removeLeaving();
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+      delete window.dataset.rollState;
+      leaving.remove();
+    };
   }, [value]);
 
   return (

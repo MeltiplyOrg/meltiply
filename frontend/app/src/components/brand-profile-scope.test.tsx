@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useEffect, useState } from "react";
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { contractSuccessBody } from "@/test/contract-fixtures";
@@ -360,6 +360,15 @@ const METRIC_LABELS = [
   "Analytics",
 ];
 
+/**
+ * The selection dock's count, once the roll that announces a change has settled:
+ * a `RollingCount` splits the sentence across nodes while it plays.
+ */
+async function settleSelection(text: string) {
+  const region = screen.getByRole("region", { name: "Selection actions" });
+  await waitFor(() => expect(within(region).getByRole("status")).toHaveTextContent(text));
+}
+
 beforeAll(() => {
   // jsdom does not implement scrollIntoView; Radix Select calls it when its
   // popover content mounts and focuses the selected item.
@@ -433,9 +442,7 @@ describe("Channels table contract", () => {
         name: "Select channel",
       }),
     ).toBeChecked();
-    expect(screen.getByRole("region", { name: "Selection actions" })).toHaveTextContent(
-      "1 selected",
-    );
+    await settleSelection("1 selected");
   });
 
   /** Channel settings expose granted scopes and require confirmation before disconnecting. */
@@ -1003,9 +1010,7 @@ describe("Posts surfaces", () => {
     expect(
       screen.getByRole("checkbox", { name: "Select all visible posts" }),
     ).not.toBePartiallyChecked();
-    expect(await screen.findByRole("region", { name: "Selection actions" })).toHaveTextContent(
-      "1 selected",
-    );
+    await settleSelection("1 selected");
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all visible posts" }));
     const pill = await screen.findByRole("region", { name: "Selection actions" });
     fireEvent.click(within(pill).getByRole("button", { name: "Delete" }));
@@ -1022,9 +1027,7 @@ describe("Posts surfaces", () => {
       { id: first.id, brandProfileId: first.brand_profile_id },
       { id: second.id, brandProfileId: second.brand_profile_id },
     ]);
-    expect(screen.getByRole("region", { name: "Selection actions" })).toHaveTextContent(
-      "1 selected",
-    );
+    await settleSelection("1 selected");
     const rows = screen.getAllByRole("checkbox", { name: "Select post" });
     expect(rows.filter((row) => (row as HTMLInputElement).checked)).toHaveLength(1);
   });

@@ -317,6 +317,13 @@ html.theme-changing *::after {
     inset: 0;
     pointer-events: none;
   }
+
+  /* Until the roll starts the previous value stands in, so a change that lands
+     while the collection around it re-renders shows the count it replaced rather
+     than jumping. */
+  [data-value-roll][data-roll-state="pending"] > [data-value-roll="in"] {
+    opacity: 0;
+  }
 }
 
 /*

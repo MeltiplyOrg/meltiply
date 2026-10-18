@@ -14,19 +14,19 @@ host, not the Cloudflare managed service or an availability guarantee.
 
 ## Services and differences
 
-| Service                 | Self-hosted implementation                                                                                       |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| App, API                | Production app assets and Workers; port 8080                                                                     |
-| PostgreSQL / Hyperdrive | PostgreSQL 18, canonical migrations, distinct system and RLS roles; request-scoped direct connections            |
-| R2                      | Persistent local R2 binding and authenticated SigV4 upload/download endpoint                                     |
-| Durable Objects         | SQLite-backed canonical OAuth coordinator                                                                        |
-| Workflows               | Persistent local binding running the canonical reply workflow                                                    |
-| Queues                  | SQLite WAL broker; commit-before-ack, delayed delivery, visibility leases, retries and dead-letter queues        |
-| Cron                    | Durable hourly/daily schedule ledger invoking canonical scheduled handlers; missed slots coalesce after downtime |
-| Email                   | Real SMTP transport; signup still requires email verification                                                    |
-| Operator authentication | Private administrator-issued HMAC tokens, at most 15 minutes, instead of Cloudflare Access                       |
-| Media processing        | Existing FFmpeg/libvips processor in a private container; no Docker socket                                       |
-| TLS                     | Optional Caddy profile in the same Compose file                                                                  |
+| Service                 | Self-hosted implementation                                                                                        |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| App, API                | Production app assets and Workers; port 8080                                                                      |
+| PostgreSQL / Hyperdrive | PostgreSQL 18, canonical migrations, distinct system and RLS roles; request-scoped direct connections             |
+| R2                      | Persistent local R2 binding and authenticated SigV4 upload/download endpoint, or an external S3-compatible origin |
+| Durable Objects         | SQLite-backed canonical OAuth coordinator                                                                         |
+| Workflows               | Persistent local binding running the canonical reply workflow                                                     |
+| Queues                  | SQLite WAL broker; commit-before-ack, delayed delivery, visibility leases, retries and dead-letter queues         |
+| Cron                    | Durable hourly/daily schedule ledger invoking canonical scheduled handlers; missed slots coalesce after downtime  |
+| Email                   | Real SMTP transport; signup still requires email verification                                                     |
+| Operator authentication | Private administrator-issued HMAC tokens, at most 15 minutes, instead of Cloudflare Access                        |
+| Media processing        | Existing FFmpeg/libvips processor in a private container; no Docker socket                                        |
+| TLS                     | Optional Caddy profile in the same Compose file                                                                   |
 
 This is a **single-host** deployment, not a replacement for Cloudflare's global
 network, managed durability, autoscaling, Access, or service SLAs. Run one runtime
@@ -78,6 +78,67 @@ Set optional Provider/billing variables in `.env.selfhost` using the names in
 [`.env.example`](../.env.example). Self-hosting does not bypass Provider live-mode
 checks or account permissions. Do not change `ENVIRONMENT` to disable verification;
 the supervisor deliberately retains deployed security behavior.
+
+## Object storage
+
+Stored assets live in Cloudflare R2 by default: the runtime provides a persistent
+local R2 binding and signs upload, preview, and download capabilities against its
+own authenticated SigV4 endpoint. Nothing needs configuring.
+
+To store objects in an external S3-compatible service instead (MinIO, Ceph RGW,
+Wasabi, Backblaze B2's S3 endpoint, or another gateway), set these in
+`.env.selfhost` and restart the runtime:
+
+```dotenv
+OBJECT_STORAGE_PROVIDER=s3
+S3_ACCESS_KEY_ID=<access key>
+S3_SECRET_ACCESS_KEY=<secret key>
+S3_BUCKET=meltiply-assets
+S3_ENDPOINT=https://objects.example.com
+S3_REGION=us-east-1          # optional, defaults to us-east-1
+S3_FORCE_PATH_STYLE=true     # optional; set false for virtual-hosted addressing
+```
+
+`S3_ENDPOINT` must be an origin with no path, and must use HTTPS: the
+supervisor runs as `ENVIRONMENT=staging`, which never permits signing a
+plain-HTTP origin. `S3_FORCE_PATH_STYLE` defaults to `true`, which is what
+MinIO, Ceph, and other self-hosted services expect; AWS endpoints want `false`.
+The origin must be reachable from the runtime container and from any machine or
+service that fetches signed URLs.
+
+Leaving `OBJECT_STORAGE_PROVIDER` unset keeps R2, so an existing installation
+is unaffected. The runtime refuses to start when the `s3` provider is selected
+without its required settings.
+
+Both providers offer identical behavior: uploads and multipart uploads, media
+processing, retention and brand-profile purges, and private media delivery all
+run through whichever provider is configured.
+
+`/api/v1/ready` validates storage _configuration_, not connectivity. It reports
+an unusable provider or endpoint as unavailable, but it never contacts the
+origin, so a container stays healthy while an S3 service is down. Watch the
+runtime logs and the first asset upload for that failure; `admin.mjs probe-write`
+/ `probe-read` also exercises the configured provider's storage.
+
+The S3 service must implement conditional `CopyObject` (`If-None-Match: *`
+for the destination and `x-amz-copy-source-if-match` for the source), conditional
+PUT, and multipart uploads. These guards preserve immutable ready objects and
+create-only processor outputs; an S3-like service without them is not supported.
+Configure bucket CORS to allow browser PUTs from the application origin, including
+`content-type` and the signed headers, and expose `ETag` for multipart uploads.
+Provider selection changes where new requests go; it does not migrate existing
+objects. Copy all retained object keys to the new bucket before switching both
+Workers, and retain the old endpoint until previously issued signed URLs expire.
+
+The hosted `object-storage` lane in the
+[extended workflow](../.github/workflows/extended.yml) verifies switching through
+the application lifecycle with a disposable PostgreSQL database, real native
+media processing, R2, and MinIO. `bun run storage:s3:check` checks signatures
+against the bundled gateway locally; that gateway does not support server-side
+copy. For full copy coverage, run the same command with `S3_CHECK_ENDPOINT`,
+`S3_CHECK_ACCESS_KEY`, `S3_CHECK_SECRET_KEY`, and optional `S3_CHECK_BUCKET`
+against a **disposable empty bucket**: the check creates the bucket and writes
+and deletes fixture objects. Never use production credentials or a real bucket.
 
 ## Authentication and owner recovery
 

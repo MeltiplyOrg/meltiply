@@ -1,5 +1,5 @@
 import type { ObjectUrlSigner } from "@meltiply/storage";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { AutomationEnv } from "../src/env";
 import { createProviderMediaResolver } from "../src/provider-media";
@@ -8,6 +8,10 @@ const baseEnv = {
   ENVIRONMENT: "test",
   VERSION: "1.0.0-target.0",
 } satisfies AutomationEnv;
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function metadata(contentType = "video/mp4", size = 512) {
   return {
@@ -109,7 +113,7 @@ describe("provider media resolver", () => {
     expect(get).toHaveBeenCalledWith("org-1/asset-1/video.mp4");
   });
 
-  it("rejects cross-asset keys and mismatched R2 metadata before signing", async () => {
+  it("rejects cross-asset keys and mismatched object metadata before signing", async () => {
     const signDownload = vi.fn();
     const signer = { signDownload } as unknown as ObjectUrlSigner;
     const resolve = createProviderMediaResolver(
@@ -128,7 +132,9 @@ describe("provider media resolver", () => {
         objectKey: "org-1/other-asset/video.mp4",
       }),
     ).rejects.toThrow("object key is invalid");
-    await expect(resolve(request("remote_ingest"))).rejects.toThrow("metadata does not match R2");
+    await expect(resolve(request("remote_ingest"))).rejects.toThrow(
+      "metadata does not match the object store",
+    );
     expect(signDownload).not.toHaveBeenCalled();
   });
 
@@ -181,5 +187,48 @@ describe("provider media resolver", () => {
       }),
     ).rejects.toThrow("object key is invalid");
     expect(head).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Switching provider is a configuration change, not a code change: the same
+   * resolver verifies authoritative metadata against an S3-compatible origin
+   * and signs the same object-scoped download capability there.
+   */
+  it("reads and signs against an S3-compatible origin when that provider is selected", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      expect(url.origin).toBe("https://objects.example.test");
+      expect(url.pathname).toBe("/meltiply-assets/org-1/asset-1/video.mp4");
+      return new Response(null, {
+        headers: {
+          "content-length": "512",
+          "content-type": "video/mp4",
+          etag: '"etag-1"',
+          "last-modified": "Sat, 19 Jul 2026 00:00:00 GMT",
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const resolve = createProviderMediaResolver({
+      ...baseEnv,
+      OBJECT_STORAGE_PROVIDER: "s3",
+      S3_ACCESS_KEY_ID: "s3-access-key",
+      S3_BUCKET: "meltiply-assets",
+      S3_ENDPOINT: "https://objects.example.test",
+      S3_SECRET_ACCESS_KEY: "s3-secret",
+    });
+
+    const resolved = await resolve(request("remote_ingest"));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://objects.example.test/meltiply-assets/org-1/asset-1/video.mp4",
+      expect.objectContaining({ method: "HEAD" }),
+    );
+    if (resolved.mode !== "remote_ingest") throw new Error("expected remote-ingest media");
+    const url = new URL(resolved.url);
+    expect(url.origin).toBe("https://objects.example.test");
+    expect(url.pathname).toBe("/meltiply-assets/org-1/asset-1/video.mp4");
+    expect(url.searchParams.get("X-Amz-Credential")).toContain("/s3/aws4_request");
+    expect(resolved.url).not.toContain("s3-secret");
   });
 });

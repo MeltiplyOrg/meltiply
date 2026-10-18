@@ -90,6 +90,11 @@ const exactRuntimeKeys = new Set([
   "facebook_client_id",
   "instagram_client_id",
   "r2_account_id",
+  "object_storage_provider",
+  "s3_bucket",
+  "s3_endpoint",
+  "s3_force_path_style",
+  "s3_region",
   "threads_client_id",
   "tiktok_client_key",
   "tiktok_media_url_prefix",
@@ -283,6 +288,9 @@ export function containsCredentialMaterial(serialized) {
  * the shared sender address/name policy with a
  * dotted sender domain required for staging, a staging DNS suffix, Neon scope,
  * and ISO 8601 restore point expiry. Rejects secrets, private keys, and connection strings.
+ * Object storage defaults to R2; S3 selection requires a bucket and HTTPS origin,
+ * with region us-east-1 and path-style addressing by default. Credentials stay
+ * in provider-specific remote secrets, never this document.
  * @param {unknown} input - Raw release specification object
  * @returns {object} Normalized, validated release specification
  * @throws {TypeError} If validation fails or forbidden secrets are present
@@ -359,6 +367,10 @@ export function validateReleaseSpec(input) {
   if (mailFromName !== undefined && !isMailSenderName(mailFromName)) {
     throw new TypeError("runtime.mail_from_name is invalid");
   }
+  const storageProvider = runtime.object_storage_provider ?? "r2";
+  if (storageProvider !== "r2" && storageProvider !== "s3") {
+    throw new TypeError("runtime.object_storage_provider must be r2 or s3");
+  }
   const validatedRuntime = {
     mail_from_address: mailFromAddress,
     mail_from_name: mailFromName,
@@ -375,6 +387,25 @@ export function validateReleaseSpec(input) {
       runtime.youtube_shorts_client_id,
       "runtime.youtube_shorts_client_id",
     ),
+    ...(storageProvider === "s3"
+      ? {
+          object_storage_provider: "s3",
+          s3_bucket: requiredString(
+            runtime.s3_bucket,
+            "runtime.s3_bucket",
+            /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/,
+          ),
+          s3_endpoint: httpsUrl(runtime.s3_endpoint, "runtime.s3_endpoint", { originOnly: true }),
+          s3_force_path_style:
+            runtime.s3_force_path_style === undefined
+              ? true
+              : boolean(runtime.s3_force_path_style, "runtime.s3_force_path_style"),
+          s3_region:
+            runtime.s3_region === undefined
+              ? "us-east-1"
+              : requiredString(runtime.s3_region, "runtime.s3_region", /^[a-z0-9-]+$/),
+        }
+      : {}),
   };
   for (const [provider, fields] of Object.entries(providerVariables)) {
     if (acceptance[provider] && !validatedRuntime[fields.clientField]) {
@@ -570,9 +601,10 @@ function replaceBinding(entries, identifier, replacement, key = "binding") {
 
 /**
  * Renders concrete Cloudflare Wrangler configuration trees for the api, automation, and state Workers.
- * Injects staging environment variables, Hyperdrive bindings, R2 bucket references, queue producers,
+ * Injects staging environment variables, Hyperdrive bindings, the selected object storage settings, queue producers,
  * allowed CORS origins, the sender-restricted send_email MAIL binding, Zero Trust Access bindings,
  * and per-version preview URLs on the API Worker (the stable workers.dev route stays disabled).
+ * S3 deployments omit the unused ASSETS binding; omitted provider selection preserves R2.
  *
  * @param {Record<string, object>} sourceConfigs - Base source Wrangler configurations loaded from disk
  * @param {object} spec - Validated release specification
@@ -586,7 +618,15 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   const commonVars = {
     ENVIRONMENT: "staging",
     PUBLIC_API_URL: spec.api_base_url,
-    R2_BUCKET_NAME: iac.assets_bucket,
+    ...(spec.runtime.object_storage_provider === "s3"
+      ? {
+          OBJECT_STORAGE_PROVIDER: "s3",
+          S3_BUCKET: spec.runtime.s3_bucket,
+          S3_ENDPOINT: spec.runtime.s3_endpoint,
+          S3_FORCE_PATH_STYLE: String(spec.runtime.s3_force_path_style),
+          S3_REGION: spec.runtime.s3_region,
+        }
+      : { R2_ACCOUNT_ID: spec.runtime.r2_account_id, R2_BUCKET_NAME: iac.assets_bucket }),
     VERSION: spec.git_sha,
     ...providerVars(spec),
   };
@@ -636,6 +676,10 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
     binding: "ASSETS",
     bucket_name: iac.assets_bucket,
   });
+  if (spec.runtime.object_storage_provider === "s3") {
+    api.r2_buckets = api.r2_buckets.filter((entry) => entry.binding !== "ASSETS");
+    automation.r2_buckets = automation.r2_buckets.filter((entry) => entry.binding !== "ASSETS");
+  }
   api.hyperdrive = [
     { binding: "DB_AUTHENTICATED", id: iac.authenticated_hyperdrive_id },
     { binding: "DB_SYSTEM", id: iac.system_hyperdrive_id },
@@ -857,8 +901,8 @@ export function validateDatabaseEnvironment(environment) {
 }
 
 /**
- * Computes the remote secret names each Worker requires for a release: common storage/encryption
- * keys, the session and first-owner bootstrap secrets for the API Worker, and
+ * Computes the remote secret names each Worker requires for a release: selected
+ * object storage credentials, encryption keys, and the API session and first-owner bootstrap secrets,
  * provider-specific credentials enabled in provider acceptance. Mail delivery uses the native
  * send_email binding, so no delivery credential is required.
  *
@@ -866,7 +910,11 @@ export function validateDatabaseEnvironment(environment) {
  * @returns {{ api: Array<string>, automation: Array<string>, state: Array<string> }} Required secret names by worker
  */
 function requiredRemoteSecrets(spec) {
-  const common = ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "TOKEN_ENCRYPTION_KEY"];
+  const storage =
+    spec.runtime.object_storage_provider === "s3"
+      ? ["S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]
+      : ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"];
+  const common = [...storage, "TOKEN_ENCRYPTION_KEY"];
   const api = [...common, "AUTH_SETUP_SECRET", "BETTER_AUTH_SECRET"];
   const automation = [...common];
   for (const [provider, fields] of Object.entries(providerVariables)) {

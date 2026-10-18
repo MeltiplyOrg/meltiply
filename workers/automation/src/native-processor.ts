@@ -2,7 +2,7 @@
 // bucket credentials. Native compute stays in FFmpeg/libvips; the Container host
 // lives separately so this adapter also loads in Node integration tests.
 import { Effect } from "effect";
-import { createR2SignerFromEnv } from "@meltiply/storage";
+import { createObjectUrlSignerFromEnv } from "@meltiply/storage";
 
 import type { AutomationEnv } from "./env";
 
@@ -193,7 +193,7 @@ export function processorJobUrlsEffect(
           cause instanceof Error ? cause.message : "Object storage signing is unavailable.",
           true,
         ),
-      try: () => createR2SignerFromEnv(env),
+      try: () => createObjectUrlSignerFromEnv(env),
     });
     const expiresInSeconds = request.expiresInSeconds ?? PROCESSOR_CAPABILITY_TTL_SECONDS;
     const inputUrl = yield* Effect.tryPromise({

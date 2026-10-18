@@ -31,7 +31,9 @@ COPY workers/api/package.json ./workers/api/
 COPY workers/automation/package.json ./workers/automation/
 COPY workers/state/package.json ./workers/state/
 RUN bun install --frozen-lockfile
-COPY --from=runtime-dependencies /app/scripts/selfhost/node_modules ./scripts/selfhost/node_modules
+# Typecheck smoke scripts with their dev dependencies without adding them to runtime.
+COPY scripts/selfhost/package.json scripts/selfhost/package-lock.json ./scripts/selfhost/
+RUN npm ci --prefix scripts/selfhost --include=dev
 COPY . .
 RUN bun x --no-install tsc --project scripts/selfhost/tsconfig.json
 RUN bun run --cwd frontend/app build:production

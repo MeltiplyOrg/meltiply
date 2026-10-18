@@ -1,6 +1,6 @@
 import { Data, Effect } from "effect";
 import type { DatabaseError } from "@meltiply/domain";
-import { R2ObjectStore } from "@meltiply/storage";
+import { createObjectStoreFromEnv, type ConfiguredObjectStore } from "@meltiply/storage";
 
 import { claimObjectsForDeletion, settleDeletedObjects } from "./assets";
 import { withSystemTransactionEffect } from "./database";
@@ -258,7 +258,7 @@ const liveProfileMedia = `
  *
  * Storage is reclaimed through the Asset lifecycle's per-object inventory
  * protocol instead of a parallel delete path: one transaction claims the
- * profile's `asset_objects` rows for deletion, the R2 deletes run outside any
+ * profile's `asset_objects` rows for deletion, the object deletes run outside any
  * database transaction, and each object is durably recorded as 'deleted' with
  * its charged bytes released exactly once. Only a profile whose inventory is
  * fully gone — the gate and the cascading DELETE are the same statement — may
@@ -271,7 +271,7 @@ const liveProfileMedia = `
  * deadline is refused by the API. Every later statement re-checks `purge_at`
  * and live media eligibility, so nothing claimed earlier can be finalized once
  * the profile became ineligible again. Profiles without stored objects skip
- * the bucket entirely, so a missing ASSETS binding only fails cleanup when
+ * the bucket entirely, so unusable object storage only fails cleanup when
  * bytes are actually owed; any failed object delete still settles the
  * successes and then fails the cleanup retryably.
  */
@@ -301,16 +301,17 @@ const purgeDueBrandProfiles: RetentionCleanup = (env, batchSize) =>
     const reclaimedObjectIds: string[] = [];
     let failure: RetentionStorageError | undefined;
     if (claimed.length > 0) {
-      const bucket = env.ASSETS;
-      if (!bucket) {
+      let store: ConfiguredObjectStore;
+      try {
+        store = createObjectStoreFromEnv(env);
+      } catch (cause) {
         return yield* Effect.fail(
           new RetentionStorageError({
-            cause: null,
-            message: "asset R2 binding is unavailable for brand profile purge",
+            cause,
+            message: "object storage is unavailable for brand profile purge",
           }),
         );
       }
-      const store = new R2ObjectStore(bucket);
       for (const object of claimed) {
         // Deleting an already-removed key is a bucket no-op and the durable
         // completion below is a guarded status transition, so a re-claimed

@@ -31,20 +31,22 @@ export interface AutomationEnv {
   INSTAGRAM_LIVE_ACCEPTED?: string;
   INSTAGRAM_PUBLISH_QUEUE?: Queue<unknown>;
   /**
-   * Private processor lookup and RPC surface; excludes stub lifecycle methods
-   * whose class-specific types make full DurableObjectNamespace types invariant.
-   * The engine remains reachable only through this binding.
+   * Private processor lookup and awaited process outcome. Excludes stub lifecycle
+   * and promise-pipelining APIs, so both Durable Object RPC and the self-hosted
+   * engine transport satisfy the same contract without assertions.
    */
   MEDIA_PROCESSOR?: {
     /** Maps the asset-scoped processor name to its stable Durable Object ID. */
     idFromName(name: string): DurableObjectId;
-    /** Resolves the ID to the typed process RPC without exposing container internals. */
-    get(id: DurableObjectId): Pick<DurableObjectStub<MediaProcessorStub>, "process">;
+    /** Resolves the ID to the awaited process contract without exposing transport internals. */
+    get(id: DurableObjectId): Pick<MediaProcessorStub, "process">;
   };
   /** Verified public API origin; remote-ingest media URLs are signed under its `/api/v1/provider-media/` route. */
   PUBLIC_API_URL?: string;
   REPLIES_QUEUE?: Queue<unknown>;
   REPLY_WORKFLOW?: Workflow<ReplyWorkflowPayload>;
+  /** Object storage backend: `r2` (default) or `s3`. Selects which bindings below apply. */
+  OBJECT_STORAGE_PROVIDER?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_ACCOUNT_ID?: string;
   R2_BUCKET_NAME?: string;
@@ -53,6 +55,18 @@ export interface AutomationEnv {
   /** Optional path prefix the local runtime serves the bucket under (e.g. /cdn-cgi/local/r2/s3). */
   R2_ENDPOINT_PATH_PREFIX?: string;
   R2_SECRET_ACCESS_KEY?: string;
+  /** Access key for the `s3` object storage provider; unused when the provider is `r2`. */
+  S3_ACCESS_KEY_ID?: string;
+  /** Bucket name for the `s3` object storage provider; unused when the provider is `r2`. */
+  S3_BUCKET?: string;
+  /** Origin only (no path) of the S3-compatible service, e.g. `https://minio.internal:9000`. */
+  S3_ENDPOINT?: string;
+  /** `true` (default) addresses the bucket in the path, `false` in the host. */
+  S3_FORCE_PATH_STYLE?: string;
+  /** S3 signing region; defaults to `us-east-1`. */
+  S3_REGION?: string;
+  /** Secret access key for the `s3` object storage provider; unused when the provider is `r2`. */
+  S3_SECRET_ACCESS_KEY?: string;
   TIKTOK_CLIENT_KEY?: string;
   TIKTOK_CLIENT_SECRET?: string;
   TIKTOK_LIVE_ACCEPTED?: string;

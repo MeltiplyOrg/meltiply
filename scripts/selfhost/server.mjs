@@ -13,6 +13,11 @@ import { startControl } from "./control.mjs";
 const root = resolve(import.meta.dirname, "../..");
 const dist = resolve(root, "dist/selfhost");
 const metadata = JSON.parse(await readFile(resolve(dist, "metadata.json"), "utf8"));
+// The provider decides which storage settings are required, so it is resolved
+// before the settings that depend on it are validated.
+const objectStorageProvider = z
+  .enum(["r2", "s3"])
+  .parse(process.env.OBJECT_STORAGE_PROVIDER || "r2");
 const config = z
   .object({
     SELFHOST_DATA: z.string().default("/data"),
@@ -24,12 +29,20 @@ const config = z
     TOKEN_ENCRYPTION_KEY: z.string().min(32),
     SELFHOST_OPERATOR_SECRET: z.string().min(32),
     PROCESSOR_JOB_TOKEN: z.string().min(32),
-    R2_ACCESS_KEY_ID: z.string().min(16),
-    R2_SECRET_ACCESS_KEY: z.string().min(32),
     MAIL_FROM_ADDRESS: z.email(),
     SELFHOST_SMTP_URL: z.string().url(),
   })
   .parse(process.env);
+/** Credentials for the bundled R2 binding; absent when an operator selected S3. */
+const r2Credentials =
+  objectStorageProvider === "r2"
+    ? z
+        .object({
+          R2_ACCESS_KEY_ID: z.string().min(16),
+          R2_SECRET_ACCESS_KEY: z.string().min(32),
+        })
+        .parse(process.env)
+    : null;
 await mkdir(config.SELFHOST_DATA, { recursive: true, mode: 0o700 });
 const queuePolicies = JSON.parse(await readFile(resolve(dist, "queues.json"), "utf8"));
 const queues = { ...queuePolicies };
@@ -116,8 +129,7 @@ const bindings = {
   TOKEN_ENCRYPTION_KEY: config.TOKEN_ENCRYPTION_KEY,
   SELFHOST_OPERATOR_SECRET: config.SELFHOST_OPERATOR_SECRET,
   PROCESSOR_JOB_TOKEN: config.PROCESSOR_JOB_TOKEN,
-  R2_ACCESS_KEY_ID: config.R2_ACCESS_KEY_ID,
-  R2_SECRET_ACCESS_KEY: config.R2_SECRET_ACCESS_KEY,
+  ...(r2Credentials ?? {}),
   R2_ACCOUNT_ID: "selfhost",
   R2_BUCKET_NAME: "meltiply-assets",
   R2_ENDPOINT: new URL(config.SELFHOST_ORIGIN).origin,
@@ -152,11 +164,53 @@ for (const name of [
 ]) {
   if (process.env[name]) bindings[name] = process.env[name];
 }
-const credentials = {
-  accessKeyId: config.R2_ACCESS_KEY_ID,
-  secretAccessKey: config.R2_SECRET_ACCESS_KEY,
-};
-const storage = { ASSETS: { id: "meltiply-assets", s3Credentials: credentials } };
+
+// Object storage defaults to the bundled local R2 binding. An operator who
+// runs against an external S3-compatible service sets OBJECT_STORAGE_PROVIDER=s3
+// plus the S3_* settings in .env.selfhost; the same Workers code then reads,
+// writes, and signs there instead. Startup rejects missing or malformed settings
+// rather than letting the stack boot with every asset request failing: the S3
+// settings whenever S3 is selected, and the R2 credentials whenever R2 is
+// (`r2Credentials` above). Origin trust rules (HTTPS, origin only) stay with the
+// signer and surface through /api/v1/ready, so they are reported there rather
+// than duplicated here.
+if (objectStorageProvider === "s3") {
+  z.object({
+    S3_ACCESS_KEY_ID: z.string().min(1),
+    S3_BUCKET: z.string().min(1),
+    S3_ENDPOINT: z.url(),
+    S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).optional(),
+    S3_SECRET_ACCESS_KEY: z.string().min(1),
+  }).parse(process.env);
+}
+bindings.OBJECT_STORAGE_PROVIDER = objectStorageProvider;
+for (const name of [
+  "S3_ACCESS_KEY_ID",
+  "S3_BUCKET",
+  "S3_ENDPOINT",
+  "S3_FORCE_PATH_STYLE",
+  "S3_REGION",
+  "S3_SECRET_ACCESS_KEY",
+]) {
+  if (process.env[name]) bindings[name] = process.env[name];
+}
+/**
+ * The bundled local R2 bucket and the credentials its SigV4 gateway accepts.
+ *
+ * Only the R2 provider reads this bucket, so an S3 deployment binds no bucket at
+ * all instead of leaving an unused one behind.
+ */
+const bundledR2 = r2Credentials
+  ? {
+      ASSETS: {
+        id: "meltiply-assets",
+        s3Credentials: {
+          accessKeyId: r2Credentials.R2_ACCESS_KEY_ID,
+          secretAccessKey: r2Credentials.R2_SECRET_ACCESS_KEY,
+        },
+      },
+    }
+  : null;
 /** Creates direct PostgreSQL URLs, keeping passwords escaped and distinct RLS/system roles intact. */
 function databaseUrl(role, password) {
   const url = new URL("postgresql://postgres:5432/meltiply");
@@ -164,6 +218,38 @@ function databaseUrl(role, password) {
   url.password = password;
   return url.href;
 }
+/**
+ * The only bindings the restart probe needs.
+ *
+ * It is granted object storage settings and nothing else: the probe must not
+ * receive the session secret, the provider credentials, or the operator secret
+ * that the API and Automation workers legitimately hold. The R2 binding itself
+ * arrives from this worker's own `r2Buckets` entry, not from here.
+ */
+function diagnosticBindings() {
+  const granted = {};
+  for (const name of [
+    "ENVIRONMENT",
+    "OBJECT_STORAGE_PROVIDER",
+    "R2_ACCESS_KEY_ID",
+    "R2_ACCOUNT_ID",
+    "R2_BUCKET_NAME",
+    "R2_ENDPOINT",
+    "R2_ENDPOINT_PATH_PREFIX",
+    "R2_SECRET_ACCESS_KEY",
+    "S3_ACCESS_KEY_ID",
+    "S3_BUCKET",
+    "S3_ENDPOINT",
+    "S3_FORCE_PATH_STYLE",
+    "S3_REGION",
+    "S3_SECRET_ACCESS_KEY",
+    "VERSION",
+  ]) {
+    if (bindings[name]) granted[name] = bindings[name];
+  }
+  return granted;
+}
+
 /** Points at immutable Wrangler output; imports/chunks are resolved by the runtime, never rebuilt at startup. */
 function worker(name) {
   const built = metadata[name];
@@ -176,7 +262,9 @@ function worker(name) {
     bindings:
       name === "api" || name === "automation"
         ? bindings
-        : { ENVIRONMENT: bindings.ENVIRONMENT, VERSION: bindings.VERSION },
+        : name === "diagnostics"
+          ? diagnosticBindings()
+          : { ENVIRONMENT: bindings.ENVIRONMENT, VERSION: bindings.VERSION },
   };
 }
 const proxySecret = randomBytes(32).toString("hex");
@@ -203,7 +291,7 @@ const runtime = new Miniflare(
       },
       {
         ...worker("api"),
-        r2Buckets: storage,
+        ...(bundledR2 ? { r2Buckets: bundledR2 } : {}),
         hyperdrives: {
           DB_SYSTEM: databaseUrl("meltiply_system", config.SELFHOST_DB_SYSTEM_PASSWORD),
           DB_AUTHENTICATED: databaseUrl("meltiply_rls", config.SELFHOST_DB_AUTHENTICATED_PASSWORD),
@@ -218,7 +306,7 @@ const runtime = new Miniflare(
       },
       {
         ...worker("automation"),
-        r2Buckets: storage,
+        ...(bundledR2 ? { r2Buckets: bundledR2 } : {}),
         hyperdrives: {
           DB_SYSTEM: databaseUrl("meltiply_system", config.SELFHOST_DB_SYSTEM_PASSWORD),
         },
@@ -242,7 +330,7 @@ const runtime = new Miniflare(
       { ...worker("bindings"), bindings: {}, serviceBindings: { HOST: host } },
       {
         ...worker("diagnostics"),
-        r2Buckets: storage,
+        ...(bundledR2 ? { r2Buckets: bundledR2 } : {}),
         durableObjects: {
           OAUTH_STATE: { className: "OAuthStateCoordinator", scriptName: "state", useSQLite: true },
         },

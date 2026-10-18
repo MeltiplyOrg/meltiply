@@ -536,7 +536,7 @@ interface QueueDispatchInput {
   ) => Effect.Effect<"processed" | "skipped", unknown>;
   /**
    * Per-batch memoized asset processor factory: the queue handler caches the
-   * Promise once per batch so N asset messages share one R2ObjectStore
+   * Promise once per batch so N asset messages share one object store
    * instead of constructing a processor per message.
    */
   processorFor: () => Promise<AssetJobProcessor>;
@@ -843,9 +843,9 @@ export function createAutomationHandler(
      */
     async queue(batch, env) {
       configureJobLogging(env);
-      // One asset processor per batch: construction builds an R2ObjectStore,
-      // so the dispatcher resolves it lazily through this memoized thunk
-      // rather than paying per message.
+      // One asset processor per batch: construction builds the configured
+      // object storage store, so the dispatcher resolves it lazily through this
+      // memoized thunk rather than paying per message.
       let assetProcessor: Promise<AssetJobProcessor> | undefined;
       for (const message of batch.messages) {
         const startedAt = performance.now();

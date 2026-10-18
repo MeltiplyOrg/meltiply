@@ -392,7 +392,7 @@ export default defineConfig({
                     "@/components/ui/*",
                     "@/components/atoms",
                     "@/components/atoms/*",
-                    "@/components/primitives/sliding-menu-highlight",
+                    "@/components/primitives/sliding-highlight",
                   ],
                   message:
                     "Shared UI lives in @meltiply/ui/<basename>; extend it instead of adding app-local copies.",

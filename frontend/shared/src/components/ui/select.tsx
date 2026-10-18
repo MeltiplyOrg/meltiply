@@ -2,7 +2,7 @@ import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
-import { SlidingMenuHighlight } from "../primitives/sliding-menu-highlight";
+import { SlidingHighlight } from "../primitives/sliding-highlight";
 
 /**
  * Root context container for custom select dropdowns built on Radix Select.
@@ -171,7 +171,11 @@ export const SelectContent = React.forwardRef<
               "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
           )}
         >
-          <SlidingMenuHighlight containerRef={viewportRef} itemSelector="[data-dropdown-item]" />
+          <SlidingHighlight
+            containerRef={viewportRef}
+            itemSelector="[data-dropdown-item]"
+            deferUntilInteraction
+          />
           {children}
         </SelectPrimitive.Viewport>
         <SelectScrollDownButton />

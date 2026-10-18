@@ -2,7 +2,7 @@ import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronRight } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
-import { SlidingMenuHighlight } from "../primitives/sliding-menu-highlight";
+import { SlidingHighlight } from "../primitives/sliding-highlight";
 /**
  * Root container for dropdown menus built on Radix DropdownMenu.
  *
@@ -116,7 +116,11 @@ const DropdownMenuSubContent = React.forwardRef<
       {...props}
     >
       {highlight && (
-        <SlidingMenuHighlight containerRef={subContentRef} itemSelector="[data-dropdown-item]" />
+        <SlidingHighlight
+          containerRef={subContentRef}
+          itemSelector="[data-dropdown-item]"
+          deferUntilInteraction
+        />
       )}
       {children}
     </DropdownMenuPrimitive.SubContent>
@@ -166,7 +170,11 @@ export const DropdownMenuContent = React.forwardRef<
         {...props}
       >
         {highlight && (
-          <SlidingMenuHighlight containerRef={contentRef} itemSelector="[data-dropdown-item]" />
+          <SlidingHighlight
+            containerRef={contentRef}
+            itemSelector="[data-dropdown-item]"
+            deferUntilInteraction
+          />
         )}
         {children}
       </DropdownMenuPrimitive.Content>
@@ -179,7 +187,7 @@ DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName;
  * Actionable item within a dropdown menu.
  *
  * Chrome (row geometry, tokens, and hover suppression for the shared
- * `SlidingMenuHighlight` pill) comes from the `[data-menu-item]` hook, so every
+ * `SlidingHighlight` pill) comes from the `[data-menu-item]` hook, so every
  * menu family — this one, `Select`, and page-composed panels — renders
  * identically.
  *

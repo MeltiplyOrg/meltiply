@@ -426,7 +426,7 @@ html.theme-changing *::after {
     animation: menu-surface-out 120ms var(--ease-exit) both;
   }
 
-  /* A row never paints its own fill: `SlidingMenuHighlight` owns the hover pill,
+  /* A row never paints its own fill: `SlidingHighlight` owns the hover pill,
      and it tracks the same `data-dropdown-item` attribute this hook styles. */
   [data-menu-item] {
     position: relative;

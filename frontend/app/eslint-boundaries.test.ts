@@ -450,7 +450,7 @@ ruleTester.run("boundaries/no-canonical-ui-clones", cloneGuardRule, {
     {
       name: "rejects a new file in the retired app primitives dir",
       code: "export const Highlight = () => null;",
-      filename: `${appRoot}/src/components/primitives/sliding-menu-highlight.tsx`,
+      filename: `${appRoot}/src/components/primitives/sliding-highlight.tsx`,
       errors: [{ messageId: "retiredDir" }],
     },
     {

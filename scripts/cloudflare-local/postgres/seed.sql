@@ -7,7 +7,14 @@
 --     test contract — packages/database/test/rls.integration.test.ts and
 --   * Personal-workspace fixtures (orgs …0005/…0006; ids in the c/d/e/f/aa/bb
 --     ranges) are the day-to-day demo set: the API activates the personal
---     workspace by default, so signing in shows populated UI immediately.
+--     workspace by default, so signing in shows populated UI immediately. The
+--     demo set at the end of this file widens Alpha's personal workspace to
+--     every Posts outcome, the remaining connection states and Providers, a
+--     third Brand Profile, and the media lifecycle variants — its ids stay in
+--     fresh `49…`/`4b…` (Posts), `4c…`/`ac…` (objects and renditions),
+--     `d7…`/`d8…` (media), `e3…`/`e4…` (accounts), `f8…` (distributions),
+--     `a3…` (provider attempts), `ab…` (metrics), and `c4…` (profile) prefixes
+--     that no fixture and no integration suite allocates.
 -- Post-owned media adds two more ranges: Posts are 4800… (…0001 is pinned by
 -- the API integration suite) and the per-object storage inventory is
 -- 4100…/4200… for objects and their renditions.
@@ -887,7 +894,13 @@ INSERT INTO usage_records (
 VALUES
   ('20000000-0000-4000-8000-000000000001', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 1, 1, 12, 4096),
   ('20000000-0000-4000-8000-000000000002', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 1, 0, 3, 0),
-  ('20000000-0000-4000-8000-000000000005', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 5, 5, 214, 8835072),
+  -- The demo workspace's numbers cover the canonical rows above plus the demo
+  -- set appended below this block: 7 finalized Assets and 20 stored
+  -- Distributions inside the current period — deliberately under the community
+  -- ceilings, so the demo workspace can still upload and publish — and
+  -- 18,317,312 resident inventory bytes, which is exactly what a reconciliation
+  -- recomputes for the current period.
+  ('20000000-0000-4000-8000-000000000005', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 7, 20, 214, 18317312),
   ('20000000-0000-4000-8000-000000000006', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 0, 0, 3, 0),
   ('20000000-0000-4000-8000-000000000005', to_char((now() - interval '1 month') AT TIME ZONE 'UTC', 'YYYY-MM'), 3, 2, 96, 4194304)
 ON CONFLICT (org_id, period) DO UPDATE
@@ -896,5 +909,1260 @@ SET uploads = EXCLUDED.uploads,
     api_calls = EXCLUDED.api_calls,
     storage_bytes = EXCLUDED.storage_bytes,
     updated_at = now();
+
+-- ===========================================================================
+-- Personal-workspace demo set: every Posts, Channels, and media variant.
+--
+-- Alpha's personal workspace (…0005) is the signed-in demo workspace, so its
+-- fixtures are the sample data the UI is exercised against. The `4900…`/`4b00…`
+-- Posts cover every outcome `/posts` can group by — draft, scheduled, queued,
+-- processing, awaiting provider, published, failed, cancel requested, cancelled,
+-- needs reconciliation — plus the shapes around them: a Post with no
+-- Distribution, a saved Channel target with no outcome, five Channels on one
+-- Post, a published + failed pair, a non-retryable failure, text-only and
+-- media-only compositions, ordered multi-attachment Posts, a caption that is
+-- only a long unbroken token, an empty caption, and attachments that are
+-- processing or failed. The `e300…`/`e400…` accounts cover all five connection
+-- states across all six Providers, and `c400…0001` adds a third Brand Profile so
+-- profile grouping and the profile scope have more than two rows to show.
+--
+-- Ids are disjoint from the canonical team fixtures (orgs …0001/…0002), from
+-- every id the integration suites allocate, and from the retired ranges.
+-- ===========================================================================
+
+-- A third Brand Profile in the demo workspace: profile grouping, the profile
+-- scope, and the Channels directory need more than the two profiles that
+-- predate it. `#0f766e` is one of the fixed accessible palette values
+-- `brand_profiles_color_check` accepts.
+INSERT INTO brand_profiles (id, org_id, name, color)
+VALUES
+  ('c4000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'Alpha Labs', '#0f766e')
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    color = EXCLUDED.color,
+    updated_at = now();
+
+-- Every remaining Provider and connection state on the demo profiles, so
+-- /channels and the composer's destination chips show connected, expiring,
+-- expired, revoked, and reconnect-required accounts. `e300…0002` deliberately
+-- carries no display name: the directory must fall back to the platform user id
+-- rather than rendering an empty name cell.
+INSERT INTO platform_accounts (
+  id, org_id, brand_profile_id, platform, platform_user_id, display_name,
+  access_token, scopes, metadata, connection_status, last_synced_at, revoked_at
+)
+VALUES
+  (
+    'e3000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'facebook',
+    'local-facebook-alpha',
+    'Alpha Page',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload', 'analytics'],
+    '{"fixture": true}'::jsonb,
+    'connected',
+    now() - interval '2 hours',
+    NULL
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'linkedin',
+    'local-linkedin-alpha',
+    NULL,
+    'local-only-not-a-provider-credential',
+    ARRAY['upload'],
+    '{"fixture": true}'::jsonb,
+    'connected',
+    now() - interval '1 day',
+    NULL
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'threads',
+    'local-threads-alpha',
+    '@alpha.threads',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload'],
+    '{"fixture": true}'::jsonb,
+    'expiring',
+    now() - interval '3 hours',
+    NULL
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000004',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'tiktok',
+    'local-tiktok-alpha-clips',
+    '@alpha.clips',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload'],
+    '{"fixture": true}'::jsonb,
+    'revoked',
+    now() - interval '20 days',
+    now() - interval '20 days'
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000005',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    'youtube',
+    'local-youtube-nights',
+    'Alpha Nights',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload'],
+    '{"fixture": true}'::jsonb,
+    'reconnect_required',
+    now() - interval '4 days',
+    NULL
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000006',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    'tiktok',
+    'local-tiktok-nights',
+    '@alpha.nights.tv',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload', 'analytics'],
+    '{"fixture": true}'::jsonb,
+    'connected',
+    now() - interval '6 hours',
+    NULL
+  ),
+  (
+    'e4000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'c4000000-0000-4000-8000-000000000001',
+    'instagram',
+    'local-instagram-labs',
+    '@alphalabs',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload'],
+    '{"fixture": true}'::jsonb,
+    'connected',
+    now() - interval '5 hours',
+    NULL
+  ),
+  (
+    'e4000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'c4000000-0000-4000-8000-000000000001',
+    'linkedin',
+    'local-linkedin-labs',
+    'Alpha Labs',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload'],
+    '{"fixture": true}'::jsonb,
+    'expired',
+    now() - interval '11 days',
+    NULL
+  )
+ON CONFLICT (platform, platform_user_id) DO UPDATE
+SET display_name = EXCLUDED.display_name,
+    scopes = EXCLUDED.scopes,
+    metadata = EXCLUDED.metadata,
+    connection_status = EXCLUDED.connection_status,
+    last_synced_at = EXCLUDED.last_synced_at,
+    revoked_at = EXCLUDED.revoked_at,
+    updated_at = now();
+
+-- Media variants the demo Posts attach: two images and a video per shape, an
+-- image with unknown dimensions, a ready asset with no measured size, a failed
+-- upload, and an asset still processing. Ready assets own one original object
+-- and one ready rendition below; the failed and processing rows own neither.
+INSERT INTO assets (
+  id, org_id, brand_profile_id, uploaded_by, asset_type, title,
+  duration_sec, file_size, mime_type, width, height, status, original_filename,
+  failure_code, failure_message, failure_retryable, failure_at, finalized_at
+)
+VALUES
+  (
+    'd7000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'image',
+    'Studio still 01',
+    NULL, 262144, 'image/png', 1080, 1350, 'ready', 'studio-still-01.png',
+    NULL, NULL, NULL, NULL, now()
+  ),
+  (
+    'd7000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'image',
+    'Studio still 02',
+    NULL, 331776, 'image/png', 1080, 1080, 'ready', 'studio-still-02.png',
+    NULL, NULL, NULL, NULL, now()
+  ),
+  (
+    'd7000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'video',
+    'Launch recap',
+    42, 8388608, 'video/mp4', 1920, 1080, 'ready', 'launch-recap.mp4',
+    NULL, NULL, NULL, NULL, now()
+  ),
+  (
+    'd7000000-0000-4000-8000-000000000004',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'image',
+    'Product macro',
+    NULL, NULL, 'image/png', NULL, NULL, 'ready', 'product-macro.png',
+    NULL, NULL, NULL, NULL, now()
+  ),
+  (
+    'd7000000-0000-4000-8000-000000000005',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'video',
+    'Truncated clip',
+    NULL, NULL, NULL, NULL, NULL, 'failed', 'truncated-clip.mp4',
+    'upload_aborted',
+    'Part upload aborted before completion.',
+    TRUE,
+    now() - interval '3 hours',
+    NULL
+  ),
+  (
+    'd7000000-0000-4000-8000-000000000006',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'image',
+    'Reels cover',
+    NULL, 131072, 'image/png', 1080, 1920, 'processing', 'reels-cover.png',
+    NULL, NULL, NULL, NULL, NULL
+  ),
+  (
+    'd7000000-0000-4000-8000-000000000007',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000001',
+    'image',
+    'Nights teaser',
+    NULL, 196608, 'image/png', 1080, 1080, 'ready', 'nights-teaser.png',
+    NULL, NULL, NULL, NULL, now()
+  ),
+  (
+    'd8000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'c4000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'image',
+    'Labs diagram',
+    NULL, 98304, 'image/png', 1600, 900, 'ready', 'labs-diagram.png',
+    NULL, NULL, NULL, NULL, now()
+  ),
+  (
+    'd8000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'c4000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'image',
+    'Labs key art',
+    NULL, 204800, 'image/png', 1080, 1350, 'ready', 'labs-key-art.png',
+    NULL, NULL, NULL, NULL, now()
+  )
+ON CONFLICT (id) DO UPDATE
+SET asset_type = EXCLUDED.asset_type,
+    title = EXCLUDED.title,
+    duration_sec = EXCLUDED.duration_sec,
+    file_size = EXCLUDED.file_size,
+    mime_type = EXCLUDED.mime_type,
+    width = EXCLUDED.width,
+    height = EXCLUDED.height,
+    status = EXCLUDED.status,
+    original_filename = EXCLUDED.original_filename,
+    failure_code = EXCLUDED.failure_code,
+    failure_message = EXCLUDED.failure_message,
+    failure_retryable = EXCLUDED.failure_retryable,
+    failure_at = EXCLUDED.failure_at,
+    finalized_at = EXCLUDED.finalized_at,
+    updated_at = now();
+
+-- Originals for the ready demo media, keyed with the canonical protected
+-- `<orgId>/<assetId>/original` layout a signed preview or delivery resolves.
+INSERT INTO asset_objects (
+  id, org_id, asset_id, brand_profile_id, kind, r2_key, bytes, content_type,
+  width, height, duration_sec, status
+)
+VALUES
+  ('4c000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001', 'original', '20000000-0000-4000-8000-000000000005/d7000000-0000-4000-8000-000000000001/original', 262144, 'image/png', 1080, 1350, NULL, 'ready'),
+  ('4c000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000002', 'c0000000-0000-4000-8000-000000000001', 'original', '20000000-0000-4000-8000-000000000005/d7000000-0000-4000-8000-000000000002/original', 331776, 'image/png', 1080, 1080, NULL, 'ready'),
+  ('4c000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000003', 'c0000000-0000-4000-8000-000000000001', 'original', '20000000-0000-4000-8000-000000000005/d7000000-0000-4000-8000-000000000003/original', 8388608, 'video/mp4', 1920, 1080, 42, 'ready'),
+  ('4c000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000004', 'c0000000-0000-4000-8000-000000000001', 'original', '20000000-0000-4000-8000-000000000005/d7000000-0000-4000-8000-000000000004/original', 0, 'image/png', NULL, NULL, NULL, 'ready'),
+  ('4c000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000007', 'c0000000-0000-4000-8000-000000000002', 'original', '20000000-0000-4000-8000-000000000005/d7000000-0000-4000-8000-000000000007/original', 196608, 'image/png', 1080, 1080, NULL, 'ready'),
+  ('4c000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', 'd8000000-0000-4000-8000-000000000001', 'c4000000-0000-4000-8000-000000000001', 'original', '20000000-0000-4000-8000-000000000005/d8000000-0000-4000-8000-000000000001/original', 98304, 'image/png', 1600, 900, NULL, 'ready'),
+  ('4c000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 'd8000000-0000-4000-8000-000000000002', 'c4000000-0000-4000-8000-000000000001', 'original', '20000000-0000-4000-8000-000000000005/d8000000-0000-4000-8000-000000000002/original', 204800, 'image/png', 1080, 1350, NULL, 'ready')
+ON CONFLICT (r2_key) DO UPDATE
+SET bytes = EXCLUDED.bytes,
+    content_type = EXCLUDED.content_type,
+    width = EXCLUDED.width,
+    height = EXCLUDED.height,
+    duration_sec = EXCLUDED.duration_sec,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+INSERT INTO asset_renditions (
+  id, org_id, asset_id, brand_profile_id, profile, object_id, status
+)
+VALUES
+  ('ac000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001', 'original', '4c000000-0000-4000-8000-000000000001', 'ready'),
+  ('ac000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000002', 'c0000000-0000-4000-8000-000000000001', 'original', '4c000000-0000-4000-8000-000000000002', 'ready'),
+  ('ac000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000003', 'c0000000-0000-4000-8000-000000000001', 'original', '4c000000-0000-4000-8000-000000000003', 'ready'),
+  ('ac000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000004', 'c0000000-0000-4000-8000-000000000001', 'original', '4c000000-0000-4000-8000-000000000004', 'ready'),
+  ('ac000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000005', 'd7000000-0000-4000-8000-000000000007', 'c0000000-0000-4000-8000-000000000002', 'original', '4c000000-0000-4000-8000-000000000005', 'ready'),
+  ('ac000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', 'd8000000-0000-4000-8000-000000000001', 'c4000000-0000-4000-8000-000000000001', 'original', '4c000000-0000-4000-8000-000000000006', 'ready'),
+  ('ac000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 'd8000000-0000-4000-8000-000000000002', 'c4000000-0000-4000-8000-000000000001', 'original', '4c000000-0000-4000-8000-000000000007', 'ready')
+ON CONFLICT (asset_id, profile) DO UPDATE
+SET object_id = EXCLUDED.object_id,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+-- The demo Posts. `created_at` is explicit and varied so list ordering and the
+-- "Newest/Oldest" sort have something real to order; `status` is the lifecycle
+-- marker only, because every collection row's displayed status is aggregated
+-- from its Distributions.
+INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status, created_at)
+VALUES
+  (
+    '49000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Launch day recap',
+    E'Launch day is here 🚀\n\nWe shipped the new editor this morning.\n\n#launch #creator',
+    'active',
+    now() - interval '21 days'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Recap, two ways',
+    'Full recap plus the short cut.',
+    'active',
+    now() - interval '14 days'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    'Nights teaser',
+    E'Nights teaser drops tonight.\n\nTurn the sound on 🔊',
+    'active',
+    now() - interval '9 days'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000004',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Everything, everywhere',
+    'One post, five destinations — the full cross-post check.',
+    'active',
+    now() - interval '8 days'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000005',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '',
+    '',
+    'active',
+    now() - interval '7 days'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000006',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Release notes',
+    'Pneumonoultramicroscopicsilicovolcanoconiosis #shipit #launch #creator #publishing #scheduling #analytics #growth #community #behindthescenes',
+    'active',
+    now() - interval '5 days'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000007',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    'Tonight on the feed',
+    'Going live at 9pm — set a reminder 🔔',
+    'active',
+    now() - interval '3 days'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000008',
+    '20000000-0000-4000-8000-000000000005',
+    'c4000000-0000-4000-8000-000000000001',
+    'Labs roadmap',
+    'Q4 roadmap: analytics, drafts, and scheduling improvements.',
+    'active',
+    now() - interval '2 days'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000009',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Copy-only announcement',
+    'No media on this one — copy only.',
+    'active',
+    now() - interval '1 day'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000010',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Rendering the cut',
+    'Rendering the 4K cut now…',
+    'active',
+    now() - interval '20 hours'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000011',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Waiting on the provider',
+    'Uploaded — the provider is still transcoding.',
+    'active',
+    now() - interval '18 hours'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000012',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Pull this one back',
+    'Cancel requested before it goes out.',
+    'active',
+    now() - interval '12 hours'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000013',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Superseded teaser',
+    'Superseded by the launch recap.',
+    'active',
+    now() - interval '11 days'
+  ),
+  (
+    '49000000-0000-4000-8000-000000000014',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    'Provider mismatch',
+    'The provider accepted half of this post.',
+    'active',
+    now() - interval '6 days'
+  ),
+  (
+    '4b000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Storyboard notes',
+    'Hook: the problem. Middle: the work. End: the invite.',
+    'draft',
+    now() - interval '4 hours'
+  ),
+  (
+    '4b000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Carousel draft',
+    'Slide one copy — three images, no destination picked yet.',
+    'draft',
+    now() - interval '3 hours'
+  ),
+  (
+    '4b000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '',
+    '',
+    'draft',
+    now() - interval '2 hours'
+  ),
+  (
+    '4b000000-0000-4000-8000-000000000004',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Saved, not targeted',
+    'Saved composition with no destination yet.',
+    'active',
+    now() - interval '90 minutes'
+  ),
+  (
+    '4b000000-0000-4000-8000-000000000005',
+    '20000000-0000-4000-8000-000000000005',
+    'c4000000-0000-4000-8000-000000000001',
+    'Labs target, no outcome',
+    'A saved Channel target that was never scheduled.',
+    'active',
+    now() - interval '80 minutes'
+  ),
+  (
+    '4b000000-0000-4000-8000-000000000006',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    'Permanent provider failure',
+    'This one is not retryable.',
+    'active',
+    now() - interval '70 minutes'
+  ),
+  (
+    '4b000000-0000-4000-8000-000000000007',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Two channels, one revoked',
+    'Published before the second account was disconnected.',
+    'active',
+    now() - interval '60 minutes'
+  ),
+  (
+    '4b000000-0000-4000-8000-000000000008',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Draft with broken media',
+    'The attached clip failed to upload.',
+    'draft',
+    now() - interval '30 minutes'
+  )
+ON CONFLICT (id) DO UPDATE
+SET title = EXCLUDED.title,
+    default_text = EXCLUDED.default_text,
+    status = EXCLUDED.status,
+    created_at = EXCLUDED.created_at,
+    updated_at = now();
+
+-- Ordered attachments: one media-only Post, one three-attachment Post, one
+-- two-attachment Post, one post whose media the frozen publication detached,
+-- and Posts carrying a processing or failed Asset.
+INSERT INTO post_attachments (post_id, asset_id, org_id, brand_profile_id, position)
+VALUES
+  ('49000000-0000-4000-8000-000000000001', 'd7000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('49000000-0000-4000-8000-000000000001', 'd7000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 1),
+  ('49000000-0000-4000-8000-000000000001', 'd7000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 2),
+  ('49000000-0000-4000-8000-000000000002', 'd7000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('49000000-0000-4000-8000-000000000002', 'd7000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 1),
+  ('49000000-0000-4000-8000-000000000003', 'd7000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 0),
+  ('49000000-0000-4000-8000-000000000004', 'd7000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('49000000-0000-4000-8000-000000000006', 'd7000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('49000000-0000-4000-8000-000000000007', 'd7000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 0),
+  ('49000000-0000-4000-8000-000000000008', 'd8000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c4000000-0000-4000-8000-000000000001', 0),
+  ('49000000-0000-4000-8000-000000000010', 'd7000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('49000000-0000-4000-8000-000000000011', 'd7000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('49000000-0000-4000-8000-000000000013', 'd7000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('49000000-0000-4000-8000-000000000014', 'd7000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 0),
+  ('4b000000-0000-4000-8000-000000000002', 'd7000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('4b000000-0000-4000-8000-000000000002', 'd7000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 1),
+  ('4b000000-0000-4000-8000-000000000003', 'd7000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('4b000000-0000-4000-8000-000000000004', 'd7000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('4b000000-0000-4000-8000-000000000005', 'd8000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c4000000-0000-4000-8000-000000000001', 0),
+  ('4b000000-0000-4000-8000-000000000006', 'd7000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 0),
+  ('4b000000-0000-4000-8000-000000000007', 'd7000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0),
+  ('4b000000-0000-4000-8000-000000000008', 'd7000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 0)
+ON CONFLICT (post_id, asset_id) DO UPDATE
+SET position = EXCLUDED.position;
+
+-- Saved per-Channel targets. `description_override` carries a real custom
+-- caption, `attachment_ids` carries a Channel-specific media subset and the
+-- deliberate text-only empty array, and one target points at an expired and one
+-- at a revoked account so the composer's unavailable-destination states are
+-- reachable from demo data.
+INSERT INTO post_targets (
+  post_id, platform_account_id, org_id, brand_profile_id, title_override,
+  description_override, attachment_ids
+)
+VALUES
+  ('49000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Launch day recap', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', NULL, 'Same recap, cut for TikTok.', ARRAY['d7000000-0000-4000-8000-000000000003']::uuid[]),
+  ('49000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Recap, two ways', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000002', 'e3000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Recap, two ways', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000003', 'e0000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 'Nights teaser', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000004', 'e0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Everything, everywhere', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000004', 'e0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Everything, everywhere', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000004', 'e3000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Everything, everywhere', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000004', 'e3000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Everything, everywhere', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000004', 'e3000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Everything, everywhere', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000005', 'e0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', NULL, NULL, NULL),
+  ('49000000-0000-4000-8000-000000000006', 'e3000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Release notes', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000007', 'e0000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 'Tonight on the feed', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000008', 'e4000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c4000000-0000-4000-8000-000000000001', 'Labs roadmap', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000008', 'e4000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c4000000-0000-4000-8000-000000000001', 'Labs roadmap', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000009', 'e3000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Copy-only announcement', NULL, '{}'::uuid[]),
+  ('49000000-0000-4000-8000-000000000010', 'e0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Rendering the cut', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000011', 'e0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Waiting on the provider', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000012', 'e3000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Pull this one back', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000013', 'e0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Superseded teaser', NULL, NULL),
+  ('49000000-0000-4000-8000-000000000014', 'e3000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 'Provider mismatch', NULL, NULL),
+  ('4b000000-0000-4000-8000-000000000005', 'e4000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c4000000-0000-4000-8000-000000000001', 'Labs target, no outcome', NULL, NULL),
+  ('4b000000-0000-4000-8000-000000000006', 'e3000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 'Permanent provider failure', NULL, NULL),
+  ('4b000000-0000-4000-8000-000000000007', 'e0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Two channels, one revoked', NULL, NULL),
+  ('4b000000-0000-4000-8000-000000000007', 'e3000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Two channels, one revoked', NULL, ARRAY['d7000000-0000-4000-8000-000000000002']::uuid[])
+ON CONFLICT (post_id, platform_account_id) DO UPDATE
+SET title_override = EXCLUDED.title_override,
+    description_override = EXCLUDED.description_override,
+    attachment_ids = EXCLUDED.attachment_ids,
+    updated_at = now();
+
+-- One Distribution per outcome the collection can group by, with the timing
+-- each one needs: published history in the past (including earlier today),
+-- pending work scheduled in the future, and terminal failures with their own
+-- retryability. `created_at` stays inside the current usage period so a
+-- reconciliation recomputes exactly what the counters below record.
+INSERT INTO distributions (
+  id, org_id, brand_profile_id, post_id, platform_account_id, platform, status,
+  scheduled_at, published_at, platform_post_id, platform_url, title_override,
+  attachment_ids, error_message, retry_count, attempt_count, last_attempt_at,
+  failure_code, failure_retryable, created_at
+)
+VALUES
+  (
+    'f8000000-0000-4000-8000-000000000101',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000001',
+    'e0000000-0000-4000-8000-000000000001',
+    'youtube',
+    'published',
+    NULL,
+    now() - interval '20 days',
+    'local-post-launch-recap',
+    'https://example.invalid/watch/local-post-launch-recap',
+    'Launch day recap',
+    NULL,
+    NULL, 0, 1, now() - interval '20 days', NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000102',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000001',
+    'e0000000-0000-4000-8000-000000000002',
+    'tiktok',
+    'published',
+    NULL,
+    now() - interval '19 days',
+    'local-post-launch-recap-tiktok',
+    'https://example.invalid/tiktok/local-post-launch-recap-tiktok',
+    'Same recap, cut for TikTok.',
+    ARRAY['d7000000-0000-4000-8000-000000000003']::uuid[],
+    NULL, 0, 1, now() - interval '19 days', NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000103',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000002',
+    'e0000000-0000-4000-8000-000000000001',
+    'youtube',
+    'published',
+    NULL,
+    now() - interval '14 days',
+    'local-post-recap-two-ways',
+    'https://example.invalid/watch/local-post-recap-two-ways',
+    'Recap, two ways',
+    NULL,
+    NULL, 0, 1, now() - interval '14 days', NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000104',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000002',
+    'e3000000-0000-4000-8000-000000000001',
+    'facebook',
+    'failed',
+    NULL,
+    NULL, NULL, NULL,
+    'Recap, two ways',
+    NULL,
+    'Provider rejected the publish request: rate limited.',
+    1, 2, now() - interval '13 days', 'provider_rate_limited', TRUE,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000105',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    '49000000-0000-4000-8000-000000000003',
+    'e0000000-0000-4000-8000-000000000003',
+    'instagram',
+    'published',
+    NULL,
+    now() - interval '9 days',
+    'local-post-nights-teaser',
+    'https://example.invalid/instagram/local-post-nights-teaser',
+    'Nights teaser',
+    NULL,
+    NULL, 0, 1, now() - interval '9 days', NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000106',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000004',
+    'e0000000-0000-4000-8000-000000000001',
+    'youtube',
+    'published',
+    NULL,
+    now() - interval '8 days',
+    'local-post-everywhere',
+    'https://example.invalid/watch/local-post-everywhere',
+    'Everything, everywhere',
+    NULL,
+    NULL, 0, 1, now() - interval '8 days', NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000107',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000004',
+    'e0000000-0000-4000-8000-000000000002',
+    'tiktok',
+    'published',
+    NULL,
+    now() - interval '8 days',
+    'local-post-everywhere-tiktok',
+    'https://example.invalid/tiktok/local-post-everywhere-tiktok',
+    'Everything, everywhere',
+    NULL,
+    NULL, 0, 1, now() - interval '8 days', NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000108',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000004',
+    'e3000000-0000-4000-8000-000000000001',
+    'facebook',
+    'published',
+    NULL,
+    now() - interval '8 days',
+    'local-post-everywhere-facebook',
+    'https://example.invalid/facebook/local-post-everywhere-facebook',
+    'Everything, everywhere',
+    NULL,
+    NULL, 0, 1, now() - interval '8 days', NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000109',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000004',
+    'e3000000-0000-4000-8000-000000000002',
+    'linkedin',
+    'published',
+    NULL,
+    now() - interval '8 days',
+    'local-post-everywhere-linkedin',
+    'https://example.invalid/linkedin/local-post-everywhere-linkedin',
+    'Everything, everywhere',
+    NULL,
+    NULL, 0, 1, now() - interval '8 days', NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000110',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000004',
+    'e3000000-0000-4000-8000-000000000003',
+    'threads',
+    'cancelled',
+    NULL,
+    NULL, NULL, NULL,
+    'Everything, everywhere',
+    NULL,
+    'Cancelled before delivery.',
+    0, 0, NULL, NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000111',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000005',
+    'e0000000-0000-4000-8000-000000000001',
+    'youtube',
+    'published',
+    NULL,
+    now() - interval '7 days',
+    'local-post-media-only',
+    'https://example.invalid/watch/local-post-media-only',
+    NULL,
+    NULL,
+    NULL, 0, 1, now() - interval '7 days', NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000112',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000006',
+    'e3000000-0000-4000-8000-000000000003',
+    'threads',
+    'scheduled',
+    now() + interval '1 day',
+    NULL, NULL, NULL,
+    'Release notes',
+    NULL,
+    NULL, 0, 0, NULL, NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000113',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    '49000000-0000-4000-8000-000000000007',
+    'e0000000-0000-4000-8000-000000000003',
+    'instagram',
+    'scheduled',
+    now() + interval '3 hours',
+    NULL, NULL, NULL,
+    'Tonight on the feed',
+    NULL,
+    NULL, 0, 0, NULL, NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000114',
+    '20000000-0000-4000-8000-000000000005',
+    'c4000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000008',
+    'e4000000-0000-4000-8000-000000000001',
+    'instagram',
+    'scheduled',
+    now() + interval '12 days',
+    NULL, NULL, NULL,
+    'Labs roadmap',
+    NULL,
+    NULL, 0, 0, NULL, NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000115',
+    '20000000-0000-4000-8000-000000000005',
+    'c4000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000008',
+    'e4000000-0000-4000-8000-000000000002',
+    'linkedin',
+    'scheduled',
+    now() + interval '28 days',
+    NULL, NULL, NULL,
+    'Labs roadmap',
+    NULL,
+    NULL, 0, 0, NULL, NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000116',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000009',
+    'e3000000-0000-4000-8000-000000000001',
+    'facebook',
+    'queued',
+    NULL,
+    NULL, NULL, NULL,
+    'Copy-only announcement',
+    '{}'::uuid[],
+    NULL, 0, 0, NULL, NULL, NULL,
+    now() - interval '1 day'
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000117',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000010',
+    'e0000000-0000-4000-8000-000000000002',
+    'tiktok',
+    'processing',
+    NULL,
+    NULL, NULL, NULL,
+    'Rendering the cut',
+    NULL,
+    NULL, 0, 1, now() - interval '1 hour', NULL, NULL,
+    now() - interval '20 hours'
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000118',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000011',
+    'e0000000-0000-4000-8000-000000000001',
+    'youtube',
+    'awaiting_provider',
+    NULL,
+    NULL, NULL, NULL,
+    'Waiting on the provider',
+    NULL,
+    NULL, 0, 2, now() - interval '30 minutes', NULL, NULL,
+    now() - interval '18 hours'
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000119',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000012',
+    'e3000000-0000-4000-8000-000000000002',
+    'linkedin',
+    'cancel_requested',
+    now() + interval '2 days',
+    NULL, NULL, NULL,
+    'Pull this one back',
+    NULL,
+    NULL, 0, 1, now() - interval '12 hours', NULL, NULL,
+    now() - interval '12 hours'
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000120',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '49000000-0000-4000-8000-000000000013',
+    'e0000000-0000-4000-8000-000000000001',
+    'youtube',
+    'cancelled',
+    NULL,
+    NULL, NULL, NULL,
+    'Superseded teaser',
+    NULL,
+    'Cancelled before delivery.',
+    0, 0, NULL, NULL, NULL,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000121',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    '49000000-0000-4000-8000-000000000014',
+    'e3000000-0000-4000-8000-000000000005',
+    'youtube',
+    'needs_reconciliation',
+    NULL,
+    NULL, NULL, NULL,
+    'Provider mismatch',
+    NULL,
+    'The provider response did not confirm whether this post was published.',
+    0, 3, now() - interval '5 days', 'publish_unverified', FALSE,
+    now()
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000122',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '4b000000-0000-4000-8000-000000000007',
+    'e0000000-0000-4000-8000-000000000001',
+    'youtube',
+    'published',
+    NULL,
+    now() - interval '1 hour',
+    'local-post-two-channels',
+    'https://example.invalid/watch/local-post-two-channels',
+    'Two channels, one revoked',
+    NULL,
+    NULL, 0, 1, now() - interval '1 hour', NULL, NULL,
+    now() - interval '1 hour'
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000123',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '4b000000-0000-4000-8000-000000000007',
+    'e3000000-0000-4000-8000-000000000004',
+    'tiktok',
+    'published',
+    NULL,
+    now() - interval '1 hour',
+    'local-post-two-channels-tiktok',
+    'https://example.invalid/tiktok/local-post-two-channels-tiktok',
+    'Two channels, one revoked',
+    ARRAY['d7000000-0000-4000-8000-000000000002']::uuid[],
+    NULL, 0, 1, now() - interval '1 hour', NULL, NULL,
+    now() - interval '1 hour'
+  ),
+  (
+    'f8000000-0000-4000-8000-000000000124',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    '4b000000-0000-4000-8000-000000000006',
+    'e3000000-0000-4000-8000-000000000006',
+    'tiktok',
+    'failed',
+    NULL,
+    NULL, NULL, NULL,
+    'Permanent provider failure',
+    NULL,
+    'Provider rejected the media format permanently.',
+    1, 1, now() - interval '40 minutes', 'media_rejected', FALSE,
+    now() - interval '50 minutes'
+  )
+ON CONFLICT (id) DO UPDATE
+SET post_id = EXCLUDED.post_id,
+    platform_account_id = EXCLUDED.platform_account_id,
+    platform = EXCLUDED.platform,
+    title_override = EXCLUDED.title_override,
+    attachment_ids = EXCLUDED.attachment_ids,
+    status = EXCLUDED.status,
+    scheduled_at = EXCLUDED.scheduled_at,
+    published_at = EXCLUDED.published_at,
+    platform_post_id = EXCLUDED.platform_post_id,
+    platform_url = EXCLUDED.platform_url,
+    error_message = EXCLUDED.error_message,
+    retry_count = EXCLUDED.retry_count,
+    attempt_count = EXCLUDED.attempt_count,
+    last_attempt_at = EXCLUDED.last_attempt_at,
+    failure_code = EXCLUDED.failure_code,
+    failure_retryable = EXCLUDED.failure_retryable,
+    created_at = EXCLUDED.created_at,
+    updated_at = now();
+
+-- Claimed publish attempts. Three succeed and freeze the composition the
+-- Channel published, which is what a row previews after later Post edits:
+-- `…0001` froze two attachments, `…0002` one, and `…0003` a media-only
+-- composition whose frozen Asset is no longer attached to its Post — the
+-- detached slot the inspector and previews must keep showing as published
+-- media rather than silently replacing with the Post's own order. `…0004`
+-- failed verification and drives the needs-reconciliation fixture.
+INSERT INTO provider_operations (
+  id, org_id, distribution_id, operation, idempotency_key, status,
+  provider_operation_id, provider_post_id, provider_url, error_class, last_error,
+  attempt_count, created_at, updated_at, completed_at, publication_snapshot
+)
+VALUES
+  (
+    'a3000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'f8000000-0000-4000-8000-000000000101',
+    'publish',
+    'seed-publish-f800-101',
+    'succeeded',
+    'local-op-launch-recap',
+    'local-post-launch-recap',
+    'https://example.invalid/watch/local-post-launch-recap',
+    NULL, NULL,
+    1, now() - interval '20 days', now() - interval '20 days', now() - interval '20 days',
+    '{
+       "version": 1,
+       "post_id": "49000000-0000-4000-8000-000000000001",
+       "content": {
+         "title": "Launch day recap",
+         "text": "Launch day is here 🚀\n\nWe shipped the new editor this morning.\n\n#launch #creator",
+         "hashtags": ["#launch", "#creator"]
+       },
+       "media": [
+         {"asset_id": "d7000000-0000-4000-8000-000000000001", "asset_type": "image", "content_type": "image/png", "duration_sec": null, "file_size": 262144, "height": 1350, "position": 0, "width": 1080},
+         {"asset_id": "d7000000-0000-4000-8000-000000000002", "asset_type": "image", "content_type": "image/png", "duration_sec": null, "file_size": 331776, "height": 1080, "position": 1, "width": 1080}
+       ]
+     }'::jsonb
+  ),
+  (
+    'a3000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'f8000000-0000-4000-8000-000000000103',
+    'publish',
+    'seed-publish-f800-103',
+    'succeeded',
+    'local-op-recap-two-ways',
+    'local-post-recap-two-ways',
+    'https://example.invalid/watch/local-post-recap-two-ways',
+    NULL, NULL,
+    1, now() - interval '14 days', now() - interval '14 days', now() - interval '14 days',
+    '{
+       "version": 1,
+       "post_id": "49000000-0000-4000-8000-000000000002",
+       "content": {
+         "title": "Recap, two ways",
+         "text": "Full recap plus the short cut.",
+         "hashtags": []
+       },
+       "media": [
+         {"asset_id": "d7000000-0000-4000-8000-000000000003", "asset_type": "video", "content_type": "video/mp4", "duration_sec": 42, "file_size": 8388608, "height": 1080, "position": 0, "width": 1920}
+       ]
+     }'::jsonb
+  ),
+  (
+    'a3000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005',
+    'f8000000-0000-4000-8000-000000000111',
+    'publish',
+    'seed-publish-f800-111',
+    'succeeded',
+    'local-op-media-only',
+    'local-post-media-only',
+    'https://example.invalid/watch/local-post-media-only',
+    NULL, NULL,
+    1, now() - interval '7 days', now() - interval '7 days', now() - interval '7 days',
+    '{
+       "version": 1,
+       "post_id": "49000000-0000-4000-8000-000000000005",
+       "content": {"title": "", "text": "", "hashtags": []},
+       "media": [
+         {"asset_id": "d7000000-0000-4000-8000-000000000004", "asset_type": "image", "content_type": "image/png", "duration_sec": null, "file_size": 0, "height": null, "position": 0, "width": null}
+       ]
+     }'::jsonb
+  ),
+  (
+    'a3000000-0000-4000-8000-000000000004',
+    '20000000-0000-4000-8000-000000000005',
+    'f8000000-0000-4000-8000-000000000121',
+    'publish',
+    'seed-publish-f800-121',
+    'needs_reconciliation',
+    'local-op-provider-mismatch',
+    NULL,
+    NULL,
+    'provider_timeout',
+    'The provider response did not confirm whether this post was published.',
+    3, now() - interval '6 days', now() - interval '5 days', NULL,
+    NULL
+  )
+ON CONFLICT (distribution_id, operation, idempotency_key) DO UPDATE
+SET status = EXCLUDED.status,
+    provider_operation_id = EXCLUDED.provider_operation_id,
+    provider_post_id = EXCLUDED.provider_post_id,
+    provider_url = EXCLUDED.provider_url,
+    error_class = EXCLUDED.error_class,
+    last_error = EXCLUDED.last_error,
+    attempt_count = EXCLUDED.attempt_count,
+    completed_at = EXCLUDED.completed_at,
+    updated_at = now();
+
+-- The media inventory each frozen publication holds, including the detached
+-- slot above, so cleanup can tell held media from reclaimable bytes.
+INSERT INTO provider_operation_media (
+  operation_id, org_id, distribution_id, asset_id, brand_profile_id,
+  rendition_id, object_id, object_key, position
+)
+VALUES
+  (
+    'a3000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'f8000000-0000-4000-8000-000000000101',
+    'd7000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001',
+    'ac000000-0000-4000-8000-000000000001',
+    '4c000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005/d7000000-0000-4000-8000-000000000001/original',
+    0
+  ),
+  (
+    'a3000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'f8000000-0000-4000-8000-000000000101',
+    'd7000000-0000-4000-8000-000000000002',
+    'c0000000-0000-4000-8000-000000000001',
+    'ac000000-0000-4000-8000-000000000002',
+    '4c000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005/d7000000-0000-4000-8000-000000000002/original',
+    1
+  ),
+  (
+    'a3000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'f8000000-0000-4000-8000-000000000103',
+    'd7000000-0000-4000-8000-000000000003',
+    'c0000000-0000-4000-8000-000000000001',
+    'ac000000-0000-4000-8000-000000000003',
+    '4c000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005/d7000000-0000-4000-8000-000000000003/original',
+    0
+  ),
+  (
+    'a3000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005',
+    'f8000000-0000-4000-8000-000000000111',
+    'd7000000-0000-4000-8000-000000000004',
+    'c0000000-0000-4000-8000-000000000001',
+    'ac000000-0000-4000-8000-000000000004',
+    '4c000000-0000-4000-8000-000000000004',
+    '20000000-0000-4000-8000-000000000005/d7000000-0000-4000-8000-000000000004/original',
+    0
+  )
+ON CONFLICT (operation_id, position) DO UPDATE
+SET asset_id = EXCLUDED.asset_id,
+    rendition_id = EXCLUDED.rendition_id,
+    object_id = EXCLUDED.object_id,
+    object_key = EXCLUDED.object_key;
+
+-- Metric history for the two published demo Distributions, so the analytics
+-- projection has a multi-point curve instead of a single reading.
+INSERT INTO analytics_snapshots (
+  id, distribution_id, org_id, views, likes, comments, shares,
+  watch_time_sec, reach, impressions, snapshot_at
+)
+VALUES
+  ('ab000000-0000-4000-8000-000000000001', 'f8000000-0000-4000-8000-000000000101', '20000000-0000-4000-8000-000000000005', 640, 41, 5, 8, 1800, 480, 760, now() - interval '19 days'),
+  ('ab000000-0000-4000-8000-000000000002', 'f8000000-0000-4000-8000-000000000101', '20000000-0000-4000-8000-000000000005', 1980, 132, 17, 24, 6100, 1490, 2380, now() - interval '12 days'),
+  ('ab000000-0000-4000-8000-000000000003', 'f8000000-0000-4000-8000-000000000101', '20000000-0000-4000-8000-000000000005', 3640, 246, 33, 47, 11800, 2760, 4310, now() - interval '2 days'),
+  ('ab000000-0000-4000-8000-000000000004', 'f8000000-0000-4000-8000-000000000103', '20000000-0000-4000-8000-000000000005', 910, 58, 6, 11, 2400, 690, 1010, now() - interval '13 days'),
+  ('ab000000-0000-4000-8000-000000000005', 'f8000000-0000-4000-8000-000000000103', '20000000-0000-4000-8000-000000000005', 2265, 151, 19, 36, 5600, 1680, 2510, now() - interval '5 days'),
+  ('ab000000-0000-4000-8000-000000000006', 'f8000000-0000-4000-8000-000000000122', '20000000-0000-4000-8000-000000000005', 118, 9, 1, 2, 320, 96, 150, now() - interval '30 minutes')
+ON CONFLICT (id) DO UPDATE
+SET views = EXCLUDED.views,
+    likes = EXCLUDED.likes,
+    comments = EXCLUDED.comments,
+    shares = EXCLUDED.shares,
+    watch_time_sec = EXCLUDED.watch_time_sec,
+    reach = EXCLUDED.reach,
+    impressions = EXCLUDED.impressions,
+    snapshot_at = EXCLUDED.snapshot_at;
+
+-- The demo workspace has to stay *usable*, not merely populated: the community
+-- policy caps a period at ten uploads and thirty Distributions, and a workspace
+-- already at its ceiling cannot be used to try the very flows these fixtures
+-- demonstrate. The older half of the demo set therefore keeps its creation and
+-- finalization instants in the previous period, which the current-period counter
+-- (and the quota check behind it) does not count. Nothing displayed changes: a
+-- Distribution's creation instant is not a rendered field, and a ready Asset is
+-- previewable whenever it was finalized. The rows the counters do include are
+-- exactly what a reconciliation recomputes, so the seeded `usage_records` values
+-- stay authoritative.
+UPDATE distributions
+SET created_at = now() - interval '40 days',
+    updated_at = now()
+WHERE id IN (
+  'f8000000-0000-4000-8000-000000000103',
+  'f8000000-0000-4000-8000-000000000104',
+  'f8000000-0000-4000-8000-000000000105',
+  'f8000000-0000-4000-8000-000000000106',
+  'f8000000-0000-4000-8000-000000000107',
+  'f8000000-0000-4000-8000-000000000108',
+  'f8000000-0000-4000-8000-000000000109',
+  'f8000000-0000-4000-8000-000000000110',
+  'f8000000-0000-4000-8000-000000000120'
+);
+
+UPDATE assets
+SET finalized_at = now() - interval '40 days',
+    updated_at = now()
+WHERE id IN (
+  'd7000000-0000-4000-8000-000000000003',
+  'd7000000-0000-4000-8000-000000000004',
+  'd7000000-0000-4000-8000-000000000007',
+  'd8000000-0000-4000-8000-000000000001',
+  'd8000000-0000-4000-8000-000000000002'
+);
+
+-- Usage meters for the demo workspace are written once, by the `usage_records`
+-- insert above the demo set: an hourly reconciliation recomputes them from the
+-- rows in this file exactly, so the sweep never rewrites the demo counters.
 
 COMMIT;

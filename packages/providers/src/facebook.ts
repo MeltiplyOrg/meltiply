@@ -47,13 +47,16 @@ const publishingScopes = [
   "pages_manage_posts",
 ] as const;
 
+/** Facebook's caption ceiling remains known even before live publishing is configured. */
+export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
+
 const capability: PlatformCapability = {
   accepted_mime_types: ["video/mp4", "video/quicktime"],
   analytics: false,
   asset_types: ["video"],
   comments: false,
   connect_available: true,
-  max_caption_length: 2_200,
+  max_caption_length: FACEBOOK_MAX_CAPTION_LENGTH,
   max_file_size: videoMaximumBytes,
   max_hashtags: 30,
   max_media_count: 1,

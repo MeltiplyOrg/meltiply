@@ -56,13 +56,16 @@ const engagementScopes = [
   "threads_read_replies",
 ] as const;
 
+/** Threads' caption ceiling remains known even before live publishing is configured. */
+export const THREADS_MAX_CAPTION_LENGTH = 500;
+
 const capability: PlatformCapability = {
   accepted_mime_types: ["image/jpeg", "image/png", "video/mp4", "video/quicktime"],
   analytics: true,
   asset_types: ["image", "video"],
   comments: true,
   connect_available: true,
-  max_caption_length: 500,
+  max_caption_length: THREADS_MAX_CAPTION_LENGTH,
   max_file_size: videoMaximumBytes,
   max_hashtags: 1,
   max_media_count: 20,

@@ -14,6 +14,7 @@ import { ScheduleDateTime } from "./schedule-date-time";
 import { MediaPreview } from "@/components/media/media-preview";
 import { Button } from "@meltiply/ui/button";
 import { Textarea } from "@meltiply/ui/textarea";
+import { Switch } from "@meltiply/ui/switch";
 import { Input } from "@meltiply/ui/input";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { Alert } from "@meltiply/ui/alert";
@@ -2473,6 +2474,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             );
             const channelAttachments = attachmentsForChannel(channel.id);
             const inheritsAttachments = !attachmentOverrides[channel.id];
+            const includesAttachments = inheritsAttachments || channelAttachments.length > 0;
             const channelCaptionLimit = captionLimitFor(channel);
             const channelContent = resolvedContentFor(channel.id);
 
@@ -2552,32 +2554,38 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                     icon={ImageIcon}
                     title={t("Attachments for {name}", { name: channel.name })}
                   >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        variant={inheritsAttachments ? "secondary" : "outline"}
-                        size="sm"
-                        className="text-xs"
-                        aria-pressed={inheritsAttachments}
-                        onClick={() => handleSetChannelAttachments(channel.id, null)}
-                      >
-                        {t("Use all post attachments")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={
-                          !inheritsAttachments && channelAttachments.length === 0
-                            ? "secondary"
-                            : "outline"
+                    <label
+                      htmlFor={`channel-media-${channel.id}`}
+                      className="flex min-h-12 cursor-pointer items-center justify-between gap-3"
+                    >
+                      <span className="flex min-w-0 flex-col gap-1">
+                        <span
+                          id={`channel-media-label-${channel.id}`}
+                          className="text-xs font-medium text-ink"
+                        >
+                          {t("Use post attachments")}
+                        </span>
+                        <span
+                          id={`channel-media-state-${channel.id}`}
+                          className="text-(length:--font-size-micro) text-ink-3"
+                        >
+                          {inheritsAttachments
+                            ? t("All post attachments")
+                            : includesAttachments
+                              ? t("Selected attachments")
+                              : t("Text only")}
+                        </span>
+                      </span>
+                      <Switch
+                        id={`channel-media-${channel.id}`}
+                        aria-labelledby={`channel-media-label-${channel.id}`}
+                        aria-describedby={`channel-media-state-${channel.id}`}
+                        checked={includesAttachments}
+                        onCheckedChange={(checked) =>
+                          handleSetChannelAttachments(channel.id, checked ? null : [])
                         }
-                        size="sm"
-                        className="text-xs"
-                        aria-pressed={!inheritsAttachments && channelAttachments.length === 0}
-                        onClick={() => handleSetChannelAttachments(channel.id, [])}
-                      >
-                        {t("Text only")}
-                      </Button>
-                    </div>
+                      />
+                    </label>
                     {attachments.length > 0 && (
                       <div className="flex flex-wrap gap-2">
                         {attachments.map((attachment, index) => {

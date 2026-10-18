@@ -343,7 +343,9 @@ const spanishTranslations: Record<string, string> = {
   "Replace attachment {index}": "Reemplazar el archivo adjunto {index}",
   "Remove attachment {index}": "Eliminar el archivo adjunto {index}",
   "Attachments for {name}": "Archivos adjuntos para {name}",
-  "Use all post attachments": "Usar todos los adjuntos de la publicación",
+  "Use post attachments": "Usar adjuntos de la publicación",
+  "All post attachments": "Todos los adjuntos de la publicación",
+  "Selected attachments": "Adjuntos seleccionados",
   "Text only": "Solo texto",
   "Saved to your workspace at {time}": "Guardado en tu espacio de trabajo a las {time}",
   "Unsaved changes are kept in this browser until you save.":

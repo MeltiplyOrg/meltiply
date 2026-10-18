@@ -161,6 +161,7 @@ const FALLBACK_TIKTOK_PRIVACY_LEVELS: TikTokPrivacyLevel[] = [
 /**
  * Shared panel chrome for a provider settings editor: the bordered card with
  * the "{name} Configuration" heading. The enclosing section identifies its provider.
+ * Its inline-size container makes setting grids respond to the panel, not the viewport.
  */
 function ProviderPanel({
   channelName,
@@ -172,7 +173,7 @@ function ProviderPanel({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <div className="flex flex-col gap-4 rounded-control border border-line bg-surface p-4">
+    <div className="@container flex flex-col gap-4 rounded-control border border-line bg-surface p-4">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-ink flex items-center gap-2">
           {t("{name} Configuration", { name: channelName })}
@@ -252,6 +253,7 @@ function YoutubeEditor({
  *
  * Live `PublishingRequirements` drive the selectable privacy levels and whether
  * the interaction toggles are offered; the static list is the loading fallback.
+ * Every switch shares one responsive grid and a full-row label/touch target.
  */
 function TikTokEditor({
   channelName,
@@ -272,6 +274,49 @@ function TikTokEditor({
     FOLLOWER_OF_CREATOR: t("Followers"),
     SELF_ONLY: t("Private (Self Only)"),
   };
+  const toggles = [
+    {
+      field: "duet",
+      label: t("Duet"),
+      checked: tt.duet ?? true,
+      disabled: requirements?.duet_allowed === false,
+    },
+    {
+      field: "stitch",
+      label: t("Stitch"),
+      checked: tt.stitch ?? true,
+      disabled: requirements?.stitch_allowed === false,
+    },
+    {
+      field: "comment",
+      label: t("Comments"),
+      checked: tt.comment ?? true,
+      disabled: requirements?.comment_allowed === false,
+    },
+    {
+      field: "brand_content",
+      label: t("Brand Content"),
+      checked: tt.brand_content ?? false,
+      disabled: false,
+    },
+    {
+      field: "brand_organic",
+      label: t("Organic Brand"),
+      checked: tt.brand_organic ?? false,
+      disabled: false,
+    },
+    {
+      field: "is_ai_generated",
+      label: t("AI Generated"),
+      checked: tt.is_ai_generated ?? false,
+      disabled: false,
+    },
+  ] as const satisfies ReadonlyArray<{
+    field: keyof TikTokComposerSettings;
+    label: string;
+    checked: boolean;
+    disabled: boolean;
+  }>;
 
   return (
     <ProviderPanel channelName={channelName} t={t}>
@@ -309,77 +354,22 @@ function TikTokEditor({
         </Select>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
-          <label htmlFor={`${fieldId}-duet`} className="text-xs font-medium text-ink">
-            {t("Duet")}
+      <div className="grid grid-cols-1 gap-x-6 @sm:grid-cols-2">
+        {toggles.map((toggle) => (
+          <label
+            key={toggle.field}
+            htmlFor={`${fieldId}-${toggle.field}`}
+            className="flex min-h-12 min-w-0 cursor-pointer items-center justify-between gap-3 py-2 has-[:disabled]:cursor-not-allowed"
+          >
+            <span className="min-w-0 text-xs font-medium text-ink">{toggle.label}</span>
+            <Switch
+              id={`${fieldId}-${toggle.field}`}
+              checked={toggle.checked}
+              disabled={toggle.disabled}
+              onCheckedChange={(checked) => update(toggle.field, checked)}
+            />
           </label>
-          <Switch
-            id={`${fieldId}-duet`}
-            checked={tt.duet ?? true}
-            disabled={requirements?.duet_allowed === false}
-            onCheckedChange={(val: boolean) => update("duet", val)}
-          />
-        </div>
-
-        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
-          <label htmlFor={`${fieldId}-stitch`} className="text-xs font-medium text-ink">
-            {t("Stitch")}
-          </label>
-          <Switch
-            id={`${fieldId}-stitch`}
-            checked={tt.stitch ?? true}
-            disabled={requirements?.stitch_allowed === false}
-            onCheckedChange={(val: boolean) => update("stitch", val)}
-          />
-        </div>
-
-        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
-          <label htmlFor={`${fieldId}-comment`} className="text-xs font-medium text-ink">
-            {t("Comments")}
-          </label>
-          <Switch
-            id={`${fieldId}-comment`}
-            checked={tt.comment ?? true}
-            disabled={requirements?.comment_allowed === false}
-            onCheckedChange={(val: boolean) => update("comment", val)}
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
-          <label htmlFor={`${fieldId}-brand-content`} className="text-xs font-medium text-ink">
-            {t("Brand Content")}
-          </label>
-          <Switch
-            id={`${fieldId}-brand-content`}
-            checked={tt.brand_content ?? false}
-            onCheckedChange={(val: boolean) => update("brand_content", val)}
-          />
-        </div>
-
-        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
-          <label htmlFor={`${fieldId}-brand-organic`} className="text-xs font-medium text-ink">
-            {t("Organic Brand")}
-          </label>
-          <Switch
-            id={`${fieldId}-brand-organic`}
-            checked={tt.brand_organic ?? false}
-            onCheckedChange={(val: boolean) => update("brand_organic", val)}
-          />
-        </div>
-
-        <div className="flex items-center justify-between border border-line rounded-control p-2.5">
-          <label htmlFor={`${fieldId}-ai-generated`} className="text-xs font-medium text-ink">
-            {t("AI Generated")}
-          </label>
-          <Switch
-            id={`${fieldId}-ai-generated`}
-            checked={tt.is_ai_generated ?? false}
-            onCheckedChange={(val: boolean) => update("is_ai_generated", val)}
-          />
-        </div>
+        ))}
       </div>
     </ProviderPanel>
   );

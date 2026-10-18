@@ -649,7 +649,7 @@ test("replaces one attachment without changing the count, order, or channel sele
   // only, then that one row, so its saved target names a single Asset.
   const narrowPanel = page.getByRole("region", { name: narrow, exact: true });
   const silentPanel = page.getByRole("region", { name: silent, exact: true });
-  await narrowPanel.getByRole("button", { name: /text only/i }).click();
+  await narrowPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
   const narrowRow = narrowPanel.getByRole("button", {
     name: attachmentControlName("2. ", gif.name),
   });
@@ -657,7 +657,7 @@ test("replaces one attachment without changing the count, order, or channel sele
   await narrowRow.click();
   await expect(narrowRow).toHaveAttribute("aria-pressed", "true");
   // The second Channel publishes no media at all, and a swap must not disturb it.
-  await silentPanel.getByRole("button", { name: /text only/i }).click();
+  await silentPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
 
   await page.getByRole("button", { name: "Replace attachment 2" }).click();
   await composerFileInput(page).setInputFiles({
@@ -689,10 +689,9 @@ test("replaces one attachment without changing the count, order, or channel sele
       name: attachmentControlName("1. ", png.name),
     }),
   ).toHaveAttribute("aria-pressed", "false");
-  await expect(silentPanel.getByRole("button", { name: /text only/i })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(
+    silentPanel.getByRole("switch", { name: "Use post attachments", exact: true }),
+  ).toHaveAttribute("aria-checked", "false");
 
   await saveAndSettle(page, [
     [png.name, "Ready"],
@@ -721,10 +720,9 @@ test("replaces one attachment without changing the count, order, or channel sele
       name: attachmentControlName("1. ", png.name),
     }),
   ).toHaveAttribute("aria-pressed", "false");
-  await expect(silentPanel.getByRole("button", { name: /text only/i })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(
+    silentPanel.getByRole("switch", { name: "Use post attachments", exact: true }),
+  ).toHaveAttribute("aria-checked", "false");
 });
 
 /**
@@ -1097,7 +1095,7 @@ test("reopens one Post with its ordered attachments and channel targets", async 
   // overrides the caption and still inherits the whole ordered attachment set.
   const instagramPanel = page.getByRole("region", { name: instagram, exact: true });
   const threadsPanel = page.getByRole("region", { name: threads, exact: true });
-  await instagramPanel.getByRole("button", { name: /text only/i }).click();
+  await instagramPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
   await threadsPanel.getByRole("textbox").fill("Threads-only caption");
   await saveDraft(page);
   const savedPreview = new RegExp(`${caption}|Threads-only caption`);
@@ -1112,10 +1110,9 @@ test("reopens one Post with its ordered attachments and channel targets", async 
     [gif.name, "1. "],
     [png.name, "2. "],
   ]);
-  await expect(instagramPanel.getByRole("button", { name: /text only/i })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(
+    instagramPanel.getByRole("switch", { name: "Use post attachments", exact: true }),
+  ).toHaveAttribute("aria-checked", "false");
   await expect(threadsPanel.getByRole("textbox")).toHaveValue("Threads-only caption");
 
   // A separate authenticated session must rebuild the same Post from the server,

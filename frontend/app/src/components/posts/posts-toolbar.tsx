@@ -30,12 +30,20 @@ import {
 import { useI18n } from "@/lib/i18n";
 import type { PostGroupBy } from "./post-groups";
 import type { PostViewMode, PostStatusFilter, PostSortKey, BrandProfile } from "./types";
-
 import {
   POST_COLLECTION_MODES,
   POST_VIEW_OPTIONS,
   type PostCollectionMode,
 } from "./post-view-options";
+
+/** Grid column bounds: the narrowest and widest card row the collection supports. */
+const GRID_COLUMN_MIN = 2;
+const GRID_COLUMN_MAX = 5;
+/** The strip the column count steps through, so a change slides instead of swapping. */
+const GRID_COLUMN_VALUES = Array.from(
+  { length: GRID_COLUMN_MAX - GRID_COLUMN_MIN + 1 },
+  (_, index) => GRID_COLUMN_MIN + index,
+);
 
 export interface PostsToolbarProps {
   searchQuery: string;
@@ -293,19 +301,19 @@ export const PostsToolbar = React.memo(function PostsToolbar({
               size="icon"
               className="size-6"
               aria-label={t("Decrease grid columns")}
-              disabled={columns <= 2}
-              onClick={() => onColumnsChange((count) => Math.max(2, count - 1))}
+              disabled={columns <= GRID_COLUMN_MIN}
+              onClick={() => onColumnsChange((count) => Math.max(GRID_COLUMN_MIN, count - 1))}
             >
               <Minus className="size-3" />
             </Button>
-            <span>{columns}</span>
+            <GridColumnCount value={columns} />
             <Button
               variant="ghost"
               size="icon"
               className="size-6"
               aria-label={t("Increase grid columns")}
-              disabled={columns >= 5}
-              onClick={() => onColumnsChange((count) => Math.min(5, count + 1))}
+              disabled={columns >= GRID_COLUMN_MAX}
+              onClick={() => onColumnsChange((count) => Math.min(GRID_COLUMN_MAX, count + 1))}
             >
               <Plus className="size-3" />
             </Button>
@@ -335,3 +343,30 @@ export const PostsToolbar = React.memo(function PostsToolbar({
     </>
   );
 });
+
+/**
+ * Grid column count. Every supported count renders in one strip that slides to the
+ * selected cell, so stepping a column pushes the next count in from the right as
+ * the previous one leaves to the left (`value-push` in `motion.css`) instead of
+ * swapping a glyph in place. The strip is decorative — assistive technology reads
+ * the value once, as text.
+ *
+ * @param props.value - Selected column count, one of `GRID_COLUMN_VALUES`.
+ */
+function GridColumnCount({ value }: { value: number }) {
+  return (
+    <span
+      data-value-push-track
+      style={{ "--value-push-index": value - GRID_COLUMN_MIN } as React.CSSProperties}
+    >
+      <span data-value-push-strip aria-hidden>
+        {GRID_COLUMN_VALUES.map((count) => (
+          <span key={count} data-value-push-cell>
+            {count}
+          </span>
+        ))}
+      </span>
+      <span className="sr-only">{value}</span>
+    </span>
+  );
+}

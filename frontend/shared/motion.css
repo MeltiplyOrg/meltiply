@@ -287,6 +287,39 @@ html.theme-changing *::after {
   animation-delay: 150ms;
 }
 
+/*
+ * In-place value push. A control whose value steps where it stands — the Posts
+ * grid's column count — renders its whole range as one digit strip and marks the
+ * selected index on the track, so a step slides the strip one cell instead of
+ * swapping a glyph: the next value pushes in from the right as the previous one
+ * leaves to the left, and a step back mirrors it. Motion stays on `transform`
+ * inside a one-cell window, which is also what keeps the neighbours from moving.
+ *
+ * The component feeds one custom property: `--value-push-index` (0 for the first
+ * value, increasing as the strip advances).
+ */
+@layer components {
+  [data-value-push-track] {
+    position: relative;
+    display: inline-flex;
+    width: 1ch;
+    overflow: hidden;
+  }
+
+  [data-value-push-strip] {
+    display: inline-flex;
+    transform: translateX(calc(var(--value-push-index, 0) * -1ch));
+    transition: transform 200ms var(--ease-enter);
+  }
+
+  [data-value-push-cell] {
+    display: flex;
+    width: 1ch;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 /* Standalone icon geometry for Astro; Tailwind utilities can still override it in the app. */
 @layer components {
   [data-animated-icon] {

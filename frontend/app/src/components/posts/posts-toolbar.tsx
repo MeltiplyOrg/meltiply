@@ -295,7 +295,10 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           }}
         />
         {viewMode === "grid" && (
-          <div className="flex items-center text-(length:--font-size-micro) tabular-nums">
+          <div
+            data-rise-in
+            className="flex items-center text-(length:--font-size-micro) tabular-nums"
+          >
             <Button
               variant="ghost"
               size="icon"
@@ -345,11 +348,11 @@ export const PostsToolbar = React.memo(function PostsToolbar({
 });
 
 /**
- * Grid column count. Every supported count renders in one strip that slides to the
- * selected cell, so stepping a column pushes the next count in from the right as
- * the previous one leaves to the left (`value-push` in `motion.css`) instead of
- * swapping a glyph in place. The strip is decorative — assistive technology reads
- * the value once, as text.
+ * Grid column count. Every supported count renders in one strip that rolls to the
+ * selected cell, so stepping a column raises the next count into the window from
+ * below as the previous one leaves upwards (`value-push` in `motion.css`) instead
+ * of swapping a glyph in place. The strip is decorative — assistive technology
+ * reads the value once, as text.
  *
  * @param props.value - Selected column count, one of `GRID_COLUMN_VALUES`.
  */

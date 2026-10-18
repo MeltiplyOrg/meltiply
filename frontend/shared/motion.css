@@ -288,12 +288,13 @@ html.theme-changing *::after {
 }
 
 /*
- * In-place value push. A control whose value steps where it stands — the Posts
+ * In-place value roll. A control whose value steps where it stands — the Posts
  * grid's column count — renders its whole range as one digit strip and marks the
- * selected index on the track, so a step slides the strip one cell instead of
- * swapping a glyph: the next value pushes in from the right as the previous one
- * leaves to the left, and a step back mirrors it. Motion stays on `transform`
- * inside a one-cell window, which is also what keeps the neighbours from moving.
+ * selected index on the track, so a step rolls the strip one cell instead of
+ * swapping a glyph: the next value rises into the window from below as the
+ * previous one leaves upwards, and a step back rolls the other way. Motion stays
+ * on `transform` inside a one-cell window, which is also what keeps the
+ * neighbours from moving.
  *
  * The component feeds one custom property: `--value-push-index` (0 for the first
  * value, increasing as the strip advances).
@@ -303,20 +304,43 @@ html.theme-changing *::after {
     position: relative;
     display: inline-flex;
     width: 1ch;
+    height: 1lh;
     overflow: hidden;
   }
 
   [data-value-push-strip] {
-    display: inline-flex;
-    transform: translateX(calc(var(--value-push-index, 0) * -1ch));
+    display: flex;
+    flex-direction: column;
+    transform: translateY(calc(var(--value-push-index, 0) * -1lh));
     transition: transform 200ms var(--ease-enter);
   }
 
   [data-value-push-cell] {
     display: flex;
-    width: 1ch;
+    height: 1lh;
     align-items: center;
     justify-content: center;
+  }
+}
+
+/*
+ * A control that appears with its view rises into place and fades in instead of
+ * popping in, using the same entrance curve as the surfaces it belongs to.
+ */
+@keyframes control-rise-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@layer components {
+  [data-rise-in] {
+    animation: control-rise-in 200ms var(--ease-enter) both;
   }
 }
 

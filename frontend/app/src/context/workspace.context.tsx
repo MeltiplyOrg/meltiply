@@ -85,6 +85,8 @@ function toSourceUser(profile: ContractUserProfile): UserProfile {
  * `brand_profile_id` carries the owning Brand Profile so views can filter and
  * label channels by profile; `platform_user_id` preserves the provider's channel
  * identifier for identity rows, separately from Meltiply's internal account id.
+ * `username` remains the real optional handle; never infer it from either id or
+ * the display name, which can independently contain an @-prefixed label.
  *
  * @param account Contract platform account from `GET /platforms`.
  * @returns Source-shaped channel integration for workspace consumers.
@@ -95,6 +97,7 @@ function toSourceIntegration(account: PlatformAccount): ChannelIntegration {
   return {
     id: account.id,
     platformUserId: account.platform_user_id,
+    username: account.username,
     name: account.display_name ?? account.platform_user_id,
     picture: account.avatar_url,
     providerIdentifier: account.platform,

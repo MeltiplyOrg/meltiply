@@ -40,3 +40,14 @@ export function formatDuration(seconds: number): string {
 export function abbreviateRecordId(id: string): string {
   return id.length <= 6 ? id : id.slice(-6);
 }
+
+/**
+ * Formats only the real provider username for display, adding @ when absent.
+ * Null, missing, or whitespace-only usernames return null; IDs and display names
+ * must never be passed as username fallbacks. The raw copy value stays unchanged.
+ */
+export function formatUsername(raw: string | null | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+}

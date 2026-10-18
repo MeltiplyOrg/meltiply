@@ -15,6 +15,8 @@ export interface ChannelIntegration {
   id: string;
   /** Provider account ID displayed in channel identity rows, distinct from the internal id. */
   platformUserId: string;
+  /** Real provider username, separate from the provider ID and display name; may be absent. */
+  username?: string | null;
   name: string;
   picture?: string | null;
   providerIdentifier: string;

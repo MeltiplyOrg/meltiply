@@ -10,6 +10,7 @@ import { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
 
 import { Button } from "@meltiply/ui/button";
 import { ChannelAvatar } from "@/components/channels/channel-avatar";
+import { formatUsername } from "@/lib/format";
 import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { Check, Share2, Plus } from "lucide-react";
@@ -40,8 +41,9 @@ export interface DestinationSelectorProps {
  * the aggregate row, which cannot publish) and the profile choice lands in the
  * shared workspace selection the rest of the drawer already reads. Every
  * profile-owned destination shows its account photo or initials, with a small
- * provider badge, account name, provider channel ID, and explicit selection or
- * connection state.
+ * provider badge, display name, separate username and provider channel ID rows,
+ * and explicit selection or connection state. Missing usernames are stated, not
+ * inferred from an id or display name.
  *
  * Filters connected integrations to the channels owned by the currently selected
  * Brand Profile (the aggregate "All Brand Profiles" view lists every channel but
@@ -181,6 +183,10 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
               const isAvailable = statusInfo?.isAvailable ?? true;
               const isSelected = selectedChannelIdSet.has(channel.id);
               const isUngrouped = channel.brandProfileId == null;
+              const username = formatUsername(channel.username);
+              const usernameLabel = username
+                ? t("Username: {username}", { username })
+                : t("Username not provided");
               const avatar = (
                 <span aria-hidden="true" className="shrink-0">
                   <ChannelAvatar
@@ -204,6 +210,9 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                           <span className="w-full truncate font-medium">{channel.name}</span>
                           <span className="text-(length:--font-size-micro)">
                             {platformDisplayName(channel.providerIdentifier)}
+                          </span>
+                          <span className="w-full whitespace-normal break-all text-left text-(length:--font-size-micro)">
+                            {usernameLabel}
                           </span>
                           <span className="w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)">
                             {t("ID: {id}", { id: channel.platformUserId })}
@@ -258,6 +267,14 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                       )}
                     >
                       {platformDisplayName(channel.providerIdentifier)}
+                    </span>
+                    <span
+                      className={cn(
+                        "w-full whitespace-normal break-all text-left text-(length:--font-size-micro)",
+                        isSelected ? "text-accent-ink/70" : "text-ink-3",
+                      )}
+                    >
+                      {usernameLabel}
                     </span>
                     <span
                       className={cn(

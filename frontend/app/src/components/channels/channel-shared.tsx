@@ -22,6 +22,7 @@ import { toast } from "@meltiply/ui/toast";
 import { type BrandProfile, type PlatformAccount } from "@/types";
 import { platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
+import { formatUsername } from "@/lib/format";
 import { cn } from "@meltiply/ui/utils";
 
 /**
@@ -29,13 +30,6 @@ import { cn } from "@meltiply/ui/utils";
  */
 const channelActionClass =
   "size-7 shrink-0 text-ink-3 hover:bg-hover hover:text-ink [&_svg]:size-3.5";
-
-/** Displays only real, nonblank handles, adding @ without changing their copy value. */
-function formatUsername(raw: string | null | undefined): string | null {
-  const trimmed = raw?.trim();
-  if (!trimmed) return null;
-  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
-}
 
 /**
  * Resolves the channel's display title for its table row and settings dialog:

@@ -153,6 +153,8 @@ const spanishTranslations: Record<string, string> = {
   "Channel settings": "Configuración del canal",
   "Copy username": "Copiar nombre de usuario",
   "Copy channel ID": "Copiar ID del canal",
+  "Username: {username}": "Nombre de usuario: {username}",
+  "Username not provided": "Nombre de usuario no proporcionado",
   "Username copied": "Nombre de usuario copiado",
   "Channel ID copied": "ID del canal copiado",
   "Copied “{value}” to your clipboard.": "Se copió «{value}» al portapapeles.",

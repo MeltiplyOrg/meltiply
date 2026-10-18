@@ -450,6 +450,15 @@ html.theme-changing *::after {
     opacity: 0.45;
   }
 
+  /* A menu rendered without the travelling pill (`highlight={false}`) marks its
+     surface `data-menu-plain` and paints each row's own hover/active fill
+     instead: keyboard highlight and pointer hover read the same. */
+  [data-menu-plain] [data-menu-item]:hover,
+  [data-menu-plain] [data-menu-item][data-highlighted],
+  [data-menu-plain] [data-menu-item]:focus-visible {
+    background-color: var(--hover);
+  }
+
   [data-menu-item] > svg {
     pointer-events: none;
     flex-shrink: 0;

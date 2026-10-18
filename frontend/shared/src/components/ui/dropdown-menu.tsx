@@ -83,14 +83,17 @@ DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayNam
  * submenu does not fight Radix's positioning transform during opening.
  *
  * @param className - Optional CSS classes for width, padding, or borders.
+ * @param highlight - Renders the travelling highlight pill (defaults to true).
+ *   Pass false to mark the surface data-menu-plain, whose shared rule paints
+ *   each row's own hover/highlight fill instead of moving the pill.
  * @param props - Radix SubContent props.
  * @param ref - Forwarded ref.
  * @returns Styled submenu content overlay.
  */
 const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, children, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent> & { highlight?: boolean }
+>(({ className, highlight = true, children, ...props }, ref) => {
   const subContentRef = React.useRef<HTMLDivElement | null>(null);
   const setRefs = React.useCallback(
     (node: HTMLDivElement | null) => {
@@ -108,10 +111,13 @@ const DropdownMenuSubContent = React.forwardRef<
     <DropdownMenuPrimitive.SubContent
       ref={setRefs}
       data-menu-surface=""
+      data-menu-plain={highlight ? undefined : ""}
       className={cn("relative z-50 select-none", className)}
       {...props}
     >
-      <SlidingMenuHighlight containerRef={subContentRef} itemSelector="[data-dropdown-item]" />
+      {highlight && (
+        <SlidingMenuHighlight containerRef={subContentRef} itemSelector="[data-dropdown-item]" />
+      )}
       {children}
     </DropdownMenuPrimitive.SubContent>
   );
@@ -125,14 +131,17 @@ DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayNam
  *
  * @param sideOffset - Distance in pixels from the trigger (defaults to 4px).
  * @param className - Optional CSS classes for custom width, max-height, or styling.
+ * @param highlight - Renders the travelling highlight pill (defaults to true).
+ *   Pass false to mark the surface data-menu-plain, whose shared rule paints
+ *   each row's own hover/highlight fill instead of moving the pill.
  * @param props - Remaining Radix Content props.
  * @param ref - Forwarded ref.
  * @returns Styled portalled dropdown content container.
  */
 export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 4, children, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & { highlight?: boolean }
+>(({ className, sideOffset = 4, highlight = true, children, ...props }, ref) => {
   const contentRef = React.useRef<HTMLDivElement | null>(null);
   const setRefs = React.useCallback(
     (node: HTMLDivElement | null) => {
@@ -152,10 +161,13 @@ export const DropdownMenuContent = React.forwardRef<
         ref={setRefs}
         sideOffset={sideOffset}
         data-menu-surface=""
+        data-menu-plain={highlight ? undefined : ""}
         className={cn("relative z-50 select-none", className)}
         {...props}
       >
-        <SlidingMenuHighlight containerRef={contentRef} itemSelector="[data-dropdown-item]" />
+        {highlight && (
+          <SlidingMenuHighlight containerRef={contentRef} itemSelector="[data-dropdown-item]" />
+        )}
         {children}
       </DropdownMenuPrimitive.Content>
     </DropdownMenuPrimitive.Portal>

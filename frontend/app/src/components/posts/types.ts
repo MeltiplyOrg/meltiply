@@ -226,12 +226,10 @@ export interface PostsViewProps {
   onNavigate?: (view: WorkspaceView, options?: { search?: string }) => void;
 }
 
-export const SKELETON_TABLE_KEYS = ["row-sk-1", "row-sk-2", "row-sk-3", "row-sk-4", "row-sk-5"];
-export const SKELETON_CARD_KEYS = [
-  "card-sk-1",
-  "card-sk-2",
-  "card-sk-3",
-  "card-sk-4",
-  "card-sk-5",
-  "card-sk-6",
-];
+/**
+ * Loading placeholder identities. Counts fill the workspace fold at both the
+ * desktop and phone viewport heights, so resolved content neither grows the page
+ * nor adds a scrollbar the placeholder did not already have.
+ */
+export const SKELETON_TABLE_KEYS = Array.from({ length: 18 }, (_, index) => `row-sk-${index + 1}`);
+export const SKELETON_CARD_KEYS = Array.from({ length: 8 }, (_, index) => `card-sk-${index + 1}`);

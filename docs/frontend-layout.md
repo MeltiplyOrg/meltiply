@@ -22,17 +22,19 @@ Posts is one destination. Its view switcher belongs in the page toolbar, in **Ta
 
 `WorkspaceSurface` composes the page heading/actions, toolbar, active filters, and selected collection view on the shared surface background.
 
-- **Table** is the default. The shared spreadsheet table has a sticky header, selection column, title, optional metadata, and counted collapsible groups. Status, Brand Profile, or no grouping changes presentation without changing identity or selection. Rows reach the working edges and inset the leading cell. There is no trailing actions column.
+- **Table** is the default. The shared spreadsheet table has a sticky header, selection column, title, optional metadata, and counted collapsible groups. Rows paint the shared table hover fill, and the header row stays pinned while the table scrolls; a group's toggle turns its chevron while its rows collapse in place with a height transition, staying mounted so expanding and collapsing animate alike. Status, Brand Profile, or no grouping changes presentation without changing identity or selection. Rows reach the working edges and inset the leading cell. There is no trailing actions column.
 - **Calendar** is a flush canvas, not a nested card. Its toolbar contains Today, previous/next, the period heading, and Month/Week controls. Month is Monday-first with 35 or 42 local dates, 112px minimum rows, three Post chips per day, and overflow/day-list access. Week uses seven date columns. The canvas may scroll horizontally; its surrounding controls wrap.
 - **Grid** uses `PostCard`, real attachments, and the selected column count. The grid viewport owns its gutters. Cards reflow rather than causing document overflow.
 
 Table, Grid, and Calendar day lists share real Post identity, selection, and supported actions. A partial selection leaves select-all visually unchecked. The shared bottom pill reports the actual selected count and opens the existing destructive confirmation.
 
+All three views load inside the same frame they resolve into: while a query is pending, the page header reports the loading state instead of a zero count, the toolbar and table head stay mounted, the Table renders its real column slots as placeholder rows, the Grid renders placeholder cards with the `PostCard` anatomy, and the Calendar keeps its real period controls and dates with placeholder chips. The shell's own frame covers the session and route-chunk waits as one shape (`WorkspaceLoadingSkeleton`, painted from `index.html` before the module graph arrives), and the header's workspace name holds a placeholder bar until the Brand Profile resolves. Loading therefore never changes the page's height, columns, or scrollbars.
+
 ### Channels
 
 Channels uses the Members-style directory composition, not a copy of Posts grouping: a centered 1200px maximum, heading/actions, underlined Accounts/Brand Profiles tabs, account search, connection-status segments, field-row filters, and an inset directory table.
 
-Accounts show identity, platform, owning profile, a single accessible health icon, and channel settings. The Brand Profiles tab shows real profile cards and connection counts. Both tabs use the same background and canonical controls as Posts. Table horizontal overflow stays inside the directory viewport.
+The directory header row stays pinned to the top of the accounts viewport, and that viewport owns both scroll axes, so the wide table scrolls sideways without capturing the sticky header in an inner scroller. Accounts show identity, platform, owning profile, a single accessible health icon, and channel settings. The Brand Profiles tab shows real profile cards and connection counts. Both tabs use the same background and canonical controls as Posts. Table horizontal overflow stays inside the directory viewport.
 
 ## Settings
 
@@ -46,7 +48,7 @@ All sections share one layout; Security does not get a separate width rule.
 
 ## Dialogs and floating controls
 
-`CenterDialog` owns focused forms and search; `CenterAlertDialog` owns destructive confirmations. `SideDialog` owns large Post inspection: a 620px right-edge drawer, a compact 46px toolbar, and the full-viewport phone layout. It is a non-modal companion — the workspace stays clickable so another Post is inspected in place — and it never dims or blocks the surface behind it. Composition uses the same drawer: flat sections and the shared tab strip inside the scrolling body, with the schedule field and the Save/Schedule/Publish bar pinned at its bottom, and no composer route of its own.
+`CenterDialog` owns focused forms and search; `CenterAlertDialog` owns destructive confirmations. `SideDialog` owns large Post inspection: a 620px right-edge drawer, a compact 46px toolbar, and the full-viewport phone layout. It is a non-modal companion — the workspace stays clickable so another Post is inspected in place — and it never dims or blocks the surface behind it. Composition uses the same drawer: titled sections and the shared tab strip inside the scrolling body — writing area and media in the compose column, destinations and publishing in a fixed-width rail beside it — with the draft's save state and the one primary action the selected publishing mode resolves pinned at the bottom, and no composer route of its own. The compose/rail split is a container query on the panel, so a narrow panel stacks in one reading order instead of squeezing two columns.
 
 Dialog bodies own native scrolling and keep `data-lenis-prevent` where the document's smooth-scroll controller must not intercept them. Primitives own Escape, scroll lock, and opener restoration; the side inspector deliberately leaves focus untrapped so the workspace stays reachable, while the centered dialogs keep containment.
 
@@ -57,5 +59,7 @@ Dialog bodies own native scrolling and keep `data-lenis-prevent` where the docum
 Keep control identity, unsaved content, selection, and keyboard focus stable as labels or state change. Hidden columns retain underlying data; filters operate only on loaded, authorized records. Scope changes clear selection according to the owning feature's contract.
 
 There is one implemented animation path, with no application motion mode or mode-specific guards. Preserve existing animation recipes when cleaning up; extend their canonical owners when animation work is requested.
+
+Smooth scrolling has one owner, `frontend/app/src/components/layout/smooth-scroll.tsx`. The document controller (`SmoothScroll`) smooths the window and deliberately stays out of every region marked `data-lenis-prevent`, so it can never swallow a nested wheel gesture. Each list viewport that owns its scrolling — the Posts table, Grid, Calendar, and both Channels directories — mounts `useSmoothScrollContainer` for its own controller, re-measures when its children change, and snaps its scroll position to whole pixels so a `position: sticky` header cannot flicker along its top edge while the container animates through fractional offsets.
 
 Verify the actual desktop, phone, and reported user viewport. Cover both palettes, long content, loading, empty/error states, keyboard traversal, nested scrolling, and available actions. Every bounded scroller needs shrinkable flex/grid ancestors; only the intended table or calendar canvas may overflow horizontally.

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useState } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState } from "react";
 import { readFunctionalStorage, writeFunctionalStorage } from "@meltiply/ui/cookie-consent";
 
 import { isDevMode } from "@/lib/env";
@@ -274,8 +274,8 @@ const spanishTranslations: Record<string, string> = {
   Incomplete: "Incompleto",
   Language: "Idioma",
   Light: "Claro",
-  "Loading account…": "Cargando cuenta…",
   "Loading Meltiply…": "Cargando Meltiply…",
+  "Loading posts…": "Cargando publicaciones…",
   "Meltiply could not reach the API. Check your connection and try again.":
     "Meltiply no pudo conectar con la API. Revisa tu conexión e inténtalo de nuevo.",
   "Meltiply could not refresh this view": "Meltiply no pudo actualizar esta vista",
@@ -563,6 +563,14 @@ const spanishTranslations: Record<string, string> = {
   "Tags (comma separated, max 500 chars combined)":
     "Etiquetas (separadas por comas, máx. 500 caracteres combinados)",
   "Targeting {count} channel(s)": "Destinado a {count} canal(es)",
+  "Choose a Brand Profile in the Posts filters to compose, schedule, or publish.":
+    "Elige un perfil de marca en los filtros de publicaciones para redactar, programar o publicar.",
+  "Choose a Brand Profile to pick publish destinations.":
+    "Elige un perfil de marca para elegir destinos de publicación.",
+  "Queues this post to {count} channel(s) at the selected time.":
+    "Pone esta publicación en cola para {count} canal(es) a la hora seleccionada.",
+  "Queues this post to {count} channel(s) right away.":
+    "Pone esta publicación en cola para {count} canal(es) ahora mismo.",
   Threads: "Threads",
   "TikTok post title...": "Título de publicación de TikTok...",
   "Time: Newest first": "Fecha: Más recientes primero",
@@ -639,8 +647,6 @@ const spanishTranslations: Record<string, string> = {
   "Update profile": "Actualizar perfil",
   "Select a Brand Profile": "Seleccionar un perfil de marca",
   "Select a Brand Profile before publishing.": "Selecciona un perfil de marca antes de publicar.",
-  "Select a Brand Profile in the sidebar to compose, schedule, or publish.":
-    "Selecciona un perfil de marca en la barra lateral para redactar, programar o publicar.",
   "Something went wrong": "Algo salió mal",
   "This post belongs to {name}. Switch to that Brand Profile to edit it.":
     "Esta publicación pertenece a {name}. Cambia a ese perfil de marca para editarla.",
@@ -861,16 +867,18 @@ export function I18nProvider({ children }: I18nProviderProps): React.ReactElemen
   }, [language]);
   // Rebuilt whenever language or pseudoTick changes; pseudoTick exists so the
   // dev-only pseudo-localization toggle re-renders consumers with expanded
-  // strings. The provider renders rarely, so a fresh object per render is
-  // cheaper than memo bookkeeping.
-
-  const value: I18nContextValue = {
-    language,
-    setLanguage,
-    t: (message, values) => translate(language, message, values),
-    tStatus: (status) => translateStatus(language, status),
-  };
-  void pseudoTick;
+  // strings. Memoizing keeps that key complete while a provider re-render for
+  // any other reason - consent, an unmounting sibling, a dev toggle - from
+  // handing every `t()`/`translate()` consumer a new context identity.
+  const value = useMemo<I18nContextValue>(() => {
+    void pseudoTick;
+    return {
+      language,
+      setLanguage,
+      t: (message, values) => translate(language, message, values),
+      tStatus: (status) => translateStatus(language, status),
+    };
+  }, [language, setLanguage, pseudoTick]);
 
   return <I18nContext value={value}>{children}</I18nContext>;
 }

@@ -70,7 +70,25 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
     return ch.brandProfileId === selectedBrandProfileId;
   });
 
-  const selectedCount = selectedChannelIds.length;
+  /**
+   * Publishing targets exactly one Brand Profile. In the aggregate view the
+   * directory still lists every account, but none of them can be selected, so
+   * the block shows why instead of accepting a selection nothing can publish.
+   */
+  const canPublish = selectedBrandProfileId !== null;
+  // Both loops below read these two collections per channel, so index them once
+  // rather than scanning either list inside the render map. First occurrence wins,
+  // matching the `find` calls they replace.
+  const selectedChannelIdSet = new Set(selectedChannelIds);
+  const statusByChannelId = new Map<string, ChannelStatusInfo>();
+  for (const status of channelStatuses) {
+    if (!statusByChannelId.has(status.integration.id)) {
+      statusByChannelId.set(status.integration.id, status);
+    }
+  }
+  const selectedCount = displayedChannels.filter((ch: ChannelIntegration) =>
+    selectedChannelIdSet.has(ch.id),
+  ).length;
 
   return (
     <TooltipProvider>
@@ -86,7 +104,7 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {selectedBrandProfileId !== null && (
+            {canPublish && (
               <span className="hidden items-center gap-1 text-(length:--font-size-micro) text-ink-3 sm:flex">
                 <Layers className="size-3" aria-hidden="true" /> {t("Filtered by active profile")}
               </span>
@@ -103,6 +121,12 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
             </Button>
           </div>
         </div>
+
+        {!canPublish && (
+          <p className="text-(length:--font-size-micro) text-ink-3">
+            {t("Choose a Brand Profile to pick publish destinations.")}
+          </p>
+        )}
 
         {displayedChannels.length === 0 ? (
           <div className="flex flex-col items-center gap-2.5 rounded-control border border-dashed border-line px-3 py-4 text-center">
@@ -123,14 +147,15 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {displayedChannels.map((channel: ChannelIntegration) => {
-              const statusInfo = channelStatuses.find(
-                (s: ChannelStatusInfo) => s.integration.id === channel.id,
-              );
+              const statusInfo = statusByChannelId.get(channel.id);
               const isAvailable = statusInfo?.isAvailable ?? true;
-              const isSelected = selectedChannelIds.includes(channel.id);
+              const isSelected = selectedChannelIdSet.has(channel.id);
               const isUngrouped = channel.brandProfileId == null;
 
-              if (!isAvailable) {
+              // Unavailable accounts and the aggregate view share one
+              // treatment: the row states the account's identity, and the
+              // tooltip states the one reason it cannot be chosen.
+              if (!isAvailable || !canPublish) {
                 return (
                   <Tooltip key={channel.id}>
                     <TooltipTrigger asChild>
@@ -156,7 +181,11 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                       </div>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>{statusInfo?.reason || t("Channel is unavailable")}</p>
+                      <p>
+                        {isAvailable
+                          ? t("Choose a Brand Profile to pick publish destinations.")
+                          : (statusInfo?.reason ?? t("Channel is unavailable"))}
+                      </p>
                     </TooltipContent>
                   </Tooltip>
                 );

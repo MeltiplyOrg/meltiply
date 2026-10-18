@@ -1,5 +1,5 @@
 import { ArrowRight, Check, CircleAlert, Info, LoaderCircle, X } from "lucide-react";
-import { motion } from "motion/react";
+import { LazyMotion, domAnimation, m } from "motion/react";
 import {
   type AriaRole,
   type CSSProperties,
@@ -160,7 +160,7 @@ const GooeyDefs = memo(function GooeyDefs({
  * Meltiply's shared token palette.
  *
  * Renders a compact header pill (`[data-sileo-header]`) and an expandable
- * body (`[data-sileo-content]`) backed by two spring-animated `<motion.rect>`
+ * body (`[data-sileo-content]`) backed by two spring-animated `<m.rect>`
  * shapes fused through `<GooeyDefs>`. When `pinned` is true (e.g. for an
  * interactive cookie consent prompt), the body stays open until an explicit
  * action transitions it into a confirmation status or closes it.
@@ -345,6 +345,14 @@ export const Sileo = memo(function Sileo({
       pillRoRef.current.observe(el);
       pillObservedRef.current = el;
     }
+
+    // The observer itself is ref-owned and survives re-runs (the unmount effect
+    // disconnects it), so this run releases exactly the element it registered:
+    // clearing the tracking ref lets the next run observe the current pill.
+    return () => {
+      pillRoRef.current?.unobserve(el);
+      if (pillObservedRef.current === el) pillObservedRef.current = null;
+    };
   }, [headerLayer.current.key]);
 
   useEffect(() => {
@@ -656,33 +664,39 @@ export const Sileo = memo(function Sileo({
         >
           <GooeyDefs filterId={filterId} blur={blur} />
           <g filter={`url(#${filterId})`}>
-            <motion.rect
-              data-sileo-pill
-              rx={resolvedRoundness}
-              ry={resolvedRoundness}
-              fill={view.fill}
-              initial={false}
-              animate={{
-                x: pillX,
-                width: resolvedPillWidth,
-                height: open ? pillHeight : HEIGHT,
-              }}
-              transition={ready ? SPRING : { duration: 0 }}
-            />
-            <motion.rect
-              data-sileo-body
-              y={HEIGHT}
-              width={resolvedWidth}
-              rx={resolvedRoundness}
-              ry={resolvedRoundness}
-              fill={view.fill}
-              initial={false}
-              animate={{
-                height: open ? expandedContent : 0,
-                opacity: open ? 1 : 0,
-              }}
-              transition={open ? SPRING : { ...SPRING, bounce: 0 }}
-            />
+            <LazyMotion features={domAnimation} strict>
+              {/* The animated keys are SVG geometry attributes on a `<rect>`,
+                  not CSS layout properties: a rect's x/width/height drive the
+                  shape the gooey filter morphs, so they repaint the SVG instead
+                  of reflowing the document and have no transform equivalent. */}
+              <m.rect
+                data-sileo-pill
+                rx={resolvedRoundness}
+                ry={resolvedRoundness}
+                fill={view.fill}
+                initial={false}
+                animate={{
+                  x: pillX,
+                  width: resolvedPillWidth,
+                  height: open ? pillHeight : HEIGHT,
+                }}
+                transition={ready ? SPRING : { duration: 0 }}
+              />
+              <m.rect
+                data-sileo-body
+                y={HEIGHT}
+                width={resolvedWidth}
+                rx={resolvedRoundness}
+                ry={resolvedRoundness}
+                fill={view.fill}
+                initial={false}
+                animate={{
+                  height: open ? expandedContent : 0,
+                  opacity: open ? 1 : 0,
+                }}
+                transition={open ? SPRING : { ...SPRING, bounce: 0 }}
+              />
+            </LazyMotion>
           </g>
         </svg>
       </div>

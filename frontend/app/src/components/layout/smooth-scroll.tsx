@@ -1,11 +1,12 @@
 import Lenis from "lenis";
-import { useEffect } from "react";
+import { useEffect, type RefObject } from "react";
 
 const nestedScrollSelector = "[data-lenis-prevent]";
 
 /**
  * Predicate determining whether an element or any ancestor opt out of Lenis smooth scrolling.
- * Checks for the presence of the `[data-lenis-prevent]` attribute to retain native scrolling on nested containers.
+ * Checks for the presence of the `[data-lenis-prevent]` attribute so the document controller
+ * leaves those regions to their own scrolling owner.
  *
  * @param node - The DOM element initiating a scroll event.
  * @returns True if the element is within a container marked with data-lenis-prevent.
@@ -16,7 +17,8 @@ function preventNestedScroll(node: HTMLElement): boolean {
 
 /**
  * Initializes the document-level Lenis smooth scrolling controller with autoRaf and anchor handling.
- * Exempts nested scroll containers marked with `[data-lenis-prevent]` so they retain native scroll behavior.
+ * Stays out of regions marked `[data-lenis-prevent]`, which are either native scrollers or the
+ * containers smoothed by `useSmoothScrollContainer`.
  *
  * @returns Cleanup function that destroys the Lenis instance on unmount.
  */
@@ -29,6 +31,60 @@ export function createSmoothScroll(): () => void {
   });
 
   return () => lenis.destroy();
+}
+
+/**
+ * Smooths one nested scroll container with its own Lenis instance.
+ *
+ * The document controller deliberately leaves `[data-lenis-prevent]` regions alone,
+ * so a workspace list that owns its own viewport (Posts table, Grid, Calendar,
+ * Channels directory) needs its own controller to keep wheel inertia. Lenis
+ * respects `prefers-reduced-motion` by default, so a reduced-motion visitor keeps
+ * native scrolling, and destroying the instance restores native scrolling for
+ * every other teardown path.
+ *
+ * @param ref - Ref to the scrollable element that owns the viewport.
+ */
+export function useSmoothScrollContainer(ref: RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    // Lenis needs a real layout engine: it reads reduced-motion preferences and
+    // observes element boxes. A DOM without them (server rendering, a jsdom test
+    // surface) has nothing to smooth, so the viewport keeps native scrolling.
+    if (typeof window.matchMedia !== "function" || typeof ResizeObserver === "undefined") return;
+    const lenis = new Lenis({
+      wrapper: element,
+      content: element.firstElementChild ?? element,
+      autoRaf: true,
+    });
+    // An element wrapper's scroll limit is measured from the wrapper, and the
+    // wrapper's own box never changes while a list grows, so its resize observer
+    // cannot notice new rows. Re-measure when the list's children change instead,
+    // batched to one frame.
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => lenis.resize());
+    });
+    observer.observe(element, { childList: true, subtree: true });
+    // Lenis animates through fractional offsets, and a `position: sticky` header
+    // inside such a container repaints at each of them, which reads as a flicker
+    // along the header's top edge. Snapping the container's own scroll position to
+    // whole pixels after the write keeps the header still; the correction is under
+    // a pixel, so Lenis's animation values are untouched.
+    const snapToWholePixel = () => {
+      const rounded = Math.round(element.scrollTop);
+      if (rounded !== element.scrollTop) element.scrollTop = rounded;
+    };
+    element.addEventListener("scroll", snapToWholePixel, { passive: true });
+    return () => {
+      observer.disconnect();
+      element.removeEventListener("scroll", snapToWholePixel);
+      cancelAnimationFrame(frame);
+      lenis.destroy();
+    };
+  }, [ref]);
 }
 
 /**

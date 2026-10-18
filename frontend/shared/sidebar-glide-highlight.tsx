@@ -87,8 +87,15 @@ const SPRING = {
 };
 /** Short opacity fade for entry/exit; independent of the position spring. */
 const FADE = { duration: 0.2, ease: "easeOut" as const };
+
 /**
- * Attributes that can change the highlighted row or its geometry without a
+ * Selector for interactive rows that own their hover fill and must not attract
+ * the pill, even through the snap radius (the sidebar's account block).
+ */
+const GLIDE_IGNORE_SELECTOR = "[data-glide-ignore]";
+
+/**
+ * Attributes that can change the highlighted item or its geometry without a
  * childList mutation. `style` is deliberately absent: the pill's own motion
  * writes would retrigger the observer every frame.
  */
@@ -242,12 +249,18 @@ function useGlideTracking({
     const scroller = viewport ?? container;
 
     const nearest = (clientX: number, clientY: number): HTMLElement | null => {
+      // A row that opts out (`data-glide-ignore`) keeps its own hover fill and
+      // must not attract the pill through the snap radius either: while the
+      // pointer is inside one, nothing is highlighted.
+      const underPointer = document.elementFromPoint(clientX, clientY);
+      if (underPointer?.closest(GLIDE_IGNORE_SELECTOR)) return null;
       let closest: HTMLElement | null = null;
       let minDistance = Infinity;
       for (const item of container.querySelectorAll<HTMLElement>(itemSelector)) {
         const r = item.getBoundingClientRect();
-        // Exclude hidden elements (e.g. display: none in collapsed mode).
-        if (r.height <= 0 && item.offsetParent === null) continue;
+        // Exclude items with no visible box: `display: none` in a collapsed
+        // rail, and any item another owner has animated to zero size.
+        if (r.height <= 0 || r.width <= 0) continue;
         if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
           return item;
         }

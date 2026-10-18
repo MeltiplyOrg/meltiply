@@ -126,7 +126,7 @@ Posts is one destination with **Table → Calendar → Grid**. Channels follows 
 
 Settings uses one bounded 672px content column for every section. Its section rail is 220px from 768px and horizontal below; theme choices remain compact rather than stretching across the column. The Channels directory has a centered 1200px ceiling. Do not apply Settings' form width to collection tables.
 
-The side dialog is a 620px drawer at the right edge and fills the phone viewport. Its 46px record toolbar remains separate from the native scrolling body. The same drawer hosts composition: flat sections with a shared tab strip, and a pinned footer carrying the schedule field plus Save, Schedule, and Publish Now. See [layout ownership](docs/frontend-layout.md) for scroll boundaries and responsive details.
+The side dialog is a 620px drawer at the right edge and fills the phone viewport. Its 46px record toolbar remains separate from the native scrolling body. The same drawer hosts composition: one column of titled sections — a shared content tab strip over the writing area and its media, then the destinations and publishing blocks in a fixed-width rail — with the draft's save state and the one primary action the selected publishing mode resolves in the pinned action bar. The compose/rail split follows the panel's own width, not the viewport, so a narrow panel stacks in one reading order. See [layout ownership](docs/frontend-layout.md) for scroll boundaries and responsive details.
 
 ## Elevation & Depth
 
@@ -154,13 +154,17 @@ Canonical [Button](frontend/shared/src/components/ui/button.tsx) owns primary, d
 
 [Card](frontend/shared/src/components/ui/card.tsx) supplies the shared opaque surface, quiet line, card corners, and restrained shadow. Metadata badges and status atoms use their existing variants; do not turn every label into an action or give inert metadata invented keyboard behavior.
 
+### Loading states
+
+A loading placeholder is the resolved geometry with its content held back, never a second layout the page settles away from. One owner per surface: `WorkspaceLoadingSkeleton` (`frontend/app/src/components/layout/workspace-loading-skeleton.tsx`) renders the workspace frame — rail, top bar, titled header, toolbar, rows — for the router's Suspense boundary and the session gate, and its geometry, palette, and pulse live once in `globals.css` (`.ws-boot*`), which `index.html` also renders as static markup so the pre-JavaScript first paint is already the shell's shape. The Posts table placeholder repeats the real cell slots through `PostRowCell`, the Grid placeholder repeats the `PostCard` anatomy inside the shared `Card`, and the Calendar keeps its real month heading, dates, and controls while only Post chips become placeholders. Skeletons carry the shared `Skeleton` fill, hide their bars from assistive technology, and let the surface announce loading once in visible copy ("Loading posts…"); a placeholder count fills the fold so resolved content neither grows the page nor adds a scrollbar it did not have.
+
 ### Navigation
 
 The rail uses quiet text and neutral selected rows, not accent-filled navigation. Its footer has one compact 36px avatar/name account trigger with trailing chevrons and an avatar-only collapsed state. A 260px menu contains real identity details, Account settings, inline Light/Dark/System theme segments with matching icons, and Sign out. Theme changes apply immediately without closing the menu and reuse the shared preference owner. Unsupported reference profile/presence/shortcut actions are absent.
 
 **The One Icon Column Rule.** Every rail row reserves the same 16px leading slot. A larger 24px identity avatar centers inside that slot instead of widening it, so icons, labels, and the account name share one axis.
 
-**The Gliding Highlight Rule.** Rail rows never paint their own hover fill. One shared pill (`SidebarGlideHighlight`) springs to the hovered row and fades out on leave, in the workspace rail and the Settings section rail alike, while the row keeps its labels, focus ring, and selected surface above it.
+**The Gliding Highlight Rule.** Rows that live in a glide container never paint their own hover fill. One shared pill (`SidebarGlideHighlight`) springs to the hovered row and fades out on leave in the workspace rail and the Settings section rail, while the row keeps its labels, focus ring, and selected surface above it. A row marked `data-glide-ignore` is not a glide target and keeps its own plain hover fill: the sidebar's account block opts out, and the account menu it opens sets `highlight={false}` so its rows use the shared `data-menu-plain` fill instead of a travelling pill. Posts table rows keep the table's own hover fill, with no pill behind them.
 
 ### Filters and tooltips
 

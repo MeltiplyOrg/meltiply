@@ -1,12 +1,14 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
 import { LayoutGrid, Plus } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
+import { Card } from "@meltiply/ui/card";
 import { Input } from "@meltiply/ui/input";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription } from "@meltiply/ui/empty";
 import { cn } from "@meltiply/ui/utils";
 import { useI18n } from "@/lib/i18n";
 import { PostCard } from "./post-card";
+import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import {
   SKELETON_CARD_KEYS,
   type BrandProfile,
@@ -49,6 +51,8 @@ export const PostGridCardView = React.memo(function PostGridCardView({
   selectionDisabled,
 }: PostGridCardViewProps) {
   const { t } = useI18n();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useSmoothScrollContainer(scrollRef);
   const profiles = useMemo(
     () => new Map(brandProfiles.map((profile) => [profile.id, profile.name])),
     [brandProfiles],
@@ -60,8 +64,20 @@ export const PostGridCardView = React.memo(function PostGridCardView({
     return (
       <div className={GRID_VIEWPORT_CLASS}>
         <div className={cn("grid gap-3", gridColumnClass)}>
+          {/* Same anatomy as `post-card.tsx` - profile line, caption, the
+              `h-35` media box, status, and meta row - so resolved cards drop
+              into these slots without moving anything. */}
           {SKELETON_CARD_KEYS.map((key) => (
-            <Skeleton key={key} className="h-64 rounded-card" />
+            <Card key={key} aria-hidden="true" className="flex min-w-0 flex-col gap-2 px-3 py-2.5">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-3.5 w-full" />
+              <Skeleton className="h-3.5 w-3/5" />
+              <Skeleton className="h-35 rounded-chip" />
+              <Skeleton className="h-4.5 w-20 rounded-chip" />
+              <div className="flex min-h-4.5 items-center gap-2">
+                <Skeleton className="h-3.5 w-28" />
+              </div>
+            </Card>
           ))}
         </div>
       </div>
@@ -83,7 +99,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
       </Empty>
     );
   return (
-    <div className={cn(GRID_VIEWPORT_CLASS, selectedIds.size > 0 && "pb-32")}>
+    <div ref={scrollRef} className={cn(GRID_VIEWPORT_CLASS, selectedIds.size > 0 && "pb-32")}>
       <label className="mb-3 flex items-center gap-2 text-xs text-ink-3">
         <Input
           type="checkbox"

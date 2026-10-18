@@ -55,7 +55,10 @@ export function ChannelTableView({
   const { t } = useI18n();
   return (
     <TooltipProvider>
-      <div className="overflow-x-auto rounded-card border border-line bg-surface">
+      {/* No scroll container of its own: an `overflow` here would capture the
+          table's `sticky` header, so the viewport above owns both axes and the
+          header row stays pinned while the directory scrolls. */}
+      <div className="rounded-card border border-line bg-surface">
         <Table variant="directory" className="min-w-220" aria-label={t("Connected accounts")}>
           <colgroup>
             <col className="w-12" />

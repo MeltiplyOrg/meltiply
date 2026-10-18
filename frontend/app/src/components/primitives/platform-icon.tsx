@@ -53,6 +53,7 @@ export const PlatformIcon = React.memo(function PlatformIcon({
       <img
         src={`/icons/platforms/${slug}${themed ? "-light" : ""}.svg`}
         alt=""
+        decoding="async"
         draggable={false}
         className={cn(
           "size-full object-contain",

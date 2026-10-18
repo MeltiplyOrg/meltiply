@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { PLATFORM_IDS } from "@meltiply/domain";
 import { useWorkspace } from "@/context/workspace.context";
@@ -12,6 +12,7 @@ import {
 import { useSearchParams } from "@/lib/navigation";
 import { CONNECTION_TONES, oauthOutcomeMessage, platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
+import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import {
   brandProfileColorClass,
   type BrandProfile,
@@ -187,6 +188,10 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   } = useWorkspace();
   const scope = useSessionScope();
   const { t, tStatus, language } = useI18n();
+  const accountsScrollRef = useRef<HTMLDivElement | null>(null);
+  const profilesScrollRef = useRef<HTMLDivElement | null>(null);
+  useSmoothScrollContainer(accountsScrollRef);
+  useSmoothScrollContainer(profilesScrollRef);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -817,8 +822,9 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
             </TopToolbarFilterChips>
           )}
           <div
+            ref={accountsScrollRef}
             className={cn(
-              "min-h-0 flex-1 overflow-y-auto px-4 pb-24 sm:px-6",
+              "min-h-0 flex-1 overflow-auto px-4 pb-24 sm:px-6",
               selectedIds.size > 0 && "pb-32",
             )}
           >
@@ -876,6 +882,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         </TabsContent>
         <TabsContent
           value="profiles"
+          ref={profilesScrollRef}
           className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 pb-24 pt-3.5 sm:px-6"
         >
           <BrandProfileDirectory

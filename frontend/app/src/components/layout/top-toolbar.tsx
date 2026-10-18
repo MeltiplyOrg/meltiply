@@ -250,7 +250,10 @@ export function TopToolbarFilters({
               </Button>
             )}
           </div>
-          <div className="max-h-[55dvh] space-y-1.5 overflow-y-auto px-2 pb-1.5 pt-0.5">
+          <div
+            data-lenis-prevent
+            className="max-h-[55dvh] space-y-1.5 overflow-y-auto px-2 pb-1.5 pt-0.5"
+          >
             {visibleFields.length === 0 ? (
               <p className="pb-1 text-xs leading-relaxed text-ink-3">
                 {t("No filters applied. Add a filter to narrow this collection.")}

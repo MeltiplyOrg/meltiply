@@ -1,3 +1,4 @@
+import React from "react";
 import { CalendarDays, FileText, Paperclip, Play } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
@@ -15,6 +16,9 @@ import {
 } from "./posts-helpers";
 import type { PostRow } from "./types";
 
+/** Card meta date, formatted with one shared formatter instead of one per card per render. */
+const CARD_DATE_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+
 export interface PostCardProps extends PostActionsProps {
   post: PostRow;
   profileName: string;
@@ -28,7 +32,7 @@ export interface PostCardProps extends PostActionsProps {
  * attachment data. The title button's stretched hit area opens inspection with
  * native keyboard semantics; selection and quick actions sit above that area.
  */
-export function PostCard({
+export const PostCard = React.memo(function PostCard({
   post,
   postId,
   profileName,
@@ -67,7 +71,13 @@ export function PostCard({
       <div className="relative flex h-35 items-center justify-center overflow-hidden rounded-chip bg-inset">
         {image ? (
           <>
-            <img src={image} alt="" className="size-full object-cover" />
+            <img
+              src={image}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="size-full object-cover"
+            />
             {preview?.asset.asset_type === "video" && (
               <Play className="absolute size-5.5 text-ink-inverse" />
             )}
@@ -88,9 +98,7 @@ export function PostCard({
         </span>
         <span className="inline-flex shrink-0 items-center gap-1">
           <CalendarDays className="size-3" />
-          <time dateTime={post.date}>
-            {new Date(post.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-          </time>
+          <time dateTime={post.date}>{CARD_DATE_FORMAT.format(new Date(post.date))}</time>
         </span>
         {attachments > 0 && (
           <span className="inline-flex shrink-0 items-center gap-1">
@@ -113,4 +121,4 @@ export function PostCard({
       </div>
     </Card>
   );
-}
+});

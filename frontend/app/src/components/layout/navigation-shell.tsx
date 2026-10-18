@@ -10,6 +10,7 @@ import {
 } from "@/components/primitives/sidebar-nav";
 import { Button } from "@meltiply/ui/button";
 import { BrandMark } from "@meltiply/ui/brand-mark";
+import { Skeleton } from "@meltiply/ui/skeleton";
 import { CenterDialog, CenterDialogContent, CenterDialogTitle } from "@meltiply/ui/center-dialog";
 import { Toaster } from "@meltiply/ui/sileo";
 import { preloadDashboardRoute } from "@/lib/preload-routes";
@@ -31,7 +32,7 @@ interface NavigationShellProps {
  * Canonical dialogs own mobile/search focus trapping and dismissal.
  */
 export function NavigationShell({ currentView, onNavigate, children }: NavigationShellProps) {
-  const { selectedBrandProfile } = useWorkspace();
+  const { selectedBrandProfile, isLoading: workspaceLoading } = useWorkspace();
   const { t } = useI18n();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -71,9 +72,13 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
           </Button>
           <BrandMark className="size-5 shrink-0 lg:hidden" />
           <nav aria-label={t("Breadcrumb")} className="flex min-w-0 items-center gap-2 text-xs">
-            <span className="hidden truncate text-ink-3 sm:inline">
-              {selectedBrandProfile?.name ?? t("Workspace")}
-            </span>
+            {workspaceLoading ? (
+              <Skeleton className="hidden h-4 w-28 sm:block" aria-hidden="true" />
+            ) : (
+              <span className="hidden truncate text-ink-3 sm:inline">
+                {selectedBrandProfile?.name ?? t("Workspace")}
+              </span>
+            )}
             <ChevronRight className="hidden size-3 shrink-0 text-ink-3 sm:block" />
             <span className="font-medium">{pageTitle}</span>
           </nav>
@@ -125,6 +130,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
         <main
           id="workspace-content"
           tabIndex={-1}
+          data-lenis-prevent
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-surface"
         >
           <div className="flex h-full min-h-0 w-full min-w-0 flex-col">{children}</div>

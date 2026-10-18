@@ -191,3 +191,309 @@
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/*
+ * Upload progress fill (`composer.tsx`). Only its width animates as the upload
+ * advances; naming that property here keeps `transition-all` - which would
+ * animate every property that changes on the element - off the progress bar.
+ */
+[data-attachment-progress] {
+  transition-property: width;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/*
+ * Workspace boot frame (`components/layout/workspace-loading-skeleton.tsx`).
+ *
+ * The shell's loading geometry lives here, once, because two renderers need it:
+ * the static markup in `index.html` paints before the module graph downloads,
+ * and `WorkspaceLoadingSkeleton` renders the identical markup for the router's
+ * Suspense fallback and the session gate. React clears the static frame on its
+ * first commit, so the handoff is the same pixels rather than a second shape.
+ *
+ * Geometry mirrors the resolved shell through the same `--workspace-*`,
+ * `--control-height`, and `--radius-*` tokens the shell itself uses: the 252px
+ * rail, the 46px top bar (52px on phones) with its breadcrumb and jump-search
+ * pill, and a workspace surface's titled header, toolbar, and rows. A token
+ * change therefore moves the frame and the shell together.
+ */
+.ws-boot {
+  display: flex;
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--page);
+}
+
+.ws-boot-bar,
+.ws-boot-rows > i::before {
+  display: block;
+  background: var(--muted);
+  border-radius: var(--radius-chip);
+  animation: ws-boot-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes ws-boot-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.ws-boot-rail {
+  display: none;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: var(--workspace-sidebar-width);
+  padding: 0 8px;
+  border-right: 1px solid var(--line);
+  background: var(--canvas);
+}
+
+@media (min-width: 1024px) {
+  .ws-boot-rail {
+    display: flex;
+  }
+}
+
+.ws-boot-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--workspace-topbar-height);
+  margin: 0 -8px;
+  padding: 0 12px;
+}
+
+.ws-boot-mark {
+  width: 22px;
+  height: 22px;
+}
+
+.ws-boot-name {
+  width: 96px;
+  height: 12px;
+}
+
+.ws-boot-heading {
+  width: 56px;
+  height: 8px;
+  margin: 14px 8px 7px;
+}
+
+.ws-boot-nav {
+  height: var(--control-height);
+  margin-bottom: 4px;
+}
+
+.ws-boot-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ws-boot-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 3.25rem;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+@media (min-width: 640px) {
+  .ws-boot-topbar {
+    height: var(--workspace-topbar-height);
+    padding: 0 24px;
+  }
+}
+
+.ws-boot-crumb {
+  width: 132px;
+  height: 11px;
+}
+
+.ws-boot-search {
+  width: 196px;
+  height: 26px;
+  margin-left: auto;
+  border-radius: var(--radius-control);
+}
+
+.ws-boot-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 16px 0;
+  background: var(--surface);
+}
+
+@media (min-width: 640px) {
+  .ws-boot-content {
+    padding: 24px 24px 0;
+  }
+}
+
+.ws-boot-title {
+  width: 128px;
+  height: 22px;
+}
+
+.ws-boot-subtitle {
+  width: 264px;
+  height: 12px;
+}
+
+.ws-boot-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ws-boot-field {
+  width: 208px;
+  height: 26px;
+  border-radius: var(--radius-control);
+}
+
+.ws-boot-chip {
+  width: 64px;
+  height: 26px;
+  border-radius: var(--radius-control);
+}
+
+.ws-boot-switch {
+  width: 168px;
+  height: 26px;
+  margin-left: auto;
+  border-radius: var(--radius-control);
+}
+
+.ws-boot-rows {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.ws-boot-rows > i {
+  height: 36px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ws-boot-rows > i::before {
+  width: 58%;
+  height: 12px;
+  margin-top: 12px;
+}
+
+.ws-boot-rows > i:nth-child(3n)::before {
+  width: 44%;
+}
+
+.ws-boot-rows > i:nth-child(4n)::before {
+  width: 68%;
+}
+
+/*
+ * Sticky table headers inside a smooth-scrolled viewport composite on their own
+ * layer: without it the browser repaints the header's background and bottom
+ * border against the rows sliding beneath, which reads as a flicker along the
+ * top edge of the table.
+ */
+thead th {
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
+/*
+ * A row that opts out of the gliding highlight (`data-glide-ignore`) owns its
+ * hover fill: nothing travels behind it, so the row itself must show the
+ * affordance. Declared here, unlayered, so it beats the shared row utilities
+ * that deliberately keep glide targets transparent.
+ */
+[data-glide-ignore]:hover {
+  background-color: var(--hover);
+}
+
+/*
+ * Collapsible grouped rows in the Posts table (`post-table-view.tsx`).
+ *
+ * A grouped row stays mounted while its group is collapsed, so expanding and
+ * collapsing are the same height transition instead of a mount or unmount. The
+ * row's height is `--post-row-h` (36px open, 0 collapsed) and the group's rows
+ * hide once the transition finishes, which takes them out of hit-testing, the
+ * tab order, and the accessibility tree while staying animated.
+ *
+ * Each cell's content lives in an absolutely positioned layer: a table cell
+ * never shrinks below its content, so zeroing the cell's own height only clips
+ * the content once that content has left the cell's flow. Padding moves with the
+ * content layer for the same reason — the cell owns height and clipping only.
+ *
+ * These rules are deliberately unlayered, so they beat the shared TableCell
+ * utilities (`h-9`, `px-2`, `first:pl-4`) they replace; a cell in this table
+ * states its own height/padding through the layer instead.
+ */
+:root {
+  --post-row-h: 2.25rem;
+  --post-row-collapse-duration: 200ms;
+}
+
+[data-post-row],
+[data-post-group-row] {
+  position: relative;
+  /* Above the table's own surfaces so a selected row's tint stays readable, and
+     always visible while its group is open. */
+  z-index: 1;
+  visibility: visible;
+}
+
+[data-post-row] > [data-post-cell] {
+  --post-row-ease: var(--ease-enter);
+  position: relative;
+  height: var(--post-row-h);
+  overflow: hidden;
+  padding: 0;
+  transition:
+    height var(--post-row-collapse-duration) var(--post-row-ease),
+    border-bottom-width var(--post-row-collapse-duration) var(--post-row-ease);
+}
+
+[data-post-row] [data-post-row-content] {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+}
+
+[data-post-row][data-collapsed] {
+  /* Delayed, so the group animates at full visibility and only then leaves the
+     pointer, tab order, and accessibility tree. */
+  visibility: hidden;
+  transition: visibility 0s linear var(--post-row-collapse-duration);
+}
+
+[data-post-row][data-collapsed] > [data-post-cell] {
+  --post-row-h: 0px;
+  --post-row-ease: var(--ease-exit);
+  border-bottom-width: 0;
+}
+
+/* The group's phase chevron turns instead of swapping glyphs, and the group
+   header's own `data-collapsed` drives it — one recipe for the whole toggle. */
+[data-post-group-row] [data-post-group-chevron] {
+  transition: rotate var(--post-row-collapse-duration) var(--ease-enter);
+}
+
+[data-post-group-row][data-collapsed] [data-post-group-chevron] {
+  rotate: -90deg;
+}

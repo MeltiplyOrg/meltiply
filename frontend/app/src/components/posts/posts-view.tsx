@@ -142,12 +142,17 @@ function toChannelEntry(
 function toPostRow(post: Post, integrationById: IntegrationById): PostRow {
   const channels: PostDetailItem[] = [];
   const seen = new Set<string>();
+  const distributionByAccount = new Map<string, Distribution>();
+  for (const distribution of post.distributions) {
+    const accountId = distribution.platform_account_id;
+    if (accountId && !distributionByAccount.has(accountId)) {
+      distributionByAccount.set(accountId, distribution);
+    }
+  }
   for (const target of post.targets) {
     if (seen.has(target.platform_account_id)) continue;
     seen.add(target.platform_account_id);
-    const distribution = post.distributions.find(
-      (d) => d.platform_account_id === target.platform_account_id,
-    );
+    const distribution = distributionByAccount.get(target.platform_account_id);
     channels.push(toChannelEntry(post, target, distribution, integrationById));
   }
   for (const distribution of post.distributions) {
@@ -603,9 +608,10 @@ export function PostsView({
     (postIds: string[], selected: boolean) => {
       setSelectedPosts((prev) => {
         const next = new Map(prev);
+        const rowsById = new Map(posts.map((row) => [row.id, row]));
         for (const postId of postIds) {
           if (selected) {
-            const row = posts.find((r) => r.id === postId);
+            const row = rowsById.get(postId);
             if (!row) continue;
             next.set(postId, {
               id: postId,
@@ -915,6 +921,7 @@ export function PostsView({
     viewMode === "calendar" ? (
       <PostCalendarGridView
         posts={processedPosts}
+        isLoading={isLoading}
         calendarMonth={calendarMonth}
         calendarDays={calendarDays}
         onPrevMonth={handlePrevMonth}
@@ -964,9 +971,15 @@ export function PostsView({
   return (
     <WorkspaceSurface
       title={t("Posts")}
-      description={t("Showing {count} posts across your Brand Profiles.", {
-        count: processedPosts.length,
-      })}
+      description={
+        isLoading ? (
+          <span role="status">{t("Loading posts…")}</span>
+        ) : (
+          t("Showing {count} posts across your Brand Profiles.", {
+            count: processedPosts.length,
+          })
+        )
+      }
       actions={
         <Button variant="default" onClick={handleCreatePost}>
           <Plus className="size-4" />

@@ -63,8 +63,9 @@ export function summarizeChannelStatuses(statuses: string[], fallback = "draft")
     "cancelled",
     "published",
   ];
+  const present = new Set(statuses);
   for (const status of order) {
-    if (statuses.includes(status)) return status;
+    if (present.has(status)) return status;
   }
   return statuses[0] ?? fallback;
 }

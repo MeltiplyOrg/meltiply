@@ -19,6 +19,7 @@ import { Alert } from "@meltiply/ui/alert";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@meltiply/ui/tabs";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
+import { cn } from "@meltiply/ui/utils";
 import { toast } from "@meltiply/ui/toast";
 import {
   Image as ImageIcon,
@@ -36,9 +37,18 @@ import {
   ChevronUp,
   ChevronDown,
   Replace,
+  Plus,
+  type LucideIcon,
 } from "lucide-react";
 import type { ChannelIntegration } from "@/api/types";
-import type { Asset, CreatePostInput, Post, TikTokPublishingRequirements } from "@/types";
+import type {
+  Asset,
+  CreatePostInput,
+  Distribution,
+  PlatformCapability,
+  Post,
+  TikTokPublishingRequirements,
+} from "@/types";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import {
   useAsset,
@@ -348,12 +358,17 @@ function overridesFromPost(
   platformByAccountId: Readonly<Record<string, string | undefined>>,
 ): Record<string, ChannelOverride> {
   const overrides: Record<string, ChannelOverride> = {};
+  const distributionByAccount = new Map<string, Distribution>();
+  for (const distribution of post.distributions) {
+    const accountId = distribution.platform_account_id;
+    if (accountId && !distributionByAccount.has(accountId)) {
+      distributionByAccount.set(accountId, distribution);
+    }
+  }
   for (const target of post.targets) {
     const platform =
       platformByAccountId[target.platform_account_id] ??
-      post.distributions.find(
-        (distribution) => distribution.platform_account_id === target.platform_account_id,
-      )?.platform ??
+      distributionByAccount.get(target.platform_account_id)?.platform ??
       "";
     const descriptor = providerDescriptorFor(platform);
     const content = target.description_override ?? post.default_text;
@@ -431,6 +446,52 @@ function restoredAttachmentRows(
     }
   }
   return rows;
+}
+
+/**
+ * One titled section of the composer panel.
+ *
+ * The panel has a single section grammar — an optional leading icon, a
+ * `--font-size-ui` title, an optional right-aligned action cluster, and content
+ * below — so the compose column, the targeting rail, and the per-Channel panels
+ * read as one surface instead of three stacked widgets. The Destinations block
+ * owns the same header shape inside `DestinationSelector`, which is why this
+ * renderer mirrors its type scale rather than introducing a second convention.
+ *
+ * @param props.icon - Optional leading Lucide icon, sized and muted by the renderer.
+ * @param props.title - Localized section title.
+ * @param props.action - Optional right-aligned action cluster (counts, buttons).
+ * @param props.className - Extra classes for the section wrapper.
+ * @param props.children - Section content.
+ * @returns The section element.
+ */
+function ComposerSection({
+  icon: Icon,
+  title,
+  action,
+  className,
+  children,
+}: {
+  icon?: LucideIcon;
+  title: string;
+  action?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={cn("flex min-w-0 flex-col gap-3", className)}>
+      <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {Icon && <Icon className="size-3.5 shrink-0 text-ink-3" aria-hidden="true" />}
+          <h3 className="min-w-0 truncate text-(length:--font-size-ui) font-semibold text-ink">
+            {title}
+          </h3>
+        </div>
+        {action}
+      </header>
+      {children}
+    </section>
+  );
 }
 
 /**
@@ -527,9 +588,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   // Recovery is neither read nor written until functional consent is active.
   const [functionalConsent, setFunctionalConsent] = useState(() => hasCookieConsent("functional"));
   const [recoveryReadNamespace, setRecoveryReadNamespace] = useState<string | null>(null);
-  const [tiktokRequirements, setTiktokRequirements] = useState<
-    Record<string, TikTokPublishingRequirements | null>
-  >({});
+  /**
+   * Live TikTok publishing requirements reported by a Channel's settings panel.
+   * Imperative scratch data: it is written by a child callback and read only when
+   * a submission is validated, so a ref keeps arriving requirements from
+   * re-rendering every composer surface.
+   */
+  const tiktokRequirementsRef = useRef<Record<string, TikTokPublishingRequirements | null>>({});
   const [pendingOwnershipAssetIds, setPendingOwnershipAssetIds] = useState<string[] | null>(null);
   const [isDragActive, setDragActive] = useState(false);
 
@@ -964,7 +1029,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     if (fresh.length === 0) return;
     for (const assetId of fresh) persistedOwnershipRef.current.add(assetId);
     const attachmentIds = [...orderedAssetIds()];
-    for (const assetId of fresh) if (!attachmentIds.includes(assetId)) attachmentIds.push(assetId);
+    const claimed = new Set(attachmentIds);
+    for (const assetId of fresh) {
+      if (claimed.has(assetId)) continue;
+      attachmentIds.push(assetId);
+      claimed.add(assetId);
+    }
     void updatePost
       .mutateAsync({
         id: postId,
@@ -975,15 +1045,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       });
   }, [orderedAssetIds, pendingOwnershipAssetIds, postId, selectedBrandProfileId, updatePost]);
 
-  const selectedChannels = useMemo(
-    () =>
-      integrations.filter(
-        (channel: ChannelIntegration) =>
-          channel.brandProfileId === selectedBrandProfileId &&
-          selectedChannelIds.includes(channel.id),
-      ),
-    [integrations, selectedBrandProfileId, selectedChannelIds],
-  );
+  const selectedChannels = useMemo(() => {
+    const selectedIds = new Set(selectedChannelIds);
+    return integrations.filter(
+      (channel: ChannelIntegration) =>
+        channel.brandProfileId === selectedBrandProfileId && selectedIds.has(channel.id),
+    );
+  }, [integrations, selectedBrandProfileId, selectedChannelIds]);
 
   /**
    * Receives live TikTok publishing requirements from a Channel's settings panel
@@ -994,11 +1062,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    */
   const handleRequirementsChange = useCallback(
     (channelId: string, requirements: TikTokPublishingRequirements | null) => {
-      setTiktokRequirements((previous) =>
-        previous[channelId] === requirements
-          ? previous
-          : { ...previous, [channelId]: requirements },
-      );
+      if (tiktokRequirementsRef.current[channelId] === requirements) return;
+      tiktokRequirementsRef.current = {
+        ...tiktokRequirementsRef.current,
+        [channelId]: requirements,
+      };
     },
     [],
   );
@@ -1153,6 +1221,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           const next = { ...previous };
           for (const [channelId, position] of replaced) {
             const current = next[channelId];
+            // One membership test per channel against that channel's own list:
+            // not a repeated scan, so a Set here would only add construction.
             if (!current || current.includes(newAssetId)) continue;
             const ordered = [...current];
             ordered.splice(Math.min(position, ordered.length), 0, newAssetId);
@@ -1524,12 +1594,20 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         errors.push(t("Platform publishing limits are still loading; try again in a moment."));
       }
 
+      // First row per platform wins, matching the `find` this replaces.
+      const capabilityByPlatform = new Map<string, PlatformCapability>();
+      for (const item of capabilities ?? []) {
+        if (!capabilityByPlatform.has(item.platform)) {
+          capabilityByPlatform.set(item.platform, item);
+        }
+      }
+
       for (const channel of selectedChannels) {
         const name = channel.name;
         const platform = channel.providerIdentifier.toLowerCase();
         const settings = channelOverrides[channel.id]?.settings ?? {};
         const content = resolvedContentFor(channel.id);
-        const capability = capabilities?.find((item) => item.platform === platform);
+        const capability = capabilityByPlatform.get(platform);
         const channelAttachments = attachmentsForChannel(channel.id);
 
         if (!content.trim() && channelAttachments.length === 0) {
@@ -1567,13 +1645,17 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             }),
           );
         }
+        // Per-channel acceptance sets: each attachment below re-tests membership
+        // against these lists, so build them once for the channel.
+        const acceptedAssetTypes = new Set(capability?.asset_types ?? []);
+        const combinedAssetTypes = new Set(capability?.multi_asset_types ?? []);
         if (channelAttachments.length > 1 && capability) {
           const combined = capability.multi_asset_types ?? [];
           if (combined.length === 0) {
             errors.push(t("{name}: cannot publish more than one attachment per post.", { name }));
           } else {
             const hasUnsupported = channelAttachments.some(
-              (attachment) => attachment.assetType && !combined.includes(attachment.assetType),
+              (attachment) => attachment.assetType && !combinedAssetTypes.has(attachment.assetType),
             );
             if (hasUnsupported) {
               errors.push(
@@ -1590,8 +1672,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           if (
             assetType &&
             capability &&
-            capability.asset_types.length > 0 &&
-            !capability.asset_types.includes(assetType)
+            acceptedAssetTypes.size > 0 &&
+            !acceptedAssetTypes.has(assetType)
           ) {
             errors.push(
               t("{name}: this channel does not accept {type} media.", { name, type: assetType }),
@@ -1623,7 +1705,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               channelName: name,
               settings,
               capability,
-              requirements: tiktokRequirements[channel.id] ?? null,
+              requirements: tiktokRequirementsRef.current[channel.id] ?? null,
               t,
             }),
           );
@@ -1643,9 +1725,22 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       selectedChannels,
       sharedContent,
       t,
-      tiktokRequirements,
     ],
   );
+
+  /**
+   * Validation messages keyed for rendering. A message may repeat verbatim (the
+   * same rule can fail for two Channels), so identity is the message plus its
+   * occurrence count - stable across re-renders and unique within the list.
+   */
+  const validationErrorRows = useMemo(() => {
+    const occurrences = new Map<string, number>();
+    return validationErrors.map((message) => {
+      const occurrence = (occurrences.get(message) ?? 0) + 1;
+      occurrences.set(message, occurrence);
+      return { key: `${message}#${occurrence}`, message };
+    });
+  }, [validationErrors]);
 
   /**
    * Persists the current composer state as one authoritative Post, creating it on
@@ -1805,84 +1900,88 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     <fieldset
       disabled={isInitializing}
       aria-busy={isInitializing}
-      className="flex min-w-0 shrink-0 grow flex-col gap-6"
+      className="@container flex min-w-0 shrink-0 grow flex-col gap-5"
     >
-      {selectedBrandProfileId === null && (
-        <Alert variant="info" className="items-center">
-          <AlertCircle className="size-5 shrink-0" />
-          <div className="flex-1">
-            {t("Select a Brand Profile in the sidebar to compose, schedule, or publish.")}
-          </div>
-        </Alert>
-      )}
-      {profileMismatch && (
-        <Alert variant="destructive" className="items-center">
-          <AlertCircle className="size-5 shrink-0" />
-          <div className="flex-1">
-            {t("This post belongs to {name}. Switch to that Brand Profile to edit it.", {
-              name:
-                brandProfiles.find((profile) => profile.id === postQuery.data?.brand_profile_id)
-                  ?.name ?? t("another Brand Profile"),
-            })}
-          </div>
-        </Alert>
-      )}
-      {postLoadError && (
-        <Alert variant="destructive" className="items-center">
-          <AlertCircle className="size-5 shrink-0" />
-          <div className="flex-1">
-            <span className="font-semibold">{t("Could not load post")}:</span>{" "}
-            {userFacingErrorMessage(postLoadError, language)}
-          </div>
-        </Alert>
-      )}
-
-      {errorMessage && (
-        <Alert variant="destructive" className="items-center">
-          <AlertCircle className="size-5 shrink-0" />
-          <div className="flex-1">
-            <span className="font-semibold">{t("Submission Error")}:</span> {errorMessage}
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setErrorMessage(null)}
-            aria-label={t("Dismiss")}
-            className="text-red hover:bg-red/20 size-7 p-0"
-          >
-            <X className="size-4" />
-          </Button>
-        </Alert>
-      )}
-
-      {validationErrors.length > 0 && (
-        <Alert variant="destructive" className="flex-col items-start">
-          <div className="flex items-center gap-2 font-semibold">
+      <div className="flex flex-col gap-3 empty:hidden">
+        {selectedBrandProfileId === null && (
+          <Alert variant="info" className="items-center">
             <AlertCircle className="size-4 shrink-0" />
-            {t("Please fix the following before submitting:")}
-          </div>
-          <ul className="list-disc pl-6 flex flex-col gap-0.5">
-            {validationErrors.map((message, index) => (
-              <li key={index}>{message}</li>
-            ))}
-          </ul>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setValidationErrors([])}
-            aria-label={t("Dismiss")}
-            className="text-red hover:bg-red/20 size-7 p-0 self-end"
-          >
-            <X className="size-4" />
-          </Button>
-        </Alert>
-      )}
+            <div className="flex-1">
+              {t("Choose a Brand Profile in the Posts filters to compose, schedule, or publish.")}
+            </div>
+          </Alert>
+        )}
+        {profileMismatch && (
+          <Alert variant="destructive" className="items-center">
+            <AlertCircle className="size-4 shrink-0" />
+            <div className="flex-1">
+              {t("This post belongs to {name}. Switch to that Brand Profile to edit it.", {
+                name:
+                  brandProfiles.find((profile) => profile.id === postQuery.data?.brand_profile_id)
+                    ?.name ?? t("another Brand Profile"),
+              })}
+            </div>
+          </Alert>
+        )}
+        {postLoadError && (
+          <Alert variant="destructive" className="items-center">
+            <AlertCircle className="size-4 shrink-0" />
+            <div className="flex-1">
+              <span className="font-semibold">{t("Could not load post")}:</span>{" "}
+              {userFacingErrorMessage(postLoadError, language)}
+            </div>
+          </Alert>
+        )}
 
-      {/* Reference layout, adapted: what you publish on the left, where and when
-          on the right. Below the large breakpoint the columns stack, content
-          first, so phone widths keep one reading order. */}
-      <div className="grid min-w-0 grow grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
-        <div className="flex min-w-0 flex-col gap-4">
+        {errorMessage && (
+          <Alert variant="destructive" className="items-center">
+            <AlertCircle className="size-4 shrink-0" />
+            <div className="flex-1">
+              <span className="font-semibold">{t("Submission Error")}:</span> {errorMessage}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setErrorMessage(null)}
+              aria-label={t("Dismiss")}
+              className="text-red hover:bg-red/20 size-7 p-0"
+            >
+              <X className="size-4" />
+            </Button>
+          </Alert>
+        )}
+
+        {validationErrors.length > 0 && (
+          <Alert variant="destructive" className="flex-col items-start">
+            <div className="flex items-center gap-2 font-semibold">
+              <AlertCircle className="size-4 shrink-0" />
+              {t("Please fix the following before submitting:")}
+            </div>
+            <ul className="list-disc pl-6 flex flex-col gap-0.5">
+              {validationErrorRows.map((row) => (
+                <li key={row.key}>{row.message}</li>
+              ))}
+            </ul>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setValidationErrors([])}
+              aria-label={t("Dismiss")}
+              className="text-red hover:bg-red/20 size-7 p-0 self-end"
+            >
+              <X className="size-4" />
+            </Button>
+          </Alert>
+        )}
+      </div>
+
+      {/* Reference layout, adapted: what gets published fills the panel and
+          where and when stays beside it as a fixed-width rail. The split
+          follows the panel's own width (`@container`), never the viewport:
+          composing always happens inside the drawer, so a narrow panel has to
+          stack in one reading order rather than squeeze two columns. */}
+      <div className="flex min-w-0 grow flex-col gap-6 @4xl:flex-row @4xl:items-stretch @4xl:gap-8">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
           <Tabs
             value={activeTab}
             onValueChange={setActiveTab}
@@ -1890,7 +1989,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           >
             <TabsList
               variant="line"
-              className="w-full overflow-x-auto"
+              className="hide-scrollbar w-full overflow-x-auto"
               aria-label={t("Composer sections")}
             >
               <TabsTrigger value="shared" className="text-xs font-semibold">
@@ -1911,10 +2010,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               ))}
             </TabsList>
 
-            <div className="flex flex-col gap-4">
-              <TabsContent value="shared" className="mt-0">
-                <div className="flex flex-col gap-4">
-                  <div className="relative">
+            {/* The compose panel owns the column's leftover height so the
+                writing area fills the drawer instead of leaving it empty under
+                a fixed-height textarea; the media section stays beneath it. */}
+            <div className="flex min-h-0 grow flex-col gap-4">
+              <TabsContent value="shared" className="mt-0 flex min-h-0 grow flex-col gap-4">
+                <div className="flex min-h-0 grow flex-col gap-4">
+                  <div className="flex min-h-0 grow flex-col gap-2">
                     <Textarea
                       placeholder={t("What do you want to publish?")}
                       aria-label={t("Shared Content")}
@@ -1923,11 +2025,16 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         setSharedContent(event.target.value);
                         markDirty();
                       }}
-                      className="min-h-[140px] text-base resize-y font-normal bg-field"
+                      className="min-h-[140px] grow resize-none text-base font-normal bg-field"
                     />
-                    <div className="flex items-center justify-between text-xs text-ink-3 mt-2">
+                    {/* The destination count only means something once the Post
+                        has an owning Brand Profile: in the aggregate view the
+                        banner above already says what is missing, and the
+                        Destinations block shows the accounts as unavailable. */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-(length:--font-size-micro) text-ink-3">
                       <span>
-                        {t("Targeting {count} channel(s)", { count: selectedChannels.length })}
+                        {selectedBrandProfileId !== null &&
+                          t("Targeting {count} channel(s)", { count: selectedChannels.length })}
                       </span>
                       <span className="font-mono">
                         {t("{count} characters", { count: sharedContent.length })}
@@ -1935,11 +2042,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-(length:--font-size-ui) font-semibold text-ink">
-                        {t("Attached Media ({count})", { count: attachments.length })}
-                      </h3>
+                  <ComposerSection
+                    icon={ImageIcon}
+                    title={t("Attached Media ({count})", { count: attachments.length })}
+                    action={
                       <div className="flex items-center gap-2">
                         <Button
                           type="button"
@@ -1965,8 +2071,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                           onChange={handleFilesSelected}
                         />
                       </div>
-                    </div>
-
+                    }
+                  >
                     <div
                       onDragOver={(event: React.DragEvent<HTMLDivElement>) => {
                         event.preventDefault();
@@ -1978,219 +2084,247 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         isDragActive ? "border-foreground bg-inset" : "border-line"
                       }`}
                     >
-                      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                        {attachments.map((attachment, index) => {
-                          const phase = attachmentPhase(attachment, t);
-                          const isActive =
-                            attachment.uploadStatus !== null &&
-                            activeUploadStatuses.has(attachment.uploadStatus);
-                          const isPaused = attachment.uploadStatus === "paused";
-                          return (
-                            <div
-                              key={attachment.key}
-                              className="relative group aspect-square rounded-control border border-line overflow-hidden bg-hover"
-                            >
-                              {attachment.assetId !== null && postId === null && (
-                                <AttachmentStatusPoller
-                                  assetId={attachment.assetId}
-                                  assetStatus={attachment.assetStatus}
-                                  onAssetUpdate={handleAssetUpdate}
-                                />
-                              )}
-                              <MediaPreview
-                                assetId={attachment.assetId ?? ""}
-                                assetType={attachment.assetType ?? undefined}
-                                hintPath={attachment.mimeType ?? attachment.name}
-                                fallbackSrc={attachment.previewUrl}
-                                enabled={
-                                  attachment.assetId !== null && attachment.assetStatus === "ready"
-                                }
-                                alt={attachment.name || t("media")}
-                                className="size-full object-cover"
-                                empty={
-                                  <div className="size-full flex items-center justify-center text-ink-3">
-                                    {!phase.ready && !phase.failed ? (
-                                      <Loader2 className="size-5 animate-spin" />
-                                    ) : (
-                                      <ImageIcon className="size-5" />
-                                    )}
-                                  </div>
-                                }
-                              />
+                      {attachments.length > 0 && (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                          {attachments.map((attachment, index) => {
+                            const phase = attachmentPhase(attachment, t);
+                            const isActive =
+                              attachment.uploadStatus !== null &&
+                              activeUploadStatuses.has(attachment.uploadStatus);
+                            const isPaused = attachment.uploadStatus === "paused";
+                            return (
                               <div
-                                className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-surface/85 px-1 py-0.5 text-(length:--font-size-micro) text-ink"
-                                role="status"
+                                key={attachment.key}
+                                className="relative group aspect-square rounded-control border border-line overflow-hidden bg-hover"
                               >
-                                <span className="truncate">
-                                  {index + 1}. {attachment.name}
-                                </span>
-                                <span
-                                  className={
-                                    phase.failed
-                                      ? "text-red"
-                                      : phase.ready
-                                        ? "text-green"
-                                        : "text-ink-3"
-                                  }
-                                >
-                                  {phase.label}
-                                </span>
-                              </div>
-                              {isActive && attachment.percent < 100 && (
-                                <div
-                                  className="absolute inset-x-0 top-0 h-1 bg-surface/60"
-                                  role="progressbar"
-                                  aria-valuemin={0}
-                                  aria-valuemax={100}
-                                  aria-valuenow={attachment.percent}
-                                  aria-label={t("Upload progress for {name}", {
-                                    name: attachment.name,
-                                  })}
-                                >
-                                  <div
-                                    className="h-1 bg-accent transition-all w-[var(--attachment-progress)]"
-                                    style={
-                                      {
-                                        "--attachment-progress": `${attachment.percent}%`,
-                                      } as React.CSSProperties
-                                    }
+                                {attachment.assetId !== null && postId === null && (
+                                  <AttachmentStatusPoller
+                                    assetId={attachment.assetId}
+                                    assetStatus={attachment.assetStatus}
+                                    onAssetUpdate={handleAssetUpdate}
                                   />
+                                )}
+                                <MediaPreview
+                                  assetId={attachment.assetId ?? ""}
+                                  assetType={attachment.assetType ?? undefined}
+                                  hintPath={attachment.mimeType ?? attachment.name}
+                                  fallbackSrc={attachment.previewUrl}
+                                  enabled={
+                                    attachment.assetId !== null &&
+                                    attachment.assetStatus === "ready"
+                                  }
+                                  alt={attachment.name || t("media")}
+                                  className="size-full object-cover"
+                                  empty={
+                                    <div className="size-full flex items-center justify-center text-ink-3">
+                                      {!phase.ready && !phase.failed ? (
+                                        <Loader2 className="size-5 animate-spin" />
+                                      ) : (
+                                        <ImageIcon className="size-5" />
+                                      )}
+                                    </div>
+                                  }
+                                />
+                                <div
+                                  className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-surface/85 px-1 py-0.5 text-(length:--font-size-micro) text-ink"
+                                  role="status"
+                                >
+                                  <span className="truncate">
+                                    {index + 1}. {attachment.name}
+                                  </span>
+                                  <span
+                                    className={
+                                      phase.failed
+                                        ? "text-red"
+                                        : phase.ready
+                                          ? "text-green"
+                                          : "text-ink-3"
+                                    }
+                                  >
+                                    {phase.label}
+                                  </span>
                                 </div>
-                              )}
-                              {phase.message && (
-                                <p className="absolute inset-x-0 top-1 px-1 text-(length:--font-size-micro) leading-tight text-red">
-                                  {phase.message}
-                                </p>
-                              )}
-                              <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100">
-                                <Button
-                                  type="button"
-                                  variant="default"
-                                  size="icon"
-                                  aria-label={t("Move attachment {index} earlier", {
-                                    index: index + 1,
-                                  })}
-                                  disabled={index === 0}
-                                  onClick={() => handleMoveAttachment(index, -1)}
-                                  className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                >
-                                  <ChevronUp className="size-3" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="default"
-                                  size="icon"
-                                  aria-label={t("Move attachment {index} later", {
-                                    index: index + 1,
-                                  })}
-                                  disabled={index === attachments.length - 1}
-                                  onClick={() => handleMoveAttachment(index, 1)}
-                                  className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                >
-                                  <ChevronDown className="size-3" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="default"
-                                  size="icon"
-                                  aria-label={t("Replace attachment {index}", { index: index + 1 })}
-                                  disabled={selectedBrandProfileId === null}
-                                  onClick={() => {
-                                    replaceTargetRef.current = attachment.key;
-                                    fileInputRef.current?.click();
-                                  }}
-                                  className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                >
-                                  <Replace className="size-3" />
-                                </Button>
-                                {attachment.uploadStatus === "failed" &&
-                                  attachment.hasLocalFile && (
+                                {isActive && attachment.percent < 100 && (
+                                  <div
+                                    className="absolute inset-x-0 top-0 h-1 bg-surface/60"
+                                    role="progressbar"
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                    aria-valuenow={attachment.percent}
+                                    aria-label={t("Upload progress for {name}", {
+                                      name: attachment.name,
+                                    })}
+                                  >
+                                    <div
+                                      data-attachment-progress
+                                      className="h-1 bg-accent w-[var(--attachment-progress)]"
+                                      style={
+                                        {
+                                          "--attachment-progress": `${attachment.percent}%`,
+                                        } as React.CSSProperties
+                                      }
+                                    />
+                                  </div>
+                                )}
+                                {phase.message && (
+                                  <p className="absolute inset-x-0 top-1 px-1 text-(length:--font-size-micro) leading-tight text-red">
+                                    {phase.message}
+                                  </p>
+                                )}
+                                <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100">
+                                  <Button
+                                    type="button"
+                                    variant="default"
+                                    size="icon"
+                                    aria-label={t("Move attachment {index} earlier", {
+                                      index: index + 1,
+                                    })}
+                                    disabled={index === 0}
+                                    onClick={() => handleMoveAttachment(index, -1)}
+                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                  >
+                                    <ChevronUp className="size-3" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="default"
+                                    size="icon"
+                                    aria-label={t("Move attachment {index} later", {
+                                      index: index + 1,
+                                    })}
+                                    disabled={index === attachments.length - 1}
+                                    onClick={() => handleMoveAttachment(index, 1)}
+                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                  >
+                                    <ChevronDown className="size-3" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="default"
+                                    size="icon"
+                                    aria-label={t("Replace attachment {index}", {
+                                      index: index + 1,
+                                    })}
+                                    disabled={selectedBrandProfileId === null}
+                                    onClick={() => {
+                                      replaceTargetRef.current = attachment.key;
+                                      fileInputRef.current?.click();
+                                    }}
+                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                  >
+                                    <Replace className="size-3" />
+                                  </Button>
+                                  {attachment.uploadStatus === "failed" &&
+                                    attachment.hasLocalFile && (
+                                      <Button
+                                        type="button"
+                                        variant="default"
+                                        size="icon"
+                                        aria-label={t("Retry upload of {name}", {
+                                          name: attachment.name,
+                                        })}
+                                        onClick={() => handleRetryUpload(attachment.key)}
+                                        className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                      >
+                                        <Upload className="size-3" />
+                                      </Button>
+                                    )}
+                                  {isActive &&
+                                    (isPaused ? (
+                                      <Button
+                                        type="button"
+                                        variant="default"
+                                        size="icon"
+                                        aria-label={t("Resume upload of {name}", {
+                                          name: attachment.name,
+                                        })}
+                                        onClick={() => attachment.task?.resume()}
+                                        className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                      >
+                                        <Play className="size-3" />
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        variant="default"
+                                        size="icon"
+                                        aria-label={t("Pause upload of {name}", {
+                                          name: attachment.name,
+                                        })}
+                                        onClick={() => attachment.task?.pause()}
+                                        className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                      >
+                                        <Pause className="size-3" />
+                                      </Button>
+                                    ))}
+                                  {/* An unfinished upload is stopped by the same action that
+                                  removes it, so the row shows exactly one destructive
+                                  control whose label states the real effect. */}
+                                  {attachment.uploadStatus !== null &&
+                                  !terminalUploadStatuses.has(attachment.uploadStatus) ? (
                                     <Button
                                       type="button"
                                       variant="default"
                                       size="icon"
-                                      aria-label={t("Retry upload of {name}", {
+                                      aria-label={t("Cancel upload of {name}", {
                                         name: attachment.name,
                                       })}
-                                      onClick={() => handleRetryUpload(attachment.key)}
-                                      className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                      onClick={() => handleRemoveAttachment(attachment.key)}
+                                      className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
                                     >
-                                      <Upload className="size-3" />
-                                    </Button>
-                                  )}
-                                {isActive &&
-                                  (isPaused ? (
-                                    <Button
-                                      type="button"
-                                      variant="default"
-                                      size="icon"
-                                      aria-label={t("Resume upload of {name}", {
-                                        name: attachment.name,
-                                      })}
-                                      onClick={() => attachment.task?.resume()}
-                                      className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
-                                    >
-                                      <Play className="size-3" />
+                                      <X className="size-3" />
                                     </Button>
                                   ) : (
                                     <Button
                                       type="button"
                                       variant="default"
                                       size="icon"
-                                      aria-label={t("Pause upload of {name}", {
-                                        name: attachment.name,
+                                      aria-label={t("Remove attachment {index}", {
+                                        index: index + 1,
                                       })}
-                                      onClick={() => attachment.task?.pause()}
-                                      className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
+                                      onClick={() => handleRemoveAttachment(attachment.key)}
+                                      className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
                                     >
-                                      <Pause className="size-3" />
+                                      <X className="size-3" />
                                     </Button>
-                                  ))}
-                                {/* An unfinished upload is stopped by the same action that
-                                  removes it, so the row shows exactly one destructive
-                                  control whose label states the real effect. */}
-                                {attachment.uploadStatus !== null &&
-                                !terminalUploadStatuses.has(attachment.uploadStatus) ? (
-                                  <Button
-                                    type="button"
-                                    variant="default"
-                                    size="icon"
-                                    aria-label={t("Cancel upload of {name}", {
-                                      name: attachment.name,
-                                    })}
-                                    onClick={() => handleRemoveAttachment(attachment.key)}
-                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
-                                  >
-                                    <X className="size-3" />
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    type="button"
-                                    variant="default"
-                                    size="icon"
-                                    aria-label={t("Remove attachment {index}", {
-                                      index: index + 1,
-                                    })}
-                                    onClick={() => handleRemoveAttachment(attachment.key)}
-                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
-                                  >
-                                    <X className="size-3" />
-                                  </Button>
-                                )}
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                            );
+                          })}
+                          {/* Once a Post has media, the picker stays inside the
+                              grid as a dashed tile so adding one more is the
+                              same gesture as the first; the dropzone wrapper
+                              remains the drag target for the whole area. */}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              replaceTargetRef.current = null;
+                              fileInputRef.current?.click();
+                            }}
+                            disabled={selectedBrandProfileId === null || !scope.isSignedIn}
+                            className="aspect-square h-auto w-full flex-col gap-1.5 rounded-control border-dashed font-normal text-ink-3 hover:text-ink"
+                          >
+                            <Plus className="size-4" />
+                            <span className="text-(length:--font-size-micro)">
+                              {t("Add Media")}
+                            </span>
+                          </Button>
+                        </div>
+                      )}
                       {attachments.length === 0 && (
-                        <p className="py-6 text-center text-xs text-ink-3">
-                          {t(
-                            "Drag images or videos here, or use Add Media. Attachments keep their order.",
-                          )}
-                        </p>
+                        <div className="flex flex-col items-center gap-2 py-5 text-center">
+                          <ImageIcon className="size-4 text-ink-3" aria-hidden="true" />
+                          <p className="text-(length:--font-size-micro) text-ink-3">
+                            {t(
+                              "Drag images or videos here, or use Add Media. Attachments keep their order.",
+                            )}
+                          </p>
+                        </div>
                       )}
                     </div>
-                  </div>
+                  </ComposerSection>
                 </div>
               </TabsContent>
 
@@ -2208,10 +2342,29 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
                 return (
                   <TabsContent key={channel.id} value={channel.id} className="mt-0">
-                    <div className="flex flex-col gap-4">
-                      <div className="flex items-center justify-between border-b border-line pb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-ink">{channel.name}</span>
+                    <div className="flex flex-col gap-6">
+                      <ComposerSection
+                        title={channel.name}
+                        action={
+                          <Button
+                            type="button"
+                            variant={override.hasOverride ? "secondary" : "outline"}
+                            size="sm"
+                            onClick={() =>
+                              handleChannelOverrideChange(channel.id, {
+                                hasOverride: !override.hasOverride,
+                                content: override.hasOverride ? sharedContent : override.content,
+                              })
+                            }
+                            className="text-xs"
+                          >
+                            {override.hasOverride
+                              ? t("Remove Custom Override")
+                              : t("Customize for This Channel")}
+                          </Button>
+                        }
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="outline" className="font-mono text-xs uppercase">
                             {channel.providerIdentifier}
                           </Badge>
@@ -2224,52 +2377,36 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                             </Badge>
                           )}
                         </div>
-                        <Button
-                          type="button"
-                          variant={override.hasOverride ? "secondary" : "outline"}
-                          size="sm"
-                          onClick={() =>
-                            handleChannelOverrideChange(channel.id, {
-                              hasOverride: !override.hasOverride,
-                              content: override.hasOverride ? sharedContent : override.content,
-                            })
-                          }
-                          className="text-xs"
-                        >
-                          {override.hasOverride
-                            ? t("Remove Custom Override")
-                            : t("Customize for This Channel")}
-                        </Button>
-                      </div>
 
-                      {override.hasOverride && (
-                        <div className="flex flex-col gap-2">
-                          <label
-                            htmlFor={`channel-override-text-${channel.id}`}
-                            className="text-xs font-medium text-ink-3"
-                          >
-                            {t("Custom Text for {name}", { name: channel.name })}
-                          </label>
-                          <Textarea
-                            id={`channel-override-text-${channel.id}`}
-                            value={override.content}
-                            onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
-                              handleChannelOverrideChange(channel.id, {
-                                content: event.target.value,
-                              })
-                            }
-                            className="min-h-[120px] text-sm resize-y"
-                          />
-                          <span className="text-(length:--font-size-micro) text-ink-3 self-end font-mono">
-                            {t("{count} characters", { count: override.content.length })}
-                          </span>
-                        </div>
-                      )}
+                        {override.hasOverride && (
+                          <div className="flex flex-col gap-2">
+                            <label
+                              htmlFor={`channel-override-text-${channel.id}`}
+                              className="text-xs font-medium text-ink-3"
+                            >
+                              {t("Custom Text for {name}", { name: channel.name })}
+                            </label>
+                            <Textarea
+                              id={`channel-override-text-${channel.id}`}
+                              value={override.content}
+                              onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
+                                handleChannelOverrideChange(channel.id, {
+                                  content: event.target.value,
+                                })
+                              }
+                              className="min-h-[120px] text-sm resize-y"
+                            />
+                            <span className="text-(length:--font-size-micro) text-ink-3 self-end font-mono">
+                              {t("{count} characters", { count: override.content.length })}
+                            </span>
+                          </div>
+                        )}
+                      </ComposerSection>
 
-                      <div className="flex flex-col gap-2">
-                        <span className="text-xs font-medium text-ink">
-                          {t("Attachments for {name}", { name: channel.name })}
-                        </span>
+                      <ComposerSection
+                        icon={ImageIcon}
+                        title={t("Attachments for {name}", { name: channel.name })}
+                      >
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
                             type="button"
@@ -2327,7 +2464,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                             })}
                           </div>
                         )}
-                      </div>
+                      </ComposerSection>
 
                       <PlatformSettings
                         provider={channel.providerIdentifier}
@@ -2349,15 +2486,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
         {/* Where and when: the destinations block and the publishing controls the
             reference keeps beside the editor, so nothing about targeting or timing
-            hides behind a tab. */}
-        <div className="flex min-w-0 flex-col gap-6 lg:border-l lg:border-line lg:pl-8">
+            hides behind a tab. The rail only appears once the panel is wide enough
+            for it; below that the same blocks stack under the compose column. */}
+        <div className="flex min-w-0 flex-col gap-6 @4xl:w-76 @4xl:shrink-0 @4xl:border-l @4xl:border-line @4xl:pl-8">
           <DestinationSelector onNavigate={onNavigate} />
 
-          <section className="flex flex-col gap-3 border-t border-line pt-5">
-            <h3 className="text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3">
-              {t("Publishing")}
-            </h3>
-
+          <ComposerSection icon={Send} title={t("Publishing")}>
             <SegmentedControl
               options={PUBLISH_MODES}
               value={publishMode}
@@ -2396,30 +2530,46 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               </div>
             )}
 
-            {/* The save state belongs to the draft, not to the action bar. */}
-            <p className="text-(length:--font-size-micro) text-ink-3" role="status">
-              {savedAt && !isDirty
-                ? t("Saved to your workspace at {time}", {
-                    time: new Date(savedAt).toLocaleTimeString(language),
-                  })
-                : isDirty
-                  ? t("Unsaved changes are kept in this browser until you save.")
-                  : t("Draft changes are saved to your workspace when you save.")}
+            {/* What the selected mode will do, in the mode's own words: the
+                action bar names the commit, this line names its effect. */}
+            <p className="text-(length:--font-size-micro) text-ink-3">
+              {publishMode === "draft"
+                ? t("Saves this post's text, attachments, and channel settings without publishing")
+                : publishMode === "schedule"
+                  ? t("Queues this post to {count} channel(s) at the selected time.", {
+                      count: selectedChannels.length,
+                    })
+                  : t("Queues this post to {count} channel(s) right away.", {
+                      count: selectedChannels.length,
+                    })}
             </p>
-          </section>
+          </ComposerSection>
         </div>
       </div>
 
-      {/* One primary action stays in view; the publishing selector above decides
-          what it submits, so the bar never repeats a control the body owns. */}
-      <div className="sticky bottom-0 -mx-4 flex shrink-0 justify-end border-t border-line bg-surface px-4 py-2.5 sm:-mx-6 sm:px-6">
+      {/* The action bar carries the draft's real save state and the one primary
+          action; the publishing selector in the rail decides what it submits, so
+          the bar never repeats a control the body owns. */}
+      <div className="sticky bottom-0 -mx-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line bg-surface px-4 py-2.5 sm:-mx-6 sm:px-6">
+        <p
+          className="min-w-0 flex-1 truncate text-(length:--font-size-micro) text-ink-3"
+          role="status"
+        >
+          {savedAt && !isDirty
+            ? t("Saved to your workspace at {time}", {
+                time: new Date(savedAt).toLocaleTimeString(language),
+              })
+            : isDirty
+              ? t("Unsaved changes are kept in this browser until you save.")
+              : t("Draft changes are saved to your workspace when you save.")}
+        </p>
         <Button
           type="button"
           variant="default"
           size="sm"
           onClick={() => void handleSubmit(publishMode)}
           disabled={submitDisabled || (publishMode === "schedule" && !scheduleDate)}
-          className="h-8 gap-1.5"
+          className="h-8 shrink-0 gap-1.5"
           title={
             publishMode === "draft"
               ? t("Saves this post's text, attachments, and channel settings without publishing")

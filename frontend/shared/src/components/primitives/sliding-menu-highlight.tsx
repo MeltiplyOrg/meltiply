@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { motion } from "motion/react";
+import { LazyMotion, domAnimation, m } from "motion/react";
 import { cn } from "@meltiply/ui/utils";
 
 /**
@@ -173,41 +173,41 @@ export function SlidingMenuHighlight({
     };
   }, [containerRef, itemSelector, updateBox]);
 
+  // The pill's travel is the only thing that moves between menu items: Radix
+  // menu rows share one height and span the viewport width, so left/width/height
+  // are written as static style (they only change on a resize, where snapping is
+  // correct) and the vertical move animates as `y`. Animating top/left/width/
+  // height would redo layout on every frame of every pointer move; translate
+  // keeps the movement off the layout path, and because nothing scales, the
+  // pill's border and radius stay undistorted.
   return (
-    <motion.div
-      aria-hidden
-      className={cn(
-        "pointer-events-none absolute z-0 rounded-control border border-line-soft shadow-xs",
-        className,
-      )}
-      style={{
-        backgroundColor: "var(--hover)",
-        borderColor: "var(--line-soft)",
-      }}
-      initial={false}
-      animate={{
-        top: targetBox?.top ?? 0,
-        left: targetBox?.left ?? 0,
-        width: targetBox?.width ?? 0,
-        height: targetBox?.height ?? 0,
-        opacity: isVisible && targetBox ? 1 : 0,
-        scale: 1,
-      }}
-      transition={{
-        top: isFirstEntry
-          ? { duration: 0 }
-          : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
-        left: isFirstEntry
-          ? { duration: 0 }
-          : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
-        width: isFirstEntry
-          ? { duration: 0 }
-          : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
-        height: isFirstEntry
-          ? { duration: 0 }
-          : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
-        opacity: { duration: 0.14, ease: "easeOut" },
-      }}
-    />
+    <LazyMotion features={domAnimation} strict>
+      <m.div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute z-0 rounded-control border border-line-soft shadow-xs",
+          className,
+        )}
+        style={{
+          top: 0,
+          left: targetBox?.left ?? 0,
+          width: targetBox?.width ?? 0,
+          height: targetBox?.height ?? 0,
+          backgroundColor: "var(--hover)",
+          borderColor: "var(--line-soft)",
+        }}
+        initial={false}
+        animate={{
+          y: targetBox?.top ?? 0,
+          opacity: isVisible && targetBox ? 1 : 0,
+        }}
+        transition={{
+          y: isFirstEntry
+            ? { duration: 0 }
+            : { type: "spring", stiffness: 450, damping: 32, mass: 0.8 },
+          opacity: { duration: 0.14, ease: "easeOut" },
+        }}
+      />
+    </LazyMotion>
   );
 }

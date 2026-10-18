@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ChevronLeft,
@@ -11,15 +11,24 @@ import {
 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
+import { Skeleton } from "@meltiply/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { cn } from "@meltiply/ui/utils";
 import { useI18n } from "@/lib/i18n";
 import { normalizePostStatus, resolveRowCaption, toLocalDateKey } from "./posts-helpers";
 import { StatusBadge } from "./status-badge";
+import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import type { PostRow, CalendarDayCell } from "./types";
 
 export interface PostCalendarGridViewProps {
   posts: PostRow[];
+  /**
+   * Renders the month's real dates, weekday heading, and controls with
+   * placeholder chips in place of Post chips. The grid's dates come from the
+   * displayed month rather than the response, so only the chips are unknown
+   * while the calendar query resolves.
+   */
+  isLoading: boolean;
   calendarMonth: Date;
   calendarDays: CalendarDayCell[];
   onPrevMonth: () => void;
@@ -35,15 +44,96 @@ export interface PostCalendarGridViewProps {
 }
 
 /**
+ * Placeholder chips per calendar day while the calendar query resolves. The
+ * three-day cycle keeps a realistic mix of busy and quiet days without random
+ * values, so the grid reads the same on every render.
+ */
+const PLACEHOLDER_CHIPS = [["chip-1", "chip-2"], ["chip-1"], []] as const;
+
+/**
+ * The calendar's period bar: Today, month/week stepping, the live period label,
+ * and the Month/Week switch. Kept separate from the grid so period controls and
+ * the day canvas can be read and changed independently.
+ *
+ * @param props.mode - Active period, month or week.
+ * @param props.onModeChange - Selects month or week.
+ * @param props.label - Localized period label for the active mode.
+ * @param props.onToday - Returns the anchor to today.
+ * @param props.onPrevious - Steps one month or week back for the active mode.
+ * @param props.onNext - Steps one month or week forward for the active mode.
+ * @returns The period control bar.
+ */
+function CalendarToolbar({
+  mode,
+  onModeChange,
+  label,
+  onToday,
+  onPrevious,
+  onNext,
+}: {
+  mode: "month" | "week";
+  onModeChange: (mode: "month" | "week") => void;
+  label: string;
+  onToday: () => void;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2 sm:px-6">
+      <Button variant="outline" size="sm" onClick={onToday}>
+        {t("Today")}
+      </Button>
+      <div className="flex items-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label={mode === "month" ? t("Previous month") : t("Previous week")}
+          onClick={onPrevious}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label={mode === "month" ? t("Next month") : t("Next week")}
+          onClick={onNext}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
+      <h2 aria-live="polite" className="mx-1 text-[15px] font-semibold tracking-tight">
+        {label}
+      </h2>
+      <div className="ml-auto">
+        <SegmentedControl
+          options={["month", "week"] as const}
+          value={mode}
+          onChange={onModeChange}
+          label={t("Calendar period")}
+          renderOption={(value) => (value === "month" ? t("Month") : t("Week"))}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
  * Gr8r Calendar's flat Month grid and Week columns over real filtered Post rows.
  * Indexes once by local day; a Post appears once per affected day, not per Channel.
  * Post chips open inspection, day numbers/overflow open the selectable day list,
  * and explicit plus controls seed the real composer. No drag-to-reschedule or
  * task-only events are implied. Week navigation keeps the parent's query anchor
  * current, so crossing month/year boundaries fetches the displayed dates.
+ * While `isLoading`, the real month heading, dates, and controls stay in place and
+ * only the chips become placeholders.
  */
 export const PostCalendarGridView = React.memo(function PostCalendarGridView({
   posts,
+  isLoading,
   calendarMonth,
   calendarDays,
   onPrevMonth,
@@ -57,6 +147,8 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
   selectionActive = false,
 }: PostCalendarGridViewProps) {
   const { t, tStatus, language } = useI18n();
+  const scrollRef = useRef<HTMLElement | null>(null);
+  useSmoothScrollContainer(scrollRef);
   const [mode, setMode] = useState<"month" | "week">("month");
   const dateLabel = useMemo(
     () => new Intl.DateTimeFormat(language, { dateStyle: "full" }),
@@ -109,49 +201,21 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
   return (
     <TooltipProvider>
       <section
+        ref={scrollRef}
         aria-label={t("Publishing calendar")}
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-auto bg-surface overscroll-contain",
           selectionActive && "pb-24",
         )}
       >
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2 sm:px-6">
-          <Button variant="outline" size="sm" onClick={onToday}>
-            {t("Today")}
-          </Button>
-          <div className="flex items-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              aria-label={mode === "month" ? t("Previous month") : t("Previous week")}
-              onClick={() => (mode === "month" ? onPrevMonth() : onWeekNavigate(-1))}
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              aria-label={mode === "month" ? t("Next month") : t("Next week")}
-              onClick={() => (mode === "month" ? onNextMonth() : onWeekNavigate(1))}
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
-          <h2 aria-live="polite" className="mx-1 text-[15px] font-semibold tracking-tight">
-            {label}
-          </h2>
-          <div className="ml-auto">
-            <SegmentedControl
-              options={["month", "week"] as const}
-              value={mode}
-              onChange={setMode}
-              label={t("Calendar period")}
-              renderOption={(value) => (value === "month" ? t("Month") : t("Week"))}
-            />
-          </div>
-        </div>
+        <CalendarToolbar
+          mode={mode}
+          onModeChange={setMode}
+          label={label}
+          onToday={onToday}
+          onPrevious={() => (mode === "month" ? onPrevMonth() : onWeekNavigate(-1))}
+          onNext={() => (mode === "month" ? onNextMonth() : onWeekNavigate(1))}
+        />
         <div className="flex min-h-160 min-w-196 flex-1 flex-col">
           {mode === "month" && (
             <div className="grid grid-cols-7 border-b border-line">
@@ -168,7 +232,7 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
               mode === "month" ? "auto-rows-[minmax(112px,1fr)]" : "grid-rows-1",
             )}
           >
-            {days.map((cell) => {
+            {days.map((cell, index) => {
               const key = toLocalDateKey(cell.date);
               const dayPosts = postsByDay.get(key) ?? [];
               const isToday = key === today;
@@ -240,76 +304,88 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                       mode === "month" ? "gap-0.75" : "flex-1 gap-1.5 overflow-y-auto p-2",
                     )}
                   >
-                    {(mode === "month" ? dayPosts.slice(0, 3) : dayPosts).map((row) => {
-                      const caption = resolveRowCaption(row) || t("Untitled post");
-                      const status = normalizePostStatus(row);
-                      const published = status === "published";
-                      const failed = status === "failed" || status === "needs_reconciliation";
-                      const Icon = published
-                        ? CircleCheck
-                        : failed
-                          ? AlertCircle
-                          : status === "draft"
-                            ? FileText
-                            : status === "cancelled"
-                              ? CircleX
-                              : Clock;
-                      return (
-                        <Tooltip key={row.id}>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              onClick={() => onViewDetails(row.id)}
-                              className={cn(
-                                "min-w-0 justify-start text-left font-normal",
-                                mode === "month"
-                                  ? "h-5.5 gap-1.25 rounded-control border border-accent/20 bg-accent-tint px-1.5 py-0 text-xs hover:bg-accent-tint/70"
-                                  : "h-auto flex-col items-stretch gap-1.25 whitespace-normal rounded-control border border-line bg-surface px-2 py-1.75 hover:border-line-strong",
-                                published &&
-                                  mode === "month" &&
-                                  "border-green/20 bg-green-tint hover:bg-green-tint/70",
-                                failed &&
-                                  mode === "month" &&
-                                  "border-red/20 bg-red-tint hover:bg-red-tint/70",
-                              )}
-                            >
-                              <span className="flex min-w-0 items-center gap-1.25">
-                                <Icon
-                                  className={cn(
-                                    "size-2.75 shrink-0",
-                                    published ? "text-green" : failed ? "text-red" : "text-accent",
-                                  )}
-                                />
-                                <span
-                                  className={cn(
-                                    mode === "month"
-                                      ? "truncate"
-                                      : "line-clamp-2 text-(length:--font-size-control) font-medium leading-snug",
-                                  )}
-                                >
-                                  {caption}
+                    {isLoading ? (
+                      <div className="flex min-w-0 flex-col gap-0.75" aria-hidden="true">
+                        {PLACEHOLDER_CHIPS[index % PLACEHOLDER_CHIPS.length]!.map((chip) => (
+                          <Skeleton key={chip} className="h-5.5 rounded-control" />
+                        ))}
+                      </div>
+                    ) : (
+                      (mode === "month" ? dayPosts.slice(0, 3) : dayPosts).map((row) => {
+                        const caption = resolveRowCaption(row) || t("Untitled post");
+                        const status = normalizePostStatus(row);
+                        const published = status === "published";
+                        const failed = status === "failed" || status === "needs_reconciliation";
+                        const Icon = published
+                          ? CircleCheck
+                          : failed
+                            ? AlertCircle
+                            : status === "draft"
+                              ? FileText
+                              : status === "cancelled"
+                                ? CircleX
+                                : Clock;
+                        return (
+                          <Tooltip key={row.id}>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                onClick={() => onViewDetails(row.id)}
+                                className={cn(
+                                  "min-w-0 justify-start text-left font-normal",
+                                  mode === "month"
+                                    ? "h-5.5 gap-1.25 rounded-control border border-accent/20 bg-accent-tint px-1.5 py-0 text-xs hover:bg-accent-tint/70"
+                                    : "h-auto flex-col items-stretch gap-1.25 whitespace-normal rounded-control border border-line bg-surface px-2 py-1.75 hover:border-line-strong",
+                                  published &&
+                                    mode === "month" &&
+                                    "border-green/20 bg-green-tint hover:bg-green-tint/70",
+                                  failed &&
+                                    mode === "month" &&
+                                    "border-red/20 bg-red-tint hover:bg-red-tint/70",
+                                )}
+                              >
+                                <span className="flex min-w-0 items-center gap-1.25">
+                                  <Icon
+                                    className={cn(
+                                      "size-2.75 shrink-0",
+                                      published
+                                        ? "text-green"
+                                        : failed
+                                          ? "text-red"
+                                          : "text-accent",
+                                    )}
+                                  />
+                                  <span
+                                    className={cn(
+                                      mode === "month"
+                                        ? "truncate"
+                                        : "line-clamp-2 text-(length:--font-size-control) font-medium leading-snug",
+                                    )}
+                                  >
+                                    {caption}
+                                  </span>
                                 </span>
-                              </span>
-                              {mode === "week" && (
-                                <span className="flex flex-wrap items-center gap-1.5 text-(length:--font-size-micro) text-ink-3">
-                                  <StatusBadge status={status} />
-                                  <time dateTime={row.date}>
-                                    {new Date(row.date).toLocaleTimeString(language, {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })}
-                                  </time>
-                                </span>
-                              )}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {caption} · {tStatus(status)}
-                          </TooltipContent>
-                        </Tooltip>
-                      );
-                    })}
-                    {mode === "month" && dayPosts.length > 3 && (
+                                {mode === "week" && (
+                                  <span className="flex flex-wrap items-center gap-1.5 text-(length:--font-size-micro) text-ink-3">
+                                    <StatusBadge status={status} />
+                                    <time dateTime={row.date}>
+                                      {new Date(row.date).toLocaleTimeString(language, {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}
+                                    </time>
+                                  </span>
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {caption} · {tStatus(status)}
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })
+                    )}
+                    {!isLoading && mode === "month" && dayPosts.length > 3 && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -319,7 +395,7 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                         {t("+{count} more", { count: dayPosts.length - 3 })}
                       </Button>
                     )}
-                    {mode === "week" && dayPosts.length === 0 && (
+                    {!isLoading && mode === "week" && dayPosts.length === 0 && (
                       <p className="p-1 text-xs text-ink-3">{t("No posts")}</p>
                     )}
                   </div>

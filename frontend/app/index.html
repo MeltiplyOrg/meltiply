@@ -122,7 +122,43 @@
          FIRST VIEWPORT: 252px rail, 46px top bar, aligned title/toolbar/collection.
          FORM: User-pinned Gr8r Studio 904205c626918ee96054eb35495c394a60c0c601.
          FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance -->
-    <div id="root"></div>
+    <!-- Boot frame: the workspace's own shape, painted by CSS before the module
+         graph downloads, then replaced by React's first commit, which renders
+         the identical markup from `components/layout/workspace-loading-skeleton.tsx`.
+         Geometry lives in `globals.css` (`.ws-boot*`) so both renderers share it. -->
+    <div id="root">
+      <div class="ws-boot" role="status" aria-busy="true">
+        <span class="sr-only">Loading Meltiply…</span>
+        <div class="ws-boot-rail">
+          <div class="ws-boot-brand">
+            <i class="ws-boot-bar ws-boot-mark"></i>
+            <i class="ws-boot-bar ws-boot-name"></i>
+          </div>
+          <i class="ws-boot-bar ws-boot-heading"></i>
+          <i class="ws-boot-bar ws-boot-nav"></i>
+          <i class="ws-boot-bar ws-boot-nav"></i>
+        </div>
+        <div class="ws-boot-main">
+          <div class="ws-boot-topbar">
+            <i class="ws-boot-bar ws-boot-crumb"></i>
+            <i class="ws-boot-bar ws-boot-search"></i>
+          </div>
+          <div class="ws-boot-content">
+            <i class="ws-boot-bar ws-boot-title"></i>
+            <i class="ws-boot-bar ws-boot-subtitle"></i>
+            <div class="ws-boot-toolbar">
+              <i class="ws-boot-bar ws-boot-field"></i>
+              <i class="ws-boot-bar ws-boot-chip"></i>
+              <i class="ws-boot-bar ws-boot-chip"></i>
+              <i class="ws-boot-bar ws-boot-switch"></i>
+            </div>
+            <div class="ws-boot-rows">
+              <i></i><i></i><i></i><i></i><i></i><i></i> <i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

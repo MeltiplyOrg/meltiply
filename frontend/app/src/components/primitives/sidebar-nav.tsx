@@ -64,16 +64,25 @@ export function workspaceViewPath(view: WorkspaceView): string {
   return WORKSPACE_NAV_ITEMS.find((item) => item.id === view)?.path ?? "/posts";
 }
 
-/** Reference navigation row shared by the desktop rail and mobile drawer; native button/Slot semantics stay intact. */
+/**
+ * Reference navigation row shared by the desktop rail and mobile drawer; native button/Slot semantics stay intact.
+ *
+ * @param props.collapsed - Centers icon-only content in the collapsed rail.
+ * @param props.active - Paints the selected surface treatment.
+ * @param props.glideTarget - Marks the row as a `SidebarGlideHighlight` target
+ *   (the default). The account identity row opts out so the travelling pill
+ *   never lights the sidebar's account block; that row paints its own fill.
+ */
 export const SidebarNavRow = forwardRef<
   HTMLButtonElement,
-  ButtonProps & { collapsed?: boolean; active?: boolean }
->(({ collapsed = false, active = false, title, className, ...props }, ref) => {
+  ButtonProps & { collapsed?: boolean; active?: boolean; glideTarget?: boolean }
+>(({ collapsed = false, active = false, glideTarget = true, title, className, ...props }, ref) => {
   const row = (
     <Button
       ref={ref}
       variant="ghost"
-      data-sidebar-item=""
+      data-sidebar-item={glideTarget ? "" : undefined}
+      data-glide-ignore={glideTarget ? undefined : ""}
       className={cn(
         "relative z-10 h-control w-full justify-start gap-2.25 px-2 text-left text-(length:--font-size-ui) font-normal hover:bg-transparent",
         collapsed && "justify-center px-0",
@@ -247,6 +256,7 @@ export function SidebarNav({ currentView, onNavigate, className }: SidebarNavPro
           <DropdownMenuTrigger asChild>
             <SidebarNavRow
               collapsed={collapsed}
+              glideTarget={false}
               className="h-9"
               aria-label={t("Account menu")}
               title={collapsed ? t("Account menu") : undefined}
@@ -271,6 +281,7 @@ export function SidebarNav({ currentView, onNavigate, className }: SidebarNavPro
             side="top"
             align="start"
             sideOffset={8}
+            highlight={false}
             className="w-65"
             aria-label={t("Account menu")}
           >

@@ -1,11 +1,12 @@
-import React, { Fragment, useMemo, useState } from "react";
-import { ArrowUpDown, ChevronDown, ChevronRight, Paperclip, Plus } from "lucide-react";
+import React, { Fragment, useMemo, useRef, useState } from "react";
+import { ArrowUpDown, ChevronDown, Paperclip, Plus } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { Empty, EmptyDescription } from "@meltiply/ui/empty";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@meltiply/ui/table";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
+import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import { StatusBadge } from "./status-badge";
 import { useI18n } from "@/lib/i18n";
 import { abbreviateRecordId } from "@/lib/format";
@@ -33,9 +34,253 @@ export interface PostTableViewProps extends PostSelectionProps {
 }
 
 /**
+ * One cell of a collapsible Post row.
+ *
+ * The row's height is the `--post-row-h` hook in `globals.css`, and the cell's
+ * content sits in an absolutely positioned layer (`data-post-row-content`)
+ * because a table cell never shrinks below its content: only content that has
+ * left the cell's flow lets an animated zero height clip it, which is what makes
+ * a whole group collapse. Padding therefore belongs to the layer, and `className`
+ * carries it plus whatever layout that column's content needs.
+ *
+ * @param props.className - Layout and padding for the content layer.
+ * @param props.onClick - Cell-local handler, e.g. stopping row navigation.
+ * @param props.children - Real cell content.
+ * @returns The cell with its animated content layer.
+ */
+function PostRowCell({
+  className,
+  onClick,
+  children,
+}: {
+  className?: string;
+  onClick?: React.MouseEventHandler<HTMLTableCellElement>;
+  children: React.ReactNode;
+}) {
+  return (
+    <TableCell data-post-cell="" onClick={onClick}>
+      <div data-post-row-content="" className={className}>
+        {children}
+      </div>
+    </TableCell>
+  );
+}
+
+/**
+ * Publish-date column formatters.
+ *
+ * The column renders the same two shapes in every row, and constructing an
+ * `Intl.DateTimeFormat` is the expensive part of formatting, so both are built
+ * once for the module instead of per row per render.
+ */
+const PUBLISH_DAY_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const PUBLISH_TIME_FORMAT = new Intl.DateTimeFormat("en-US", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+});
+
+/**
+ * One resolved Post row of the Posts table.
+ *
+ * Memoized on its own props so a parent re-render that does not change this row
+ * - a keystroke elsewhere in the toolbar, a selection change on another row, a
+ * collapse in another group - skips the row's subtree entirely. Every prop is a
+ * primitive, a stable row object, a memoized map value, or a `useCallback`
+ * handler from `PostsView`, so the comparison is cheap and never stale.
+ *
+ * @param props.post - Row data: caption, channels, date, Brand Profile.
+ * @param props.selected - Whether this row is in the shared selection.
+ * @param props.collapsed - Whether this row's group is collapsed.
+ * @param props.selectionDisabled - Disables the checkbox while a bulk action runs.
+ * @param props.profileName - Resolved Brand Profile name.
+ * @param props.showStatus - Whether the Status column is visible.
+ * @param props.showChannels - Whether the Channels column is visible.
+ * @param props.showDate - Whether the Publish date column is visible.
+ * @param props.showProfile - Whether the Brand Profile column is visible.
+ * @param props.onToggleSelection - Toggles this row's selection.
+ * @param props.onViewDetails - Opens the Post drawer for this row.
+ * @returns The row's table cells.
+ */
+const PostTableRow = React.memo(function PostTableRow({
+  post,
+  selected,
+  collapsed,
+  selectionDisabled,
+  profileName,
+  showStatus,
+  showChannels,
+  showDate,
+  showProfile,
+  onToggleSelection,
+  onViewDetails,
+}: {
+  post: PostRow;
+  selected: boolean;
+  collapsed: boolean;
+  selectionDisabled: boolean | undefined;
+  profileName: string;
+  showStatus: boolean;
+  showChannels: boolean;
+  showDate: boolean;
+  showProfile: boolean;
+  onToggleSelection: (postId: string) => void;
+  onViewDetails: (postId: string) => void;
+}) {
+  const { t } = useI18n();
+  const providers = resolveRowProviders(post);
+  const publishDate = new Date(post.date);
+  const attachments = post.post?.attachments.length ?? 0;
+
+  return (
+    <TableRow
+      data-post-row=""
+      data-collapsed={collapsed || undefined}
+      data-selected={selected || undefined}
+      onClick={(event) => {
+        if (event.target instanceof Element && event.target.closest("button, input, a")) return;
+        event.currentTarget.querySelector<HTMLButtonElement>("[data-post-details]")?.focus();
+        onViewDetails(post.id);
+      }}
+    >
+      <PostRowCell className="pl-4 pr-2 sm:pl-6" onClick={(event) => event.stopPropagation()}>
+        <Input
+          type="checkbox"
+          aria-label={t("Select post")}
+          checked={selected}
+          disabled={selectionDisabled}
+          onChange={() => onToggleSelection(post.id)}
+        />
+      </PostRowCell>
+      <PostRowCell className="min-w-0 gap-2 px-2">
+        <span
+          title={post.id}
+          className="shrink-0 font-mono text-(length:--font-size-micro) text-ink-3"
+        >
+          {abbreviateRecordId(post.id)}
+        </span>
+        <Button
+          data-post-details
+          variant="ghost"
+          className="block h-auto min-w-0 truncate p-0 text-left text-(length:--font-size-ui) font-normal text-ink hover:bg-transparent hover:underline"
+          title={t("View details")}
+          onClick={(event) => {
+            event.stopPropagation();
+            onViewDetails(post.id);
+          }}
+        >
+          {resolveRowCaption(post) || t("Untitled post")}
+        </Button>
+        {attachments > 0 && (
+          <span className="inline-flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-ink-3">
+            <Paperclip className="size-3" />
+            {attachments}
+          </span>
+        )}
+      </PostRowCell>
+      {showStatus && (
+        <PostRowCell className="px-2">
+          <StatusBadge status={normalizePostStatus(post)} compact />
+        </PostRowCell>
+      )}
+      {showChannels && (
+        <PostRowCell className="gap-1.5 px-2">
+          {providers.map((provider) => (
+            <PlatformIcon key={provider} provider={provider} className="size-3.5" />
+          ))}
+          {providers.length === 0 && <span className="text-ink-3">—</span>}
+        </PostRowCell>
+      )}
+      {showDate && (
+        <PostRowCell className="px-2 whitespace-nowrap tabular-nums">
+          <time dateTime={post.date}>{PUBLISH_DAY_FORMAT.format(publishDate)}</time>
+          <span className="ml-1.5 text-(length:--font-size-micro) text-ink-3">
+            {PUBLISH_TIME_FORMAT.format(publishDate)}
+          </span>
+        </PostRowCell>
+      )}
+      {showProfile && (
+        <PostRowCell className="px-2">
+          <span className="flex w-full min-w-0 items-center gap-1.5 truncate text-xs">
+            <span className="size-1.75 shrink-0 rounded-chip bg-accent" />
+            {profileName}
+          </span>
+        </PostRowCell>
+      )}
+    </TableRow>
+  );
+});
+
+/**
+ * One placeholder row of the Posts table.
+ *
+ * Renders the same cell slots as a resolved row - checkbox, id and caption,
+ * status, Channels, publish date, Brand Profile - through `PostRowCell`, so the
+ * row height, padding, and column widths match the real row exactly and the
+ * resolved table does not move when data lands. Hidden from assistive
+ * technology; the page's header announces the loading state.
+ *
+ * @param props.showStatus - Whether the Status column is visible.
+ * @param props.showChannels - Whether the Channels column is visible.
+ * @param props.showDate - Whether the Publish date column is visible.
+ * @param props.showProfile - Whether the Brand Profile column is visible.
+ * @returns A single 36px placeholder row.
+ */
+function PostRowSkeleton({
+  showStatus,
+  showChannels,
+  showDate,
+  showProfile,
+}: {
+  showStatus: boolean;
+  showChannels: boolean;
+  showDate: boolean;
+  showProfile: boolean;
+}) {
+  return (
+    <TableRow data-post-row="" aria-hidden="true">
+      <PostRowCell className="pl-4 pr-2 sm:pl-6">
+        <Skeleton className="size-4" />
+      </PostRowCell>
+      <PostRowCell className="min-w-0 gap-2 px-2">
+        <Skeleton className="h-3 w-14 shrink-0" />
+        <Skeleton className="h-3.5 min-w-0 max-w-72 flex-1" />
+        <Skeleton className="h-3 w-8 shrink-0" />
+      </PostRowCell>
+      {showStatus && (
+        <PostRowCell className="px-2">
+          <Skeleton className="h-4.5 w-20 rounded-chip" />
+        </PostRowCell>
+      )}
+      {showChannels && (
+        <PostRowCell className="gap-1.5 px-2">
+          <Skeleton className="size-3.5 rounded-chip" />
+          <Skeleton className="size-3.5 rounded-chip" />
+        </PostRowCell>
+      )}
+      {showDate && (
+        <PostRowCell className="px-2">
+          <Skeleton className="h-3.5 w-28" />
+        </PostRowCell>
+      )}
+      {showProfile && (
+        <PostRowCell className="px-2">
+          <Skeleton className="h-3.5 w-24" />
+        </PostRowCell>
+      )}
+    </TableRow>
+  );
+}
+
+/**
  * Gr8r Tasks' grouped spreadsheet Table shares semantic primitives with the
  * channel directory. Selection includes collapsed filtered rows, not unloaded
  * records; grouping preserves Post identity. Rows open Details instead of a trailing action column.
+ *
+ * This view adds one behavior the directory does not have: a group's rows
+ * collapse in place. They stay mounted, driven by the `data-collapsed` /
+ * `--post-row-h` hook in `globals.css`, so expanding and collapsing are one
+ * transition in both directions. Rows keep the shared table hover fill.
  */
 export const PostTableView = React.memo(function PostTableView({
   posts,
@@ -54,6 +299,8 @@ export const PostTableView = React.memo(function PostTableView({
 }: PostTableViewProps) {
   const { t, tStatus } = useI18n();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useSmoothScrollContainer(scrollRef);
   const groups = useMemo(
     () => groupPostRows(posts, groupBy, brandProfiles),
     [posts, groupBy, brandProfiles],
@@ -72,7 +319,10 @@ export const PostTableView = React.memo(function PostTableView({
   const columnCount =
     2 + Number(showStatus) + Number(showChannels) + Number(showDate) + Number(showProfile);
   return (
-    <div className={cn("min-h-0 flex-1 overflow-auto pb-24", selectedIds.size > 0 && "pb-32")}>
+    <div
+      ref={scrollRef}
+      className={cn("min-h-0 flex-1 overflow-auto pb-24", selectedIds.size > 0 && "pb-32")}
+    >
       <Table variant="spreadsheet" className="min-w-191 sm:min-w-221" aria-label={t("Posts table")}>
         <colgroup>
           <col className="w-12" />
@@ -115,11 +365,13 @@ export const PostTableView = React.memo(function PostTableView({
         <TableBody>
           {isLoading ? (
             SKELETON_TABLE_KEYS.map((key) => (
-              <TableRow key={key}>
-                <TableCell colSpan={columnCount}>
-                  <Skeleton className="my-2 h-5 w-full" />
-                </TableCell>
-              </TableRow>
+              <PostRowSkeleton
+                key={key}
+                showStatus={showStatus}
+                showChannels={showChannels}
+                showDate={showDate}
+                showProfile={showProfile}
+              />
             ))
           ) : posts.length === 0 ? (
             <TableRow>
@@ -146,14 +398,21 @@ export const PostTableView = React.memo(function PostTableView({
               return (
                 <Fragment key={group.id}>
                   {groupBy !== "none" && (
-                    <TableRow className="hover:bg-surface">
+                    <TableRow
+                      data-post-group-row=""
+                      data-collapsed={isCollapsed || undefined}
+                      className="hover:bg-surface"
+                    >
                       <TableCell
                         colSpan={columnCount}
                         className="h-11.5 border-line pt-2.5 group-data-[variant=spreadsheet]/table:h-11.5"
                       >
+                        {/* The row is a label, not a target: it keeps the quiet
+                            surface hover and never paints a pressed fill. The
+                            chevron states the group's phase and turns. */}
                         <Button
                           variant="ghost"
-                          className="h-9 justify-start gap-2 p-0 text-(length:--font-size-control) font-semibold text-ink hover:bg-transparent"
+                          className="h-9 justify-start gap-2 p-0 text-(length:--font-size-control) font-semibold text-ink hover:bg-transparent active:bg-transparent"
                           aria-expanded={!isCollapsed}
                           aria-label={t("Toggle {label} group", { label })}
                           onClick={() =>
@@ -165,11 +424,7 @@ export const PostTableView = React.memo(function PostTableView({
                             })
                           }
                         >
-                          {isCollapsed ? (
-                            <ChevronRight className="size-3.5" />
-                          ) : (
-                            <ChevronDown className="size-3.5" />
-                          )}
+                          <ChevronDown data-post-group-chevron="" className="size-3.5" />
                           {group.status ? <StatusBadge status={group.status} compact /> : label}
                           <span className="text-xs font-normal tabular-nums text-ink-3">
                             {group.posts.length}
@@ -178,110 +433,22 @@ export const PostTableView = React.memo(function PostTableView({
                       </TableCell>
                     </TableRow>
                   )}
-                  {!isCollapsed &&
-                    group.posts.map((post) => {
-                      const providers = resolveRowProviders(post);
-                      const publishDate = new Date(post.date);
-                      return (
-                        <TableRow
-                          key={post.id}
-                          data-selected={selectedIds.has(post.id) || undefined}
-                          onClick={(event) => {
-                            if (
-                              event.target instanceof Element &&
-                              event.target.closest("button, input, a")
-                            )
-                              return;
-                            event.currentTarget
-                              .querySelector<HTMLButtonElement>("[data-post-details]")
-                              ?.focus();
-                            onViewDetails(post.id);
-                          }}
-                        >
-                          <TableCell onClick={(event) => event.stopPropagation()}>
-                            <Input
-                              type="checkbox"
-                              aria-label={t("Select post")}
-                              checked={selectedIds.has(post.id)}
-                              disabled={selectionDisabled}
-                              onChange={() => onToggleSelection(post.id)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex min-w-0 items-center gap-2">
-                              <span
-                                title={post.id}
-                                className="shrink-0 font-mono text-(length:--font-size-micro) text-ink-3"
-                              >
-                                {abbreviateRecordId(post.id)}
-                              </span>
-                              <Button
-                                data-post-details
-                                variant="ghost"
-                                className="block h-auto min-w-0 truncate p-0 text-left text-(length:--font-size-ui) font-normal text-ink hover:bg-transparent hover:underline"
-                                title={t("View details")}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  onViewDetails(post.id);
-                                }}
-                              >
-                                {resolveRowCaption(post) || t("Untitled post")}
-                              </Button>
-                              {(post.post?.attachments.length ?? 0) > 0 && (
-                                <span className="inline-flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-ink-3">
-                                  <Paperclip className="size-3" />
-                                  {post.post?.attachments.length}
-                                </span>
-                              )}
-                            </div>
-                          </TableCell>
-                          {showStatus && (
-                            <TableCell>
-                              <StatusBadge status={normalizePostStatus(post)} compact />
-                            </TableCell>
-                          )}
-                          {showChannels && (
-                            <TableCell>
-                              <div className="flex items-center gap-1.5">
-                                {providers.map((provider) => (
-                                  <PlatformIcon
-                                    key={provider}
-                                    provider={provider}
-                                    className="size-3.5"
-                                  />
-                                ))}
-                                {providers.length === 0 && <span className="text-ink-3">—</span>}
-                              </div>
-                            </TableCell>
-                          )}
-                          {showDate && (
-                            <TableCell className="whitespace-nowrap tabular-nums">
-                              <time dateTime={post.date}>
-                                {publishDate.toLocaleDateString("en-US", {
-                                  month: "short",
-                                  day: "numeric",
-                                })}
-                              </time>
-                              <span className="ml-1.5 text-(length:--font-size-micro) text-ink-3">
-                                {publishDate.toLocaleTimeString("en-US", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                  hour12: true,
-                                })}
-                              </span>
-                            </TableCell>
-                          )}
-                          {showProfile && (
-                            <TableCell>
-                              <span className="flex min-w-0 items-center gap-1.5 truncate text-xs">
-                                <span className="size-1.75 shrink-0 rounded-chip bg-accent" />
-                                {profileNames.get(post.brandProfileId) ?? t("Unknown profile")}
-                              </span>
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      );
-                    })}
+                  {group.posts.map((post) => (
+                    <PostTableRow
+                      key={post.id}
+                      post={post}
+                      selected={selectedIds.has(post.id)}
+                      collapsed={Boolean(isCollapsed)}
+                      selectionDisabled={selectionDisabled}
+                      profileName={profileNames.get(post.brandProfileId) ?? t("Unknown profile")}
+                      showStatus={showStatus}
+                      showChannels={showChannels}
+                      showDate={showDate}
+                      showProfile={showProfile}
+                      onToggleSelection={onToggleSelection}
+                      onViewDetails={onViewDetails}
+                    />
+                  ))}
                 </Fragment>
               );
             })

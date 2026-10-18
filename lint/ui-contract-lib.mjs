@@ -50,6 +50,7 @@ export const CANONICAL_FLAT_OWNERS = Object.freeze({
   tooltip: "ui",
   segmentedcontrol: "atoms",
   statuspill: "atoms",
+  rollingcount: "atoms",
   slidinghighlight: "primitives",
 });
 

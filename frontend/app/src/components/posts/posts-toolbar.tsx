@@ -28,6 +28,7 @@ import {
   platformFilterLabel,
 } from "@/components/workspace/platform-filter-select";
 import { effectMoveEasing, playEffect } from "@meltiply/ui/effects";
+import { RollingCount } from "@meltiply/ui/rolling-count";
 import { useI18n } from "@/lib/i18n";
 import type { PostGroupBy } from "./post-groups";
 import type { PostViewMode, PostStatusFilter, PostSortKey, BrandProfile } from "./types";
@@ -42,11 +43,6 @@ import {
  */
 const GRID_COLUMN_MIN = 2;
 const GRID_COLUMN_MAX = 5;
-/** The strip the column count steps through, so a change slides instead of swapping. */
-const GRID_COLUMN_VALUES = Array.from(
-  { length: GRID_COLUMN_MAX - GRID_COLUMN_MIN + 1 },
-  (_, index) => GRID_COLUMN_MIN + index,
-);
 /** How long a revealed view control takes to grow in or out, in milliseconds. */
 const VIEW_CONTROL_MORPH_MS = 220;
 
@@ -314,7 +310,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             >
               <Minus className="size-3" />
             </Button>
-            <GridColumnCount value={columns} />
+            <RollingCount value={columns} />
             <Button
               variant="ghost"
               size="icon"
@@ -436,32 +432,5 @@ function MorphingControl({ open, children }: { open: boolean; children: React.Re
     <div ref={boxRef} data-control-morph>
       <div className="flex items-center">{children}</div>
     </div>
-  );
-}
-
-/**
- * Grid column count. Every supported count renders in one strip that rolls to the
- * selected cell, so stepping a column raises the next count into the window from
- * below as the previous one leaves upwards (`value-push` in `motion.css`) instead
- * of swapping a glyph in place. The strip is decorative — assistive technology
- * reads the value once, as text.
- *
- * @param props.value - Selected column count, one of `GRID_COLUMN_VALUES`.
- */
-function GridColumnCount({ value }: { value: number }) {
-  return (
-    <span
-      data-value-push-track
-      style={{ "--value-push-index": value - GRID_COLUMN_MIN } as React.CSSProperties}
-    >
-      <span data-value-push-strip aria-hidden>
-        {GRID_COLUMN_VALUES.map((count) => (
-          <span key={count} data-value-push-cell>
-            {count}
-          </span>
-        ))}
-      </span>
-      <span className="sr-only">{value}</span>
-    </span>
   );
 }

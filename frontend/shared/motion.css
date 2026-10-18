@@ -288,38 +288,34 @@ html.theme-changing *::after {
 }
 
 /*
- * In-place value roll. A control whose value steps where it stands — the Posts
- * grid's column count — renders its whole range as one digit strip and marks the
- * selected index on the track, so a step rolls the strip one cell instead of
- * swapping a glyph: the next value rises into the window from below as the
- * previous one leaves upwards, and a step back rolls the other way. Motion stays
- * on `transform` inside a one-cell window, which is also what keeps the
- * neighbours from moving.
- *
- * The component feeds one custom property: `--value-push-index` (0 for the first
- * value, increasing as the strip advances).
+ * A count that changes in place rolls. The window is one line tall and clips, so
+ * the new value arrives from the side the count moved from while the previous one
+ * leaves the other way: a drum turning, not a swap. `rolling-count.tsx` marks the
+ * window `data-value-roll`, renders the current value in it, and appends the
+ * leaving value as a clone for the duration of its exit; both halves are one
+ * shared WAAPI effect on `translate` and `opacity`, so no CSS timing is duplicated
+ * here.
  */
 @layer components {
-  [data-value-push-track] {
+  [data-value-roll] {
     position: relative;
     display: inline-flex;
-    width: 1ch;
-    height: 1lh;
-    overflow: hidden;
-  }
-
-  [data-value-push-strip] {
-    display: flex;
-    flex-direction: column;
-    transform: translateY(calc(var(--value-push-index, 0) * -1lh));
-    transition: transform 200ms var(--ease-enter);
-  }
-
-  [data-value-push-cell] {
-    display: flex;
     height: 1lh;
     align-items: center;
     justify-content: center;
+    overflow: hidden;
+  }
+
+  [data-value-roll] > [data-value-roll] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  [data-value-roll] > [data-value-roll="out"] {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
   }
 }
 

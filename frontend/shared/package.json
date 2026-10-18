@@ -26,6 +26,7 @@
     "./tooltip": "./src/components/ui/tooltip.tsx",
     "./segmented-control": "./src/components/atoms/segmented-control.tsx",
     "./status-pill": "./src/components/atoms/status-pill.tsx",
+    "./rolling-count": "./src/components/atoms/rolling-count.tsx",
     "./sliding-highlight": "./src/components/primitives/sliding-highlight.tsx",
     "./public/brand-mark": "./src/components/public/brand-mark.astro",
     "./cookie-consent": "./cookie-consent.ts",

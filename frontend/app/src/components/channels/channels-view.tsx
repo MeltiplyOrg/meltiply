@@ -21,6 +21,7 @@ import {
   type PlatformAccount,
 } from "@/types";
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription } from "@meltiply/ui/empty";
+import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@meltiply/ui/tabs";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { BrandProfileDirectory } from "@/components/workspace/brand-profile-directory";
@@ -727,13 +728,13 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
           <TabsTrigger value="accounts">
             {t("Accounts")}
             <span className="rounded-chip bg-hover-2 px-1 text-(length:--font-size-micro) text-ink-3">
-              {accounts.length}
+              <RollingCount value={accounts.length} />
             </span>
           </TabsTrigger>
           <TabsTrigger value="profiles">
             {t("Brand Profiles")}
             <span className="rounded-chip bg-hover-2 px-1 text-(length:--font-size-micro) text-ink-3">
-              {brandProfiles.length}
+              <RollingCount value={brandProfiles.length} />
             </span>
           </TabsTrigger>
         </TabsList>

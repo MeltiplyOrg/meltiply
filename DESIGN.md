@@ -168,6 +168,8 @@ The rail uses quiet text and neutral selected rows, not accent-filled navigation
 
 **The Travelling Selection Rule.** A control that picks one of several options never paints the picked one in place. Segmented tracks (`SegmentedControl`), `TabsList variant="segment"`, and `line` tab strips hand the selected fill or accent rule to one shared `SlidingHighlight`: it measures the selected item, commits that box as static geometry, and moves with transforms only — translate, plus `scaleX` from the left edge when the items differ in width — settling back to `scaleX(1)` so the pill or rule and its radius are exact and crisp at rest. Items stay `relative z-10` above it and keep their own label color, hover, and press treatment; the highlight owns the selected fill, and a caller's `indicatorClassName` recolors it when the strip inverts.
 
+**The Rolling Count Rule.** A count that changes where it stands rolls instead of swapping. One `RollingCount` serves them all — the grid's column count, Channels' tab counts, a Post's channel and attachment totals, a table group's size — inside a one-line window (`data-value-roll`) that clips, so the new value arrives from the side the count moved and the previous one leaves the other way, on transforms and opacity only. Humble counts keep the animation out of the layout: the number stays one reading of itself for assistive technology, and a count that is merely mounted, loaded, or re-rendered never rolls.
+
 ### Filters and tooltips
 
 Canonical field-row filters share Where/and rows, equality controls, Add filter chips, clear/remove actions, and active-value chips. Tooltips use compact inverse ink, a 350ms opening delay, 120ms fade, and 6px offset. Radix owns portals, collision handling, focus, and Escape.

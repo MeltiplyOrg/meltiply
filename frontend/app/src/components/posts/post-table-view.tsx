@@ -1,6 +1,7 @@
 import React, { Fragment, useMemo, useRef, useState } from "react";
 import { ArrowUpDown, ChevronDown, Paperclip, Plus } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
+import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Input } from "@meltiply/ui/input";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { Empty, EmptyDescription } from "@meltiply/ui/empty";
@@ -427,7 +428,7 @@ export const PostTableView = React.memo(function PostTableView({
                           <ChevronDown data-post-group-chevron="" className="size-3.5" />
                           {group.status ? <StatusBadge status={group.status} compact /> : label}
                           <span className="text-xs font-normal tabular-nums text-ink-3">
-                            {group.posts.length}
+                            <RollingCount value={group.posts.length} />
                           </span>
                         </Button>
                       </TableCell>

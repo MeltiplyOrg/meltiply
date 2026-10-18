@@ -13,6 +13,7 @@ import {
   Ban,
 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
+import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { Input } from "@meltiply/ui/input";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
@@ -491,7 +492,9 @@ export function usePostDetailSurface({
               <Share2 className="size-3.5 text-ink-3" />
               {t("Channels")}
             </dt>
-            <dd className="text-ink">{post.channels.length}</dd>
+            <dd className="text-ink">
+              <RollingCount value={post.channels.length} />
+            </dd>
             {dateLabel && (
               <>
                 <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
@@ -513,7 +516,9 @@ export function usePostDetailSurface({
             <section className="mt-6.5">
               <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
                 {t("Attachments")}
-                <span className="text-xs font-normal text-ink-3">{attachments.length}</span>
+                <span className="text-xs font-normal text-ink-3">
+                  <RollingCount value={attachments.length} />
+                </span>
               </h3>
               <div className="flex items-center gap-2 overflow-x-auto">
                 {attachments.map((attachment) => {
@@ -542,7 +547,9 @@ export function usePostDetailSurface({
           <section className="mt-6.5">
             <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
               {t("Channels")}
-              <span className="text-xs font-normal text-ink-3">{post.channels.length}</span>
+              <span className="text-xs font-normal text-ink-3">
+                <RollingCount value={post.channels.length} />
+              </span>
             </h3>
             {post.channels.map((item) => (
               <ChannelOutcomeRow

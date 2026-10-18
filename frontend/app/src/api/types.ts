@@ -13,6 +13,8 @@ export interface UserProfile {
  */
 export interface ChannelIntegration {
   id: string;
+  /** Provider account ID displayed in channel identity rows, distinct from the internal id. */
+  platformUserId: string;
   name: string;
   picture?: string | null;
   providerIdentifier: string;

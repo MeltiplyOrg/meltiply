@@ -83,7 +83,8 @@ function toSourceUser(profile: ContractUserProfile): UserProfile {
  * disabled, `expired`/`reconnect_required` read as needing re-authentication, and
  * `expiring` stays available while still surfacing through `channelStatuses`.
  * `brand_profile_id` carries the owning Brand Profile so views can filter and
- * label channels by profile.
+ * label channels by profile; `platform_user_id` preserves the provider's channel
+ * identifier for identity rows, separately from Meltiply's internal account id.
  *
  * @param account Contract platform account from `GET /platforms`.
  * @returns Source-shaped channel integration for workspace consumers.
@@ -93,6 +94,7 @@ function toSourceIntegration(account: PlatformAccount): ChannelIntegration {
     account.connection_status === "expired" || account.connection_status === "reconnect_required";
   return {
     id: account.id,
+    platformUserId: account.platform_user_id,
     name: account.display_name ?? account.platform_user_id,
     picture: account.avatar_url,
     providerIdentifier: account.platform,

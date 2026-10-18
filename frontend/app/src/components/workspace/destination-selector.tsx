@@ -40,7 +40,8 @@ export interface DestinationSelectorProps {
  * the aggregate row, which cannot publish) and the profile choice lands in the
  * shared workspace selection the rest of the drawer already reads. Every
  * profile-owned destination shows its account photo or initials, with a small
- * provider badge, account name, and explicit selection or connection state.
+ * provider badge, account name, provider channel ID, and explicit selection or
+ * connection state.
  *
  * Filters connected integrations to the channels owned by the currently selected
  * Brand Profile (the aggregate "All Brand Profiles" view lists every channel but
@@ -204,6 +205,9 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                           <span className="text-(length:--font-size-micro)">
                             {platformDisplayName(channel.providerIdentifier)}
                           </span>
+                          <span className="w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)">
+                            {t("ID: {id}", { id: channel.platformUserId })}
+                          </span>
                         </span>
                         {(channel.disabled || channel.refreshNeeded || channel.inBetweenSteps) && (
                           <span className="flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-red">
@@ -254,6 +258,14 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                       )}
                     >
                       {platformDisplayName(channel.providerIdentifier)}
+                    </span>
+                    <span
+                      className={cn(
+                        "w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)",
+                        isSelected ? "text-accent-ink/70" : "text-ink-3",
+                      )}
+                    >
+                      {t("ID: {id}", { id: channel.platformUserId })}
                     </span>
                   </span>
                   {isUngrouped && (

@@ -81,6 +81,8 @@ Primitives own accessible names, focus trapping, Escape/dismissal, scroll lock, 
 
 Use `@meltiply/ui/toast` and `@meltiply/ui/sileo` for transient outcomes, with the affected object and useful recovery. Clipboard feedback includes the copied value. Keep inline validation and durable failures beside their controls/records. Accepted delivery is not published success.
 
+Copy resolves through `useI18n`: `t` for messages that interpolate values, and `<Trans>` for a message whose placeholder carries a component — a `RollingCount` inside `"{count} accounts"`, for instance — instead of assembling a sentence from translated fragments. Both translate the same way, including the dev-only pseudo-localization of literal text.
+
 ## Public surfaces and verification
 
 Landing and docs share palette/fonts but serve different jobs: product explanation and reading. `DocumentationSearchTrigger` opens the canonical article-index dialog from both landing and documentation preferences; it is separate from workspace jump search. Public scrolling/navigation adapters release state during Astro swaps. Native links, keyboard navigation, fragments, and accessibility behavior remain usable.

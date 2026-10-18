@@ -1,8 +1,9 @@
 import { createPortal } from "react-dom";
 import { LoaderCircle, X, type LucideIcon } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
+import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
-import { useI18n } from "@/lib/i18n";
+import { Trans, useI18n } from "@/lib/i18n";
 
 export interface BulkSelectionBarProps {
   count: number;
@@ -44,7 +45,7 @@ export function BulkSelectionBar({
           role="status"
           aria-live="polite"
         >
-          {t("{count} selected", { count })}
+          <Trans message="{count} selected" values={{ count: <RollingCount value={count} /> }} />
         </span>
         <span aria-hidden="true" className="mx-1 h-4.5 w-px shrink-0 bg-ink-inverse/20" />
         <Button

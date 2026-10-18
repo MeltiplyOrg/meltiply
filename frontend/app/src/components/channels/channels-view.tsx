@@ -11,7 +11,7 @@ import {
 } from "@/lib/queries";
 import { useSearchParams } from "@/lib/navigation";
 import { CONNECTION_TONES, oauthOutcomeMessage, platformDisplayName } from "@/lib/platforms";
-import { useI18n } from "@/lib/i18n";
+import { Trans, useI18n } from "@/lib/i18n";
 import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import {
   brandProfileColorClass,
@@ -796,7 +796,10 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
               renderOption={(status) => (status === "all" ? t("All statuses") : tStatus(status))}
             />
             <span className="ml-auto text-xs tabular-nums text-ink-3">
-              {t("{count} accounts", { count: totalMatchingAccounts })}
+              <Trans
+                message="{count} accounts"
+                values={{ count: <RollingCount value={totalMatchingAccounts} /> }}
+              />
             </span>
           </TopToolbar>
           {activeFilterCount > 0 && (

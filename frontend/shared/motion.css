@@ -324,23 +324,35 @@ html.theme-changing *::after {
 }
 
 /*
- * A control that appears with its view rises into place and fades in instead of
- * popping in, using the same entrance curve as the surfaces it belongs to.
+ * A control that appears with its view morphs in: its own box grows from nothing
+ * to the width it measures, so the controls beside it are pushed over smoothly in
+ * both directions and the arrival slides in from the trailing edge. The viewport
+ * clips while the content keeps its natural width instead of being squashed, and
+ * the box's resting width is its content's, so nothing carries a stale number.
+ *
+ * The growth itself is a WAAPI effect (`playEffect` from `MorphingControl`), not
+ * a transition, and it starts once the view's own render, effects, and layout have
+ * settled: those run as their own tasks, so an effect created while they run — or
+ * a transition, whose clock starts at the style change — spends its whole
+ * duration inside that work and the user only ever sees the end state. `display` keeps a control the view does not use from leaving a box
+ * — or a flex gap — behind.
  */
-@keyframes control-rise-in {
-  from {
-    opacity: 0;
-    translate: 0 6px;
-  }
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
-}
-
 @layer components {
-  [data-rise-in] {
-    animation: control-rise-in 200ms var(--ease-enter) both;
+  [data-control-morph] {
+    display: none;
+    /* A flex item's automatic minimum would clamp the box to its content width and
+       the growth would jump; the clip keeps the content intact instead. */
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  [data-control-morph][data-morph="open"] {
+    display: flex;
+  }
+
+  [data-control-morph] > * {
+    width: max-content;
+    flex-shrink: 0;
   }
 }
 

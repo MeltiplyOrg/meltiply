@@ -27,6 +27,7 @@ import {
   PlatformFilterSelect,
   platformFilterLabel,
 } from "@/components/workspace/platform-filter-select";
+import { playEffect } from "@meltiply/ui/effects";
 import { useI18n } from "@/lib/i18n";
 import type { PostGroupBy } from "./post-groups";
 import type { PostViewMode, PostStatusFilter, PostSortKey, BrandProfile } from "./types";
@@ -36,7 +37,9 @@ import {
   type PostCollectionMode,
 } from "./post-view-options";
 
-/** Grid column bounds: the narrowest and widest card row the collection supports. */
+/**
+ * Grid column bounds: the narrowest and widest card row the collection supports.
+ */
 const GRID_COLUMN_MIN = 2;
 const GRID_COLUMN_MAX = 5;
 /** The strip the column count steps through, so a change slides instead of swapping. */
@@ -44,6 +47,8 @@ const GRID_COLUMN_VALUES = Array.from(
   { length: GRID_COLUMN_MAX - GRID_COLUMN_MIN + 1 },
   (_, index) => GRID_COLUMN_MIN + index,
 );
+/** How long a revealed view control takes to grow in or out, in milliseconds. */
+const VIEW_CONTROL_MORPH_MS = 220;
 
 export interface PostsToolbarProps {
   searchQuery: string;
@@ -127,11 +132,13 @@ export const PostsToolbar = React.memo(function PostsToolbar({
     <>
       <TopToolbar>
         <TopToolbarSearch
+          key="search"
           value={searchQuery}
           onChange={onSearchChange}
           placeholder={t("Search posts...")}
         />
         <TopToolbarFilters
+          key="filters"
           activeCount={activeCount}
           onClearAll={reset}
           fields={[
@@ -212,7 +219,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             },
           ]}
         />
-        <DropdownMenu>
+        <DropdownMenu key="sort">
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm">
               <ArrowDownUp className="size-3.5" />
@@ -229,7 +236,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           </DropdownMenuContent>
         </DropdownMenu>
         {viewMode === "table" && (
-          <DropdownMenu>
+          <DropdownMenu key="group">
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm">
                 <Rows3 className="size-3.5" />
@@ -255,7 +262,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           </DropdownMenu>
         )}
         {viewMode === "table" && (
-          <DropdownMenu>
+          <DropdownMenu key="columns">
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm">
                 <Columns3 className="size-3.5" />
@@ -277,6 +284,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           </DropdownMenu>
         )}
         <SegmentedControl
+          key="view"
           options={POST_COLLECTION_MODES}
           value={viewMode}
           onChange={onViewModeChange}
@@ -294,11 +302,8 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             );
           }}
         />
-        {viewMode === "grid" && (
-          <div
-            data-rise-in
-            className="flex items-center text-(length:--font-size-micro) tabular-nums"
-          >
+        <MorphingControl key="grid-columns" open={viewMode === "grid"}>
+          <div className="flex items-center text-(length:--font-size-micro) tabular-nums">
             <Button
               variant="ghost"
               size="icon"
@@ -321,7 +326,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
               <Plus className="size-3" />
             </Button>
           </div>
-        )}
+        </MorphingControl>
       </TopToolbar>
       {activeCount > 0 && (
         <TopToolbarFilterChips>
@@ -346,6 +351,85 @@ export const PostsToolbar = React.memo(function PostsToolbar({
     </>
   );
 });
+
+/**
+ * A toolbar control that appears with the selected view. It stays mounted so its
+ * box can grow from nothing and push the controls beside it over smoothly — and
+ * shrink again on the way out — instead of the row snapping to a new layout.
+ *
+ * The growth is a WAAPI effect rather than a transition: switching to the Grid
+ * mounts a whole view, and that render can block the main thread past a
+ * transition's entire duration, so the morph would start and finish with no frame
+ * in between. The effect is created in a layout effect, after that render has
+ * finished and before the view's first paint, and rests on styles the browser
+ * resolves alone: the box's width is its content's, so nothing stale is kept.
+ *
+ * @param props.open - Whether the selected view uses this control.
+ * @param props.children - The control's content, unclipped inside the morphing box.
+ */
+function MorphingControl({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const boxRef = React.useRef<HTMLDivElement>(null);
+
+  React.useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const content = box.firstElementChild;
+    if (!(content instanceof HTMLElement)) return;
+    if ((box.dataset.morph === "open") === open) return;
+
+    // The change lands in the frame after the view has settled. Switching views
+    // mounts a whole view, and its render, effects, and layout run as their own
+    // tasks: an effect created inside that work spends its whole duration there and
+    // the user sees the end state instead of the move.
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        if (open) {
+          // The box is rendered before it is measured — hidden content has no width —
+          // and the effect starts from nothing in that same frame.
+          box.dataset.morph = "open";
+          const width = content.getBoundingClientRect().width;
+          if (width > 0) {
+            playEffect(box, [{ width: "0px" }, { width: `${width}px` }], 0, {
+              duration: VIEW_CONTROL_MORPH_MS,
+            });
+          }
+          return;
+        }
+
+        // Closing keeps the box rendered for the effect, then removes it in the same
+        // frame the effect's fill is released, so the row never sees the swap.
+        const width = content.getBoundingClientRect().width;
+        const effect =
+          width > 0
+            ? playEffect(box, [{ width: `${width}px` }, { width: "0px" }], 0, {
+                duration: VIEW_CONTROL_MORPH_MS,
+                fill: "forwards",
+              })
+            : null;
+        if (!effect) {
+          delete box.dataset.morph;
+          return;
+        }
+        const settle = () => {
+          delete box.dataset.morph;
+          effect.cancel();
+        };
+        effect.finished.then(settle, settle);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [open]);
+
+  return (
+    <div ref={boxRef} data-control-morph>
+      <div className="flex items-center">{children}</div>
+    </div>
+  );
+}
 
 /**
  * Grid column count. Every supported count renders in one strip that rolls to the

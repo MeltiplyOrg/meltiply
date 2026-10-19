@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 import { expect } from "@playwright/test";
+import { Schema } from "effect";
 
 /**
  * One durable publication the controlled external Provider holds for a Channel.
@@ -46,20 +47,22 @@ export interface ControlledChannelSpec {
   providerUserId: string;
 }
 
-/** The Channels a {@link provisionControlledChannels} call created. */
-interface ProvisionedControlledChannel {
-  displayName: string;
-  id: string;
-  platform: string;
-  providerUserId: string;
-}
+/** Validates the acceptance entry's wire names before ownership drives fault injection. */
+const provisionedChannelsSchema = Schema.Struct({
+  brand_profile_id: Schema.String,
+  channels: Schema.Array(
+    Schema.Struct({
+      display_name: Schema.String,
+      id: Schema.String,
+      platform: Schema.String,
+      platform_user_id: Schema.String,
+    }),
+  ),
+  organization_id: Schema.String,
+});
 
-/** Identity of the Brand Profile a provisioned Channel was attached to. */
-export interface ProvisionedChannelsResult {
-  brandProfileId: string;
-  channels: ProvisionedControlledChannel[];
-  organizationId: string;
-}
+/** Identity and real account records returned by controlled Channel provisioning. */
+export type ProvisionedChannelsResult = typeof provisionedChannelsSchema.Type;
 
 /** Stored attachment bytes as the controlled Provider returned them. */
 export interface ControlledMediaBytes {
@@ -188,7 +191,7 @@ export async function closeComposer(page: Page): Promise<void> {
  * @param profileName - Display name of the already-created Brand Profile.
  * @param channels - Channels to attach to that profile.
  * @returns The resolved profile identity plus the created Channels.
- * @throws {Error} When the fixture rejects the request.
+ * @throws {Error} When the fixture rejects the request or returns an invalid result.
  */
 export async function provisionControlledChannels(
   request: APIRequestContext,
@@ -209,7 +212,7 @@ export async function provisionControlledChannels(
     response.status(),
     `provisioning ${channels.length} controlled channel(s) for "${profileName}"`,
   ).toBe(201);
-  return (await response.json()) as ProvisionedChannelsResult;
+  return Schema.decodeUnknownSync(provisionedChannelsSchema)(await response.json());
 }
 
 /**

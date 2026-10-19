@@ -655,7 +655,7 @@ test("recovers independent profile copies and retries only unfinished publishing
       typeof body === "object" &&
       body !== null &&
       "brand_profile_id" in body &&
-      body.brand_profile_id === secondary.brandProfileId
+      body.brand_profile_id === secondary.brand_profile_id
     ) {
       await route.fulfill({
         status: 503,
@@ -668,9 +668,9 @@ test("recovers independent profile copies and retries only unfinished publishing
   await page.getByRole("button", { name: "Save Drafts", exact: true }).click();
   await expect(page.getByRole("alert")).toBeVisible({ timeout: 60_000 });
   const primaryBeforeRetry = mutations.find(
-    (mutation) => mutation.response.brand_profile_id === primary.brandProfileId,
+    (mutation) => mutation.response.brand_profile_id === primary.brand_profile_id,
   )?.response;
-  expect(primaryBeforeRetry?.brand_profile_id).toBe(primary.brandProfileId);
+  expect(primaryBeforeRetry?.brand_profile_id).toBe(primary.brand_profile_id);
   rejectSecondaryDraft = false;
   await reloadWithScopedProfile(page);
   await openComposer(page);
@@ -680,16 +680,16 @@ test("recovers independent profile copies and retries only unfinished publishing
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText(/Saved to your workspace at/i)).toBeVisible({ timeout: 60_000 });
   const firstCopy = mutations.findLast(
-    (mutation) => mutation.response.brand_profile_id === primary.brandProfileId,
+    (mutation) => mutation.response.brand_profile_id === primary.brand_profile_id,
   )?.response;
   const secondCopy = mutations.findLast(
-    (mutation) => mutation.response.brand_profile_id === secondary.brandProfileId,
+    (mutation) => mutation.response.brand_profile_id === secondary.brand_profile_id,
   )?.response;
   expect(firstCopy?.id).toBe(primaryBeforeRetry?.id);
   expect(firstCopy?.attachments).toHaveLength(1);
   expect(secondCopy?.attachments).toHaveLength(1);
-  expect(firstCopy?.attachments[0]?.asset.brand_profile_id).toBe(primary.brandProfileId);
-  expect(secondCopy?.attachments[0]?.asset.brand_profile_id).toBe(secondary.brandProfileId);
+  expect(firstCopy?.attachments[0]?.asset.brand_profile_id).toBe(primary.brand_profile_id);
+  expect(secondCopy?.attachments[0]?.asset.brand_profile_id).toBe(secondary.brand_profile_id);
   expect(secondCopy?.attachments[0]?.asset_id).not.toBe(firstCopy?.attachments[0]?.asset_id);
   expect(
     secondCopy?.targets.find((target) => target.platform_account_id === secondary.channels[0]?.id),

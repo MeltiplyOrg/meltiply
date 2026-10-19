@@ -59,6 +59,8 @@ Live deployments follow the [operator-run release path](../infra/cloudflare/READ
 journeys. It runs production-entry browser scenarios, then the cross-profile
 media/recovery/publishing journey against the controlled-Provider acceptance
 entries; provisioning helpers never run against production endpoints.
+Controlled fixture responses are schema-decoded using their wire ownership fields
+before those identities drive media copying or injected failures.
 User-facing journeys and screenshots use production assets without DevBox chrome.
 `frontend-ui` runs both frontend checks, dead-code detection,
 documentation links, React review, development CSS/font HTTP smoke, and the

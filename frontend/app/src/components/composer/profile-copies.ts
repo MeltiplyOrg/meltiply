@@ -33,6 +33,8 @@ export interface ProfileCopyProgress {
  * Every draft is saved before scheduling begins. A failed save prevents all scheduling;
  * scheduling failures preserve completed intents so retry never resends successful profiles.
  * Only media used by a Channel target gates delivery; excluded media can remain in the draft.
+ * Each profile's readiness reads and polling share a five-minute deadline; timeout
+ * reports a retryable profile failure without discarding its saved Post or media.
  * The caller retains `copies` for this composition only and aborts on identity change/unmount.
  * Returns false for reported profile failures; cancellation rejects with the abort reason.
  */
@@ -172,15 +174,18 @@ export async function persistProfileCopies({
       const copy = copies.get(profileId);
       if (!copy?.postId) throw new Error("The saved profile copy is missing.");
       onProgress({ profileId, phase: "media" });
+      const readinessSignal = AbortSignal.any([signal, AbortSignal.timeout(5 * 60_000)]);
       for (const assetId of intent.assetIds) {
-        let asset: Asset = await runQueryEffect(getAsset(workspaceId, assetId), { signal });
+        let asset: Asset = await runQueryEffect(getAsset(workspaceId, assetId), {
+          signal: readinessSignal,
+        });
         while (
           asset.status === "pending_upload" ||
           asset.status === "uploading" ||
           asset.status === "processing"
         ) {
-          await runQueryEffect(Effect.sleep("1 second"), { signal });
-          asset = await runQueryEffect(getAsset(workspaceId, assetId), { signal });
+          await runQueryEffect(Effect.sleep("1 second"), { signal: readinessSignal });
+          asset = await runQueryEffect(getAsset(workspaceId, assetId), { signal: readinessSignal });
         }
         if (asset.status !== "ready")
           throw new Error(asset.failure?.message ?? "An attachment could not finish processing.");

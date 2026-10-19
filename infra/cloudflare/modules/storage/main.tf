@@ -26,7 +26,7 @@ resource "cloudflare_r2_bucket_cors" "assets" {
         "x-amz-content-sha256",
         "x-amz-security-token",
       ]
-      methods = ["PUT"]
+      methods = ["GET", "PUT"]
       origins = sort(tolist(var.allowed_origins))
     }
     expose_headers  = ["etag", "x-amz-request-id"]

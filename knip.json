@@ -41,6 +41,8 @@
         "build.mjs",
         "notices.mjs",
         "server.mjs",
+        "s3-check.ts",
+        "storage-pipeline-check.ts",
         "admin.mjs"
       ],
       "project": ["*.ts", "*.mjs"]

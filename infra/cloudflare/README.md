@@ -73,6 +73,36 @@ for migration, password, and authenticator policies. Managed Workers trust
 Cloudflare's `CF-Connecting-IP` for shared rate limits, not caller-supplied
 `X-Forwarded-For`; the self-hosted ingress instead uses its socket peer.
 
+## Object storage selection
+
+Releases default to the IaC-managed R2 bucket. To select an S3-compatible service,
+add these non-secret settings to `runtime` in the release input:
+
+```json
+{
+  "object_storage_provider": "s3",
+  "s3_bucket": "meltiply-assets",
+  "s3_endpoint": "https://objects.example.com",
+  "s3_region": "us-east-1",
+  "s3_force_path_style": true
+}
+```
+
+Region and addressing style are optional with the defaults shown above. The
+endpoint must be an origin-only HTTPS URL. Keep `runtime.r2_account_id`: despite
+its historical name, it identifies the Cloudflare account for Worker and Cron
+administration even when assets live elsewhere.
+
+The renderer applies the same provider settings to API and Automation and omits
+their unused `ASSETS` bindings for S3. Protected secret injection then requires
+`S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` on both Workers instead of the R2
+credentials. Never put either credential in the release input or Wrangler vars.
+The infrastructure foundation still provisions its R2 bucket; selecting S3
+does not destroy that bucket or copy its data.
+
+See [object storage requirements](../../docs/self-hosting.md#object-storage)
+for conditional operations, browser CORS, and provider cutover requirements.
+
 ## Release and rollback
 
 Release transitions are explicit: create the paused foundation, deploy State and

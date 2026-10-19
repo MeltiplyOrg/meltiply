@@ -183,6 +183,7 @@ test("deploy phases distinguish first initialization from version updates", () =
 
 test("stdin secret bundles require exact worker-specific names without recording values", () => {
   const spec = {
+    runtime: {},
     provider_acceptance: {
       facebook: false,
       instagram: false,
@@ -238,6 +239,7 @@ test("Automation update uploads code, creates a stdin secret version, and activa
 
   const gitSha = "a".repeat(40);
   const spec = {
+    runtime: {},
     deployment_mode: "update",
     git_sha: gitSha,
     provider_acceptance: {

@@ -1,4 +1,9 @@
-import { createR2SignerFromEnv, type ObjectUrlSigner } from "@meltiply/storage";
+import {
+  createObjectStoreFromEnv,
+  createObjectUrlSignerFromEnv,
+  type ConfiguredObjectStore,
+  type ObjectUrlSigner,
+} from "@meltiply/storage";
 
 import type { DistributionProviderDependencies } from "./distribution-provider";
 import type { AutomationEnv } from "./env";
@@ -55,7 +60,7 @@ function normalizedContentType(value: string | undefined): string | null {
  * exactly that second.
  *
  * @param expiresAtSeconds - Unix seconds after which the URL stops verifying.
- * @param key - R2 object key the bearer may read.
+ * @param key - Object key the bearer may read.
  * @returns Canonical `v1\n<expires>\n<key>` payload string.
  */
 function providerMediaPayload(expiresAtSeconds: number, key: string): string {
@@ -81,7 +86,7 @@ function base64UrlEncode(bytes: Uint8Array): string {
  *
  * @param secret - `TOKEN_ENCRYPTION_KEY` raw key material.
  * @param expiresAtSeconds - Unix seconds after which the URL stops verifying.
- * @param key - R2 object key the bearer may read.
+ * @param key - Object key the bearer may read.
  * @returns Base64url-encoded HMAC-SHA256 digest.
  */
 async function providerMediaSignature(
@@ -113,7 +118,7 @@ async function providerMediaSignature(
  * valid for `providerMediaRetrievalLeaseSeconds`.
  *
  * @param env - Automation worker environment with PUBLIC_API_URL and TOKEN_ENCRYPTION_KEY.
- * @param key - Validated R2 object key to authorize.
+ * @param key - Validated object key to authorize.
  * @returns Signed verified-domain URL, or undefined when unavailable.
  */
 async function verifiedRemoteIngestUrl(
@@ -142,7 +147,7 @@ async function verifiedRemoteIngestUrl(
 }
 
 /**
- * Validates an R2 object key against path traversal and asset ownership rules.
+ * Validates an object key against path traversal and asset ownership rules.
  * Requires at least 3 segments with the second segment strictly matching the
  * asset ID, which holds for every publishable object kind under
  * `<org_id>/<asset_id>/`: the verified original, a ready rendition, or a
@@ -150,7 +155,7 @@ async function verifiedRemoteIngestUrl(
  * delivered.
  *
  * @param assetId - Asset UUID that owns the media file.
- * @param key - R2 object key (e.g. "org-1/asset-1/rendition-webp").
+ * @param key - Object key (e.g. "org-1/asset-1/rendition-webp").
  * @throws {TypeError} When key format is invalid or attempts path traversal.
  */
 function validateObjectKey(assetId: string, key: string): void {
@@ -168,45 +173,54 @@ function validateObjectKey(assetId: string, key: string): void {
 }
 
 /**
- * Verifies that the R2 object's physical size and content type match recorded database metadata.
+ * Verifies that the stored object's physical size and content type match recorded database metadata.
  *
  * @param request - Requested asset metadata containing fileSize and contentType.
- * @param object - R2 object head result containing size and httpMetadata.
- * @throws {TypeError} When file size or content type differs from R2 metadata.
+ * @param object - Provider object metadata containing size and contentType.
+ * @throws {TypeError} When file size or content type differs from stored metadata.
  */
 function validateMetadata(
   request: {
     contentType: string;
     fileSize: number;
   },
-  object: { httpMetadata?: { contentType?: string }; size: number },
+  object: { contentType: string | null; size: number },
 ): void {
   if (
     !Number.isSafeInteger(request.fileSize) ||
     request.fileSize < 1 ||
     object.size !== request.fileSize ||
-    normalizedContentType(object.httpMetadata?.contentType) !==
+    normalizedContentType(object.contentType ?? undefined) !==
       normalizedContentType(request.contentType)
   ) {
-    throw new TypeError("provider media metadata does not match R2");
+    throw new TypeError("provider media metadata does not match the object store");
   }
 }
 /**
- * Resolves validated R2 media for publication. Remote ingest prefers a 24-hour
- * verified-domain URL, otherwise lazily signs through createR2SignerFromEnv;
- * TikTok rejects that fallback via its verified-domain prefix check.
- * Direct upload returns the object stream. Missing storage, invalid keys, or
+ * Resolves validated media for publication. Remote ingest prefers a 24-hour
+ * verified-domain URL, otherwise lazily signs through the configured provider's
+ * signer; TikTok rejects that fallback via its verified-domain prefix check.
+ * Direct upload returns the object stream. Unusable storage, invalid keys, or
  * mismatched size/type fail; an injected signer overrides environment signing.
+ *
+ * The store comes from the shared provider factory, so a deployment on an
+ * S3-compatible origin publishes and uploads exactly like one on R2.
  */
 export function createProviderMediaResolver(
   env: AutomationEnv,
   signer: ObjectUrlSigner | undefined = undefined,
 ): NonNullable<DistributionProviderDependencies["mediaFor"]> {
   let resolvedSigner = signer;
+  let resolvedStore: ConfiguredObjectStore | undefined;
   return async (request) => {
-    if (!env.ASSETS) {
-      throw new TypeError("provider media R2 binding is unavailable");
+    if (!resolvedStore) {
+      try {
+        resolvedStore = createObjectStoreFromEnv(env);
+      } catch {
+        throw new TypeError("provider media object storage is unavailable");
+      }
     }
+    const store = resolvedStore;
     validateObjectKey(request.assetId, request.objectKey);
     const contentType = normalizedContentType(request.contentType);
     if (!contentType) {
@@ -214,7 +228,7 @@ export function createProviderMediaResolver(
     }
 
     if (request.transferMode === "remote_ingest") {
-      const object = await env.ASSETS.head(request.objectKey);
+      const object = await store.head(request.objectKey);
       if (!object) throw new TypeError("provider media object is unavailable");
       validateMetadata(request, object);
       const verifiedUrl = await verifiedRemoteIngestUrl(env, request.objectKey);
@@ -226,7 +240,7 @@ export function createProviderMediaResolver(
           url: verifiedUrl,
         };
       }
-      resolvedSigner ??= createR2SignerFromEnv(env);
+      resolvedSigner ??= createObjectUrlSignerFromEnv(env);
       return {
         contentType,
         fileSize: request.fileSize,
@@ -238,7 +252,7 @@ export function createProviderMediaResolver(
       };
     }
 
-    const object = await env.ASSETS.get(request.objectKey);
+    const object = await store.read(request.objectKey);
     if (!object) throw new TypeError("provider media object is unavailable");
     validateMetadata(request, object);
     return {

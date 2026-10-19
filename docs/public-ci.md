@@ -47,9 +47,12 @@ The [extended workflow](../.github/workflows/extended.yml) exposes manually
 selected lanes: `frontend-full` for full browser/Lighthouse journeys,
 `frontend-ui` for focused UI verification, `cloudflare-full` for
 `bun run cloudflare:check`, `cloudflare-integration` for live-local topology/load,
-and `cloudflare-extended` for release/staging/IaC checks. They run on GitHub-hosted
-machines without deployment secrets. A passing automatic `ci-gate` does not imply
-that a manual lane ran.
+`cloudflare-extended` for release/staging/IaC checks, and `object-storage` for
+provider switching. The storage lane builds a pinned MinIO release from source,
+checks live S3 operations, runs `bun run cloudflare:check`, then exercises
+application uploads, native media processing, private delivery, and retention
+against R2 and MinIO. They run on GitHub-hosted machines without deployment
+secrets. A passing automatic `ci-gate` does not imply that a manual lane ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
 `frontend-full` provisions local signing/storage configuration before browser

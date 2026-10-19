@@ -1,75 +1,19 @@
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { AutomationEntrypoint } from "../../workers/automation/src/index";
-import {
-  PROCESSOR_CONTAINER_TIMEOUT_MS,
-  validateJob,
-  type NativeProcessorJob,
-  type MediaProcessorRpcOutcome,
+import type {
+  NativeProcessorJob,
+  MediaProcessorRpcOutcome,
 } from "../../workers/automation/src/native-processor";
+import { processNativeJob } from "../lib/processor-client";
 
 export { ReplyWorkflow } from "../../workers/automation/src/index";
-
-const successSchema = z.object({
-  engine: z.object({ duration_ms: z.number(), ffmpeg: z.string(), vips: z.string() }),
-  input: z.object({ bytes: z.number(), sha256: z.string() }),
-  job_id: z.string(),
-  media: z.object({
-    animated: z.boolean(),
-    content_type: z.string(),
-    duration_seconds: z.number().nullable(),
-    frame_count: z.number().nullable(),
-    has_audio: z.boolean(),
-    height: z.number().nullable(),
-    width: z.number().nullable(),
-  }),
-  output: z
-    .object({
-      bytes: z.number(),
-      content_type: z.string(),
-      etag: z.string().nullable(),
-      sha256: z.string(),
-    })
-    .nullable(),
-  replayed: z.boolean().optional(),
-  result: z.enum(["optimized", "original_compatible"]),
-});
-const failureSchema = z.object({
-  error: z.object({ code: z.string(), message: z.string(), retryable: z.boolean() }),
-});
 
 /** Addresses the Compose processor over its private network; bucket credentials never enter the processor. */
 export class MediaProcessorContainer extends DurableObject<{ PROCESSOR_JOB_TOKEN: string }> {
   /** Validates jobs and engine responses, retaining the Cloudflare adapter's failure classification and deadline. */
   async process(job: NativeProcessorJob): Promise<MediaProcessorRpcOutcome> {
-    const invalid = validateJob(job);
-    if (invalid)
-      return { ok: false, error: { code: "invalid_request", message: invalid, retryable: false } };
-    try {
-      const response = await fetch("http://127.0.0.1:8082/process", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${this.env.PROCESSOR_JOB_TOKEN}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(job),
-        signal: AbortSignal.timeout(PROCESSOR_CONTAINER_TIMEOUT_MS),
-      });
-      const payload: unknown = await response.json();
-      if (!response.ok) return { ok: false, error: failureSchema.parse(payload).error };
-      // The HTTP engine signals success with its status; normalize the internal
-      // RPC discriminator only after the entire wire payload has validated.
-      return { ok: true, result: { ...successSchema.parse(payload), status: "succeeded" } };
-    } catch {
-      return {
-        ok: false,
-        error: {
-          code: "engine_error",
-          message: "The self-hosted processor could not complete the job.",
-          retryable: true,
-        },
-      };
-    }
+    return processNativeJob(job, this.env.PROCESSOR_JOB_TOKEN);
   }
 }
 

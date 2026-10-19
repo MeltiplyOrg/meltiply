@@ -3364,4 +3364,62 @@ describe("provider media delivery route", () => {
     expect(response.status).toBe(404);
     expect(get).toHaveBeenCalledWith(mediaKey);
   });
+
+  /**
+   * Delivery must follow the configured provider, not the R2 binding: an S3
+   * deployment relays the same bearer-authorized object from its own origin,
+   * and a deployment whose provider cannot be constructed still fails closed
+   * with 503 rather than serving bytes from an unintended store.
+   */
+  it("relays the same signed object from an S3-compatible origin", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("video-bytes", {
+          headers: { "content-length": "11", "content-type": "video/mp4" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const app = createApiApp();
+      const url = await signedMediaUrl(mediaKey, Math.floor(Date.now() / 1000) + 3600);
+      const response = await app.request(
+        url,
+        {},
+        {
+          ...env,
+          ASSETS: undefined,
+          OBJECT_STORAGE_PROVIDER: "s3",
+          S3_ACCESS_KEY_ID: "s3-access-key",
+          S3_BUCKET: "meltiply-assets",
+          S3_ENDPOINT: "https://objects.example.test",
+          S3_SECRET_ACCESS_KEY: "s3-secret",
+          TOKEN_ENCRYPTION_KEY: mediaSecret,
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("video/mp4");
+      expect(await response.text()).toBe("video-bytes");
+      expect(fetchMock).toHaveBeenCalledWith(
+        `https://objects.example.test/meltiply-assets/${mediaKey}`,
+        expect.objectContaining({ method: "GET" }),
+      );
+
+      const unavailable = createApiApp();
+      const response503 = await unavailable.request(
+        url,
+        {},
+        {
+          ...env,
+          ASSETS: undefined,
+          OBJECT_STORAGE_PROVIDER: "s3",
+          S3_BUCKET: "meltiply-assets",
+          TOKEN_ENCRYPTION_KEY: mediaSecret,
+        },
+      );
+      expect(response503.status).toBe(503);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

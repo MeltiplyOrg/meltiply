@@ -1,5 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "types": [] },
-  "include": ["*.ts", "../../workers/automation/worker-configuration.d.ts"]
+  "include": [
+    "*.ts",
+    "../../workers/automation/worker-configuration.d.ts",
+    "../lib/processor-client.ts"
+  ]
 }

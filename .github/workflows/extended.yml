@@ -13,6 +13,7 @@ on:
           - cloudflare-integration
           - cloudflare-extended
           - cloudflare-full
+          - object-storage
 
 permissions:
   contents: read
@@ -42,6 +43,82 @@ jobs:
       - name: Validate complete application contract
         if: inputs.lane == 'cloudflare-full'
         run: bun run cloudflare:check
+      - uses: actions/setup-go@v6
+        if: inputs.lane == 'object-storage'
+        with:
+          go-version: "1.26"
+          cache: false
+      - name: Check storage types and focused scenarios
+        if: inputs.lane == 'object-storage'
+        run: |
+          bun run --filter @meltiply/storage type-check
+          bunx --no-install tsc --project scripts/selfhost/tsconfig.json
+          bun run --cwd packages/storage test test/s3.test.ts test/provider.test.ts --coverage.enabled=false
+      - name: Exercise S3-compatible storage against MinIO
+        if: inputs.lane == 'object-storage'
+        env:
+          S3_CHECK_ENDPOINT: http://127.0.0.1:9000
+        run: |
+          git clone --depth 1 --branch RELEASE.2025-04-22T22-12-26Z https://github.com/minio/minio.git "$RUNNER_TEMP/minio"
+          go build -C "$RUNNER_TEMP/minio" -o "$RUNNER_TEMP/minio-server" .
+          MINIO_ROOT_USER=s3-check-access-key MINIO_ROOT_PASSWORD=s3-check-secret-key \
+            "$RUNNER_TEMP/minio-server" server "$RUNNER_TEMP/storage-check" >"$RUNNER_TEMP/minio.log" 2>&1 &
+          minio_pid=$!
+          echo "$minio_pid" >"$RUNNER_TEMP/storage-check.pid"
+          minio_ready=false
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then minio_ready=true; break; fi
+            if ! kill -0 "$minio_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$minio_ready" != true ]; then
+            echo "MinIO did not report healthy within 60s" >&2
+            cat "$RUNNER_TEMP/minio.log" >&2
+            exit 1
+          fi
+          bun run storage:s3:check
+      - name: Validate complete application gate
+        if: inputs.lane == 'object-storage'
+        run: |
+          ./scripts/cloudflare-local/compose.sh up -d postgres
+          env -u MELTIPLY_DEV_TUNNEL bun run cloudflare:check
+          bun run release:test
+      - name: Exercise provider switching through application lifecycle
+        if: inputs.lane == 'object-storage'
+        env:
+          S3_CHECK_ENDPOINT: http://127.0.0.1:9000
+          PROCESSOR_JOB_TOKEN: storage-check-private-native-engine-token
+          PROCESSOR_PORT: "8082"
+          S3_CHECK_IMAGE: ${{ runner.temp }}/storage-check.png
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libvips-tools
+          ffmpeg -v error -f lavfi -i color=c=blue:s=640x640 -frames:v 1 "$S3_CHECK_IMAGE"
+          node workers/automation/processor/engine/server.mjs >"$RUNNER_TEMP/processor.log" 2>&1 &
+          processor_pid=$!
+          trap 'kill "$processor_pid"; rm -f scripts/selfhost/.storage-pipeline-check.mjs' EXIT
+          processor_ready=false
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8082/healthz; then processor_ready=true; break; fi
+            if ! kill -0 "$processor_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$processor_ready" != true ]; then
+            echo "Processor did not report healthy within 60s" >&2
+            cat "$RUNNER_TEMP/processor.log" >&2
+            exit 1
+          fi
+          # Miniflare transfers R2 body streams between threads; this needs Node, not Bun.
+          bun build scripts/selfhost/storage-pipeline-check.ts --target=node \
+            --external miniflare --external pg --external effect --external zod \
+            --outfile=scripts/selfhost/.storage-pipeline-check.mjs
+          node scripts/selfhost/.storage-pipeline-check.mjs
+      - name: Stop object storage origin
+        if: always() && inputs.lane == 'object-storage'
+        run: |
+          if [ -f "$RUNNER_TEMP/storage-check.pid" ]; then kill "$(cat "$RUNNER_TEMP/storage-check.pid")"; fi
+          mkdir -p artifacts/storage
+          cp "$RUNNER_TEMP/minio.log" "$RUNNER_TEMP/processor.log" artifacts/storage/ 2>/dev/null || true
       - name: Validate release, infrastructure, and dependency policies
         if: inputs.lane == 'cloudflare-extended'
         run: |
@@ -152,11 +229,17 @@ jobs:
           setsid bun run --no-install vp preview --host 127.0.0.1 --port 3000 --strictPort >/tmp/meltiply-preview.log 2>&1 &
           preview_pid=$!
           trap 'kill -TERM -- "-$preview_pid" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:3000/posts >/dev/null; then break; fi
-            kill -0 "$preview_pid"
+          preview_ready=false
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/posts >/dev/null; then preview_ready=true; break; fi
+            if ! kill -0 "$preview_pid" 2>/dev/null; then break; fi
             sleep 1
           done
+          if [ "$preview_ready" != true ]; then
+            echo "Preview did not report ready within 60s" >&2
+            cat /tmp/meltiply-preview.log >&2
+            exit 1
+          fi
           ../../scripts/ci/lighthouse.sh http://127.0.0.1:3000/posts ../../artifacts/performance/lighthouse.json
           bun run --cwd ../public check
       - name: Stop owned local services

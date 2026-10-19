@@ -56,7 +56,7 @@ Use `bun run local:teardown` only when the local database and volumes can be dis
 
 ## Architecture
 
-Meltiply is a Bun monorepo. Cloudflare Workers provide the API and asynchronous publishing pipeline; PostgreSQL runs through Hyperdrive, and media is stored in R2.
+Meltiply is a Bun monorepo. Cloudflare Workers provide the API and asynchronous publishing pipeline; PostgreSQL runs through Hyperdrive, and media is stored in R2 or any S3-compatible object store.
 
 | Directory            | Responsibility                                                                        |
 | -------------------- | ------------------------------------------------------------------------------------- |

@@ -17,7 +17,7 @@ import {
   JobInProgressError,
 } from "./job-lease";
 import { assetOrphanGraceSeconds, type DatabaseError } from "@meltiply/domain";
-import { R2ObjectStore, type ObjectStore } from "@meltiply/storage";
+import { createObjectStoreFromEnv, type ObjectStore } from "@meltiply/storage";
 import { errorDiagnostic, log } from "@meltiply/observability";
 
 import { safeErrorMessage } from "./errors";
@@ -586,21 +586,15 @@ export function settleDeletedObjects(
  * AssetJobProcessor) that the queue/scheduled boundaries run via runJobProgram.
  *
  * @param env - Automation worker environment containing Cloudflare bindings.
- * @param objectStore - Optional injected ObjectStore implementation (defaults to R2ObjectStore on env.ASSETS).
+ * @param objectStore - Optional injected ObjectStore implementation (defaults to the configured object storage provider store).
  * @returns Configured AssetJobProcessor instance with Effect-returning `process` and `runMaintenance` methods.
- * @throws {Error} Synchronously when neither objectStore nor env.ASSETS is available.
+ * @throws {Error} Synchronously when neither objectStore nor a usable provider store is available.
  */
 export function createAssetJobProcessor(
   env: AutomationEnv,
   objectStore?: ObjectStore,
 ): AssetJobProcessor {
-  const storage =
-    objectStore ??
-    (env.ASSETS
-      ? new R2ObjectStore(env.ASSETS)
-      : (() => {
-          throw new Error("asset R2 binding is unavailable");
-        })());
+  const storage = objectStore ?? createObjectStoreFromEnv(env);
 
   /**
    * Reclaims one Asset's inventoried bytes and finalizes its lifecycle row.

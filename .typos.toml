@@ -32,3 +32,10 @@ extend-glob = ["python-argparse.txt"]
 [type.python-license.extend-words]
 Stichting = "Stichting"
 Mathematisch = "Mathematisch"
+
+# The generated bundles reproduce third-party attribution verbatim.
+[type.third-party-notices]
+extend-glob = ["third-party-notices.txt"]
+
+[type.third-party-notices.extend-words]
+Friedly = "Friedly"

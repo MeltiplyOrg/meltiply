@@ -126,6 +126,10 @@ Gitleaks 8.30.1 and typos 1.35.5 using versioned release archives and pinned
 SHA-256 archive checksums. These verify downloads; they are not GitHub Action
 commit references. Linux x64 and arm64 are supported.
 
+Spelling checks still cover generated third-party notice bundles. A scoped
+dictionary preserves an upstream author's surname; do not rewrite copyright
+attribution to satisfy an English spelling suggestion.
+
 The scanner retains its live synthetic detection canary. Its configuration
 excludes three proven false-positive values only when their exact source path
 and detection rule also match: the Argo guide's `YOUR_API_TOKEN`, the SQL DDL

@@ -74,6 +74,7 @@ Meltiply is a Bun monorepo. Cloudflare Workers provide the API and asynchronous 
 - **Coding agents:** Follow [`AGENTS.md`](AGENTS.md) for repository rules and verification. Read [`CONTEXT.md`](CONTEXT.md) for domain terms, [`PRODUCT.md`](PRODUCT.md) for product intent, and [`STATE.md`](STATE.md) before refactors, schema changes, or data resets.
 - **UI work:** Read [shared UI ownership](docs/frontend-ui.md), [layout](docs/frontend-layout.md), and the [capability inventory](docs/frontend-capabilities.md). App components use the current shared TypeScript/React/Tailwind system; public Astro adapters share its tokens.
 - **API work:** See [`packages/contracts/README.md`](packages/contracts/README.md) for OpenAPI and generated-client workflow.
+- **UI translations:** See [`docs/i18n.md`](docs/i18n.md) for the catalog layout, offline generation, and the CI check.
 - **Deployment:** See [`infra/cloudflare/README.md`](infra/cloudflare/README.md) for infrastructure ownership and release safety.
 
 ## CI

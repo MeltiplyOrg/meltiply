@@ -40,8 +40,8 @@ export interface DestinationSelectorProps {
  * profile, so the block leads with the canonical `BrandProfileSelect` (without
  * the aggregate row, which cannot publish) and the profile choice lands in the
  * shared workspace selection the rest of the drawer already reads. Every
- * profile-owned destination shows its account photo or initials, with a small
- * provider badge, display name, separate username and provider channel ID rows,
+ * profile-owned destination shows a row-filling square account photo or initials,
+ * with a small provider badge, display name, separate username and provider channel ID rows,
  * and explicit selection or connection state. Missing usernames are stated, not
  * inferred from an id or display name.
  *
@@ -193,6 +193,7 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                     provider={channel.providerIdentifier}
                     channelName={channel.name}
                     picture={channel.picture}
+                    size="card"
                   />
                 </span>
               );
@@ -204,12 +205,16 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                 return (
                   <Tooltip key={channel.id}>
                     <TooltipTrigger asChild>
-                      <div className="flex cursor-not-allowed select-none items-center gap-2 rounded-control border border-line bg-inset px-2 py-1.5 text-(length:--font-size-control) text-ink-3">
+                      <div className="flex cursor-not-allowed select-none items-center gap-2 rounded-control border border-line bg-inset p-2 text-(length:--font-size-control) text-ink-3">
                         {avatar}
                         <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                          <span className="w-full truncate font-medium">{channel.name}</span>
-                          <span className="text-(length:--font-size-micro)">
-                            {platformDisplayName(channel.providerIdentifier)}
+                          <span className="flex w-full min-w-0 items-baseline gap-2">
+                            <span className="min-w-0 flex-1 truncate font-medium">
+                              {channel.name}
+                            </span>
+                            <span className="shrink-0 text-(length:--font-size-micro)">
+                              {platformDisplayName(channel.providerIdentifier)}
+                            </span>
                           </span>
                           <span className="w-full whitespace-normal break-all text-left text-(length:--font-size-micro)">
                             {usernameLabel}
@@ -249,7 +254,7 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                   aria-pressed={isSelected}
                   onClick={() => toggleChannelSelection(channel.id)}
                   className={cn(
-                    "h-auto w-full justify-start gap-2 rounded-control border px-2 py-1.5 text-(length:--font-size-control) font-normal",
+                    "h-auto w-full justify-start gap-2 rounded-control border p-2 text-(length:--font-size-control) font-normal",
                     // Selected rows pin their own hover colors so the ghost
                     // variant's default hover cannot repaint the active state.
                     isSelected
@@ -259,14 +264,18 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                 >
                   {avatar}
                   <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                    <span className="w-full truncate text-left font-medium">{channel.name}</span>
-                    <span
-                      className={cn(
-                        "text-(length:--font-size-micro)",
-                        isSelected ? "text-accent-ink/70" : "text-ink-3",
-                      )}
-                    >
-                      {platformDisplayName(channel.providerIdentifier)}
+                    <span className="flex w-full min-w-0 items-baseline gap-2">
+                      <span className="min-w-0 flex-1 truncate text-left font-medium">
+                        {channel.name}
+                      </span>
+                      <span
+                        className={cn(
+                          "shrink-0 text-(length:--font-size-micro)",
+                          isSelected ? "text-accent-ink/70" : "text-ink-3",
+                        )}
+                      >
+                        {platformDisplayName(channel.providerIdentifier)}
+                      </span>
                     </span>
                     <span
                       className={cn(

@@ -2126,15 +2126,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         )}
       </div>
 
-      {/* Reference layout, adapted: what gets published and where it goes share
-          the panel equally — a fixed-width rail left the destinations and
-          publishing controls cramped while the writing area stretched. The split
-          follows the panel's own width (`@container`), never the viewport:
-          composing always happens inside the drawer, so a narrow panel stacks in
-          one reading order instead. The compose half scrolls on its own, so a
-          long draft, its media, and its provider settings move while the
-          destinations and publishing half stays in view. */}
-      <div className="flex min-w-0 grow flex-col gap-6 @4xl:min-h-0 @4xl:flex-1 @4xl:flex-row @4xl:items-stretch @4xl:gap-8">
+      {/* The editor takes the remaining width beside a compact destinations and
+          publishing column. The split follows the panel's own width; narrower
+          panels stack in reading order. Each wide column scrolls independently. */}
+      <div className="flex min-w-0 grow flex-col gap-6 @4xl:min-h-0 @4xl:flex-1 @4xl:flex-row @4xl:items-stretch">
         <div
           aria-label={t("Post content")}
           tabIndex={0}
@@ -2635,12 +2630,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           })}
         </div>
 
-        {/* Where and when: the destinations block and the publishing controls the
-            reference keeps beside the editor, so nothing about targeting or timing
-            hides behind a tab. It takes the panel's other half, separated by the
-            shared line; below the split width the same blocks stack under the
-            compose column. */}
-        <div className="flex min-w-0 flex-1 flex-col gap-6 @4xl:min-h-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:pl-8">
+        {/* Targeting and timing stay together in a bounded rail rather than
+            stretching to half the composer. Mobile retains the same DOM order. */}
+        <div className="flex min-w-0 flex-col gap-6 @4xl:min-h-0 @4xl:w-85 @4xl:shrink-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:pl-6">
           <DestinationSelector onNavigate={onNavigate} />
 
           <ComposerSection icon={Send} title={t("Publishing")}>

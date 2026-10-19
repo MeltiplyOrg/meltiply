@@ -32,6 +32,7 @@ export interface ProfileCopyProgress {
  * Shared media is uploaded once per destination profile and cached by source Asset id.
  * Every draft is saved before scheduling begins. A failed save prevents all scheduling;
  * scheduling failures preserve completed intents so retry never resends successful profiles.
+ * Only media used by a Channel target gates delivery; excluded media can remain in the draft.
  * The caller retains `copies` for this composition only and aborts on identity change/unmount.
  * Returns false for reported profile failures; cancellation rejects with the abort reason.
  */
@@ -69,7 +70,14 @@ export async function persistProfileCopies({
   onProgress: (progress: ProfileCopyProgress) => void;
 }): Promise<boolean> {
   let saveFailed = false;
-  const intents = new Map<string, { input: SchedulePostInput; fingerprint: string }>();
+  const intents = new Map<
+    string,
+    {
+      input: SchedulePostInput;
+      fingerprint: string;
+      assetIds: Set<string>;
+    }
+  >();
   for (const profileId of profileIds) {
     signal.throwIfAborted();
     let copy = copies.get(profileId);
@@ -127,16 +135,20 @@ export async function persistProfileCopies({
         attachment_ids: attachmentIds,
         targets,
       };
-      const scheduleInput: SchedulePostInput = {
-        brand_profile_id: profileId,
-        scheduled_at: scheduledAt,
-        targets,
-      };
-      const fingerprint = JSON.stringify({ mode, ...profileInput, scheduledAt });
-      intents.set(profileId, { input: scheduleInput, fingerprint });
-      if (mode !== "draft" && copy.postId && copy.scheduledIntent === fingerprint) {
-        onProgress({ profileId, phase: "scheduled" });
-        continue;
+      if (mode !== "draft") {
+        const fingerprint = JSON.stringify({ mode, ...profileInput, scheduledAt });
+        if (copy.postId && copy.scheduledIntent === fingerprint) {
+          onProgress({ profileId, phase: "scheduled" });
+          continue;
+        }
+        const assetIds = new Set<string>();
+        for (const target of targets)
+          for (const id of target.attachment_ids ?? attachmentIds) assetIds.add(id);
+        intents.set(profileId, {
+          input: { brand_profile_id: profileId, scheduled_at: scheduledAt, targets },
+          fingerprint,
+          assetIds,
+        });
       }
       onProgress({ profileId, phase: "saving" });
       const id = copy.postId ?? (profileId === sourceProfileId ? sourcePostId : null);
@@ -159,11 +171,8 @@ export async function persistProfileCopies({
       signal.throwIfAborted();
       const copy = copies.get(profileId);
       if (!copy?.postId) throw new Error("The saved profile copy is missing.");
-      if (copy.scheduledIntent === intent.fingerprint) continue;
       onProgress({ profileId, phase: "media" });
-      for (const source of attachments) {
-        const assetId = copy.assets.get(source.assetId);
-        if (!assetId) throw new Error("An attachment copy is missing.");
+      for (const assetId of intent.assetIds) {
         let asset: Asset = await runQueryEffect(getAsset(workspaceId, assetId), { signal });
         while (
           asset.status === "pending_upload" ||

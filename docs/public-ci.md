@@ -56,8 +56,11 @@ secrets. A passing automatic `ci-gate` does not imply that a manual lane ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
 `frontend-full` provisions local signing/storage configuration before browser
-journeys. User-facing journeys and screenshots use production assets without
-DevBox chrome. `frontend-ui` runs both frontend checks, dead-code detection,
+journeys. It runs production-entry browser scenarios, then the cross-profile
+media/recovery/publishing journey against the controlled-Provider acceptance
+entries; provisioning helpers never run against production endpoints.
+User-facing journeys and screenshots use production assets without DevBox chrome.
+`frontend-ui` runs both frontend checks, dead-code detection,
 documentation links, React review, development CSS/font HTTP smoke, and the
 controlled-backend workspace/public browser journey. Artifacts include desktop,
 phone, and reported-user-width captures plus failure traces.

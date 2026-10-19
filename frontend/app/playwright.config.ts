@@ -29,6 +29,7 @@ if (stagingBaseUrl && !stagingStorageState) {
  * exclude these scenarios to avoid provisioning 404s.
  */
 const controlledComposerPatterns = [
+  /recovers independent profile copies and retries only unfinished publishing/,
   /replaces one attachment without changing the count, order, or channel selections/,
   /reports an actionable processing failure and blocks publishing/,
   /reopens one Post with its ordered attachments and channel targets/,

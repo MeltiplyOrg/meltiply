@@ -678,11 +678,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const persistedOwnershipRef = useRef(new Set<string>());
   const removedAssetIdsRef = useRef<Set<string>>(new Set());
 
-  // The composition and its recovery record share one stable identity. Learning
-  // saved copy ids must not switch namespaces mid-batch and leave stale progress
-  // behind; only changing scope or opening another Post abandons this identity.
+  // Session identity stays stable when the first single-Post save learns its id,
+  // but subsequent edits must recover under that Post's durable identity. A new
+  // batch keeps its copy ids in one new-composition record instead.
   const composerIdentity = `${scope.workspaceId ?? "personal"}::${selectedBrandProfileId ?? "all"}::${initialPostId ?? "new"}`;
-  const recoveryNamespace = composerIdentity;
+  const recoveryNamespace = `${scope.workspaceId ?? "personal"}::${selectedBrandProfileId ?? "all"}::${postId ?? "new"}`;
   const [previousComposerIdentity, setPreviousComposerIdentity] = useState(composerIdentity);
   if (previousComposerIdentity !== composerIdentity) {
     setPreviousComposerIdentity(composerIdentity);
@@ -867,8 +867,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   }, []);
 
   /**
-   * Deletes the supplemental record superseded by a successful save. Saved copy
-   * ids live inside this stable composition namespace, never in a second key.
+   * Deletes the supplemental record superseded by a successful save. A single
+   * Post's later edits use its durable id; new batches retain all copy ids together.
    * Removal remains permitted after consent withdrawal and never clears another
    * composition that became active while the request was in flight.
    *
@@ -2013,6 +2013,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       const brandProfileId = selectedBrandProfileId;
       // Async completion must affect only the composition that submitted it.
       const recoveryNamespaceAtSubmit = recoveryNamespaceRef.current;
+      const composerIdentityAtSubmit = composerIdentityRef.current;
 
       setIsSubmitting(true);
       try {
@@ -2067,16 +2068,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               ]);
             },
           });
-          if (
-            controller.signal.aborted ||
-            composerIdentityRef.current !== recoveryNamespaceAtSubmit
-          )
+          if (controller.signal.aborted || composerIdentityRef.current !== composerIdentityAtSubmit)
             return;
           const anchor = profileCopiesRef.current.get(brandProfileId);
-          if (anchor?.postId) {
-            setCreatedPostId(anchor.postId);
-            setHydratedPostId(anchor.postId);
-          }
           await refreshWorkspace();
           if (!succeeded) {
             markDirty();
@@ -2152,7 +2146,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         await refreshWorkspace();
         onPostSuccess?.();
       } catch (error) {
-        if (composerIdentityRef.current !== recoveryNamespaceAtSubmit) return;
+        if (composerIdentityRef.current !== composerIdentityAtSubmit) return;
         // A rejected mutation that carried structured per-field violations names
         // each one in the fix-list; anything else falls back to the masked
         // user-facing message so internals never surface.

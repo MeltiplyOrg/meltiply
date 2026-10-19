@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expect, type Page } from "@playwright/test";
 import { activeBrandProfileName } from "./publication-fixtures";
@@ -53,10 +53,10 @@ async function allowFunctionalConsent(page: Page): Promise<void> {
 
 /**
  * Starts a serial local journey with the same single owner and an empty personal
- * Workspace. Resets only that fixture's domain rows in the dedicated loopback test
- * database; auth tables, owner credentials, and other RLS users are untouched.
- * Requires explicit MELTIPLY_DATABASE_TEST_ADMIN_URL. Remote/staging resets are
- * forbidden. A second browser uses signIn, never reset.
+ * Workspace. Resets only that fixture's domain rows and sign-in email budget in
+ * the dedicated loopback test database. Auth accounts/sessions and other users'
+ * budgets are untouched. Requires explicit MELTIPLY_DATABASE_TEST_ADMIN_URL;
+ * remote/staging resets are forbidden. A second browser uses signIn, never reset.
  */
 export async function openOwnerWorkspace(page: Page, credentials: GeneratedCredentials) {
   if (process.env.STAGING_E2E_BASE_URL) throw new Error("Owner fixture reset is local-only");
@@ -72,6 +72,9 @@ export async function openOwnerWorkspace(page: Page, credentials: GeneratedCrede
       `DELETE FROM organizations o USING users u WHERE o.personal_user_id = u.id AND u.auth_user_id = $1`,
       ["auth_user_local_alpha"],
     );
+    await pool.query(`DELETE FROM auth_rate_limits WHERE action = 'sign-in' AND subject = $1`, [
+      `email:${createHash("sha256").update(credentials.email.trim().toLowerCase()).digest("hex")}`,
+    ]);
   } finally {
     await pool.end();
   }

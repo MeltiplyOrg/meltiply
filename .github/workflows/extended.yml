@@ -207,7 +207,9 @@ jobs:
         working-directory: frontend/app
         env:
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
-        run: bun run test:e2e --trace on
+        run: |
+          bun run test:e2e --trace on
+          MELTIPLY_E2E_ACCEPTANCE=1 bun run test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies and retries only unfinished publishing" --trace on
       - name: Exercise redesigned workspace and public pages
         if: inputs.lane == 'frontend-ui'
         env:

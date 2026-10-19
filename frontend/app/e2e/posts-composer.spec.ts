@@ -1201,6 +1201,9 @@ test("keeps composer input and reports no saved state when saving fails", async 
   // Editing after a successful save is what makes the next save a claim the
   // composer has to earn; a failure here must not leave a saved indicator up.
   const caption = "Unsaved work survives a failed save";
+  // Filling does not move Playwright's pointer off the hover-paused saved toast.
+  // A real click into the editor leaves that notification before the next save.
+  await composerTextarea(page).click();
   await composerTextarea(page).fill(caption);
   await expect(page.getByText(/Unsaved changes are kept in this browser/i)).toBeVisible();
 

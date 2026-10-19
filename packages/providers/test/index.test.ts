@@ -98,6 +98,35 @@ describe("ProviderRegistry", () => {
     expect(capabilities.every((capability) => capability.analytics)).toBe(true);
   });
 
+  it("fails analytics coverage closed once any adapter is configured", () => {
+    const registry = new ProviderRegistry();
+    registry.register("instagram", {
+      capability: {
+        accepted_mime_types: [],
+        analytics: true,
+        asset_types: [],
+        comments: false,
+        connect_available: false,
+        max_caption_length: 2200,
+        max_file_size: null,
+        max_hashtags: 30,
+        max_media_count: null,
+        max_video_duration_sec: null,
+        min_media_count: 0,
+        multi_asset_types: [],
+        notes: [],
+        platform: "instagram",
+        publish: false,
+        reply: false,
+      },
+      listAnalytics: async () => ({ items: [] }),
+      transferModes: [],
+    });
+    const capabilities = registry.capabilities();
+    expect(capabilities.find(({ platform }) => platform === "instagram")?.analytics).toBe(true);
+    expect(capabilities.find(({ platform }) => platform === "tiktok")?.analytics).toBe(false);
+  });
+
   it("checks the declared caption boundary before a provider is activated", () => {
     const threads = new ProviderRegistry()
       .capabilities()

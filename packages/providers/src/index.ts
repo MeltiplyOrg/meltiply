@@ -240,20 +240,23 @@ export class ProviderRegistry {
   /**
    * Returns capability descriptors for all platforms defined in PLATFORM_IDS.
    * Registered adapters supply their active descriptors. Unconfigured providers
-   * retain their declared caption ceilings and analytics support while every
-   * runtime operation remains unavailable. Analytics is a static platform
-   * capability, not a runtime enablement flag: stored snapshots stay meaningful
-   * before credentials and live acceptance exist. Returned descriptors are
-   * isolated and follow canonical platform order.
+   * retain their declared caption ceilings while every runtime operation remains
+   * unavailable. Analytics follows the configured set: when no adapter is
+   * configured at all (the local fixture stack), every supported Platform keeps
+   * its declared analytics support so stored snapshots stay readable. Once any
+   * adapter exists, an unconfigured Platform reports no analytics and coverage
+   * fails closed. Returned descriptors are isolated and follow canonical
+   * platform order.
    */
   capabilities(): PlatformCapability[] {
+    const anyConfigured = this.#adapters.size > 0;
     return PLATFORM_IDS.map((platform) => {
       const adapter = this.#adapters.get(platform);
       return adapter
         ? structuredClone(adapter.capability)
         : {
             accepted_mime_types: [],
-            analytics: true,
+            analytics: !anyConfigured,
             asset_types: [],
             comments: false,
             connect_available: false,

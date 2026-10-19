@@ -67,6 +67,17 @@ keep test databases isolated, and never point these commands at production data.
 Do not run standalone integration suites alongside browser-upload jobs; the outbox
 relay claims shared due work.
 
+Exact scheduler-count tests must exclude unrelated in-flight demo fixtures without
+changing production eligibility or relaxing assertions. The Automation asset suite
+uses a separate connection's row locks only during each scheduler call, letting
+the real `SKIP LOCKED` query skip baseline rows. Release those locks before later
+provider-sync fixtures update the shared data.
+
+Doctor and teardown regression scripts default to fixture-owned host topology;
+container scenarios set their identities explicitly. Keep process and port probes,
+Compose resources, tunnel credentials, home directories, and cgroup inputs inside
+the fixture so running these checks cannot inspect or reap a developer's live stack.
+
 The native media processor runs as a `linux/amd64` Cloudflare Container using
 FFmpeg/libvips. ARM hosts need working amd64 emulation. Verify a real image with
 `./scripts/cloudflare-local/processor-smoke.sh`; see the

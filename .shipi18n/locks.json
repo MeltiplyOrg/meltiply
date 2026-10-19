@@ -195,7 +195,7 @@
     },
     "es::ui::Deleting the selected posts removes their drafts and stops their pending channels. Anything already published stays live on its platform — deleting a post here never removes a copy from a platform.": {
       "sourceHash": "363a259ccb5012f8",
-      "translationHash": "394bd8947f5f3ef1"
+      "translationHash": "dcab5c7c5c1c9d77"
     },
     "es::ui::Keep posts": {
       "sourceHash": "7b8264497b5f15a2",
@@ -371,7 +371,7 @@
     },
     "es::ui::Your private publishing workspace": {
       "sourceHash": "cd143bc370dcf6b1",
-      "translationHash": "6712deecb03b42f5"
+      "translationHash": "2d6357b822d9dbcd"
     },
     "es::ui::One place to shape what’s next.": {
       "sourceHash": "0240ac6abbbbe0ee",
@@ -555,11 +555,11 @@
     },
     "es::ui::I saved my codes — verify": {
       "sourceHash": "4d3e2f61b01be02a",
-      "translationHash": "c9d0026f08f138f7"
+      "translationHash": "c311814784d69173"
     },
     "es::ui::Cancel enrollment": {
       "sourceHash": "064fe5b422c634a1",
-      "translationHash": "cf84cfac87777f50"
+      "translationHash": "5ae1d6b843341037"
     },
     "es::ui::I saved my codes": {
       "sourceHash": "f8256e1d0bbd9999",
@@ -1067,7 +1067,7 @@
     },
     "es::ui::there": {
       "sourceHash": "e244f187f696561d",
-      "translationHash": "a29bb351ab702592"
+      "translationHash": "d7a38df7d098c138"
     },
     "es::ui::Welcome back, {name}. Let’s make your next post count.": {
       "sourceHash": "c3b0a993cc229602",
@@ -1087,15 +1087,15 @@
     },
     "es::ui::Inbox": {
       "sourceHash": "94835ea2fcf775cd",
-      "translationHash": "7fc12c8a456c1b48"
+      "translationHash": "f5b889e0254434fc"
     },
     "es::ui::Inbox pages": {
       "sourceHash": "0921bb5afd630093",
-      "translationHash": "d0c9eb160c7b4a0c"
+      "translationHash": "506295503a69e314"
     },
     "es::ui::Inbox replies": {
       "sourceHash": "6ab9f568b45767c3",
-      "translationHash": "f2f10969892a9a7b"
+      "translationHash": "6a28930fcf1d0142"
     },
     "es::ui::Included": {
       "sourceHash": "ba829a98b7994088",
@@ -1503,7 +1503,7 @@
     },
     "es::ui::Ready when your next post is": {
       "sourceHash": "4c9983739b20293a",
-      "translationHash": "8b8ac70dfcb1239b"
+      "translationHash": "e5dc6ee8774344d3"
     },
     "es::ui::Reconnect": {
       "sourceHash": "bf8a9eab9e7e141b",
@@ -1559,7 +1559,7 @@
     },
     "es::ui::Retry failed": {
       "sourceHash": "2630f65050626204",
-      "translationHash": "bc2cb451fb23fec4"
+      "translationHash": "62b13716606104b7"
     },
     "es::ui::Retrying…": {
       "sourceHash": "a16c8b1c95956fba",
@@ -1803,7 +1803,7 @@
     },
     "es::ui::This is the organization identity and access level enforced by the Meltiply API.": {
       "sourceHash": "08f1f4e0e3e5b242",
-      "translationHash": "9025ca6a2d0e54b6"
+      "translationHash": "d5185c0d1575a2cf"
     },
     "es::ui::This post promotes another brand or a third party.": {
       "sourceHash": "51789ef85e375508",
@@ -2119,7 +2119,7 @@
     },
     "es::ui::Intents in the selected range": {
       "sourceHash": "5db4683fa7b2e0c3",
-      "translationHash": "c8cb04f293967f54"
+      "translationHash": "56f35bd73a0929aa"
     },
     "es::ui::No distribution activity in this range yet.": {
       "sourceHash": "f86dba1c3f9b0e51",
@@ -2231,7 +2231,7 @@
     },
     "es::ui::Your storage or upload quota has been reached.": {
       "sourceHash": "275062c37c37ee16",
-      "translationHash": "3a1326bda68440ae"
+      "translationHash": "a8f492212dd182e5"
     },
     "es::ui::) and restart the development server.": {
       "sourceHash": "a457aba0ffaa8644",
@@ -2783,7 +2783,7 @@
     },
     "es::ui::AI Publishing Studio": {
       "sourceHash": "2ad097ac9eb396c7",
-      "translationHash": "b48a7793a80414b6"
+      "translationHash": "d488b84f2734ccbe"
     },
     "es::ui::API & Keys": {
       "sourceHash": "bf3639eaee1bc5a7",
@@ -2947,7 +2947,7 @@
     },
     "es::ui::Brand Profiles & Groups": {
       "sourceHash": "51c7accd21b63c44",
-      "translationHash": "8c07e7515bec1569"
+      "translationHash": "c738d8f2f6044d01"
     },
     "es::ui::Browse Available Channels": {
       "sourceHash": "a3e7188c480a0f1c",
@@ -2991,7 +2991,7 @@
     },
     "es::ui::Deleting this post removes its draft and stops its pending channels. Anything already published stays live on its platform — deleting a post here never removes a copy from a platform.": {
       "sourceHash": "3fa891c543fd68e0",
-      "translationHash": "0dbefc306603d9d4"
+      "translationHash": "eb8d45c500c1bb5c"
     },
     "es::ui::Cancel scheduled post?": {
       "sourceHash": "39a4bf695b4ebfa0",
@@ -4063,7 +4063,7 @@
     },
     "es::ui::Welcome to AI Studio. Connected to your publishing workspace. I can craft multi-platform campaigns, optimize queue schedules, analyze top posts, or suggest viral hooks.": {
       "sourceHash": "86788bf0babd8784",
-      "translationHash": "77a85efd038e6cf2"
+      "translationHash": "884aa4fa54a88a05"
     },
     "es::ui::What do you want to publish? Share across all selected destinations...": {
       "sourceHash": "50fa11c940c27e36",

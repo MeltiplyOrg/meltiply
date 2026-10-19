@@ -240,8 +240,11 @@ export class ProviderRegistry {
   /**
    * Returns capability descriptors for all platforms defined in PLATFORM_IDS.
    * Registered adapters supply their active descriptors. Unconfigured providers
-   * retain their declared caption ceilings while every runtime operation remains
-   * unavailable. Returned descriptors are isolated and follow canonical platform order.
+   * retain their declared caption ceilings and analytics support while every
+   * runtime operation remains unavailable. Analytics is a static platform
+   * capability, not a runtime enablement flag: stored snapshots stay meaningful
+   * before credentials and live acceptance exist. Returned descriptors are
+   * isolated and follow canonical platform order.
    */
   capabilities(): PlatformCapability[] {
     return PLATFORM_IDS.map((platform) => {
@@ -250,7 +253,7 @@ export class ProviderRegistry {
         ? structuredClone(adapter.capability)
         : {
             accepted_mime_types: [],
-            analytics: false,
+            analytics: true,
             asset_types: [],
             comments: false,
             connect_available: false,

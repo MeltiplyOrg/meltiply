@@ -93,6 +93,11 @@ describe("ProviderRegistry", () => {
     expect(capabilities.every((capability) => !capability.publish)).toBe(true);
   });
 
+  it("keeps declared analytics support for stored snapshots while providers are unconfigured", () => {
+    const capabilities = new ProviderRegistry().capabilities();
+    expect(capabilities.every((capability) => capability.analytics)).toBe(true);
+  });
+
   it("checks the declared caption boundary before a provider is activated", () => {
     const threads = new ProviderRegistry()
       .capabilities()

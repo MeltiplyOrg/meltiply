@@ -1864,8 +1864,13 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     });
     await expect(Effect.runPromise(service.calendar(env, beta, start, end))).resolves.toEqual([]);
 
+    const analyticsService = createCoreApiService(
+      new ProviderRegistry()
+        .capabilities()
+        .map((capability) => ({ ...capability, analytics: capability.platform !== "youtube" })),
+    );
     const analytics = await Effect.runPromise(
-      service.summaryAnalytics(env, alpha, {
+      analyticsService.summaryAnalytics(env, alpha, {
         end,
         start,
       }),
@@ -1880,7 +1885,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     expect(analytics.partial).toBe(true);
     // Coverage is derived from the Platforms actually published in scope, not
     // from every registered Platform. Alpha's only in-range publication is on
-    // YouTube, whose adapter has no analytics capability.
+    // YouTube, which this fixture deliberately marks analytics-unsupported.
     expect(analytics.unsupported_platforms).toEqual(["youtube"]);
     expect(analytics.by_platform).toEqual([
       expect.objectContaining({
@@ -2052,14 +2057,13 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   it("ranks the analytics Post cohort by stored metrics with honest coverage", async () => {
     const start = new Date("2026-10-01T00:00:00Z");
     const end = new Date("2026-10-31T23:59:59Z");
-    // The default registry leaves every adapter unconfigured, so opt Instagram
-    // into analytics to prove that coverage tracks the adapters that report it.
+    // Mark only Instagram analytics-capable so coverage must exclude the
+    // YouTube destination even though the shipped registry declares support.
     const analyticsService = createCoreApiService(
-      new ProviderRegistry()
-        .capabilities()
-        .map((capability) =>
-          capability.platform === "instagram" ? { ...capability, analytics: true } : capability,
-        ),
+      new ProviderRegistry().capabilities().map((capability) => ({
+        ...capability,
+        analytics: capability.platform === "instagram",
+      })),
     );
     const postIds = {
       mixed: "4f000000-0000-4000-8000-000000000070",
@@ -7084,9 +7088,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const revoke = vi.fn(async () => undefined);
     const registry = new ProviderRegistry();
     registry.register("youtube", {
-      capability: service
-        .platformCapabilities()
-        .find((capability) => capability.platform === "youtube")!,
+      capability: {
+        ...service.platformCapabilities().find((capability) => capability.platform === "youtube")!,
+        analytics: false,
+      },
       revoke,
       transferModes: [],
     });
@@ -7121,9 +7126,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
     const registry = new ProviderRegistry();
     registry.register("tiktok", {
-      capability: service
-        .platformCapabilities()
-        .find((capability) => capability.platform === "tiktok")!,
+      capability: {
+        ...service.platformCapabilities().find((capability) => capability.platform === "tiktok")!,
+        analytics: false,
+      },
       getPublicationRequirements: readRequirements,
       transferModes: [],
     });

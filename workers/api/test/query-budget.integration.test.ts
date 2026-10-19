@@ -267,7 +267,13 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       redirectUri: "https://query-budget.invalid/oauth/threads/callback",
     }),
   );
-  const configuredCapabilities = providerRegistry.capabilities();
+  // Force one platform analytics-unsupported so coverage classification stays
+  // inside the measured summary path.
+  const configuredCapabilities = providerRegistry
+    .capabilities()
+    .map((capability) =>
+      capability.platform === "tiktok" ? { ...capability, analytics: false } : capability,
+    );
   const coreService = createCoreApiService(configuredCapabilities);
   const postService = createPostApiService(configuredCapabilities);
   const app = createApiApp({

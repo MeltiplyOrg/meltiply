@@ -107,8 +107,12 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page.getByLabel("Views: 200")).toBeVisible();
   await expect(page.getByLabel("Published destinations: 1")).toBeVisible();
   await expect(table.locator("tbody tr")).toHaveCount(1);
+  // One platform is the whole cohort: the comparison card would be a single
+  // bar against empty space, so the page omits it.
+  await expect(page.getByRole("heading", { name: "Platform comparison" })).toBeHidden();
   await page.goBack();
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Platform comparison" })).toBeVisible();
 
   // Refresh re-reads stored metrics; it never implies a provider sync.
   await page.getByRole("button", { name: "Refresh analytics" }).click();

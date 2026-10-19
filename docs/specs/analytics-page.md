@@ -14,7 +14,8 @@ Contract change: approved in conversation on 2026-10-19
 
 Add a dedicated `/analytics` workspace route and sidebar section. The page is a
 read-only, Brand Profile-scoped overview of performance for published Posts:
-KPI totals, a platform comparison chart, and a ranked Post table. It uses the
+KPI totals, a platform comparison chart when at least two supported platforms
+have stored snapshots, and a ranked Post table. It uses the
 existing analytics snapshots already synced by the automation worker; it does not
 add provider sync, new metrics, or fabricated data.
 
@@ -25,19 +26,19 @@ trimmed except each Distribution's latest value.
 
 ## 2. Decisions
 
-| Area                | Decision                                                                                                                                                 |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Primary job         | Answer which platforms and Posts are earning attention, not publishing health or per-Post forensics.                                                     |
-| Scope               | Read-only, single-owner workspace, respects the active Brand Profile; "All Brand Profiles" is the aggregate.                                             |
-| Range semantics     | Cohort: Posts published in the selected range, with each Distribution's latest snapshot at or before the range end. The UI must say so.                  |
-| Metrics             | Views, likes, comments, shares, and published destinations. No reach, impressions, watch time, or derived engagement rate.                               |
-| Surfaces            | KPI totals, platform comparison bar chart, top-Posts table. No trend, demographics, follower growth, link clicks, AI insights, export, or email reports. |
-| Data-honesty states | Show last sync, unsupported platforms, and platforms awaiting first sync. Never render an unsupported metric as zero.                                    |
-| Posts surface       | Analytics lives only on `/analytics`. Do not restore metrics in the Posts list, grid, calendar, or detail dialog.                                        |
-| Contract            | Extend the OpenAPI contract with `getAnalyticsPosts` and additive per-platform/per-row sync timestamps.                                                  |
-| Charting            | EvilCharts Recharts bar chart, vendored from its shadcn registry, colored with existing CSS tokens.                                                      |
-| Navigation          | New top-level item in the order Posts, Analytics, Channels.                                                                                              |
-| URL state           | `?range=7d\|30d\|90d\|366d`, `?platform=<platform>`, `?metric=views\|likes\|comments\|shares`. Brand Profile remains global.                             |
+| Area                | Decision                                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Primary job         | Answer which platforms and Posts are earning attention, not publishing health or per-Post forensics.                                                                                                         |
+| Scope               | Read-only, single-owner workspace, respects the active Brand Profile; "All Brand Profiles" is the aggregate.                                                                                                 |
+| Range semantics     | Cohort: Posts published in the selected range, with each Distribution's latest snapshot at or before the range end. The UI must say so.                                                                      |
+| Metrics             | Views, likes, comments, shares, and published destinations. No reach, impressions, watch time, or derived engagement rate.                                                                                   |
+| Surfaces            | KPI totals, platform comparison bar chart when two or more supported platforms have snapshots, top-Posts table. No trend, demographics, follower growth, link clicks, AI insights, export, or email reports. |
+| Data-honesty states | Show last sync, unsupported platforms, and platforms awaiting first sync. Never render an unsupported metric as zero.                                                                                        |
+| Posts surface       | Analytics lives only on `/analytics`. Do not restore metrics in the Posts list, grid, calendar, or detail dialog.                                                                                            |
+| Contract            | Extend the OpenAPI contract with `getAnalyticsPosts` and additive per-platform/per-row sync timestamps.                                                                                                      |
+| Charting            | EvilCharts Recharts bar chart, vendored from its shadcn registry, colored with existing CSS tokens.                                                                                                          |
+| Navigation          | New top-level item in the order Posts, Analytics, Channels.                                                                                                                                                  |
+| URL state           | `?range=7d\|30d\|90d\|366d`, `?platform=<platform>`, `?metric=views\|likes\|comments\|shares`. Brand Profile remains global.                                                                                 |
 
 ## 3. Non-goals
 
@@ -82,7 +83,8 @@ Below the header:
    control, refresh button.
 2. **KPI row**: Views, Likes, Comments, Shares, Published destinations.
 3. **Platform comparison** card: EvilCharts horizontal bar chart of the selected
-   metric by platform.
+   metric by platform. Omitted when fewer than two supported platforms have a
+   stored snapshot; a single platform has nothing to compare.
 4. **Top Posts** card: table of the ten highest Posts for the selected metric,
    with a Load more action when the API reports more rows.
 
@@ -117,7 +119,12 @@ No percentage, delta, or target is shown. Do not compute an engagement rate.
 
 ### 4.5 Platform comparison chart
 
-- EvilCharts Recharts horizontal bar chart.
+- EvilCharts Recharts horizontal bar chart, shown only when at least two
+  supported platforms have a snapshot. With one platform the card is omitted
+  instead of rendering a single bar against empty space.
+- Bars are sorted by the selected metric descending, capped at a slim 28px
+  thickness, and labeled with their exact value. The chart height follows the
+  number of bars instead of reserving a fixed large canvas.
 - One bar per supported platform with at least one published destination and at
   least one snapshot (`last_synced_at !== null`).
 - Value: the selected metric from `by_platform`.

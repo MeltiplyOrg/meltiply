@@ -28,9 +28,9 @@ import {
   parseAnalyticsSearchParams,
   resolveAnalyticsEmptyState,
 } from "./analytics-helpers";
-import { AnalyticsToolbar, analyticsRangeLabel } from "./analytics-toolbar";
+import { AnalyticsToolbar, analyticsMetricLabel, analyticsRangeLabel } from "./analytics-toolbar";
 import { MetricCards } from "./metric-cards";
-import { PlatformMetricChart } from "./platform-metric-chart";
+import { comparablePlatformRows, PlatformMetricChart } from "./platform-metric-chart";
 import { TopPostsTable } from "./top-posts-table";
 import type { Platform } from "@/types";
 
@@ -172,6 +172,9 @@ export function AnalyticsView(): React.ReactElement {
     .map(platformDisplayName)
     .join(", ");
   const emptyState = summary ? resolveAnalyticsEmptyState(summary) : null;
+  const comparableRowCount = summary
+    ? comparablePlatformRows(summary.by_platform, summary.unsupported_platforms).length
+    : 0;
   const rangeLabel = analyticsRangeLabel(range, t);
 
   const refresh = () => {
@@ -300,19 +303,26 @@ export function AnalyticsView(): React.ReactElement {
                 "Metrics are cumulative snapshots for posts published in this range, not activity during it.",
               )}
             </p>
-            <Card>
-              <CardHeader className="p-4 pb-0">
-                <CardTitle className="text-sm">{t("Platform comparison")}</CardTitle>
-              </CardHeader>
-              <CardContent className="p-4">
-                <PlatformMetricChart
-                  rows={summary.by_platform}
-                  metric={metric}
-                  rangeLabel={rangeLabel}
-                  unsupportedPlatforms={summary.unsupported_platforms}
-                />
-              </CardContent>
-            </Card>
+            {comparableRowCount > 1 && (
+              <Card>
+                <CardHeader className="p-4 pb-0">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <CardTitle className="text-sm">{t("Platform comparison")}</CardTitle>
+                    <span className="text-xs font-normal text-ink-3">
+                      {analyticsMetricLabel(metric, t)}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-4">
+                  <PlatformMetricChart
+                    rows={summary.by_platform}
+                    metric={metric}
+                    rangeLabel={rangeLabel}
+                    unsupportedPlatforms={summary.unsupported_platforms}
+                  />
+                </CardContent>
+              </Card>
+            )}
             <Card>
               <CardHeader className="p-4 pb-0">
                 <CardTitle className="text-sm">{t("Top posts")}</CardTitle>

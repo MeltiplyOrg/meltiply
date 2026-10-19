@@ -30,6 +30,16 @@ interface PlatformMetricChartProps {
   unsupportedPlatforms: readonly PlatformMetrics["platform"][];
 }
 
+/** Supported platforms with at least one stored snapshot in this cohort. */
+export function comparablePlatformRows(
+  rows: readonly PlatformMetrics[],
+  unsupportedPlatforms: readonly PlatformMetrics["platform"][],
+): PlatformMetrics[] {
+  return rows.filter(
+    (row) => !unsupportedPlatforms.includes(row.platform) && row.last_synced_at !== null,
+  );
+}
+
 /**
  * Renders one tooltip row: the platform, the selected metric's exact value, and
  * how many published destinations produced it.
@@ -84,20 +94,27 @@ export function PlatformMetricChart({
   const reduceMotion = useReducedMotion();
   const metricLabel = analyticsMetricLabel(metric, t);
   const supportedRows = rows.filter((row) => !unsupportedPlatforms.includes(row.platform));
-  const chartRows = supportedRows.filter((row) => row.last_synced_at !== null);
+  const chartRows = comparablePlatformRows(rows, unsupportedPlatforms);
   const awaiting = supportedRows.filter((row) => row.last_synced_at === null);
-  const data: PlatformChartDatum[] = chartRows.map((row) => ({
-    destinations: row.post_count,
-    label: platformDisplayName(row.platform),
-    metric: row[metric],
-    platform: row.platform,
-  }));
+  const data: PlatformChartDatum[] = chartRows
+    .map((row) => ({
+      destinations: row.post_count,
+      label: platformDisplayName(row.platform),
+      metric: row[metric],
+      platform: row.platform,
+    }))
+    .sort((left, right) => right.metric - left.metric || left.label.localeCompare(right.label));
   const config = {
     metric: {
       colors: { dark: ["var(--accent)"], light: ["var(--accent)"] },
       label: metricLabel,
     },
   } satisfies ChartConfig;
+
+  // A single Platform has nothing to compare against. The page omits this card
+  // in that case, but keep the component itself honest and compact if reused.
+  const chartHeight =
+    data.length <= 2 ? "h-28" : data.length === 3 ? "h-36" : data.length === 4 ? "h-44" : "h-52";
 
   if (data.length === 0) {
     return (
@@ -113,6 +130,12 @@ export function PlatformMetricChart({
       </div>
     );
   }
+
+  // Reserve room for the exact-value labels at the right edge of each bar.
+  const labelMargin = Math.max(
+    48,
+    16 + Math.max(...data.map((row) => formatAnalyticsInteger(row.metric, language).length)) * 7,
+  );
 
   return (
     <div className="flex flex-col gap-2">
@@ -131,7 +154,8 @@ export function PlatformMetricChart({
           animationType={reduceMotion ? "none" : "left-to-right"}
           barRadius={3}
           barCategoryGap={8}
-          className="aspect-auto h-64"
+          chartProps={{ margin: { bottom: 0, left: 0, right: labelMargin, top: 0 } }}
+          className={`aspect-auto ${chartHeight}`}
         >
           <EvilBarChart.Grid horizontal={false} vertical />
           <EvilBarChart.XAxis
@@ -144,7 +168,20 @@ export function PlatformMetricChart({
             cursor={false}
             content={<PlatformMetricTooltipContent language={language} metricLabel={metricLabel} />}
           />
-          <EvilBarChart.Bar dataKey="metric" radius={3} />
+          <EvilBarChart.Bar
+            dataKey="metric"
+            radius={3}
+            barProps={{
+              label: {
+                fill: "var(--ink-2)",
+                fontSize: 11,
+                formatter: (value: unknown) =>
+                  typeof value === "number" ? formatAnalyticsInteger(value, language) : "",
+                position: "right",
+              },
+              maxBarSize: 28,
+            }}
+          />
         </EvilBarChart>
       </div>
       <table className="sr-only">

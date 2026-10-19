@@ -196,6 +196,25 @@ afterEach(() => {
 
 describe("analytics view", () => {
   it("renders the cohort KPIs, coverage, chart, and ranked Posts", () => {
+    state.summary = {
+      data: summary({
+        by_platform: [
+          platformRow(),
+          platformRow({
+            comments: 0,
+            last_synced_at: "2026-10-30T12:00:00Z",
+            likes: 1,
+            platform: "threads",
+            post_count: 1,
+            shares: 0,
+            views: 80,
+          }),
+        ],
+      }),
+      error: null,
+      isFetching: false,
+      isPending: false,
+    };
     renderView();
     expect(screen.getByRole("heading", { name: "Analytics" })).toBeInTheDocument();
     expect(screen.getByLabelText("Views: 300")).toBeInTheDocument();
@@ -203,6 +222,13 @@ describe("analytics view", () => {
     expect(screen.getByRole("heading", { name: "Top posts" })).toBeInTheDocument();
     expect(screen.getByText(/Metrics are cumulative snapshots/)).toBeInTheDocument();
     expect(screen.getByText(/Last synced/)).toBeInTheDocument();
+  });
+
+  it("omits the comparison card when only one platform has stored metrics", () => {
+    state.searchParams = new URLSearchParams("metric=views&range=30d&platform=instagram");
+    renderView();
+    expect(screen.queryByRole("heading", { name: "Platform comparison" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Top posts" })).toBeInTheDocument();
   });
 
   it("reloads stored metrics and updates shareable URL state", () => {

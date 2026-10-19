@@ -42,6 +42,7 @@ export const SelectValue = SelectPrimitive.Value;
  * Carries the canonical field vocabulary (30px control height, control radius,
  * strong field boundary, 13px text, accent focus ring) so a select sitting
  * beside an {@link import("./input").Input} reads as the same control family.
+ * Coarse pointers get a 44px minimum target without changing desktop density.
  *
  * @param className - Optional CSS classes for custom sizing, background, or borders.
  * @param children - Trigger content, usually {@link SelectValue}.
@@ -65,7 +66,7 @@ export const SelectTrigger = React.forwardRef<
     <SelectPrimitive.Trigger
       ref={ref}
       className={cn(
-        "flex h-control w-full items-center justify-between gap-2 whitespace-nowrap rounded-control border border-line-strong bg-field px-2.5 text-[13px] transition-colors duration-150 placeholder:text-ink-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45 [&>span]:line-clamp-1",
+        "flex h-control min-w-0 w-full touch-manipulation items-center justify-between gap-2 whitespace-nowrap rounded-control border border-line-strong bg-field px-2.5 text-[13px] transition-colors duration-150 pointer-coarse:min-h-11 placeholder:text-ink-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45 [&>span]:line-clamp-1",
         className,
       )}
       {...props}

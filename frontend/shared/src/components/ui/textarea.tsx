@@ -24,6 +24,7 @@ export interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextArea
  * dynamic-geometry seam) after every commit and on input, because the browser
  * offers no stylesheet form of content sizing. The height is never transitioned,
  * so typing resizes the box immediately rather than animating layout.
+ * Coarse pointers retain at least 16px text to prevent native phone focus zoom.
  *
  * @param props - Standard HTML textarea attributes (`value`, `onChange`, `placeholder`, `rows`, etc.)
  *                and forwarded element ref.
@@ -74,7 +75,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     return (
       <textarea
         className={cn(
-          "flex min-h-[80px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+          "flex min-h-[80px] min-w-0 w-full rounded-md border border-border bg-background px-3 py-2 text-sm shadow-sm pointer-coarse:text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
         ref={assignRef}

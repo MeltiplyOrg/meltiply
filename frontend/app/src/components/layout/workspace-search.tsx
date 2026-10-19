@@ -47,7 +47,7 @@ export function WorkspaceSearch({
       }}
     >
       <CenterDialogContent
-        className="max-w-xl overflow-hidden p-0"
+        className="flex max-w-xl flex-col gap-0 overflow-hidden p-0 sm:p-0"
         aria-describedby="workspace-search-description"
         onOpenAutoFocus={() => {
           returnFocus.current =
@@ -66,7 +66,7 @@ export function WorkspaceSearch({
             "Find workspace pages and Brand Profiles. Search posts and channels from their page toolbar.",
           )}
         </CenterDialogDescription>
-        <div className="flex items-center gap-3 border-b border-line px-4 py-3 pr-10">
+        <div className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3 pr-12">
           <Search className="size-4 shrink-0 text-ink-3" />
           <Input
             aria-label={t("Search pages and Brand Profiles")}
@@ -76,7 +76,7 @@ export function WorkspaceSearch({
             className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
           />
         </div>
-        <div className="max-h-[55dvh] overflow-y-auto p-2" data-lenis-prevent>
+        <div className="min-h-0 max-h-[55dvh] overflow-y-auto p-2" data-lenis-prevent>
           {destinations.length > 0 && (
             <section aria-label={t("Workspace")}>
               <h2 className="px-2 pb-1 pt-2 text-(length:--font-size-micro) font-medium text-ink-3">
@@ -134,7 +134,7 @@ export function WorkspaceSearch({
             </p>
           )}
         </div>
-        <p className="border-t border-line bg-inset px-4 py-2 text-(length:--font-size-micro) text-ink-3">
+        <p className="shrink-0 border-t border-line bg-inset px-4 py-2 text-(length:--font-size-micro) text-ink-3">
           {t("Tab to move · Enter to open · Esc to close")}
         </p>
       </CenterDialogContent>

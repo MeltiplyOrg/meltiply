@@ -19,6 +19,8 @@ export type InputProps = React.InputHTMLAttributes<HTMLInputElement>;
  * Checkboxes and radios opt out of text-input chrome, retaining compact native control
  * geometry and the theme accent. Radio groups preserve native keyboard selection while
  * using the same lint-sanctioned primitive as every other form control.
+ * Text fields use 16px text and a 44px minimum height on coarse pointers to
+ * avoid focus zoom on phones; native checkbox/radio geometry stays unchanged.
  *
  * @param className - Additional CSS class names merged onto the input element.
  * @param type - Native HTML input type; checkbox and radio use compact control styling.
@@ -39,7 +41,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         className={cn(
           type === "checkbox" || type === "radio"
             ? "size-4 shrink-0 accent-primary transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-            : "flex h-[30px] w-full rounded-control border border-line-strong bg-field px-2.5 py-1 text-[13px] transition-colors duration-150 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-ink-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45",
+            : "flex h-[30px] min-w-0 w-full rounded-control border border-line-strong bg-field px-2.5 py-1 text-[13px] transition-colors duration-150 pointer-coarse:min-h-11 pointer-coarse:text-base file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-ink-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45",
           className,
         )}
         ref={ref}

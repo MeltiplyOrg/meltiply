@@ -6,15 +6,17 @@ This document owns layout and scroll boundaries for the current Gr8r-adapted int
 
 `NavigationShell` owns the viewport frame, persistent header, desktop rail, mobile navigation dialog, skip link, and route working column. Routes own their headings, toolbars, content gutters, and scroll regions; the shell does not add a second padded card.
 
-| Region            | Current geometry and behavior                                                                                                       |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop rail      | Visible from 1024px; 252px expanded or 52px collapsed. Destinations scroll independently of the account/footer controls.            |
-| Header            | 52px below 640px; 46px from 640px. Contains navigation access, workspace/profile context, page title, and jump search.              |
-| Mobile navigation | Below 1024px, the header opens the shared navigation dialog. Posts, Channels, Settings, help, and account actions remain reachable. |
-| Working column    | `min-w-0` and `min-h-0` preserve bounded scrolling. No document-level horizontal overflow.                                          |
-| Route gutters     | Normally 16px on phones and 24px from the small breakpoint. A collection owns its own edge treatment.                               |
+| Region            | Current geometry and behavior                                                                                                                                                                                    |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop rail      | Visible from 1024px; 252px expanded or 52px collapsed. Destinations scroll independently of the account/footer controls.                                                                                         |
+| Header            | 52px below 640px; 46px from 640px. Contains navigation access, workspace/profile context, page title, and jump search.                                                                                           |
+| Mobile navigation | Below 1024px, the header opens a full-height, at-most-320px panel containing the same `SidebarNav` as desktop, without its collapse control. Help, account settings, theme choices, and sign-out stay available. |
+| Working column    | `min-w-0` and `min-h-0` preserve bounded scrolling. No document-level horizontal overflow.                                                                                                                       |
+| Route gutters     | Normally 16px on phones and 24px from the small breakpoint. A collection owns its own edge treatment.                                                                                                            |
 
 Posts is one destination. Its view switcher belongs in the page toolbar, in **Table → Calendar → Grid** order. Brand Profiles remain collection scope and a Channels tab; jump search belongs in the header.
+
+The shell and drawer frames use the shared safe-area tokens for viewport cutouts and home indicators. Coarse-pointer buttons, select triggers, and menu rows have 44px minimum heights; text fields retain 16px text to avoid phone focus zoom. Fine-pointer controls keep desktop density.
 
 ## Collection surfaces
 
@@ -51,6 +53,8 @@ All sections share one layout; Security does not get a separate width rule.
 `CenterDialog` owns focused forms and search; `CenterAlertDialog` owns destructive confirmations. `SideDialog` owns large Post inspection: a 620px right-edge drawer, a compact 46px toolbar, and the full-viewport phone layout. It is a non-modal companion — the workspace stays clickable so another Post is inspected in place — and it never dims or blocks the surface behind it. Composition uses the same drawer: **Shared Content**, media, and selected Channels' customization/settings sections form a continuous scrollable editor. Wide panels split into equal editor and destinations/publishing columns with independent overflow; the draft's save state and single primary action remain pinned below. Shrinkable ancestors bound the columns, and sections do not shrink into one another. The split is a container query on the panel, so narrow panels stack in one reading order inside the drawer's native scrolling body instead of squeezing two columns.
 
 Dialog bodies own native scrolling and keep `data-lenis-prevent` where the document's smooth-scroll controller must not intercept them. Primitives own Escape, scroll lock, and opener restoration; the side inspector deliberately leaves focus untrapped so the workspace stays reachable, while the centered dialogs keep containment.
+
+Centered forms and confirmations have 16px viewport gutters and a maximum height of `100dvh - 32px`; their canonical primitives own native scrolling rather than each caller setting a `vh` ceiling. Jump search retains a shrinkable results viewport between its input and keyboard-help row. Mobile navigation explicitly uses full viewport height instead.
 
 `BulkSelectionBar` is portalled outside clipped collection viewports. Its inverse-ink pill stays 24px above the safe-area edge and within the available viewport width.
 

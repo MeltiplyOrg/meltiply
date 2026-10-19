@@ -48,6 +48,14 @@
   --font-size-micro: 11px;
   --icon-stroke: 1.8;
 
+  /* Viewport cutouts and home indicators, shared by shell and dialog frames. */
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --safe-control-bottom: max(0.625rem, var(--safe-area-bottom));
+  --safe-content-bottom: max(2.5rem, var(--safe-area-bottom));
+
   --page: #fbfaf8;
   --canvas: #f4f3f0;
   --surface: #ffffff;

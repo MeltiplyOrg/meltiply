@@ -474,7 +474,7 @@ html.theme-changing *::after {
 @layer components {
   [data-menu-surface] {
     min-width: 200px;
-    max-height: min(420px, 70vh);
+    max-height: min(420px, 70dvh);
     /* `overflow-y: auto` would otherwise force horizontal scrolling too; menus
        never scroll sideways — long rows truncate instead. */
     overflow-x: hidden;
@@ -515,6 +515,12 @@ html.theme-changing *::after {
     text-align: left;
     outline: none;
     transition: color 150ms ease;
+  }
+
+  @media (pointer: coarse) {
+    [data-menu-item] {
+      min-height: 44px;
+    }
   }
 
   [data-menu-item][data-disabled] {

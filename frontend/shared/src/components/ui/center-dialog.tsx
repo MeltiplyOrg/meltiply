@@ -66,6 +66,8 @@ export type CenterDialogContentProps = React.ComponentPropsWithoutRef<
  * close pops out to the bottom. Radix retains content through exit, traps
  * focus, and restores it on close. Shared CSS owns the implemented transitions;
  * callers customize content and layout without duplicating the primitive.
+ * The surface bounds itself to the dynamic viewport and owns native overflow;
+ * short screens and software-keyboard resizes never put form actions offscreen.
  */
 export const CenterDialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
@@ -78,15 +80,16 @@ export const CenterDialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={boxRef}
         className={cn(
-          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg content-start translate-x-[-50%] translate-y-[-50%] gap-4 overflow-x-clip border border-border bg-background p-6 shadow-lg sm:rounded-lg",
+          "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] content-start translate-x-[-50%] translate-y-[-50%] gap-4 overflow-x-hidden overflow-y-auto overscroll-contain rounded-window border border-border bg-background p-4 shadow-lg sm:p-6",
           "dialog-bottom-popup",
           className,
         )}
         data-dialog-surface=""
+        data-lenis-prevent=""
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+        <DialogPrimitive.Close className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-sm opacity-70 ring-offset-background transition-opacity pointer-coarse:size-11 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
           <X className="size-4" />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>
@@ -123,7 +126,7 @@ export const CenterDialogFooter = ({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
-    className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:gap-2", className)}
+    className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
     {...props}
   />
 );

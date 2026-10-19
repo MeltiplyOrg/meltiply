@@ -39,6 +39,8 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
  * with the content sliding sideways, and a confirmation opened on its own pops
  * up and pops out from the bottom edge. Traps focus and blocks outside dismissal
  * so destructive actions require an explicit answer.
+ * Dynamic-viewport bounds and native scrolling keep both answers reachable on
+ * phones and short landscape screens without weakening confirmation semantics.
  */
 export const CenterAlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
@@ -51,9 +53,10 @@ export const CenterAlertDialogContent = React.forwardRef<
       <AlertDialogPrimitive.Content
         ref={boxRef}
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md content-start -translate-x-1/2 -translate-y-1/2 gap-4 overflow-x-clip rounded-window border border-line bg-surface p-6 shadow-overlay dialog-bottom-popup",
+          "fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-md max-h-[calc(100dvh-2rem)] content-start -translate-x-1/2 -translate-y-1/2 gap-4 overflow-x-hidden overflow-y-auto overscroll-contain rounded-window border border-line bg-surface p-4 shadow-overlay dialog-bottom-popup sm:p-6",
           className,
         )}
+        data-lenis-prevent=""
         data-dialog-surface=""
         {...props}
       >

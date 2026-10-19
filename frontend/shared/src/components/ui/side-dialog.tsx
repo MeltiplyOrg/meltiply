@@ -99,7 +99,7 @@ export function SideDialog({
             if (active?.isConnected) active.focus();
           }}
           className={cn(
-            "fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 flex-col overflow-hidden border-l border-line bg-surface shadow-overlay outline-none sm:max-w-155",
+            "fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 flex-col overflow-hidden border-l border-line bg-surface pt-(--safe-area-top) shadow-overlay outline-none sm:max-w-155",
             className,
           )}
         >
@@ -148,7 +148,7 @@ export function SideDialog({
             data-lenis-prevent=""
             data-side-dialog-body=""
             className={cn(
-              "min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-10 pt-4 sm:px-6 sm:pb-8 sm:pt-5",
+              "min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-(--safe-content-bottom) pt-4 sm:px-6 sm:pb-8 sm:pt-5",
               bodyClassName,
             )}
           >

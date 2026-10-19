@@ -73,7 +73,7 @@ export function workspaceViewPath(view: WorkspaceView): string {
  *   (the default). The account identity row opts out so the travelling pill
  *   never lights the sidebar's account block; that row paints its own fill.
  */
-export const SidebarNavRow = forwardRef<
+const SidebarNavRow = forwardRef<
   HTMLButtonElement,
   ButtonProps & { collapsed?: boolean; active?: boolean; glideTarget?: boolean }
 >(({ collapsed = false, active = false, glideTarget = true, title, className, ...props }, ref) => {
@@ -110,6 +110,8 @@ export interface SidebarNavProps {
   currentView: WorkspaceView;
   onNavigate: (view: WorkspaceView, options?: { search?: string }) => void;
   className?: string;
+  /** Mobile navigation reuses the full rail without a collapse-only desktop control. */
+  collapsible?: boolean;
 }
 
 const HEADING_CLASS =
@@ -145,7 +147,12 @@ function AccountAvatar({ src, className }: { src?: string | null; className?: st
  * row painting its own hover fill; rows stay `relative z-10` so their labels and
  * selected surface read above the travelling background.
  */
-export function SidebarNav({ currentView, onNavigate, className }: SidebarNavProps) {
+export function SidebarNav({
+  currentView,
+  onNavigate,
+  className,
+  collapsible = true,
+}: SidebarNavProps) {
   const { user, workspaceName } = useWorkspace();
   const { t } = useI18n();
   const { requestedTheme, setTheme } = useTheme();
@@ -158,7 +165,7 @@ export function SidebarNav({ currentView, onNavigate, className }: SidebarNavPro
       ref={asideRef}
       className={cn(
         "relative flex h-full flex-col border-r border-line bg-canvas",
-        collapsed ? "w-sidebar-collapsed" : "w-sidebar",
+        !collapsible ? "w-full" : collapsed ? "w-sidebar-collapsed" : "w-sidebar",
         className,
       )}
       aria-label={t("Workspace navigation")}
@@ -167,7 +174,9 @@ export function SidebarNav({ currentView, onNavigate, className }: SidebarNavPro
           the pill. The 26px snap radius crosses the nav divider (~21px) without
           lighting a row from the identity header above the list. */}
       <SidebarGlideHighlight containerRef={asideRef} snapThreshold={26} />
-      <div className="flex h-topbar shrink-0 items-center gap-2 px-3">
+      <div
+        className={cn("flex h-topbar shrink-0 items-center gap-2 px-3", !collapsible && "pr-12")}
+      >
         <BrandMark className="size-5.5 shrink-0 text-ink" />
         {!collapsed && (
           <>
@@ -177,16 +186,18 @@ export function SidebarNav({ currentView, onNavigate, className }: SidebarNavPro
             >
               {name}
             </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 shrink-0"
-              onClick={() => setCollapsed(true)}
-              aria-label={t("Collapse sidebar")}
-              title={t("Collapse sidebar")}
-            >
-              <PanelLeftClose className="size-3.5" />
-            </Button>
+            {collapsible && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-6 shrink-0"
+                onClick={() => setCollapsed(true)}
+                aria-label={t("Collapse sidebar")}
+                title={t("Collapse sidebar")}
+              >
+                <PanelLeftClose className="size-3.5" />
+              </Button>
+            )}
           </>
         )}
       </div>

@@ -2,18 +2,12 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Menu, Search } from "lucide-react";
 import { useWorkspace } from "@/context/workspace.context";
-import {
-  SidebarNav,
-  SidebarNavRow,
-  WORKSPACE_NAV_ITEMS,
-  type WorkspaceView,
-} from "@/components/primitives/sidebar-nav";
+import { SidebarNav, type WorkspaceView } from "@/components/primitives/sidebar-nav";
 import { Button } from "@meltiply/ui/button";
 import { BrandMark } from "@meltiply/ui/brand-mark";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { CenterDialog, CenterDialogContent, CenterDialogTitle } from "@meltiply/ui/center-dialog";
 import { Toaster } from "@meltiply/ui/sileo";
-import { preloadDashboardRoute } from "@/lib/preload-routes";
 import { formatHotkey, hotkeys, useHotkey } from "@/lib/hotkeys";
 import { useI18n } from "@/lib/i18n";
 import { WorkspaceSearch } from "./workspace-search";
@@ -49,7 +43,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
         ? t("Channels")
         : t("Settings");
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-page text-ink antialiased">
+    <div className="flex h-dvh w-full overflow-hidden bg-page pt-(--safe-area-top) pr-(--safe-area-right) pl-(--safe-area-left) text-ink antialiased">
       <a
         href="#workspace-content"
         className="sr-only z-50 rounded-control border border-accent bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:left-3 focus:top-2"
@@ -100,31 +94,16 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
         </header>
         <CenterDialog open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
           <CenterDialogContent
-            className="dialog-edge-panel fixed left-0 right-0 top-0 w-full max-w-none translate-x-0 translate-y-0 rounded-none rounded-b-window border-b border-line bg-canvas p-4 shadow-overlay sm:left-0 sm:top-0 lg:hidden"
+            className="dialog-edge-panel fixed left-0 right-auto top-0 flex h-dvh max-h-dvh w-80 max-w-full translate-x-0 translate-y-0 rounded-none border-r border-line bg-canvas p-0 pt-(--safe-area-top) pb-(--safe-area-bottom) shadow-overlay sm:p-0 sm:pt-(--safe-area-top) sm:pb-(--safe-area-bottom) lg:hidden"
             aria-describedby={undefined}
           >
-            <CenterDialogTitle className="text-sm font-semibold">
-              {t("Workspace navigation")}
-            </CenterDialogTitle>
-            <nav className="grid grid-cols-2 gap-2 pt-3">
-              {WORKSPACE_NAV_ITEMS.map((item) => {
-                const Icon = item.mobileIcon;
-                return (
-                  <SidebarNavRow
-                    key={item.id}
-                    active={currentView === item.id}
-                    className="h-11"
-                    onClick={() => handleNavClick(item.id)}
-                    onMouseEnter={() => preloadDashboardRoute(item.id)}
-                    onFocus={() => preloadDashboardRoute(item.id)}
-                    aria-current={currentView === item.id ? "page" : undefined}
-                  >
-                    <Icon className="size-4" />
-                    {t(item.label)}
-                  </SidebarNavRow>
-                );
-              })}
-            </nav>
+            <CenterDialogTitle className="sr-only">{t("Workspace navigation")}</CenterDialogTitle>
+            <SidebarNav
+              currentView={currentView}
+              onNavigate={handleNavClick}
+              collapsible={false}
+              className="min-h-0 w-full border-r-0"
+            />
           </CenterDialogContent>
         </CenterDialog>
         <main

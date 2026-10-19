@@ -45,7 +45,7 @@ const sizeStyles: Record<NonNullable<ButtonProps["size"]>, string> = {
   default: "h-[30px] px-[11px] text-[12.5px]",
   sm: "h-[26px] px-2 text-xs",
   lg: "h-9 px-3.5 text-[13.5px]",
-  icon: "size-[30px]",
+  icon: "size-[30px] pointer-coarse:min-w-11",
 };
 
 /**
@@ -57,6 +57,8 @@ const sizeStyles: Record<NonNullable<ButtonProps["size"]>, string> = {
  * only matches icons without an authored `size-*` utility, so callers keep
  * compact icons (e.g. `size-3`, `size-full`) at their exact dimensions while
  * unsized icons still get the standard default.
+ * Coarse pointers get a 44px minimum height (and square icon targets); compact
+ * fine-pointer geometry stays unchanged even on a narrow desktop window.
  *
  * @param options.variant - Visual style variant; defaults to `default`.
  * @param options.size - Size preset; defaults to `default`.
@@ -69,7 +71,7 @@ export function buttonVariants(options?: {
   className?: string;
 }): string {
   return cn(
-    "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-45 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0",
+    "inline-flex touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-colors duration-150 pointer-coarse:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-45 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0",
     variantStyles[options?.variant ?? "default"],
     sizeStyles[options?.size ?? "default"],
     options?.className,

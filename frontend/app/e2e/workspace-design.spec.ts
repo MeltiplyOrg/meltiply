@@ -590,7 +590,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     .getByRole("button", { name: "Remove Post status filter", exact: true })
     .click();
   await page.keyboard.press("Escape");
-  await expect(postsFilterPanel).toHaveAttribute("data-state", "closed");
+  await expect(postsFilterPanel).toBeHidden();
   await expect(
     page.locator("aside").getByRole("button", { name: "Table", exact: true }),
   ).toHaveCount(0);

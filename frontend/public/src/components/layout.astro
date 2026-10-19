@@ -85,7 +85,7 @@ const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
     <meta name="twitter:card" content="summary" />
     <link rel="icon" type="image/svg+xml" href={favicon} />
   </head>
-  <body>
+  <body class="public-canvas">
     <!-- THESIS: Meltiply's public surfaces share the publishing workspace's visual system.
          OWN-WORLD: Warm stone surfaces, indigo actions, Geist, compact controls.
          STORY: Understand publishing, then find setup and recovery guidance.
@@ -95,3 +95,15 @@ const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
     <slot />
   </body>
 </html>
+
+<style>
+  /* One public-only canvas, painted beneath content rather than as an overlay.
+     Shared ink keeps its quiet contrast consistent across both palettes. */
+  .public-canvas {
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent 0 7px,
+      color-mix(in srgb, var(--ink) 6%, transparent) 7px 8px
+    );
+  }
+</style>

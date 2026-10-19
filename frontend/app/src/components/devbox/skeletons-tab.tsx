@@ -3,8 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Switch } from "@meltiply/ui/switch";
-import { useTheme, type Theme } from "@/lib/theme";
-import { themeOriginFromEvent } from "@meltiply/ui/theme-transition";
+import { useTheme } from "@/lib/theme";
 import { cn } from "@meltiply/ui/utils";
 
 import { type DevBoxLatency } from "./devbox-state";
@@ -57,7 +56,7 @@ interface SkeletonsTabProps {
  * The 390px frame and breakpoint pill cover the responsive gate; Capture and
  * Compare record placeholder vs resolved geometry; the Agentation toggle
  * mounts the visual feedback tool from the same control surface.
- * Theme segments anchor the shared ink transition to the activated button.
+ * Theme segments apply the same immediate Light/Dark/System preference as Settings.
  */
 export function SkeletonsTab({
   latency,
@@ -122,14 +121,6 @@ export function SkeletonsTab({
     if (audit) setDiffs(diffSkeletonRects(audit));
   };
 
-  /** Anchors the theme wave to the selected segment's button for pointer and keyboard activation. */
-  const selectTheme = (next: Theme, control: HTMLButtonElement) => {
-    setTheme(
-      next,
-      themeOriginFromEvent({ clientX: 0, clientY: 0, detail: 0, currentTarget: control }),
-    );
-  };
-
   return (
     <div className="flex flex-col gap-3 text-[12px]">
       <div className="flex items-center justify-between gap-2">
@@ -188,9 +179,9 @@ export function SkeletonsTab({
         <span className="font-medium">Theme</span>
         <div>
           <SegmentedControl
-            options={["light", "dark"] as const}
+            options={["light", "dark", "system"] as const}
             value={requestedTheme}
-            onChange={selectTheme}
+            onChange={setTheme}
             label="Theme"
             className="h-7"
           />

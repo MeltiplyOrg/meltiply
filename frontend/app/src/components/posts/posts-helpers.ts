@@ -63,8 +63,9 @@ export function summarizeChannelStatuses(statuses: string[], fallback = "draft")
     "cancelled",
     "published",
   ];
+  const present = new Set(statuses);
   for (const status of order) {
-    if (statuses.includes(status)) return status;
+    if (present.has(status)) return status;
   }
   return statuses[0] ?? fallback;
 }
@@ -195,7 +196,7 @@ export function resolveRowPreviewAttachment(row: PostRow): PostAttachment | null
 }
 
 /**
- * Resolves a row's caption preview for list, grid, and calendar presenters.
+ * Resolves a row's caption preview for Table, Grid, Calendar, and Details.
  *
  * A frozen publication supplies its own caption, so a published Channel
  * displays what it delivered rather than text reconstructed from the edited
@@ -304,28 +305,28 @@ const FAILED_OUTCOMES: Record<string, true> = {
  * still needs to be findable under each of them.
  *
  * @param posts - Complete list of Post rows.
- * @param filters - Active filter and sort criteria. An empty platform array means all platforms;
- * multiple selected platforms are OR-matched.
+ * @param filters - Active criteria; empty arrays mean all, values within a field
+ * are OR-matched, and separate fields are AND-matched.
  * @returns Filtered and sorted Post rows array.
  */
 export function filterAndSortPosts(posts: PostRow[], filters: FilterCriteria): PostRow[] {
   let list = [...posts];
 
-  if (filters.statusFilter !== "all") {
+  if (filters.statusFilter.length > 0) {
+    const includeDrafts = filters.statusFilter.includes("draft");
+    const includePublished = filters.statusFilter.includes("published");
+    const includeScheduled = filters.statusFilter.includes("scheduled");
+    const includeFailed = filters.statusFilter.includes("failed");
     list = list.filter((row) => {
       if (row.status === "draft" || row.post?.status === "draft") {
-        return filters.statusFilter === "draft";
+        return includeDrafts;
       }
-      if (filters.statusFilter === "published") {
-        return row.channels.some((c) => c.distribution?.status === "published");
-      }
-      if (filters.statusFilter === "scheduled") {
-        return row.channels.some((c) => PENDING_OUTCOMES[c.status] === true);
-      }
-      if (filters.statusFilter === "failed") {
-        return row.channels.some((c) => FAILED_OUTCOMES[c.status] === true);
-      }
-      return true;
+      return row.channels.some(
+        (channel) =>
+          (includePublished && channel.distribution?.status === "published") ||
+          (includeScheduled && PENDING_OUTCOMES[channel.status] === true) ||
+          (includeFailed && FAILED_OUTCOMES[channel.status] === true),
+      );
     });
   }
 
@@ -341,8 +342,9 @@ export function filterAndSortPosts(posts: PostRow[], filters: FilterCriteria): P
     );
   }
 
-  if (filters.profileFilter !== "all") {
-    list = list.filter((row) => row.brandProfileId === filters.profileFilter);
+  if (filters.profileFilter.length > 0) {
+    const profileIds = new Set(filters.profileFilter);
+    list = list.filter((row) => profileIds.has(row.brandProfileId));
   }
 
   if (filters.searchQuery.trim()) {

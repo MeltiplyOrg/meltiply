@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  filterAndSortPosts,
   prunePostSelection,
   resolveChannelMedia,
   resolveChannelText,
@@ -9,6 +10,7 @@ import {
 import { contractSuccessBody } from "@/test/contract-fixtures";
 import type { Distribution, Post, PostAttachment } from "@/types";
 import type { PostDetailItem, PostRow, PostSelectionEntry } from "./types";
+import type { FilterCriteria } from "./types";
 
 const basePost = contractSuccessBody<Post>("getPost");
 const baseDistribution = contractSuccessBody<Distribution>("getDistribution");
@@ -53,6 +55,76 @@ function postRow(overrides: Partial<PostRow>): PostRow {
     ...overrides,
   };
 }
+
+describe("filterAndSortPosts multi-select", () => {
+  const draft = postRow({
+    id: "draft-a",
+    status: "draft",
+    brandProfileId: "profile-a",
+    post: { ...basePost, status: "draft" },
+    channels: [],
+  });
+  const mixed = postRow({
+    id: "mixed-b",
+    brandProfileId: "profile-b",
+    post: { ...basePost, status: "active" },
+    channels: [
+      channelItem({ distribution: { ...baseDistribution, status: "published" } }),
+      channelItem({ status: "failed", distribution: { ...baseDistribution, status: "failed" } }),
+    ],
+  });
+  const scheduled = postRow({
+    id: "scheduled-c",
+    status: "scheduled",
+    brandProfileId: "profile-c",
+    post: { ...basePost, status: "active" },
+    channels: [
+      channelItem({ status: "queued", distribution: { ...baseDistribution, status: "queued" } }),
+    ],
+  });
+  const rows = [draft, mixed, scheduled];
+  const criteria: FilterCriteria = {
+    statusFilter: [],
+    profileFilter: [],
+    platformFilter: [],
+    searchQuery: "",
+    dateFilter: "all",
+    sortKey: "date-desc",
+  };
+
+  it("unions selected statuses without duplicating a Post matching several outcomes", () => {
+    expect(
+      filterAndSortPosts(rows, {
+        ...criteria,
+        statusFilter: ["published", "failed", "draft"],
+      }).map((row) => row.id),
+    ).toEqual(["draft-a", "mixed-b"]);
+  });
+
+  it("intersects profile and status fields while unioning values within each", () => {
+    expect(
+      filterAndSortPosts(rows, {
+        ...criteria,
+        statusFilter: ["draft", "scheduled"],
+        profileFilter: ["profile-a", "profile-b"],
+      }).map((row) => row.id),
+    ).toEqual(["draft-a"]);
+    expect(
+      filterAndSortPosts(rows, {
+        ...criteria,
+        profileFilter: ["profile-a", "profile-c"],
+      }).map((row) => row.id),
+    ).toEqual(["draft-a", "scheduled-c"]);
+  });
+
+  it("restores every loaded Post when both selections clear", () => {
+    expect(filterAndSortPosts(rows, criteria).map((row) => row.id)).toEqual([
+      "draft-a",
+      "mixed-b",
+      "scheduled-c",
+    ]);
+  });
+});
 
 describe("resolveChannelMedia", () => {
   it("keeps the frozen publication order of a claimed Channel after Post edits", () => {

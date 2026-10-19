@@ -1674,6 +1674,180 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
   });
 
+  it("removes deleted Posts from Calendar while retaining published history", async () => {
+    const postIds = [
+      "4e000000-0000-4000-8000-000000000050",
+      "4e000000-0000-4000-8000-000000000051",
+    ];
+    const publishedId = "93000000-0000-4000-8000-000000000050";
+    const scheduledId = "93000000-0000-4000-8000-000000000051";
+    const keys = postIds.map((id) => `integration-calendar-delete-${id}`);
+    const start = new Date("2026-10-01T00:00:00Z");
+    const end = new Date("2026-10-31T23:59:59Z");
+    const posts = createPostApiService();
+    try {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          for (const postId of postIds) {
+            yield* insertFixturePost(client, { postId, title: "Integration calendar deletion" });
+          }
+          yield* client.query(
+            `INSERT INTO distributions
+               (id, org_id, brand_profile_id, post_id, platform_account_id,
+                platform, status, published_at, scheduled_at, platform_post_id)
+             VALUES
+               ($1, $3, $4, $5, $7, 'youtube', 'published',
+                '2026-10-15T12:00:00Z', NULL, 'integration-calendar-published'),
+               ($2, $3, $4, $6, $7, 'youtube', 'scheduled',
+                NULL, '2026-10-16T12:00:00Z', NULL)`,
+            [
+              publishedId,
+              scheduledId,
+              alpha.organizationId,
+              alphaBrandProfileId,
+              postIds[0],
+              postIds[1],
+              alphaYoutubeAccountId,
+            ],
+          );
+        }),
+      );
+      const before = await Effect.runPromise(service.calendar(env, alpha, start, end));
+      expect(
+        before.filter((event) => postIds.includes(event.post_id)).map((event) => event.id),
+      ).toEqual([publishedId, scheduledId]);
+      for (const [index, postId] of postIds.entries()) {
+        await Effect.runPromise(
+          posts.deletePost(
+            env,
+            alpha,
+            postId,
+            { brandProfileId: alphaBrandProfileId },
+            keys[index]!,
+          ),
+        );
+        await expect(Effect.runPromise(posts.getPost(env, alpha, postId))).rejects.toMatchObject({
+          status: 404,
+        });
+      }
+      const after = await Effect.runPromise(service.calendar(env, alpha, start, end));
+      expect(after.filter((event) => postIds.includes(event.post_id))).toEqual([]);
+      await expect(
+        Effect.runPromise(service.distributionAnalytics(env, alpha, publishedId, { limit: 1 })),
+      ).resolves.toEqual([]);
+    } finally {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* client.query("DELETE FROM distributions WHERE post_id = ANY($1::uuid[])", [
+            postIds,
+          ]);
+          yield* client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [postIds]);
+          yield* client.query(
+            "DELETE FROM idempotency_keys WHERE idempotency_key = ANY($1::text[])",
+            [keys],
+          );
+        }),
+      );
+    }
+  });
+
+  it("batches latest published-Channel analytics without inventing measurements", async () => {
+    const postIds = [
+      "4e000000-0000-4000-8000-000000000060",
+      "4e000000-0000-4000-8000-000000000061",
+      "4e000000-0000-4000-8000-000000000062",
+      "4e000000-0000-4000-8000-000000000063",
+    ];
+    const distributionIds = [
+      "93000000-0000-4000-8000-000000000060",
+      "93000000-0000-4000-8000-000000000061",
+      "93000000-0000-4000-8000-000000000062",
+      "93000000-0000-4000-8000-000000000063",
+      "93000000-0000-4000-8000-000000000064",
+    ];
+    const posts = createPostApiService();
+    try {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          for (const postId of postIds) {
+            yield* insertFixturePost(client, { postId, title: "Integration Post analytics" });
+          }
+          yield* client.query("UPDATE posts SET status = 'draft' WHERE id = $1", [postIds[2]]);
+          yield* client.query(
+            `INSERT INTO distributions
+               (id, org_id, brand_profile_id, post_id, platform, status, published_at, scheduled_at)
+             VALUES
+               ($1, $6, $7, $8, 'youtube', 'published', '2026-10-15T12:00:00Z', NULL),
+               ($2, $6, $7, $8, 'tiktok', 'published', '2026-10-15T12:00:00Z', NULL),
+               ($3, $6, $7, $8, 'threads', 'scheduled', NULL, '2026-10-16T12:00:00Z'),
+               ($4, $6, $7, $9, 'youtube', 'published', '2026-10-15T12:00:00Z', NULL),
+               ($5, $6, $7, $10, 'youtube', 'published', '2026-10-15T12:00:00Z', NULL)`,
+            [
+              ...distributionIds,
+              alpha.organizationId,
+              alphaBrandProfileId,
+              postIds[0],
+              postIds[1],
+              postIds[3],
+            ],
+          );
+          yield* client.query(
+            `INSERT INTO analytics_snapshots
+               (distribution_id, org_id, likes, comments, shares, views, impressions, reach, snapshot_at)
+             VALUES
+               ($1, $5, 999, 999, 999, 999, 999, 999, '2026-10-15T12:00:00Z'),
+               ($1, $5, 10, 0, 2, 200, 300, 100, '2026-10-15T13:00:00Z'),
+               ($2, $5, 7, 2, 1, 10, 20, 8, '2026-10-15T13:00:00Z'),
+               ($3, $5, 888, 888, 888, 888, 888, 888, '2026-10-15T13:00:00Z'),
+               ($4, $5, 0, 0, 0, 0, 0, 0, '2026-10-15T13:00:00Z')`,
+            [
+              distributionIds[0],
+              distributionIds[1],
+              distributionIds[2],
+              distributionIds[4],
+              alpha.organizationId,
+            ],
+          );
+        }),
+      );
+      const page = await Effect.runPromise(posts.listPosts(env, alpha, { limit: 100, offset: 0 }));
+      expect(page.posts.find((post) => post.id === postIds[0])?.analytics).toEqual({
+        likes: 17,
+        comments: 2,
+        shares: 3,
+        saves: null,
+        clicks: null,
+        views: 210,
+        impressions: 320,
+        reach: 108,
+      });
+      expect(page.posts.find((post) => post.id === postIds[1])?.analytics).toBeNull();
+      expect(page.posts.find((post) => post.id === postIds[2])?.analytics).toBeNull();
+      expect(page.posts.find((post) => post.id === postIds[3])?.analytics).toEqual({
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        saves: null,
+        clicks: null,
+        views: 0,
+        impressions: 0,
+        reach: 0,
+      });
+      await expect(Effect.runPromise(posts.getPost(env, beta, postIds[0]!))).rejects.toMatchObject({
+        status: 404,
+      });
+    } finally {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* client.query("DELETE FROM distributions WHERE post_id = ANY($1::uuid[])", [
+            postIds,
+          ]);
+          yield* client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [postIds]);
+        }),
+      );
+    }
+  });
+
   it("isolates calendar, analytics, and inbox reads across tenants", async () => {
     const start = new Date("2026-07-01T00:00:00Z");
     const end = new Date("2026-07-31T23:59:59Z");

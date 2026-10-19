@@ -53,13 +53,16 @@ const configuredScopes = [
   "https://www.googleapis.com/auth/youtube.readonly",
 ] as const;
 
+/** YouTube's description ceiling remains known even before live publishing is configured. */
+export const YOUTUBE_MAX_CAPTION_LENGTH = 5_000;
+
 const capability: PlatformCapability = {
   accepted_mime_types: ["video/mp4", "video/quicktime"],
   analytics: false,
   asset_types: ["video"],
   comments: false,
   connect_available: true,
-  max_caption_length: 5_000,
+  max_caption_length: YOUTUBE_MAX_CAPTION_LENGTH,
   max_file_size: videoMaximumBytes,
   max_hashtags: 15,
   max_media_count: 1,

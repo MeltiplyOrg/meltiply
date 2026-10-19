@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { writeCookieConsent } from "@meltiply/ui/cookie-consent";
 
-import { I18nProvider, translate, useI18n } from "./i18n";
+import { I18nProvider, Trans, translate, useI18n } from "./i18n";
 
 const storageKey = "meltiply.language";
 
@@ -62,6 +62,28 @@ describe("I18nProvider", () => {
   it("interpolates named values in translated messages", () => {
     expect(translate("es", "Expires {date}", { date: "mañana" })).toBe("Caduca el mañana");
     expect(translate("en", "Week {week}", { week: 42 })).toBe("Week 42");
+  });
+
+  it("interpolates nodes into a translated sentence", () => {
+    const { result } = renderHook(useI18n, { wrapper });
+    act(() => result.current.setLanguage("es"));
+
+    const { container } = render(
+      <I18nProvider>
+        <Trans message="{count} selected" values={{ count: <strong>3</strong> }} />
+      </I18nProvider>,
+    );
+
+    expect(container.textContent).toBe("3 seleccionados");
+    expect(container.querySelector("strong")?.textContent).toBe("3");
+  });
+
+  it("keeps an unmapped node placeholder as its own text", () => {
+    const { container } = render(
+      <Trans message="{count} accounts" values={{ other: <strong>1</strong> }} />,
+    );
+
+    expect(container.textContent).toBe("{count} accounts");
   });
 
   it("translates the generic error copy", () => {

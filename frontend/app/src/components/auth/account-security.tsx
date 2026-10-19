@@ -1,30 +1,22 @@
-import React, { useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { useBeforeUnload, useBlocker } from "react-router";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Alert } from "@meltiply/ui/alert";
-import {
-  CenterDialog,
-  CenterDialogContent,
-  CenterDialogHeader,
-  CenterDialogTitle,
-  CenterDialogDescription,
-  CenterDialogTrigger,
-} from "@meltiply/ui/center-dialog";
 import { useMeltiplyAuth } from "./auth-provider";
 import { authClient } from "@/lib/auth-client";
 import { useI18n } from "@/lib/i18n";
 
 /**
- * Existing account-surface security actions, always password-reauthenticated.
- * Secrets live only while the dialog is open. TOTP stays pending until confirmed;
- * cancellation disables the pending enrollment. Security changes require a fresh
- * sign-in, and regenerated backup codes replace the previous set.
+ * Inline account-security controls, always password-reauthenticated.
+ * Secrets remain local and clear on an allowed departure. Requests and unconfirmed
+ * enrollment block section/route/history changes; document departures warn before
+ * unloading. TOTP must be confirmed or explicitly cancelled on the server.
+ * Security changes require a fresh sign-in; new backup codes replace the old set.
  */
 export function AccountSecurity(): React.ReactElement {
   const { user, signOut } = useMeltiplyAuth();
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [code, setCode] = useState("");
@@ -33,10 +25,26 @@ export function AccountSecurity(): React.ReactElement {
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const departureBlocked = busy || enrollment !== null;
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      departureBlocked &&
+      (currentLocation.pathname !== nextLocation.pathname ||
+        currentLocation.search !== nextLocation.search),
+  );
+  useEffect(() => {
+    if (blocker.state === "blocked" && !departureBlocked) blocker.reset();
+  }, [blocker, departureBlocked]);
+  useBeforeUnload((event) => {
+    if (!departureBlocked) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
 
   const act = async (
     action: "enable" | "disable" | "generate-backup-codes" | "confirm" | "password" | "cancel",
   ) => {
+    if (busy) return;
     if (!password) {
       setError(t("Enter your current password to continue."));
       return;
@@ -68,214 +76,188 @@ export function AccountSecurity(): React.ReactElement {
   };
 
   return (
-    <CenterDialog
-      open={open}
-      onOpenChange={(next) => {
-        if (busy || (!next && enrollment?.totpURI)) return;
-        setOpen(next);
-        if (!next) {
-          setPassword("");
-          setNewPassword("");
-          setCode("");
-          setEnrollment(null);
-          setError(null);
-        }
-      }}
-    >
-      <CenterDialogTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={t("Account security")}
-          title={t("Account security")}
-        >
-          <ShieldCheck className="size-4" aria-hidden="true" />
-        </Button>
-      </CenterDialogTrigger>
-      <CenterDialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-lenis-prevent>
-        <CenterDialogHeader>
-          <CenterDialogTitle>{t("Account security")}</CenterDialogTitle>
-          <CenterDialogDescription>
-            {t(
-              "Protect the only account for this installation. Changes to your password or authenticator sign out previous sessions.",
-            )}
-          </CenterDialogDescription>
-        </CenterDialogHeader>
-        {error && <Alert variant="destructive">{error}</Alert>}
-        <div className="space-y-5">
-          <div className="space-y-2">
-            <label htmlFor="security-password" className="text-sm font-medium text-ink">
-              {t("Current password")}
-            </label>
-            <Input
-              id="security-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              disabled={busy}
-            />
-          </div>
-          {enrollment ? (
-            <div className="space-y-4">
-              {enrollment.totpURI && (
-                <div className="space-y-2">
-                  <label htmlFor="authenticator-uri" className="text-sm font-medium text-ink">
-                    {t("Authenticator setup key")}
-                  </label>
-                  <Input
-                    id="authenticator-uri"
-                    readOnly
-                    value={new URL(enrollment.totpURI).searchParams.get("secret") ?? ""}
-                  />
-                  <p className="text-xs text-ink-2">
-                    {t(
-                      "Add a time-based account named Meltiply in your authenticator using this key. Keep it secret.",
-                    )}
-                  </p>
-                </div>
-              )}
+    <section aria-label={t("Account security")} className="space-y-5">
+      <p className="text-sm text-ink-2">
+        {t(
+          "Protect the only account for this installation. Changes to your password or authenticator sign out previous sessions.",
+        )}
+      </p>
+      {error && <Alert variant="destructive">{error}</Alert>}
+      {blocker.state === "blocked" && (
+        <Alert variant="destructive">
+          {t("Finish or cancel the current security action before leaving this section.")}
+        </Alert>
+      )}
+      <div className="space-y-5">
+        <div className="space-y-2">
+          <label htmlFor="security-password" className="text-sm font-medium text-ink">
+            {t("Current password")}
+          </label>
+          <Input
+            id="security-password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            disabled={busy}
+          />
+        </div>
+        {enrollment ? (
+          <div className="space-y-4">
+            {enrollment.totpURI && (
               <div className="space-y-2">
-                <h3 className="text-sm font-medium text-ink">{t("Save your backup codes")}</h3>
+                <label htmlFor="authenticator-uri" className="text-sm font-medium text-ink">
+                  {t("Authenticator setup key")}
+                </label>
+                <Input
+                  id="authenticator-uri"
+                  readOnly
+                  value={new URL(enrollment.totpURI).searchParams.get("secret") ?? ""}
+                />
                 <p className="text-xs text-ink-2">
                   {t(
-                    "Store these somewhere safe before continuing. Each code works once. New codes invalidate the previous set.",
+                    "Add a time-based account named Meltiply in your authenticator using this key. Keep it secret.",
                   )}
                 </p>
-                <pre className="select-text rounded-control border border-line bg-inset p-3 text-sm text-ink">
-                  {enrollment.backupCodes?.join("\n")}
-                </pre>
               </div>
-              {enrollment.totpURI ? (
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void act("confirm");
-                  }}
-                  className="space-y-3"
-                >
-                  <label htmlFor="enrollment-code" className="text-sm font-medium text-ink">
-                    {t("Authenticator code")}
-                  </label>
-                  <Input
-                    id="enrollment-code"
-                    autoComplete="one-time-code"
-                    inputMode="numeric"
-                    required
-                    value={code}
-                    onChange={(event) => setCode(event.target.value)}
-                    disabled={busy}
-                  />
-                  <Button type="submit" disabled={busy}>
-                    {t("I saved my codes — verify")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() => {
-                      void act("cancel");
-                    }}
-                  >
-                    {t("Cancel enrollment")}
-                  </Button>
-                </form>
-              ) : (
+            )}
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-ink">{t("Save your backup codes")}</h3>
+              <p className="text-xs text-ink-2">
+                {t(
+                  "Store these somewhere safe before continuing. Each code works once. New codes invalidate the previous set.",
+                )}
+              </p>
+              <pre className="select-text rounded-control border border-line bg-inset p-3 text-sm text-ink">
+                {enrollment.backupCodes?.join("\n")}
+              </pre>
+            </div>
+            {enrollment.totpURI ? (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void act("confirm");
+                }}
+                className="space-y-3"
+              >
+                <label htmlFor="enrollment-code" className="text-sm font-medium text-ink">
+                  {t("Authenticator code")}
+                </label>
+                <Input
+                  id="enrollment-code"
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  required
+                  value={code}
+                  onChange={(event) => setCode(event.target.value)}
+                  disabled={busy}
+                />
+                <Button type="submit" disabled={busy}>
+                  {t("I saved my codes — verify")}
+                </Button>
                 <Button
                   type="button"
+                  variant="ghost"
                   disabled={busy}
-                  onClick={async () => {
-                    try {
-                      await signOut();
-                    } catch {
-                      setError(
-                        t(
-                          "Could not confirm server sign-out. Sign in again to check your sessions.",
-                        ),
-                      );
-                    }
+                  onClick={() => {
+                    void act("cancel");
                   }}
                 >
-                  {t("I saved my codes")}
+                  {t("Cancel enrollment")}
                 </Button>
-              )}
-            </div>
-          ) : (
-            <>
-              <section className="space-y-3 border-t border-line pt-4">
-                <h3 className="text-sm font-medium text-ink">{t("Two-factor authentication")}</h3>
-                <p className="text-sm text-ink-2">
-                  {user?.twoFactorEnabled
-                    ? t(
-                        "An authenticator code is required at sign-in. Use a backup code if you lose your authenticator.",
-                      )
-                    : t(
-                        "Add an authenticator app and save recovery codes before enabling this extra sign-in check.",
-                      )}
-                </p>
-                {user?.twoFactorEnabled ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => {
-                        void act("generate-backup-codes");
-                      }}
-                    >
-                      {t("Replace backup codes")}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => {
-                        void act("disable");
-                      }}
-                    >
-                      {t("Disable two-factor")}
-                    </Button>
-                  </div>
-                ) : (
+              </form>
+            ) : (
+              <Button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  try {
+                    await signOut();
+                  } catch {
+                    setError(
+                      t("Could not confirm server sign-out. Sign in again to check your sessions."),
+                    );
+                  }
+                }}
+              >
+                {t("I saved my codes")}
+              </Button>
+            )}
+          </div>
+        ) : (
+          <>
+            <section className="space-y-3 border-t border-line pt-4">
+              <h3 className="text-sm font-medium text-ink">{t("Two-factor authentication")}</h3>
+              <p className="text-sm text-ink-2">
+                {user?.twoFactorEnabled
+                  ? t(
+                      "An authenticator code is required at sign-in. Use a backup code if you lose your authenticator.",
+                    )
+                  : t(
+                      "Add an authenticator app and save recovery codes before enabling this extra sign-in check.",
+                    )}
+              </p>
+              {user?.twoFactorEnabled ? (
+                <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
                     disabled={busy}
                     onClick={() => {
-                      void act("enable");
+                      void act("generate-backup-codes");
                     }}
                   >
-                    {t("Set up authenticator")}
+                    {t("Replace backup codes")}
                   </Button>
-                )}
-              </section>
-              <form
-                className="space-y-3 border-t border-line pt-4"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void act("password");
-                }}
-              >
-                <label htmlFor="security-new-password" className="text-sm font-medium text-ink">
-                  {t("New password")}
-                </label>
-                <Input
-                  id="security-new-password"
-                  type="password"
-                  autoComplete="new-password"
-                  minLength={8}
-                  maxLength={128}
-                  required
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      void act("disable");
+                    }}
+                  >
+                    {t("Disable two-factor")}
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
                   disabled={busy}
-                />
-                <Button type="submit" disabled={busy}>
-                  {t("Change password and sign out")}
+                  onClick={() => {
+                    void act("enable");
+                  }}
+                >
+                  {t("Set up authenticator")}
                 </Button>
-              </form>
-            </>
-          )}
-        </div>
-      </CenterDialogContent>
-    </CenterDialog>
+              )}
+            </section>
+            <form
+              className="space-y-3 border-t border-line pt-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void act("password");
+              }}
+            >
+              <label htmlFor="security-new-password" className="text-sm font-medium text-ink">
+                {t("New password")}
+              </label>
+              <Input
+                id="security-new-password"
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                maxLength={128}
+                required
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                disabled={busy}
+              />
+              <Button type="submit" disabled={busy}>
+                {t("Change password and sign out")}
+              </Button>
+            </form>
+          </>
+        )}
+      </div>
+    </section>
   );
 }

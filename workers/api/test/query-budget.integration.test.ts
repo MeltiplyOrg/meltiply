@@ -658,11 +658,10 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 100,
-        // The Post read model serves its collections in every projection: the
-        // paged read plus one grouped ANY($1) read each for attachments,
-        // targets, and distributions is a fixed four statements — constant at
-        // any page size, so a per-row lookup still breaks this bound.
-        maxStatements: 4,
+        // Paged Posts plus grouped attachments, targets, distributions, and
+        // latest analytics: five statements independent of page size. A
+        // per-Post or per-Channel analytics request still exceeds this bound.
+        maxStatements: 5,
         minRows: 100,
         name: "post list",
         run: async () => {
@@ -680,9 +679,8 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 100,
-        // Same fixed projection cost as the list: the Post row read plus the
-        // grouped attachments, targets, and distributions reads.
-        maxStatements: 4,
+        // Same fixed projection as the list, including batched latest analytics.
+        maxStatements: 5,
         minRows: 1,
         name: "post detail",
         run: async () => {
@@ -1390,11 +1388,9 @@ describeIntegration("core API PostgreSQL query budgets", () => {
             }),
           ),
         (page) => page.posts.length,
-        // The Post read model serves its collections in every projection: the
-        // paged read plus one grouped ANY($1) read each for attachments,
-        // targets, and distributions is a fixed four statements at every
-        // offset, so the bound stays page-size independent.
-        4,
+        // Page plus grouped attachments, targets, distributions, and latest
+        // analytics: five statements at every offset, independent of page size.
+        5,
       );
       expect(body.limit).toBe(pageSize);
       expect(body.offset).toBe(postOffset);

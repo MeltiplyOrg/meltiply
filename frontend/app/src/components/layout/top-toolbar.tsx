@@ -1,114 +1,45 @@
-import React, { type ReactNode } from "react";
-import { AnimatePresence, LayoutGroup, motion, useIsPresent, type Transition } from "motion/react";
-import { RotateCcw, Search, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { ListFilter, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
-import { useI18n } from "@/lib/i18n";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
 import { cn } from "@meltiply/ui/utils";
-
-export interface TopToolbarProps {
-  children: ReactNode;
-  className?: string;
-}
-
-export interface TopToolbarSearchProps {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  id?: string;
-  ariaLabel?: string;
-  className?: string;
-}
-
-export interface TopToolbarLabelProps {
-  label: string;
-  className?: string;
-}
-export interface TopToolbarResetProps {
-  hasActiveFilters: boolean;
-  onReset: () => void;
-  title?: string;
-  className?: string;
-}
-
-/**
- * Route-shared filter participants that morph between workspace toolbars. Each id
- * maps to the `workspace-filter-${id}` layout identity inside the route-level
- * `LayoutGroup`; `sort` is Posts-only but shares the same identity scheme.
- */
-type TopToolbarFilterSlotId = "platform" | "profile" | "status" | "date" | "reset" | "sort";
-
-export interface TopToolbarFilterGroupProps {
-  children: ReactNode;
-  className?: string;
-}
-
-export interface TopToolbarFilterSlotProps {
-  id: TopToolbarFilterSlotId;
-  children?: ReactNode;
-  /**
-   * Render the slot's collapsed stand-in when no child is provided. Reserved for
-   * the `date` slot: routes without a date filter keep a two-pixel,
-   * negative-margin target so the Posts date trigger still has a morph partner.
-   */
-  collapseWhenEmpty?: boolean;
-}
+import { useI18n } from "@/lib/i18n";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 
 export { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
 
 /**
- * Top horizontal toolbar card anchoring operational view filters, search, and view switchers.
- *
- * Provides the shared navigation card geometry with identical dimensions and layout across
- * workspace views, keeping filters and search controls anchored without route-transition scaling.
- * Marks the scroll viewport so route snapshots preserve its clipping on narrow screens.
- * The persistent `layoutId`/`layout` morph is disabled under the shared low-motion
- * preference so the card lands at its resting geometry with no projection or travel.
- *
- * @param props.children - Toolbar content (search bar, filter clusters, mode switchers).
- * @param props.className - Optional outer styling overrides.
- * @returns Solid interactive toolbar card adhering to the Beautiful UI design tokens.
+ * Exit duration of the shared menu surface animation (`menu-surface-out` in
+ * `@meltiply/ui/motion.css`); the native disclosure stays mounted this long so
+ * the panel leaves like every other menu. Keep the two values in sync.
  */
-export function TopToolbar({ children, className }: TopToolbarProps) {
-  const { lowMotion } = useMotionPreference();
-  const transition: Transition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] };
+const MENU_EXIT_MS = 120;
 
+/**
+ * Portalled layers that belong to the disclosure even though the DOM puts them
+ * outside it: the shared menu surface, any Radix popper wrapper, and the
+ * fallback roles Radix uses for listboxes and menus. A pointer down inside one
+ * of these must not close the filter builder.
+ */
+const NESTED_LAYER_SELECTOR =
+  "[data-menu-surface], [data-radix-popper-content-wrapper], [role='menu'], [role='listbox']";
+
+/** Shared Gr8r collection control row; wrapping preserves mobile access without clipping overlays. */
+export function TopToolbar({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <motion.div
-      layout={lowMotion ? false : "position"}
-      layoutId={lowMotion ? undefined : "workspace-surface-toolbar"}
-      transition={{ layout: transition }}
-      data-workspace-toolbar=""
+    <div
+      role="toolbar"
       className={cn(
-        "flex h-[3.375rem] min-h-[3.375rem] shrink-0 items-center justify-between gap-3 overflow-x-auto rounded-card border border-line bg-surface p-2.5 hide-scrollbar select-none",
+        "relative flex min-h-11 shrink-0 flex-wrap items-center gap-1 border-b border-line px-4 py-2 sm:px-6",
         className,
       )}
     >
       {children}
-    </motion.div>
+    </div>
   );
 }
 
-/**
- * Shared search input with persistent layout continuity and animated placeholder morphing.
- * Anchors the search box across view transitions via `layoutId="workspace-toolbar-search"`,
- * crossfading dynamic placeholder text with a subtle vertical drift and optical blur rather
- * than abruptly blinking between routes. Dissolves away when populated and shows a clear
- * trigger whose accessible name follows the active i18n translation. The same
- * `AnimatePresence`/`motion.*` tree renders in both motion modes — under the
- * shared low-motion preference the layout morph is disabled and the placeholder
- * swap and clear trigger settle at their final state in zero duration — so
- * toggling the preference never remounts the input's overlays.
- *
- * @param props.value - Controlled query string.
- * @param props.onChange - Value change callback receiving the updated query string.
- * @param props.placeholder - Localized placeholder label crossfaded across route changes.
- * @param props.id - Optional HTML input element id for accessible form association.
- * @param props.ariaLabel - Accessible name attribute passed to the underlying input.
- * @param props.className - Optional wrapper element styling overrides.
- * @returns Fluid search bar element adhering to the workspace design system.
- */
+/** Controlled compact collection search; the same mounted input survives filter and label updates. */
 export function TopToolbarSearch({
   value,
   onChange,
@@ -116,310 +47,363 @@ export function TopToolbarSearch({
   id,
   ariaLabel,
   className,
-}: TopToolbarSearchProps) {
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  id?: string;
+  ariaLabel?: string;
+  className?: string;
+}) {
   const { t } = useI18n();
-  const { lowMotion } = useMotionPreference();
-  const transition: Transition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] };
+  return (
+    <div className={cn("relative w-full shrink-0 sm:w-50", className)}>
+      <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-ink-3" />
+      <Input
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        aria-label={ariaLabel ?? placeholder}
+        className="h-control-sm border-line pl-7 pr-7 text-xs"
+      />
+      {value && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute right-0.5 top-1/2 size-5.5 -translate-y-1/2 pointer-coarse:min-w-11"
+          onClick={() => onChange("")}
+          aria-label={t("Clear search")}
+        >
+          <X className="size-3" />
+        </Button>
+      )}
+    </div>
+  );
+}
 
-  const clearButton = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      onClick={() => onChange("")}
-      className="size-6 text-ink-3 hover:text-ink active:scale-90 transition-colors p-0 rounded-control"
-      aria-label={t("Clear search")}
+/** A supported equality filter; the route owns its real value, selector, and reset behavior. */
+export interface CollectionFilterField {
+  id: string;
+  label: string;
+  active: boolean;
+  control: ReactNode;
+  onClear: () => void;
+}
+
+/**
+ * Ports Gr8r's field-row builder, Add filter chips, per-row removal, and Clear all
+ * into the existing real equality filters. Added rows do not apply a filter until
+ * their value changes. Route state owns the predicate; this component never
+ * invents backend operators. Escape restores focus and nested menus stay open.
+ *
+ * The panel is a native disclosure, so it stays mounted through the shared menu
+ * exit before the browser hides it; its surface, rows, and animation come from
+ * the same `[data-menu-surface]` vocabulary as every Radix menu.
+ */
+export function TopToolbarFilters({
+  activeCount,
+  fields,
+  onClearAll,
+}: {
+  activeCount: number;
+  fields: readonly CollectionFilterField[];
+  onClearAll: () => void;
+}) {
+  const { t } = useI18n();
+  const ref = useRef<HTMLDetailsElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const pendingFocusField = useRef<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef<number | null>(null);
+  const [addedFields, setAddedFields] = useState<ReadonlySet<string>>(new Set());
+  const visibleFields = fields.filter((field) => field.active || addedFields.has(field.id));
+  const availableFields = fields.filter((field) => !field.active && !addedFields.has(field.id));
+  /**
+   * Writes the surface state straight to the panel. A native disclosure shows its
+   * content before React re-renders, so the attribute has to change in the same
+   * handler as `details.open`; otherwise the first painted frame runs the exit
+   * animation and the panel flashes before its entrance.
+   */
+  const setSurfaceState = (state: "open" | "closed") => {
+    if (panelRef.current) panelRef.current.dataset.state = state;
+  };
+  /** Opens the disclosure with its surface already in the entering state. */
+  const openPanel = () => {
+    const details = ref.current;
+    if (!details || details.open) return;
+    setSurfaceState("open");
+    details.open = true;
+    setClosing(false);
+    setOpen(true);
+  };
+  /**
+   * Holds the native disclosure open for the shared exit animation so the panel
+   * leaves exactly like a Radix menu, then closes it for real. Every close path
+   * (Escape, outside pointer, summary toggle) routes through here; toggling the
+   * summary mid-exit cancels the pending close instead of swallowing the click.
+   */
+  const close = useCallback(() => {
+    const details = ref.current;
+    if (!details?.open || closeTimer.current !== null) return;
+    setSurfaceState("closed");
+    setClosing(true);
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      details.open = false;
+      setClosing(false);
+    }, MENU_EXIT_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      // While a nested list is open, Radix owns the press: its modal layer sets
+      // pointer-events on the rest of the page, so the press can surface here
+      // as a target outside the disclosure. The list closes itself; the
+      // builder stays open so the next field can be chosen immediately.
+      if (document.querySelector("[data-radix-popper-content-wrapper]")) return;
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        ref.current?.contains(target) ||
+        target.closest(NESTED_LAYER_SELECTOR)
+      )
+        return;
+      close();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [close, open]);
+  return (
+    <TooltipProvider>
+      <details
+        ref={ref}
+        className="group/filter"
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          // A nested list closes itself on this key. Its keydown reaches here
+          // through the portal, and the list is still mounted in the same
+          // commit, so the builder stays open for the next field instead of
+          // dismissing both layers with one Escape.
+          if (document.querySelector("[data-radix-popper-content-wrapper]")) return;
+          close();
+          event.currentTarget.querySelector("summary")?.focus();
+        }}
+      >
+        <summary
+          className="flex h-control-sm cursor-pointer list-none items-center gap-1.5 rounded-control px-2 text-xs text-ink-2 hover:bg-hover pointer-coarse:min-h-11 group-open/filter:bg-hover [&::-webkit-details-marker]:hidden"
+          onClick={(event) => {
+            event.preventDefault();
+            if (ref.current?.open === false) {
+              openPanel();
+              return;
+            }
+            if (closeTimer.current !== null) {
+              window.clearTimeout(closeTimer.current);
+              closeTimer.current = null;
+              setSurfaceState("open");
+              setClosing(false);
+              return;
+            }
+            close();
+          }}
+        >
+          <ListFilter className="size-3.5" />
+          {t("Filter")}
+          {activeCount > 0 && (
+            <span className="rounded-chip bg-accent-tint px-1 text-(length:--font-size-micro) text-accent-ink">
+              {activeCount}
+            </span>
+          )}
+        </summary>
+        <div
+          ref={panelRef}
+          role="group"
+          aria-label={t("Filters")}
+          data-menu-surface=""
+          data-state={open && !closing ? "open" : "closed"}
+          className="absolute left-4 top-full z-30 mt-1 max-h-none w-140 max-w-[calc(100%-2rem)] overflow-hidden sm:left-6 sm:max-w-[calc(100%-3rem)]"
+        >
+          <div className="flex min-h-8 items-center justify-between px-2 py-1">
+            <h2 data-menu-label="" className="flex-1">
+              {t("Filter by")}
+            </h2>
+            {visibleFields.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setAddedFields(new Set());
+                  onClearAll();
+                  ref.current?.querySelector("summary")?.focus();
+                }}
+              >
+                {t("Clear all")}
+              </Button>
+            )}
+          </div>
+          <div
+            data-lenis-prevent
+            className="max-h-[55dvh] space-y-1.5 overflow-y-auto px-2 pb-1.5 pt-0.5"
+          >
+            {visibleFields.length === 0 ? (
+              <p className="pb-1 text-xs leading-relaxed text-ink-3">
+                {t("No filters applied. Add a filter to narrow this collection.")}
+              </p>
+            ) : (
+              visibleFields.map((field, index) => (
+                <div
+                  key={field.id}
+                  ref={(element) => {
+                    if (element && pendingFocusField.current === field.id) {
+                      element.querySelector<HTMLButtonElement>("button, input, select")?.focus();
+                      pendingFocusField.current = null;
+                    }
+                  }}
+                  className="grid grid-cols-[36px_minmax(0,1fr)_26px] items-center gap-1.5 sm:grid-cols-[44px_112px_24px_minmax(0,1fr)_26px]"
+                >
+                  <span className="text-right text-(length:--font-size-micro) text-ink-3">
+                    {index === 0 ? t("Where") : t("and")}
+                  </span>
+                  <span className="hidden h-control-sm items-center truncate rounded-chip border border-line bg-field px-2 text-xs sm:flex">
+                    {field.label}
+                  </span>
+                  <span className="hidden text-center text-xs text-ink-3 sm:block">{t("is")}</span>
+                  <div className="min-w-0">
+                    <span className="mb-1 block text-(length:--font-size-micro) text-ink-3 sm:hidden">
+                      {field.label}
+                    </span>
+                    {field.control}
+                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6.5"
+                        aria-label={t("Remove {label} filter", { label: field.label })}
+                        onClick={() => {
+                          field.onClear();
+                          setAddedFields((previous) => {
+                            const next = new Set(previous);
+                            next.delete(field.id);
+                            return next;
+                          });
+                          ref.current?.querySelector("summary")?.focus();
+                        }}
+                      >
+                        <Trash2 className="size-3.25" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("Remove filter")}</TooltipContent>
+                  </Tooltip>
+                </div>
+              ))
+            )}
+          </div>
+          {availableFields.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1 border-t border-line px-2 pb-1.5 pt-2">
+              <span className="mr-1 text-(length:--font-size-micro) text-ink-3">
+                {t("Add filter:")}
+              </span>
+              {availableFields.map((field) => (
+                <Button
+                  key={field.id}
+                  variant="outline"
+                  size="sm"
+                  className="h-5 rounded-chip px-1.5 text-(length:--font-size-micro) font-normal shadow-none"
+                  aria-label={t("Add {label} filter", { label: field.label })}
+                  onClick={() => {
+                    pendingFocusField.current = field.id;
+                    setAddedFields((previous) => new Set(previous).add(field.id));
+                  }}
+                >
+                  {field.label}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+      </details>
+    </TooltipProvider>
+  );
+}
+
+/**
+ * Active-filter row stays separate from the dense toolbar, matching the reference chip hierarchy.
+ *
+ * `inset` keeps the divider on a collection that owns an inset gutter (Channels'
+ * directory table): the row is margined by the route gutter instead of padded, so
+ * the line ends where the collection, tab underline, and search row end while the
+ * chips keep the same content x. Omitted, the divider bleeds to the surface edges
+ * like the full-width Post rows and toolbar above it.
+ */
+export function TopToolbarFilterChips({
+  children,
+  inset = false,
+}: {
+  children: ReactNode;
+  inset?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex shrink-0 flex-wrap items-center gap-1.5 border-b border-line py-2",
+        inset ? "mx-4 sm:mx-6" : "px-4 sm:px-6",
+      )}
     >
+      {children}
+    </div>
+  );
+}
+
+/** Named removable chip centralizes keyboard access, clear icon, and compact treatment. */
+export function TopToolbarFilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  const { t } = useI18n();
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onClear}
+      aria-label={t("Clear {label} filter", { label })}
+    >
+      {label}
       <X className="size-3" />
     </Button>
   );
-
-  return (
-    <motion.div
-      layout={lowMotion ? false : "position"}
-      layoutId={lowMotion ? undefined : "workspace-toolbar-search"}
-      transition={transition}
-      className={cn("relative w-52 shrink-0 sm:w-64", className)}
-    >
-      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-3 z-10" />
-      <Input
-        type="text"
-        id={id}
-        aria-label={ariaLabel ?? placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-8 w-full rounded-control border border-line bg-page pl-8 pr-7 text-xs text-ink placeholder:text-transparent focus:border-line-strong focus:outline-none select-text transition-colors"
-      />
-      {/* Animated placeholder overlay */}
-      {!value && (
-        <div className="pointer-events-none absolute inset-y-0 left-8 right-7 flex items-center overflow-hidden select-none">
-          <AnimatePresence initial={false} mode="popLayout">
-            <motion.span
-              key={placeholder}
-              initial={lowMotion ? false : { opacity: 0, y: 3, filter: "blur(2px)" }}
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              exit={lowMotion ? { opacity: 0 } : { opacity: 0, y: -3, filter: "blur(2px)" }}
-              transition={{ duration: lowMotion ? 0 : 0.18, ease: [0.16, 1, 0.3, 1] }}
-              className="truncate text-xs text-ink-3"
-            >
-              {placeholder}
-            </motion.span>
-          </AnimatePresence>
-        </div>
-      )}
-      <AnimatePresence>
-        {value && (
-          <motion.div
-            initial={lowMotion ? false : { opacity: 0, scale: 0.7 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={lowMotion ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
-            transition={{ duration: lowMotion ? 0 : 0.15, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute right-1 top-1/2 -translate-y-1/2"
-          >
-            {clearButton}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
 }
 
-/**
- * Crossfades changing label text inside a toolbar button without unmounting its trigger.
- *
- * The keyed text runs inside the persistent button so focus and menu identity remain
- * stable while the surrounding motion wrapper interpolates the control's new width.
- * Exiting spans are removed from the accessibility tree via `aria-hidden` so a
- * trigger whose accessible name comes from its content (e.g. the platform
- * filter button) never transiently announces the concatenation of the outgoing
- * and incoming labels mid-crossfade. The same `AnimatePresence`/`motion.span`
- * tree renders in both motion modes — under the shared low-motion preference
- * `initial` is suppressed, the exit is opacity-only, and the duration is zero —
- * so toggling the preference never remounts the label or shifts its spacing.
- *
- * @param props.label - Localized visible label for the current filter or sort state.
- * @param props.className - Optional text styling overrides.
- * @returns The current label, crossfaded only when effective low motion is off.
- */
-export function TopToolbarLabel({ label, className }: TopToolbarLabelProps) {
-  const { lowMotion } = useMotionPreference();
-  return (
-    <AnimatePresence initial={false} mode="popLayout">
-      <TopToolbarLabelText key={label} label={label} className={className} lowMotion={lowMotion} />
-    </AnimatePresence>
-  );
-}
-
-/**
- * One keyed label span inside {@link TopToolbarLabel}'s `AnimatePresence`.
- *
- * Must be a direct child of `AnimatePresence` so `useIsPresent` flips to false
- * the moment the exit animation starts; the resulting `aria-hidden` keeps the
- * outgoing text out of the trigger's accessible name while it fades. The
- * `popLayout` mode also injects a measurement ref into its direct children, so
- * this wrapper forwards that ref to the `motion.span`: without it the exiting
- * label cannot be popped out of flow and the crossfade snaps layout instead of
- * overlapping. `lowMotion` gates the variants in place — no travel, no blur,
- * zero duration — so the span's geometry is identical in both modes.
- *
- * @param props.label - Text rendered inside the animated span.
- * @param props.className - Optional text styling overrides.
- * @param props.lowMotion - Effective low-motion preference; disables travel, blur, and duration.
- * @param ref - Measurement ref injected by `AnimatePresence` `popLayout`.
- * @returns Motion span that hides from assistive technology while exiting.
- */
-const TopToolbarLabelText = React.forwardRef<
-  HTMLSpanElement,
-  TopToolbarLabelProps & { lowMotion: boolean }
->(({ label, className, lowMotion }, ref) => {
-  const isPresent = useIsPresent();
-  return (
-    <motion.span
-      ref={ref}
-      initial={lowMotion ? false : { opacity: 0, y: 3, filter: "blur(2px)" }}
-      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-      exit={lowMotion ? { opacity: 0 } : { opacity: 0, y: -3, filter: "blur(2px)" }}
-      transition={{ duration: lowMotion ? 0 : 0.16, ease: [0.16, 1, 0.3, 1] }}
-      aria-hidden={!isPresent}
-      className={cn("inline-block whitespace-nowrap", className)}
-    >
-      {label}
-    </motion.span>
-  );
-});
-TopToolbarLabelText.displayName = "TopToolbarLabelText";
-
-/**
- * Wraps the pill row in a dedicated `LayoutGroup` (`inherit={false}`) so the
- * slots' local geometry changes — especially Reset entering or exiting — are
- * measured as one toolbar row. Cross-route projection belongs to the
- * navigation shell's persistent snapshot host; the row itself remains a plain
- * flex container and callers provide only ordered slots.
- *
- * @param props.children - `TopToolbarFilterSlot` participants in display order.
- * @param props.className - Optional row styling overrides.
- * @returns Flex row grouping the toolbar's morphing filter slots.
- */
-export function TopToolbarFilterGroup({ children, className }: TopToolbarFilterGroupProps) {
-  return (
-    <LayoutGroup inherit={false}>
-      <div className={cn("flex items-center gap-1.5 shrink-0", className)}>{children}</div>
-    </LayoutGroup>
-  );
-}
-
-/**
- * Per-participant layout mode and resting geometry for {@link TopToolbarFilterSlot}.
- * `position` slots only translate as siblings resize; `date` and `reset` also
- * interpolate size because their footprint changes between routes and filter states.
- */
-const FILTER_SLOT_GEOMETRY: Record<
-  TopToolbarFilterSlotId,
-  { layout: "position" | true; className: string }
-> = {
-  platform: { layout: "position", className: "shrink-0" },
-  profile: { layout: "position", className: "shrink-0" },
-  status: { layout: "position", className: "shrink-0" },
-  sort: { layout: "position", className: "shrink-0" },
-  date: {
-    layout: true,
-    className: "w-40 shrink-0 overflow-hidden origin-left flex items-center",
-  },
-  reset: {
-    layout: true,
-    className: "shrink-0 flex items-center overflow-hidden origin-left",
-  },
-};
-
-/**
- * Collapsed `date` stand-in geometry: `w-2 -mr-3.5` cancels its own flex footprint
- * plus the following `gap-1.5`, so the reset slot sits one gap after the status
- * filter exactly as on routes with a real date control.
- */
-const FILTER_SLOT_COLLAPSED_CLASS = "w-2 h-8 -mr-3.5 shrink-0 pointer-events-none";
-
-/**
- * Marks the slot for the shell's persistent snapshot host and applies standard
- * local geometry motion (0.22s). Feature toolbars therefore compose ordinary
- * controls without authoring route-level Motion wrappers. With
- * `collapseWhenEmpty` and no child, the slot renders the date participant's
- * collapsed stand-in — a two-pixel, aria-hidden target that cancels its own
- * flex footprint so the reset slot keeps its usual gap while the Posts date
- * trigger still has a morph partner on this route. Under the shared low-motion
- * preference `layout` is disabled so sibling resizes land instantly instead of
- * interpolating; the snapshot markers stay so the imperative handoff (itself
- * skipped in low motion) keeps working when motion returns.
- *
- * @param props.id - Route-shared participant id (`platform`, `profile`, `status`,
- * `date`, `reset`, or `sort`).
- * @param props.children - Ordinary filter control rendered inside the slot.
- * @param props.collapseWhenEmpty - Render the collapsed date stand-in when no
- * child is provided; only meaningful for the `date` slot.
- * @returns Local motion wrapper marked for the shell's shared snapshot host.
- */
-export function TopToolbarFilterSlot({
-  id,
-  children,
-  collapseWhenEmpty,
-}: TopToolbarFilterSlotProps) {
-  const { lowMotion } = useMotionPreference();
-  const transition: Transition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] };
-  const hasChild = !(children === undefined || children === null || children === false);
-  const collapsed = collapseWhenEmpty === true && !hasChild;
-  const geometry = FILTER_SLOT_GEOMETRY[id];
-
-  return (
-    <motion.div
-      layout={lowMotion ? false : geometry.layout}
-      transition={{ layout: transition }}
-      data-workspace-transition-slot={id}
-      data-workspace-transition-collapsed={collapsed ? "true" : undefined}
-      aria-hidden={collapsed ? true : undefined}
-      className={collapsed ? FILTER_SLOT_COLLAPSED_CLASS : geometry.className}
-    >
-      {children}
-    </motion.div>
-  );
-}
-
-/**
- * Shared filter reset button providing seamless morph animation on appearance and dismissal.
- *
- * Renders only the button's internal enter/exit animation. The surrounding
- * `TopToolbarFilterSlot id="reset"` marks its geometry for the navigation
- * shell's snapshot host and handles the ordinary flex-row footprint, so
- * Channels/Posts navigation projects the reset control in place without
- * retaining an entire outgoing route. The button enters and exits via
- * `AnimatePresence` (expanding width, scaling up, and sliding from the
- * preceding filter pill), with
- * `initial={false}` so a route remount renders the button directly at its resting
- * state. The same `AnimatePresence`/`motion.div` tree renders in both motion
- * modes — under the shared low-motion preference the width morph, slide, and
- * blur collapse to an instant opacity swap — so toggling the preference never
- * remounts the button or shifts the pill row's spacing.
- *
- * @param props.hasActiveFilters - Boolean flag indicating if any filter is non-default.
- * @param props.onReset - Callback function invoked when the operator clicks reset.
- * @param props.title - Accessible tooltip/title string.
- * @param props.className - Optional extra button styling overrides.
- * @returns A reset trigger when filters are active, rendered immediately in low motion; otherwise `null`.
- */
+/** Renders the shared reset action only while filters are active. */
 export function TopToolbarReset({
   hasActiveFilters,
   onReset,
   title,
   className,
-}: TopToolbarResetProps) {
+}: {
+  hasActiveFilters: boolean;
+  onReset: () => void;
+  title?: string;
+  className?: string;
+}) {
   const { t } = useI18n();
-  const { lowMotion } = useMotionPreference();
-  const transition: Transition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] };
-
-  const resetButton = (
+  return hasActiveFilters ? (
     <Button
+      variant="ghost"
       size="sm"
-      variant="outline"
-      type="button"
       onClick={onReset}
-      className={cn(
-        "h-8 w-[4.875rem] rounded-chip border-dashed border-line-strong bg-hover/80 px-2 text-[11px] font-medium text-ink-2 hover:text-ink hover:bg-hover active:scale-95 transition-colors shadow-hairline shrink-0 gap-1",
-        className,
-      )}
-      title={title ?? t("Reset all active filters")}
+      title={title ?? t("Reset filters")}
+      className={className}
     >
-      <RotateCcw className="size-3 text-ink-3 shrink-0" />
-      <span className="whitespace-nowrap">{t("Reset")}</span>
+      <RotateCcw className="size-3" />
+      {t("Clear all")}
     </Button>
-  );
-
-  return (
-    <AnimatePresence initial={false}>
-      {hasActiveFilters && (
-        <motion.div
-          initial={
-            lowMotion ? false : { opacity: 0, scale: 0.75, x: -16, width: 0, filter: "blur(2px)" }
-          }
-          animate={{ opacity: 1, scale: 1, x: 0, width: "auto", filter: "blur(0px)" }}
-          exit={
-            lowMotion
-              ? { opacity: 0 }
-              : { opacity: 0, scale: 0.75, x: -16, width: 0, filter: "blur(2px)" }
-          }
-          transition={
-            lowMotion
-              ? { duration: 0 }
-              : {
-                  opacity: { duration: 0.18 },
-                  width: transition,
-                  scale: transition,
-                  x: transition,
-                  filter: { duration: 0.18 },
-                }
-          }
-          className="overflow-hidden shrink-0 flex items-center origin-left"
-        >
-          {resetButton}
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
+  ) : null;
 }

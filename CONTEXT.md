@@ -24,6 +24,16 @@ A creator's connected account on one Platform, held by exactly one Brand Profile
 user interface calls a Platform account a Channel.
 _Avoid_: connection, social account, provider account
 
+**Channel ID**:
+The identifier a Platform assigns to a Platform account, often numeric but not
+necessarily so; it is neither the account's username nor Meltiply's record identifier.
+_Avoid_: username, handle, display name
+
+**Channel username**:
+A Platform account's user-facing `@` handle, usually chosen by its owner when
+the Platform supports one; it is distinct from its Channel ID and display name.
+_Avoid_: channel ID, display name
+
 **Platform capability**:
 The declared record of what one Platform permits — accepted asset types, caption
 length, hashtag count, media limits. It is the single authority on those limits.

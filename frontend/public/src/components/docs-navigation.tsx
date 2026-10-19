@@ -54,15 +54,14 @@ export function NavItem({ item }: { item: PageTreeItem }) {
 }
 
 /**
- * Docs adapter for the shared `SidebarGlideHighlight` — the same spring
- * implementation the app sidebar uses, pointed at the page-tree rows.
+ * Docs adapter for the shared sidebar hover indicator, targeting real
+ * page-tree rows without changing active navigation state.
  *
  * Rendered once per sidebar instance through the `banner` slot. A display:
  * contents probe resolves the enclosing `aside` on desktop or in the drawer,
  * which becomes the shared pill's non-scrolling positioning root, while
  * `viewportSelector` points it at the nested Radix ScrollArea so the travelling
- * indicator stays clipped to the nav column. Like the app, only pointer hover
- * drives the pill: entry fades in at the row and exit fades out in place.
+ * indicator stays clipped to the nav column. Pointer hover drives the pill.
  * Fumadocs mounts only the matching mode, giving each surface an
  * independent pill that rebinds on breakpoint remounts and document swaps.
  */

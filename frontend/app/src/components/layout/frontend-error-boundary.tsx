@@ -19,7 +19,7 @@ type FrontendErrorBoundaryState = {
  *
  * @returns A full-screen accessible alert section with workspace reload and home links.
  */
-function FrontendErrorFallback(): React.ReactElement {
+export function FrontendErrorFallback(): React.ReactElement {
   const { t } = useI18n();
 
   return (

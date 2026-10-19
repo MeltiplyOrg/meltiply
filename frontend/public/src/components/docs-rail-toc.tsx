@@ -7,7 +7,6 @@ import {
   type TOCProps,
 } from "fumadocs-ui/layouts/docs/page/slots/toc";
 import { DocsTocPlane } from "./docs-toc-plane";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
 import { initializeReadingRail } from "./docs-reading-rail";
 import {
   Collapsible,
@@ -40,7 +39,7 @@ function ReadingRail({
   onNavigate?: () => void;
 }) {
   const rootRef = useRef<HTMLElement>(null);
-  const { lowMotion } = useMotionPreference();
+
   const activeAnchor = useActiveAnchor();
   const minDepth = Math.min(...items.map((item) => item.depth));
   const [initial] = useState(() => {
@@ -65,7 +64,6 @@ function ReadingRail({
     );
     return {
       measured: root.dataset.measured,
-      lowMotion: root.dataset.lowMotion,
       path: root.querySelector(".docs-reading-remaining")?.getAttribute("d") ?? undefined,
       dasharray: progressStyles["stroke-dasharray"],
       dashoffset: progressStyles["stroke-dashoffset"],
@@ -81,8 +79,8 @@ function ReadingRail({
 
   useClientLayoutEffect(() => {
     const root = rootRef.current;
-    if (root) return initializeReadingRail(root, lowMotion);
-  }, [items, minDepth, lowMotion]);
+    if (root) return initializeReadingRail(root);
+  }, [items, minDepth]);
 
   return (
     <nav
@@ -91,7 +89,6 @@ function ReadingRail({
       className="docs-reading-rail"
       aria-labelledby={labelledBy}
       data-measured={initial?.measured}
-      data-low-motion={initial?.lowMotion ?? (lowMotion || undefined)}
     >
       <svg className="docs-reading-track" aria-hidden="true">
         <path className="docs-reading-remaining" d={initial?.path} />

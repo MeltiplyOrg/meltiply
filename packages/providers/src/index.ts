@@ -6,17 +6,26 @@ import {
 } from "@meltiply/domain";
 
 import { assertHttpsOrLoopbackUrl } from "./meta-common";
-import { createFacebookAdapter } from "./facebook";
-import { createInstagramAdapter } from "./instagram";
-import { createThreadsAdapter } from "./threads";
-import { createTikTokAdapter } from "./tiktok";
+import { createFacebookAdapter, FACEBOOK_MAX_CAPTION_LENGTH } from "./facebook";
+import { createInstagramAdapter, INSTAGRAM_MAX_CAPTION_LENGTH } from "./instagram";
+import { createThreadsAdapter, THREADS_MAX_CAPTION_LENGTH } from "./threads";
+import { createTikTokAdapter, TIKTOK_MAX_CAPTION_LENGTH } from "./tiktok";
 import type {
   ProviderAdapter,
   ProviderOperationResult,
   ProviderPublicationStatus,
   ProviderRequestContext,
 } from "./types";
-import { createYouTubeAdapter } from "./youtube";
+import { createYouTubeAdapter, YOUTUBE_MAX_CAPTION_LENGTH } from "./youtube";
+
+/** Draft caption constraints are independent of credentials and runtime activation. */
+const captionLimits: Readonly<Record<Platform, number>> = {
+  facebook: FACEBOOK_MAX_CAPTION_LENGTH,
+  instagram: INSTAGRAM_MAX_CAPTION_LENGTH,
+  threads: THREADS_MAX_CAPTION_LENGTH,
+  tiktok: TIKTOK_MAX_CAPTION_LENGTH,
+  youtube: YOUTUBE_MAX_CAPTION_LENGTH,
+};
 
 export * from "./effect";
 export * from "./failures";
@@ -230,8 +239,9 @@ export class ProviderRegistry {
 
   /**
    * Returns capability descriptors for all platforms defined in PLATFORM_IDS.
-   * Emits active capabilities for registered providers, and safe unconfigured fallback stubs for absent providers.
-   * Returns an array of PlatformCapability records in canonical platform order.
+   * Registered adapters supply their active descriptors. Unconfigured providers
+   * retain their declared caption ceilings while every runtime operation remains
+   * unavailable. Returned descriptors are isolated and follow canonical platform order.
    */
   capabilities(): PlatformCapability[] {
     return PLATFORM_IDS.map((platform) => {
@@ -244,7 +254,7 @@ export class ProviderRegistry {
             asset_types: [],
             comments: false,
             connect_available: false,
-            max_caption_length: null,
+            max_caption_length: captionLimits[platform],
             max_file_size: null,
             max_hashtags: null,
             max_media_count: null,

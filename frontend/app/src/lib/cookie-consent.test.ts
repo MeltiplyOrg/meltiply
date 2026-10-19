@@ -57,7 +57,7 @@ describe("optional cookie and storage consent", () => {
     for (const key of [
       "meltiply.theme",
       "meltiply.language",
-      "meltiply.composer.v1.brand",
+      "meltiply.composer.v2.brand",
       "meltiply.upload.v1.file",
       "meltiply.upload.create.v1.file",
     ])

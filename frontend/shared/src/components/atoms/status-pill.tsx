@@ -27,6 +27,7 @@ const dotColors: Record<StatusPillTone, string> = {
  * through predefined tone themes with balanced background tints, text ink colors, and dot accents.
  *
  * @param props.tone - Semantic color theme (defaults to `'neutral'`)
+ * @param props.variant - `badge` for compact tinted badges; `plain` for flat Tasks metadata.
  * @param props.children - Label content to display inside the pill
  * @param props.dot - Whether to display the 6px colored indicator dot (defaults to `true`)
  * @param props.className - Optional classes to merge into the pill container
@@ -39,18 +40,23 @@ export function StatusPill({
   tone = "neutral",
   children,
   dot = true,
+  variant = "badge",
   className = "",
 }: {
   tone?: StatusPillTone;
   children: React.ReactNode;
   dot?: boolean;
+  variant?: "badge" | "plain";
   className?: string;
 }) {
   return (
     <span
       className={cn(
-        "inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium leading-none shadow-hairline",
+        "inline-flex items-center gap-1.5 whitespace-nowrap text-xs leading-none",
         toneClasses[tone],
+        variant === "plain"
+          ? "h-auto bg-transparent p-0 font-normal"
+          : "h-5 rounded-chip px-1.5 font-medium",
         className,
       )}
     >

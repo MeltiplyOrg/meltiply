@@ -164,7 +164,7 @@ function BrandProfileDialogForm({
   ]);
 
   return (
-    <CenterDialogContent className="max-h-[90vh] overflow-y-auto">
+    <CenterDialogContent>
       <CenterDialogHeader>
         <CenterDialogTitle>
           {isEditing ? t("Update Brand Profile") : t("Create Brand Profile")}
@@ -265,7 +265,7 @@ function BrandProfileDialogForm({
             type="button"
             onClick={handleSave}
             disabled={!name.trim() || isSubmitting}
-            className="rounded-control bg-foreground text-background font-semibold shadow-btn text-xs"
+            className="rounded-control font-medium text-xs"
           >
             {isEditing ? t("Update profile") : t("Create profile")}
           </Button>

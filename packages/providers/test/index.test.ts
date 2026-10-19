@@ -6,6 +6,7 @@ import {
   normalizeProviderFailure,
   ProviderAdapterError,
   ProviderRegistry,
+  validatePublishInput,
 } from "../src";
 import type { ProviderAdapter } from "../src/types";
 
@@ -90,6 +91,27 @@ describe("ProviderRegistry", () => {
     expect(capabilities).toHaveLength(5);
     expect(capabilities.every((capability) => !capability.connect_available)).toBe(true);
     expect(capabilities.every((capability) => !capability.publish)).toBe(true);
+  });
+
+  it("checks the declared caption boundary before a provider is activated", () => {
+    const threads = new ProviderRegistry()
+      .capabilities()
+      .find(({ platform }) => platform === "threads")!;
+    const input = {
+      caption: "🚀".repeat(500),
+      hashtags: [],
+      idempotencyKey: "draft-caption",
+      media: [],
+    };
+    expect(validatePublishInput(threads, input)).toEqual([]);
+    expect(validatePublishInput(threads, { ...input, caption: input.caption + "🚀" })).toEqual([
+      expect.objectContaining({
+        actual: 501,
+        constraint: "provider_caption_limit",
+        field: "caption",
+        limit: 500,
+      }),
+    ]);
   });
 
   it("keeps runtime providers closed until live acceptance is explicit", () => {

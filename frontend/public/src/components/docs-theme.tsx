@@ -6,18 +6,10 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
-import {
-  applyThemeImmediately,
-  startThemeReveal,
-  themeOriginFromEvent,
-  type Theme,
-  type ThemeRevealHandle,
-} from "@meltiply/ui/theme-transition";
+import { applyThemeImmediately, type Theme } from "@meltiply/ui/theme-transition";
 import {
   readInitialThemePreference,
   subscribeThemePreference,
@@ -25,10 +17,7 @@ import {
   type ThemePreference,
 } from "@meltiply/ui/theme-preference";
 
-/**
- * Resolves the live OS palette for an unpinned preference. This keeps docs
- * theme controls useful without optional browser storage or next-themes.
- */
+/** Resolves an unpinned theme from the device; unsupported media queries use light. */
 function readSystemTheme(): Theme {
   try {
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -40,16 +29,14 @@ function readSystemTheme(): Theme {
 export const DocsThemeContext = createContext<{
   requestedTheme: Theme | null;
   resolvedTheme: Theme;
-  toggleTheme: (event: MouseEvent<HTMLButtonElement>) => void;
+  toggleTheme: () => void;
 } | null>(null);
 
 /**
- * Owns the live palette and reversible landing-style reveal across desktop/
- * drawer controls and persisted guide navigation. Validated navigation intent
- * survives hydration even without consent. Explicit intent is persisted only
- * with functional consent; an unpinned choice follows the OS. Lazy state adopts
- * the head bootstrap without an effect-driven extra render; preference controls
- * keep server-neutral labels until mounted, preserving hydration parity.
+ * Owns the public palette across persisted Astro guide navigation. Explicit
+ * current-page intent survives hydration and is stored only with functional
+ * consent. Changes commit synchronously without an ink clone or delayed mask;
+ * unpinned pages follow live OS color-scheme changes.
  */
 export function DocsThemeProvider({ children }: { children: ReactNode }): ReactElement {
   const [resolvedTheme, setResolvedTheme] = useState<Theme>(() =>
@@ -57,115 +44,56 @@ export function DocsThemeProvider({ children }: { children: ReactNode }): ReactE
       ? "dark"
       : "light",
   );
-  const { lowMotion } = useMotionPreference();
   const [requestedTheme, setRequestedTheme] = useState<Theme | null>(() => {
     const preference = readInitialThemePreference();
     return preference === "light" || preference === "dark" ? preference : null;
   });
   const requested = useRef<Theme | null>(requestedTheme);
-  const reveal = useRef<ThemeRevealHandle | null>(null);
-  const inkTarget = useRef<Theme | null>(null);
 
-  /** Commits the wave endpoint to the live root without relying on a theme provider. */
-  const commitPalette = useCallback(
-    (next: Theme) => {
-      const root = document.documentElement;
-      root.classList.toggle("dark", next === "dark");
-      root.style.colorScheme = next;
+  /** Updates root CSS and the rendered preference label within one synchronous palette commit. */
+  const commitPalette = useCallback((next: Theme) => {
+    applyThemeImmediately(() => {
+      document.documentElement.classList.toggle("dark", next === "dark");
+      document.documentElement.style.colorScheme = next;
       setResolvedTheme(next);
-    },
-    [setResolvedTheme],
-  );
-
-  /** Settles the current wave toward the latest request and releases its inert copy. */
-  const settleReveal = useCallback(() => {
-    if (inkTarget.current !== null)
-      reveal.current?.setDirection(requested.current === inkTarget.current);
-    reveal.current?.skip();
-    reveal.current = null;
-    inkTarget.current = null;
+    });
   }, []);
 
-  /**
-   * Toggles against the latest request, not the still-visible source palette.
-   * Rapid activations reverse the existing mask; new waves start at the clicked
-   * control's viewport center. The shared write is optional; the root is always
-   * updated in memory when animation commits.
-   */
-  const toggleTheme = useCallback(
-    (event: MouseEvent<HTMLButtonElement>) => {
-      const current =
-        requested.current ??
-        (document.documentElement.classList.contains("dark") ? "dark" : "light");
-      const next = current === "dark" ? "light" : "dark";
-      requested.current = next;
-      setRequestedTheme(next);
-      writeThemePreference(next);
-      if (reveal.current?.kind === "ink" && reveal.current.setDirection(next === inkTarget.current))
-        return;
-      settleReveal();
-      const fromTheme = document.documentElement.classList.contains("dark") ? "dark" : "light";
-      if (next === fromTheme) {
-        applyThemeImmediately(() => commitPalette(next));
-        return;
-      }
-      const handle = startThemeReveal({
-        fromTheme,
-        toTheme: next,
-        applyTheme: () => commitPalette(next),
-        restoreTheme: () => commitPalette(fromTheme),
-        origin: themeOriginFromEvent(event),
-        lowMotion,
-      });
-      reveal.current = handle;
-      inkTarget.current = handle.kind === "ink" ? next : null;
-    },
-    [commitPalette, lowMotion, settleReveal],
-  );
-
-  /** Adopts external intent without an origin; equal pinned choices leave the wave running. */
-  const onPreference = useEffectEvent((preference: ThemePreference | null) => {
-    const next: Theme | null = preference === "light" || preference === "dark" ? preference : null;
-    if (next === requested.current) return;
-    settleReveal();
-    const palette = next ?? readSystemTheme();
+  /** Toggles the latest explicit/current palette without changing route or control identity. */
+  const toggleTheme = useCallback(() => {
+    const current =
+      requested.current ?? (document.documentElement.classList.contains("dark") ? "dark" : "light");
+    const next = current === "dark" ? "light" : "dark";
     requested.current = next;
     setRequestedTheme(next);
-    applyThemeImmediately(() => commitPalette(palette));
-  });
+    writeThemePreference(next);
+    commitPalette(next);
+  }, [commitPalette]);
 
+  /** Applies external preference changes, including consent withdrawal, through the same owner. */
+  const onPreference = useEffectEvent((preference: ThemePreference | null) => {
+    const next = preference === "light" || preference === "dark" ? preference : null;
+    if (next === requested.current) return;
+    requested.current = next;
+    setRequestedTheme(next);
+    commitPalette(next ?? readSystemTheme());
+  });
   useEffect(() => subscribeThemePreference((preference) => onPreference(preference)), []);
 
   useEffect(() => {
-    let colorScheme: MediaQueryList;
+    let query: MediaQueryList;
     try {
-      colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+      query = window.matchMedia("(prefers-color-scheme: dark)");
     } catch {
       return;
     }
-
-    /**
-     * Follows OS changes only while no explicit palette is pinned; settle a
-     * pending reveal before applying an origin-less system update.
-     */
-    const onSystemColorChange = () => {
-      if (requested.current !== null) return;
-      const next = readSystemTheme();
-      const current = document.documentElement.classList.contains("dark") ? "dark" : "light";
-      if (next === current) return;
-      settleReveal();
-      applyThemeImmediately(() => commitPalette(next));
+    /** Device changes apply only while no explicit light/dark choice is pinned. */
+    const onChange = () => {
+      if (requested.current === null) commitPalette(readSystemTheme());
     };
-
-    colorScheme.addEventListener("change", onSystemColorChange);
-    return () => colorScheme.removeEventListener("change", onSystemColorChange);
-  }, [commitPalette, settleReveal]);
-
-  useEffect(() => {
-    if (lowMotion && reveal.current?.kind === "ink") settleReveal();
-  }, [lowMotion, settleReveal]);
-
-  useEffect(() => () => settleReveal(), [settleReveal]);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, [commitPalette]);
 
   const value = useMemo(
     () => ({ requestedTheme, resolvedTheme, toggleTheme }),

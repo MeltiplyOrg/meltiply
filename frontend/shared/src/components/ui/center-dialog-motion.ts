@@ -1,5 +1,4 @@
 import * as React from "react";
-import { motionAllowed } from "@meltiply/ui/motion-state";
 
 /**
  * Coordinates centered dialog handoffs before paint. One opaque destination
@@ -181,8 +180,7 @@ function morphHandoff(
       : visible.width > 0 && visible.height > 0
         ? { ...from, width: visible.width, height: visible.height }
         : from;
-  const animate = motionAllowed();
-  const snapshot = animate ? snapshotContent(replaced.element, start) : null;
+  const snapshot = snapshotContent(replaced.element, start);
   arriving.element.querySelectorAll("[data-dialog-snapshot]").forEach((node) => node.remove());
   // A return to a still-mounted parent must start a fresh track.
   arriving.element.dataset.dialogMotion = "settled";
@@ -192,10 +190,6 @@ function morphHandoff(
   coverSurface(replaced, true);
   if (replaced.element.dataset.state === "closed") {
     replaced.element.dataset.dialogMotion = "morph-out";
-  }
-  if (snapshot === null) {
-    arriving.visible = to;
-    return;
   }
   arriving.element.appendChild(snapshot);
   arriving.element.dataset.dialogMotion = "morph-in";

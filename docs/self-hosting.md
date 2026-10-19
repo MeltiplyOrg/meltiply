@@ -124,8 +124,10 @@ The S3 service must implement conditional `CopyObject` (`If-None-Match: *`
 for the destination and `x-amz-copy-source-if-match` for the source), conditional
 PUT, and multipart uploads. These guards preserve immutable ready objects and
 create-only processor outputs; an S3-like service without them is not supported.
-Configure bucket CORS to allow browser PUTs from the application origin, including
-`content-type` and the signed headers, and expose `ETag` for multipart uploads.
+Configure bucket CORS to allow browser GETs and PUTs from the application origin,
+including `content-type` and the signed headers, and expose `ETag` for multipart
+uploads. GET allows signed original-media reads when copying a composition's
+attachments into another Brand Profile.
 Provider selection changes where new requests go; it does not migrate existing
 objects. Copy all retained object keys to the new bucket before switching both
 Workers, and retain the old endpoint until previously issued signed URLs expire.
@@ -172,8 +174,8 @@ for a single-use, expiring reset link. Recovery responses do not disclose whethe
 an address is registered. Mailpit proves SMTP submission and link handling in CI,
 not delivery to an external inbox.
 
-Open **Account security** from desktop or mobile navigation to change the password
-or configure an authenticator. Enrollment provides a manual setup key and backup
+Open **Settings → Security** on desktop or mobile to see password and authenticator
+controls directly. Enrollment provides a manual setup key and backup
 codes, then requires a live authenticator code before activation. Save backup
 codes offline: each works once; generating replacements invalidates the old set.
 Password reauthentication protects enrollment, replacement, and disabling the

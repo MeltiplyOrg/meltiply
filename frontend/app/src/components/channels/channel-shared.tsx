@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { Check, Copy, Pencil, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { Check, Copy, Ellipsis, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { copyText } from "@meltiply/ui/copy-text";
-import { Avatar, AvatarFallback, AvatarImage } from "@meltiply/ui/avatar";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import {
@@ -20,32 +19,17 @@ import {
 } from "@meltiply/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { toast } from "@meltiply/ui/toast";
-import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { type BrandProfile, type PlatformAccount } from "@/types";
 import { platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
+import { formatUsername } from "@/lib/format";
 import { cn } from "@meltiply/ui/utils";
 
 /**
  * Consistent icon-button chrome for the channel table's copy, health, and settings controls.
  */
 const channelActionClass =
-  "size-7 shrink-0 rounded-full text-ink-3 hover:bg-hover hover:text-ink [&_svg]:size-3.5";
-
-/** Derives up to two uppercase initials; blank names use a neutral avatar fallback. */
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
-}
-
-/** Displays only real, nonblank handles, adding @ without changing their copy value. */
-function formatUsername(raw: string | null | undefined): string | null {
-  const trimmed = raw?.trim();
-  if (!trimmed) return null;
-  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
-}
+  "size-7 shrink-0 text-ink-3 hover:bg-hover hover:text-ink [&_svg]:size-3.5";
 
 /**
  * Resolves the channel's display title for its table row and settings dialog:
@@ -82,43 +66,6 @@ function useCopyChannelValue(): (value: string, successTitle: string) => Promise
       }
     },
     [t],
-  );
-}
-
-export interface ChannelAvatarProps {
-  account: PlatformAccount;
-  /** Resolved display title used for the initials fallback. */
-  channelName: string;
-  picture?: string | null;
-}
-
-/**
- * Renders the compact table avatar with the platform badge overlay. The badge
- * keeps `role="img"` naming so assistive tech announces the provider even when
- * the picture fails and initials show.
- */
-export function ChannelAvatar({
-  account,
-  channelName,
-  picture = null,
-}: ChannelAvatarProps): React.ReactElement {
-  const platformName = platformDisplayName(account.platform);
-  return (
-    <span className="relative size-9 shrink-0">
-      <Avatar className="size-9 rounded-full border border-line bg-page">
-        <AvatarImage src={picture ?? account.avatar_url ?? undefined} alt="" />
-        <AvatarFallback className="rounded-full bg-inset text-xs font-medium text-ink-2">
-          {getInitials(channelName)}
-        </AvatarFallback>
-      </Avatar>
-      <span
-        role="img"
-        aria-label={platformName}
-        className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-surface ring-2 ring-surface"
-      >
-        <PlatformIcon provider={account.platform} className="size-2.5" />
-      </span>
-    </span>
   );
 }
 
@@ -182,7 +129,6 @@ export interface ChannelHealthControlProps {
   account: PlatformAccount;
   statusReason?: string | null;
   isReconnecting?: boolean;
-  lowMotion: boolean;
   onReconnect: (account: PlatformAccount) => void;
 }
 
@@ -195,7 +141,6 @@ export function ChannelHealthControl({
   account,
   statusReason = null,
   isReconnecting = false,
-  lowMotion,
   onReconnect,
 }: ChannelHealthControlProps): React.ReactElement {
   const { t, tStatus } = useI18n();
@@ -232,7 +177,7 @@ export function ChannelHealthControl({
           <p className="px-2 py-1.5 text-xs text-ink-2">{healthDescription}</p>
           <DropdownMenuItem disabled={isReconnecting} onSelect={() => onReconnect(account)}>
             <RefreshCw
-              className={cn("size-3.5", isReconnecting && !lowMotion && "animate-spin")}
+              className={cn("size-3.5", isReconnecting && "animate-spin")}
               aria-hidden="true"
             />
             {isReconnecting ? t("Redirecting…") : t("Re-authenticate")}
@@ -253,7 +198,7 @@ export interface ChannelSettingsActionProps {
 }
 
 /**
- * Renders the channel table's pencil trigger and settings dialog.
+ * Renders the directory's overflow trigger and real channel settings dialog.
  * The dialog shows the owning Brand Profile and the real granted scopes, and
  * its destructive action closes the dialog before delegating to the board's
  * disconnect confirmation so exactly one CenterAlertDialog is ever active.
@@ -279,13 +224,13 @@ export function ChannelSettingsAction({
               aria-label={t("Channel settings")}
               className={channelActionClass}
             >
-              <Pencil aria-hidden="true" />
+              <Ellipsis aria-hidden="true" />
             </Button>
           </CenterDialogTrigger>
         </TooltipTrigger>
         <TooltipContent>{t("Channel settings")}</TooltipContent>
       </Tooltip>
-      <CenterDialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md" data-lenis-prevent>
+      <CenterDialogContent className="sm:max-w-md">
         <CenterDialogHeader>
           <CenterDialogTitle>{channelName}</CenterDialogTitle>
           <CenterDialogDescription>

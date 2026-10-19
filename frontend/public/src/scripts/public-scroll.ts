@@ -1,13 +1,10 @@
 import Lenis from "lenis";
 import "lenis/dist/lenis.css";
-import { motionAllowed, reducedMotionQuery } from "@meltiply/ui/motion-state";
 import { navigate } from "astro:transitions/client";
 
 let scroll: Lenis | undefined;
-const systemMotion = window.matchMedia(reducedMotionQuery);
-const preferenceObserver = new MutationObserver(syncMotion);
 
-/** Releases inertia before Astro's native route scroll, root replacement, or low motion. */
+/** Releases inertia before Astro's native route scroll, root replacement, or page exit. */
 function destroyScroll() {
   scroll?.destroy();
   scroll = undefined;
@@ -17,14 +14,9 @@ function destroyScroll() {
  * Gives the public document longer wheel travel and slip (Facebook-FYP-like
  * inertia) without changing native touch, keyboard, or nested overflow
  * scrolling. A lower 0.1 lerp keeps a coasting tail and a raised wheel
- * multiplier covers more distance per gesture; live manual/OS low motion and
- * theme capture release the controller.
+ * multiplier covers more distance per gesture.
  */
 function syncMotion() {
-  if (!motionAllowed()) {
-    destroyScroll();
-    return;
-  }
   scroll ??= new Lenis({
     autoRaf: true,
     anchors: false,
@@ -36,17 +28,12 @@ function syncMotion() {
 }
 
 /**
- * Rebinds preferences after Astro replaces the root and restores scroll position.
+ * Recreates the scroll controller after Astro replaces the root and restores position.
  * One controller survives hydration, never a route swap; deep links and Back use
  * Astro's native positioning before new wheel input starts smoothing.
  */
 function loadPage() {
   destroyScroll();
-  preferenceObserver.disconnect();
-  preferenceObserver.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ["data-low-motion", "data-theme-ink"],
-  });
   syncMotion();
 }
 
@@ -54,7 +41,7 @@ function loadPage() {
  * Pulls same-page anchors to their CSS heading offset in a bounded 320ms ease-out
  * (440ms for non-TOC links). Astro commits fragment history before travel; focus
  * and mobile callbacks stay intact, and modified or missing links stay native.
- * No controller means no interception, preserving immediate low-motion anchors.
+ * No mounted controller means no interception; links retain native navigation.
  */
 function pullAnchor(event: MouseEvent) {
   if (
@@ -127,5 +114,4 @@ document.addEventListener("astro:before-preparation", destroyScroll);
 document.addEventListener("astro:page-load", loadPage);
 window.addEventListener("pagehide", destroyScroll);
 window.addEventListener("pageshow", loadPage);
-systemMotion.addEventListener("change", syncMotion);
 loadPage();

@@ -573,6 +573,9 @@ export interface ComposerProps {
  * Renders the composer with one authoritative Post as its state boundary.
  * Controls remain disabled until server hydration and browser recovery settle,
  * so their deferred restores cannot overwrite a creator's first edit or save.
+ * Wide scroll columns reserve 4px for outward control focus rings. Compensated
+ * editor margins preserve the shared content edge while keeping rings inside
+ * each column's clipping boundary.
  *
  * @param props - Deep-link Post id, optional schedule seed, and navigation callbacks.
  * @returns The Post composer surface.
@@ -2124,7 +2127,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         <div
           aria-label={t("Post content")}
           tabIndex={0}
-          className="hide-scrollbar flex min-w-0 flex-1 flex-col gap-6 @4xl:min-h-0 @4xl:overflow-y-auto @4xl:overscroll-contain @4xl:pr-2"
+          className="hide-scrollbar flex min-w-0 flex-1 flex-col gap-6 @4xl:-my-1 @4xl:-ml-1 @4xl:min-h-0 @4xl:overflow-y-auto @4xl:overscroll-contain @4xl:py-1 @4xl:pr-2 @4xl:pl-1"
         >
           <ComposerSection icon={Layers} title={t("Shared Content")}>
             <div className="flex flex-col gap-4">
@@ -2623,7 +2626,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
         {/* Targeting and timing stay together in a bounded rail rather than
             stretching to half the composer. Mobile retains the same DOM order. */}
-        <div className="flex min-w-0 flex-col gap-6 @4xl:min-h-0 @4xl:w-85 @4xl:shrink-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:pl-6">
+        <div className="flex min-w-0 flex-col gap-6 @4xl:-my-1 @4xl:min-h-0 @4xl:w-85 @4xl:shrink-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:py-1 @4xl:pr-1 @4xl:pl-6">
           <DestinationSelector onNavigate={onNavigate} />
 
           <ComposerSection icon={Send} title={t("Publishing")}>

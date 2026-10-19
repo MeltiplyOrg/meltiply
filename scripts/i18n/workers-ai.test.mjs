@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createProvider } from "./generate.mjs";
-import { createWorkersAiProvider, ProviderError, withFallback } from "./workers-ai.mjs";
+import { ProviderError } from "./provider.mjs";
+import { createWorkersAiProvider, withFallback } from "./workers-ai.mjs";
 
 /**
  * Builds a fetch Response-compatible object with JSON text.
@@ -47,14 +48,16 @@ function batchPrompt(texts) {
 /**
  * Applies temporary environment values and returns a restore callback.
  *
- * @param {Record<string, string>} values Environment values to set.
+ * @param {Record<string, string | null>} values Values to set; `null` deletes
+ *   the variable so `auto` selection sees a credential-free environment.
  * @returns {() => void} Restores the previous values.
  */
 function temporaryEnvironment(values) {
   const previous = {};
   for (const [key, value] of Object.entries(values)) {
     previous[key] = process.env[key];
-    process.env[key] = value;
+    if (value === null) delete process.env[key];
+    else process.env[key] = value;
   }
   return () => {
     for (const [key, value] of Object.entries(previous)) {
@@ -196,6 +199,7 @@ test("retries the primary model before switching to the fallback", async () => {
   const restore = temporaryEnvironment({
     WORKERS_AI_ACCOUNT_ID: "account",
     WORKERS_AI_API_TOKEN: "token",
+    I18N_PROVIDER: null,
     I18N_MODEL: "@cf/test/primary",
     I18N_FALLBACK_MODEL: "@cf/test/fallback",
     I18N_SEED: "1",
@@ -222,10 +226,83 @@ test("retries the primary model before switching to the fallback", async () => {
   }
 });
 
+test("auto selects local Ollama when Workers AI credentials are absent", async () => {
+  const restore = temporaryEnvironment({
+    WORKERS_AI_ACCOUNT_ID: null,
+    WORKERS_AI_API_TOKEN: null,
+    I18N_PROVIDER: null,
+    I18N_OLLAMA_URL: "http://ollama.test:11434",
+    I18N_OLLAMA_MODEL: "qwen3:8b",
+    I18N_SEED: "1",
+    I18N_TIMEOUT_MS: "1000",
+  });
+  const calls = [];
+  try {
+    const provider = createProvider({
+      systemPrompt: "",
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init });
+        return jsonResponse({ message: { content: '["Hola"]' } });
+      },
+      retryOptions: { retries: 0, baseDelayMs: 0, sleep: async () => {} },
+    });
+
+    assert.equal(await provider.complete("prompt"), '["Hola"]');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "http://ollama.test:11434/api/chat");
+    assert.equal(calls[0].init.headers.Authorization, undefined);
+    assert.equal(JSON.parse(calls[0].init.body).model, "qwen3:8b");
+  } finally {
+    restore();
+  }
+});
+
+test("explicit workers-ai without credentials explains both options", () => {
+  const restore = temporaryEnvironment({
+    WORKERS_AI_ACCOUNT_ID: null,
+    WORKERS_AI_API_TOKEN: null,
+    I18N_PROVIDER: null,
+  });
+  try {
+    assert.throws(
+      () => createProvider({ systemPrompt: "", provider: "workers-ai" }),
+      /omit I18N_PROVIDER or set it to ollama/u,
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("partial Workers AI credentials fail instead of silently switching", () => {
+  const restore = temporaryEnvironment({
+    WORKERS_AI_ACCOUNT_ID: "account",
+    WORKERS_AI_API_TOKEN: null,
+    I18N_PROVIDER: null,
+  });
+  try {
+    assert.throws(() => createProvider({ systemPrompt: "" }), /set both/u);
+  } finally {
+    restore();
+  }
+});
+
+test("rejects an unknown provider mode", () => {
+  const restore = temporaryEnvironment({ WORKERS_AI_ACCOUNT_ID: null, WORKERS_AI_API_TOKEN: null });
+  try {
+    assert.throws(
+      () => createProvider({ systemPrompt: "", provider: "magic" }),
+      /provider must be auto, workers-ai, or ollama/u,
+    );
+  } finally {
+    restore();
+  }
+});
+
 test("fails fast without trying the fallback when the primary token is rejected", async () => {
   const restore = temporaryEnvironment({
     WORKERS_AI_ACCOUNT_ID: "account",
     WORKERS_AI_API_TOKEN: "token",
+    I18N_PROVIDER: null,
     I18N_MODEL: "@cf/test/primary",
     I18N_FALLBACK_MODEL: "@cf/test/fallback",
     I18N_SEED: "1",

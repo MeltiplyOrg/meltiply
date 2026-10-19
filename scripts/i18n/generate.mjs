@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { buildSystemPrompt, GlossaryError, loadGlossary } from "./glossary.mjs";
 import { generateNamespace, PlaceholderDriftError, writeCatalogAtomic } from "./generation.mjs";
+import { createOllamaProvider, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL } from "./ollama.mjs";
 import { withRetry } from "./retry.mjs";
 import { createWorkersAiProvider, withFallback } from "./workers-ai.mjs";
 
@@ -15,6 +16,7 @@ const DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
 const DEFAULT_FALLBACK_MODEL = "@cf/google/gemma-3-12b-it";
 const DEFAULT_SEED = 20261019;
 const DEFAULT_TIMEOUT_MS = 120_000;
+const PROVIDER_MODES = new Set(["auto", "workers-ai", "ollama"]);
 
 /**
  * Parses a positive integer environment override, falling back when unset.
@@ -35,12 +37,12 @@ function parsePositiveInteger(value, fallback, name) {
 }
 
 /**
- * Parses generation flags. `--dry-run`, `--force`, `--target`, and `--model`
- * are the supported developer options; `--locales` exists for tests and
- * alternate checkouts.
+ * Parses generation flags. `--dry-run`, `--force`, `--target`, `--model`, and
+ * `--provider` are the supported developer options; `--locales` exists for
+ * tests and alternate checkouts.
  *
  * @param {string[]} argv Process arguments after the script name.
- * @returns {{localeRoot: string, target: string, dryRun: boolean, force: boolean, model?: string}}
+ * @returns {{localeRoot: string, target: string, dryRun: boolean, force: boolean, model?: string, provider?: string}}
  */
 function parseArguments(argv) {
   const options = {
@@ -49,6 +51,7 @@ function parseArguments(argv) {
     dryRun: false,
     force: false,
     model: undefined,
+    provider: undefined,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -57,6 +60,9 @@ function parseArguments(argv) {
       index += 1;
     } else if (argument === "--model") {
       options.model = argv[index + 1];
+      index += 1;
+    } else if (argument === "--provider") {
+      options.provider = argv[index + 1];
       index += 1;
     } else if (argument === "--locales") {
       options.localeRoot = argv[index + 1];
@@ -72,6 +78,9 @@ function parseArguments(argv) {
   if (!options.target) throw new Error("--target <language> is required");
   if (!options.localeRoot) throw new Error("--locales requires a path");
   if (options.model !== undefined && !options.model) throw new Error("--model requires a value");
+  if (options.provider !== undefined && !options.provider) {
+    throw new Error("--provider requires a value");
+  }
   return options;
 }
 
@@ -87,24 +96,48 @@ function readJson(path) {
 }
 
 /**
- * Creates the production provider from environment configuration. The token is
- * read only from the environment and is never printed. Each model gets its own
- * bounded retries and the fallback model runs only after the primary exhausts
- * them, so a transient primary failure does not switch models prematurely.
+ * Resolves the provider mode from the CLI override, `I18N_PROVIDER`, or the
+ * `auto` default.
  *
- * @param {{model?: string, systemPrompt: string, fetchImpl?: typeof fetch, retryOptions?: {retries?: number, baseDelayMs?: number, sleep?: (milliseconds: number) => Promise<void>}}} options
- * @returns {{complete: (prompt: string, options?: {maxTokens?: number}) => Promise<string>}}
+ * @param {string | undefined} provider CLI override.
+ * @returns {"auto" | "workers-ai" | "ollama"} Selected mode.
+ * @throws {Error} When the mode is unknown.
  */
-export function createProvider({ model, systemPrompt, fetchImpl, retryOptions = {} }) {
-  const accountId = process.env.WORKERS_AI_ACCOUNT_ID;
-  const apiToken = process.env.WORKERS_AI_API_TOKEN;
-  if (!accountId || !apiToken) {
+function resolveProviderMode(provider) {
+  const mode = provider ?? process.env.I18N_PROVIDER ?? "auto";
+  if (!PROVIDER_MODES.has(mode)) {
     throw new Error(
-      "generation requires WORKERS_AI_ACCOUNT_ID and WORKERS_AI_API_TOKEN; see .env.example",
+      `provider must be auto, workers-ai, or ollama; received ${JSON.stringify(mode)}`,
     );
   }
-  const primaryModel = model ?? process.env.I18N_MODEL ?? DEFAULT_MODEL;
-  const fallbackModel = process.env.I18N_FALLBACK_MODEL ?? DEFAULT_FALLBACK_MODEL;
+  return mode;
+}
+
+/**
+ * Creates the provider chain from environment configuration. The Workers AI
+ * token is read only from the environment and is never printed. Each cloud
+ * model gets its own bounded retries and the fallback model runs only after the
+ * primary exhausts them.
+ *
+ * `auto` uses Workers AI when both credentials are present and local Ollama
+ * otherwise, so a machine with no account or key can still draft translations
+ * offline. `workers-ai` and `ollama` force one backend; `--model` overrides the
+ * active backend's model.
+ *
+ * @param {{model?: string, provider?: string, systemPrompt: string, fetchImpl?: typeof fetch, retryOptions?: {retries?: number, baseDelayMs?: number, sleep?: (milliseconds: number) => Promise<void>}}} options
+ * @returns {{complete: (prompt: string, options?: {maxTokens?: number}) => Promise<string>}}
+ * @throws {Error} When credentials are partial, missing for an explicit cloud mode, or configuration is invalid.
+ */
+export function createProvider({ model, provider, systemPrompt, fetchImpl, retryOptions = {} }) {
+  const mode = resolveProviderMode(provider);
+  const accountId = process.env.WORKERS_AI_ACCOUNT_ID;
+  const apiToken = process.env.WORKERS_AI_API_TOKEN;
+  if ((accountId && !apiToken) || (!accountId && apiToken)) {
+    throw new Error(
+      "set both WORKERS_AI_ACCOUNT_ID and WORKERS_AI_API_TOKEN, or neither to use local Ollama; see .env.example",
+    );
+  }
+  const hasWorkersAi = Boolean(accountId && apiToken);
   const seed = parsePositiveInteger(process.env.I18N_SEED, DEFAULT_SEED, "I18N_SEED");
   const timeoutMs = parsePositiveInteger(
     process.env.I18N_TIMEOUT_MS,
@@ -112,6 +145,28 @@ export function createProvider({ model, systemPrompt, fetchImpl, retryOptions = 
     "I18N_TIMEOUT_MS",
   );
   const retry = { retries: 3, baseDelayMs: 500, ...retryOptions };
+
+  if (mode === "ollama" || (mode === "auto" && !hasWorkersAi)) {
+    return withRetry(
+      createOllamaProvider({
+        url: process.env.I18N_OLLAMA_URL || DEFAULT_OLLAMA_URL,
+        model: model ?? process.env.I18N_OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL,
+        systemPrompt,
+        seed,
+        timeoutMs,
+        fetchImpl,
+      }),
+      retry,
+    );
+  }
+  if (!hasWorkersAi) {
+    throw new Error(
+      "I18N_PROVIDER=workers-ai requires WORKERS_AI_ACCOUNT_ID and WORKERS_AI_API_TOKEN; omit I18N_PROVIDER or set it to ollama for credential-free local generation",
+    );
+  }
+
+  const primaryModel = model ?? process.env.I18N_MODEL ?? DEFAULT_MODEL;
+  const fallbackModel = process.env.I18N_FALLBACK_MODEL ?? DEFAULT_FALLBACK_MODEL;
   const primary = withRetry(
     createWorkersAiProvider({
       accountId,
@@ -209,7 +264,7 @@ export async function generateAll({
  * 1 means a provider/placeholder failure with no partial write, and 2 means
  * invalid configuration or arguments.
  *
- * @param {{localeRoot: string, target: string, dryRun: boolean, force: boolean, model?: string}} options
+ * @param {{localeRoot: string, target: string, dryRun: boolean, force: boolean, model?: string, provider?: string}} options
  * @returns {Promise<number>} Process exit code.
  */
 export async function main(options) {
@@ -229,6 +284,7 @@ export async function main(options) {
     try {
       provider = createProvider({
         model: options.model,
+        provider: options.provider,
         systemPrompt: buildSystemPrompt(glossary, options.target),
       });
     } catch (error) {

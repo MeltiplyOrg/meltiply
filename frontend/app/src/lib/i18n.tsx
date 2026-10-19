@@ -763,10 +763,10 @@ const spanishTranslations: Record<string, string> = {
   "Load more": "Cargar más",
   "No published posts in this range.": "No hay publicaciones publicadas en este intervalo.",
   "Open Channels": "Abrir canales",
-  "Analytics needs an Instagram or Threads channel.":
-    "Las analíticas necesitan un canal de Instagram o Threads.",
-  "Connect a platform account that reports analytics to see performance for published posts.":
-    "Conecta una cuenta de plataforma que informe analíticas para ver el rendimiento de las publicaciones publicadas.",
+  "Analytics needs a connected channel that reports analytics.":
+    "Las analíticas necesitan un canal conectado que informe analíticas.",
+  "Connect an account on a platform whose Provider reports analytics. Reconnect an existing channel if its analytics scope was not granted.":
+    "Conecta una cuenta en una plataforma cuyo proveedor informe analíticas. Vuelve a conectar un canal existente si no se concedió su permiso de analíticas.",
   "{profile} · Performance for published posts across connected channels.":
     "{profile} · Rendimiento de las publicaciones publicadas en los canales conectados.",
   "Not synced yet": "Aún sin sincronizar",
@@ -780,10 +780,10 @@ const spanishTranslations: Record<string, string> = {
     "Las métricas aparecen después de la primera sincronización con el proveedor.",
   "Choose another range or publish a Post to build this cohort.":
     "Elige otro intervalo o publica una publicación para formar esta cohorte.",
-  "The published destinations in this range do not report analytics yet. Publish to an Instagram or Threads channel, or choose another range.":
-    "Los destinos publicados en este intervalo aún no informan analíticas. Publica en un canal de Instagram o Threads o elige otro intervalo.",
-  "Stored metrics will appear here after the next scheduled sync.":
-    "Las métricas almacenadas aparecerán aquí tras la próxima sincronización programada.",
+  "The published destinations in this range do not report analytics yet. Publish from a platform whose Provider reports analytics, or choose another range.":
+    "Los destinos publicados en este intervalo aún no informan analíticas. Publica desde una plataforma cuyo proveedor informe analíticas o elige otro intervalo.",
+  "Stored metrics will appear after the next scheduled sync. If they remain empty, reconnect the channel to grant its analytics scope.":
+    "Las métricas almacenadas aparecerán tras la próxima sincronización programada. Si siguen vacías, vuelve a conectar el canal para conceder su permiso de analíticas.",
   "Partial data: no analytics are available for {platforms}.":
     "Datos parciales: no hay analíticas disponibles para {platforms}.",
   "Analytics may be behind: the last sync was {time}.":

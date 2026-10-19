@@ -209,9 +209,9 @@ export function AnalyticsView(): React.ReactElement {
     return (
       <WorkspaceSurface title={t("Analytics")} description={description} actions={lastSyncStatus}>
         <AnalyticsEmpty
-          title={t("Analytics needs an Instagram or Threads channel.")}
+          title={t("Analytics needs a connected channel that reports analytics.")}
           description={t(
-            "Connect a platform account that reports analytics to see performance for published posts.",
+            "Connect an account on a platform whose Provider reports analytics. Reconnect an existing channel if its analytics scope was not granted.",
           )}
           showChannelsLink
         />
@@ -265,9 +265,11 @@ export function AnalyticsView(): React.ReactElement {
                 ? t("Choose another range or publish a Post to build this cohort.")
                 : emptyState === "all-unsupported"
                   ? t(
-                      "The published destinations in this range do not report analytics yet. Publish to an Instagram or Threads channel, or choose another range.",
+                      "The published destinations in this range do not report analytics yet. Publish from a platform whose Provider reports analytics, or choose another range.",
                     )
-                  : t("Stored metrics will appear here after the next scheduled sync.")
+                  : t(
+                      "Stored metrics will appear after the next scheduled sync. If they remain empty, reconnect the channel to grant its analytics scope.",
+                    )
             }
           />
         ) : summary ? (

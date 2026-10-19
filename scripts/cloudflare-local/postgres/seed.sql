@@ -255,6 +255,19 @@ VALUES
     now() - interval '2 hours'
   ),
   (
+    'e3000000-0000-4000-8000-000000000009',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'facebook',
+    'local-facebook-analytics-alpha',
+    'Alpha Page',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload', 'analytics'],
+    '{"fixture": true}'::jsonb,
+    'connected',
+    now() - interval '2 hours'
+  ),
+  (
     'e3000000-0000-4000-8000-000000000008',
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
@@ -641,6 +654,14 @@ VALUES
     'Analytics cohort launch',
     'Two supported destinations published in the retained analytics cohort.',
     'active'
+  ),
+  (
+    '48000000-0000-4000-8000-000000000008',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Analytics Facebook Reel',
+    'A Page Reel with lifetime insights in the analytics cohort.',
+    'active'
   )
 ON CONFLICT (id) DO UPDATE
 SET title = EXCLUDED.title,
@@ -820,6 +841,22 @@ VALUES
     'Analytics cohort launch',
     NULL,
     NULL, 0, 1, now() - interval '4 days', NULL, NULL
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000008',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '48000000-0000-4000-8000-000000000008',
+    'e3000000-0000-4000-8000-000000000009',
+    'facebook',
+    'published',
+    NULL,
+    now() - interval '2 days',
+    'local-post-analytics-facebook',
+    'https://example.invalid/facebook/local-post-analytics-facebook',
+    'Analytics Facebook Reel',
+    NULL,
+    NULL, 0, 1, now() - interval '2 days', NULL, NULL
   )
 -- `post_id` and the frozen `attachment_ids` are re-asserted on reseed: a
 -- database seeded before the Post-owned-media cutover holds distribution rows
@@ -854,7 +891,8 @@ VALUES
   ('aa000000-0000-4000-8000-000000000005', 'f0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 820, 64, 7, 19, 1500, 700, 980, now() - interval '2 days'),
   ('aa000000-0000-4000-8000-000000000006', 'f0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 1935, 148, 18, 44, 3900, 1600, 2200, now() - interval '8 hours'),
   ('aa000000-0000-4000-8000-000000000007', 'f0000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', 640, 42, 6, 8, 0, 0, 0, now() - interval '12 hours'),
-  ('aa000000-0000-4000-8000-000000000008', 'f0000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 310, 19, 4, 3, 0, 0, 0, now() - interval '10 hours')
+  ('aa000000-0000-4000-8000-000000000008', 'f0000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 310, 19, 4, 3, 0, 0, 0, now() - interval '10 hours'),
+  ('aa000000-0000-4000-8000-000000000009', 'f0000000-0000-4000-8000-000000000008', '20000000-0000-4000-8000-000000000005', 180, 12, 2, 1, 0, 0, 0, now() - interval '9 hours')
 ON CONFLICT (id) DO UPDATE
 SET views = EXCLUDED.views,
     likes = EXCLUDED.likes,

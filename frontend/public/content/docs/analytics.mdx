@@ -42,9 +42,19 @@ in the URL so a view can be bookmarked and restored with browser back/forward.
 | Published destinations | Published Distributions in the cohort; each Post-to-Channel outcome counts once. |
 
 Reach, impressions, watch time, saves, clicks, and a derived engagement rate are
-not shown. Provider coverage is limited to Instagram and Threads today, and
-Threads engagement reporting can be disabled by the deployment's acceptance
-configuration. The page never fabricates data for Facebook, TikTok, or YouTube.
+not shown. All five supported Providers report stored analytics when their
+analytics scope is granted: Instagram and Threads media insights, Facebook Page
+Reel insights, TikTok video counters, and YouTube Analytics. Threads engagement
+reporting can still be disabled by the deployment's acceptance configuration.
+The page never fabricates data for a Provider that has rejected or not granted
+analytics access.
+
+Provider limits still apply. Facebook Reels use Video Insights, which requires
+the `read_insights` and `pages_manage_engagement` permissions; shares are
+derived from Meta's combined comments-and-shares metric. YouTube Analytics
+reports lifetime aggregates for the uploaded video and shares Google's quota.
+TikTok reports the creator's current video counters. After an analytics scope is
+added, reconnect the Channel so the Provider issues a token that can read it.
 
 ## Coverage and freshness
 

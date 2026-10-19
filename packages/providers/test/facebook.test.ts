@@ -42,6 +42,10 @@ const defaultGrantedPermissions: Responder = () =>
       { permission: "pages_show_list", status: "granted" },
       { permission: "pages_read_engagement", status: "granted" },
       { permission: "pages_manage_posts", status: "granted" },
+
+      { permission: "pages_manage_engagement", status: "granted" },
+
+      { permission: "read_insights", status: "granted" },
     ],
   });
 
@@ -104,7 +108,7 @@ describe("createFacebookAdapter", () => {
   it("advertises only the implemented Page Reels subset", () => {
     const provider = adapter(vi.fn<typeof fetch>());
     expect(provider.capability).toMatchObject({
-      analytics: false,
+      analytics: true,
       asset_types: ["video"],
       comments: false,
       connect_available: true,
@@ -120,7 +124,7 @@ describe("createFacebookAdapter", () => {
       reply: false,
     });
     expect(provider.transferModes).toEqual(["remote_ingest"]);
-    expect(provider.listAnalytics).toBeUndefined();
+    expect(provider.listAnalytics).toBeTypeOf("function");
     expect(provider.listComments).toBeUndefined();
     expect(provider.reply).toBeUndefined();
     expect(provider.cancelPublication).toBeUndefined();
@@ -143,7 +147,8 @@ describe("createFacebookAdapter", () => {
       client_id: "facebook-client",
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "pages_show_list,pages_read_engagement,pages_manage_posts",
+      scope:
+        "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights",
       state: "oauth-state",
     });
     expect(() =>
@@ -205,7 +210,13 @@ describe("createFacebookAdapter", () => {
           account: { displayName: "Meltiply Page", id: "page-1" },
           expiresAt: "2026-09-17T00:00:00.000Z",
           refreshToken: '{"pageId":"page-1","userAccessToken":"long-user-secret"}',
-          scopes: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"],
+          scopes: [
+            "pages_show_list",
+            "pages_read_engagement",
+            "pages_manage_posts",
+            "pages_manage_engagement",
+            "read_insights",
+          ],
         },
       ],
     });
@@ -384,6 +395,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
           ],
         },
         { data: null },
@@ -403,6 +418,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
           ],
         },
         {
@@ -430,6 +449,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
           ],
         },
         {
@@ -458,6 +481,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
           ],
         },
         {
@@ -903,6 +930,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
             { permission: "email", status: "declined" },
           ],
         }),
@@ -931,6 +962,8 @@ describe("createFacebookAdapter", () => {
       "pages_show_list",
       "pages_read_engagement",
       "pages_manage_posts",
+      "pages_manage_engagement",
+      "read_insights",
     ]);
   });
 
@@ -1200,7 +1233,13 @@ describe("createFacebookAdapter", () => {
       accessToken: "new-page-secret",
       expiresAt: "2026-09-17T00:00:00.000Z",
       refreshToken: '{"pageId":"page-1","userAccessToken":"new-user-secret"}',
-      scopes: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"],
+      scopes: [
+        "pages_show_list",
+        "pages_read_engagement",
+        "pages_manage_posts",
+        "pages_manage_engagement",
+        "read_insights",
+      ],
     });
 
     await expect(
@@ -1208,5 +1247,132 @@ describe("createFacebookAdapter", () => {
     ).rejects.toMatchObject({
       failure: { code: "facebook_refresh_secret_invalid" },
     });
+  });
+
+  it("requires read_insights before a Page can be selected", async () => {
+    const providerCalls = sequence(
+      () => json({ access_token: "short" }),
+      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
+      () =>
+        json({
+          data: [
+            { permission: "pages_show_list", status: "granted" },
+            { permission: "pages_read_engagement", status: "granted" },
+            { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+            { permission: "read_insights", status: "declined" },
+          ],
+        }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+        code: "code",
+        codeVerifier: "unused",
+        redirectUri,
+      }),
+    ).resolves.toEqual({ accounts: [] });
+  });
+
+  it("reads Reel plays, likes, comments, and derived shares from the video identity", async () => {
+    const providerCalls = sequence(
+      (url, init) => {
+        expect(url.origin).toBe("https://graph.facebook.com");
+        expect(url.pathname).toBe("/v25.0/video-1/video_insights");
+        expect(url.searchParams.get("metric")).toBe(
+          "blue_reels_play_count,post_video_social_actions",
+        );
+        expect(url.searchParams.get("period")).toBe("lifetime");
+        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer page-access-secret");
+        return json({
+          data: [
+            {
+              name: "blue_reels_play_count",
+              period: "lifetime",
+              values: [{ value: 1200 }],
+            },
+            {
+              name: "post_video_social_actions",
+              period: "lifetime",
+              values: [{ value: 21 }],
+            },
+          ],
+        });
+      },
+      (url) => {
+        expect(url.pathname).toBe("/v25.0/video-1");
+        expect(url.searchParams.get("fields")).toBe(
+          "likes.summary(true).limit(0),comments.summary(true).limit(0)",
+        );
+        return json({
+          likes: { summary: { total_count: 84 } },
+          comments: { summary: { total_count: 9 } },
+        });
+      },
+    );
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).resolves.toEqual({
+      items: [
+        {
+          comments: 9,
+          impressions: 0,
+          likes: 84,
+          providerPostId: "video-1",
+          recordedAt: "2026-07-19T00:00:00.000Z",
+          reach: 0,
+          shares: 12,
+          views: 1200,
+          watchTimeSeconds: 0,
+        },
+      ],
+    });
+  });
+
+  it("rejects social actions below comments and missing Reel metrics", async () => {
+    const inconsistent = sequence(
+      () =>
+        json({
+          data: [
+            { name: "blue_reels_play_count", values: [{ value: 1200 }] },
+            { name: "post_video_social_actions", values: [{ value: 4 }] },
+          ],
+        }),
+      () =>
+        json({
+          likes: { summary: { total_count: 84 } },
+          comments: { summary: { total_count: 9 } },
+        }),
+    );
+    await expect(
+      adapter(inconsistent.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
+
+    const missingPlays = sequence(
+      () => json({ data: [{ name: "post_video_social_actions", values: [{ value: 0 }] }] }),
+      () =>
+        json({
+          likes: { summary: { total_count: 0 } },
+          comments: { summary: { total_count: 0 } },
+        }),
+    );
+    await expect(
+      adapter(missingPlays.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
   });
 });

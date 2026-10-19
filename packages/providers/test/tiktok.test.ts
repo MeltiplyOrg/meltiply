@@ -121,7 +121,7 @@ describe("createTikTokAdapter", () => {
     const provider = adapter(vi.fn<typeof fetch>());
     expect(provider.capability).toMatchObject({
       accepted_mime_types: ["image/jpeg", "image/webp", "video/mp4", "video/quicktime"],
-      analytics: false,
+      analytics: true,
       asset_types: ["image", "video"],
       comments: false,
       connect_available: true,
@@ -137,7 +137,7 @@ describe("createTikTokAdapter", () => {
       reply: false,
     });
     expect(provider.getPublicationRequirements).toBeTypeOf("function");
-    expect(provider.listAnalytics).toBeUndefined();
+    expect(provider.listAnalytics).toBeTypeOf("function");
     expect(provider.listComments).toBeUndefined();
     expect(provider.reply).toBeUndefined();
     expect(() => new ProviderRegistry().register("tiktok", provider)).not.toThrow();
@@ -158,7 +158,7 @@ describe("createTikTokAdapter", () => {
       client_key: "tiktok-client-key",
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "user.info.basic,video.publish",
+      scope: "user.info.basic,video.publish,video.list",
       state: "oauth-state",
     });
     expect(() =>
@@ -188,7 +188,7 @@ describe("createTikTokAdapter", () => {
           open_id: "open-id-1",
           refresh_expires_in: 31_536_000,
           refresh_token: "refresh-secret",
-          scope: "user.info.basic,video.publish",
+          scope: "user.info.basic,video.publish,video.list",
           token_type: "Bearer",
         });
       },
@@ -220,7 +220,7 @@ describe("createTikTokAdapter", () => {
       },
       expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-secret",
-      scopes: ["user.info.basic", "video.publish"],
+      scopes: ["user.info.basic", "video.publish", "video.list"],
     });
   });
 
@@ -232,7 +232,7 @@ describe("createTikTokAdapter", () => {
           expires_in: 86_400,
           open_id: "open-id-1",
           refresh_token: "refresh-secret",
-          scope: "user.info.basic,video.publish",
+          scope: "user.info.basic,video.publish,video.list",
           token_type: "Bearer",
         }),
       () =>
@@ -627,7 +627,7 @@ describe("createTikTokAdapter", () => {
           expires_in: 86_400,
           open_id: "open-id-1",
           refresh_token: "refresh-rotated",
-          scope: "user.info.basic,video.publish",
+          scope: "user.info.basic,video.publish,video.list",
           token_type: "Bearer",
         });
       },
@@ -646,7 +646,7 @@ describe("createTikTokAdapter", () => {
       accessToken: "access-rotated",
       expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-rotated",
-      scopes: ["user.info.basic", "video.publish"],
+      scopes: ["user.info.basic", "video.publish", "video.list"],
     });
     await expect(provider.revoke!("access-rotated")).resolves.toBeUndefined();
   });
@@ -675,5 +675,76 @@ describe("createTikTokAdapter", () => {
       },
     });
     expect(JSON.stringify(error)).not.toContain("raw provider detail");
+  });
+
+  it("reads the creator's video counters without inventing measurements", async () => {
+    const providerCalls = sequence((url, init) => {
+      expect(url.origin).toBe("https://open.tiktokapis.com");
+      expect(url.pathname).toBe("/v2/video/query/");
+      expect(url.searchParams.get("fields")).toBe(
+        "id,view_count,like_count,comment_count,share_count",
+      );
+      expect(JSON.parse(String(init.body))).toEqual({ filters: { video_ids: ["video-1"] } });
+      expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-secret");
+      return success({
+        videos: [
+          {
+            comment_count: 9,
+            id: "video-1",
+            like_count: 84,
+            share_count: 12,
+            view_count: 1200,
+          },
+        ],
+      });
+    });
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).resolves.toEqual({
+      items: [
+        {
+          comments: 9,
+          impressions: 0,
+          likes: 84,
+          providerPostId: "video-1",
+          recordedAt: "2026-07-19T00:00:00.000Z",
+          reach: 0,
+          shares: 12,
+          views: 1200,
+          watchTimeSeconds: 0,
+        },
+      ],
+    });
+  });
+
+  it("writes no snapshot when TikTok no longer reports the video", async () => {
+    const providerCalls = sequence(() => success({ videos: [] }));
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).resolves.toEqual({ items: [] });
+  });
+
+  it("rejects a metric row that omits a requested counter", async () => {
+    const providerCalls = sequence(() =>
+      success({ videos: [{ id: "video-1", like_count: 1, view_count: 2 }] }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
   });
 });

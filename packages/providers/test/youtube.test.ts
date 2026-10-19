@@ -134,7 +134,7 @@ describe("createYouTubeAdapter", () => {
   it("advertises only the implemented YouTube Shorts candidate subset", () => {
     const provider = adapter(vi.fn<typeof fetch>());
     expect(provider.capability).toMatchObject({
-      analytics: false,
+      analytics: true,
       asset_types: ["video"],
       comments: false,
       connect_available: true,
@@ -150,7 +150,7 @@ describe("createYouTubeAdapter", () => {
       reply: false,
     });
     expect(provider.transferModes).toEqual(["resumable_upload"]);
-    expect(provider.listAnalytics).toBeUndefined();
+    expect(provider.listAnalytics).toBeTypeOf("function");
     expect(provider.listComments).toBeUndefined();
     expect(provider.reply).toBeUndefined();
     expect(provider.cancelPublication).toBeUndefined();
@@ -179,7 +179,7 @@ describe("createYouTubeAdapter", () => {
       redirect_uri: redirectUri,
       response_type: "code",
       scope:
-        "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+        "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
       state: "oauth-state",
     });
     expect(() =>
@@ -202,7 +202,7 @@ describe("createYouTubeAdapter", () => {
           expires_in: 3_600,
           refresh_token: "refresh-secret",
           scope:
-            "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+            "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
           token_type: "Bearer",
         });
       },
@@ -250,6 +250,7 @@ describe("createYouTubeAdapter", () => {
       scopes: [
         "https://www.googleapis.com/auth/youtube.upload",
         "https://www.googleapis.com/auth/youtube.readonly",
+        "https://www.googleapis.com/auth/yt-analytics.readonly",
       ],
     });
   });
@@ -1104,5 +1105,98 @@ describe("createYouTubeAdapter", () => {
     });
     expect(providerCalls.calls).toHaveLength(3);
     expect(reads).toBeLessThanOrEqual(fragments + 4);
+  });
+
+  it("reads lifetime views, likes, comments, and shares for one video", async () => {
+    const providerCalls = sequence((url) => {
+      expect(url.origin).toBe("https://youtubeanalytics.googleapis.com");
+      expect(url.pathname).toBe("/v2/reports");
+      expect(url.searchParams.get("ids")).toBe("channel==channel-1");
+      expect(url.searchParams.get("startDate")).toBe("2005-02-14");
+      expect(url.searchParams.get("endDate")).toBe("2026-07-19");
+      expect(url.searchParams.get("metrics")).toBe("views,likes,comments,shares");
+      expect(url.searchParams.get("filters")).toBe("video==video-1");
+      return json({
+        columnHeaders: [
+          { name: "views" },
+          { name: "likes" },
+          { name: "comments" },
+          { name: "shares" },
+        ],
+        rows: [[1200, 84, 9, 12]],
+      });
+    });
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).resolves.toEqual({
+      items: [
+        {
+          comments: 9,
+          impressions: 0,
+          likes: 84,
+          providerPostId: "video-1",
+          recordedAt: "2026-07-19T00:00:00.000Z",
+          reach: 0,
+          shares: 12,
+          views: 1200,
+          watchTimeSeconds: 0,
+        },
+      ],
+    });
+  });
+
+  it("writes no snapshot when the Analytics report omits rows", async () => {
+    const providerCalls = sequence(() =>
+      json({
+        columnHeaders: [
+          { name: "views" },
+          { name: "likes" },
+          { name: "comments" },
+          { name: "shares" },
+        ],
+      }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).resolves.toEqual({ items: [] });
+  });
+
+  it("rejects a report without column metadata", async () => {
+    const providerCalls = sequence(() => json({}));
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
+  });
+
+  it("rejects a report that omits a requested metric", async () => {
+    const providerCalls = sequence(() =>
+      json({
+        columnHeaders: [{ name: "views" }, { name: "likes" }],
+        rows: [[1200, 84]],
+      }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
   });
 });

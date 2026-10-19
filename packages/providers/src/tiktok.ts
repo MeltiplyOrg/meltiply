@@ -1,7 +1,7 @@
 import type { PlatformCapability } from "@meltiply/domain";
 import { extractRateLimitBudget } from "./rate-limit";
 
-import { addSeconds, malformed, unknownResult } from "./adapter-helpers";
+import { addSeconds, malformed, requiredIdentifier, unknownResult } from "./adapter-helpers";
 import { classifyProviderFailure, ProviderAdapterError } from "./failures";
 import { ProviderHttpClient } from "./http";
 import {
@@ -10,9 +10,11 @@ import {
   boundedString,
   boundedText,
   exactRedirectUri,
+  metricValue,
   record,
   required,
   secureUrl,
+  validatePageInput,
 } from "./meta-common";
 import type {
   OAuthConnection,
@@ -35,7 +37,7 @@ const authorizationOrigin = "https://www.tiktok.com";
 const imageMaximumBytes = 20 * 1024 * 1024;
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 2 * 24 * 60 * 60;
-const configuredScopes = ["user.info.basic", "video.publish"] as const;
+const configuredScopes = ["user.info.basic", "video.publish", "video.list"] as const;
 const privacyLevels = new Set<TikTokPrivacyLevel>([
   "PUBLIC_TO_EVERYONE",
   "MUTUAL_FOLLOW_FRIENDS",
@@ -48,7 +50,7 @@ export const TIKTOK_MAX_CAPTION_LENGTH = 2_200;
 
 const capability: PlatformCapability = {
   accepted_mime_types: ["image/jpeg", "image/webp", "video/mp4", "video/quicktime"],
-  analytics: false,
+  analytics: true,
   asset_types: ["image", "video"],
   comments: false,
   connect_available: true,
@@ -65,7 +67,8 @@ const capability: PlatformCapability = {
     "Privacy, interaction, commercial-content, AI, and music-usage choices are explicit per target.",
     "Media uses PULL_FROM_URL from an HTTPS URL prefix verified in the TikTok developer portal.",
     "Creator eligibility and current account limits are queried immediately before publication.",
-    "Analytics, comments, and replies are not claimed.",
+    "Analytics reads the creator's own view, like, comment, and share counters; comments and replies are not claimed.",
+    "Existing connections must reconnect to grant the video.list analytics scope.",
     "TikTok app audit and approved live-account acceptance remain required.",
   ],
   platform: "tiktok",
@@ -578,6 +581,78 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
     },
 
     getPublicationRequirements: getRequirements,
+
+    /**
+     * Reads the creator's current view, like, comment, and share counters for
+     * one published TikTok video. The query endpoint belongs to the Display API
+     * and requires the `video.list` scope; an empty result means TikTok no
+     * longer reports the video, so no snapshot is written.
+     *
+     * @param context - Provider request context carrying cancellation.
+     * @param credentials - Connected creator token and account identity.
+     * @param lookup - Publication whose providerPostId names the TikTok video.
+     * @param page - Single-page query input; TikTok returns one video.
+     * @returns One analytics record, or an empty page when TikTok omits the video.
+     * @throws {ProviderAdapterError} On a rejected scope, malformed payload, or
+     *   missing counter, so a sync failure is recorded instead of a false zero.
+     */
+    async listAnalytics(context, credentials, lookup, page) {
+      validatePageInput("tiktok", page);
+      if (page.cursor) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "tiktok_analytics_not_paginated",
+            status: 400,
+          }),
+        );
+      }
+      const providerPostId = requiredIdentifier(lookup.providerPostId, "tiktok_video_id_required");
+      const url = new URL("/v2/video/query/", apiOrigin);
+      url.searchParams.set("fields", "id,view_count,like_count,comment_count,share_count");
+      const response = await http.request<unknown>(context, {
+        body: JSON.stringify({ filters: { video_ids: [providerPostId] } }),
+        headers: {
+          ...bearer(credentials.accessToken),
+          "Content-Type": "application/json; charset=UTF-8",
+        },
+        method: "POST",
+        url: url.toString(),
+      });
+      const data = envelope(response.body);
+      const videos = data.videos;
+      if (!Array.isArray(videos) || videos.length > 1) throw malformed();
+      if (videos.length === 0) return { items: [] };
+      const video = record(videos[0]);
+      const id = tiktokIdentifier(video?.id);
+      const views = metricValue(video?.view_count);
+      const likes = metricValue(video?.like_count);
+      const comments = metricValue(video?.comment_count);
+      const shares = metricValue(video?.share_count);
+      if (
+        id !== providerPostId ||
+        views === undefined ||
+        likes === undefined ||
+        comments === undefined ||
+        shares === undefined
+      ) {
+        throw malformed();
+      }
+      return {
+        items: [
+          {
+            comments,
+            impressions: 0,
+            likes,
+            providerPostId,
+            recordedAt: now().toISOString(),
+            reach: 0,
+            shares,
+            views,
+            watchTimeSeconds: 0,
+          },
+        ],
+      };
+    },
 
     /**
      * Reconciles a Direct Post operation through TikTok's status/fetch endpoint.

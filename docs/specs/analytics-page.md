@@ -4,6 +4,12 @@ Status: ready for implementation
 Date: 2026-10-19
 Contract change: approved in conversation on 2026-10-19
 
+> Implementation note (2026-10-19): the owner later required analytics for
+> every supported Provider, so Facebook Page Reels, TikTok videos, and YouTube
+> videos now expose stored analytics too. The Instagram/Threads-only coverage
+> and provider out-of-scope statements below describe the initial spec and are
+> superseded by the capability inventory and the shipped Provider adapters.
+
 ## 1. Summary
 
 Add a dedicated `/analytics` workspace route and sidebar section. The page is a
@@ -163,7 +169,7 @@ Columns:
 | Loading                             | First summary or Post query fetch                                                      | Skeleton matching KPI, chart, and table geometry.                                                     |
 | Refreshing                          | A range, platform, metric, or profile change with prior data                           | Keep prior data visible; show a subtle busy state on the refresh control.                             |
 | Error                               | Either query rejects                                                                   | Shared `Alert` with the error message and a Retry button. The page header remains visible.            |
-| No capable channels                 | No connected platform has `analytics: true`                                            | Empty state: `Analytics needs an Instagram or Threads channel.` with a link to Channels.              |
+| No capable channels                 | No connected platform has `analytics: true`                                            | Empty state: `Analytics needs a connected channel that reports analytics.` with a link to Channels.   |
 | No published Posts                  | `totals.post_count === 0`                                                              | Empty state: `No published posts in this range.`                                                      |
 | All published platforms unsupported | `post_count > 0`, `partial`, and every `by_platform` row is unsupported                | Empty state: `No analytics-capable published destinations in this range.`                             |
 | Awaiting first sync                 | Published destinations exist but every included platform has `last_synced_at === null` | Empty state: `Metrics appear after the first provider sync.` with the last-sync label when available. |
@@ -590,7 +596,7 @@ Add and translate new keys for:
 - `Last 7 days`, `Last 90 days`, `Last 12 months`
 - `Published destinations`
 - `Metrics are cumulative snapshots for posts published in this range, not activity during it.`
-- `Analytics needs an Instagram or Threads channel.`
+- `Analytics needs a connected channel that reports analytics.`
 - `No analytics-capable published destinations in this range.`
 - `Metrics appear after the first provider sync.`
 - `Awaiting first sync`
@@ -640,10 +646,10 @@ completion:
 
 Browser smoke on the local stack with seeded data:
 
-- Add published Instagram and Threads Distributions with snapshots to the local
-  seed so the page has a supported-platform cohort. Keep at least one published
-  Distribution on an unsupported platform to exercise the partial and
-  not-supported states.
+- Add published Instagram, Threads, Facebook, TikTok, and YouTube Distributions
+  with snapshots to the local seed so the page has a supported-platform cohort.
+  Keep an unaccepted Provider Distribution to exercise partial and not-supported
+  states.
 - Remove `/analytics` from the real-stack end-to-end retired-route list; it is a
   retained route after this change.
 
@@ -652,8 +658,8 @@ Browser smoke on the local stack with seeded data:
    aggregate.
 3. Switch each range, platform, and metric; verify the URL, chart, KPIs, and
    Post ranking update and survive back/forward.
-4. Verify a Post with Instagram and Threads Distributions sums both; a Post with
-   only an unsupported platform shows `Not supported`, not zero.
+4. Verify a Post with several supported Distributions sums them; a Post whose
+   Provider lacks analytics access shows `Not supported`, not zero.
 5. Verify partial, awaiting-sync, no-capable-channel, no-published-Post, loading,
    and error states.
 6. Verify light and dark themes, keyboard navigation, focus visibility, the
@@ -682,9 +688,10 @@ Browser smoke on the local stack with seeded data:
 
 - EvilCharts is vendored source, not a versioned package. Pin Recharts `3.8.0`,
   keep the generated files isolated, and review registry updates as code.
-- Provider coverage is limited to Instagram and Threads, and Threads engagement
-  may be disabled by deployment acceptance flags. The empty states must make this
-  explicit rather than showing an empty dashboard.
+- Every supported Provider reports analytics when its analytics scope is granted;
+  Threads engagement may still be disabled by deployment acceptance flags, and
+  older connections need reauthorization. The empty states must make this explicit
+  rather than showing an empty dashboard.
 - Cohorts can be mistaken for activity in the range. The range and KPI captions
   are mandatory, not optional copy.
 - The summary semantic fix changes existing API behavior. No current frontend

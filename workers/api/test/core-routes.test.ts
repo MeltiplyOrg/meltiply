@@ -1516,7 +1516,7 @@ describe("core API routes", () => {
     expect(location.searchParams.get("redirect_uri")).toBe(
       "http://localhost:8787/api/v1/platforms/tiktok/callback",
     );
-    expect(location.searchParams.get("scope")).toBe("user.info.basic,video.publish");
+    expect(location.searchParams.get("scope")).toBe("user.info.basic,video.publish,video.list");
     expect(create).toHaveBeenCalledOnce();
   });
 

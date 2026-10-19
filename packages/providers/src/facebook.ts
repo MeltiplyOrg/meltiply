@@ -18,10 +18,12 @@ import {
   boundedString,
   boundedText,
   exactRedirectUri,
+  metricValue,
   providerIdentifier,
   record,
   required,
   secureUrl,
+  validatePageInput,
 } from "./meta-common";
 import type {
   OAuthConnection,
@@ -41,10 +43,12 @@ const apiVersion = "v25.0";
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 90 * 24 * 60 * 60;
 
-const publishingScopes = [
+const configuredScopes = [
   "pages_show_list",
   "pages_read_engagement",
   "pages_manage_posts",
+  "pages_manage_engagement",
+  "read_insights",
 ] as const;
 
 /** Facebook's caption ceiling remains known even before live publishing is configured. */
@@ -52,7 +56,7 @@ export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
 
 const capability: PlatformCapability = {
   accepted_mime_types: ["video/mp4", "video/quicktime"],
-  analytics: false,
+  analytics: true,
   asset_types: ["video"],
   comments: false,
   connect_available: true,
@@ -68,6 +72,8 @@ const capability: PlatformCapability = {
     "Page Reels use a hosted HTTPS video and the documented remote-ingest flow.",
     "One video publishes one Reel; carousels and photo posts are not supported.",
     "Reels are limited to 500 MiB and 60 seconds.",
+    "Analytics reads Reel plays from Video Insights and likes/comments from the Video edges; shares come from the documented comments-plus-shares social-actions metric.",
+    "Video Insights requires read_insights and pages_manage_engagement; old connections must reconnect to grant them.",
   ],
   platform: "facebook",
   publish: true,
@@ -570,7 +576,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
       url.searchParams.set("client_id", clientId);
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
-      url.searchParams.set("scope", publishingScopes.join(","));
+      url.searchParams.set("scope", configuredScopes.join(","));
       url.searchParams.set("state", required("state", input.state, 1_024));
       return url.toString();
     },
@@ -625,10 +631,8 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
         }
       }
 
-      const hasRequiredPublishingScopes = publishingScopes.every((scope) =>
-        grantedScopes.includes(scope),
-      );
-      if (!hasRequiredPublishingScopes) {
+      const hasRequiredScopes = configuredScopes.every((scope) => grantedScopes.includes(scope));
+      if (!hasRequiredScopes) {
         return { accounts: [] };
       }
 
@@ -787,6 +791,104 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
       return { accounts: eligible };
     },
 
+    /**
+     * Reads lifetime engagement for one published Page Reel.
+     *
+     * Video Insights supplies the Reels play count and the documented
+     * comments-plus-shares social-actions total with `period=lifetime`. The
+     * Video object supplies like and comment summaries; shares are the
+     * social-actions total minus the separately measured comments. A missing
+     * metric or a social-actions total below the comment count is an error, so a
+     * failed measurement is never stored as zero. Video Insights require
+     * `read_insights` and `pages_manage_engagement`.
+     *
+     * @param context - Provider request context carrying cancellation.
+     * @param credentials - Page access token and Page identity.
+     * @param lookup - Publication whose providerPostId names the Reel video.
+     * @param page - Single-page input; Video Insights are not paginated here.
+     * @returns One analytics record for the Reel.
+     * @throws {ProviderAdapterError} On a rejected permission, malformed
+     *   Insights response, or missing requested counter.
+     */
+    async listAnalytics(context, credentials, lookup, page) {
+      validatePageInput("facebook", page);
+      if (page.cursor) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "facebook_analytics_not_paginated",
+            status: 400,
+          }),
+        );
+      }
+      const providerPostId = requiredIdentifier(
+        lookup.providerPostId,
+        "facebook_video_id_required",
+      );
+      const insightsUrl = new URL(
+        `/${apiVersion}/${encodeURIComponent(providerPostId)}/video_insights`,
+        graphOrigin,
+      );
+      insightsUrl.searchParams.set("metric", "blue_reels_play_count,post_video_social_actions");
+      insightsUrl.searchParams.set("period", "lifetime");
+      const insightsResponse = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: insightsUrl.toString(),
+      });
+      const insights = record(insightsResponse.body)?.data;
+      if (!Array.isArray(insights) || insights.length > 20) throw malformed();
+      const metrics = new Map<string, number>();
+      for (const value of insights) {
+        const metric = record(value);
+        const name = boundedString(metric?.name, 64);
+        const values = metric?.values;
+        if (!Array.isArray(values) || values.length !== 1) throw malformed();
+        const result = metricValue(record(values[0])?.value);
+        if (!name || result === undefined || metrics.has(name)) throw malformed();
+        metrics.set(name, result);
+      }
+
+      const videoUrl = new URL(`/${apiVersion}/${encodeURIComponent(providerPostId)}`, graphOrigin);
+      videoUrl.searchParams.set(
+        "fields",
+        "likes.summary(true).limit(0),comments.summary(true).limit(0)",
+      );
+      const videoResponse = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: videoUrl.toString(),
+      });
+      const video = record(videoResponse.body);
+      const likes = metricValue(record(record(video?.likes)?.summary)?.total_count);
+      const comments = metricValue(record(record(video?.comments)?.summary)?.total_count);
+      const views = metrics.get("blue_reels_play_count");
+      const socialActions = metrics.get("post_video_social_actions");
+      if (
+        comments === undefined ||
+        likes === undefined ||
+        views === undefined ||
+        socialActions === undefined ||
+        socialActions < comments
+      ) {
+        throw malformed();
+      }
+      return {
+        items: [
+          {
+            comments,
+            impressions: 0,
+            likes,
+            providerPostId,
+            recordedAt: now().toISOString(),
+            reach: 0,
+            shares: socialActions - comments,
+            views,
+            watchTimeSeconds: 0,
+          },
+        ],
+      };
+    },
+
     async lookupPublication(context, credentials, lookup) {
       accountId(credentials);
       const providerPostId = providerIdentifier(lookup.providerPostId);
@@ -909,7 +1011,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
           pageId: current.pageId,
           userAccessToken: longToken.accessToken,
         }),
-        scopes: [...publishingScopes],
+        scopes: [...configuredScopes],
       };
     },
 

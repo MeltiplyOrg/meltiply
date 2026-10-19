@@ -254,7 +254,7 @@ describe("analytics view", () => {
     };
     renderView();
     expect(
-      screen.getByText("Analytics needs an Instagram or Threads channel."),
+      screen.getByText("Analytics needs a connected channel that reports analytics."),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Channels" })).toHaveAttribute(
       "href",
@@ -330,7 +330,7 @@ describe("analytics view", () => {
     renderView();
     expect(screen.getByText("Analytics could not be loaded")).toBeInTheDocument();
     expect(
-      screen.queryByText("Analytics needs an Instagram or Threads channel."),
+      screen.queryByText("Analytics needs a connected channel that reports analytics."),
     ).not.toBeInTheDocument();
   });
 });

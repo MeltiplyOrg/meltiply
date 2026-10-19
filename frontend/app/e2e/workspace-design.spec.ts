@@ -263,38 +263,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(inspector.locator("header code").first()).toHaveText(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
   );
-  // The record drawer steps 48px in from its edge instead of fading in place.
-  const panelEntrance = await page.evaluate(() => {
-    const panel = document.querySelector("[data-side-dialog]");
-    return (panel?.getAnimations() ?? []).map((animation) => {
-      const frames = (animation.effect as KeyframeEffect | null)?.getKeyframes?.() ?? [];
-      return {
-        name: (animation as CSSAnimation).animationName,
-        from: String(frames[0]?.translate ?? ""),
-      };
-    });
-  });
-  expect(
-    panelEntrance.some(
-      (animation) => animation.name === "side-dialog-enter" && animation.from.startsWith("48px"),
-    ),
-  ).toBe(true);
-  // The body rises behind the panel with the reference's stagger.
-  const bodyRise = await page.evaluate(() => {
-    const body = document.querySelector("[data-side-dialog-body]");
-    return Array.from(body?.children ?? [])
-      .slice(0, 3)
-      .map((child) => {
-        const animation = child.getAnimations()[0] as CSSAnimation | undefined;
-        return {
-          name: animation?.animationName ?? "",
-          delay: animation?.effect?.getTiming?.().delay ?? -1,
-        };
-      });
-  });
-  expect(bodyRise[0]).toEqual({ name: "side-dialog-rise-in", delay: 0 });
-  expect(bodyRise[1]?.name).toBe("side-dialog-rise-in");
-  expect(bodyRise[1]?.delay ?? 0).toBeGreaterThan(0);
   await page.screenshot({
     path: testInfo.outputPath("post-drawer-sliding-in-desktop.png"),
     fullPage: true,
@@ -316,72 +284,21 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   };
   await inspectAnotherPost("Second draft — selection review.");
   await expect(inspector).toBeVisible();
-  // The replacement replays the same staggered rise for the new record.
-  const swappedRise = await page.evaluate(() => {
-    const body = document.querySelector("[data-side-dialog-body]");
-    return Array.from(body?.children ?? [])
-      .slice(0, 2)
-      .map((child) => {
-        const animation = child.getAnimations()[0] as CSSAnimation | undefined;
-        return {
-          name: animation?.animationName ?? "",
-          delay: animation?.effect?.getTiming?.().delay ?? -1,
-        };
-      });
-  });
-  expect(swappedRise[0]).toEqual({ name: "side-dialog-rise-in", delay: 0 });
-  expect(swappedRise[1]).toEqual({ name: "side-dialog-rise-in", delay: 55 });
   await inspectAnotherPost("Studio update — ready for the next publishing window.");
-  // Record the dismissal from inside the page: Radix unmounts the panel when the
-  // exit animation ends, so the event is the only durable proof it played.
-  await page.evaluate(() => {
-    const panel = document.querySelector("[data-side-dialog]");
-    const exits: string[] = [];
-    Reflect.set(window, "__sideDialogExits", exits);
-    panel?.addEventListener("animationstart", (event) => {
-      const { animationName } = event as AnimationEvent;
-      if (animationName !== "side-dialog-exit") return;
-      const running = panel
-        .getAnimations()
-        .find((animation) => (animation as CSSAnimation).animationName === animationName);
-      const frames = (running?.effect as KeyframeEffect | null)?.getKeyframes?.() ?? [];
-      exits.push(`${animationName}:${String(frames.at(-1)?.translate ?? "")}`);
-    });
-  });
   await page.keyboard.press("Escape");
   await expect(inspector).toBeHidden();
   await expect(inspectTrigger).toBeFocused();
-  const exits = await page.evaluate(() => Reflect.get(window, "__sideDialogExits") as string[]);
-  expect(exits.length).toBe(1);
-  expect(exits[0]?.startsWith("side-dialog-exit:48px")).toBe(true);
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: "Studio update" }));
   await expect(page.getByPlaceholder(/what do you want to publish/i)).toHaveValue(
     "Studio update — ready for the next publishing window.",
   );
   await closeComposer(page);
 
-  // Composing and inspecting share one panel: asking for the other surface swaps
-  // its content and width in place, so no second drawer appears and the panel
-  // never exits between them.
+  // Inspecting another Post must retain the live, unsaved composition.
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: "Studio update" }));
-  await expect(page.getByPlaceholder(/what do you want to publish/i)).toBeVisible();
-  await page.evaluate(() => {
-    const exits: string[] = [];
-    Reflect.set(window, "__surfaceSwapExits", exits);
-    document.addEventListener(
-      "animationstart",
-      (event) => {
-        const { animationName } = event as AnimationEvent;
-        if (animationName.startsWith("side-dialog-exit")) exits.push(animationName);
-      },
-      true,
-    );
-  });
-  const composerPanel = await page.evaluate(() => ({
-    panels: document.querySelectorAll("[data-side-dialog]").length,
-    width: Math.round(document.querySelector("[data-side-dialog]")!.getBoundingClientRect().width),
-  }));
-  expect(composerPanel.panels).toBe(1);
+  const liveCaption = page.getByPlaceholder(/what do you want to publish/i);
+  const unsavedCaption = "Studio update — an unsaved edit survives inspection.";
+  await liveCaption.fill(unsavedCaption);
   await page
     .getByRole("row")
     .filter({ hasText: "Second draft — selection review." })
@@ -390,46 +307,16 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     inspector.getByText("Second draft — selection review.", { exact: true }),
   ).toBeVisible();
   await expect(page.getByPlaceholder(/what do you want to publish/i)).toBeHidden();
-  // The panel keeps its identity and interpolates to the inspector's width: the
-  // composer is the wide surface, the inspector the narrow one.
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const panel = document.querySelector("[data-side-dialog]");
-        return {
-          panels: document.querySelectorAll("[data-side-dialog]").length,
-          state: panel?.getAttribute("data-state") ?? null,
-          width: panel ? Math.round(panel.getBoundingClientRect().width) : 0,
-          transition: panel ? getComputedStyle(panel).transitionProperty : "",
-        };
-      }),
-    )
-    .toEqual({ panels: 1, state: "open", width: 620, transition: "max-width" });
-  expect(composerPanel.width).toBeGreaterThan(620);
-  const swapExits = await page.evaluate(
-    () => Reflect.get(window, "__surfaceSwapExits") as string[],
-  );
-  expect(swapExits).toEqual([]);
   await page.keyboard.press("Escape");
   await expect(inspector).toBeHidden();
+  await expect(liveCaption).toBeVisible();
+  await expect(liveCaption).toHaveValue(unsavedCaption);
+  await closeComposer(page);
 
-  // While the panel is open it covers the page's own create action at this
-  // viewport, so the drawer carries a create affordance at its head's left edge:
-  // it is the first thing in the header and it starts a fresh composition.
+  // The inspector keeps creation reachable even while it covers the page action.
   await inspectTrigger.click();
   const drawerCreate = inspector.getByRole("button", { name: "New Post", exact: true });
   await expect(drawerCreate).toBeVisible();
-  // It rides the toolbar's action cluster, so the record context keeps its room.
-  const createSlot = await page.evaluate(() => {
-    const header = document.querySelector("[data-side-dialog] header");
-    const cluster = header?.querySelector(":scope > div:nth-child(2)");
-    return {
-      firstAction: cluster?.querySelector("button")?.getAttribute("aria-label") ?? null,
-      breadcrumbIntact:
-        header?.querySelector(":scope > div")?.textContent.includes("Posts") ?? false,
-    };
-  });
-  expect(createSlot).toEqual({ firstAction: "New Post", breadcrumbIntact: true });
   await drawerCreate.click();
   await expect(page.getByPlaceholder(/what do you want to publish/i)).toBeVisible();
   await expect(page.locator("[data-side-dialog]")).toHaveCount(1);

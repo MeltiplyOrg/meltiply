@@ -1,37 +1,46 @@
 {
   "upstream": "https://github.com/vercel/geist-font",
   "license": "../../../LICENSES/geist.txt",
+  "conversion": {
+    "tool": "wawoff2@2.0.1",
+    "command": "woff2_compress.js",
+    "description": "Lossless WOFF2 packaging of the original TTFs without subsetting or glyph/metric changes."
+  },
   "fonts": [
     {
-      "file": "geist-400.ttf",
+      "file": "geist-400.woff2",
       "family": "Geist",
       "weight": 400,
       "source": "https://fonts.gstatic.com/s/geist/v5/gyBhhwUxId8gMGYQMKR3pzfaWI_RnOM4nQ.ttf",
-      "sha256": "ccce59465ae5c61930ada5453834f60500fbd95084d85db63e0e65fad0125455",
+      "source_sha256": "ccce59465ae5c61930ada5453834f60500fbd95084d85db63e0e65fad0125455",
+      "sha256": "378900b0cb432e189fdef8f747b235a54389e2392a27bf220a2d65fb9af0e58b",
       "license": "OFL-1.1"
     },
     {
-      "file": "geist-500.ttf",
+      "file": "geist-500.woff2",
       "family": "Geist",
       "weight": 500,
       "source": "https://fonts.gstatic.com/s/geist/v5/gyBhhwUxId8gMGYQMKR3pzfaWI_RruM4nQ.ttf",
-      "sha256": "a8eefb873ba9c9020665f8a98302697ce1f3b79ab2deef6ee508c0ca6a82e876",
+      "source_sha256": "a8eefb873ba9c9020665f8a98302697ce1f3b79ab2deef6ee508c0ca6a82e876",
+      "sha256": "07ee2c9183fb3e0b978f31ac387284f1c44e88a0bb4f819721e6852b77a7b4ab",
       "license": "OFL-1.1"
     },
     {
-      "file": "geist-600.ttf",
+      "file": "geist-600.woff2",
       "family": "Geist",
       "weight": 600,
       "source": "https://fonts.gstatic.com/s/geist/v5/gyBhhwUxId8gMGYQMKR3pzfaWI_RQuQ4nQ.ttf",
-      "sha256": "7171f481b121803d007f5c6c76cd9988c0d41cce4202db9a18dff9945505d36d",
+      "source_sha256": "7171f481b121803d007f5c6c76cd9988c0d41cce4202db9a18dff9945505d36d",
+      "sha256": "73570d0a6ede40fa55039a3e658d140467d2d9edfd0fcc03e861a5bc25b1c551",
       "license": "OFL-1.1"
     },
     {
-      "file": "geist-mono-400.ttf",
+      "file": "geist-mono-400.woff2",
       "family": "Geist Mono",
       "weight": 400,
       "source": "https://fonts.gstatic.com/s/geistmono/v6/or3yQ6H-1_WfwkMZI_qYPLs1a-t7PU0AbeE9KJ5T.ttf",
-      "sha256": "7022da390e9b401ea35b722f8ed2376948e70add10954bc798839b4bfe17ef3f",
+      "source_sha256": "7022da390e9b401ea35b722f8ed2376948e70add10954bc798839b4bfe17ef3f",
+      "sha256": "fc27f0c164a8ddead579e4a467134f46add0d07980d4fb852b42c506b6380fcd",
       "license": "OFL-1.1"
     }
   ]

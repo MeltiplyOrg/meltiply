@@ -143,7 +143,7 @@ jobs:
         run: |
           cd frontend/app
           git fetch origin ${{ github.event.repository.default_branch }}:refs/remotes/origin/${{ github.event.repository.default_branch }}
-          npx --yes react-doctor@0.9.18 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+          npx --yes react-doctor@0.9.14 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
           cd ../..
           bun run lint:dead
           bun run --filter frontend-app check
@@ -177,13 +177,13 @@ jobs:
           assert(response, "Development server did not become reachable");
           const css = await response.text();
           assert.equal(response.status, 200, css);
-          const fonts = [...css.matchAll(/url\(["']?([^"')]*geist[^"')]*\.ttf[^"')]*)["']?\)/g)];
+          const fonts = [...css.matchAll(/url\(["']?([^"')]*geist[^"')]*\.woff2[^"')]*)["']?\)/g)];
           assert.equal(fonts.length, 4, "Stylesheet must resolve all four self-hosted Geist faces");
           for (const [, path] of fonts) {
             const font = await fetch(new URL(path, origin));
             assert.equal(font.status, 200, `Font request failed: ${path}`);
             const bytes = new Uint8Array(await font.arrayBuffer());
-            assert.deepEqual([...bytes.slice(0, 4)], [0, 1, 0, 0], `Invalid TrueType response: ${path}`);
+            assert.deepEqual([...bytes.slice(0, 4)], [0x77, 0x4f, 0x46, 0x32], `Invalid WOFF2 response: ${path}`);
             console.log(`Loaded development font: ${path}`);
           }
           NODE

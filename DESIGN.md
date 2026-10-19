@@ -114,6 +114,8 @@ Success, warning, and danger indicate actual semantic state. Provider identity c
 
 **Body and heading font:** self-hosted Geist with system sans-serif fallbacks. **Code and shortcut font:** self-hosted Geist Mono with system monospace fallbacks.
 
+Both sites serve losslessly compressed WOFF2 assets from the shared token owner. Preserve the original glyph coverage and metrics; conversion and source/output hashes are recorded in the font provenance manifest.
+
 The hierarchy is compact and information-led. Shared title, UI, control, and micro roles are recorded above; primitives retain their intentional local sizes, such as the text input's 13px field text. Public reading and landing typography scale for their own tasks without replacing the font family.
 
 Use weight and spacing before additional color. Interface glyphs use the canonical Lucide system; preserve Meltiply's faceted brand mark and actual provider marks.

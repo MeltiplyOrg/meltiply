@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { writeCookieConsent } from "@meltiply/ui/cookie-consent";
 
 import { I18nProvider, translate, useI18n } from "./i18n";
+import { setPseudoLocalization } from "./pseudo-locale";
 
 const storageKey = "meltiply.language";
 
@@ -57,6 +58,28 @@ describe("I18nProvider", () => {
     expect(reloaded.result.current.language).toBe("es");
     expect(reloaded.result.current.t("Dashboard")).toBe("Panel");
     expect(document.documentElement.lang).toBe("es");
+  });
+
+  it("translates status identifiers and falls back to readable labels", () => {
+    const english = renderHook(useI18n, { wrapper });
+    expect(english.result.current.tStatus("awaiting_provider")).toBe("Awaiting provider");
+    expect(english.result.current.tStatus("some_unknown_status")).toBe("some unknown status");
+
+    window.localStorage.setItem(storageKey, "es");
+    const spanish = renderHook(useI18n, { wrapper });
+    expect(spanish.result.current.tStatus("awaiting_provider")).toBe("Esperando al proveedor");
+    expect(spanish.result.current.tStatus("some_unknown_status")).toBe("some unknown status");
+  });
+
+  it("pseudo-localizes after locale lookup", () => {
+    setPseudoLocalization(true);
+    try {
+      const output = translate("es", "Dashboard");
+      expect(output).toMatch(/^⟦.*⟧$/);
+      expect(output).not.toBe("Panel");
+    } finally {
+      setPseudoLocalization(false);
+    }
   });
 
   it("interpolates named values in translated messages", () => {

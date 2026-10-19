@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "style": {
+    "es": "Write neutral, idiomatic Spanish using the informal tú form. Keep UI copy concise and natural rather than literal."
+  },
+  "keepVerbatim": {
+    "Meltiply": "Product name",
+    "MELTIPLY": "Wordmark",
+    "TikTok": "Platform name",
+    "YouTube": "Platform name",
+    "Instagram": "Platform name",
+    "Facebook": "Platform name",
+    "Threads": "Platform name",
+    "Duet": "TikTok feature name",
+    "Stitch": "TikTok feature name",
+    "English": "Language name shown in the language selector",
+    "Español": "Language name shown in the language selector",
+    "Hashtags": "Feature label",
+    "Plan": "Product label",
+    "General": "Settings section label",
+    "ID": "Identifier label",
+    "ID: {id}": "Identifier label with a placeholder",
+    "Impr.": "Abbreviated impressions label",
+    "sk_live_…": "Example secret; never a real credential",
+    "#viral #shorts": "Hashtag example",
+    "{start}–{end}": "Time range placeholder"
+  },
+  "preferredTranslations": {
+    "Brand Profile": {
+      "es": "Perfil de marca"
+    },
+    "Post": {
+      "es": "Publicación"
+    },
+    "Channel": {
+      "es": "Canal"
+    },
+    "Workspace": {
+      "es": "Espacio de trabajo"
+    }
+  },
+  "intentionallyIdentical": ["⌘K", "s", "M", "P"]
+}

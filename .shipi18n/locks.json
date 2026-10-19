@@ -1,0 +1,4525 @@
+{
+  "version": 1,
+  "locked": {
+    "es::status::awaiting_provider": {
+      "sourceHash": "e5a9f79ad46ef0fa",
+      "translationHash": "cc9fd52444bbb3f7"
+    },
+    "es::status::cancelled": {
+      "sourceHash": "d353a99eb4556847",
+      "translationHash": "3d15e61f2ccd5186"
+    },
+    "es::status::cancel_requested": {
+      "sourceHash": "c07f337c6361b13e",
+      "translationHash": "ee7587f235269d0a"
+    },
+    "es::status::deleted": {
+      "sourceHash": "b48ff39c2e0f5451",
+      "translationHash": "aa133c8ed7084f53"
+    },
+    "es::status::deleting": {
+      "sourceHash": "21ed2f9e00a509be",
+      "translationHash": "8f48d409458d660d"
+    },
+    "es::status::draft": {
+      "sourceHash": "ebf12ef47cf575b3",
+      "translationHash": "9b73881b69ec5f3b"
+    },
+    "es::status::failed": {
+      "sourceHash": "031a8f0f659df890",
+      "translationHash": "6883aef403fc794a"
+    },
+    "es::status::needs_reconciliation": {
+      "sourceHash": "91f59cec3ce4c7b8",
+      "translationHash": "88aed49236147481"
+    },
+    "es::status::pending_upload": {
+      "sourceHash": "fed0fa9a795408f8",
+      "translationHash": "f78e647a2f90c981"
+    },
+    "es::status::processing": {
+      "sourceHash": "c8e3e92a62ecf181",
+      "translationHash": "d9ab8c014a69233f"
+    },
+    "es::status::published": {
+      "sourceHash": "2ef42ec21d9300dd",
+      "translationHash": "4ce1fc3292ea60c8"
+    },
+    "es::status::queued": {
+      "sourceHash": "661ff40a07e037bb",
+      "translationHash": "d197619adfc61289"
+    },
+    "es::status::ready": {
+      "sourceHash": "5fa7aac5375c5815",
+      "translationHash": "b5fa51d564a9d880"
+    },
+    "es::status::replied": {
+      "sourceHash": "1cd7fa936258e09c",
+      "translationHash": "e4fb821e8135708d"
+    },
+    "es::status::scheduled": {
+      "sourceHash": "4724f344c1c0e4a1",
+      "translationHash": "5d1ab3dc1e106137"
+    },
+    "es::status::sent": {
+      "sourceHash": "c16bc82bf1f04ede",
+      "translationHash": "a96e6d8830f2a773"
+    },
+    "es::status::uploading": {
+      "sourceHash": "8b898ca34ce71371",
+      "translationHash": "8a8aad457bb91bbd"
+    },
+    "es::status::active": {
+      "sourceHash": "92340695899bd2d8",
+      "translationHash": "723858144bd5482d"
+    },
+    "es::status::admin": {
+      "sourceHash": "c1c224b03cd9bc7b",
+      "translationHash": "d4584547c7f6a01a"
+    },
+    "es::status::connected": {
+      "sourceHash": "22965568d22a14ee",
+      "translationHash": "79c5eb4810e5c905"
+    },
+    "es::status::expired": {
+      "sourceHash": "424a2551d356754c",
+      "translationHash": "33d4a7cbb39faf64"
+    },
+    "es::status::expiring": {
+      "sourceHash": "ff44a401445c99df",
+      "translationHash": "5928284bd654e2d7"
+    },
+    "es::status::follower_of_creator": {
+      "sourceHash": "a145ab342a4a3b94",
+      "translationHash": "6a2fc86a95c59bf4"
+    },
+    "es::status::member": {
+      "sourceHash": "7c968fb71f50e335",
+      "translationHash": "e841f8bfd02f85ce"
+    },
+    "es::status::mutual_follow_friends": {
+      "sourceHash": "e8c4e49d2db8226c",
+      "translationHash": "161f4e1c3f8d66f4"
+    },
+    "es::status::not_replied": {
+      "sourceHash": "f002223624b96aa2",
+      "translationHash": "ba65279e3d7a2fc5"
+    },
+    "es::status::owner": {
+      "sourceHash": "4b1b8aa3608a26da",
+      "translationHash": "82001fa2ec57ac59"
+    },
+    "es::status::public_to_everyone": {
+      "sourceHash": "da2e5dc515b188dc",
+      "translationHash": "bd02b9a7d71dac67"
+    },
+    "es::status::reconnect_required": {
+      "sourceHash": "06b42a9189e10d33",
+      "translationHash": "deb48b2a282f7c67"
+    },
+    "es::status::revoked": {
+      "sourceHash": "f6f738d043929f59",
+      "translationHash": "ded45901a0a8e5b3"
+    },
+    "es::status::self_only": {
+      "sourceHash": "c080649df65782fc",
+      "translationHash": "2eb594138b1bae9a"
+    },
+    "es::ui::Selection actions": {
+      "sourceHash": "b847ffdd0a1bfe55",
+      "translationHash": "fe8a4203ffc63405"
+    },
+    "es::ui::{count} selected": {
+      "sourceHash": "529aacfdfd2b17bf",
+      "translationHash": "1f69bc951c21753b"
+    },
+    "es::ui::Deselect": {
+      "sourceHash": "142174c194577c23",
+      "translationHash": "85630e64570942dd"
+    },
+    "es::ui::Select all visible channels": {
+      "sourceHash": "b4313916792be101",
+      "translationHash": "adb5bf19b23ebb5c"
+    },
+    "es::ui::Select channel": {
+      "sourceHash": "4de9a223e69c28fe",
+      "translationHash": "2b630d587884ead4"
+    },
+    "es::ui::Select all": {
+      "sourceHash": "1fc9a387654d410f",
+      "translationHash": "f691776fbc8ed669"
+    },
+    "es::ui::Channels could not be disconnected": {
+      "sourceHash": "e135772cf5c865cc",
+      "translationHash": "2d53a29efcf32f01"
+    },
+    "es::ui::Disconnect {count} channels?": {
+      "sourceHash": "51d3604533b8ef29",
+      "translationHash": "48ea486779641a40"
+    },
+    "es::ui::Scheduled and queued posts for these channels will stop publishing. You can reconnect them at any time.": {
+      "sourceHash": "7e3f94b49612be58",
+      "translationHash": "4c924e947143c003"
+    },
+    "es::ui::{count} channels disconnected": {
+      "sourceHash": "c1feba258017eb58",
+      "translationHash": "f9b6447565ba7491"
+    },
+    "es::ui::{succeeded} of {total} channels disconnected": {
+      "sourceHash": "bd9c011edd6e46a4",
+      "translationHash": "db31c1e21ffb8652"
+    },
+    "es::ui::{failed} could not be disconnected and remain selected.": {
+      "sourceHash": "7835cd7dd2573873",
+      "translationHash": "3ba6f1777dee4a57"
+    },
+    "es::ui::Select post": {
+      "sourceHash": "933292688508afac",
+      "translationHash": "cb1fa8208927e8ae"
+    },
+    "es::ui::Select all visible posts": {
+      "sourceHash": "216892d4864fcaa2",
+      "translationHash": "d118abcde22ce1ef"
+    },
+    "es::ui::Select all posts for this day": {
+      "sourceHash": "0cf9399978c738cd",
+      "translationHash": "e2f5a960483d04dc"
+    },
+    "es::ui::Select all posts": {
+      "sourceHash": "a2fba9ee96138e22",
+      "translationHash": "cb603eef2d18093b"
+    },
+    "es::ui::Delete {count} posts?": {
+      "sourceHash": "e28c7be104be8cab",
+      "translationHash": "a6d224f62d52dd3d"
+    },
+    "es::ui::Deleting the selected posts removes their drafts and stops their pending channels. Anything already published stays live on its platform — deleting a post here never removes a copy from a platform.": {
+      "sourceHash": "363a259ccb5012f8",
+      "translationHash": "394bd8947f5f3ef1"
+    },
+    "es::ui::Keep posts": {
+      "sourceHash": "7b8264497b5f15a2",
+      "translationHash": "2a629e1cb7e920e8"
+    },
+    "es::ui::Deleted {count} posts": {
+      "sourceHash": "307a3fc6ddd6b6ab",
+      "translationHash": "be15255c5e05250b"
+    },
+    "es::ui::The posts were removed and their pending channels stopped.": {
+      "sourceHash": "a300d5a5b9321316",
+      "translationHash": "3a405d811684c687"
+    },
+    "es::ui::Could not delete the selected posts": {
+      "sourceHash": "d8084bd2ef0bcdb7",
+      "translationHash": "6765b7b579c969a5"
+    },
+    "es::ui::Deleted {succeeded} of {total} posts": {
+      "sourceHash": "c7c93e385ad691d0",
+      "translationHash": "d7ed9cff0d3e4cbc"
+    },
+    "es::ui::{failed} could not be deleted and remain selected.": {
+      "sourceHash": "c350fa4e668fe18d",
+      "translationHash": "b81e78f81e6c2e43"
+    },
+    "es::ui::Channel settings": {
+      "sourceHash": "afc219f2a1e7b328",
+      "translationHash": "f67371dbce00bdd4"
+    },
+    "es::ui::Copy username": {
+      "sourceHash": "7ba3cdab9a587cf8",
+      "translationHash": "d1023dc3a0b4f449"
+    },
+    "es::ui::Copy channel ID": {
+      "sourceHash": "bdb175df4bda7af9",
+      "translationHash": "9cf7656482727a23"
+    },
+    "es::ui::Username copied": {
+      "sourceHash": "5886dd7a79e8702a",
+      "translationHash": "eae7a3cd8da9b1bd"
+    },
+    "es::ui::Channel ID copied": {
+      "sourceHash": "2b01b199d50c26a9",
+      "translationHash": "5b2fadf699cbc799"
+    },
+    "es::ui::Copied “{value}” to your clipboard.": {
+      "sourceHash": "dbe69db10901fb15",
+      "translationHash": "08ecf07caecd3720"
+    },
+    "es::ui::Could not copy": {
+      "sourceHash": "d5cb934f8035e733",
+      "translationHash": "2af3009605d0a4d7"
+    },
+    "es::ui::Select the value and copy it manually.": {
+      "sourceHash": "39d804a2172bd2e4",
+      "translationHash": "e28c0cf6cffc1b09"
+    },
+    "es::ui::The selected Page is ready to publish to.": {
+      "sourceHash": "2aad3766bd4690e8",
+      "translationHash": "94af4a819e6e2aaa"
+    },
+    "es::ui::The post and its pending channels were removed.": {
+      "sourceHash": "a41e663e0deeb1bd",
+      "translationHash": "077f3baacc6ca36e"
+    },
+    "es::ui::Cancelled {count} pending channel(s).": {
+      "sourceHash": "4500b84e6d49df82",
+      "translationHash": "f23946d3b812c7fc"
+    },
+    "es::ui::{channel} scheduled for {date}": {
+      "sourceHash": "c86ae6e1435fd228",
+      "translationHash": "56c55a0961ec68d5"
+    },
+    "es::ui::Previous month": {
+      "sourceHash": "6a2769502a5dda78",
+      "translationHash": "52ee5f657f3e5c56"
+    },
+    "es::ui::Next month": {
+      "sourceHash": "74e53211fef4b4d4",
+      "translationHash": "833349835465410c"
+    },
+    "es::ui::Schedule date and time": {
+      "sourceHash": "23a8a25b7e87a119",
+      "translationHash": "16a5b78fe209dbcf"
+    },
+    "es::ui::Sort by date": {
+      "sourceHash": "3085315f1358d685",
+      "translationHash": "0390ed344ce2ea17"
+    },
+    "es::ui::Toggle {label} sub-navigation": {
+      "sourceHash": "7e6bb34a93bff479",
+      "translationHash": "23b938a3280081d1"
+    },
+    "es::ui::The profile could not be deleted": {
+      "sourceHash": "a38fce2c8b7f5004",
+      "translationHash": "2c33802ff76dc787"
+    },
+    "es::ui::has no channels yet": {
+      "sourceHash": "32b9badf3b49dac7",
+      "translationHash": "a797d61162e550d7"
+    },
+    "es::ui::Connect an account to start publishing and scheduling across platforms.": {
+      "sourceHash": "1392f35fb9c28f1f",
+      "translationHash": "5280200330434d41"
+    },
+    "es::ui::Deleting this Brand Profile permanently removes its channels, assets, and posts. This cannot be undone.": {
+      "sourceHash": "4147092800bbd557",
+      "translationHash": "3a72d8246a2e0d89"
+    },
+    "es::ui::Choose a name, short description, and fixed palette color for this Brand Profile.": {
+      "sourceHash": "820bbcdbe75ad839",
+      "translationHash": "657442b368a69c3e"
+    },
+    "es::ui::Description": {
+      "sourceHash": "526e0087cc3f254d",
+      "translationHash": "ee00b96fff266fe2"
+    },
+    "es::ui::Optional context for this profile": {
+      "sourceHash": "130239f39258f658",
+      "translationHash": "e797c5bcf0a08e0e"
+    },
+    "es::ui::Name, describe, and color-label the ownership scope for channels, assets, and posts.": {
+      "sourceHash": "1d4371dbf17849bc",
+      "translationHash": "e80f770c958ccfb6"
+    },
+    "es::ui::Profile description": {
+      "sourceHash": "e5db3ddf30644b85",
+      "translationHash": "f1185ca438a5971f"
+    },
+    "es::ui::No profile description": {
+      "sourceHash": "28cb8959658ba1a3",
+      "translationHash": "92b0e5907af0d439"
+    },
+    "es::ui::Authentication failed. Please try again.": {
+      "sourceHash": "4190475b52357e7a",
+      "translationHash": "f00c3bd44be51f46"
+    },
+    "es::ui::Email address": {
+      "sourceHash": "f2488fd4ef4adbc6",
+      "translationHash": "ec64dc30a483cdcf"
+    },
+    "es::ui::Password": {
+      "sourceHash": "e7cf3ef4f17c3999",
+      "translationHash": "a389a638dec32538"
+    },
+    "es::ui::Your name": {
+      "sourceHash": "2c6b2e253c01fb2e",
+      "translationHash": "d36ae2c1bf451e93"
+    },
+    "es::ui::Make this workspace yours.": {
+      "sourceHash": "8533fd5a72b9de88",
+      "translationHash": "24c8492cd2269e13"
+    },
+    "es::ui::Email verified. Sign in to continue.": {
+      "sourceHash": "f54d058055dc44c7",
+      "translationHash": "3fd782415c71b063"
+    },
+    "es::ui::Welcome back.": {
+      "sourceHash": "dfdbca16342fc231",
+      "translationHash": "5db25a1f0dcd1366"
+    },
+    "es::ui::Recover your access.": {
+      "sourceHash": "77be7e3ee27962af",
+      "translationHash": "38f34f3d741f931a"
+    },
+    "es::ui::Choose a new password.": {
+      "sourceHash": "5a5fc919d36d5cf6",
+      "translationHash": "b9984914061197a8"
+    },
+    "es::ui::One more security check.": {
+      "sourceHash": "559bac93ae9545df",
+      "translationHash": "003edff380d94e63"
+    },
+    "es::ui::Your private publishing workspace": {
+      "sourceHash": "cd143bc370dcf6b1",
+      "translationHash": "6712deecb03b42f5"
+    },
+    "es::ui::One place to shape what’s next.": {
+      "sourceHash": "0240ac6abbbbe0ee",
+      "translationHash": "d8d3d2c6269e8465"
+    },
+    "es::ui::Compose your posts, connect your channels, and publish on your terms.": {
+      "sourceHash": "73cc0d5ef117447d",
+      "translationHash": "b7e53f5348a34a70"
+    },
+    "es::ui::Self-hosted. Single owner. Your account is the only way into this installation.": {
+      "sourceHash": "77758a036b8512ac",
+      "translationHash": "6f0c8b5e760efba8"
+    },
+    "es::ui::INITIAL SETUP": {
+      "sourceHash": "2b35d02688987066",
+      "translationHash": "988326f765130dd7"
+    },
+    "es::ui::OWNER ACCESS": {
+      "sourceHash": "05ae061263a85d06",
+      "translationHash": "f5c39d7ef007504c"
+    },
+    "es::ui::Create the only account for this installation. You’ll need the setup secret from your deployment configuration.": {
+      "sourceHash": "ad26d8da222c9ef9",
+      "translationHash": "ee5ba204e0f67207"
+    },
+    "es::ui::Enter a code from your authenticator, or use a saved backup code.": {
+      "sourceHash": "d70f6726717d35c2",
+      "translationHash": "9f887a6b2554dce0"
+    },
+    "es::ui::We’ll send a reset link to the owner’s email address.": {
+      "sourceHash": "9ec382baab15a496",
+      "translationHash": "8bcafef37e7af07e"
+    },
+    "es::ui::Use a unique password or a long passphrase. All previous sessions will be signed out.": {
+      "sourceHash": "d721403664e13885",
+      "translationHash": "91b5a2e6daabb79d"
+    },
+    "es::ui::Sign in with the owner account to continue to your workspace.": {
+      "sourceHash": "04042c9f39ccecbb",
+      "translationHash": "fe185ac5520e64cd"
+    },
+    "es::ui::Checking installation…": {
+      "sourceHash": "e0a4247cd392d77d",
+      "translationHash": "9dea041d7dfaf8bc"
+    },
+    "es::ui::Could not check installation status.": {
+      "sourceHash": "85bdd77adbaea745",
+      "translationHash": "6fff873a953f88b2"
+    },
+    "es::ui::This link is invalid or expired. Request a new verification or password reset link.": {
+      "sourceHash": "81b13a5ceef554f3",
+      "translationHash": "348321ffd06cf6b9"
+    },
+    "es::ui::Owner account created. Check your email to verify your address, then sign in.": {
+      "sourceHash": "42a9d7533bda1836",
+      "translationHash": "a05173416082e275"
+    },
+    "es::ui::This installation now has an owner. Sign in, or resend verification if this is your account.": {
+      "sourceHash": "a6f2bef15bbdf7ba",
+      "translationHash": "ccffb8489a0f830b"
+    },
+    "es::ui::If this address belongs to the owner, a password reset link will arrive by email.": {
+      "sourceHash": "10dd50b1d2a3505e",
+      "translationHash": "5c8aed190cf06f5f"
+    },
+    "es::ui::Password updated. Sign in again with your new password.": {
+      "sourceHash": "e5be080b3b279697",
+      "translationHash": "d1f87e9164942cd9"
+    },
+    "es::ui::Enter your email address first.": {
+      "sourceHash": "e30416d7053649e0",
+      "translationHash": "08908619096e2c73"
+    },
+    "es::ui::If verification is needed, a new link will arrive by email.": {
+      "sourceHash": "ab69021856dd629f",
+      "translationHash": "9778ff3629e7afa6"
+    },
+    "es::ui::Could not send a verification link.": {
+      "sourceHash": "ee75b9925e65f1fc",
+      "translationHash": "c194083a73579411"
+    },
+    "es::ui::8–128 characters. Passphrases and password managers welcome.": {
+      "sourceHash": "886e09500521a189",
+      "translationHash": "092e2466b738d9b2"
+    },
+    "es::ui::Setup secret": {
+      "sourceHash": "5a35f3ffc35d38b9",
+      "translationHash": "3e88057236608842"
+    },
+    "es::ui::Use AUTH_SETUP_SECRET from your private deployment environment. It is not your account password.": {
+      "sourceHash": "daa0b2d34d72388a",
+      "translationHash": "366e5cfd95e89463"
+    },
+    "es::ui::Backup code": {
+      "sourceHash": "18cf5cd997ad5a0e",
+      "translationHash": "4841a70c13dc5050"
+    },
+    "es::ui::Authenticator code": {
+      "sourceHash": "eab111732640b10d",
+      "translationHash": "2e24f34b5c36b07a"
+    },
+    "es::ui::Please wait…": {
+      "sourceHash": "4660a983366f7101",
+      "translationHash": "d3b560d9f848e05e"
+    },
+    "es::ui::Create owner account": {
+      "sourceHash": "75d8201c860a2896",
+      "translationHash": "676d51909a82fe0d"
+    },
+    "es::ui::Send reset link": {
+      "sourceHash": "708c5d67ba8e2818",
+      "translationHash": "be3b2d31aaa1b919"
+    },
+    "es::ui::Update password": {
+      "sourceHash": "fe45b4014135b70f",
+      "translationHash": "1cbe240be93c0ea4"
+    },
+    "es::ui::Verify and sign in": {
+      "sourceHash": "7a970cb4533f7dd1",
+      "translationHash": "12bf2a7bfb49fd87"
+    },
+    "es::ui::Forgot password?": {
+      "sourceHash": "30c1d8d3e9128893",
+      "translationHash": "8eb9cbdec36eae40"
+    },
+    "es::ui::Resend verification": {
+      "sourceHash": "1eedf1ae24597927",
+      "translationHash": "70576fc5488e60aa"
+    },
+    "es::ui::Use authenticator instead": {
+      "sourceHash": "5792c719d94573f5",
+      "translationHash": "a3fb91efeefaaa95"
+    },
+    "es::ui::Use a backup code": {
+      "sourceHash": "591d610342a9a70b",
+      "translationHash": "1e00ef9d1d1a458e"
+    },
+    "es::ui::Back to sign in": {
+      "sourceHash": "71fe31ccd37c3268",
+      "translationHash": "1581ca4764202ace"
+    },
+    "es::ui::Account security": {
+      "sourceHash": "1d85c11e14444f61",
+      "translationHash": "84333a19855a3470"
+    },
+    "es::ui::Protect the only account for this installation. Changes to your password or authenticator sign out previous sessions.": {
+      "sourceHash": "87ccaa37a6e607ec",
+      "translationHash": "5f2a62bd8eec2704"
+    },
+    "es::ui::Current password": {
+      "sourceHash": "72ed2bd767cef627",
+      "translationHash": "14a433147337bb11"
+    },
+    "es::ui::New password": {
+      "sourceHash": "3dd9df4441fb348f",
+      "translationHash": "79bfcd9afe952802"
+    },
+    "es::ui::Enter your current password to continue.": {
+      "sourceHash": "288637d42ec93add",
+      "translationHash": "44691f476ae5f03d"
+    },
+    "es::ui::Could not update account security.": {
+      "sourceHash": "e4897b30e31bfb5e",
+      "translationHash": "b5e1570e23d8b1f2"
+    },
+    "es::ui::Authenticator setup key": {
+      "sourceHash": "a844c5e5cd31b58f",
+      "translationHash": "554e97f0b530a209"
+    },
+    "es::ui::Add a time-based account named Meltiply in your authenticator using this key. Keep it secret.": {
+      "sourceHash": "2ccac706e1cf62f4",
+      "translationHash": "b6547047d5f5e011"
+    },
+    "es::ui::Save your backup codes": {
+      "sourceHash": "e4ba5db96993081f",
+      "translationHash": "019b64390167dc76"
+    },
+    "es::ui::Store these somewhere safe before continuing. Each code works once. New codes invalidate the previous set.": {
+      "sourceHash": "3e25ec13dbf873d1",
+      "translationHash": "b24df577f6624381"
+    },
+    "es::ui::I saved my codes — verify": {
+      "sourceHash": "4d3e2f61b01be02a",
+      "translationHash": "c9d0026f08f138f7"
+    },
+    "es::ui::Cancel enrollment": {
+      "sourceHash": "064fe5b422c634a1",
+      "translationHash": "cf84cfac87777f50"
+    },
+    "es::ui::I saved my codes": {
+      "sourceHash": "f8256e1d0bbd9999",
+      "translationHash": "8d8fb8de8ea1b636"
+    },
+    "es::ui::Could not confirm server sign-out. Sign in again to check your sessions.": {
+      "sourceHash": "1ddead52e2ed6354",
+      "translationHash": "29b853325b70641a"
+    },
+    "es::ui::Two-factor authentication": {
+      "sourceHash": "b6824cc8a91e3b51",
+      "translationHash": "30fa1c8c147ecda7"
+    },
+    "es::ui::An authenticator code is required at sign-in. Use a backup code if you lose your authenticator.": {
+      "sourceHash": "ccfef2f8fba71291",
+      "translationHash": "c888acb210e6d44f"
+    },
+    "es::ui::Add an authenticator app and save recovery codes before enabling this extra sign-in check.": {
+      "sourceHash": "5cea019d362f2faf",
+      "translationHash": "7ab7542100d82e9a"
+    },
+    "es::ui::Replace backup codes": {
+      "sourceHash": "2cc604413ee7c874",
+      "translationHash": "39ba257d5b21bd90"
+    },
+    "es::ui::Disable two-factor": {
+      "sourceHash": "a173b14a3ebc1c0e",
+      "translationHash": "eb669023269d130e"
+    },
+    "es::ui::Set up authenticator": {
+      "sourceHash": "334d116a6c0c4f6b",
+      "translationHash": "c9ecebd40865e779"
+    },
+    "es::ui::Change password and sign out": {
+      "sourceHash": "c7cafb4af09a4150",
+      "translationHash": "8ab7f0d6901b3c80"
+    },
+    "es::ui::Access": {
+      "sourceHash": "ec5ba0abb717da87",
+      "translationHash": "bf904abc16526a69"
+    },
+    "es::ui::Account access": {
+      "sourceHash": "3386f588f0c29420",
+      "translationHash": "86d85b3b8a0ae7ac"
+    },
+    "es::ui::Account menu": {
+      "sourceHash": "7fb5995bca43a6a3",
+      "translationHash": "2b304c33030235c9"
+    },
+    "es::ui::Account": {
+      "sourceHash": "7e1b0d5641f2640c",
+      "translationHash": "e436ddcd06e85cd0"
+    },
+    "es::ui::Account settings": {
+      "sourceHash": "a587aa1f4ffc5016",
+      "translationHash": "50f67c2e9d040b6e"
+    },
+    "es::ui::Actions needed": {
+      "sourceHash": "693fe733addb6d18",
+      "translationHash": "8bc64c19fc71402b"
+    },
+    "es::ui::Active workspace": {
+      "sourceHash": "68971a708371db85",
+      "translationHash": "4f2a12f90209e448"
+    },
+    "es::ui::AI-generated": {
+      "sourceHash": "cc7ff1bfed60eb09",
+      "translationHash": "9ada809bca87f194"
+    },
+    "es::ui::AI-generated content": {
+      "sourceHash": "871cd7d50f248ca3",
+      "translationHash": "f427a9964a1200e5"
+    },
+    "es::ui::All": {
+      "sourceHash": "a52ace420f2175d0",
+      "translationHash": "bd02b9a7d71dac67"
+    },
+    "es::ui::All platforms": {
+      "sourceHash": "6d46bb346f19a539",
+      "translationHash": "b9878aa1da036b44"
+    },
+    "es::ui::Allow comments": {
+      "sourceHash": "ad3aa40a267991dd",
+      "translationHash": "09bd0cf0bb5d7fdf"
+    },
+    "es::ui::Allow Duets": {
+      "sourceHash": "e268b038e02b022a",
+      "translationHash": "5c874c4639e7e22c"
+    },
+    "es::ui::Allow people to": {
+      "sourceHash": "07c94ae17e8d3884",
+      "translationHash": "3ce837b7a381b411"
+    },
+    "es::ui::Allow Stitches": {
+      "sourceHash": "c73c99f946ff91a4",
+      "translationHash": "2bd75b7f1eb8deba"
+    },
+    "es::ui::Analytics": {
+      "sourceHash": "94c116ee118a7299",
+      "translationHash": "555446882879c7a3"
+    },
+    "es::ui::Analytics are partial": {
+      "sourceHash": "db9ac279ea4ecfc7",
+      "translationHash": "fa2fb939f89f2a4d"
+    },
+    "es::ui::Analytics could not be loaded": {
+      "sourceHash": "dfb5117c0dd150c0",
+      "translationHash": "8b798e4c42f1849b"
+    },
+    "es::ui::Analytics views time series": {
+      "sourceHash": "112961237bd6b4e6",
+      "translationHash": "6a72442d7c5c953e"
+    },
+    "es::ui::Attempts": {
+      "sourceHash": "06e70139fcf5e5c7",
+      "translationHash": "3a32ca0d5d6db721"
+    },
+    "es::ui::Available to connect": {
+      "sourceHash": "536862c6324d4d00",
+      "translationHash": "ff96e7f0e610d57e"
+    },
+    "es::ui::Back": {
+      "sourceHash": "76900f1bfd16c8d4",
+      "translationHash": "f9618693ab0e05f9"
+    },
+    "es::ui::Before you continue": {
+      "sourceHash": "a79a71b58afe2bcd",
+      "translationHash": "ab2f402a25a73512"
+    },
+    "es::ui::Branded content": {
+      "sourceHash": "efeb5833d694926b",
+      "translationHash": "c6b46e6432d2ac01"
+    },
+    "es::ui::Calendar": {
+      "sourceHash": "d5d0a30b517e3bea",
+      "translationHash": "68de201e0ef3fd85"
+    },
+    "es::ui::Cancel": {
+      "sourceHash": "19766ed6ccb2f4a3",
+      "translationHash": "bb9dbb406dcbd524"
+    },
+    "es::ui::Channel health": {
+      "sourceHash": "b3575639c4703c00",
+      "translationHash": "f45725cf109c91b5"
+    },
+    "es::ui::Choose a new date and time": {
+      "sourceHash": "12df534c01955246",
+      "translationHash": "8da0a56dbab968bb"
+    },
+    "es::ui::Choose a privacy setting": {
+      "sourceHash": "bb197ee1d93c8902",
+      "translationHash": "73f34d8873d389a5"
+    },
+    "es::ui::Choose an active workspace to continue.": {
+      "sourceHash": "c531ab2dfffea7fe",
+      "translationHash": "bbd504d87c666325"
+    },
+    "es::ui::Choose an organization": {
+      "sourceHash": "9d563bd7228ade03",
+      "translationHash": "72b86ddc1b0fd60b"
+    },
+    "es::ui::Choose another file": {
+      "sourceHash": "26eac8f8c95b6a86",
+      "translationHash": "3ce6a460e64568be"
+    },
+    "es::ui::Choose who can view this post.": {
+      "sourceHash": "1e55f2ef58d86c4e",
+      "translationHash": "85b450396b7a0257"
+    },
+    "es::ui::Close": {
+      "sourceHash": "7d9eb7acb13e2462",
+      "translationHash": "aeccae342e4bd0a7"
+    },
+    "es::ui::Close navigation": {
+      "sourceHash": "99904db30de4a2a3",
+      "translationHash": "98e9abd642513bdd"
+    },
+    "es::ui::Collapse navigation": {
+      "sourceHash": "1afa67a9d3e7598b",
+      "translationHash": "7b75fe5676d98ab3"
+    },
+    "es::ui::Expand navigation": {
+      "sourceHash": "4a984a4ea6d05945",
+      "translationHash": "0a919ee23fe95d6f"
+    },
+    "es::ui::Low motion": {
+      "sourceHash": "ceb65e2c9d4107a2",
+      "translationHash": "3f0290103d41bf1b"
+    },
+    "es::ui::Low motion on": {
+      "sourceHash": "880372dadadac92d",
+      "translationHash": "3a18cdc79e5174f5"
+    },
+    "es::ui::Low motion — your device is requesting reduced motion": {
+      "sourceHash": "439f4eec7ceb49fd",
+      "translationHash": "9bade515ad44eb47"
+    },
+    "es::ui::Your device is requesting reduced motion": {
+      "sourceHash": "285e8b52e47f9bf0",
+      "translationHash": "9b5f01307dd290c1"
+    },
+    "es::ui::Log out": {
+      "sourceHash": "49616145514e9abf",
+      "translationHash": "c6e6960395f49b48"
+    },
+    "es::ui::Breadcrumb": {
+      "sourceHash": "2bd873d6c734e63e",
+      "translationHash": "21bee151fbaa82f2"
+    },
+    "es::ui::Comment": {
+      "sourceHash": "44f5e3fbec57be75",
+      "translationHash": "b144e59660fc23c1"
+    },
+    "es::ui::Comment inbox": {
+      "sourceHash": "20cb2f83fef4f3d4",
+      "translationHash": "711a71a777752966"
+    },
+    "es::ui::Comments": {
+      "sourceHash": "355f79f29d7d3c2d",
+      "translationHash": "b144e59660fc23c1"
+    },
+    "es::ui::Commercial content": {
+      "sourceHash": "1025bdd85b10630f",
+      "translationHash": "b092fbaefe0236f8"
+    },
+    "es::ui::Confirm that you have permission to use the music in this post.": {
+      "sourceHash": "dfc5750915f1e3cd",
+      "translationHash": "e1619688a30422b4"
+    },
+    "es::ui::Connect": {
+      "sourceHash": "1a2303ede07493ac",
+      "translationHash": "3b0b0fdfe2e3a691"
+    },
+    "es::ui::Connect a platform": {
+      "sourceHash": "7901a25593ea8b39",
+      "translationHash": "aa3ac98d8467a656"
+    },
+    "es::ui::Connect a platform →": {
+      "sourceHash": "b7ca5d0f546d55e9",
+      "translationHash": "fd04e7d7f92ae198"
+    },
+    "es::ui::Create an asset →": {
+      "sourceHash": "957df62b10915dfb",
+      "translationHash": "a0eecea01d1d66d3"
+    },
+    "es::ui::Connected": {
+      "sourceHash": "22965568d22a14ee",
+      "translationHash": "eda65ddafa3514b0"
+    },
+    "es::ui::Content disclosure": {
+      "sourceHash": "de2046750c95edd9",
+      "translationHash": "118f5215e2160f6b"
+    },
+    "es::ui::Content": {
+      "sourceHash": "47bd29075f8b8019",
+      "translationHash": "197c7a8551b91c79"
+    },
+    "es::ui::Details": {
+      "sourceHash": "45989de49fb7f66d",
+      "translationHash": "c8a74ca68d39907d"
+    },
+    "es::ui::Insights": {
+      "sourceHash": "2a932f90172e99ea",
+      "translationHash": "2b4141b03043e262"
+    },
+    "es::ui::Context stays together": {
+      "sourceHash": "77a218bfd84c7a8d",
+      "translationHash": "ae49b5e4298879ea"
+    },
+    "es::ui::Create an asset": {
+      "sourceHash": "d812d8be5b8abbc9",
+      "translationHash": "bfc05ae30e39c0cd"
+    },
+    "es::ui::Create text asset": {
+      "sourceHash": "196eee6e9c0f6fc7",
+      "translationHash": "f158e3870f2caa3a"
+    },
+    "es::ui::Create your workspace": {
+      "sourceHash": "632cca79ab3e0e47",
+      "translationHash": "f99ca4f2f144b7c4"
+    },
+    "es::ui::Creating…": {
+      "sourceHash": "c79ed9492e3c1719",
+      "translationHash": "7b5825e6fdd079cb"
+    },
+    "es::ui::Creator inbox": {
+      "sourceHash": "c660bfc1b538cc81",
+      "translationHash": "37485116a4d5b187"
+    },
+    "es::ui::Current creator settings have not loaded yet.": {
+      "sourceHash": "e2364f8499d80dc9",
+      "translationHash": "98e998bb8057698e"
+    },
+    "es::ui::Current TikTok creator settings are still loading.": {
+      "sourceHash": "395ee530292e8a27",
+      "translationHash": "9a30dab817d7a881"
+    },
+    "es::ui::Current TikTok creator settings are unavailable.": {
+      "sourceHash": "3a09ddf1f2596efc",
+      "translationHash": "e0ceb1f606214aed"
+    },
+    "es::ui::Current TikTok creator settings could not be loaded.": {
+      "sourceHash": "4d756c3541bbdc4c",
+      "translationHash": "98315c04a8111434"
+    },
+    "es::ui::Current usage": {
+      "sourceHash": "6f2214c032cdd3a6",
+      "translationHash": "fc110b31f00f8929"
+    },
+    "es::ui::Dashboard": {
+      "sourceHash": "67b696468610b879",
+      "translationHash": "d0d91173008b6f83"
+    },
+    "es::ui::Date & time": {
+      "sourceHash": "2459ea42894c5c5b",
+      "translationHash": "b0bddd1a69b779a7"
+    },
+    "es::ui::Delete": {
+      "sourceHash": "e2d0a54968ead24e",
+      "translationHash": "c9894cf002f90bd0"
+    },
+    "es::ui::Dark": {
+      "sourceHash": "60acc53f13a5d1bf",
+      "translationHash": "1b1c27c397aee60c"
+    },
+    "es::ui::Deleting…": {
+      "sourceHash": "43b5894c3e4e2b24",
+      "translationHash": "22f067cf9e0581a7"
+    },
+    "es::ui::Demo": {
+      "sourceHash": "8a2cc0673b1c4283",
+      "translationHash": "219b2fa38da949f4"
+    },
+    "es::ui::Description and tags": {
+      "sourceHash": "789a221947b9ee04",
+      "translationHash": "b39b9c833b9e684e"
+    },
+    "es::ui::Description override": {
+      "sourceHash": "5abae9c086dad967",
+      "translationHash": "14319f42e359ef26"
+    },
+    "es::ui::Disconnect": {
+      "sourceHash": "acfc5be785a9bb3d",
+      "translationHash": "89130f77b7fa436b"
+    },
+    "es::ui::Distribute": {
+      "sourceHash": "b0585a6eba7b0a23",
+      "translationHash": "9890839e3991ff9b"
+    },
+    "es::ui::Distribution activity": {
+      "sourceHash": "ed88cc2e172a99e4",
+      "translationHash": "523a4d0100e6686d"
+    },
+    "es::ui::Distribution activity could not be loaded": {
+      "sourceHash": "9d4e4a1253bb8ae6",
+      "translationHash": "82c961a797ba02ad"
+    },
+    "es::ui::Distribution OS": {
+      "sourceHash": "7cb075f55359e128",
+      "translationHash": "a2fe0c212af29534"
+    },
+    "es::ui::Distribution picker": {
+      "sourceHash": "1248eb16a73c76df",
+      "translationHash": "6142cebba97119fa"
+    },
+    "es::ui::Distribution queue": {
+      "sourceHash": "6e4c812880280591",
+      "translationHash": "f672f75ebd8ea1b2"
+    },
+    "es::ui::Distribution snapshots could not be loaded": {
+      "sourceHash": "9b3d02a6b3385bdd",
+      "translationHash": "c1f4eaebcb314629"
+    },
+    "es::ui::Distribution timeline": {
+      "sourceHash": "9ea1cd41b5df8c00",
+      "translationHash": "d2f51d157e697745"
+    },
+    "es::ui::Distribution wizard": {
+      "sourceHash": "1165fad61623466c",
+      "translationHash": "4e5d6945cb93f2ef"
+    },
+    "es::ui::Distributions": {
+      "sourceHash": "7fe7bf5ec1c8feb5",
+      "translationHash": "74aa88f88085fd03"
+    },
+    "es::ui::Distributions usage": {
+      "sourceHash": "5193ecbae472e6b4",
+      "translationHash": "b12936a27855c0eb"
+    },
+    "es::ui::Download": {
+      "sourceHash": "d6eafe8235910042",
+      "translationHash": "ed3d9c907370d711"
+    },
+    "es::ui::Drag and drop your asset here": {
+      "sourceHash": "eae206d59d064e56",
+      "translationHash": "235d9bb8fd96c9fb"
+    },
+    "es::ui::Duration": {
+      "sourceHash": "4fc52a3c4c558b51",
+      "translationHash": "d5a804455b3392ca"
+    },
+    "es::ui::Duet": {
+      "sourceHash": "2bb2e9ecaaa68a1c",
+      "translationHash": "2bb2e9ecaaa68a1c"
+    },
+    "es::ui::Email": {
+      "sourceHash": "969ccbd3cf6300ec",
+      "translationHash": "ec64dc30a483cdcf"
+    },
+    "es::ui::English": {
+      "sourceHash": "ba118bf7fc9c1aed",
+      "translationHash": "ba118bf7fc9c1aed"
+    },
+    "es::ui::Español": {
+      "sourceHash": "94b382b61b9dde0f",
+      "translationHash": "94b382b61b9dde0f"
+    },
+    "es::ui::Every status": {
+      "sourceHash": "f10d3b7751b7d82d",
+      "translationHash": "ecda92faab01f5c1"
+    },
+    "es::ui::Everyone": {
+      "sourceHash": "da2e5dc515b188dc",
+      "translationHash": "bd02b9a7d71dac67"
+    },
+    "es::ui::Everything in the right order": {
+      "sourceHash": "8cda889a13648f61",
+      "translationHash": "ec9f95587b4d7a50"
+    },
+    "es::ui::Expired": {
+      "sourceHash": "424a2551d356754c",
+      "translationHash": "33d4a7cbb39faf64"
+    },
+    "es::ui::Expires {date}": {
+      "sourceHash": "4bd9e42fe2cf7983",
+      "translationHash": "638c44f27dc61db0"
+    },
+    "es::ui::File size": {
+      "sourceHash": "ff0442941bd8348f",
+      "translationHash": "f9a974d4069f5b96"
+    },
+    "es::ui::Followers": {
+      "sourceHash": "a145ab342a4a3b94",
+      "translationHash": "6a2fc86a95c59bf4"
+    },
+    "es::ui::Footer navigation": {
+      "sourceHash": "76363a64dcfacd31",
+      "translationHash": "c3271fcf59a6b3f0"
+    },
+    "es::ui::Friends who follow each other": {
+      "sourceHash": "e8c4e49d2db8226c",
+      "translationHash": "161f4e1c3f8d66f4"
+    },
+    "es::ui::Get started": {
+      "sourceHash": "61e8d44ad423a4a0",
+      "translationHash": "b39b9114ac90dce4"
+    },
+    "es::ui::Go": {
+      "sourceHash": "6cc8519b91584e8b",
+      "translationHash": "460edadffdaf99de"
+    },
+    "es::ui::Hashtags": {
+      "sourceHash": "eb485662972f4850",
+      "translationHash": "eb485662972f4850"
+    },
+    "es::ui::Hello, {name}. What do you want to publish today?": {
+      "sourceHash": "33a933778a162fa5",
+      "translationHash": "f0df575a5269e335"
+    },
+    "es::ui::Home": {
+      "sourceHash": "3a78695388b38b5c",
+      "translationHash": "58fcc9468fe1f607"
+    },
+    "es::ui::No recent sections yet. Open a workspace section to find it here.": {
+      "sourceHash": "4dce18abe1ff49e4",
+      "translationHash": "9a6ca122a5f30cb5"
+    },
+    "es::ui::Ready when you are, {name}. What will you share next?": {
+      "sourceHash": "16fee6cdeb4dedc5",
+      "translationHash": "d1f997a89f9dd5ce"
+    },
+    "es::ui::Recent trend": {
+      "sourceHash": "c287ac938c17f80f",
+      "translationHash": "1a569398c4fedfd5"
+    },
+    "es::ui::Recents": {
+      "sourceHash": "41a86988751ad5cb",
+      "translationHash": "2a731b52293f60a4"
+    },
+    "es::ui::Refresh analytics": {
+      "sourceHash": "2b3d8ae96dc54325",
+      "translationHash": "1495693917446c96"
+    },
+    "es::ui::Search": {
+      "sourceHash": "49c266baaaa70981",
+      "translationHash": "5f55edf900896012"
+    },
+    "es::ui::Search results": {
+      "sourceHash": "e978b00de465a271",
+      "translationHash": "5c1742856c8b354b"
+    },
+    "es::ui::Search your workspace": {
+      "sourceHash": "84917b36f495dc9c",
+      "translationHash": "574ae3bcd31669e4"
+    },
+    "es::ui::there": {
+      "sourceHash": "e244f187f696561d",
+      "translationHash": "a29bb351ab702592"
+    },
+    "es::ui::Welcome back, {name}. Let’s make your next post count.": {
+      "sourceHash": "c3b0a993cc229602",
+      "translationHash": "de23281ad7189adc"
+    },
+    "es::ui::What are we publishing today, {name}?": {
+      "sourceHash": "5ae6dd1c3a9555de",
+      "translationHash": "7b1cf5c51323c35e"
+    },
+    "es::ui::I confirm I have permission to use this music": {
+      "sourceHash": "c7ca4706c429a392",
+      "translationHash": "69a8ca1e90a12b5f"
+    },
+    "es::ui::Immediately": {
+      "sourceHash": "0fe556b25edd844f",
+      "translationHash": "a760405f3280ce27"
+    },
+    "es::ui::Inbox": {
+      "sourceHash": "94835ea2fcf775cd",
+      "translationHash": "7fc12c8a456c1b48"
+    },
+    "es::ui::Inbox pages": {
+      "sourceHash": "0921bb5afd630093",
+      "translationHash": "d0c9eb160c7b4a0c"
+    },
+    "es::ui::Inbox replies": {
+      "sourceHash": "6ab9f568b45767c3",
+      "translationHash": "f2f10969892a9a7b"
+    },
+    "es::ui::Included": {
+      "sourceHash": "ba829a98b7994088",
+      "translationHash": "384f88d56ff5e0dd"
+    },
+    "es::ui::Incomplete": {
+      "sourceHash": "75f33cdfc8e52098",
+      "translationHash": "aa82b7c23cc5c591"
+    },
+    "es::ui::Internal description": {
+      "sourceHash": "a1499b095201eef1",
+      "translationHash": "30e19759ca23d2e4"
+    },
+    "es::ui::Keep asset": {
+      "sourceHash": "11bd76b8d88ae251",
+      "translationHash": "8f51bda1523ec378"
+    },
+    "es::ui::Keep current time": {
+      "sourceHash": "b4b4bb5f9d61dcfb",
+      "translationHash": "dffca4f6406637af"
+    },
+    "es::ui::Language": {
+      "sourceHash": "a4fe65264ef7dbb3",
+      "translationHash": "7ae9d418353b399f"
+    },
+    "es::ui::Light": {
+      "sourceHash": "dbcd5e7bb7a0f538",
+      "translationHash": "2f3e8dcc24649850"
+    },
+    "es::ui::Last 24 hours": {
+      "sourceHash": "5c37cf8f018b4ac5",
+      "translationHash": "f6b12b22a24db3b4"
+    },
+    "es::ui::Last 30 days": {
+      "sourceHash": "f8f03fb441b8b4ae",
+      "translationHash": "43b4552642c14025"
+    },
+    "es::ui::Last synced {date}": {
+      "sourceHash": "aee482f7c1bca427",
+      "translationHash": "5f2b6160a4a0a103"
+    },
+    "es::ui::Live workspace": {
+      "sourceHash": "87f917084d1f0496",
+      "translationHash": "4552428fbc5a20b4"
+    },
+    "es::ui::Loading account…": {
+      "sourceHash": "e1802082fa439087",
+      "translationHash": "004c85f0b91ff914"
+    },
+    "es::ui::Loading assets…": {
+      "sourceHash": "b08b772f8ab91c94",
+      "translationHash": "b5205a5f65e325e6"
+    },
+    "es::ui::Loading calendar…": {
+      "sourceHash": "b3910a31805628d8",
+      "translationHash": "2009e8aec7731811"
+    },
+    "es::ui::Loading distribution activity": {
+      "sourceHash": "61e5ab3bff1b7be5",
+      "translationHash": "2c8508fdc7fa35f8"
+    },
+    "es::ui::Loading your workspace overview…": {
+      "sourceHash": "d37e5036a3158c21",
+      "translationHash": "96b5d5b3a1413b5e"
+    },
+    "es::ui::Loading Meltiply…": {
+      "sourceHash": "59d86c4dd32b82c5",
+      "translationHash": "28afbd54243e1e3d"
+    },
+    "es::ui::Loading platforms…": {
+      "sourceHash": "82bac9d3b051cfe3",
+      "translationHash": "db33e1285f340c94"
+    },
+    "es::ui::Loading this creator's current TikTok settings…": {
+      "sourceHash": "af0f75c9ab3b8276",
+      "translationHash": "6624b5f0d24b5f0a"
+    },
+    "es::ui::Main navigation": {
+      "sourceHash": "eb355944b92d1058",
+      "translationHash": "781509b25aa03251"
+    },
+    "es::ui::Make the next publishing action obvious.": {
+      "sourceHash": "e7b97ec2c2c04c7d",
+      "translationHash": "724d79849ee3f59f"
+    },
+    "es::ui::Manage OAuth connections for publishing destinations.": {
+      "sourceHash": "2145d696bab8aa71",
+      "translationHash": "764184715e089bf0"
+    },
+    "es::ui::Manage your profile, security, and workspace preferences.": {
+      "sourceHash": "91b6a0c1cb7d9fdc",
+      "translationHash": "3dceabfea2936d0a"
+    },
+    "es::ui::Meltiply / Overview": {
+      "sourceHash": "8116a531092c3529",
+      "translationHash": "a45ace04ecc516dd"
+    },
+    "es::ui::Meltiply / Product demo": {
+      "sourceHash": "a7bd82138f6ca9f5",
+      "translationHash": "13088636ac5f77e2"
+    },
+    "es::ui::Meltiply could not reach the API. Check your connection and try again.": {
+      "sourceHash": "249bf49cb3fdad6d",
+      "translationHash": "6272c4a7dd3fa3c9"
+    },
+    "es::ui::Meltiply could not refresh this view": {
+      "sourceHash": "adf60c13333e5b9d",
+      "translationHash": "9d688fd685e977d5"
+    },
+    "es::ui::Meltiply home": {
+      "sourceHash": "b1b77f15d0255e4e",
+      "translationHash": "c67572417fec6758"
+    },
+    "es::ui::Meltiply is temporarily unavailable": {
+      "sourceHash": "aa157af2c950268a",
+      "translationHash": "f0c69ea8eeea3ea1"
+    },
+    "es::ui::Meltiply is temporarily unavailable. Try again shortly.": {
+      "sourceHash": "28da45e3771f4981",
+      "translationHash": "85b3e7252c5eb8a7"
+    },
+    "es::ui::Meltiply product interface preview": {
+      "sourceHash": "c0c2065d4631f1a4",
+      "translationHash": "58bc9b5bdb27578d"
+    },
+    "es::ui::Meltiply workspace": {
+      "sourceHash": "f054208f9e3d8ead",
+      "translationHash": "0011864ff49e2887"
+    },
+    "es::ui::Meltiply will stop exposing this asset and remove its private media in the background. Active distributions can prevent deletion.": {
+      "sourceHash": "dbff5e8ff10eaf0e",
+      "translationHash": "6f33a764369d2297"
+    },
+    "es::ui::Metrics are not available for {platforms}.": {
+      "sourceHash": "954c22b003da4ec5",
+      "translationHash": "83c413b062a8790c"
+    },
+    "es::ui::Monitor": {
+      "sourceHash": "4c2e1df4570bebd6",
+      "translationHash": "3dff3ff581a4d602"
+    },
+    "es::ui::Monitor scheduled publishes across the Cloudflare queue workflow.": {
+      "sourceHash": "fd420cb970e8c327",
+      "translationHash": "3745861230b93510"
+    },
+    "es::ui::Move from ready asset to confirmed delivery without reconstructing context across tools.": {
+      "sourceHash": "2074626c11d4cb80",
+      "translationHash": "ebd2a406e475903c"
+    },
+    "es::ui::Music usage confirmation": {
+      "sourceHash": "7b0341fd9d8da3c7",
+      "translationHash": "745dae60f5a4519a"
+    },
+    "es::ui::Name": {
+      "sourceHash": "dcd1d5223f73b3a9",
+      "translationHash": "562bb15757a8b593"
+    },
+    "es::ui::New date and time": {
+      "sourceHash": "f6a97ab652426b87",
+      "translationHash": "472bc89741424a03"
+    },
+    "es::ui::New distribution": {
+      "sourceHash": "4c62dbabbe5e1b93",
+      "translationHash": "ef33a0512f1f30be"
+    },
+    "es::ui::Next": {
+      "sourceHash": "1ff57a29d7c9d11b",
+      "translationHash": "49683b71c6acf522"
+    },
+    "es::ui::Next 7 days": {
+      "sourceHash": "52a7da460166cc9b",
+      "translationHash": "fecae83e112d969c"
+    },
+    "es::ui::No assets yet": {
+      "sourceHash": "cb5efbf3ab9213f9",
+      "translationHash": "075832d39aa71de7"
+    },
+    "es::ui::No comments yet.": {
+      "sourceHash": "b7cba9576dc55226",
+      "translationHash": "594b138c56c1119f"
+    },
+    "es::ui::No events in this date range.": {
+      "sourceHash": "8f9e6a4391bd7904",
+      "translationHash": "d0f563080cb32d33"
+    },
+    "es::ui::No expiry": {
+      "sourceHash": "fe06351db8da7041",
+      "translationHash": "15cb784388aa7cc8"
+    },
+    "es::ui::No platforms connected": {
+      "sourceHash": "f412082589f8e6ea",
+      "translationHash": "31cb4c463336ebda"
+    },
+    "es::ui::No provider snapshots have synced yet.": {
+      "sourceHash": "745cd167547b0811",
+      "translationHash": "53cd541817e89e97"
+    },
+    "es::ui::No published distributions yet.": {
+      "sourceHash": "f78520322255c59c",
+      "translationHash": "9ddb1418207f5548"
+    },
+    "es::ui::No published metrics in this range.": {
+      "sourceHash": "30453882c983bc4f",
+      "translationHash": "e382fd2bfa25e760"
+    },
+    "es::ui::No publishing intents yet": {
+      "sourceHash": "d012b5f2682d918a",
+      "translationHash": "83608e3596c42106"
+    },
+    "es::ui::No ready assets available.": {
+      "sourceHash": "2128de81eb66a1bb",
+      "translationHash": "ae725e14d465bd69"
+    },
+    "es::ui::No scopes granted; reconnect is required before publishing.": {
+      "sourceHash": "490f481b04dcd176",
+      "translationHash": "490e781c7f79edaf"
+    },
+    "es::ui::No snapshot data for this distribution yet.": {
+      "sourceHash": "779936f3ed68b2ce",
+      "translationHash": "897b13cce822a3ef"
+    },
+    "es::ui::No unreplied comments.": {
+      "sourceHash": "db4a2ba1c4869c5d",
+      "translationHash": "5e57f16626d1ffcd"
+    },
+    "es::ui::Not synced yet": {
+      "sourceHash": "c10529851ad89bd3",
+      "translationHash": "0e956c87e61036dd"
+    },
+    "es::ui::of": {
+      "sourceHash": "28391d3bc64ec15c",
+      "translationHash": "959a45d44e6fcf58"
+    },
+    "es::ui::Only you": {
+      "sourceHash": "c080649df65782fc",
+      "translationHash": "2eb594138b1bae9a"
+    },
+    "es::ui::Open published post": {
+      "sourceHash": "bdbf70af61aa7d78",
+      "translationHash": "3503289387cc887d"
+    },
+    "es::ui::Open settings": {
+      "sourceHash": "ca381c1e76e681b6",
+      "translationHash": "b28640d7dfc07006"
+    },
+    "es::ui::Optional description": {
+      "sourceHash": "c7b7b7f01360f6a5",
+      "translationHash": "e3870ef9d0a28ae2"
+    },
+    "es::ui::Organization": {
+      "sourceHash": "d764d42592fc9687",
+      "translationHash": "e3dbe4d872a577c3"
+    },
+    "es::ui::Organization access": {
+      "sourceHash": "0c44df0fc5e78cbc",
+      "translationHash": "d576e5e44487d4f1"
+    },
+    "es::ui::Organization boundaries keep each workspace and its cache isolated.": {
+      "sourceHash": "40d05bf740a0076b",
+      "translationHash": "6853682d5a93c6f1"
+    },
+    "es::ui::Pause": {
+      "sourceHash": "858e4ba7a29fd38b",
+      "translationHash": "cd25ee5b1db8f5b0"
+    },
+    "es::ui::Performance by platform": {
+      "sourceHash": "3e2caf6ef815ee0a",
+      "translationHash": "83bcaafe31d2c7d4"
+    },
+    "es::ui::Performance by platform table": {
+      "sourceHash": "56b5f0386146983c",
+      "translationHash": "dd2ed7de7f5309b8"
+    },
+    "es::ui::Platform": {
+      "sourceHash": "c78ffe19571018fb",
+      "translationHash": "5d7325dd007ccc28"
+    },
+    "es::ui::Personal workspace": {
+      "sourceHash": "58ea5a145c6a40fb",
+      "translationHash": "b4bec59a2a5f70aa"
+    },
+    "es::ui::Open navigation": {
+      "sourceHash": "0ed77fd2619ba8ab",
+      "translationHash": "068e5085ee56d305"
+    },
+    "es::ui::Overview": {
+      "sourceHash": "d4b1ea5708dd5329",
+      "translationHash": "ed7bdc67c84b3ed6"
+    },
+    "es::ui::No sections match this search.": {
+      "sourceHash": "d2058f1394d35ab4",
+      "translationHash": "69bf2eceba46b4c2"
+    },
+    "es::ui::Search…": {
+      "sourceHash": "7336265a0467a255",
+      "translationHash": "9120df43bebb82c8"
+    },
+    "es::ui::Search sections…": {
+      "sourceHash": "6acdfd09acaf804f",
+      "translationHash": "bd78e9f7b7a46407"
+    },
+    "es::ui::Switch to dark theme": {
+      "sourceHash": "8abe9e0ba6b6f383",
+      "translationHash": "5beaaf5e17f6c1f9"
+    },
+    "es::ui::Switch to light theme": {
+      "sourceHash": "2f740f4cf6888e99",
+      "translationHash": "7084be83684520ad"
+    },
+    "es::ui::Unreplied comments": {
+      "sourceHash": "86111e8522ca0488",
+      "translationHash": "9b1c2af559915214"
+    },
+    "es::ui::Platform connections": {
+      "sourceHash": "bb3f71d3444c3d1e",
+      "translationHash": "793480f1ba8912d2"
+    },
+    "es::ui::Platforms": {
+      "sourceHash": "ab9bd7584a6270cd",
+      "translationHash": "018d4daa3740331f"
+    },
+    "es::ui::Platforms could not be loaded": {
+      "sourceHash": "b73a107953016d1e",
+      "translationHash": "88f3f1035979a3a8"
+    },
+    "es::ui::Post preview": {
+      "sourceHash": "de911e0a32f95e61",
+      "translationHash": "4c68d7e36c12dde0"
+    },
+    "es::ui::Posting as": {
+      "sourceHash": "81702434b958be0e",
+      "translationHash": "fc092e48df3d62ec"
+    },
+    "es::ui::Prepare": {
+      "sourceHash": "ee820467e916f34a",
+      "translationHash": "edbadf0d55e84195"
+    },
+    "es::ui::Prepare assets, schedule distribution, monitor provider state, and respond to your audience from one dependable workspace.": {
+      "sourceHash": "1781a6b373afff96",
+      "translationHash": "d11540bb806b7599"
+    },
+    "es::ui::Prepare. Publish. Know what happened.": {
+      "sourceHash": "5305e8e9b2d594d6",
+      "translationHash": "fff32af6cd194b20"
+    },
+    "es::ui::Preparing secure preview…": {
+      "sourceHash": "1abef45f7f5eeb4b",
+      "translationHash": "b5d86145814a9835"
+    },
+    "es::ui::Preparing secure upload…": {
+      "sourceHash": "32474d9a1e606f1c",
+      "translationHash": "5917330ad107f188"
+    },
+    "es::ui::Preparing…": {
+      "sourceHash": "5d1fa38bcf0d88ca",
+      "translationHash": "d2b925965ea8d2b9"
+    },
+    "es::ui::Previous": {
+      "sourceHash": "a57b08a480b822a0",
+      "translationHash": "e4ce7c09d51e3b88"
+    },
+    "es::ui::Product": {
+      "sourceHash": "fb9ef894175c3274",
+      "translationHash": "77b9238931ed566d"
+    },
+    "es::ui::Published posts": {
+      "sourceHash": "5b91f73889a03723",
+      "translationHash": "90354a70d7b1684c"
+    },
+    "es::ui::Published posts by platform": {
+      "sourceHash": "e340cb7f349086a2",
+      "translationHash": "4074ca1872cf063d"
+    },
+    "es::ui::Published distributions could not be loaded": {
+      "sourceHash": "20ae7dd6c4af957c",
+      "translationHash": "e749e4dd281e5288"
+    },
+    "es::ui::Publishing": {
+      "sourceHash": "26c81739396ded64",
+      "translationHash": "ab3b2a4b8c89e2d4"
+    },
+    "es::ui::Publishing calendar": {
+      "sourceHash": "7e61da4d6fe9c762",
+      "translationHash": "c5f2fe08306b2349"
+    },
+    "es::ui::Publishing overview": {
+      "sourceHash": "680e27edb5890fd2",
+      "translationHash": "70f1c7eb8d396810"
+    },
+    "es::ui::Publishing…": {
+      "sourceHash": "582e0f1abad43e9e",
+      "translationHash": "eb8630e351e1ff65"
+    },
+    "es::ui::Ready": {
+      "sourceHash": "5fa7aac5375c5815",
+      "translationHash": "b5fa51d564a9d880"
+    },
+    "es::ui::Ready to connect": {
+      "sourceHash": "4aee4d08e6c82f72",
+      "translationHash": "8515fea116bcdd2c"
+    },
+    "es::ui::Ready to upload": {
+      "sourceHash": "411ffef8388acb96",
+      "translationHash": "69bc9bebd11ef041"
+    },
+    "es::ui::Ready when your next post is": {
+      "sourceHash": "4c9983739b20293a",
+      "translationHash": "8b8ac70dfcb1239b"
+    },
+    "es::ui::Reconnect": {
+      "sourceHash": "bf8a9eab9e7e141b",
+      "translationHash": "81a086996fb15c80"
+    },
+    "es::ui::Reconnect becomes available when this provider passes acceptance.": {
+      "sourceHash": "2b076970feca5373",
+      "translationHash": "8c95278a6d1ce217"
+    },
+    "es::ui::Reconnect unavailable": {
+      "sourceHash": "7e4ab3376452d293",
+      "translationHash": "7f240c75ae47c916"
+    },
+    "es::ui::Refresh resume options": {
+      "sourceHash": "e06022ee84fd3523",
+      "translationHash": "a3249567891b4d0d"
+    },
+    "es::ui::Reload workspace": {
+      "sourceHash": "8eae6a08491cc984",
+      "translationHash": "553a3d1c85efde27"
+    },
+    "es::ui::Reply": {
+      "sourceHash": "c253f451bdd56431",
+      "translationHash": "8630a0dc25e2395a"
+    },
+    "es::ui::Reply status": {
+      "sourceHash": "fab5324eebd7d6d3",
+      "translationHash": "3a304d7c16ca070e"
+    },
+    "es::ui::Reply workflows stay grouped with the rest of the dashboard.": {
+      "sourceHash": "fb0f450018f94593",
+      "translationHash": "0140c794ef572f6b"
+    },
+    "es::ui::Reschedule": {
+      "sourceHash": "a6a80431b02464c1",
+      "translationHash": "04fbade9c327ab58"
+    },
+    "es::ui::Respond": {
+      "sourceHash": "ff72d2f38ccd6a69",
+      "translationHash": "8630a0dc25e2395a"
+    },
+    "es::ui::Resume": {
+      "sourceHash": "d640c7421da06661",
+      "translationHash": "5685e1faf0b38db2"
+    },
+    "es::ui::Resume available for {file} — choose that same file.": {
+      "sourceHash": "600a073b3e06c23a",
+      "translationHash": "8666891fead1a87c"
+    },
+    "es::ui::Retry distribution": {
+      "sourceHash": "5553523ebd3cde12",
+      "translationHash": "8839eef8189e8de5"
+    },
+    "es::ui::Retry failed": {
+      "sourceHash": "2630f65050626204",
+      "translationHash": "bc2cb451fb23fec4"
+    },
+    "es::ui::Retrying…": {
+      "sourceHash": "a16c8b1c95956fba",
+      "translationHash": "91e32b71891f11ec"
+    },
+    "es::ui::Return to overview": {
+      "sourceHash": "d8eeb2739180d08a",
+      "translationHash": "0f2451421560039c"
+    },
+    "es::ui::Review & submit": {
+      "sourceHash": "6ff30361d123215c",
+      "translationHash": "901c42f9ddd07c08"
+    },
+    "es::ui::Review and reply to comments from connected platforms.": {
+      "sourceHash": "9488d4cf6373c7b3",
+      "translationHash": "a0dbb3fd7c4d6bab"
+    },
+    "es::ui::Review performance and audience conversations in their publishing context.": {
+      "sourceHash": "a281976e3d3f4f9c",
+      "translationHash": "ef2822dc5e772007"
+    },
+    "es::ui::Review target details": {
+      "sourceHash": "874d6a4473e71727",
+      "translationHash": "82938a12cd89fffb"
+    },
+    "es::ui::Role": {
+      "sourceHash": "14736a2eb9f4159f",
+      "translationHash": "fb9f51fe92502d1a"
+    },
+    "es::ui::Save schedule": {
+      "sourceHash": "387f355f83e2679c",
+      "translationHash": "5c11acddb0a7755b"
+    },
+    "es::ui::Saved as ready when creation succeeds.": {
+      "sourceHash": "55f0276c9fa53e64",
+      "translationHash": "e8ba7921bd0786af"
+    },
+    "es::ui::Schedule": {
+      "sourceHash": "f4830a1dae298044",
+      "translationHash": "d15c15cb964f5c1c"
+    },
+    "es::ui::Scheduled": {
+      "sourceHash": "4724f344c1c0e4a1",
+      "translationHash": "5d1ab3dc1e106137"
+    },
+    "es::ui::See provider progress, failures, and the next safe action without guessing.": {
+      "sourceHash": "fda13c08e1210bb5",
+      "translationHash": "ea07b7c14bae69a0"
+    },
+    "es::ui::See the product": {
+      "sourceHash": "2204959f6129ad38",
+      "translationHash": "ff4edd355efba3b8"
+    },
+    "es::ui::Select a distribution": {
+      "sourceHash": "bd3d0ae0afe22ee3",
+      "translationHash": "2cd843632c92df1b"
+    },
+    "es::ui::Select an asset": {
+      "sourceHash": "197fc3da70f507d9",
+      "translationHash": "29fa91bc5364867a"
+    },
+    "es::ui::Select Asset": {
+      "sourceHash": "bf545e1da07001cd",
+      "translationHash": "2e33987d7d71f94b"
+    },
+    "es::ui::Select asset file": {
+      "sourceHash": "e23d3893814dbcbc",
+      "translationHash": "b86c478055fbbbb1"
+    },
+    "es::ui::Select platforms": {
+      "sourceHash": "6db30ca8943c3ffe",
+      "translationHash": "9ade238f3b26a2d6"
+    },
+    "es::ui::Sending…": {
+      "sourceHash": "b8ed5279e897be5d",
+      "translationHash": "9415ac2416c5719d"
+    },
+    "es::ui::Separate up to 20 tags with commas. Repeated tags are removed.": {
+      "sourceHash": "33657e26997c453b",
+      "translationHash": "4fb42d41be6fc086"
+    },
+    "es::ui::Settings": {
+      "sourceHash": "74a883a037bc227f",
+      "translationHash": "bb507137e3631379"
+    },
+    "es::ui::Shares": {
+      "sourceHash": "d4ea333d8b1f432c",
+      "translationHash": "67dd4dc5554fd2ae"
+    },
+    "es::ui::Show the workflow. Skip the sales theatre.": {
+      "sourceHash": "77c087b2558cb1e0",
+      "translationHash": "74e858caf2b44cf3"
+    },
+    "es::ui::Sign in": {
+      "sourceHash": "bfd402b2f6f38125",
+      "translationHash": "8d518bb65ea3dedb"
+    },
+    "es::ui::Sign in again": {
+      "sourceHash": "51fbe1dc8a7319b7",
+      "translationHash": "98f641d6c3d56eb1"
+    },
+    "es::ui::Sign in again to continue.": {
+      "sourceHash": "40f531d6cd857aca",
+      "translationHash": "d02f9fe0024a8124"
+    },
+    "es::ui::Something interrupted this workspace. Your data is safe. Reload the view to continue.": {
+      "sourceHash": "aaff847b98910c1a",
+      "translationHash": "b62c1b63d6ee7bd7"
+    },
+    "es::ui::Start publishing": {
+      "sourceHash": "28fe257f203347b7",
+      "translationHash": "4f36f8a37c992108"
+    },
+    "es::ui::Start with one workspace. Keep every asset, schedule, distribution, and reply in context.": {
+      "sourceHash": "4767ff8e438c72fe",
+      "translationHash": "9213e36a66b94dc2"
+    },
+    "es::ui::State you can trust": {
+      "sourceHash": "6e4aecfe8ad54317",
+      "translationHash": "214ed74823639af5"
+    },
+    "es::ui::Status": {
+      "sourceHash": "920e413c7d411b61",
+      "translationHash": "98e5acddb6c46a24"
+    },
+    "es::ui::Status: {status}": {
+      "sourceHash": "8b586fc084ef8f06",
+      "translationHash": "597c7dc89f210b51"
+    },
+    "es::ui::Stitch": {
+      "sourceHash": "acc870db91ebe17c",
+      "translationHash": "acc870db91ebe17c"
+    },
+    "es::ui::Storage": {
+      "sourceHash": "a69c4dece144a46e",
+      "translationHash": "43e23bd36cc605b5"
+    },
+    "es::ui::Storage usage": {
+      "sourceHash": "6d4669708663a2bf",
+      "translationHash": "d83815a6f508b2c4"
+    },
+    "es::ui::Tags": {
+      "sourceHash": "1331275bc537b4c2",
+      "translationHash": "137cb944c5267302"
+    },
+    "es::ui::The asset could not be deleted": {
+      "sourceHash": "3267fdda48582b1e",
+      "translationHash": "686651bd2c32c2d5"
+    },
+    "es::ui::The asset could not be loaded": {
+      "sourceHash": "48a0003924d7e904",
+      "translationHash": "43147fd6941418c0"
+    },
+    "es::ui::The distribution could not be cancelled": {
+      "sourceHash": "5399f3ae03e4a73f",
+      "translationHash": "4bb332963f62d72b"
+    },
+    "es::ui::The distribution could not be retried": {
+      "sourceHash": "8b950ff2b4a9e80b",
+      "translationHash": "f17a02604732bcaf"
+    },
+    "es::ui::The file was uploaded but could not be processed.": {
+      "sourceHash": "fa870110c581c537",
+      "translationHash": "708956ea2c6853ae"
+    },
+    "es::ui::The platform could not be disconnected": {
+      "sourceHash": "573cfa0a575d1493",
+      "translationHash": "44268fc7dcffb938"
+    },
+    "es::ui::The profile could not be archived": {
+      "sourceHash": "2717eb33d77d1829",
+      "translationHash": "024df8016be2dbc0"
+    },
+    "es::ui::The reply could not be queued": {
+      "sourceHash": "2a45efb937fc69da",
+      "translationHash": "b9fd1d4764af7878"
+    },
+    "es::ui::The request can be retried.": {
+      "sourceHash": "e2020d31a9f7c6b6",
+      "translationHash": "09a31d4723d22919"
+    },
+    "es::ui::Theme": {
+      "sourceHash": "efb52e7172b77731",
+      "translationHash": "d5df3708bc688543"
+    },
+    "es::ui::The schedule could not be updated": {
+      "sourceHash": "212451c665fffcc7",
+      "translationHash": "e8459d86030d0dee"
+    },
+    "es::ui::The secure download could not be prepared": {
+      "sourceHash": "31c9633be4db7ae1",
+      "translationHash": "1bf944c02c1d9841"
+    },
+    "es::ui::The secure preview could not be loaded": {
+      "sourceHash": "2dd29675d7f42e2c",
+      "translationHash": "3c97ca2cceebe31a"
+    },
+    "es::ui::The text asset could not be created": {
+      "sourceHash": "9c1bca19cec934dc",
+      "translationHash": "71f9426c4dae9379"
+    },
+    "es::ui::The upload could not be completed.": {
+      "sourceHash": "843bb189110d1b16",
+      "translationHash": "cb69d578326b49e6"
+    },
+    "es::ui::The upload is missing from storage. Try it again.": {
+      "sourceHash": "b5cb87262eb9f227",
+      "translationHash": "c7199ece9b170c01"
+    },
+    "es::ui::The upload is secure. Meltiply is verifying the media now.": {
+      "sourceHash": "647bcd77325f13af",
+      "translationHash": "cc03334af9e71659"
+    },
+    "es::ui::The uploaded file did not match its approved metadata.": {
+      "sourceHash": "21b8bdb6c2293dfd",
+      "translationHash": "e56375b0b773bd78"
+    },
+    "es::ui::This area is temporarily unavailable. Try again shortly.": {
+      "sourceHash": "8f7c4e71153bb299",
+      "translationHash": "121d851288b84dbb"
+    },
+    "es::ui::This asset cannot be deleted while it is in use.": {
+      "sourceHash": "7868dbe224dabbcb",
+      "translationHash": "6bf0b9629265f1c9"
+    },
+    "es::ui::This asset is being removed and can no longer be previewed.": {
+      "sourceHash": "38c0e46857345788",
+      "translationHash": "ea8c9cc7bf6f13c7"
+    },
+    "es::ui::This changed while you were working. Refresh and try again.": {
+      "sourceHash": "e8e87e449b262fae",
+      "translationHash": "b35a4b0e030be3ea"
+    },
+    "es::ui::This confirmation is required before Meltiply can send the post to TikTok.": {
+      "sourceHash": "39a241ebcd6484d2",
+      "translationHash": "c281aca26df8c21b"
+    },
+    "es::ui::This connection is temporarily unavailable.": {
+      "sourceHash": "59949fed471bea15",
+      "translationHash": "3600f890a01689d8"
+    },
+    "es::ui::This is the organization identity and access level enforced by the Meltiply API.": {
+      "sourceHash": "08f1f4e0e3e5b242",
+      "translationHash": "9025ca6a2d0e54b6"
+    },
+    "es::ui::This post promotes another brand or a third party.": {
+      "sourceHash": "51789ef85e375508",
+      "translationHash": "a18efcfc2c1ed8c7"
+    },
+    "es::ui::This post promotes you or your own business.": {
+      "sourceHash": "70ed96ed5408c8b2",
+      "translationHash": "7645f3fe2fe28167"
+    },
+    "es::ui::This upload session expired. Start it again.": {
+      "sourceHash": "586287f552309d6d",
+      "translationHash": "42b308c3bf5e9657"
+    },
+    "es::ui::This view needs a fresh start": {
+      "sourceHash": "47ceb9d7e376ab13",
+      "translationHash": "f4d0efff893f0a6d"
+    },
+    "es::ui::TikTok choices": {
+      "sourceHash": "3301b37935aae717",
+      "translationHash": "09e21fd7e7f357de"
+    },
+    "es::ui::TikTok processes the media under this creator's current settings. Meltiply checks those settings again immediately before posting.": {
+      "sourceHash": "dbc0c07947e8f953",
+      "translationHash": "2fdd29e0ebd136d0"
+    },
+    "es::ui::TikTok publishing choices could not be loaded": {
+      "sourceHash": "5c2c061152f31d70",
+      "translationHash": "6946aecec613b395"
+    },
+    "es::ui::TikTok requires you to make this choice for every post. Meltiply never selects it for you.": {
+      "sourceHash": "a46533df0e2f5430",
+      "translationHash": "06070c5e5b576937"
+    },
+    "es::ui::Time series": {
+      "sourceHash": "5a8375f77dc7fc03",
+      "translationHash": "5e07886e6b675cbd"
+    },
+    "es::ui::Title": {
+      "sourceHash": "7e8cd2056da73a7f",
+      "translationHash": "4c08a5d5feb22ce2"
+    },
+    "es::ui::Title override": {
+      "sourceHash": "7c8797440e274099",
+      "translationHash": "83b67efff7b53b3e"
+    },
+    "es::ui::Too many requests. Wait a moment and try again.": {
+      "sourceHash": "fa85b24314476ee7",
+      "translationHash": "1ed46c24957aa9e2"
+    },
+    "es::ui::Top": {
+      "sourceHash": "d5cdfcf7ff75338f",
+      "translationHash": "60099afac8e37df3"
+    },
+    "es::ui::Try again": {
+      "sourceHash": "d8b8392e2c542950",
+      "translationHash": "3780120d42bf8bd5"
+    },
+    "es::ui::Try preview again": {
+      "sourceHash": "4fb09c4aa916d14d",
+      "translationHash": "1636653afde1fd80"
+    },
+    "es::ui::Unavailable": {
+      "sourceHash": "ca184496974204a0",
+      "translationHash": "b781f6bd9b98e43d"
+    },
+    "es::ui::Unlimited": {
+      "sourceHash": "11dde17d6c3e2098",
+      "translationHash": "bb1dcbb24f2c1e91"
+    },
+    "es::ui::Unreplied": {
+      "sourceHash": "ccdb6fa86706054c",
+      "translationHash": "ba65279e3d7a2fc5"
+    },
+    "es::ui::Update calendar": {
+      "sourceHash": "7534970ada6559bc",
+      "translationHash": "84d1f952f92a42ad"
+    },
+    "es::ui::Updated {date}": {
+      "sourceHash": "328a4d4c6ba2b1ac",
+      "translationHash": "7c0d76eb5a356709"
+    },
+    "es::ui::Updating calendar…": {
+      "sourceHash": "4b89a15e7cc74c57",
+      "translationHash": "d5d575dd3d77f734"
+    },
+    "es::ui::Updating…": {
+      "sourceHash": "dfe40efe921fe88e",
+      "translationHash": "211b1c37458e30e8"
+    },
+    "es::ui::Upload": {
+      "sourceHash": "865e89de78d94c74",
+      "translationHash": "7214d0203007a500"
+    },
+    "es::ui::Upload cancelled": {
+      "sourceHash": "6c65793474de5391",
+      "translationHash": "d1a690f5b61b2fac"
+    },
+    "es::ui::Upload cancelled.": {
+      "sourceHash": "13737e120921b53f",
+      "translationHash": "cdbb4aa3fc3d29d4"
+    },
+    "es::ui::Upload complete": {
+      "sourceHash": "e5bc844545d910e1",
+      "translationHash": "010e1e4e64222143"
+    },
+    "es::ui::Upload complete. Processing…": {
+      "sourceHash": "00933f6b4be61f1e",
+      "translationHash": "6d71ce93ce7a7b77"
+    },
+    "es::ui::Upload paused": {
+      "sourceHash": "5f15c2d50ec98dc4",
+      "translationHash": "d6db9547f3fe6fbd"
+    },
+    "es::ui::Upload progress": {
+      "sourceHash": "11a8bfc000fce25a",
+      "translationHash": "00765cd49c3ac84c"
+    },
+    "es::ui::Uploading…": {
+      "sourceHash": "5ce44dd77dae789f",
+      "translationHash": "205443ee88568e8c"
+    },
+    "es::ui::Upload failed. Retry or remove this attachment.": {
+      "sourceHash": "0945629439538cc0",
+      "translationHash": "0d995f0f122f39e0"
+    },
+    "es::ui::Upload progress for {name}": {
+      "sourceHash": "fc816625307d2b1b",
+      "translationHash": "10ca9c1bfde9865a"
+    },
+    "es::ui::Pause upload of {name}": {
+      "sourceHash": "5f8331351ed79f0e",
+      "translationHash": "530a59562b4d49a8"
+    },
+    "es::ui::Resume upload of {name}": {
+      "sourceHash": "d76fafd295384276",
+      "translationHash": "a939a489ddf38e0c"
+    },
+    "es::ui::Cancel upload of {name}": {
+      "sourceHash": "2e10d835c0689d93",
+      "translationHash": "012721ba7f6cedfb"
+    },
+    "es::ui::Retry upload of {name}": {
+      "sourceHash": "e610606cbd728514",
+      "translationHash": "36d9a0a3462a4038"
+    },
+    "es::ui::This attachment could not be processed.": {
+      "sourceHash": "2a3987986cfeff58",
+      "translationHash": "9989369760e084b4"
+    },
+    "es::ui::Drag images or videos here, or use Add Media. Attachments keep their order.": {
+      "sourceHash": "6db21a274cd29b44",
+      "translationHash": "edf951144bb4aeb8"
+    },
+    "es::ui::Move attachment {index} earlier": {
+      "sourceHash": "fd58a9580ce471e5",
+      "translationHash": "01df08f6e7c37c95"
+    },
+    "es::ui::Move attachment {index} later": {
+      "sourceHash": "c6177270116078b1",
+      "translationHash": "4c4f4a11f28f023b"
+    },
+    "es::ui::Replace attachment {index}": {
+      "sourceHash": "ca92ae860fe7f1e6",
+      "translationHash": "616bf1bb806c3973"
+    },
+    "es::ui::Remove attachment {index}": {
+      "sourceHash": "f082cbb8e461bf07",
+      "translationHash": "928465b8fa1e2a89"
+    },
+    "es::ui::Attachments for {name}": {
+      "sourceHash": "7c43e7140bfbceaa",
+      "translationHash": "b6a19c820bbbee9a"
+    },
+    "es::ui::Use all post attachments": {
+      "sourceHash": "876e58491cecb425",
+      "translationHash": "6559489cc3f67642"
+    },
+    "es::ui::Text only": {
+      "sourceHash": "8bbfc646f3f5d9c2",
+      "translationHash": "1abadec9a7f9ee99"
+    },
+    "es::ui::Saved to your workspace at {time}": {
+      "sourceHash": "745a817ca7be3081",
+      "translationHash": "68eb9885d8c413ec"
+    },
+    "es::ui::Unsaved changes are kept in this browser until you save.": {
+      "sourceHash": "e0a4ea6c9a95321b",
+      "translationHash": "ed6e4c178b115486"
+    },
+    "es::ui::Draft changes are saved to your workspace when you save.": {
+      "sourceHash": "b9dc3d6cc9a458d4",
+      "translationHash": "5ea59beb55b49954"
+    },
+    "es::ui::Saves this post's text, attachments, and channel settings without publishing": {
+      "sourceHash": "4b6eb969488535ee",
+      "translationHash": "e213cc4046aa12f1"
+    },
+    "es::ui::Your post text, attachments, and channel settings are stored.": {
+      "sourceHash": "7dd9fe8ef928692b",
+      "translationHash": "2d7edfd42ebcc0c9"
+    },
+    "es::ui::Select a Brand Profile before uploading media.": {
+      "sourceHash": "4ae703e7074fc532",
+      "translationHash": "6aaaba3d687edeca"
+    },
+    "es::ui::Wait for {count} attachment(s) to finish starting their upload, or remove them.": {
+      "sourceHash": "c6a44c23006b2cf9",
+      "translationHash": "591217568e244308"
+    },
+    "es::ui::{name}: accepts at most {limit} attachment(s) per post.": {
+      "sourceHash": "270b8a0dbcffd15f",
+      "translationHash": "d242987b9312f166"
+    },
+    "es::ui::{name}: cannot combine these attachments; a multi-attachment post accepts {types} media only.": {
+      "sourceHash": "8955e7a07c96f93d",
+      "translationHash": "53ca987d2e7936f9"
+    },
+    "es::ui::{name}: cannot publish more than one attachment per post.": {
+      "sourceHash": "e486c12651722ae9",
+      "translationHash": "7c43e1bc998198d2"
+    },
+    "es::ui::{name}: requires at least {limit} attachment(s) per post.": {
+      "sourceHash": "13505d0fe10444dd",
+      "translationHash": "6c40c692df502270"
+    },
+    "es::ui::{name}: attachment {file} is not usable — {reason}": {
+      "sourceHash": "68eda8a458f81415",
+      "translationHash": "180ea994b265902b"
+    },
+    "es::ui::{name}: wait for attachment {file} to finish processing before publishing.": {
+      "sourceHash": "3cef162655247884",
+      "translationHash": "69c5b73e82de10d4"
+    },
+    "es::ui::Platform publishing limits are still loading; try again in a moment.": {
+      "sourceHash": "17fba7e0e1b918bb",
+      "translationHash": "bd819a391fff6dc2"
+    },
+    "es::ui::Uploads": {
+      "sourceHash": "d084236cbcc7f7f0",
+      "translationHash": "34ada7bb1215ddd2"
+    },
+    "es::ui::View": {
+      "sourceHash": "dcc839a4015c4b7d",
+      "translationHash": "20ab386d12d982bd"
+    },
+    "es::ui::View details": {
+      "sourceHash": "d1bf045bb524dae5",
+      "translationHash": "73389e60fff6f8d1"
+    },
+    "es::ui::View scheduled and published distributions across all platforms.": {
+      "sourceHash": "30025e1bc8cb0ccd",
+      "translationHash": "b6bbc2abc9762ef0"
+    },
+    "es::ui::Waiting for your connection…": {
+      "sourceHash": "3a1f4973353daa1e",
+      "translationHash": "8a13522977708c2f"
+    },
+    "es::ui::We could not complete that request. Try again in a moment.": {
+      "sourceHash": "f6151a1155dfb2dd",
+      "translationHash": "db873487ed04f456"
+    },
+    "es::ui::We could not refresh this view. Try again in a moment.": {
+      "sourceHash": "5ee18f5ec3844ba8",
+      "translationHash": "a31527caaf142b05"
+    },
+    "es::ui::Week {week}": {
+      "sourceHash": "d074252e073ed8cf",
+      "translationHash": "da0c9322dfddbee2"
+    },
+    "es::ui::Welcome to Meltiply": {
+      "sourceHash": "940f6147eddc4577",
+      "translationHash": "d57a2f212682e2c1"
+    },
+    "es::ui::Who can view this post?": {
+      "sourceHash": "8c256ed3ebe3e6fb",
+      "translationHash": "f0b08354fa5d7631"
+    },
+    "es::ui::Workflow": {
+      "sourceHash": "2e2d5c5649b718b5",
+      "translationHash": "523e06b2c0911690"
+    },
+    "es::ui::Workspace overview": {
+      "sourceHash": "46ba244c8ee97cf3",
+      "translationHash": "9622513ec0085ad8"
+    },
+    "es::ui::Workspace": {
+      "sourceHash": "87bb59ba2f92f2a5",
+      "translationHash": "b326fc96874e1a06"
+    },
+    "es::ui::Workspace identity could not be loaded": {
+      "sourceHash": "18a63b06e9c4f2af",
+      "translationHash": "764d14e6f7dd711c"
+    },
+    "es::ui::Across connected platforms": {
+      "sourceHash": "184557b26e4ab86a",
+      "translationHash": "7cd3af10d73dbb59"
+    },
+    "es::ui::Awaiting publication": {
+      "sourceHash": "dc228022390227e8",
+      "translationHash": "f31397462a822afe"
+    },
+    "es::ui::Connected platforms": {
+      "sourceHash": "86319eed22ce46ca",
+      "translationHash": "3985bcd7ade02452"
+    },
+    "es::ui::Distribution activity by period": {
+      "sourceHash": "8186557e68f18097",
+      "translationHash": "af07be6095423213"
+    },
+    "es::ui::Here is how your workspace performed over the last 30 days.": {
+      "sourceHash": "10543fc7a54055f5",
+      "translationHash": "f03fd95ffa772051"
+    },
+    "es::ui::Intents in the selected range": {
+      "sourceHash": "5db4683fa7b2e0c3",
+      "translationHash": "c8cb04f293967f54"
+    },
+    "es::ui::No distribution activity in this range yet.": {
+      "sourceHash": "f86dba1c3f9b0e51",
+      "translationHash": "49914836f07b418c"
+    },
+    "es::ui::No distributions yet.": {
+      "sourceHash": "dd1a5937812ade59",
+      "translationHash": "63fd40e6421a9338"
+    },
+    "es::ui::Platform reach": {
+      "sourceHash": "cbb06f2ad1958829",
+      "translationHash": "966f26b2e4b6c5c5"
+    },
+    "es::ui::Range": {
+      "sourceHash": "5de74a81b192304c",
+      "translationHash": "0dd4192180fd772e"
+    },
+    "es::ui::Recent distributions": {
+      "sourceHash": "c661c171560f3545",
+      "translationHash": "742ad30d29b9dac3"
+    },
+    "es::ui::View all": {
+      "sourceHash": "30a64216eaeac5d3",
+      "translationHash": "38ce196e3f0715df"
+    },
+    "es::ui::Views by platform": {
+      "sourceHash": "a480f322735c9d29",
+      "translationHash": "cd84512ce9d9fef0"
+    },
+    "es::ui::Waiting in the inbox": {
+      "sourceHash": "fc53004b95a7a0e0",
+      "translationHash": "cf058b1f6c039b66"
+    },
+    "es::ui::Welcome back, {name}": {
+      "sourceHash": "112b1022f9403c0a",
+      "translationHash": "8c27b91591a4be2f"
+    },
+    "es::ui::vs previous 24 hours": {
+      "sourceHash": "ce232e161bd0649a",
+      "translationHash": "830cbaaa90696e24"
+    },
+    "es::ui::vs previous 30 days": {
+      "sourceHash": "a672bba6e25d8199",
+      "translationHash": "01deac81dfad1896"
+    },
+    "es::ui::Comment activity": {
+      "sourceHash": "4692a4117689928e",
+      "translationHash": "3d034b6a8735d39b"
+    },
+    "es::ui::Engagement rate": {
+      "sourceHash": "1ac4e889df974e6b",
+      "translationHash": "6d9bc7052b18fec7"
+    },
+    "es::ui::Failure rate": {
+      "sourceHash": "b4026941cb387e14",
+      "translationHash": "bd16328ccdbcbc40"
+    },
+    "es::ui::Last synced": {
+      "sourceHash": "52f55f8ae5c2eb2e",
+      "translationHash": "36e3a0200520b709"
+    },
+    "es::ui::Performance": {
+      "sourceHash": "442aded87a55aa8c",
+      "translationHash": "0fb6f5157a9090e0"
+    },
+    "es::ui::Views per post": {
+      "sourceHash": "1c88d6c3c6cc11bd",
+      "translationHash": "2be84349373c78e3"
+    },
+    "es::ui::Workspace unavailable": {
+      "sourceHash": "f29d3f31dc6e215a",
+      "translationHash": "038123557d557f94"
+    },
+    "es::ui::Write a reply…": {
+      "sourceHash": "182fe0aac991af44",
+      "translationHash": "fdba181a7765f390"
+    },
+    "es::ui::Write a text asset": {
+      "sourceHash": "8470711e930dd107",
+      "translationHash": "070b0d4e54b5c7a4"
+    },
+    "es::ui::Write or paste the text you want to publish…": {
+      "sourceHash": "69bea4513eeff4eb",
+      "translationHash": "3b1e4b0b3a18212f"
+    },
+    "es::ui::You are offline": {
+      "sourceHash": "4d5c943931a4f3ae",
+      "translationHash": "a7c6056aa0ac85a1"
+    },
+    "es::ui::Your brand": {
+      "sourceHash": "406265d32c91d384",
+      "translationHash": "8f5819e4b5e6f3c9"
+    },
+    "es::ui::Your browser cannot play this video. Use the secure download action instead.": {
+      "sourceHash": "08d27d7fdecfe9d6",
+      "translationHash": "51404b89379fd651"
+    },
+    "es::ui::Your product, front and center": {
+      "sourceHash": "a99929cf4a7a2633",
+      "translationHash": "089aefb836efb1d9"
+    },
+    "es::ui::Your session expired": {
+      "sourceHash": "3a6573ba300911a0",
+      "translationHash": "37ffbf5d1cc4cdb1"
+    },
+    "es::ui::Your session no longer has access to this workspace.": {
+      "sourceHash": "d20ac341a2ca19a6",
+      "translationHash": "8a685819f0cf6074"
+    },
+    "es::ui::Your storage or upload quota has been reached.": {
+      "sourceHash": "275062c37c37ee16",
+      "translationHash": "3a1326bda68440ae"
+    },
+    "es::ui::) and restart the development server.": {
+      "sourceHash": "a457aba0ffaa8644",
+      "translationHash": "126559e527a614d3"
+    },
+    "es::ui::{count} attempt": {
+      "sourceHash": "5a70ef92ae54b96e",
+      "translationHash": "7a7cbd1f4af9a615"
+    },
+    "es::ui::{count} attempts": {
+      "sourceHash": "98c22f516faa183e",
+      "translationHash": "b793d888d400ecd7"
+    },
+    "es::ui::{name}: descriptions cannot exceed {limit} characters.": {
+      "sourceHash": "d3b9dfe3bccc706f",
+      "translationHash": "bd9f9bd3d51e9e51"
+    },
+    "es::ui::{name}: title overrides cannot exceed 200 characters.": {
+      "sourceHash": "b5d1d74db4feb906",
+      "translationHash": "84b51d9ca0251ce3"
+    },
+    "es::ui::{name}: use no more than {limit} hashtags.": {
+      "sourceHash": "4bf002aeb1073ff3",
+      "translationHash": "687115af9f75e785"
+    },
+    "es::ui::A calmer operating system for publishing.": {
+      "sourceHash": "0a6f7d7296487293",
+      "translationHash": "1beca27924cc0cc4"
+    },
+    "es::ui::An error has occurred.": {
+      "sourceHash": "86010c018a03fa35",
+      "translationHash": "d08479e89998685d"
+    },
+    "es::ui::Accepted and waiting for a publisher worker.": {
+      "sourceHash": "133310af331dd8d8",
+      "translationHash": "e57c2d777867138d"
+    },
+    "es::ui::AI-generated photo posting is not available yet.": {
+      "sourceHash": "3d09ad4cea0d5a35",
+      "translationHash": "5423f7fb9e4a509d"
+    },
+    "es::ui::Analytics {metric} time series": {
+      "sourceHash": "a4d1980c4df7b7b7",
+      "translationHash": "d5595881556a5b01"
+    },
+    "es::ui::Asset title": {
+      "sourceHash": "2c4037fe8925c9fd",
+      "translationHash": "d48d8d265423fdbf"
+    },
+    "es::ui::Attention": {
+      "sourceHash": "c2eb8cd9d9564314",
+      "translationHash": "411bf79d5de4a1f5"
+    },
+    "es::ui::branded content": {
+      "sourceHash": "1608d373261b54c9",
+      "translationHash": "a792a52a859c1c86"
+    },
+    "es::ui::Branded content cannot be visible only to you.": {
+      "sourceHash": "c2d4a5a2883e11ff",
+      "translationHash": "76204da117a110a7"
+    },
+    "es::ui::Bytes travel directly to private storage and become ready only after verification.": {
+      "sourceHash": "45a4c36f1a1aac83",
+      "translationHash": "6afa3b4bade50ea3"
+    },
+    "es::ui::Campaign note, caption, or post": {
+      "sourceHash": "ae1d01f663c9d6cd",
+      "translationHash": "34fd2bc604e77340"
+    },
+    "es::ui::Cancel distribution": {
+      "sourceHash": "f700ec4433541b62",
+      "translationHash": "470e834e0a52856a"
+    },
+    "es::ui::Cancellation is pending. Do not submit a replacement until this settles.": {
+      "sourceHash": "a813f9814d48f8ad",
+      "translationHash": "548d72024dff7b1d"
+    },
+    "es::ui::Cancelling…": {
+      "sourceHash": "91b104db05da1b2d",
+      "translationHash": "c5b0af9a5e5c8958"
+    },
+    "es::ui::Cancels {date}": {
+      "sourceHash": "c02768f25c1139a9",
+      "translationHash": "268f6622f11ab5ac"
+    },
+    "es::ui::comments": {
+      "sourceHash": "2b4244fb2663714e",
+      "translationHash": "e04bda482bb37683"
+    },
+    "es::ui::Comments are not available for this creator.": {
+      "sourceHash": "33cb15b36ece9bf5",
+      "translationHash": "58bace2ca33dad9c"
+    },
+    "es::ui::Connection": {
+      "sourceHash": "639a40e82b9a96f0",
+      "translationHash": "a7f534961a9cafe5"
+    },
+    "es::ui::Connection is not available.": {
+      "sourceHash": "7efedfe67a5cecf6",
+      "translationHash": "00972ff4b7280321"
+    },
+    "es::ui::Connection status": {
+      "sourceHash": "c5612baad29591b5",
+      "translationHash": "9f99b0637769001c"
+    },
+    "es::ui::Customize per platform": {
+      "sourceHash": "47f15099b5f2647a",
+      "translationHash": "35723e8e59735072"
+    },
+    "es::ui::Delete {title}": {
+      "sourceHash": "b4c7358981b69175",
+      "translationHash": "7e4ea686b99cbf2a"
+    },
+    "es::ui::Deleting {title}": {
+      "sourceHash": "032b83d63925eaee",
+      "translationHash": "80a5035fc5014dfa"
+    },
+    "es::ui::Disconnect {platform}?": {
+      "sourceHash": "be1f5e7993e1956c",
+      "translationHash": "5b2a215dc1b69bb9"
+    },
+    "es::ui::Dismiss": {
+      "sourceHash": "48845bff334a50a5",
+      "translationHash": "1a878a55c594b0f7"
+    },
+    "es::ui::Duet is not available for this creator.": {
+      "sourceHash": "134b2f4168ab3317",
+      "translationHash": "548f2d2176ae6df2"
+    },
+    "es::ui::in": {
+      "sourceHash": "582967534d0f909d",
+      "translationHash": "dbd3a49d0d906b4e"
+    },
+    "es::ui::JPG, PNG, GIF, WebP, MP4, MOV, or WebM": {
+      "sourceHash": "7588d7dd28fecd47",
+      "translationHash": "71870dc908e8edc6"
+    },
+    "es::ui::Keep reusable copy beside your media and publish it through the same workflow.": {
+      "sourceHash": "4a64d06dfeec2a76",
+      "translationHash": "bee7150a1f4aa14f"
+    },
+    "es::ui::Know what happened.": {
+      "sourceHash": "21a0a2e86fd2dc50",
+      "translationHash": "252761583058ed3a"
+    },
+    "es::ui::launch, editorial, spring": {
+      "sourceHash": "6256c1d954966f7f",
+      "translationHash": "015e5acdb8c3a130"
+    },
+    "es::ui::Month": {
+      "sourceHash": "310ca503ef36f177",
+      "translationHash": "024261f9bfbac9ed"
+    },
+    "es::ui::no scopes": {
+      "sourceHash": "ae5b8724e8621983",
+      "translationHash": "6679ba38d58adcac"
+    },
+    "es::ui::Not set": {
+      "sourceHash": "4895f73177ab5d67",
+      "translationHash": "8cbe82eda079e713"
+    },
+    "es::ui::Photo posts cannot enable Duet or Stitch.": {
+      "sourceHash": "5cdadd460c3128fd",
+      "translationHash": "7cf27cfd6a37b412"
+    },
+    "es::ui::Posts": {
+      "sourceHash": "a80811cf68891506",
+      "translationHash": "e051b9d5f1160aa9"
+    },
+    "es::ui::Preparing the asset for provider delivery.": {
+      "sourceHash": "591d50e6063cc28d",
+      "translationHash": "1f30ae433c3de0b0"
+    },
+    "es::ui::Preview of {title}": {
+      "sourceHash": "055d958c40ab8ce0",
+      "translationHash": "ed9b641c4810ffe7"
+    },
+    "es::ui::Provider actions are currently unavailable.": {
+      "sourceHash": "5af4d052b4a38c6b",
+      "translationHash": "f911a5d4be177aed"
+    },
+    "es::ui::Provider confirmation received {date}.": {
+      "sourceHash": "470ca6b6bf5aa005",
+      "translationHash": "b0eabc0b0af68ee4"
+    },
+    "es::ui::Provider confirmation received.": {
+      "sourceHash": "dd167d7eaa5ab008",
+      "translationHash": "f159d68b720fa679"
+    },
+    "es::ui::Publish": {
+      "sourceHash": "859390eb495b2ead",
+      "translationHash": "326fdfdb1a893767"
+    },
+    "es::ui::Publish everywhere.": {
+      "sourceHash": "2760287fe4ebc4ec",
+      "translationHash": "b7cd5d8fa4e4e777"
+    },
+    "es::ui::Publish immediately": {
+      "sourceHash": "aa40b3c141ff510d",
+      "translationHash": "c59afb041df53b32"
+    },
+    "es::ui::Renews {date}": {
+      "sourceHash": "c86308bb960de5d6",
+      "translationHash": "1628ecde9cbcc87a"
+    },
+    "es::ui::Request cancellation": {
+      "sourceHash": "fbde6a9ae7a69aec",
+      "translationHash": "280bf9beba519b5f"
+    },
+    "es::ui::Saving…": {
+      "sourceHash": "23e39291d6135814",
+      "translationHash": "3c8dc4dc7a83dd2d"
+    },
+    "es::ui::Scheduled and waiting for a publish time.": {
+      "sourceHash": "f72bb8b4f7145f58",
+      "translationHash": "7933e1de8cc3a688"
+    },
+    "es::ui::Scheduled for {date}.": {
+      "sourceHash": "4a39e4a9e117db7e",
+      "translationHash": "9a08eb1a8aae1e99"
+    },
+    "es::ui::Send": {
+      "sourceHash": "f6f4688ff23d50c6",
+      "translationHash": "e1d12d1a29a77b00"
+    },
+    "es::ui::Set": {
+      "sourceHash": "b6f6f3ad07b3c05f",
+      "translationHash": "1db476ee4a5d2a88"
+    },
+    "es::ui::Step {current} of {total}: {label}": {
+      "sourceHash": "a52f533e9b32829b",
+      "translationHash": "8b7e3d88c44451c2"
+    },
+    "es::ui::Stitch is not available for this creator.": {
+      "sourceHash": "f7f8cfe6df8bca11",
+      "translationHash": "078fadade0e4747e"
+    },
+    "es::ui::Text": {
+      "sourceHash": "71988c4d8e0803ba",
+      "translationHash": "6df3d6661c095ce7"
+    },
+    "es::ui::Text content for {title}": {
+      "sourceHash": "2c4a59bd40460b65",
+      "translationHash": "14849f734291328c"
+    },
+    "es::ui::The attempt failed permanently. Review the reason before creating another intent.": {
+      "sourceHash": "ac7244e3b01d01c6",
+      "translationHash": "b60d7283eef9881a"
+    },
+    "es::ui::The attempt failed safely and can be retried without creating a duplicate post.": {
+      "sourceHash": "b30728cc699ea01b",
+      "translationHash": "967578cc772a1d4f"
+    },
+    "es::ui::The media frame accepts your own MP4 source and handles muted, in-view playback. Until then, it presents a responsive Meltiply workspace preview.": {
+      "sourceHash": "62cac9fe73e5c5b9",
+      "translationHash": "7a0d68bd2b02c8b7"
+    },
+    "es::ui::The provider has the request. Meltiply is waiting for confirmation.": {
+      "sourceHash": "3cdddec1a30b27c1",
+      "translationHash": "a6edb8a7ad153838"
+    },
+    "es::ui::The provider result is uncertain. Do not retry until an operator confirms the outcome.": {
+      "sourceHash": "b75bba1869109bd2",
+      "translationHash": "2564ecc397c470cb"
+    },
+    "es::ui::The selected privacy setting is no longer available for this creator.": {
+      "sourceHash": "de5c79e3e7dabff6",
+      "translationHash": "756167a61c019506"
+    },
+    "es::ui::This publishing intent was cancelled.": {
+      "sourceHash": "af926b7f9d47df6b",
+      "translationHash": "30cc874d0a1bab25"
+    },
+    "es::ui::This Channel publishes its own caption for the post.": {
+      "sourceHash": "11c0bf283302ba90",
+      "translationHash": "1f213448015be973"
+    },
+    "es::ui::This video exceeds the creator's {seconds}-second limit.": {
+      "sourceHash": "38b7b8f95cfa76ea",
+      "translationHash": "f1732f7faa1a88b5"
+    },
+    "es::ui::Today": {
+      "sourceHash": "2b065c7c9ce466e5",
+      "translationHash": "55133d4e6eb6172a"
+    },
+    "es::ui::Unknown": {
+      "sourceHash": "b764cdc0eab71374",
+      "translationHash": "2669e033a1213e64"
+    },
+    "es::ui::Updated": {
+      "sourceHash": "3a5ecca188c0579c",
+      "translationHash": "8b0062fa48c50d13"
+    },
+    "es::ui::Video preview for {title}": {
+      "sourceHash": "462dc10473ca3dd6",
+      "translationHash": "b23e78d1579580b4"
+    },
+    "es::ui::Week": {
+      "sourceHash": "e78041ab51a818a2",
+      "translationHash": "51656a29fb46a0a1"
+    },
+    "es::ui::your brand": {
+      "sourceHash": "9e497f0bfac94f0d",
+      "translationHash": "e8c811663d2a1004"
+    },
+    "es::ui::A preview is not available for this asset.": {
+      "sourceHash": "11560fc4fa2ab398",
+      "translationHash": "a91ef90f26b745b2"
+    },
+    "es::ui::Add both a title and text before creating the asset.": {
+      "sourceHash": "0bcbd7d69d972bd8",
+      "translationHash": "4442ad3296dbb270"
+    },
+    "es::ui::AI disclosure is not yet available for TikTok photo posts.": {
+      "sourceHash": "fd9ab98603a7c5c9",
+      "translationHash": "1c47ab8f76152d5f"
+    },
+    "es::ui::Assets, schedules, accounts, and replies share one workspace.": {
+      "sourceHash": "b54638805252100b",
+      "translationHash": "25dd64630b880798"
+    },
+    "es::ui::Changes are paused until your connection returns.": {
+      "sourceHash": "f1de4309ce5c4856",
+      "translationHash": "bab8f9de98c5e69d"
+    },
+    "es::ui::Choose a supported image or video file.": {
+      "sourceHash": "42e3ecb6893745d4",
+      "translationHash": "2efe02c7fe958ec6"
+    },
+    "es::ui::Choose a supported image or video file": {
+      "sourceHash": "278407f79c925b36",
+      "translationHash": "3b929bf49d87d343"
+    },
+    "es::ui::File must be under 500 MB": {
+      "sourceHash": "12076fb892d59a8b",
+      "translationHash": "22f24fca37fa435a"
+    },
+    "es::ui::Finish the upload to make this preview available.": {
+      "sourceHash": "fa4fd91e8971c868",
+      "translationHash": "a6d382049c28dee0"
+    },
+    "es::ui::Invalid date": {
+      "sourceHash": "cd63c7df0fec232f",
+      "translationHash": "e2f70835e1cfdbaa"
+    },
+    "es::ui::Keep each tag to 50 characters or fewer.": {
+      "sourceHash": "9f30b53b7eaaa7d2",
+      "translationHash": "0b22cea260a1464d"
+    },
+    "es::ui::Keep platform readiness and analytics close to the workspace.": {
+      "sourceHash": "65de952d56cf2d2b",
+      "translationHash": "86acc9f2d3b3c929"
+    },
+    "es::ui::Label this video as AI-generated on TikTok.": {
+      "sourceHash": "4a06f501d491b5fa",
+      "translationHash": "3256934e0cc99311"
+    },
+    "es::ui::Meltiply authentication provider is unavailable.": {
+      "sourceHash": "3e19aa6c9f57d326",
+      "translationHash": "f57c8f32eb3f376e"
+    },
+    "es::ui::OAuth could not be started": {
+      "sourceHash": "88d33bd391003d5e",
+      "translationHash": "7e971c84b5b6e665"
+    },
+    "es::ui::Pending, failed, and confirmed work stays explicit.": {
+      "sourceHash": "eeec831db5bc5b70",
+      "translationHash": "8f11eee421240f4c"
+    },
+    "es::ui::Processing failed, so this media cannot be previewed.": {
+      "sourceHash": "61aa3a59549b4e45",
+      "translationHash": "7c3ada034513a908"
+    },
+    "es::ui::Review the target choices before publishing.": {
+      "sourceHash": "342154026f7f9bc8",
+      "translationHash": "4879ab2c3d4becbb"
+    },
+    "es::ui::Scheduled time must be in the future": {
+      "sourceHash": "bec8f152b6fed313",
+      "translationHash": "d045a9d7b71376dc"
+    },
+    "es::ui::Selected asset could not be loaded": {
+      "sourceHash": "4d8e222929d03cb6",
+      "translationHash": "f9e51f24fd739bbb"
+    },
+    "es::ui::Submission failed": {
+      "sourceHash": "13ddd866499a1532",
+      "translationHash": "23785ba65f1d751c"
+    },
+    "es::ui::That item is no longer available.": {
+      "sourceHash": "380b217c64b39342",
+      "translationHash": "1141a96cecddbaa0"
+    },
+    "es::ui::The selected file name or size is invalid": {
+      "sourceHash": "a7e9d5a8955c38b0",
+      "translationHash": "61b8f810ff5e702b"
+    },
+    "es::ui::This area could not be loaded": {
+      "sourceHash": "4f197bb86f8087ff",
+      "translationHash": "8846d47b42fe6bf0"
+    },
+    "es::ui::This file cannot be uploaded": {
+      "sourceHash": "4a2a379765fe8320",
+      "translationHash": "fd1923bb1ab0e2d9"
+    },
+    "es::ui::This file is larger than the allowed limit": {
+      "sourceHash": "e11860ec6b83ee18",
+      "translationHash": "3041cab1c9a26668"
+    },
+    "es::ui::Use no more than 20 tags.": {
+      "sourceHash": "bf07eb960d2c98a5",
+      "translationHash": "983c1492299ae590"
+    },
+    "es::ui::Verifying upload…": {
+      "sourceHash": "c6b19e364a0101b0",
+      "translationHash": "d20e2caa99d98e8e"
+    },
+    "es::ui::image": {
+      "sourceHash": "6105d6cc76af4003",
+      "translationHash": "3559fb35e3328cff"
+    },
+    "es::ui::video": {
+      "sourceHash": "0cab1c9617404faf",
+      "translationHash": "b11740b53dbb7ab3"
+    },
+    "es::ui::text": {
+      "sourceHash": "982d9e3eb996f559",
+      "translationHash": "f46e3b17a6b639e5"
+    },
+    "es::ui::views": {
+      "sourceHash": "74883614c4c79e12",
+      "translationHash": "901df68fd5ba6ad7"
+    },
+    "es::ui::likes": {
+      "sourceHash": "b0aa8a6c35b4deec",
+      "translationHash": "7bf13806330334b3"
+    },
+    "es::ui::shares": {
+      "sourceHash": "4a64609f7db9facc",
+      "translationHash": "74df393c56293c19"
+    },
+    "es::ui::MON": {
+      "sourceHash": "2b76b5a38ce556db",
+      "translationHash": "53abc0bcb86fbfdb"
+    },
+    "es::ui::TUE": {
+      "sourceHash": "be0898683160c494",
+      "translationHash": "8904c61a98dbed62"
+    },
+    "es::ui::WED": {
+      "sourceHash": "10ccb2e1c6fd204b",
+      "translationHash": "65ab911f9916be21"
+    },
+    "es::ui::THU": {
+      "sourceHash": "74d1052f85c343e7",
+      "translationHash": "23f2e3bff8e4483f"
+    },
+    "es::ui::FRI": {
+      "sourceHash": "d992f7d647ec3c31",
+      "translationHash": "ed72f7ce3d2154ab"
+    },
+    "es::ui::{name} does not accept {type} assets.": {
+      "sourceHash": "c02edbacc266d6d6",
+      "translationHash": "4da44ccdb7245fac"
+    },
+    "es::ui::{name} does not accept this asset's media type.": {
+      "sourceHash": "f1e1b9f487dacbf5",
+      "translationHash": "f280138e819c233b"
+    },
+    "es::ui::{name} publishing is not available for this account.": {
+      "sourceHash": "17e3940a579df39a",
+      "translationHash": "e912a00c06ba374c"
+    },
+    "es::ui::Reconnect {name} before publishing.": {
+      "sourceHash": "af63176292f45181",
+      "translationHash": "65fad9bb893e2571"
+    },
+    "es::ui::This asset exceeds the {name} file-size limit.": {
+      "sourceHash": "75d1e16cc9e3b45f",
+      "translationHash": "5d129a45432cec19"
+    },
+    "es::ui::This asset exceeds the {name} video-duration limit.": {
+      "sourceHash": "bc5d4f320b8b51f3",
+      "translationHash": "578dc60327980bf2"
+    },
+    "es::ui::{platform} connected successfully.": {
+      "sourceHash": "5f006c7d77913956",
+      "translationHash": "18f1a190ad03bd70"
+    },
+    "es::ui::{platform} authorization succeeded, but the account could not be saved. Try connecting again.": {
+      "sourceHash": "23b9dec1b4bdc0a3",
+      "translationHash": "82f729be416541a0"
+    },
+    "es::ui::{platform} connection was cancelled before permission was granted.": {
+      "sourceHash": "d752d32b06b52479",
+      "translationHash": "a94eff4d6338b16b"
+    },
+    "es::ui::{platform} connection could not be completed because the provider omitted its code.": {
+      "sourceHash": "ed7b71d705ea5ffd",
+      "translationHash": "b551142bd9f3e6cb"
+    },
+    "es::ui::{platform} connection could not be completed because the provider rejected the exchange.": {
+      "sourceHash": "846c034b86a31b5b",
+      "translationHash": "1b8a8b457c7bb1f9"
+    },
+    "es::ui::{platform} authorization did not identify a single publishing account. Choose the intended account in the provider and try again.": {
+      "sourceHash": "82789eb92c530513",
+      "translationHash": "9136632825d63761"
+    },
+    "es::ui::{platform} connection is not available yet.": {
+      "sourceHash": "04d23680c33125b8",
+      "translationHash": "4bfc5f600c0ca69f"
+    },
+    "es::ui::{platform} connection could not be started. Share the request ID with support if the problem continues.": {
+      "sourceHash": "0e2ff923d9020dcc",
+      "translationHash": "eac7306a11d829fd"
+    },
+    "es::ui::{platform} connection could not reach the API. Check your connection and try again.": {
+      "sourceHash": "c02afb2154b2c1b0",
+      "translationHash": "42d9679cc52b319b"
+    },
+    "es::ui::{platform} connection expired or could not be verified. Start again when the provider is available.": {
+      "sourceHash": "83647a0e57f20e26",
+      "translationHash": "3cb880f5b5f08930"
+    },
+    "es::ui::{platform} connection was rejected because the provider is unknown.": {
+      "sourceHash": "97fccb3e6001d1b1",
+      "translationHash": "3284892ad62d348b"
+    },
+    "es::ui::\"{name}\" will be permanently removed from your media library. This action cannot be undone.": {
+      "sourceHash": "1f947b2375d07943",
+      "translationHash": "b71be2b2637b1135"
+    },
+    "es::ui::(ungrouped)": {
+      "sourceHash": "b8a0a9ee1112b4d1",
+      "translationHash": "52d01173c751699a"
+    },
+    "es::ui::+{count} more...": {
+      "sourceHash": "66b4d16282888f17",
+      "translationHash": "cf266f9b189908f9"
+    },
+    "es::ui::AI Generated": {
+      "sourceHash": "3049a7c3c53d9c94",
+      "translationHash": "9ada809bca87f194"
+    },
+    "es::ui::AI Insights": {
+      "sourceHash": "52657c5f6909f02b",
+      "translationHash": "4742a83b6aeb1ba7"
+    },
+    "es::ui::AI Publishing Studio": {
+      "sourceHash": "2ad097ac9eb396c7",
+      "translationHash": "b48a7793a80414b6"
+    },
+    "es::ui::API & Keys": {
+      "sourceHash": "bf3639eaee1bc5a7",
+      "translationHash": "069187248a66b4c4"
+    },
+    "es::ui::API Access & Automation": {
+      "sourceHash": "e60868c40291cc49",
+      "translationHash": "f806145555839bc8"
+    },
+    "es::ui::API Secret": {
+      "sourceHash": "e2453eca0e06cb0e",
+      "translationHash": "bfffcd88be74e394"
+    },
+    "es::ui::API calls": {
+      "sourceHash": "3edcdf922e24f7d5",
+      "translationHash": "b2993759fb76f2d5"
+    },
+    "es::ui::Across {count} published posts": {
+      "sourceHash": "fdf51d48de99dfcf",
+      "translationHash": "0d23f7ca0ffabff8"
+    },
+    "es::ui::Actions": {
+      "sourceHash": "ff8059dc6752afdd",
+      "translationHash": "fb89a30ba7f64d18"
+    },
+    "es::ui::Active": {
+      "sourceHash": "92340695899bd2d8",
+      "translationHash": "723858144bd5482d"
+    },
+    "es::ui::Active Destinations": {
+      "sourceHash": "227d30ee18c98921",
+      "translationHash": "50aeb1e4849556c8"
+    },
+    "es::ui::Active Workspace": {
+      "sourceHash": "d9394ed8a2cfead5",
+      "translationHash": "4f2a12f90209e448"
+    },
+    "es::ui::Add account": {
+      "sourceHash": "ee7ee5830f091690",
+      "translationHash": "1bf4edfc6f3539a0"
+    },
+    "es::ui::Add Another": {
+      "sourceHash": "811ce8c1db3ba5d6",
+      "translationHash": "5ca6d8be1a269680"
+    },
+    "es::ui::Add Channel": {
+      "sourceHash": "ad6357a17c016544",
+      "translationHash": "9afdf5f46168f8ec"
+    },
+    "es::ui::Add Channels": {
+      "sourceHash": "3d27758de76f598b",
+      "translationHash": "24c58a7edc689fa4"
+    },
+    "es::ui::Add Media": {
+      "sourceHash": "a078fb55c65a1f63",
+      "translationHash": "2f0c4b469b9f74b9"
+    },
+    "es::ui::Add or connect a new social channel": {
+      "sourceHash": "a8701ed6a4443b24",
+      "translationHash": "5ddfb44c441c6df8"
+    },
+    "es::ui::Administrator": {
+      "sourceHash": "e7d3e769f3f593da",
+      "translationHash": "d4584547c7f6a01a"
+    },
+    "es::ui::Agent Ready": {
+      "sourceHash": "62d135fed8e95f18",
+      "translationHash": "09b70fa5f2f62d83"
+    },
+    "es::ui::All Profiles": {
+      "sourceHash": "08c2102589330bb6",
+      "translationHash": "f75c4690d204f17f"
+    },
+    "es::ui::All dates": {
+      "sourceHash": "b60fecedb81b5d32",
+      "translationHash": "e1114229114096bb"
+    },
+    "es::ui::All profiles": {
+      "sourceHash": "18f6aff3fee00cc6",
+      "translationHash": "f75c4690d204f17f"
+    },
+    "es::ui::All statuses": {
+      "sourceHash": "8ee57323a6f24cc7",
+      "translationHash": "ecda92faab01f5c1"
+    },
+    "es::ui::Analytics & Performance": {
+      "sourceHash": "2a4135266d1ded6e",
+      "translationHash": "e86446859308e3f8"
+    },
+    "es::ui::Analytics are partial: some platforms have not finished syncing for this range.": {
+      "sourceHash": "32b4917143a7b9b4",
+      "translationHash": "0e7a8ce6dad54f45"
+    },
+    "es::ui::Analytics command": {
+      "sourceHash": "740a309ed110174f",
+      "translationHash": "9b1058c9503d7df1"
+    },
+    "es::ui::Appearance & Language": {
+      "sourceHash": "cfe2e6e504acee16",
+      "translationHash": "366e3295edbabe62"
+    },
+    "es::ui::Apply": {
+      "sourceHash": "31e392d1c0378bec",
+      "translationHash": "3a04898a6b8b6e0f"
+    },
+    "es::ui::Apply Changes (": {
+      "sourceHash": "916afa732033f596",
+      "translationHash": "8a46ad0e6d5b5349"
+    },
+    "es::ui::Apply Recommendation": {
+      "sourceHash": "44d05fe527f3ad84",
+      "translationHash": "5826cd8ddf312358"
+    },
+    "es::ui::Attached Media ({count})": {
+      "sourceHash": "8d6b2ebe47d81b71",
+      "translationHash": "3bc50394c86fdaa8"
+    },
+    "es::ui::Auto Music": {
+      "sourceHash": "74232f9738cdb27c",
+      "translationHash": "2347a98e9ff2b916"
+    },
+    "es::ui::Automated UTF-8 emoji & character limit guard": {
+      "sourceHash": "fe65cb744dfa6124",
+      "translationHash": "1c1773b71d0397de"
+    },
+    "es::ui::Autonomous Queue Rules": {
+      "sourceHash": "743c1148e737afb7",
+      "translationHash": "2bc5187963511a59"
+    },
+    "es::ui::Autonomous multi-channel social campaign planning, drafting, and queue orchestration": {
+      "sourceHash": "0c75ab581a08826b",
+      "translationHash": "b21172b250f20e9c"
+    },
+    "es::ui::Avg {rate}% engagement rate": {
+      "sourceHash": "b1e35dc04c868b4c",
+      "translationHash": "0a9c5284a09d1c0c"
+    },
+    "es::ui::Back to posts": {
+      "sourceHash": "9d67947c7e2119d2",
+      "translationHash": "acc9075ce8486259"
+    },
+    "es::ui::Brand Content": {
+      "sourceHash": "bd976072edc08f33",
+      "translationHash": "c6b46e6432d2ac01"
+    },
+    "es::ui::Brand Profile": {
+      "sourceHash": "d4472dfd900c60a0",
+      "translationHash": "1bacdd57138da876"
+    },
+    "es::ui::Post date": {
+      "sourceHash": "f61130e5d3ade79e",
+      "translationHash": "7e63dfcafd809b94"
+    },
+    "es::ui::Post status": {
+      "sourceHash": "5db4bfbc05a2a600",
+      "translationHash": "8a0b7a0ea8f891d2"
+    },
+    "es::ui::Brand Profiles": {
+      "sourceHash": "e94df0c3c9351738",
+      "translationHash": "66e49434044ed3f2"
+    },
+    "es::ui::Brand Profiles & Groups": {
+      "sourceHash": "51c7accd21b63c44",
+      "translationHash": "8c07e7515bec1569"
+    },
+    "es::ui::Browse Available Channels": {
+      "sourceHash": "a3e7188c480a0f1c",
+      "translationHash": "fbbb3ab47cf0e3bc"
+    },
+    "es::ui::{count} of {total} ordered": {
+      "sourceHash": "0c83c29da6045349",
+      "translationHash": "ef166624642955ac"
+    },
+    "es::ui::{count} ordered": {
+      "sourceHash": "80fd0057b4195181",
+      "translationHash": "9878db00df17b752"
+    },
+    "es::ui::{count} ordered attachment(s)": {
+      "sourceHash": "0ec60f33d6e8d86e",
+      "translationHash": "e7735ed337254556"
+    },
+    "es::ui::Cadence-based slot suggestions are not yet backed by the API.": {
+      "sourceHash": "f1a3e414f20d232b",
+      "translationHash": "b3ab6ae827b3d157"
+    },
+    "es::ui::Calendar View": {
+      "sourceHash": "1e6fc7a0a60c38a8",
+      "translationHash": "180609ad2c24618d"
+    },
+    "es::ui::Cancel all pending": {
+      "sourceHash": "13877dd9a16ef3dc",
+      "translationHash": "f458e9a2d469f757"
+    },
+    "es::ui::Cancel post": {
+      "sourceHash": "6e998d0c950e0461",
+      "translationHash": "6c804069bfbabcf6"
+    },
+    "es::ui::Cancel pending channels?": {
+      "sourceHash": "a6d62431463fa915",
+      "translationHash": "7906d99de3dedb41"
+    },
+    "es::ui::Cancel channels": {
+      "sourceHash": "6ed2ea2cc0e40062",
+      "translationHash": "704619bb6a71bee9"
+    },
+    "es::ui::Deleting this post removes its draft and stops its pending channels. Anything already published stays live on its platform — deleting a post here never removes a copy from a platform.": {
+      "sourceHash": "3fa891c543fd68e0",
+      "translationHash": "0dbefc306603d9d4"
+    },
+    "es::ui::Cancel scheduled post?": {
+      "sourceHash": "39a4bf695b4ebfa0",
+      "translationHash": "7f0763aac0e8611b"
+    },
+    "es::ui::Cancelled": {
+      "sourceHash": "d353a99eb4556847",
+      "translationHash": "f407384e2f304cf0"
+    },
+    "es::ui::Channel": {
+      "sourceHash": "ce4683e7013a18cd",
+      "translationHash": "0119803da011816a"
+    },
+    "es::ui::Attachments": {
+      "sourceHash": "634de114775082f0",
+      "translationHash": "a85fad96eea98af3"
+    },
+    "es::ui::Channel Performance": {
+      "sourceHash": "125cfcad6abbfa8d",
+      "translationHash": "2b640dba6204634e"
+    },
+    "es::ui::Channel disconnected": {
+      "sourceHash": "91baad879adc681f",
+      "translationHash": "84b9eab7390f153b"
+    },
+    "es::ui::Channel is unavailable": {
+      "sourceHash": "7c23c13e82b330ba",
+      "translationHash": "e99094eb9401f664"
+    },
+    "es::ui::Choose background style...": {
+      "sourceHash": "2980f7fc9264c16f",
+      "translationHash": "23fbe47af77f3e33"
+    },
+    "es::ui::Clear filters": {
+      "sourceHash": "7179ea0035fca783",
+      "translationHash": "bfc2d16235868e7c"
+    },
+    "es::ui::Clear search": {
+      "sourceHash": "3b7ea51793e9d906",
+      "translationHash": "a7859bae872b6c00"
+    },
+    "es::ui::Click to expand": {
+      "sourceHash": "2478da41171cd28f",
+      "translationHash": "7d206bba5bf6e5a9"
+    },
+    "es::ui::Collapse post metrics": {
+      "sourceHash": "75c3412685ab596c",
+      "translationHash": "9137444d3de9ba9b"
+    },
+    "es::ui::Comments on published posts appear here after the next sync.": {
+      "sourceHash": "0d5846b524a24aaa",
+      "translationHash": "975a2a3ee2f8d776"
+    },
+    "es::ui::Compose once, preview channel-specific variations, and schedule or publish across your accounts.": {
+      "sourceHash": "da3e1f7266d8d979",
+      "translationHash": "20cd73cf4e5d6d43"
+    },
+    "es::ui::Configure": {
+      "sourceHash": "6defafa2caa65304",
+      "translationHash": "d685ddb9bbfadaf9"
+    },
+    "es::ui::Configure {name}": {
+      "sourceHash": "3c5ef5402c55bbcd",
+      "translationHash": "131ae76f8b9b80bc"
+    },
+    "es::ui::Confirm & Proceed": {
+      "sourceHash": "0a62bd018d0a51aa",
+      "translationHash": "da56408a25f6f5b6"
+    },
+    "es::ui::Connect AI generation engines, automation webhooks, and agent protocols.": {
+      "sourceHash": "2c92c1fa9023bdfa",
+      "translationHash": "9dd96b572208927e"
+    },
+    "es::ui::Connect a channel": {
+      "sourceHash": "283fa1a6131eb1eb",
+      "translationHash": "531103b922ed8c16"
+    },
+    "es::ui::Connect and manage social networks for {name}.": {
+      "sourceHash": "c83ba62e0a4c3ed6",
+      "translationHash": "ac7fa11cd497cd84"
+    },
+    "es::ui::Connect social account": {
+      "sourceHash": "1642c61029173afd",
+      "translationHash": "b5f4c9a3612b8d7e"
+    },
+    "es::ui::Connect your social accounts to start publishing and scheduling across platforms.": {
+      "sourceHash": "0638bf18d994f614",
+      "translationHash": "9d4838f19ab4cadd"
+    },
+    "es::ui::Connected Accounts": {
+      "sourceHash": "6a376da1d664b311",
+      "translationHash": "1e4f211e59c0cd2a"
+    },
+    "es::ui::Content Snippet": {
+      "sourceHash": "69d93e81832b28cc",
+      "translationHash": "03df4b06ef7c16b1"
+    },
+    "es::ui::Could not cancel this post": {
+      "sourceHash": "cd370c3c9aebc278",
+      "translationHash": "bf1fcb3184a7dfde"
+    },
+    "es::ui::Could not delete this post": {
+      "sourceHash": "1b943ac560ad2d69",
+      "translationHash": "500755e88113b820"
+    },
+    "es::ui::Could not load post": {
+      "sourceHash": "84b87650d33c5cbb",
+      "translationHash": "9ce706efc8aa49b3"
+    },
+    "es::ui::Could not reschedule this post": {
+      "sourceHash": "85dbd82f15415ff0",
+      "translationHash": "a03759a4a5ca7cb1"
+    },
+    "es::ui::Could not retry this post": {
+      "sourceHash": "ea80bf03a9e66fcb",
+      "translationHash": "b7fb66b87788bcc5"
+    },
+    "es::ui::Create post": {
+      "sourceHash": "bcf1bfcaa2afa8f9",
+      "translationHash": "8c76d0379b2178a2"
+    },
+    "es::ui::Credential Key": {
+      "sourceHash": "dc3e36a3352b3dbc",
+      "translationHash": "e08bad353bf215a6"
+    },
+    "es::ui::Cross-platform reach, engagement metrics, and post performance.": {
+      "sourceHash": "a6e5428ef7d481ee",
+      "translationHash": "6278c12ee07e6674"
+    },
+    "es::ui::Custom Text for {name}": {
+      "sourceHash": "c4b808e2e25792b4",
+      "translationHash": "eb86d833238838ff"
+    },
+    "es::ui::Customize for This Channel": {
+      "sourceHash": "96f46b91040e7384",
+      "translationHash": "638c52e0ab1d6323"
+    },
+    "es::ui::Date": {
+      "sourceHash": "99c40ab405926cb5",
+      "translationHash": "93b2a9ef782cacd6"
+    },
+    "es::ui::Decrease grid columns": {
+      "sourceHash": "2f89399240fad60a",
+      "translationHash": "596210ccefa322c4"
+    },
+    "es::ui::Default Footer Template": {
+      "sourceHash": "540e77401e3f1ac5",
+      "translationHash": "3afea268ca21bf7e"
+    },
+    "es::ui::Default Profile": {
+      "sourceHash": "41198efc2f66cf31",
+      "translationHash": "2027424449b5ce4c"
+    },
+    "es::ui::Default Publishing Timezone": {
+      "sourceHash": "8d90afe2f55fe966",
+      "translationHash": "a5fcf6962c861882"
+    },
+    "es::ui::Delete draft": {
+      "sourceHash": "46495379257b35b7",
+      "translationHash": "dac552be6a06079a"
+    },
+    "es::ui::Delete this post?": {
+      "sourceHash": "0aaf3b939d245488",
+      "translationHash": "89b05eea6a5125b5"
+    },
+    "es::ui::Delete post": {
+      "sourceHash": "cac927004c6140fc",
+      "translationHash": "c9e49a8dc8dfe2e4"
+    },
+    "es::ui::Deleting published posts is not supported": {
+      "sourceHash": "4b56c827a9c1da1c",
+      "translationHash": "ed1268d3cfc3b9eb"
+    },
+    "es::ui::Destinations": {
+      "sourceHash": "72eb63f032e47e34",
+      "translationHash": "0aee0f9b73cd5593"
+    },
+    "es::ui::Disconnect channel": {
+      "sourceHash": "1db7e80d7b2c838f",
+      "translationHash": "8f4884f1d21f97d8"
+    },
+    "es::ui::Disconnecting…": {
+      "sourceHash": "cb2b6a572a8588d8",
+      "translationHash": "41baea6210e38e95"
+    },
+    "es::ui::Dismiss notification": {
+      "sourceHash": "b7bb3f342402da33",
+      "translationHash": "94ab3b052dc817d3"
+    },
+    "es::ui::Distribution to {count} channel(s) has been queued.": {
+      "sourceHash": "ac6f2ed01fafde7f",
+      "translationHash": "0d40168c15a7b6ff"
+    },
+    "es::ui::Distribution to {count} channel(s) is scheduled.": {
+      "sourceHash": "f88a196db9fa1885",
+      "translationHash": "090033d5328a6a84"
+    },
+    "es::ui::Documentation": {
+      "sourceHash": "c205924de0fe636c",
+      "translationHash": "e0d07848277c3b0d"
+    },
+    "es::ui::Done": {
+      "sourceHash": "11a6767d5674c7e4",
+      "translationHash": "b5fa51d564a9d880"
+    },
+    "es::ui::Draft saved": {
+      "sourceHash": "5ccb8caacdc53835",
+      "translationHash": "f69f77fac665af07"
+    },
+    "es::ui::Drafts": {
+      "sourceHash": "f592e6a4db3c6638",
+      "translationHash": "9b7da456a0080780"
+    },
+    "es::ui::Edit": {
+      "sourceHash": "464c4ffd019e1e96",
+      "translationHash": "2eba946b2e1ee4b6"
+    },
+    "es::ui::Edit Group": {
+      "sourceHash": "dd5f2d9ece73e898",
+      "translationHash": "726b3d835d7fb1e1"
+    },
+    "es::ui::Edit post": {
+      "sourceHash": "a1933147e7c8088f",
+      "translationHash": "8797dfc346d3eea7"
+    },
+    "es::ui::Editing published posts is not supported yet": {
+      "sourceHash": "a4d2002c301cddcd",
+      "translationHash": "ff8b70ac15d9e321"
+    },
+    "es::ui::Email Publishing Digest": {
+      "sourceHash": "cf08345979d53178",
+      "translationHash": "7d7ed930673d9774"
+    },
+    "es::ui::Engagement": {
+      "sourceHash": "ea68771a399457d9",
+      "translationHash": "ef0d726a547bd6b6"
+    },
+    "es::ui::Engagements": {
+      "sourceHash": "6777744dafe263c1",
+      "translationHash": "9b5ad2bed9921004"
+    },
+    "es::ui::Enter YouTube title...": {
+      "sourceHash": "a20db142680d0168",
+      "translationHash": "9f6f769047c3c244"
+    },
+    "es::ui::Enter your {key} to authenticate the integration. Credential storage is not yet available — this dialog is a preview.": {
+      "sourceHash": "a247619c11f4d67c",
+      "translationHash": "992fc9153f75a9c4"
+    },
+    "es::ui::Every synced comment has a reply.": {
+      "sourceHash": "654343357c3a00ea",
+      "translationHash": "d47dbbf409601a8f"
+    },
+    "es::ui::Excluded": {
+      "sourceHash": "bef1fd9e5caea8b5",
+      "translationHash": "45d4b79b0e226b7c"
+    },
+    "es::ui::Expand": {
+      "sourceHash": "07548c2c6511d4d1",
+      "translationHash": "e095e6d5592b06d0"
+    },
+    "es::ui::Expand post metrics": {
+      "sourceHash": "9c6de8965d1c83f7",
+      "translationHash": "c5005a0b0b6dbfb8"
+    },
+    "es::ui::Facebook": {
+      "sourceHash": "d41f5b4977ee05c6",
+      "translationHash": "d41f5b4977ee05c6"
+    },
+    "es::ui::Failed": {
+      "sourceHash": "031a8f0f659df890",
+      "translationHash": "6883aef403fc794a"
+    },
+    "es::ui::Failure & Disconnect Alerts": {
+      "sourceHash": "8b08abf08a7c6c90",
+      "translationHash": "cf2401c798d0fa52"
+    },
+    "es::ui::Features": {
+      "sourceHash": "5697d03daef4de9c",
+      "translationHash": "31f19241a3064781"
+    },
+    "es::ui::Feed Post / Reel": {
+      "sourceHash": "06ef561d174055c6",
+      "translationHash": "a119af8f83abd134"
+    },
+    "es::ui::Filtered by active profile": {
+      "sourceHash": "989941ef7b638c63",
+      "translationHash": "a83b568666b8c017"
+    },
+    "es::ui::Fri": {
+      "sourceHash": "66dab40cea1dea5c",
+      "translationHash": "7ed1b9d1d004c9e0"
+    },
+    "es::ui::Friends Only": {
+      "sourceHash": "d6ebf1f9b7d7fc50",
+      "translationHash": "8924a80974151042"
+    },
+    "es::ui::General": {
+      "sourceHash": "c910d474dcd724bf",
+      "translationHash": "c910d474dcd724bf"
+    },
+    "es::ui::Generate API Key": {
+      "sourceHash": "563093ba0ba28ae6",
+      "translationHash": "77a2c9edd7182c77"
+    },
+    "es::ui::Grid": {
+      "sourceHash": "0d7d12ac624c66e6",
+      "translationHash": "7e795dd6843abbe4"
+    },
+    "es::ui::Grid View": {
+      "sourceHash": "38ee89c32a2a983a",
+      "translationHash": "d61168b9008f0872"
+    },
+    "es::ui::Human-in-the-loop review": {
+      "sourceHash": "b8eec44a33bdd4fc",
+      "translationHash": "2e243f53a6190a0c"
+    },
+    "es::ui::I've prepared a customized multi-platform social package for \"{prompt}\". The copy has been tuned for algorithm reach with tailored hooks for X, LinkedIn, and Threads, and queue slots have been allocated during your audience's peak activity window.": {
+      "sourceHash": "5f307a6ec9ccca32",
+      "translationHash": "f2eed60749fc0b61"
+    },
+    "es::ui::ID": {
+      "sourceHash": "3843971dcfdee508",
+      "translationHash": "3843971dcfdee508"
+    },
+    "es::ui::Identity fields come from your Meltiply account — editing is not available yet.": {
+      "sourceHash": "18b8a18c39fb044c",
+      "translationHash": "68cca00af93edb47"
+    },
+    "es::ui::Illustrative insights — automated analysis is not connected yet.": {
+      "sourceHash": "4751ece0607c6799",
+      "translationHash": "b3ab523f6c87fdfb"
+    },
+    "es::ui::Illustrative — follower growth is not synced by the API yet.": {
+      "sourceHash": "6fd849237b3a4ee8",
+      "translationHash": "ee65ac0c308a0b55"
+    },
+    "es::ui::Illustrative — shortlink click tracking is not connected yet.": {
+      "sourceHash": "a0bd10ee7bc7159e",
+      "translationHash": "b44e31299621cc31"
+    },
+    "es::ui::Immediate notifications when social tokens expire or posts fail.": {
+      "sourceHash": "aa24164510473262",
+      "translationHash": "89f8aa351cdf3a10"
+    },
+    "es::ui::Increase grid columns": {
+      "sourceHash": "659f78fc9280c215",
+      "translationHash": "51249385bc2f4930"
+    },
+    "es::ui::Instagram": {
+      "sourceHash": "bad57ef7837c8e6b",
+      "translationHash": "bad57ef7837c8e6b"
+    },
+    "es::ui::Integration connections are not yet available": {
+      "sourceHash": "47bf4202951370f9",
+      "translationHash": "f19fe0a029ef5e86"
+    },
+    "es::ui::Integrations & Third-Party Plugs": {
+      "sourceHash": "13d6d61ae6ceff4f",
+      "translationHash": "a3dc6d719a5d5018"
+    },
+    "es::ui::Jump to...": {
+      "sourceHash": "db0b376273629a12",
+      "translationHash": "024fcadfac819fd8"
+    },
+    "es::ui::Keep post": {
+      "sourceHash": "cfbda59f4be599ed",
+      "translationHash": "425368011567797e"
+    },
+    "es::ui::Last synced {time}": {
+      "sourceHash": "938dc677e0ffdce5",
+      "translationHash": "4d9368d4cd6a62e6"
+    },
+    "es::ui::Latest published posts — expand a row for its metric history": {
+      "sourceHash": "4cce926960185318",
+      "translationHash": "1688c4aa2f557d86"
+    },
+    "es::ui::Likes, comments, and shares": {
+      "sourceHash": "b65347ee9b443b99",
+      "translationHash": "9c467d0a6a4e1131"
+    },
+    "es::ui::Link Clicks": {
+      "sourceHash": "319ae6d8f96947ae",
+      "translationHash": "3e78c26071f19b86"
+    },
+    "es::ui::List": {
+      "sourceHash": "6f202f54a7b2d8fe",
+      "translationHash": "5e77e1785d574f9b"
+    },
+    "es::ui::List View": {
+      "sourceHash": "48627bdf5dc06416",
+      "translationHash": "2eaa9ea4b35b2c87"
+    },
+    "es::ui::Made for Kids": {
+      "sourceHash": "fcca6f1ef063fd22",
+      "translationHash": "1d98d60b2df793e1"
+    },
+    "es::ui::Made for kids?": {
+      "sourceHash": "428c0b1550b851d7",
+      "translationHash": "c71f6c0fb678c11b"
+    },
+    "es::ui::Manage API keys and developer access credentials.": {
+      "sourceHash": "f337c771cb0fa827",
+      "translationHash": "ac73253a91645d39"
+    },
+    "es::ui::Manage delivery channels for publication outcomes and approval alerts.": {
+      "sourceHash": "f536b9722949a358",
+      "translationHash": "c4535f6a21287a38"
+    },
+    "es::ui::Manage your drafts, scheduled posts, and publications in one place": {
+      "sourceHash": "2061a936d11feb86",
+      "translationHash": "b29e55de076c5dfc"
+    },
+    "es::ui::Max 3 posts/day per channel to prevent fatigue": {
+      "sourceHash": "ab6e506c05d9b075",
+      "translationHash": "fd1cf58b2966f00f"
+    },
+    "es::ui::Meltiply Workspace": {
+      "sourceHash": "cb027bb79a375bd0",
+      "translationHash": "0011864ff49e2887"
+    },
+    "es::ui::Metrics are not supported for: {platforms}": {
+      "sourceHash": "f79b0c9fc899d511",
+      "translationHash": "559989157aff6ff8"
+    },
+    "es::ui::Mon": {
+      "sourceHash": "f40d7f51f69edfaf",
+      "translationHash": "90ec2b75bdf72326"
+    },
+    "es::ui::Net Growth": {
+      "sourceHash": "fe79bc8a98a5dcc8",
+      "translationHash": "421ec068512b9045"
+    },
+    "es::ui::New Brand Profile": {
+      "sourceHash": "8574d2dd1deb7481",
+      "translationHash": "f0f23e8f849c2b92"
+    },
+    "es::ui::Next optimal": {
+      "sourceHash": "5aec9d1a1a64af18",
+      "translationHash": "57b1e2deb00bc08a"
+    },
+    "es::ui::Next optimal slot suggested for your connected channels.": {
+      "sourceHash": "7c5b42e16ad15514",
+      "translationHash": "1b1847bd71546fc6"
+    },
+    "es::ui::No accounts match the active filters.": {
+      "sourceHash": "3a63d63586bc9135",
+      "translationHash": "6048faced87c8809"
+    },
+    "es::ui::No API keys issued yet": {
+      "sourceHash": "d415db8b5aa34b31",
+      "translationHash": "2c2774baeaa84a59"
+    },
+    "es::ui::No caption": {
+      "sourceHash": "b7e50bae5cb358ee",
+      "translationHash": "9e3b1fe557048884"
+    },
+    "es::ui::No channels connected yet": {
+      "sourceHash": "8eb2f36881d3209c",
+      "translationHash": "bfe3a7f7682c8d67"
+    },
+    "es::ui::No metric snapshots recorded for this post in the selected range.": {
+      "sourceHash": "89720a0bff1eaf5d",
+      "translationHash": "69a9a7e951c61c1d"
+    },
+    "es::ui::No platform metrics recorded in this range yet.": {
+      "sourceHash": "da9fdc6720b5ab38",
+      "translationHash": "e9ae26e003bbb08e"
+    },
+    "es::ui::No platforms match “{query}”.": {
+      "sourceHash": "4d2540d162944320",
+      "translationHash": "eed1010683393f89"
+    },
+    "es::ui::No plugs match your filters": {
+      "sourceHash": "b21a17266c6716a8",
+      "translationHash": "6b4d700173b0ed0b"
+    },
+    "es::ui::No posts found matching the active filters.": {
+      "sourceHash": "e9061deeba1f4bce",
+      "translationHash": "7a3c223e49bc2a91"
+    },
+    "es::ui::No posts match filters": {
+      "sourceHash": "723adb4a2554f523",
+      "translationHash": "1b570d586f0a3212"
+    },
+    "es::ui::No posts scheduled for this day yet. Click below to schedule one.": {
+      "sourceHash": "5b6b626607f6139e",
+      "translationHash": "f0a76d231f56dac9"
+    },
+    "es::ui::No published posts yet.": {
+      "sourceHash": "a83bf96bd6d29eb3",
+      "translationHash": "eb780a7d3001157b"
+    },
+    "es::ui::No publishing features yet.": {
+      "sourceHash": "15a2665d5fcf02c7",
+      "translationHash": "f4adacc7988703d6"
+    },
+    "es::ui::No social channels connected for this profile.": {
+      "sourceHash": "24c17758bb757882",
+      "translationHash": "8083ac7b49b3f495"
+    },
+    "es::ui::No social channels connected yet.": {
+      "sourceHash": "f6f6f8e9ae10b0c1",
+      "translationHash": "debc6e4d835a18e4"
+    },
+    "es::ui::No, not made for kids": {
+      "sourceHash": "a017223de53edd72",
+      "translationHash": "b639adb2eabb1e51"
+    },
+    "es::ui::Not available yet": {
+      "sourceHash": "787406ddea2a10a4",
+      "translationHash": "2ba39d34dc68e312"
+    },
+    "es::ui::Notification Preferences": {
+      "sourceHash": "1e3564bdba890599",
+      "translationHash": "da35dd3e06806c09"
+    },
+    "es::ui::Notification delivery is not yet available — preferences shown are illustrative defaults.": {
+      "sourceHash": "3fa9f053fa9721a7",
+      "translationHash": "a92e7087be141624"
+    },
+    "es::ui::Notifications": {
+      "sourceHash": "788011833a5a0f22",
+      "translationHash": "80dade6fab6f9387"
+    },
+    "es::ui::OAuth 2.0 Direct": {
+      "sourceHash": "473e2b590bb2b40e",
+      "translationHash": "5a18b02b925189ed"
+    },
+    "es::ui::Offline": {
+      "sourceHash": "a1794783aab72d20",
+      "translationHash": "879b012449c1fd87"
+    },
+    "es::ui::Only drafts and scheduled posts can be edited.": {
+      "sourceHash": "ee7704a7950c7189",
+      "translationHash": "db2bb416d8b8d75f"
+    },
+    "es::ui::Only drafts and scheduled posts can be removed.": {
+      "sourceHash": "f2830dc3fdc0d816",
+      "translationHash": "b8e9a283f42e1039"
+    },
+    "es::ui::Open navigation menu": {
+      "sourceHash": "ef373a9f3656aeda",
+      "translationHash": "3ebfc7b6ecaf2129"
+    },
+    "es::ui::Organic Brand": {
+      "sourceHash": "8c1a103d0387388d",
+      "translationHash": "4c337b969751ff2e"
+    },
+    "es::ui::Organization Name": {
+      "sourceHash": "4cbd90732447a928",
+      "translationHash": "eabb127b4b11b993"
+    },
+    "es::ui::Past 30 days": {
+      "sourceHash": "ea8721e4f083a922",
+      "translationHash": "43b4552642c14025"
+    },
+    "es::ui::Paused": {
+      "sourceHash": "e159b06187d369a0",
+      "translationHash": "d455cfb682d3705f"
+    },
+    "es::ui::Pending": {
+      "sourceHash": "331551b0de4157c9",
+      "translationHash": "2ef68536d8e21233"
+    },
+    "es::ui::Pending distributions for this post will be cancelled. Already-published channels are unaffected.": {
+      "sourceHash": "01f7b7f134666233",
+      "translationHash": "920c4009eb11bd41"
+    },
+    "es::ui::Please fix the following before submitting:": {
+      "sourceHash": "60ee85a8062f15c0",
+      "translationHash": "fef8ad1f0c31c036"
+    },
+    "es::ui::Please provide a valid schedule date and time.": {
+      "sourceHash": "c784ec2c14e617d1",
+      "translationHash": "2fb98fd23f1c2a6e"
+    },
+    "es::ui::Please select at least one destination channel.": {
+      "sourceHash": "f6f6c84e70a93825",
+      "translationHash": "788b523ad995407f"
+    },
+    "es::ui::Post & Preview": {
+      "sourceHash": "61159cc9198f4e6d",
+      "translationHash": "d3ece89de0b38199"
+    },
+    "es::ui::Post Performance": {
+      "sourceHash": "8943b0e1453eeffa",
+      "translationHash": "595924b731403ff0"
+    },
+    "es::ui::Post Signatures & Footers": {
+      "sourceHash": "0f0deaaea04e21e8",
+      "translationHash": "259b834d38bc8551"
+    },
+    "es::ui::Post Title (optional, max 90 characters)": {
+      "sourceHash": "9c321686a4769cab",
+      "translationHash": "31c0a114a4435b70"
+    },
+    "es::ui::Post Type": {
+      "sourceHash": "3cd7192151f7fef9",
+      "translationHash": "e628b74179e22abc"
+    },
+    "es::ui::Post details": {
+      "sourceHash": "b909c909f9838de7",
+      "translationHash": "9acf17379d52599f"
+    },
+    "es::ui::Post metrics could not be loaded": {
+      "sourceHash": "f504c909411c4398",
+      "translationHash": "660d906023f59356"
+    },
+    "es::ui::Post must contain text content or at least one media item.": {
+      "sourceHash": "88e6d53d20edc989",
+      "translationHash": "3528b22ff49e02a1"
+    },
+    "es::ui::Post published": {
+      "sourceHash": "63c9e1fc50066107",
+      "translationHash": "e87873360e35953b"
+    },
+    "es::ui::Post scheduled": {
+      "sourceHash": "792678842e2f2002",
+      "translationHash": "f56bc3254ee3e6c2"
+    },
+    "es::ui::Post-level metrics appear here once distributions are published.": {
+      "sourceHash": "3f16c86d2692f60f",
+      "translationHash": "a0bfa11b00624604"
+    },
+    "es::ui::Posts for": {
+      "sourceHash": "cbcc78127b82f7a4",
+      "translationHash": "634338a4aafc7080"
+    },
+    "es::ui::Preferences apply immediately and persist on this device.": {
+      "sourceHash": "dfb8c233269d06e1",
+      "translationHash": "6da03d260aa724b1"
+    },
+    "es::ui::Preparing": {
+      "sourceHash": "cf1aa6cc5951b3f4",
+      "translationHash": "e160381847c42d4d"
+    },
+    "es::ui::Preview": {
+      "sourceHash": "324b134f57c70c72",
+      "translationHash": "c5341f198fc2f4f8"
+    },
+    "es::ui::Privacy Level": {
+      "sourceHash": "f9f90d243b5bd2c6",
+      "translationHash": "f0e34f80d1db7eed"
+    },
+    "es::ui::Privacy Visibility": {
+      "sourceHash": "a0bf06bab0323397",
+      "translationHash": "64474eb6083ea426"
+    },
+    "es::ui::Private": {
+      "sourceHash": "c63eb6720c6e8849",
+      "translationHash": "cc47b77d64b539cd"
+    },
+    "es::ui::Private (Self Only)": {
+      "sourceHash": "5a164bdf40b71ff2",
+      "translationHash": "ff4c066cbb84ca83"
+    },
+    "es::ui::Processing": {
+      "sourceHash": "c8e3e92a62ecf181",
+      "translationHash": "d9ab8c014a69233f"
+    },
+    "es::ui::Profile": {
+      "sourceHash": "d696a35bdd1883da",
+      "translationHash": "00d551e63dd540fc"
+    },
+    "es::ui::Profile ID": {
+      "sourceHash": "e1093e7ec2ce4a3d",
+      "translationHash": "2fe0da6cd51b0343"
+    },
+    "es::ui::Programmatic API access is not yet available — key management arrives with the developer API.": {
+      "sourceHash": "d6a409360eba5431",
+      "translationHash": "027548780191c1fa"
+    },
+    "es::ui::Public": {
+      "sourceHash": "591935b15b1c88e2",
+      "translationHash": "7135869a6228c18e"
+    },
+    "es::ui::Public to Everyone": {
+      "sourceHash": "31ac2f2c1876c44d",
+      "translationHash": "84ff282fd1cef2cd"
+    },
+    "es::ui::Publication approved": {
+      "sourceHash": "64b1e10e5c8d68c8",
+      "translationHash": "de0567b09f188b90"
+    },
+    "es::ui::Publication batch dismissed.": {
+      "sourceHash": "3d1d8eff1350f4d0",
+      "translationHash": "5469fd72af76862d"
+    },
+    "es::ui::Publish Now": {
+      "sourceHash": "f53fe11589e73452",
+      "translationHash": "67efb1ee2dcba123"
+    },
+    "es::ui::Publish now": {
+      "sourceHash": "bf74ddc5486eb7ba",
+      "translationHash": "67efb1ee2dcba123"
+    },
+    "es::ui::Published": {
+      "sourceHash": "2ef42ec21d9300dd",
+      "translationHash": "4ce1fc3292ea60c8"
+    },
+    "es::ui::Publishing Composer": {
+      "sourceHash": "91f487177f83cf2b",
+      "translationHash": "8175e06338445f72"
+    },
+    "es::ui::Publishing Timing": {
+      "sourceHash": "db0cbd6c15783b5f",
+      "translationHash": "89e94fb615a176e8"
+    },
+    "es::ui::Queued": {
+      "sourceHash": "661ff40a07e037bb",
+      "translationHash": "d197619adfc61289"
+    },
+    "es::ui::Queued {count} channels for {time}.": {
+      "sourceHash": "23bd2137d558ad59",
+      "translationHash": "8328b78327675ee1"
+    },
+    "es::ui::Re-authenticate": {
+      "sourceHash": "3887afa4f02ec9c6",
+      "translationHash": "1991592a198b078e"
+    },
+    "es::ui::Read-only": {
+      "sourceHash": "72bb90897ab1eadc",
+      "translationHash": "6e3c2c930b472294"
+    },
+    "es::ui::Receive a daily recap of scheduled and completed publications.": {
+      "sourceHash": "07e98ece129999b3",
+      "translationHash": "21a535bd5d16d8a2"
+    },
+    "es::ui::Recommendation applied:": {
+      "sourceHash": "ccc935bfddf87bf2",
+      "translationHash": "6567d28037c1099b"
+    },
+    "es::ui::Redirecting…": {
+      "sourceHash": "0d83b98bebfb5add",
+      "translationHash": "b5b420c59808b269"
+    },
+    "es::ui::Remove attachment": {
+      "sourceHash": "595b066a8838734a",
+      "translationHash": "39c9c7dff505ce50"
+    },
+    "es::ui::Remove Custom Override": {
+      "sourceHash": "23c91d06ce6c85f1",
+      "translationHash": "a1757920f0276cb4"
+    },
+    "es::ui::Replies": {
+      "sourceHash": "31ecb5e00f95e54f",
+      "translationHash": "cb87829226fbd7e9"
+    },
+    "es::ui::Requires approval": {
+      "sourceHash": "acabdc5f09e43a2f",
+      "translationHash": "e132626f7a4a12cd"
+    },
+    "es::ui::Reset": {
+      "sourceHash": "daee7606b339f3c3",
+      "translationHash": "9b0c3e4077f88dd8"
+    },
+    "es::ui::Reset Session": {
+      "sourceHash": "52ea4448a6d35cea",
+      "translationHash": "f15fe206687475e7"
+    },
+    "es::ui::Reset all active filters": {
+      "sourceHash": "4dc7dfb33c4db7ad",
+      "translationHash": "24996c118c792208"
+    },
+    "es::ui::Reusable footers, hashtags, or disclaimers appended to post compositions.": {
+      "sourceHash": "36db47dbb499aec8",
+      "translationHash": "08cc03d40857c9c6"
+    },
+    "es::ui::Running": {
+      "sourceHash": "f4ccae29e1bb0c20",
+      "translationHash": "d2f423908e1ba509"
+    },
+    "es::ui::Sat": {
+      "sourceHash": "fdeb71b569e0034d",
+      "translationHash": "8caa81ea46301662"
+    },
+    "es::ui::Save Credentials": {
+      "sourceHash": "8e171e87357e897a",
+      "translationHash": "721695ba4e0f6fae"
+    },
+    "es::ui::Save Draft": {
+      "sourceHash": "60605e45ec0a8b1c",
+      "translationHash": "474b28f85eb284cb"
+    },
+    "es::ui::Save": {
+      "sourceHash": "1509f561f2416598",
+      "translationHash": "13e51a210f45ed1b"
+    },
+    "es::ui::Post deleted": {
+      "sourceHash": "4352dab43457a929",
+      "translationHash": "585016a869ded096"
+    },
+    "es::ui::Save Signature": {
+      "sourceHash": "5f3c15f9f7446bf2",
+      "translationHash": "09912154a9500674"
+    },
+    "es::ui::Save drafts": {
+      "sourceHash": "8921af81a30b44e3",
+      "translationHash": "51e3aa21e8da8437"
+    },
+    "es::ui::Schedule command": {
+      "sourceHash": "5010c3243b97cd0f",
+      "translationHash": "f026487721a78170"
+    },
+    "es::ui::Schedule post for this date": {
+      "sourceHash": "5c578d0fb991e328",
+      "translationHash": "1065f139a0e31e30"
+    },
+    "es::ui::Scheduled and queued posts for this channel will stop publishing. You can reconnect it at any time.": {
+      "sourceHash": "c1b687fee93c911f",
+      "translationHash": "b4a319bdca571bfe"
+    },
+    "es::ui::Scheduled post cancelled": {
+      "sourceHash": "6535fa7392ffc0ff",
+      "translationHash": "f03ace6c37a56437"
+    },
+    "es::ui::Saved destination — not scheduled yet. Scheduling or removing this Channel leaves every other Channel's result unchanged.": {
+      "sourceHash": "d8fabc27caf30aa9",
+      "translationHash": "f6c161dcf9740183"
+    },
+    "es::ui::Scheduling Defaults": {
+      "sourceHash": "93020b8ed98042a4",
+      "translationHash": "952da9cbf77b0ccc"
+    },
+    "es::ui::Scopes": {
+      "sourceHash": "0d5644ff52ce2ba3",
+      "translationHash": "e8d94ecbab5499b1"
+    },
+    "es::ui::Search accounts": {
+      "sourceHash": "904f3f10724586de",
+      "translationHash": "42e22b4ce977c1ee"
+    },
+    "es::ui::Search accounts…": {
+      "sourceHash": "0a6fa0b31ecbdc58",
+      "translationHash": "f770543e182c26d2"
+    },
+    "es::ui::Search platforms…": {
+      "sourceHash": "67fa32878dc25fd2",
+      "translationHash": "4d79fbf0feac1b72"
+    },
+    "es::ui::Search plugs…": {
+      "sourceHash": "20731fc8c0a92b68",
+      "translationHash": "2c26b2574a975277"
+    },
+    "es::ui::Search posts...": {
+      "sourceHash": "015f89cf446a6ecf",
+      "translationHash": "29283a3ecaa65957"
+    },
+    "es::ui::Select": {
+      "sourceHash": "2a78025de6aae5e7",
+      "translationHash": "4ecba858ccb80bc3"
+    },
+    "es::ui::Select a profile": {
+      "sourceHash": "b7f023bceaa5ce6b",
+      "translationHash": "07a3cd3a8a6dcd99"
+    },
+    "es::ui::Select privacy": {
+      "sourceHash": "8c338bc9881dff27",
+      "translationHash": "a21ac1659f364734"
+    },
+    "es::ui::Select type": {
+      "sourceHash": "b777140e02301e32",
+      "translationHash": "59d75b16e24ca1f7"
+    },
+    "es::ui::Select visibility": {
+      "sourceHash": "50cfa8c843e3cbd1",
+      "translationHash": "d6739b4c36617063"
+    },
+    "es::ui::Separate identity groups for clients, sub-brands, and personal ventures.": {
+      "sourceHash": "476da5c6c0b8c92c",
+      "translationHash": "471a10b2a4db75e3"
+    },
+    "es::ui::Separates video vs image scheduling slots": {
+      "sourceHash": "0d3680b5acda46f9",
+      "translationHash": "e9ee5d66caeaf4b9"
+    },
+    "es::ui::Shared Content": {
+      "sourceHash": "71dcb79381f3bf95",
+      "translationHash": "ea8f123f0ab90217"
+    },
+    "es::ui::Signature storage is not yet available — this template is illustrative.": {
+      "sourceHash": "6fcd2c9fd1cfaf6b",
+      "translationHash": "93a74d86aa6f702c"
+    },
+    "es::ui::Signatures": {
+      "sourceHash": "d348acae3aa7d6e1",
+      "translationHash": "aef67e69590d8b05"
+    },
+    "es::ui::Social Channels": {
+      "sourceHash": "85062ddf65db275e",
+      "translationHash": "1027962bab896d5e"
+    },
+    "es::ui::Social Channels & Integrations": {
+      "sourceHash": "f3d71c05c1a7669c",
+      "translationHash": "f372bfdec202fed4"
+    },
+    "es::ui::Sort plugs": {
+      "sourceHash": "12a861ce0dfd7cc6",
+      "translationHash": "95c85cc79fd96a87"
+    },
+    "es::ui::Sort: Category": {
+      "sourceHash": "21beeab2727a517c",
+      "translationHash": "0eb8f44d9d5589d7"
+    },
+    "es::ui::Sort: Name": {
+      "sourceHash": "d26f440741bf9411",
+      "translationHash": "bc1628694fa30912"
+    },
+    "es::ui::Sort: Status": {
+      "sourceHash": "8b1352571e370b7f",
+      "translationHash": "da65718836bb372c"
+    },
+    "es::ui::Sorted": {
+      "sourceHash": "049b4c0df7ac7b95",
+      "translationHash": "d2aba6849adbd4b6"
+    },
+    "es::ui::Stats": {
+      "sourceHash": "b4a7365740ef880b",
+      "translationHash": "bb847bb458b26936"
+    },
+    "es::ui::Story": {
+      "sourceHash": "e9e509dcd358f8eb",
+      "translationHash": "47980267f3cdbed0"
+    },
+    "es::ui::Submission Error": {
+      "sourceHash": "1570797cbdfa6586",
+      "translationHash": "d1c2b64f3adb2861"
+    },
+    "es::ui::Suggest Slot": {
+      "sourceHash": "234fbaf7cf151c13",
+      "translationHash": "e386dd678a15ee2c"
+    },
+    "es::ui::Sun": {
+      "sourceHash": "db18f17fe5320076",
+      "translationHash": "1111d58688186b7c"
+    },
+    "es::ui::Switch": {
+      "sourceHash": "39921a740bf2b678",
+      "translationHash": "b322167924121f7b"
+    },
+    "es::ui::Switch Brand Profile": {
+      "sourceHash": "c3c418b4480083bf",
+      "translationHash": "d2a7a24ed8bc2d7e"
+    },
+    "es::ui::Switch the active organization. Every surface re-scopes to the selected workspace.": {
+      "sourceHash": "383c470261346d5e",
+      "translationHash": "77f7935e2e3abe49"
+    },
+    "es::ui::Switching workspaces is live. Creating and editing brand profiles is not yet available.": {
+      "sourceHash": "503a7c992bf6f998",
+      "translationHash": "33a3568d85b85991"
+    },
+    "es::ui::Tag social channel": {
+      "sourceHash": "ee4d468e25566cbc",
+      "translationHash": "af525698cb1ef9dd"
+    },
+    "es::ui::Tags (comma separated, max 500 chars combined)": {
+      "sourceHash": "756cd12b103662a3",
+      "translationHash": "46af64e0076f8c33"
+    },
+    "es::ui::Target Destinations (": {
+      "sourceHash": "38ac9f42b3e663f9",
+      "translationHash": "b19c1e8f5a83daba"
+    },
+    "es::ui::Targeting {count} channel(s)": {
+      "sourceHash": "f8e1628417f5a0ab",
+      "translationHash": "14a73c07ee476fe0"
+    },
+    "es::ui::Test reel with non-followers first": {
+      "sourceHash": "645c2a70a93bb254",
+      "translationHash": "810af8886f8964ce"
+    },
+    "es::ui::Text Background Preset (text-only posts, max 130 chars)": {
+      "sourceHash": "3dacc72a744cfbc0",
+      "translationHash": "a800f6fac6ce07ce"
+    },
+    "es::ui::This catalog is a preview — credentials cannot be saved yet.": {
+      "sourceHash": "80c1c2d79182307b",
+      "translationHash": "2afb2cddca82566b"
+    },
+    "es::ui::This draft will be permanently deleted.": {
+      "sourceHash": "bf76fd77f1b3c5ac",
+      "translationHash": "faa0eef9b746f15f"
+    },
+    "es::ui::Threads": {
+      "sourceHash": "3e42e385075b9b56",
+      "translationHash": "3e42e385075b9b56"
+    },
+    "es::ui::Thu": {
+      "sourceHash": "7da11212ed340ea7",
+      "translationHash": "3af29996f29fbe77"
+    },
+    "es::ui::TikTok post title...": {
+      "sourceHash": "9b35bc7489dda49c",
+      "translationHash": "f18b8e3e5c6b555f"
+    },
+    "es::ui::Time: Newest first": {
+      "sourceHash": "2f4e241f48766eed",
+      "translationHash": "e9fb7cab234199e0"
+    },
+    "es::ui::Time: Oldest first": {
+      "sourceHash": "8fbe854991b81928",
+      "translationHash": "4203ea889fea7267"
+    },
+    "es::ui::Timezone preferences are not yet available — scheduled slots currently use UTC.": {
+      "sourceHash": "8ef9d5b136786c02",
+      "translationHash": "be3ba915104f451b"
+    },
+    "es::ui::Total Impressions": {
+      "sourceHash": "380a5f7ae487c056",
+      "translationHash": "5e544c9d50c1064a"
+    },
+    "es::ui::Trial Reel": {
+      "sourceHash": "b38c97896feb8ebf",
+      "translationHash": "f79fec321c78057e"
+    },
+    "es::ui::Try a different search term or category.": {
+      "sourceHash": "0498506d46b401db",
+      "translationHash": "eb5d463edd53fc3f"
+    },
+    "es::ui::Try adjusting your search query, status, or date range filters.": {
+      "sourceHash": "6db4d868614bc61e",
+      "translationHash": "9c2dc3bb6bfc356a"
+    },
+    "es::ui::Tue": {
+      "sourceHash": "d1eb39b09bf52b68",
+      "translationHash": "b4b7d3818dbf673e"
+    },
+    "es::ui::Unique viewers across platforms": {
+      "sourceHash": "199fc71c8ba5dda2",
+      "translationHash": "78dab9aaecfb9e23"
+    },
+    "es::ui::Unlisted": {
+      "sourceHash": "bc96567e77ca7ec8",
+      "translationHash": "156fee70cd2774ef"
+    },
+    "es::ui::Untitled post": {
+      "sourceHash": "45419482b97f0dee",
+      "translationHash": "f259102ce289cd8d"
+    },
+    "es::ui::Upload failed": {
+      "sourceHash": "6efc5d27f30b20c1",
+      "translationHash": "4b865a3da175b384"
+    },
+    "es::ui::Uploading": {
+      "sourceHash": "8b898ca34ce71371",
+      "translationHash": "8f21618a1c0cd0f6"
+    },
+    "es::ui::Uses standard text and attached media.": {
+      "sourceHash": "33cc9ae953e01172",
+      "translationHash": "e6ec2075ed5aa66e"
+    },
+    "es::ui::Video Title (required, 2-100 characters)": {
+      "sourceHash": "6336ddf10cd40da8",
+      "translationHash": "6bfe270c96250d8a"
+    },
+    "es::ui::Video and post views": {
+      "sourceHash": "94f6f4e9a99f5594",
+      "translationHash": "eb4bd023f1602982"
+    },
+    "es::ui::View on {platform}": {
+      "sourceHash": "e0926a21ce8c9560",
+      "translationHash": "e168f32c0a9bc090"
+    },
+    "es::ui::Wed": {
+      "sourceHash": "58339f45df960408",
+      "translationHash": "c24d4645630585bd"
+    },
+    "es::ui::Welcome to AI Studio. Connected to your publishing workspace. I can craft multi-platform campaigns, optimize queue schedules, analyze top posts, or suggest viral hooks.": {
+      "sourceHash": "86788bf0babd8784",
+      "translationHash": "77a85efd038e6cf2"
+    },
+    "es::ui::What do you want to publish? Share across all selected destinations...": {
+      "sourceHash": "50fa11c940c27e36",
+      "translationHash": "11e3c967674bf4e4"
+    },
+    "es::ui::Workspace Admin": {
+      "sourceHash": "cc3d2810d4dbff5b",
+      "translationHash": "61a8b0e8269f863f"
+    },
+    "es::ui::Workspace Owner": {
+      "sourceHash": "c742a5f06a742fc8",
+      "translationHash": "eb269bd8b3378ac9"
+    },
+    "es::ui::Workspace Settings": {
+      "sourceHash": "8e25832407ee8bec",
+      "translationHash": "7c10e9cb75ff1c9a"
+    },
+    "es::ui::Workspaces": {
+      "sourceHash": "1377264ba3b0a717",
+      "translationHash": "a9021aef6d3302ed"
+    },
+    "es::ui::Yes, made for kids": {
+      "sourceHash": "c8796a2a7e98702b",
+      "translationHash": "1b335796e4615603"
+    },
+    "es::ui::YouTube": {
+      "sourceHash": "fb7accfff8c6f8ea",
+      "translationHash": "fb7accfff8c6f8ea"
+    },
+    "es::ui::all workspace profiles": {
+      "sourceHash": "34fd7f230ff03a0e",
+      "translationHash": "6a491a90744c7be0"
+    },
+    "es::ui::completed": {
+      "sourceHash": "4ddb3e96801a1ee2",
+      "translationHash": "1e7c1eef4a629325"
+    },
+    "es::ui::connected": {
+      "sourceHash": "12a7bd86e0a43032",
+      "translationHash": "ecbf62ce4a28912c"
+    },
+    "es::ui::impressions": {
+      "sourceHash": "c779fa4d3957673e",
+      "translationHash": "646e12d5f14ee92b"
+    },
+    "es::ui::media": {
+      "sourceHash": "721c9525ade2ea89",
+      "translationHash": "8164841e7e37d3cb"
+    },
+    "es::ui::reach": {
+      "sourceHash": "ed4561f685f13353",
+      "translationHash": "6f90e63579ad467e"
+    },
+    "es::ui::tech, tutorial, social media": {
+      "sourceHash": "eb9e2ba680610cde",
+      "translationHash": "bf78d4fa09e2e11b"
+    },
+    "es::ui::watch sec": {
+      "sourceHash": "e5482cc02567eb8f",
+      "translationHash": "815fbc85111656f0"
+    },
+    "es::ui::{count} channel(s)": {
+      "sourceHash": "17a1982f9b58a9d0",
+      "translationHash": "c3a495ea775fa412"
+    },
+    "es::ui::{count} channel(s) · {date}": {
+      "sourceHash": "a6cf7b112db81081",
+      "translationHash": "3915c5e70908944e"
+    },
+    "es::ui::{count} characters": {
+      "sourceHash": "27764e6ed6287797",
+      "translationHash": "4814c092e76cfebe"
+    },
+    "es::ui::{count} platforms": {
+      "sourceHash": "1b77a69ab6d8c196",
+      "translationHash": "357ce95266d6121f"
+    },
+    "es::ui::{count} platforms reporting": {
+      "sourceHash": "5a806f517bf497d7",
+      "translationHash": "c920c916e37437cd"
+    },
+    "es::ui::{count} post(s) scheduled or published on this date.": {
+      "sourceHash": "af1a1fb2e0d3f7b3",
+      "translationHash": "1ea4e7320aaf7e6b"
+    },
+    "es::ui::{count} this period": {
+      "sourceHash": "03c6d061fba2297c",
+      "translationHash": "cd6e9e6fb0253762"
+    },
+    "es::ui::{name} Configuration": {
+      "sourceHash": "23b0f386d2dfb9d1",
+      "translationHash": "b51c58b86d0f1c02"
+    },
+    "es::ui::{name}: YouTube requires a video title between 2 and 100 characters.": {
+      "sourceHash": "46b26de8f147fbbc",
+      "translationHash": "688b590e3d5fd4c3"
+    },
+    "es::ui::{name}: YouTube tags cannot exceed 500 characters combined.": {
+      "sourceHash": "7312ad27b6a685d6",
+      "translationHash": "721d081a0742fcda"
+    },
+    "es::ui::{name}: choose a TikTok privacy level.": {
+      "sourceHash": "559a150fe6fa7118",
+      "translationHash": "5ffea48a29ceb764"
+    },
+    "es::ui::{name}: comments are not allowed for this creator.": {
+      "sourceHash": "a0778e895e07b705",
+      "translationHash": "aa8bc8c870288bff"
+    },
+    "es::ui::{name}: duet is not allowed for this creator.": {
+      "sourceHash": "0a8e1d1b6e64412d",
+      "translationHash": "38e02c8d649a2016"
+    },
+    "es::ui::{name}: post text is empty for this channel.": {
+      "sourceHash": "582d05b1a1ff97c7",
+      "translationHash": "1bd318cc552380a4"
+    },
+    "es::ui::{name}: stitch is not allowed for this creator.": {
+      "sourceHash": "63fcbe8cf0ef9d99",
+      "translationHash": "1463fdd1c9c94570"
+    },
+    "es::ui::{name}: text exceeds the {limit}-character limit for this platform.": {
+      "sourceHash": "64b2de58af01605f",
+      "translationHash": "e49ede7791461327"
+    },
+    "es::ui::{name}: the selected privacy level is not available for this creator.": {
+      "sourceHash": "fdc7a300f620f6d1",
+      "translationHash": "17c4b7b7463cf6b3"
+    },
+    "es::ui::{name}: this channel does not accept {type} media.": {
+      "sourceHash": "c409851530f19504",
+      "translationHash": "b1eee47fd3b0966c"
+    },
+    "es::ui::{name}: use no more than {limit} tags.": {
+      "sourceHash": "5c8f8ad1cd436400",
+      "translationHash": "567f04bdac3f5e6c"
+    },
+    "es::ui::Disabled": {
+      "sourceHash": "75081b593d15cf6e",
+      "translationHash": "e252efe6974743f6"
+    },
+    "es::ui::Image": {
+      "sourceHash": "1aa4cb0bcca76e92",
+      "translationHash": "58d6f29b06337069"
+    },
+    "es::ui::Navigation": {
+      "sourceHash": "3db65f8c2a7d1861",
+      "translationHash": "6d4ca0e85a74b8d3"
+    },
+    "es::ui::No active social channels connected.": {
+      "sourceHash": "ecb7bfc0d915ed0b",
+      "translationHash": "442125ec9d2ce1f0"
+    },
+    "es::ui::No platform": {
+      "sourceHash": "f36f1e0e8c13d3ba",
+      "translationHash": "7f35db61c0e58424"
+    },
+    "es::ui::Post": {
+      "sourceHash": "a5554622c655c7a7",
+      "translationHash": "ab3b2a4b8c89e2d4"
+    },
+    "es::ui::Post rescheduled": {
+      "sourceHash": "91e756972171dd30",
+      "translationHash": "d721adaa82880608"
+    },
+    "es::ui::Reply queued": {
+      "sourceHash": "f14751d33eb91e75",
+      "translationHash": "aff459ab68b35c66"
+    },
+    "es::ui::Retry": {
+      "sourceHash": "942087cc2d41e013",
+      "translationHash": "a9254c5f812829af"
+    },
+    "es::ui::Retry queued": {
+      "sourceHash": "06fd42bb07601325",
+      "translationHash": "c4c715c38aec21d1"
+    },
+    "es::ui::Sign out": {
+      "sourceHash": "48f0d3d397d49f13",
+      "translationHash": "c6e6960395f49b48"
+    },
+    "es::ui::This post's state could not be confirmed with the platform. It may need manual review.": {
+      "sourceHash": "9dc9d76b67f81d5e",
+      "translationHash": "fe8f2e4a025b422a"
+    },
+    "es::ui::This reply needs reconciliation — it may not have reached the platform. Check the post directly before replying again.": {
+      "sourceHash": "403c49a5b233b53c",
+      "translationHash": "f3ed694cb4ab2238"
+    },
+    "es::ui::Thumbnail": {
+      "sourceHash": "f3fe2c93b34f41e6",
+      "translationHash": "ac187ea2e38bb0b8"
+    },
+    "es::ui::Unassigned channel": {
+      "sourceHash": "7a99d3af19a0813c",
+      "translationHash": "2a31ab2a1c6636fb"
+    },
+    "es::ui::Video": {
+      "sourceHash": "d534be829e32196b",
+      "translationHash": "bc10c86c24b5ba44"
+    },
+    "es::ui::You can try replying again.": {
+      "sourceHash": "b228adb55e3af250",
+      "translationHash": "bbb0a8c8910c461d"
+    },
+    "es::ui::{count} connected": {
+      "sourceHash": "894f17f96a432fbd",
+      "translationHash": "759aedca46f690e4"
+    },
+    "es::ui::Cancel upload": {
+      "sourceHash": "326d9c957d5a6cd9",
+      "translationHash": "535fc67aa233c15f"
+    },
+    "es::ui::You have {count} incomplete upload session(s) in local storage. Select the same file to resume.": {
+      "sourceHash": "058f78d11bd1f7c1",
+      "translationHash": "405f43f3263a0968"
+    },
+    "es::ui::#viral #shorts": {
+      "sourceHash": "0309b250a227013b",
+      "translationHash": "0309b250a227013b"
+    },
+    "es::ui::Archive": {
+      "sourceHash": "66f4804ee23ddc09",
+      "translationHash": "f35f9141f4427c34"
+    },
+    "es::ui::Archive profile": {
+      "sourceHash": "2962d868f4ace180",
+      "translationHash": "a329c78cce633ebc"
+    },
+    "es::ui::Archiving…": {
+      "sourceHash": "af9e1c99f1935d3d",
+      "translationHash": "6a651144d98b8d59"
+    },
+    "es::ui::Archiving this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is permanently purged after 7 days; you can restore it until then.": {
+      "sourceHash": "4d1faf7d50a8f197",
+      "translationHash": "ceef9d5703a41a89"
+    },
+    "es::ui::All Brand Profiles": {
+      "sourceHash": "49bf03e7ca3e9438",
+      "translationHash": "e9769d1a37aeae43"
+    },
+    "es::ui::Ask a workspace admin to create a Brand Profile.": {
+      "sourceHash": "d86c02ea6297e0e8",
+      "translationHash": "e832006d95422ea5"
+    },
+    "es::ui::Choose a profile color": {
+      "sourceHash": "8c63bfd6c886a3f4",
+      "translationHash": "67d96fd11d96aee2"
+    },
+    "es::ui::Create Brand Profile": {
+      "sourceHash": "241398e0f73f1ee3",
+      "translationHash": "a91029276924185a"
+    },
+    "es::ui::Create a Brand Profile before connecting accounts.": {
+      "sourceHash": "1abc3c6536afbd89",
+      "translationHash": "c9ff82308a0b4794"
+    },
+    "es::ui::Create a Brand Profile here to add an account.": {
+      "sourceHash": "2744f8fdb3f5ef4d",
+      "translationHash": "211a630937b53bbd"
+    },
+    "es::ui::Create a Brand Profile to start connecting channels and publishing.": {
+      "sourceHash": "527a6695f3d675c9",
+      "translationHash": "b26a6b0140647547"
+    },
+    "es::ui::Create profile": {
+      "sourceHash": "61d30d997d13f63d",
+      "translationHash": "28cb1296551406a2"
+    },
+    "es::ui::Delete Brand Profile": {
+      "sourceHash": "740f10f1b443662f",
+      "translationHash": "1aad4a4bf0f14032"
+    },
+    "es::ui::Delete profile": {
+      "sourceHash": "47311af432a79c40",
+      "translationHash": "52af709e3f5c6ec5"
+    },
+    "es::ui::Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": {
+      "sourceHash": "99052ffb383f09cd",
+      "translationHash": "92e32578253bcfa2"
+    },
+    "es::ui::Edit Brand Profile": {
+      "sourceHash": "080729d42ea5900d",
+      "translationHash": "cd586bcfeafad298"
+    },
+    "es::ui::Edit profile": {
+      "sourceHash": "15c4aa13037eaf52",
+      "translationHash": "c10011b93f9c07a4"
+    },
+    "es::ui::Manage profile": {
+      "sourceHash": "803dede262ad2852",
+      "translationHash": "fbd17b2c5241b829"
+    },
+    "es::ui::Named, color-labeled ownership scopes for channels, assets, and posts.": {
+      "sourceHash": "437a2ce2dd3e8768",
+      "translationHash": "e52dbaceac8438a9"
+    },
+    "es::ui::No Brand Profiles yet": {
+      "sourceHash": "baefdf0b7e1e7000",
+      "translationHash": "dc228e495dd52422"
+    },
+    "es::ui::Profile color": {
+      "sourceHash": "97eecd9865ddf8d8",
+      "translationHash": "94d199dcbd250e70"
+    },
+    "es::ui::Profile name": {
+      "sourceHash": "d3663280e101b56d",
+      "translationHash": "b4dad080170d4de8"
+    },
+    "es::ui::Restore": {
+      "sourceHash": "a76e13b9839270eb",
+      "translationHash": "eda02893d340c1be"
+    },
+    "es::ui::Restore Brand Profile": {
+      "sourceHash": "716afc50973438db",
+      "translationHash": "06907f5c3f7f2e5f"
+    },
+    "es::ui::Restoring reactivates this Brand Profile, but its channels stay disconnected and cancelled posts are not revived. Reconnect channels from the Channels view.": {
+      "sourceHash": "4ef420be4a1a4737",
+      "translationHash": "2fcd7b3e753c733e"
+    },
+    "es::ui::Update Brand Profile": {
+      "sourceHash": "5e07bc9a507d0081",
+      "translationHash": "1022564246b2dccc"
+    },
+    "es::ui::Update profile": {
+      "sourceHash": "34540d1107b75fa9",
+      "translationHash": "9d3289384fe56cb3"
+    },
+    "es::ui::Save changes": {
+      "sourceHash": "dd0ae7a5cbcf2339",
+      "translationHash": "14bdfaf2face3a07"
+    },
+    "es::ui::Select a Brand Profile": {
+      "sourceHash": "e0e4f9832031a37a",
+      "translationHash": "704908b48520a97c"
+    },
+    "es::ui::Select a Brand Profile before publishing.": {
+      "sourceHash": "6b2c8a9054b69668",
+      "translationHash": "50111550157e138c"
+    },
+    "es::ui::Select a Brand Profile from the workspace switcher before adding an account.": {
+      "sourceHash": "b6cb4df9dfad77bc",
+      "translationHash": "74e8da0b250514c0"
+    },
+    "es::ui::Select a Brand Profile in the sidebar to compose, schedule, or publish.": {
+      "sourceHash": "78dfd0e12f75a31f",
+      "translationHash": "6d1c1cde1c84165c"
+    },
+    "es::ui::Soft-deleted profiles are purged permanently 7 days after deletion.": {
+      "sourceHash": "cdd5e5919ff77621",
+      "translationHash": "f1ba8665dc105a55"
+    },
+    "es::ui::Something went wrong": {
+      "sourceHash": "ab827e3fe17da220",
+      "translationHash": "957d926a254523a6"
+    },
+    "es::ui::The active organization for this session. Brand Profiles live inside it — manage them from the Brand Profiles tab.": {
+      "sourceHash": "064322a69d5b9c56",
+      "translationHash": "ff60233608e487bd"
+    },
+    "es::ui::This post belongs to {name}. Switch to that Brand Profile to edit it.": {
+      "sourceHash": "f3be1232f7e6a7ae",
+      "translationHash": "6142b66b6c96d352"
+    },
+    "es::ui::Unknown profile": {
+      "sourceHash": "a86a2a4fdb1d9567",
+      "translationHash": "af6c13413f226c92"
+    },
+    "es::ui::another Brand Profile": {
+      "sourceHash": "9d16e0aa2d9736c1",
+      "translationHash": "f98cd4cd5626db1f"
+    },
+    "es::ui::e.g. Acme Corp": {
+      "sourceHash": "b7ce67f3d61f2fcf",
+      "translationHash": "82f8e15339297d4c"
+    },
+    "es::ui::Channels Board": {
+      "sourceHash": "d2634dd3000ebdf7",
+      "translationHash": "7e45c8bcad48ceff"
+    },
+    "es::ui::Manage social accounts and publishing channels organized by Brand Profile.": {
+      "sourceHash": "c80b3ac2c24fc617",
+      "translationHash": "04c1f34c9e3e5d58"
+    },
+    "es::ui::Select Facebook Page": {
+      "sourceHash": "0e7c332690e9dfb1",
+      "translationHash": "dc4217852dd92a66"
+    },
+    "es::ui::Choose the Facebook Page you want to connect to your Brand Profile.": {
+      "sourceHash": "3e4ad1c331a20865",
+      "translationHash": "351822eea122dd2c"
+    },
+    "es::ui::Connecting to:": {
+      "sourceHash": "67ec951aecb18704",
+      "translationHash": "4f465cea6795a897"
+    },
+    "es::ui::Loading eligible Facebook Pages…": {
+      "sourceHash": "351f3ea0cb9fe4ee",
+      "translationHash": "bfe84b0a5e1721de"
+    },
+    "es::ui::Unable to load Facebook Pages": {
+      "sourceHash": "99e4dfba6e94272d",
+      "translationHash": "f9d4c72cdc91de2e"
+    },
+    "es::ui::The selection ticket has expired or could not be found.": {
+      "sourceHash": "9d6a9dd255b5a135",
+      "translationHash": "8a699b82fe752f9f"
+    },
+    "es::ui::No eligible Facebook Pages found": {
+      "sourceHash": "e059c1023e79c029",
+      "translationHash": "e15edc5f06670502"
+    },
+    "es::ui::You need admin or publishing access on at least one Facebook Page to connect it. Create or request access to a Page in Facebook, then try connecting again.": {
+      "sourceHash": "f559b0040b41ae40",
+      "translationHash": "2e2200c16f82b8a6"
+    },
+    "es::ui::Eligible Facebook Pages": {
+      "sourceHash": "47c2c56018cc7489",
+      "translationHash": "1c63fb995fcb7834"
+    },
+    "es::ui::Unnamed Page": {
+      "sourceHash": "4dda8ffb0d55a20d",
+      "translationHash": "36813f29c18abcf2"
+    },
+    "es::ui::The selected Page could not be connected.": {
+      "sourceHash": "3e3dce7498b472d6",
+      "translationHash": "fa7c3a8c22b57d5a"
+    },
+    "es::ui::Connect Page": {
+      "sourceHash": "60cce2ebca1e52a3",
+      "translationHash": "853a3a195a5c199e"
+    },
+    "es::ui::Connecting…": {
+      "sourceHash": "72021eb70e91b4d5",
+      "translationHash": "cc190ab9f5ec058f"
+    },
+    "es::ui::Username unavailable": {
+      "sourceHash": "8c60df82b0d6f85d",
+      "translationHash": "c5f4b38cc5d3147b"
+    },
+    "es::ui::Permissions": {
+      "sourceHash": "abccc78cc93c0793",
+      "translationHash": "e8d94ecbab5499b1"
+    },
+    "es::ui::No permissions granted": {
+      "sourceHash": "a36035d945351bac",
+      "translationHash": "9bd200dde426932c"
+    },
+    "es::ui::ID: {id}": {
+      "sourceHash": "12b0460bc24d860b",
+      "translationHash": "12b0460bc24d860b"
+    },
+    "es::ui::Facebook connected successfully.": {
+      "sourceHash": "b51bfb61132cadfb",
+      "translationHash": "5556ad758d55a609"
+    }
+  }
+}

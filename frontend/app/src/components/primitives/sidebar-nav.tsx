@@ -43,14 +43,13 @@ export interface WorkspaceNavItem {
   path: `/${WorkspaceView}`;
   label: string;
   icon: ComponentType<{ className?: string }>;
-  mobileIcon: ComponentType<{ className?: string }>;
 }
 
 /** Reference demo routes are deliberately absent; every destination opens a real publishing surface. */
 export const WORKSPACE_NAV_ITEMS: readonly WorkspaceNavItem[] = [
-  { id: "posts", path: "/posts", label: "Posts", icon: PenSquare, mobileIcon: PenSquare },
-  { id: "channels", path: "/channels", label: "Channels", icon: Share2, mobileIcon: Share2 },
-  { id: "settings", path: "/settings", label: "Settings", icon: Settings, mobileIcon: Settings },
+  { id: "posts", path: "/posts", label: "Posts", icon: PenSquare },
+  { id: "channels", path: "/channels", label: "Channels", icon: Share2 },
+  { id: "settings", path: "/settings", label: "Settings", icon: Settings },
 ];
 
 /** Resolves the first canonical route segment; unknown paths use the Posts home. */

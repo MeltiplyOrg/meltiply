@@ -19,12 +19,18 @@ puts jump search in the top bar. Workspace identity is read-only.
 
 Features own authorized data, selection, labels, and mutations. Shared
 `CenterDialog`, `CenterAlertDialog`, and `SideDialog` own their frames, scrolling,
-focus, dismissal, and transitions. `PostDetailDialog` supplies real properties,
-caption, attachments, and Channel outcomes to the edge/expanded/phone inspector.
+focus, dismissal, and transitions. `usePostDetailSurface` supplies real properties,
+caption, attachments, and Channel outcomes to the edge/phone inspector.
 
 There is one animation path, without a motion-mode provider, stored preference,
 root flag, mode props, or alternate branches. Preserve implemented animations
 during cleanup; extend their canonical owners for new animation work.
+Native OS reduced-motion preferences still suppress spatial WAAPI effects.
+
+The data router supports Security departure guards across sections, routes, and
+history while a request or enrollment is pending. Posts keeps an interrupted
+composer mounted during inspection, and loads its editing dependencies only when
+composition starts; URL-backed composition intent stays synchronized on navigation.
 
 Self-hosted font assets have explicit exports in `frontend/shared/package.json`.
 The Vite reload hook watches that manifest as well as the root environment file,

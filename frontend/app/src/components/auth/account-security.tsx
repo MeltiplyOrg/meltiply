@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { useBeforeUnload, useBlocker } from "react-router";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Alert } from "@meltiply/ui/alert";
@@ -8,9 +9,10 @@ import { useI18n } from "@/lib/i18n";
 
 /**
  * Inline account-security controls, always password-reauthenticated.
- * Secrets remain in component state and are discarded on leaving this section.
- * TOTP stays pending until confirmed or explicitly cancelled. Security changes
- * require a fresh sign-in; regenerated backup codes replace the previous set.
+ * Secrets remain local and clear on an allowed departure. Requests and unconfirmed
+ * enrollment block section/route/history changes; document departures warn before
+ * unloading. TOTP must be confirmed or explicitly cancelled on the server.
+ * Security changes require a fresh sign-in; new backup codes replace the old set.
  */
 export function AccountSecurity(): React.ReactElement {
   const { user, signOut } = useMeltiplyAuth();
@@ -23,10 +25,26 @@ export function AccountSecurity(): React.ReactElement {
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const departureBlocked = busy || enrollment !== null;
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      departureBlocked &&
+      (currentLocation.pathname !== nextLocation.pathname ||
+        currentLocation.search !== nextLocation.search),
+  );
+  useEffect(() => {
+    if (blocker.state === "blocked" && !departureBlocked) blocker.reset();
+  }, [blocker, departureBlocked]);
+  useBeforeUnload((event) => {
+    if (!departureBlocked) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
 
   const act = async (
     action: "enable" | "disable" | "generate-backup-codes" | "confirm" | "password" | "cancel",
   ) => {
+    if (busy) return;
     if (!password) {
       setError(t("Enter your current password to continue."));
       return;
@@ -65,6 +83,11 @@ export function AccountSecurity(): React.ReactElement {
         )}
       </p>
       {error && <Alert variant="destructive">{error}</Alert>}
+      {blocker.state === "blocked" && (
+        <Alert variant="destructive">
+          {t("Finish or cancel the current security action before leaving this section.")}
+        </Alert>
+      )}
       <div className="space-y-5">
         <div className="space-y-2">
           <label htmlFor="security-password" className="text-sm font-medium text-ink">

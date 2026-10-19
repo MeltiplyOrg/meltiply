@@ -1,8 +1,14 @@
-import { useMemo } from "react";
-import { Composer } from "@/components/composer/composer";
+import { lazy, Suspense, useMemo } from "react";
+import { Skeleton } from "@meltiply/ui/skeleton";
 import type { WorkspaceView } from "@/components/layout/navigation-shell";
 import { useI18n } from "@/lib/i18n";
 import type { PostDrawerSurface } from "./posts-drawer";
+
+/** Static import would load editing-only dependencies on every browsing entry; lazy owns that split. */
+const Composer = lazy(async () => {
+  const { Composer } = await import("@/components/composer/composer");
+  return { default: Composer };
+});
 
 export interface PostComposerSurfaceProps {
   /** True while composing is the intent the panel should present. */
@@ -48,13 +54,24 @@ export function usePostComposerSurface({
       wide: true,
       onClose,
       body: (
-        <Composer
-          key={sessionKey}
-          initialPostId={initialPostId}
-          initialDate={initialDate}
-          onPostSuccess={onPostSuccess}
-          onNavigate={onNavigate}
-        />
+        <Suspense
+          fallback={
+            <div role="status" className="flex flex-1 flex-col gap-4">
+              <span className="sr-only">{t("Loading posts…")}</span>
+              <Skeleton className="h-6 w-40" />
+              <Skeleton className="h-48 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          }
+        >
+          <Composer
+            key={sessionKey}
+            initialPostId={initialPostId}
+            initialDate={initialDate}
+            onPostSuccess={onPostSuccess}
+            onNavigate={onNavigate}
+          />
+        </Suspense>
       ),
     }),
     [open, initialPostId, initialDate, sessionKey, onClose, onPostSuccess, onNavigate, t],

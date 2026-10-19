@@ -57,9 +57,10 @@ const elementEffects = new WeakMap<Element, Animation>();
  * Plays one bounded WAAPI effect on a mounted element, replacing any effect
  * already running on it. Underlying styles remain the final state, so
  * cancellation never hides content or leaves a fixed height behind.
- * Completion and cancellation both release tracking.
+ * Completion and cancellation both release tracking. Native reduced-motion
+ * preferences skip the effect and retain the caller's resting styles.
  *
- * @returns The started `Animation`, or `null` when the platform lacks `element.animate`.
+ * @returns The started animation, or null when reduced motion is requested or WAAPI is absent.
  */
 export function playEffect(
   element: Element,
@@ -68,7 +69,11 @@ export function playEffect(
   timing: EffectTiming = {},
 ): Animation | null {
   elementEffects.get(element)?.cancel();
-  if (typeof element.animate !== "function") return null;
+  if (
+    element.ownerDocument.defaultView?.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
+    typeof element.animate !== "function"
+  )
+    return null;
   const animation = element.animate(frames, {
     duration: effectDurationMs,
     delay,

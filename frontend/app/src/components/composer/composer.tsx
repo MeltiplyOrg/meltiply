@@ -1155,15 +1155,14 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   );
 
   /**
-   * Real caption limit per platform from the published capabilities, indexed
-   * once per result: the shared field and every Channel override read it while
-   * rendering, and the submit-time check reads the same entries.
+   * Published capabilities indexed once per result. First row per platform wins;
+   * rendering and submission share the same limits without rebuilding the index.
    */
-  const captionLimitByPlatform = useMemo(() => {
-    const byPlatform = new Map<string, number | null>();
+  const capabilityByPlatform = useMemo(() => {
+    const byPlatform = new Map<string, PlatformCapability>();
     for (const capability of capabilitiesQuery.data ?? []) {
       const platform = capability.platform.toLowerCase();
-      if (!byPlatform.has(platform)) byPlatform.set(platform, capability.max_caption_length);
+      if (!byPlatform.has(platform)) byPlatform.set(platform, capability);
     }
     return byPlatform;
   }, [capabilitiesQuery.data]);
@@ -1176,8 +1175,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    */
   const captionLimitFor = useCallback(
     (channel: ChannelIntegration): number | null =>
-      captionLimitByPlatform.get(channel.providerIdentifier.toLowerCase()) ?? null,
-    [captionLimitByPlatform],
+      capabilityByPlatform.get(channel.providerIdentifier.toLowerCase())?.max_caption_length ??
+      null,
+    [capabilityByPlatform],
   );
 
   /**
@@ -1713,7 +1713,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const validateSubmission = useCallback(
     (type: "draft" | "schedule" | "now"): string[] => {
       const errors: string[] = [];
-      const capabilities = capabilitiesQuery.data;
       const starting = attachments.filter((attachment) => attachment.assetId === null);
 
       if (selectedBrandProfileId === null) {
@@ -1739,14 +1738,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
       if (capabilitiesQuery.isPending) {
         errors.push(t("Platform publishing limits are still loading; try again in a moment."));
-      }
-
-      // First row per platform wins, matching the `find` this replaces.
-      const capabilityByPlatform = new Map<string, PlatformCapability>();
-      for (const item of capabilities ?? []) {
-        if (!capabilityByPlatform.has(item.platform)) {
-          capabilityByPlatform.set(item.platform, item);
-        }
       }
 
       for (const channel of selectedChannels) {
@@ -1867,7 +1858,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [
       attachments,
       attachmentsForChannel,
-      capabilitiesQuery.data,
+      capabilityByPlatform,
       capabilitiesQuery.isPending,
       channelOverrides,
       resolvedContentFor,

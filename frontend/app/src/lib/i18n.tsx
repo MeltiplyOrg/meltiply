@@ -253,6 +253,8 @@ const spanishTranslations: Record<string, string> = {
   "New password": "Contraseña nueva",
   "Enter your current password to continue.": "Introduce tu contraseña actual para continuar.",
   "Could not update account security.": "No se pudo actualizar la seguridad de la cuenta.",
+  "Finish or cancel the current security action before leaving this section.":
+    "Completa o cancela la acción de seguridad actual antes de salir de esta sección.",
   "Authenticator setup key": "Clave de configuración del autenticador",
   "Add a time-based account named Meltiply in your authenticator using this key. Keep it secret.":
     "Añade una cuenta basada en tiempo llamada Meltiply en tu autenticador con esta clave. Mantenla en secreto.",

@@ -23,7 +23,6 @@ export interface ChannelIntegration {
   type: string;
   disabled: boolean;
   refreshNeeded: boolean;
-  inBetweenSteps: boolean;
   brandProfileId: string;
   postingTimes?: string;
   additionalSettings?: string;

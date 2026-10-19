@@ -271,19 +271,29 @@ html.theme-changing *::after {
  * reference runs it for 380ms on its front-loaded entrance curve, which lands as
  * a flash; the travel is spread over the drawer curve instead so each body block
  * is catchable without the stagger feeling slow. */
-[data-side-dialog][data-state="open"] [data-side-dialog-body] > * {
+[data-side-dialog][data-state="open"] [data-side-dialog-body] > :not([data-side-dialog-section]),
+[data-side-dialog][data-state="open"] [data-side-dialog-section]:not([inert]) > * {
   animation: side-dialog-rise-in 460ms var(--ease-drawer) both;
 }
 
-[data-side-dialog][data-state="open"] [data-side-dialog-body] > :nth-child(2) {
+[data-side-dialog][data-state="open"]
+  [data-side-dialog-body]
+  > :not([data-side-dialog-section]):nth-child(2),
+[data-side-dialog][data-state="open"] [data-side-dialog-section]:not([inert]) > :nth-child(2) {
   animation-delay: 55ms;
 }
 
-[data-side-dialog][data-state="open"] [data-side-dialog-body] > :nth-child(3) {
+[data-side-dialog][data-state="open"]
+  [data-side-dialog-body]
+  > :not([data-side-dialog-section]):nth-child(3),
+[data-side-dialog][data-state="open"] [data-side-dialog-section]:not([inert]) > :nth-child(3) {
   animation-delay: 105ms;
 }
 
-[data-side-dialog][data-state="open"] [data-side-dialog-body] > :nth-child(n + 4) {
+[data-side-dialog][data-state="open"]
+  [data-side-dialog-body]
+  > :not([data-side-dialog-section]):nth-child(n + 4),
+[data-side-dialog][data-state="open"] [data-side-dialog-section]:not([inert]) > :nth-child(n + 4) {
   animation-delay: 150ms;
 }
 

@@ -337,7 +337,7 @@ h1 > span {
   font-size: 13px;
   font-weight: 500;
   border: 1px solid var(--line-strong);
-  border-radius: 9999px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   transition:
     background 180ms ease,
@@ -387,7 +387,7 @@ h1 > span {
   color: var(--ink-2);
   border: 1px solid var(--line);
   background: var(--inset);
-  border-radius: 9999px;
+  border-radius: var(--radius-chip);
   font-size: 10px;
   white-space: nowrap;
 }
@@ -465,8 +465,9 @@ h1 > span {
   background: var(--hover);
 }
 .preview-tab[aria-selected="true"] {
-  background: var(--accent-tint);
-  color: var(--accent-ink);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-btn);
 }
 .sidebar-count {
   margin-left: auto;
@@ -677,7 +678,7 @@ h1 > span {
   align-items: center;
   gap: 5px;
   padding: 4px 7px;
-  border-radius: 9999px;
+  border-radius: var(--radius-chip);
   font-size: 10px;
   color: var(--ink-2);
   background: var(--canvas);
@@ -829,7 +830,7 @@ h1 > span {
 .pill {
   background: var(--inset);
   border: 1px solid var(--line);
-  border-radius: 9999px;
+  border-radius: var(--radius-chip);
   padding: 5px 8px;
   color: var(--ink-2);
   font-size: 10px;
@@ -1648,5 +1649,21 @@ h2 {
   .queue-visual .status,
   .profile-visual .status {
     margin-left: 40px;
+  }
+}
+
+/* Compact samples retain their layout while real controls stay touch-sized.
+ * Search, theme, and navigation take priority over the repeated header CTA. */
+@media (pointer: coarse) {
+  .feature-pill,
+  .preview-tab,
+  .compose-button {
+    min-height: 44px;
+  }
+}
+
+@media (pointer: coarse) and (max-width: 560px) {
+  .header-actions > .button-small {
+    display: none;
   }
 }

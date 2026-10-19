@@ -372,7 +372,7 @@ div:has(+ aside#nd-sidebar-mobile) {
   align-items: center;
   min-height: 32px;
   padding: 6px 10px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   color: var(--ink-2);
   font-size: 13.5px;
   line-height: 18px;
@@ -483,6 +483,15 @@ div:has(+ aside#nd-sidebar-mobile) {
 
 @media (max-width: 47.999rem) {
   .docs-pref-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Match the canonical control floor on touch-capable tablets as well as phones. */
+@media (pointer: coarse) {
+  .docs-pref-button,
+  .docs-nav-item {
     min-width: 44px;
     min-height: 44px;
   }

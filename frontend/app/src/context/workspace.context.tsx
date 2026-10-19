@@ -104,7 +104,6 @@ function toSourceIntegration(account: PlatformAccount): ChannelIntegration {
     type: account.platform,
     disabled: account.connection_status === "revoked",
     refreshNeeded,
-    inBetweenSteps: false,
     brandProfileId: account.brand_profile_id,
   };
 }
@@ -201,10 +200,7 @@ export function WorkspaceProvider({
   const isAdmin = user?.role === "admin";
 
   const defaultSelectedChannelIds = useMemo(
-    () =>
-      integrations
-        .filter((ch) => !ch.disabled && !ch.refreshNeeded && !ch.inBetweenSteps)
-        .map((ch) => ch.id),
+    () => integrations.filter((ch) => !ch.disabled && !ch.refreshNeeded).map((ch) => ch.id),
     [integrations],
   );
   const effectiveSelectedChannelIds = selectedChannelIds ?? defaultSelectedChannelIds;
@@ -220,13 +216,6 @@ export function WorkspaceProvider({
             integration: ch,
             isAvailable: false,
             reason: "Authentication expired — reconnection required",
-          };
-        }
-        if (ch.inBetweenSteps) {
-          return {
-            integration: ch,
-            isAvailable: false,
-            reason: "Setup incomplete — finishing connection required",
           };
         }
         return { integration: ch, isAvailable: true };
@@ -249,15 +238,6 @@ export function WorkspaceProvider({
     },
     [defaultSelectedChannelIds],
   );
-
-  /**
-   * Stores a channel set verbatim: an explicit list (including `[]`) replaces the
-   * selection, while `null` returns to the eligible defaults — the state a fresh
-   * workspace starts from, which is what abandoning a composition restores.
-   */
-  const setSelectedChannelIdsTracked = useCallback((ids: string[] | null) => {
-    setSelectedChannelIds(ids);
-  }, []);
 
   const refreshWorkspace = useCallback(async () => {
     await queryClient.invalidateQueries();
@@ -289,7 +269,7 @@ export function WorkspaceProvider({
       error,
       setSelectedBrandProfileId: setBrandProfileId,
       toggleChannelSelection,
-      setSelectedChannelIds: setSelectedChannelIdsTracked,
+      setSelectedChannelIds,
       refreshWorkspace,
       logout: signOut,
       selectedPlatforms,
@@ -309,7 +289,6 @@ export function WorkspaceProvider({
       error,
       setBrandProfileId,
       toggleChannelSelection,
-      setSelectedChannelIdsTracked,
       refreshWorkspace,
       signOut,
       selectedPlatforms,

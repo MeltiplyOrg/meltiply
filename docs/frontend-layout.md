@@ -47,6 +47,7 @@ All sections share one layout; Security does not get a separate width rule.
 - Appearance, Language, Account, and Security all use one left-aligned **672px maximum** content column with full available width below that limit.
 - Light, Dark, and System cards are **192px**, wrap, and do not stretch to fill a wide screen.
 - The content pane owns vertical scrolling. Security forms and authenticator controls are inline; focused confirmation/enrollment steps retain their real security requirements.
+- Busy security actions and pending authenticator enrollment/recovery codes block section, route, and history departures until completed or explicitly cancelled; reloading/leaving the document warns before unloading.
 
 ## Dialogs and floating controls
 
@@ -62,7 +63,11 @@ Centered forms and confirmations have 16px viewport gutters and a maximum height
 
 Keep control identity, unsaved content, selection, and keyboard focus stable as labels or state change. Hidden columns retain underlying data; filters operate only on loaded, authorized records. Scope changes clear selection according to the owning feature's contract.
 
+Inspecting a background Post hides rather than unmounts the live composer; returning preserves its local inputs and upload tasks. Only explicit composition dismissal or a deliberate identity/scope change releases it. URL-backed composer intent opens and closes on same-route navigation as well as reload.
+
 There is one implemented animation path, with no application motion mode or mode-specific guards. Preserve existing animation recipes when cleaning up; extend their canonical owners when animation work is requested.
+
+Native `prefers-reduced-motion` remains independent: CSS overrides shorten declarative motion, and the shared WAAPI owner skips spatial effects. Interrupted toolbar exits cancel their own animation and stale completion callbacks before the next intent settles.
 
 Smooth scrolling has one owner, `frontend/app/src/components/layout/smooth-scroll.tsx`. The document controller (`SmoothScroll`) smooths the window and deliberately stays out of every region marked `data-lenis-prevent`, so it can never swallow a nested wheel gesture. Each list viewport that owns its scrolling — the Posts table, Grid, Calendar, and both Channels directories — mounts `useSmoothScrollContainer` for its own controller, re-measures when its children change, and snaps its scroll position to whole pixels so a `position: sticky` header cannot flicker along its top edge while the container animates through fractional offsets.
 

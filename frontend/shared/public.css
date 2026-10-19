@@ -70,7 +70,7 @@
 }
 .desktop-nav a {
   padding: 9px 14px;
-  border-radius: 9999px;
+  border-radius: var(--radius-control);
 }
 .desktop-nav a:hover,
 .icon-button:hover {
@@ -137,6 +137,19 @@
 .icon-button svg {
   width: 17px;
   height: 17px;
+}
+/* Keep compact desktop controls, but use the workspace's 44px touch floor. */
+@media (pointer: coarse) {
+  .button-small,
+  .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .desktop-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
 }
 /* One motion vocabulary for shared public controls; sites extend the selector
  * list for their own surfaces. Palette swaps suppress these transitions

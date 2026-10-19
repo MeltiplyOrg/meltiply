@@ -361,6 +361,8 @@ export const PostsToolbar = React.memo(function PostsToolbar({
  * in between. The effect is created in a layout effect, after that render has
  * finished and before the view's first paint, and rests on styles the browser
  * resolves alone: the box's width is its content's, so nothing stale is kept.
+ * Intent changes cancel queued frames and the running effect; stale completion
+ * callbacks cannot hide a control that the current view has reopened.
  *
  * @param props.open - Whether the selected view uses this control.
  * @param props.children - The control's content, unclipped inside the morphing box.
@@ -374,6 +376,9 @@ function MorphingControl({ open, children }: { open: boolean; children: React.Re
     const content = box.firstElementChild;
     if (!(content instanceof HTMLElement)) return;
     if ((box.dataset.morph === "open") === open) return;
+
+    let active = true;
+    let animation: Animation | null = null;
 
     // The change lands in the frame after the view has settled. Switching views
     // mounts a whole view, and its render, effects, and layout run as their own
@@ -394,10 +399,15 @@ function MorphingControl({ open, children }: { open: boolean; children: React.Re
           box.dataset.morph = "open";
           const width = content.getBoundingClientRect().width;
           if (width > 0) {
-            playEffect(box, [closedEdge, { width: `${width}px`, marginLeft: "0px" }], 0, {
-              duration: VIEW_CONTROL_MORPH_MS,
-              easing: effectMoveEasing,
-            });
+            animation = playEffect(
+              box,
+              [closedEdge, { width: `${width}px`, marginLeft: "0px" }],
+              0,
+              {
+                duration: VIEW_CONTROL_MORPH_MS,
+                easing: effectMoveEasing,
+              },
+            );
           }
           return;
         }
@@ -413,11 +423,13 @@ function MorphingControl({ open, children }: { open: boolean; children: React.Re
                 fill: "forwards",
               })
             : null;
+        animation = effect;
         if (!effect) {
           delete box.dataset.morph;
           return;
         }
         const settle = () => {
+          if (!active) return;
           delete box.dataset.morph;
           effect.cancel();
         };
@@ -425,6 +437,8 @@ function MorphingControl({ open, children }: { open: boolean; children: React.Re
       });
     });
     return () => {
+      active = false;
+      animation?.cancel();
       cancelAnimationFrame(outer);
       cancelAnimationFrame(inner);
     };

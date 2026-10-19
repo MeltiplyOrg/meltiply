@@ -319,20 +319,27 @@ export function PostsView({
     initialViewMode,
     initialStatusFilter,
     initialPostId,
+    initialComposerOpen,
   });
 
   if (
     prevInputs.initialViewMode !== initialViewMode ||
     prevInputs.initialStatusFilter !== initialStatusFilter ||
-    prevInputs.initialPostId !== initialPostId
+    prevInputs.initialPostId !== initialPostId ||
+    prevInputs.initialComposerOpen !== initialComposerOpen
   ) {
-    setPrevInputs({ initialViewMode, initialStatusFilter, initialPostId });
+    const compositionChanged =
+      prevInputs.initialPostId !== initialPostId ||
+      prevInputs.initialComposerOpen !== initialComposerOpen;
+    setPrevInputs({ initialViewMode, initialStatusFilter, initialPostId, initialComposerOpen });
     if (initialViewMode) setViewMode(initialViewMode);
     if (initialStatusFilter) setStatusFilter(initialStatusFilter);
-    if (initialPostId) {
+    if (compositionChanged) {
       setEditingPostId(initialPostId);
+      setSchedulingDate(undefined);
+      setDetailPostId(null);
       setComposerKey((k) => k + 1);
-      setComposerOpen(true);
+      setComposerOpen(initialComposerOpen || Boolean(initialPostId));
     }
   }
 
@@ -732,17 +739,17 @@ export function PostsView({
   );
 
   /**
-   * Opens the composer drawer for authoring a new Post. Increments the composer
-   * session key so the composer starts with fresh component state, unmounting any
-   * previous composition without retaining a completed save or clearing unsaved
-   * recovery.
+   * Presents the live composition when inspection interrupted it; otherwise
+   * starts a fresh Post session. A background inspection never discards drafts.
    */
   const handleCreatePost = useCallback(() => {
+    setDetailPostId(null);
+    if (composerOpen) return;
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
     setComposerKey((k) => k + 1);
     setComposerOpen(true);
-  }, []);
+  }, [composerOpen]);
 
   const handleComposerOpenChange = useCallback((open: boolean) => {
     if (open) return;
@@ -841,6 +848,7 @@ export function PostsView({
 
   /** Opens a fresh composition in the drawer, seeded with a calendar slot. */
   const handleScheduleCalendarDate = useCallback((date: Date) => {
+    setDetailPostId(null);
     setSchedulingDate(date);
     setSelectedCalendarDate(null);
     setEditingPostId(undefined);
@@ -860,7 +868,6 @@ export function PostsView({
    * resumes the same composition.
    */
   const handleViewDetails = useCallback((postId: string) => {
-    setComposerOpen(false);
     setDetailPostId(postId);
   }, []);
 
@@ -1056,7 +1063,7 @@ export function PostsView({
         detail={detailSurface}
         composer={composerSurface}
         headerAction={
-          composerOpen ? undefined : (
+          composerOpen && !detailPost ? undefined : (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

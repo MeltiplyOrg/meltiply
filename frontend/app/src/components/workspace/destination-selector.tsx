@@ -223,13 +223,9 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
                             {t("ID: {id}", { id: channel.platformUserId })}
                           </span>
                         </span>
-                        {(channel.disabled || channel.refreshNeeded || channel.inBetweenSteps) && (
+                        {(channel.disabled || channel.refreshNeeded) && (
                           <span className="flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-red">
-                            {channel.disabled
-                              ? t("Disabled")
-                              : channel.refreshNeeded
-                                ? t("Expired")
-                                : t("Incomplete")}
+                            {channel.disabled ? t("Disabled") : t("Expired")}
                           </span>
                         )}
                       </div>

@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from "react";
-import * as Popover from "@radix-ui/react-popover";
+import { Popover, PopoverTrigger, PopoverContent } from "@meltiply/ui/popover";
 import { DayPicker, type ClassNames } from "react-day-picker";
 import { enUS, es } from "react-day-picker/locale";
 import { parseTime } from "@internationalized/date";
@@ -103,14 +103,14 @@ export function ScheduleDateTime({
           >
             {t("Date")}
           </span>
-          <Popover.Root
+          <Popover
             open={open}
             onOpenChange={(next) => {
               if (next) setMonth(selectedDate ?? new Date());
               setOpen(next);
             }}
           >
-            <Popover.Trigger asChild>
+            <PopoverTrigger asChild>
               <Button
                 type="button"
                 variant="outline"
@@ -123,40 +123,35 @@ export function ScheduleDateTime({
                 </span>
                 <ChevronDown className="ml-auto size-3 shrink-0 text-ink-3" aria-hidden="true" />
               </Button>
-            </Popover.Trigger>
-            <Popover.Portal>
-              <Popover.Content
-                align="start"
-                sideOffset={6}
-                collisionPadding={16}
-                aria-label={t("Date")}
-                data-menu-surface=""
-                className="z-50 w-70 max-w-[calc(100vw-2rem)] p-2 pointer-coarse:w-82"
-              >
-                <DayPicker
-                  mode="single"
-                  required
-                  autoFocus
-                  selected={selectedDate}
-                  month={month}
-                  onMonthChange={setMonth}
-                  onSelect={(day) => {
-                    onChange(`${toLocalDateKey(day)}T${time}`);
-                    setOpen(false);
-                  }}
-                  locale={language === "es" ? es : enUS}
-                  weekStartsOn={1}
-                  showOutsideDays
-                  classNames={CALENDAR_CLASSES}
-                  labels={{
-                    labelPrevious: () => t("Previous month"),
-                    labelNext: () => t("Next month"),
-                    labelDayButton: (day) => dates.full.format(day),
-                  }}
-                />
-              </Popover.Content>
-            </Popover.Portal>
-          </Popover.Root>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              aria-label={t("Date")}
+              className="z-50 w-70 max-w-[calc(100vw-2rem)] p-2 pointer-coarse:w-82"
+            >
+              <DayPicker
+                mode="single"
+                required
+                autoFocus
+                selected={selectedDate}
+                month={month}
+                onMonthChange={setMonth}
+                onSelect={(day) => {
+                  onChange(`${toLocalDateKey(day)}T${time}`);
+                  setOpen(false);
+                }}
+                locale={language === "es" ? es : enUS}
+                weekStartsOn={1}
+                showOutsideDays
+                classNames={CALENDAR_CLASSES}
+                labels={{
+                  labelPrevious: () => t("Previous month"),
+                  labelNext: () => t("Next month"),
+                  labelDayButton: (day) => dates.full.format(day),
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
         <I18nProvider locale={language}>
           <TimeField
@@ -195,8 +190,8 @@ export function ScheduleDateTime({
                   />
                 )}
               </DateInput>
-              <Popover.Root open={timeOpen} onOpenChange={setTimeOpen}>
-                <Popover.Trigger asChild>
+              <Popover open={timeOpen} onOpenChange={setTimeOpen}>
+                <PopoverTrigger asChild>
                   <Button
                     type="button"
                     variant="ghost"
@@ -206,86 +201,81 @@ export function ScheduleDateTime({
                   >
                     <Clock className="size-3.5 text-ink-3" aria-hidden="true" />
                   </Button>
-                </Popover.Trigger>
-                <Popover.Portal>
-                  <Popover.Content
-                    align="end"
-                    sideOffset={6}
-                    collisionPadding={16}
-                    aria-label={t("Choose time")}
-                    data-menu-surface=""
-                    className="z-50 w-56 max-w-[calc(100vw-2rem)] p-3"
-                  >
-                    <p className="mb-3 text-(length:--font-size-ui) font-medium text-ink">
-                      {t("Time (24-hour)")}
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="flex min-w-0 flex-col gap-1.5">
-                        <label
-                          htmlFor={`${id}-hour`}
-                          className="text-(length:--font-size-micro) text-ink-3"
+                </PopoverTrigger>
+                <PopoverContent
+                  align="end"
+                  aria-label={t("Choose time")}
+                  className="z-50 w-56 max-w-[calc(100vw-2rem)] p-3"
+                >
+                  <p className="mb-3 text-(length:--font-size-ui) font-medium text-ink">
+                    {t("Time (24-hour)")}
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                      <label
+                        htmlFor={`${id}-hour`}
+                        className="text-(length:--font-size-micro) text-ink-3"
+                      >
+                        {t("Hour")}
+                      </label>
+                      <Select
+                        value={time.slice(0, 2)}
+                        onValueChange={(hour) => chooseTime(`${hour}:${time.slice(3, 5)}`)}
+                      >
+                        <SelectTrigger
+                          id={`${id}-hour`}
+                          aria-label={t("Hour")}
+                          className="tabular-nums"
                         >
-                          {t("Hour")}
-                        </label>
-                        <Select
-                          value={time.slice(0, 2)}
-                          onValueChange={(hour) => chooseTime(`${hour}:${time.slice(3, 5)}`)}
-                        >
-                          <SelectTrigger
-                            id={`${id}-hour`}
-                            aria-label={t("Hour")}
-                            className="tabular-nums"
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-60">
-                            {HOURS.map((hour) => (
-                              <SelectItem key={hour} value={hour}>
-                                {hour}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex min-w-0 flex-col gap-1.5">
-                        <label
-                          htmlFor={`${id}-minute`}
-                          className="text-(length:--font-size-micro) text-ink-3"
-                        >
-                          {t("Minute")}
-                        </label>
-                        <Select
-                          value={time.slice(3, 5)}
-                          onValueChange={(minute) => chooseTime(`${time.slice(0, 2)}:${minute}`)}
-                        >
-                          <SelectTrigger
-                            id={`${id}-minute`}
-                            aria-label={t("Minute")}
-                            className="tabular-nums"
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-60">
-                            {MINUTES.map((minute) => (
-                              <SelectItem key={minute} value={minute}>
-                                {minute}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-60">
+                          {HOURS.map((hour) => (
+                            <SelectItem key={hour} value={hour}>
+                              {hour}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="mt-3 w-full"
-                      onClick={() => setTimeOpen(false)}
-                    >
-                      {t("Done")}
-                    </Button>
-                  </Popover.Content>
-                </Popover.Portal>
-              </Popover.Root>
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                      <label
+                        htmlFor={`${id}-minute`}
+                        className="text-(length:--font-size-micro) text-ink-3"
+                      >
+                        {t("Minute")}
+                      </label>
+                      <Select
+                        value={time.slice(3, 5)}
+                        onValueChange={(minute) => chooseTime(`${time.slice(0, 2)}:${minute}`)}
+                      >
+                        <SelectTrigger
+                          id={`${id}-minute`}
+                          aria-label={t("Minute")}
+                          className="tabular-nums"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-60">
+                          {MINUTES.map((minute) => (
+                            <SelectItem key={minute} value={minute}>
+                              {minute}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-3 w-full"
+                    onClick={() => setTimeOpen(false)}
+                  >
+                    {t("Done")}
+                  </Button>
+                </PopoverContent>
+              </Popover>
             </div>
           </TimeField>
         </I18nProvider>

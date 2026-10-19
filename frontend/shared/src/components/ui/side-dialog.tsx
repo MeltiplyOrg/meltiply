@@ -20,12 +20,6 @@ export interface SideDialogProps {
   breadcrumb?: React.ReactNode;
   /** Caller-owned supported actions; Close remains canonical. */
   actions?: React.ReactNode;
-  /**
-   * Identity of the record the content shows. Changing it while the panel stays
-   * open replaces the body, replaying the same staggered entrance for the new
-   * record instead of swapping the content in place.
-   */
-  contentKey?: string;
   children: React.ReactNode;
   /**
    * Extra classes for the scrolling body, e.g. removing its bottom padding so a
@@ -47,9 +41,9 @@ export interface SideDialogProps {
  * reaches the workspace. Native body scrolling stays untouched. Motion is the
  * reference drawer's: the panel steps 48px in on `--ease-drawer` and slides back
  * out on dismissal (`side-dialog-enter`/`side-dialog-exit`), its body blocks rise
- * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`), and
- * `contentKey` keys that body so inspecting another record replays the same
- * staggered entrance for the new one.
+ * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`).
+ * Feature-owned keyed sections replay the entrance when their record changes,
+ * while retained sections keep their state and effects.
  */
 export function SideDialog({
   open,
@@ -58,7 +52,6 @@ export function SideDialog({
   description,
   breadcrumb,
   actions,
-  contentKey,
   children,
   bodyClassName,
   className,
@@ -68,11 +61,6 @@ export function SideDialog({
   const contentRef = React.useRef<HTMLDivElement | null>(null);
   const hasDescription = description !== undefined && description !== null && description !== false;
   const hasBreadcrumb = breadcrumb !== undefined && breadcrumb !== null;
-  /**
-   * Keying the body by the shown record replays the staggered entrance for a
-   * replacement, exactly as the reference's drawer content does.
-   */
-  const shownContentKey = contentKey ?? "content";
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
@@ -152,7 +140,7 @@ export function SideDialog({
               bodyClassName,
             )}
           >
-            <React.Fragment key={shownContentKey}>{children}</React.Fragment>
+            {children}
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

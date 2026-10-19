@@ -63,6 +63,8 @@ When you submit, the composer checks the post before anything is sent: a Brand P
 
 With functional cookie consent, the composer can keep browser-local text, attachment, and override recovery for the active workspace/profile. Without that optional storage, composition and server-backed draft saving still work; do not rely on browser recovery after leaving. Successful scheduling or publication clears the local recovery copy. See [Cookies and storage](/docs/cookies).
 
+Inspecting another Post does not discard your open composition: its text, settings, and active uploads stay in memory while Details is shown. Close Details or choose **New Post** in its header to resume that composition. This does not require cookie consent; closing the composer or leaving the Posts route still releases its live state.
+
 ## Draft, schedule, or publish now
 
 - **Save Draft** — stores the post text without sending it anywhere. No channel selection is needed. Drafts appear in the **Drafts** status filter in Posts and can be edited, scheduled, or deleted later. Saving a draft for a post that was scheduled cancels its pending deliveries.
@@ -95,9 +97,9 @@ Each post shows a status per channel in the post details (open any post to see t
 
 Click a Table row, Grid card, or Calendar Post chip—or choose **Details** in a Calendar day's list—to open the side drawer. Its compact header identifies the Post and exposes supported actions. Flat properties, the full caption, ordered attachments, and real Channel outcomes share one scrollable body; this is not an editable task/status panel.
 
-Use **Expand panel** for a wider centered inspector or **Restore side panel** to return to the edge. Phones use the full viewport. The body scrolls independently; close with the header's **Close** icon, **Escape**, or a click outside. Focus returns to the opening control.
+The inspector is a non-modal edge panel, filling the viewport on phones. Close with its header's **Close** icon or **Escape**; the workspace stays clickable, and outside clicks do not dismiss it. Closing inspection returns to an interrupted composition when one exists; otherwise focus returns to its opener.
 
-Table has no trailing actions column. Open Details and choose **Edit post** for an editable Post; the header's **Post actions** menu offers **Delete draft**/**Delete post** and, when applicable, **Cancel all pending**, with confirmation. Grid cards and Calendar day entries retain direct Edit/Delete shortcuts. Provider publication outcomes cannot be manually marked complete.
+Table has no trailing actions column. Open Details and choose **Edit post** for an editable Post; its header exposes deletion and, when applicable, **Cancel all pending**, with confirmation. Grid cards and Calendar day entries retain direct Edit/Delete shortcuts. Provider publication outcomes cannot be manually marked complete.
 
 Available actions depend on the channel's state:
 

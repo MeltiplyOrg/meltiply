@@ -47,11 +47,10 @@ export interface PostsDrawerProps {
 }
 
 /**
- * Renders the Posts page's single edge drawer and guarantees that at most one
- * surface is presented: the composer and the Post inspector share this panel, so
- * a click that asks for the other one swaps its content in place. The presented
- * surface stays latched through dismissal so the closing panel fades with its
- * content instead of emptying first.
+ * Renders one edge drawer. Inspection takes presentation priority while a live
+ * composition stays mounted in a hidden, inert section, preserving uploads and
+ * local edits without browser-storage consent. Closing inspection returns to the
+ * composition; explicitly closing the drawer releases both bodies after exit.
  *
  * @param props - The two alternative surfaces, each reporting whether it is open.
  * @returns The shared drawer, or null until a surface has been presented.
@@ -65,7 +64,7 @@ export function PostsDrawer({
   // The latched value is which surface is shown, not the surface object itself:
   // descriptors are rebuilt as their data changes, and latching one would fight
   // that. Each surface keeps latching its own content.
-  const requested = composer.open ? "composer" : detail?.open ? "detail" : null;
+  const requested = detail?.open ? "detail" : composer.open ? "composer" : null;
   const shown = useLatchedValue(requested);
   const surface = shown === "composer" ? composer : shown === "detail" ? detail : null;
   if (!surface) return null;
@@ -83,12 +82,25 @@ export function PostsDrawer({
           {surface.actions}
         </>
       }
-      contentKey={surface.contentKey}
       closeLabel={t("Close")}
       className={surface.wide ? "sm:max-w-260" : undefined}
       bodyClassName={surface.wide ? "flex flex-col pb-0 sm:pb-0" : undefined}
     >
-      {surface.body}
+      {(composer.open || shown === "composer") && (
+        <div
+          key={composer.contentKey}
+          data-side-dialog-section=""
+          className={shown === "composer" ? "contents" : "hidden"}
+          inert={shown !== "composer"}
+        >
+          {composer.body}
+        </div>
+      )}
+      {shown === "detail" && detail && (
+        <div key={detail.contentKey} data-side-dialog-section="" className="contents">
+          {detail.body}
+        </div>
+      )}
     </SideDialog>
   );
 }

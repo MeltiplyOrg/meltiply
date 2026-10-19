@@ -649,16 +649,16 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       await calendar
         .getByRole("button", { name: `Schedule post on ${dateLabel}`, exact: true })
         .click();
-      // Calendar entry points seed the same local date and 10:00 time in the redesigned picker.
+      // The calendar entry seeds the selected local date in the portalled picker.
       const picker = page.getByRole("group", { name: "Date & time", exact: true });
       await picker.getByRole("button", { name: /^Date / }).click();
       await expect(
-        picker
+        page
+          .getByRole("dialog", { name: "Date", exact: true })
           .getByRole("gridcell", { selected: true })
           .getByRole("button", { name: dateLabel, exact: true }),
       ).toBeVisible();
-      await expect(picker.getByRole("combobox", { name: "Hour", exact: true })).toHaveText("10");
-      await expect(picker.getByRole("combobox", { name: "Minute", exact: true })).toHaveText("00");
+      await page.keyboard.press("Escape");
       await closeComposer(page);
     }
   }

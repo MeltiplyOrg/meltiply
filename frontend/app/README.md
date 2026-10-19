@@ -116,6 +116,9 @@ Set `MELTIPLY_DATABASE_TEST_ADMIN_URL` explicitly to that disposable database's
 admin connection URL before running local journeys; there is no reset fallback.
 The [production-image owner journey](e2e/selfhost-auth-smoke.mjs) instead exercises
 an empty installation, real SMTP capture, verification, recovery, and 2FA.
+Workspace sign-out steps open **Account menu → Sign out**; the separate button in
+Settings → Account is not a persistent sidebar footer control. Both browser
+journeys must follow the canonical menu entry when leaving the Posts surface.
 
 Publication and channel-scoped composer journeys require the controlled-Provider
 acceptance backend and are excluded from the default run:

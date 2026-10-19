@@ -12,7 +12,11 @@ test("signs the owner out and back in through the Better Auth forms", async ({ p
   await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
   await expect(page.getByRole("main")).toBeVisible();
 
-  await page.getByRole("button", { name: /sign out/i }).click();
+  await page.getByRole("button", { name: "Account menu", exact: true }).click();
+  await page
+    .getByRole("menu", { name: "Account menu", exact: true })
+    .getByRole("menuitem", { name: "Sign out", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/sign-in(?:\/|$)/, { timeout: 30_000 });
 
   await signIn(page, credentials);

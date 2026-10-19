@@ -46,7 +46,8 @@ function totp(uri) {
 /**
  * Exercises the production images in Chromium: guarded first setup, real SMTP
  * verification, closed signup, owner login, password change/reset, TOTP enrollment
- * and backup recovery. Never records traces, filled forms, or secret artifacts.
+ * and backup recovery. Sign-out follows the canonical sidebar account menu.
+ * Never records traces, filled forms, or secret artifacts.
  * Returns only the current cookie to the API smoke in the same process.
  */
 export async function ownerBrowserSession({ origin, email, password, setupSecret }) {
@@ -65,7 +66,11 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
   };
   const signOut = async () => {
-    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await page.getByRole("button", { name: "Account menu", exact: true }).click();
+    await page
+      .getByRole("menu", { name: "Account menu", exact: true })
+      .getByRole("menuitem", { name: "Sign out", exact: true })
+      .click();
     await page.waitForURL(/\/sign-in/);
   };
   try {

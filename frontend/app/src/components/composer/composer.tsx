@@ -615,6 +615,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   } = useWorkspace();
   const scope = useSessionScope();
   const { t, tStatus, language } = useI18n();
+  // Share workspace-owned labels across validation, ownership guidance, and batch
+  // progress without re-scanning every profile for each destination/progress row.
+  const profileNames = useMemo(
+    () => new Map(brandProfiles.map((profile) => [profile.id, profile.name])),
+    [brandProfiles],
+  );
 
   // The deep link is the Post identity; a composition that has not been saved yet
   // has none, so the id only appears once the first save returns it.
@@ -1792,9 +1798,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           if (!targetedProfiles.has(profileId)) {
             errors.push(
               t("{name}: select at least one destination channel.", {
-                name:
-                  brandProfiles.find((profile) => profile.id === profileId)?.name ??
-                  t("Unknown profile"),
+                name: profileNames.get(profileId) ?? t("Unknown profile"),
               }),
             );
           }
@@ -1944,7 +1948,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       scheduleDate,
       selectedBrandProfileId,
       selectedProfileIds,
-      brandProfiles,
+      profileNames,
       selectedChannels,
       sharedContent,
       t,
@@ -2233,8 +2237,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             <div className="flex-1">
               {t("This post belongs to {name}. Switch to that Brand Profile to edit it.", {
                 name:
-                  brandProfiles.find((profile) => profile.id === postQuery.data?.brand_profile_id)
-                    ?.name ?? t("another Brand Profile"),
+                  profileNames.get(postQuery.data?.brand_profile_id ?? "") ??
+                  t("another Brand Profile"),
               })}
             </div>
           </Alert>
@@ -2297,8 +2301,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           >
             {profileProgress.map((progress) => (
               <li key={progress.profileId}>
-                {brandProfiles.find((profile) => profile.id === progress.profileId)?.name ??
-                  t("Unknown profile")}
+                {profileNames.get(progress.profileId) ?? t("Unknown profile")}
                 {": "}
                 {progress.phase === "failed"
                   ? userFacingErrorMessage(progress.error, language)

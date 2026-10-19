@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -84,13 +84,60 @@ vi.mock("@/lib/queries", () => ({
           updated_at: "2026-01-02T00:00:00.000Z",
           user_id: "10000000-0000-4000-8000-000000000003",
         },
+        {
+          avatar_url: null,
+          created_at: "2026-01-03T00:00:00.000Z",
+          display_name: "Epsilon Suspended",
+          email: "epsilon@meltiply.local",
+          is_installation_owner: false,
+          role: "viewer",
+          status: "suspended",
+          suspended_at: "2026-01-03T00:00:00.000Z",
+          updated_at: "2026-01-03T00:00:00.000Z",
+          user_id: "10000000-0000-4000-8000-000000000005",
+        },
       ],
     },
     error: null,
     isPending: false,
   }),
-  useWorkspaceInvitations: () => ({ data: { invitations: [] }, error: null, isPending: false }),
-  useWorkspaceAudit: () => ({ data: { entries: [] }, error: null, isPending: false }),
+  useWorkspaceInvitations: () => ({
+    data: {
+      invitations: [
+        {
+          created_at: "2026-01-01T00:00:00.000Z",
+          email: "pending.invitee@meltiply.local",
+          expires_at: "2026-01-08T00:00:00.000Z",
+          id: "f0000000-0000-4000-8000-000000000001",
+          org_id: workspace.user.orgId,
+          role: "editor",
+          status: "pending",
+          updated_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    },
+    error: null,
+    isPending: false,
+  }),
+  useWorkspaceAudit: () => ({
+    data: {
+      entries: [
+        {
+          action: "member.role_changed",
+          actor: { display_name: "Alpha Creator", email: "alpha@meltiply.local" },
+          after: { role: "editor" },
+          before: { role: "viewer" },
+          created_at: "2026-01-01T00:05:00.000Z",
+          id: "f0000000-0000-4000-8000-000000000013",
+          request_id: "seed-admin-demo-role",
+          target_id: "10000000-0000-4000-8000-000000000003",
+          target_type: "member",
+        },
+      ],
+    },
+    error: null,
+    isPending: false,
+  }),
   useCreateWorkspaceInvitation: mutation,
   useResendWorkspaceInvitation: mutation,
   useRevokeWorkspaceInvitation: mutation,
@@ -129,8 +176,18 @@ describe("settings administration surface", () => {
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByText("gamma@meltiply.local")).toBeInTheDocument();
+    expect(screen.getByText("epsilon@meltiply.local")).toBeInTheDocument();
     expect(screen.getByText("Installation Owner")).toBeInTheDocument();
+    expect(screen.getByText("Suspended")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reactivate" })).toBeInTheDocument();
+    expect(screen.getByText("pending.invitee@meltiply.local")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Invite" }).length).toBeGreaterThan(0);
+
+    const auditTab = screen.getByRole("tab", { name: "Audit" });
+    fireEvent.mouseDown(auditTab);
+    fireEvent.click(auditTab);
+    expect(screen.getByText("member.role_changed")).toBeInTheDocument();
+    expect(screen.getByText(/alpha@meltiply.local/)).toBeInTheDocument();
   });
 
   it("redirects a caller without administration capability to posts", () => {

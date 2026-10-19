@@ -24,13 +24,15 @@ BEGIN;
 -- Better Auth subjects backing the seeded internal users. The API worker and
 -- RLS integration tests authenticate as these session subjects. Alpha is the
 -- Installation Owner; Beta is a Workspace Admin; Gamma and Delta exercise the
--- Editor and Viewer roles.
+-- Editor and Viewer roles; Epsilon is a suspended Viewer so the settings
+-- surface shows suspension and reactivation.
 INSERT INTO "user" (id, name, email, "emailVerified")
 VALUES
   ('auth_user_local_alpha', 'Alpha Creator', 'alpha@meltiply.local', TRUE),
   ('auth_user_local_beta', 'Beta Admin', 'beta@meltiply.local', TRUE),
   ('auth_user_local_gamma', 'Gamma Editor', 'gamma@meltiply.local', TRUE),
-  ('auth_user_local_delta', 'Delta Viewer', 'delta@meltiply.local', TRUE)
+  ('auth_user_local_delta', 'Delta Viewer', 'delta@meltiply.local', TRUE),
+  ('auth_user_local_epsilon', 'Epsilon Suspended', 'epsilon@meltiply.local', TRUE)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     email = EXCLUDED.email,
@@ -69,6 +71,13 @@ VALUES
     'credential',
     'auth_user_local_delta',
     '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914'
+  ),
+  (
+    'auth_account_local_epsilon',
+    'auth_user_local_epsilon',
+    'credential',
+    'auth_user_local_epsilon',
+    '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914'
   )
 ON CONFLICT (id) DO UPDATE
 SET "accountId" = EXCLUDED."accountId",
@@ -81,12 +90,24 @@ VALUES
   ('10000000-0000-4000-8000-000000000001', 'auth_user_local_alpha', 'alpha@meltiply.local', 'Alpha Creator', TRUE),
   ('10000000-0000-4000-8000-000000000002', 'auth_user_local_beta', 'beta@meltiply.local', 'Beta Admin', FALSE),
   ('10000000-0000-4000-8000-000000000003', 'auth_user_local_gamma', 'gamma@meltiply.local', 'Gamma Editor', FALSE),
-  ('10000000-0000-4000-8000-000000000004', 'auth_user_local_delta', 'delta@meltiply.local', 'Delta Viewer', FALSE)
+  ('10000000-0000-4000-8000-000000000004', 'auth_user_local_delta', 'delta@meltiply.local', 'Delta Viewer', FALSE),
+  ('10000000-0000-4000-8000-000000000005', 'auth_user_local_epsilon', 'epsilon@meltiply.local', 'Epsilon Suspended', FALSE)
 ON CONFLICT (id) DO UPDATE
 SET auth_user_id = EXCLUDED.auth_user_id,
     email = EXCLUDED.email,
     display_name = EXCLUDED.display_name,
     updated_at = now();
+
+UPDATE users
+SET suspended_at = now() - interval '2 days',
+    suspension_reason = 'On leave — sample suspended member'
+WHERE id = '10000000-0000-4000-8000-000000000005';
+
+UPDATE users
+SET suspended_at = NULL,
+    suspension_reason = NULL
+WHERE id <> '10000000-0000-4000-8000-000000000005'
+  AND (suspended_at IS NOT NULL OR suspension_reason IS NOT NULL);
 
 UPDATE users
 SET installation_owner = FALSE
@@ -158,11 +179,113 @@ VALUES
   ('30000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000001', 'admin'),
   ('30000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000002', 'admin'),
   ('30000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000003', 'editor'),
-  ('30000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000004', 'viewer')
+  ('30000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000004', 'viewer'),
+  ('30000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000005', 'viewer')
 ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
 
 UPDATE organizations SET is_shared = TRUE
 WHERE id = '20000000-0000-4000-8000-000000000005';
+
+-- A pending invitation demonstrates the reserved-Seat, resend, and revoke UI.
+INSERT INTO workspace_invitations (
+  id, org_id, email, role, invited_by, token_hash, expires_at
+)
+VALUES (
+  'f0000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000005',
+  'pending.invitee@meltiply.local',
+  'editor',
+  '10000000-0000-4000-8000-000000000001',
+  'seed-pending-invitation-token-hash',
+  now() + interval '7 days'
+)
+ON CONFLICT (id) DO UPDATE
+SET email = EXCLUDED.email,
+    role = EXCLUDED.role,
+    invited_by = EXCLUDED.invited_by,
+    token_hash = EXCLUDED.token_hash,
+    expires_at = EXCLUDED.expires_at,
+    accepted_at = NULL,
+    revoked_at = NULL,
+    updated_at = now();
+
+-- Recent administrative history so the Audit tab is meaningful on first load.
+INSERT INTO workspace_audit_entries (
+  id, org_id, actor_user_id, actor_email, actor_display_name,
+  action, target_type, target_id, before_state, after_state, request_id, created_at
+)
+VALUES
+  (
+    'f0000000-0000-4000-8000-000000000011',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000001',
+    'alpha@meltiply.local',
+    'Alpha Creator',
+    'workspace.renamed',
+    'workspace',
+    '20000000-0000-4000-8000-000000000005',
+    '{"name":"Alpha''s workspace","slug":"personal-alpha"}'::jsonb,
+    '{"name":"Alpha Creator''s workspace","slug":"workspace-10000000000040008000000000000001"}'::jsonb,
+    'seed-admin-demo-rename',
+    now() - interval '6 days'
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000012',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000001',
+    'alpha@meltiply.local',
+    'Alpha Creator',
+    'invitation.created',
+    'invitation',
+    'f0000000-0000-4000-8000-000000000001',
+    NULL,
+    '{"email":"pending.invitee@meltiply.local","role":"editor"}'::jsonb,
+    'seed-admin-demo-invite',
+    now() - interval '5 days'
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000013',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000001',
+    'alpha@meltiply.local',
+    'Alpha Creator',
+    'member.role_changed',
+    'member',
+    '10000000-0000-4000-8000-000000000003',
+    '{"role":"viewer"}'::jsonb,
+    '{"role":"editor"}'::jsonb,
+    'seed-admin-demo-role',
+    now() - interval '4 days'
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000014',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000001',
+    'alpha@meltiply.local',
+    'Alpha Creator',
+    'account.suspended',
+    'member',
+    '10000000-0000-4000-8000-000000000005',
+    '{"status":"active"}'::jsonb,
+    '{"reason":"On leave — sample suspended member","status":"suspended"}'::jsonb,
+    'seed-admin-demo-suspend',
+    now() - interval '2 days'
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000015',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000002',
+    'beta@meltiply.local',
+    'Beta Admin',
+    'invitation.revoked',
+    'invitation',
+    'f0000000-0000-4000-8000-000000000099',
+    '{"email":"former.member@meltiply.local","role":"viewer"}'::jsonb,
+    NULL,
+    'seed-admin-demo-revoke',
+    now() - interval '1 day'
+  )
+ON CONFLICT (id) DO NOTHING;
 
 -- Brand Profiles are the mandatory ownership boundary for assets, platform
 -- accounts, and distributions. The team-workspace profiles (a000…0001/0002)

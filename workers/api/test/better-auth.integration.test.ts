@@ -782,6 +782,38 @@ describe("bootstrap and invite-only sign-up", () => {
     expect(count.rows[0]?.count).toBe("1");
   });
 
+  it("blocks sign-in for a suspended account", async () => {
+    const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
+    const email = emails.session;
+    const password = crypto.randomUUID();
+    const signUp = await authPost(auth, "/api/auth/sign-up/email", {
+      email,
+      name: "Suspended Tester",
+      password,
+    });
+    expect(signUp.status).toBe(200);
+    const user = recordOf(await signUp.json()).user;
+    const authUserId = recordOf(user).id;
+    expect(typeof authUserId).toBe("string");
+    // The successful sign-up established a session; clear it so this test
+    // observes only the suspended sign-in attempt.
+    await systemPoolFor(systemEnv()).query(`DELETE FROM "session" WHERE "userId" = $1`, [
+      authUserId,
+    ]);
+    await systemPoolFor(systemEnv()).query(
+      `INSERT INTO users (auth_user_id, email, display_name, suspended_at, suspension_reason)
+       VALUES ($1, $2, 'Suspended Tester', now(), 'Sign-in policy test')`,
+      [authUserId, email],
+    );
+    const signIn = await authPost(auth, "/api/auth/sign-in/email", { email, password });
+    expect(signIn.status).toBeGreaterThanOrEqual(400);
+    const sessions = await systemPoolFor(systemEnv()).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [authUserId],
+    );
+    expect(sessions.rows[0]?.count).toBe("0");
+  });
+
   it("revokes old bearer and cookie authority on password change and password reset", async () => {
     const mail = recordingMailBinding();
     const env = localTestEnv(mail);

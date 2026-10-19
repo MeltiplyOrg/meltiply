@@ -6528,7 +6528,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     });
     expect(pending.status).toBe(200);
     expect(await pending.json()).toMatchObject({
-      invitations: [expect.objectContaining({ email: inviteEmail, role: "editor" })],
+      invitations: expect.arrayContaining([
+        expect.objectContaining({ email: inviteEmail, role: "editor" }),
+      ]),
     });
 
     const revoked = await request(
@@ -6612,6 +6614,15 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const emailFor = (index: number) => `seat-limit-${run}-${index}@meltiply.local`;
     const created: { id: string; email: string }[] = [];
     try {
+      // Start from the seeded Seat usage minus any pending invitations so the
+      // ten-Seat arithmetic is independent of fixture invitations.
+      await systemTransaction(env, (client) =>
+        client.query(
+          `DELETE FROM workspace_invitations
+           WHERE org_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL`,
+          [sharedWorkspaceId],
+        ),
+      );
       for (let index = 0; index < 6; index += 1) {
         const response = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
           body: JSON.stringify({ email: emailFor(index), role: "viewer" }),

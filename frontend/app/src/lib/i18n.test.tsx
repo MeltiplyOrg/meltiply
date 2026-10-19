@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { writeCookieConsent } from "@meltiply/ui/cookie-consent";
 
-import { I18nProvider, translate, useI18n } from "./i18n";
+import { I18nProvider, supportedLanguages, translate, useI18n } from "./i18n";
 import { setPseudoLocalization } from "./pseudo-locale";
 
 const storageKey = "meltiply.language";
@@ -60,6 +60,25 @@ describe("I18nProvider", () => {
     expect(document.documentElement.lang).toBe("es");
   });
 
+  it("resolves every supported target language from locale data", () => {
+    for (const { code } of supportedLanguages) {
+      const output = translate(code, "Settings");
+      if (code === "en") expect(output).toBe("Settings");
+      else expect(output, `${code} should translate Settings`).not.toBe("Settings");
+      expect(translate(code, "Not a catalog key")).toBe("Not a catalog key");
+    }
+  });
+
+  it("localizes status labels for every target language", () => {
+    for (const { code } of supportedLanguages) {
+      if (code === "en") continue;
+      window.localStorage.setItem(storageKey, code);
+      const { result, unmount } = renderHook(useI18n, { wrapper });
+      expect(result.current.tStatus("awaiting_provider"), code).not.toBe("Awaiting provider");
+      unmount();
+    }
+  });
+
   it("translates status identifiers and falls back to readable labels", () => {
     const english = renderHook(useI18n, { wrapper });
     expect(english.result.current.tStatus("awaiting_provider")).toBe("Awaiting provider");
@@ -107,7 +126,7 @@ describe("I18nProvider", () => {
   });
 
   it("ignores unsupported saved values", () => {
-    window.localStorage.setItem(storageKey, "fr");
+    window.localStorage.setItem(storageKey, "ja");
 
     const { result } = renderHook(useI18n, { wrapper });
 

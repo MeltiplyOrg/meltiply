@@ -3,14 +3,32 @@ import { readFunctionalStorage, writeFunctionalStorage } from "@meltiply/ui/cook
 
 import { isDevMode } from "@/lib/env";
 
+import statusDe from "../locales/de/status.json";
 import statusEn from "../locales/en/status.json";
 import statusEs from "../locales/es/status.json";
+import statusFr from "../locales/fr/status.json";
+import statusIt from "../locales/it/status.json";
+import statusPtBR from "../locales/pt-BR/status.json";
+import statusVi from "../locales/vi/status.json";
+import statusZh from "../locales/zh/status.json";
+import uiDe from "../locales/de/ui.json";
 import uiEs from "../locales/es/ui.json";
+import uiFr from "../locales/fr/ui.json";
+import uiIt from "../locales/it/ui.json";
+import uiPtBR from "../locales/pt-BR/ui.json";
+import uiVi from "../locales/vi/ui.json";
+import uiZh from "../locales/zh/ui.json";
 import { isPseudoLocalized, pseudoLocaleEvent, pseudoLocalize } from "./pseudo-locale";
 
 export const supportedLanguages = [
   { code: "en", label: "English" },
   { code: "es", label: "Español" },
+  { code: "pt-BR", label: "Português (Brasil)" },
+  { code: "fr", label: "Français" },
+  { code: "de", label: "Deutsch" },
+  { code: "it", label: "Italiano" },
+  { code: "zh", label: "简体中文" },
+  { code: "vi", label: "Tiếng Việt" },
 ] as const;
 
 export type Language = (typeof supportedLanguages)[number]["code"];
@@ -18,9 +36,18 @@ export type TranslationValues = Record<string, number | string>;
 
 const languageStorageKey = "meltiply.language";
 
-// JSON imports infer their exact key union; a string index signature keeps the
+// JSON imports infer their exact key union; string index signatures keep the
 // runtime lookup keyed by arbitrary English source strings.
-const spanishUi: Record<string, string> = uiEs;
+const uiTranslations: Record<Language, Record<string, string>> = {
+  en: {},
+  es: uiEs,
+  "pt-BR": uiPtBR,
+  fr: uiFr,
+  de: uiDe,
+  it: uiIt,
+  zh: uiZh,
+  vi: uiVi,
+};
 
 // Runtime catalog data lives in `src/locales/<language>/<namespace>.json` so the
 // same files feed `bun run i18n:check` and generation. English source strings
@@ -29,6 +56,12 @@ const spanishUi: Record<string, string> = uiEs;
 const statusTranslations: Record<Language, Record<string, string>> = {
   en: statusEn,
   es: statusEs,
+  "pt-BR": statusPtBR,
+  fr: statusFr,
+  de: statusDe,
+  it: statusIt,
+  zh: statusZh,
+  vi: statusVi,
 };
 
 /**
@@ -47,21 +80,18 @@ function interpolate(message: string, values?: TranslationValues): string {
 
 /**
  * Translates an English UI string into the active target language with variable interpolation.
- * Falls back to the raw message when a Spanish translation entry is absent.
+ * Falls back to the raw message when a target translation entry is absent.
  * In development builds the DevBox pseudo-localization toggle additionally
  * expands every returned string (~35% growth + accents) so layout resilience
  * can be verified in place; the branch is stripped from production bundles.
  *
- * @param language Active language code ("en" or "es").
+ * @param language Active language code.
  * @param message English source message key.
  * @param values Optional substitution values for placeholders in the template.
  * @returns Translated, interpolated text.
  */
 export function translate(language: Language, message: string, values?: TranslationValues): string {
-  const translated = interpolate(
-    language === "es" ? (spanishUi[message] ?? message) : message,
-    values,
-  );
+  const translated = interpolate(uiTranslations[language][message] ?? message, values);
   return isDevMode() && isPseudoLocalized() ? pseudoLocalize(translated) : translated;
 }
 
@@ -70,7 +100,7 @@ export function translate(language: Language, message: string, values?: Translat
  * Replaces underscores with spaces as a fallback if no explicit translation exists.
  * Subject to the same dev-only pseudo-localization expansion as `translate`.
  *
- * @param language Target language code ("en" or "es").
+ * @param language Target language code.
  * @param status Status identifier string.
  * @returns Localized status label.
  */
@@ -83,7 +113,7 @@ function translateStatus(language: Language, status: string): string {
  * Reads the user's language preference only after functional consent, falling
  * back to `"en"` when it is absent, invalid, or unavailable.
  *
- * @returns Active `Language` code ("en" or "es").
+ * @returns Active `Language` code, or `"en"` when no supported value is stored.
  */
 function readStoredLanguage(): Language {
   const stored = readFunctionalStorage(languageStorageKey);

@@ -1,7 +1,13 @@
 {
   "version": 1,
   "style": {
-    "es": "Write neutral, idiomatic Spanish using the informal tú form. Keep UI copy concise and natural rather than literal."
+    "es": "Write neutral, idiomatic Spanish using the informal tú form. Keep UI copy concise and natural rather than literal.",
+    "pt-BR": "Write natural Brazilian Portuguese using você. Keep UI copy concise and idiomatic rather than literal.",
+    "fr": "Write natural French using vous. Keep UI copy concise and avoid literal calques.",
+    "de": "Write natural German using Sie. Keep UI copy concise; prefer common shorter terms over long compounds.",
+    "it": "Write natural Italian using tu. Keep UI copy concise and idiomatic rather than literal.",
+    "zh": "Write natural Simplified Chinese (简体中文). Use 你 (informal), not 您. Keep UI copy concise and use standard software terminology. Translate every string fully; do not copy English source text except listed product and platform names.",
+    "vi": "Write natural Vietnamese using bạn. Keep UI copy concise and idiomatic rather than literal. Translate every string fully; do not copy English source text except listed product and platform names."
   },
   "keepVerbatim": {
     "Meltiply": "Product name",
@@ -27,17 +33,41 @@
   },
   "preferredTranslations": {
     "Brand Profile": {
-      "es": "perfil de marca"
+      "es": "perfil de marca",
+      "pt-BR": "perfil de marca",
+      "fr": "profil de marque",
+      "de": "Markenprofil",
+      "it": "profilo di marca",
+      "zh": "品牌资料",
+      "vi": "hồ sơ thương hiệu"
     },
     "Post": {
-      "es": "publicación"
+      "es": "publicación",
+      "pt-BR": "publicação",
+      "fr": "publication",
+      "de": "Beitrag",
+      "it": "pubblicazione",
+      "zh": "帖子",
+      "vi": "bài viết"
     },
     "Channel": {
-      "es": "canal"
+      "es": "canal",
+      "pt-BR": "canal",
+      "fr": "canal",
+      "de": "Kanal",
+      "it": "canale",
+      "zh": "频道",
+      "vi": "kênh"
     },
     "Workspace": {
-      "es": "espacio de trabajo"
+      "es": "espacio de trabajo",
+      "pt-BR": "espaço de trabalho",
+      "fr": "espace de travail",
+      "de": "Arbeitsbereich",
+      "it": "spazio di lavoro",
+      "zh": "工作区",
+      "vi": "không gian làm việc"
     }
   },
-  "intentionallyIdentical": ["⌘K", "s", "M", "P"]
+  "intentionallyIdentical": ["⌘K", "s", "M", "P", "OAuth 2.0 Direct", "Status: {status}"]
 }

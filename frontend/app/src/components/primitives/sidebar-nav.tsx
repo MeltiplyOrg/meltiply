@@ -560,7 +560,9 @@ export function SidebarNav({
       ? t("Workspace Admin")
       : user?.role === "editor"
         ? t("Editor")
-        : t("Viewer");
+        : user?.role === "viewer"
+          ? t("Viewer")
+          : t("Workspace");
 
   return (
     <aside

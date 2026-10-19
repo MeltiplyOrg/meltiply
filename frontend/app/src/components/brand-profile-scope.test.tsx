@@ -627,6 +627,42 @@ describe("Channels table contract", () => {
   });
 
   /**
+   * One Brand Profile connects at most one Channel per Provider: a Provider
+   * the active profile already owns renders its connected Channel without any
+   * Connect action, while the remaining Providers stay connectable.
+   */
+  it("hides Connect for Providers the active Brand Profile already owns", () => {
+    workspace.brandProfiles = [alphaProfile, betaProfile];
+    workspace.selectedBrandProfileId = alphaProfile.id;
+    queryResults.platforms.data = [connectedAccount];
+    renderChannels();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    const dialog = screen.getByRole("dialog", { name: "Connect social account" });
+
+    expect(within(dialog).getByText("Alpha TikTok")).toBeVisible();
+    expect(within(dialog).queryByRole("button", { name: "Add Another" })).not.toBeInTheDocument();
+    expect(within(dialog).getAllByRole("button", { name: "Connect" })).toHaveLength(4);
+    const ownedActions = within(dialog).getByText("Alpha TikTok").closest(".items-start");
+    expect(ownedActions).not.toBeNull();
+    expect(within(ownedActions as HTMLElement).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  /** The same Provider stays connectable for a Brand Profile that does not own it yet. */
+  it("offers Connect for a Provider the active Brand Profile does not own", () => {
+    workspace.brandProfiles = [alphaProfile, betaProfile];
+    workspace.selectedBrandProfileId = betaProfile.id;
+    queryResults.platforms.data = [connectedAccount];
+    renderChannels();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    const dialog = screen.getByRole("dialog", { name: "Connect social account" });
+
+    expect(within(dialog).queryByText("Alpha TikTok")).not.toBeInTheDocument();
+    expect(within(dialog).getAllByRole("button", { name: "Connect" })).toHaveLength(5);
+  });
+
+  /**
    * With profiles but zero connected accounts, Add account remains a single
    * enabled header action and opens the connection dialog from that fixed location.
    */

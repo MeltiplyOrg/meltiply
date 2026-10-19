@@ -56,8 +56,13 @@ describe("OAuth connection token refresh arming", () => {
    * Fake transaction client recording queries and answering the fixed
    * organization, membership, active-profile, lock, and existing-account
    * lookups the persistence path issues before the platform_accounts upsert.
+   * `profileChannel` makes the Brand-Profile-scoped Provider read report an
+   * existing Channel so the duplicate-Provider refusal can be asserted.
    */
-  function clientReturning(queries: Array<{ sql: string; params?: unknown[] }>) {
+  function clientReturning(
+    queries: Array<{ sql: string; params?: unknown[] }>,
+    profileChannel = false,
+  ) {
     return {
       query: vi.fn((sql: string, params?: unknown[]) => {
         queries.push({ params, sql });
@@ -81,7 +86,13 @@ describe("OAuth connection token refresh arming", () => {
           });
         }
         if (sql.includes("FROM platform_accounts")) {
-          return Effect.succeed({ rows: [], rowCount: 0 });
+          return Effect.succeed({
+            rows:
+              profileChannel && sql.includes("brand_profile_id = $1 AND platform = $2")
+                ? [{ id: "existing-channel" }]
+                : [],
+            rowCount: profileChannel ? 1 : 0,
+          });
         }
         if (sql.includes("INSERT INTO platform_accounts")) {
           return Effect.succeed({ rows: [{ id: "account-1" }], rowCount: 1 });
@@ -132,5 +143,24 @@ describe("OAuth connection token refresh arming", () => {
 
     const upsert = queries.find(({ sql }) => sql.includes("INSERT INTO platform_accounts"));
     expect(upsert?.params?.[11]).toBeNull();
+  });
+
+  // A Brand Profile owns at most one Channel per Provider, so a second
+  // provider account is refused before any token is written.
+  it("rejects a second Channel of the same Provider on one Brand Profile", async () => {
+    const queries: Array<{ sql: string; params?: unknown[] }> = [];
+    withSystemTransactionEffect.mockImplementation((_env, operation) =>
+      operation(clientReturning(queries, true)),
+    );
+
+    await expect(
+      Effect.runPromise(
+        saveOAuthConnectionEffect(envWithKey(primaryKey), "threads", owner, connection),
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_state",
+      status: 409,
+    });
+    expect(queries.some(({ sql }) => sql.includes("INSERT INTO platform_accounts"))).toBe(false);
   });
 });

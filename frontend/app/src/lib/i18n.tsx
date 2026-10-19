@@ -468,7 +468,6 @@ const spanishTranslations: Record<string, string> = {
   Actions: "Acciones",
   Active: "Activo",
   "Add account": "Añadir cuenta",
-  "Add Another": "Añadir otro",
   "Add Channel": "Añadir canal",
   "Add Media": "Añadir medios",
   "Add or connect a new social channel": "Añadir o conectar un nuevo canal social",
@@ -501,6 +500,8 @@ const spanishTranslations: Record<string, string> = {
   "Connect social account": "Conectar cuenta social",
   "Connect your social accounts to start publishing and scheduling across platforms.":
     "Conecta tus cuentas sociales para empezar a publicar y programar en todas las plataformas.",
+  "Connect your social accounts to start publishing and scheduling across platforms. Each Brand Profile connects one Channel per Provider.":
+    "Conecta tus cuentas sociales para empezar a publicar y programar en todas las plataformas. Cada perfil de marca conecta un canal por proveedor.",
   "Could not cancel this post": "No se pudo cancelar esta publicación",
   "Could not delete this post": "No se pudo eliminar esta publicación",
   "Could not load post": "No se pudo cargar la publicación",

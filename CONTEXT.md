@@ -20,8 +20,9 @@ means of reaching it.
 _Avoid_: connector, client, integration, platform
 
 **Platform account**:
-A creator's connected account on one Platform, held by exactly one Brand Profile. The
-user interface calls a Platform account a Channel.
+A creator's connected account on one Platform, held by exactly one Brand Profile. A
+Brand Profile holds at most one Channel per Platform. The user interface calls a
+Platform account a Channel.
 _Avoid_: connection, social account, provider account
 
 **Channel ID**:

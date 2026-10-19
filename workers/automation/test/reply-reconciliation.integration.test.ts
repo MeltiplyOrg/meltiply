@@ -436,7 +436,11 @@ describeIntegration("distribution reconciliation recovery with PostgreSQL", () =
 
     // The dead event's dedupe key must not block recovery: the claim revives
     // it as pending, and the row with no event at all gains a fresh trigger.
-    await expect(Effect.runPromise(enqueueDueDistributions(env, 100))).resolves.toBe(2);
+    // The scan is workspace-global, so seeded demo rows may be due alongside
+    // the fixture pair; both owned rows must still be claimed.
+    await expect(
+      Effect.runPromise(enqueueDueDistributions(env, 100)),
+    ).resolves.toBeGreaterThanOrEqual(2);
 
     const recovered = await runSystemTransaction(env, (client) =>
       client.query<{

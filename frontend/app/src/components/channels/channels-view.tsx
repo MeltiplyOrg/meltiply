@@ -941,7 +941,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
             <CenterDialogTitle>{t("Connect social account")}</CenterDialogTitle>
             <CenterDialogDescription>
               {t(
-                "Connect your social accounts to start publishing and scheduling across platforms.",
+                "Connect your social accounts to start publishing and scheduling across platforms. Each Brand Profile connects one Channel per Provider.",
               )}
             </CenterDialogDescription>
           </CenterDialogHeader>
@@ -1069,30 +1069,23 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                               )}
                             </div>
                           ))}
-                          {(!isAlreadyConnected || !connectUnavailable) && (
+                          {!isAlreadyConnected && (
                             <Button
                               size="sm"
-                              variant={isAlreadyConnected ? "outline" : "default"}
+                              variant="default"
                               disabled={
                                 connectUnavailable || isConnecting || !activeConnectProfileId
                               }
                               onClick={() =>
                                 void handleConnect(platform.id, activeConnectProfileId)
                               }
-                              className={cn(
-                                "rounded-control text-xs font-semibold h-8 px-3.5",
-                                isAlreadyConnected
-                                  ? "border-line text-ink-2"
-                                  : "bg-primary text-primary-foreground shadow-btn hover:bg-primary/90",
-                              )}
+                              className="rounded-control text-xs font-semibold h-8 px-3.5 bg-primary text-primary-foreground shadow-btn hover:bg-primary/90"
                             >
                               {connectUnavailable
                                 ? t("Unavailable")
                                 : isConnecting
                                   ? t("Redirecting…")
-                                  : isAlreadyConnected
-                                    ? t("Add Another")
-                                    : t("Connect")}
+                                  : t("Connect")}
                             </Button>
                           )}
                         </div>

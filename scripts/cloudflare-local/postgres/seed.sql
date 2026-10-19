@@ -212,7 +212,7 @@ VALUES
     'local-only-not-a-provider-credential',
     ARRAY['upload', 'analytics'],
     '{"fixture": true}'::jsonb,
-    'connected',
+    'revoked',
     now() - interval '26 hours'
   ),
   (
@@ -922,9 +922,10 @@ SET uploads = EXCLUDED.uploads,
 -- Post, a published + failed pair, a non-retryable failure, text-only and
 -- media-only compositions, ordered multi-attachment Posts, a caption that is
 -- only a long unbroken token, an empty caption, and attachments that are
--- processing or failed. The `e300…`/`e400…` accounts cover all five connection
--- states across all five Providers, and `c400…0001` adds a third Brand Profile so
--- profile grouping and the profile scope have more than two rows to show.
+-- processing or failed. The `e000…`/`e300…`/`e400…` accounts cover all five
+-- connection states across all five Providers without giving any Brand Profile
+-- two Channels on the same Provider, and `c400…0001` adds a third Brand Profile
+-- so profile grouping and the profile scope have more than two rows to show.
 --
 -- Ids are disjoint from the canonical team fixtures (orgs …0001/…0002), from
 -- every id the integration suites allocate, and from the retired ranges.
@@ -942,11 +943,11 @@ SET name = EXCLUDED.name,
     color = EXCLUDED.color,
     updated_at = now();
 
--- Every remaining Provider and connection state on the demo profiles, so
--- /channels and the composer's destination chips show connected, expiring,
--- expired, revoked, and reconnect-required accounts. `e300…0002` deliberately
--- carries no display name: the directory must fall back to the platform user id
--- rather than rendering an empty name cell.
+-- Additional Providers on the demo profiles, so /channels and the composer's
+-- destination chips show expiring, expired, and reconnect-required accounts
+-- alongside the revoked TikTok above. `e300…0002` deliberately carries no
+-- display name: the directory must fall back to the platform user id rather
+-- than rendering an empty name cell.
 --
 -- LinkedIn is not a supported Provider — the roster, the API contract, and the
 -- frontend label map carry the five platforms above — so retire the accounts an
@@ -1008,20 +1009,6 @@ VALUES
     'expiring',
     now() - interval '3 hours',
     NULL
-  ),
-  (
-    'e3000000-0000-4000-8000-000000000004',
-    '20000000-0000-4000-8000-000000000005',
-    'c0000000-0000-4000-8000-000000000001',
-    'tiktok',
-    'local-tiktok-alpha-clips',
-    '@alpha.clips',
-    'local-only-not-a-provider-credential',
-    ARRAY['upload'],
-    '{"fixture": true}'::jsonb,
-    'revoked',
-    now() - interval '20 days',
-    now() - interval '20 days'
   ),
   (
     'e3000000-0000-4000-8000-000000000005',
@@ -1523,7 +1510,7 @@ VALUES
   ('4b000000-0000-4000-8000-000000000005', 'e4000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c4000000-0000-4000-8000-000000000001', 'Labs target, no outcome', NULL, NULL),
   ('4b000000-0000-4000-8000-000000000006', 'e3000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 'Permanent provider failure', NULL, NULL),
   ('4b000000-0000-4000-8000-000000000007', 'e0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Two channels, one revoked', NULL, NULL),
-  ('4b000000-0000-4000-8000-000000000007', 'e3000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Two channels, one revoked', NULL, ARRAY['d7000000-0000-4000-8000-000000000002']::uuid[])
+  ('4b000000-0000-4000-8000-000000000007', 'e0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Two channels, one revoked', NULL, ARRAY['d7000000-0000-4000-8000-000000000002']::uuid[])
 ON CONFLICT (post_id, platform_account_id) DO UPDATE
 SET title_override = EXCLUDED.title_override,
     description_override = EXCLUDED.description_override,
@@ -1901,7 +1888,7 @@ VALUES
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
     '4b000000-0000-4000-8000-000000000007',
-    'e3000000-0000-4000-8000-000000000004',
+    'e0000000-0000-4000-8000-000000000002',
     'tiktok',
     'published',
     NULL,

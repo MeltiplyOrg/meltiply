@@ -726,6 +726,20 @@ describe("Brand Profile ownership and lifecycle constraints", () => {
       ),
     );
     expect(duplicate._tag).toBe("Failure");
+
+    // A Brand Profile owns at most one Channel per Provider: a different
+    // external identity of the same Platform cannot join profileA either.
+    const secondChannel = await Effect.runPromiseExit(
+      withTransactionEffect(systemPool, (client) =>
+        client.query(
+          `INSERT INTO platform_accounts
+             (org_id, brand_profile_id, platform, platform_user_id, access_token)
+           VALUES ($1, $2, 'youtube', 'suite-profile-yt', 'tok')`,
+          [alphaOrgId, profileA],
+        ),
+      ),
+    );
+    expect(secondChannel._tag).toBe("Failure");
   });
 
   it("scopes profile visibility by role and lifecycle state", async () => {

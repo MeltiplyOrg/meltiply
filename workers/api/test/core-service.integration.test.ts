@@ -2,6 +2,7 @@ import {
   MailSubmissionError,
   type DatabaseError,
   StorageUnavailableError,
+  type Platform,
   type PlatformCapability,
   COMMUNITY_LIMITS,
 } from "@meltiply/domain";
@@ -518,27 +519,28 @@ function lifecycleInvitationHarness(options: {
 }
 
 /**
- * Capability list with one publish-enabled platform for scheduling tests.
+ * Capability list with the requested Platforms opted into publishing.
  *
  * The registry ships every adapter as explicitly unavailable, so a scheduling
- * scenario opts a single platform into publishing with the media limits its
+ * scenario opts one or more Platforms into publishing with the media limits its
  * fixture uses. Both the Post scheduler and the per-Distribution operations
  * validate against the same list, which is why the builder is shared.
  *
- * @param platform - Platform to enable for publishing.
+ * @param platform - Platform(s) to enable for publishing.
  * @param patch - Extra capability fields overriding the defaults.
- @returns Registry capabilities with the requested publish override.
+ * @returns Registry capabilities with the requested publish override.
  */
 function publishableCapabilities(
-  platform: "tiktok" | "youtube",
+  platform: Platform | readonly Platform[],
   patch: Partial<PlatformCapability> = {},
 ) {
+  const platforms = typeof platform === "string" ? [platform] : platform;
   const limits =
-    platform === "youtube"
-      ? { max_file_size: 25 * 1024 * 1024 }
-      : { max_file_size: 20 * 1024 * 1024 };
+    platform === "tiktok"
+      ? { max_file_size: 20 * 1024 * 1024 }
+      : { max_file_size: 25 * 1024 * 1024 };
   return new ProviderRegistry().capabilities().map((capability) =>
-    capability.platform === platform
+    platforms.includes(capability.platform)
       ? {
           ...capability,
           accepted_mime_types: ["image/png"],
@@ -551,24 +553,30 @@ function publishableCapabilities(
   );
 }
 
-/** Core service for per-Distribution operations against publish-enabled YouTube. */
-function distributionServiceWithYoutube(patch: Partial<PlatformCapability> = {}) {
-  return createCoreApiService(publishableCapabilities("youtube", patch));
+/** Core service for per-Distribution operations against publish-enabled Platforms. */
+function distributionServiceWith(
+  platform: Platform | readonly Platform[] = "youtube",
+  patch: Partial<PlatformCapability> = {},
+) {
+  return createCoreApiService(publishableCapabilities(platform, patch));
 }
 
 /**
- * Post composition service for a platform that can publish.
+ * Post composition service for the Platforms that can publish.
  *
  * Scheduling validates the resolved caption, media, and provider options
  * against the platform capability before any Distribution is accepted, so
- * every scheduling scenario must build the service with the platform it
+ * every scheduling scenario must build the service with the platform(s) it
  * intends to publish to.
  *
- * @param platform - Platform the scenario schedules against.
+ * @param platform - Platform(s) the scenario schedules against.
  * @param patch - Extra capability fields overriding the defaults.
- @returns Post service whose scheduler accepts that platform.
+ * @returns Post service whose scheduler accepts those platforms.
  */
-function postServiceWith(platform: "tiktok" | "youtube", patch: Partial<PlatformCapability> = {}) {
+function postServiceWith(
+  platform: Platform | readonly Platform[],
+  patch: Partial<PlatformCapability> = {},
+) {
   return createPostApiService(publishableCapabilities(platform, patch));
 }
 
@@ -1183,7 +1191,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const alphaCommentId = "80000000-0000-4000-8000-000000000001";
     const alphaPostId = "48000000-0000-4000-8000-000000000001";
     const asset = assetServiceHarness([]).service;
-    const distribution = distributionServiceWithYoutube();
+    const distribution = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const crossTenantCases: Array<{
       expectedStatus: number;
@@ -2114,8 +2122,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
    * The fixture state is the precondition each scenario asserts against: one
    * publishable image, one second publishable image for ordered multi-attachment
    * work, one Asset still processing with no verified media, one failed Asset,
-   * two extra connected YouTube Channels beyond the seeded canonical account, and
-   * one connected TikTok Channel. The TikTok Channel exists because scheduling a
+   * two extra connected Channels beyond the seeded canonical YouTube
+   * account — one Instagram and one Facebook, because a Brand Profile owns at
+   * most one Channel per Provider — and one connected TikTok Channel. The
+   * TikTok Channel exists because scheduling a
    * Post that carries TikTok provider options must resolve a real Channel of that
    * platform first; without it the scenario would stop at a 404 account lookup
    * instead of reaching the provider-option validation it is asserting. Inserting
@@ -2170,10 +2180,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
             display_name, access_token, scopes, metadata)
          VALUES
            ($1, '20000000-0000-4000-8000-000000000001', '${alphaBrandProfileId}',
-            'youtube', 'integration-post-secondary', 'Integration Channel 2',
+            'instagram', 'integration-post-secondary', 'Integration Channel 2',
             'integration-post-token-2', ARRAY['upload'], '{"fixture":true}'),
            ($2, '20000000-0000-4000-8000-000000000001', '${alphaBrandProfileId}',
-            'youtube', 'integration-post-tertiary', 'Integration Channel 3',
+            'facebook', 'integration-post-tertiary', 'Integration Channel 3',
             'integration-post-token-3', ARRAY['upload'], '{"fixture":true}'),
            ($3, '20000000-0000-4000-8000-000000000001', '${alphaBrandProfileId}',
             'tiktok', 'integration-post-tiktok', 'Integration TikTok Channel',
@@ -2600,7 +2610,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // One Post identity fans out to one Distribution per Channel, and only the
   // Channels that are still editable are created, updated, or cancelled.
   it("schedules many Channels once with atomic usage and outbox state", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram", "facebook"]);
     const period = currentUsagePeriod;
     const usageBefore = await currentUsageCount();
     // Exhaust the shared community allowance to prove quota refusal is atomic.
@@ -2774,7 +2784,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // claimed, while an outcome a provider already owns keeps its own lifecycle
   // and its published copy is never un-published locally.
   it("edits pending targets in place while leaving published history immutable", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -2904,7 +2914,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // Channel reschedules, instead of the revoked Channel failing the whole
   // schedule.
   it("reschedules pending Channels when a settled Channel's credential lapsed", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -3009,7 +3019,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // read, and both surfaces expose the identical frozen publication.
   it("reads the frozen publication identically on Post and Distribution after edits", async () => {
     const posts = postServiceWith("youtube");
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -3151,7 +3161,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     // The fixture Platform publishes one attachment at a time by default, so
     // the capability is widened to accept a text-only target and a
     // multi-attachment one side by side.
-    const posts = postServiceWith("youtube", {
+    const posts = postServiceWith(["youtube", "instagram"], {
       max_media_count: 3,
       min_media_count: 0,
       multi_asset_types: ["image"],
@@ -3348,7 +3358,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // without revival the request would succeed while publishing nothing. A
   // Channel whose outcome a provider already owns keeps that outcome instead.
   it("revives a dropped Channel instead of succeeding without publishing", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -3659,7 +3669,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // A local deletion never un-publishes a live Platform copy and never
   // releases media another retained Post still holds.
   it("deletes a Post by cancelling only its pending work", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -3791,7 +3801,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // Cancelling one Channel outcome removes only its own unleased command, so a
   // leased command stays with the consumer that already owns the attempt.
   it("accepts an idempotent schedule and removes its unpublished work on cancel", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
@@ -3866,7 +3876,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   });
 
   it("cancel keeps leased publish work for the automation consumer", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
@@ -3932,8 +3942,8 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // editable, in-flight work is only asked to stop, and anything that already
   // published or failed permanently is refused instead of silently rewritten.
   it("keeps per-Channel outcomes editable only while they are pending", async () => {
-    const distributionService = distributionServiceWithYoutube();
-    const posts = postServiceWith("youtube");
+    const distributionService = distributionServiceWith(["youtube", "instagram", "facebook"]);
+    const posts = postServiceWith(["youtube", "instagram", "facebook"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -4167,7 +4177,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // the same Distribution and adds a distinct command rather than reviving the
   // one that already ran.
   it("emits one distinct outbox command for every accepted distribution retry intent", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
@@ -4330,7 +4340,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // the delivery horizon, and cancelling drops every unpublished command so a
   // stale delayed message cannot resurrect the publication.
   it("re-keys deferred commands on reschedule and stops emitting beyond the delivery horizon", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const start = Date.now();
@@ -4450,7 +4460,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // Each target of one deferred schedule carries its own command at the shared
   // instant, and a schedule past the horizon is durable without commands.
   it("emits per-target deferred commands inside the horizon and none beyond it", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const inHorizonAt = new Date(Date.now() + 7_200_000);
     const inHorizonDraft = await createAlphaPost(
@@ -4539,7 +4549,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // The monthly allowance is the last contended slot, so exactly one of two
   // simultaneous schedules is admitted and the loser reserves nothing.
   it("admits only one schedule at the final concurrent quota slot", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const period = currentUsagePeriod;
     const initial = await systemTransaction(env, (client) =>
       Effect.gen(function* () {
@@ -4716,7 +4726,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // the Post retires the identity and cancels what is still pending, but work
   // in flight stays with the consumer that owns the attempt.
   it("keeps claimed publication work alive when its Post is deleted", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -6548,11 +6558,17 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       { length: allowance - 1 },
       (_, index) => `integration-quota-baseline-${index}`,
     );
-    const accountIds = ["integration-quota-a", "integration-quota-b"];
-    const connection = (id: string) =>
+    // One Channel per Provider per Brand Profile: the concurrent candidates use
+    // distinct Providers so the quota, not provider uniqueness, decides them.
+    const candidates = [
+      { id: "integration-quota-a", platform: "youtube" as const },
+      { id: "integration-quota-b", platform: "tiktok" as const },
+    ];
+    const accountIds = candidates.map(({ id }) => id);
+    const connection = (id: string, platform: "threads" | "youtube" | "tiktok") =>
       saveOAuthConnection(
         env,
-        "threads",
+        platform,
         {
           brandProfileId: betaBrandProfileId,
           organizationId: beta.organizationId,
@@ -6565,15 +6581,17 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         },
       );
     try {
-      for (const id of baselineIds) await connection(id);
-      const results = await Promise.allSettled(accountIds.map(connection));
+      for (const id of baselineIds) await connection(id, "threads");
+      const results = await Promise.allSettled(
+        candidates.map(({ id, platform }) => connection(id, platform)),
+      );
       expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
       const rejected = results.find(
         (result): result is PromiseRejectedResult => result.status === "rejected",
       );
       expect(rejected?.reason).toMatchObject({ code: "quota_exceeded", status: 403 });
-      const acceptedId = accountIds[results.findIndex((result) => result.status === "fulfilled")]!;
-      await expect(connection(acceptedId)).resolves.toBeUndefined();
+      const accepted = candidates[results.findIndex((result) => result.status === "fulfilled")]!;
+      await expect(connection(accepted.id, accepted.platform)).resolves.toBeUndefined();
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           const result = yield* client.query<{ count: string }>(
@@ -6668,6 +6686,56 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
+  it("allows one Channel per Provider per Brand Profile", async () => {
+    const acceptedId = "integration-provider-unique-accepted";
+    const rejectedId = "integration-provider-unique-rejected";
+    const connection = (id: string) =>
+      saveOAuthConnection(
+        env,
+        "threads",
+        {
+          brandProfileId: betaBrandProfileId,
+          organizationId: beta.organizationId,
+          userId: beta.userId,
+        },
+        {
+          accessToken: `access-${id}`,
+          account: { id },
+          scopes: ["threads_basic"],
+        },
+      );
+    try {
+      // The seeded Beta profile owns no Threads Channel yet, so the first
+      // external identity fills the single Provider slot.
+      await expect(connection(acceptedId)).resolves.toBeUndefined();
+      await expect(connection(rejectedId)).rejects.toMatchObject({
+        code: "invalid_state",
+        status: 409,
+      });
+      // Reconnecting the accepted external identity refreshes its own Channel
+      // rather than competing for the slot.
+      await expect(connection(acceptedId)).resolves.toBeUndefined();
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          const result = yield* client.query<{ count: string; platform_user_id: string }>(
+            `SELECT COUNT(*)::text AS count, MIN(platform_user_id) AS platform_user_id
+               FROM platform_accounts
+              WHERE brand_profile_id = $1 AND platform = 'threads'`,
+            [betaBrandProfileId],
+          );
+          expect(result.rows[0]).toEqual({ count: "1", platform_user_id: acceptedId });
+        }),
+      );
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query("DELETE FROM platform_accounts WHERE platform_user_id IN ($1, $2)", [
+          acceptedId,
+          rejectedId,
+        ]),
+      );
+    }
+  });
+
   it("reveals a revocation token only through the owning tenant", async () => {
     const revoke = vi.fn(async () => undefined);
     const registry = new ProviderRegistry();
@@ -6689,6 +6757,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   it("reveals publication credentials only after an owning-tenant read", async () => {
     const accountId = "50000000-0000-4000-8000-000000000008";
+    // A dedicated Brand Profile keeps the TikTok fixture free of the seeded
+    // YouTube Channel and the composition fixtures' Provider slots.
+    const credentialProfileId = "a0000000-0000-4000-8000-0000000000c1";
     const readRequirements = vi.fn(
       async (_context: ProviderRequestContext, providerCredentials: ProviderCredentials) => {
         expect(providerCredentials).toEqual({
@@ -6719,15 +6790,21 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
         yield* client.query(
+          `INSERT INTO brand_profiles (id, org_id, name, color)
+           VALUES ($1, '20000000-0000-4000-8000-000000000001',
+                   'Integration Credential Brand', '#1d4ed8')`,
+          [credentialProfileId],
+        );
+        yield* client.query(
           `INSERT INTO platform_accounts
            (id, org_id, brand_profile_id, platform, platform_user_id,
             access_token, scopes, connection_status, token_expires_at)
          VALUES ($1, '20000000-0000-4000-8000-000000000001',
-                 '${alphaBrandProfileId}', 'tiktok',
-                 'integration-tiktok-creator', $2,
+                 $2, 'tiktok',
+                 'integration-tiktok-creator', $3,
                  ARRAY['user.info.basic', 'video.publish'], 'connected',
                  '2026-08-01T00:00:00Z')`,
-          [accountId, encrypted],
+          [accountId, credentialProfileId, encrypted],
         );
       }),
     );
@@ -6814,7 +6891,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(readRequirements).toHaveBeenCalledTimes(3);
     } finally {
       await systemTransaction(env, (client) =>
-        client.query("DELETE FROM platform_accounts WHERE id = $1", [accountId]),
+        client.query("DELETE FROM brand_profiles WHERE id = $1", [credentialProfileId]),
       );
     }
   });

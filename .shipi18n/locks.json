@@ -1615,15 +1615,15 @@
     },
     "de::ui::{count} of {total} ordered": {
       "sourceHash": "0c83c29da6045349",
-      "translationHash": "6bda33682bb06cb8"
+      "translationHash": "aa766daf25282d3b"
     },
     "de::ui::{count} ordered": {
       "sourceHash": "80fd0057b4195181",
-      "translationHash": "9a45f758bf653439"
+      "translationHash": "9d4a605c1b06109a"
     },
     "de::ui::{count} ordered attachment(s)": {
       "sourceHash": "0ec60f33d6e8d86e",
-      "translationHash": "f79620faa355347b"
+      "translationHash": "ffc01ecc8d3110d2"
     },
     "de::ui::Cancel all pending": {
       "sourceHash": "13877dd9a16ef3dc",
@@ -6471,15 +6471,15 @@
     },
     "fr::ui::{count} of {total} ordered": {
       "sourceHash": "0c83c29da6045349",
-      "translationHash": "4e173f820369606b"
+      "translationHash": "d5a308fcc8a0a936"
     },
     "fr::ui::{count} ordered": {
       "sourceHash": "80fd0057b4195181",
-      "translationHash": "9caec053d10e46c9"
+      "translationHash": "bf6cc4a53a9a7618"
     },
     "fr::ui::{count} ordered attachment(s)": {
       "sourceHash": "0ec60f33d6e8d86e",
-      "translationHash": "cc8aaa0163b8191f"
+      "translationHash": "40e7d4a0612b9810"
     },
     "fr::ui::Cancel all pending": {
       "sourceHash": "13877dd9a16ef3dc",
@@ -7915,7 +7915,7 @@
     },
     "it::ui::Reach": {
       "sourceHash": "2068b81b75d4b2b1",
-      "translationHash": "33926a1c77b5c126"
+      "translationHash": "4cd0d886b40bfe21"
     },
     "it::ui::Username copied": {
       "sourceHash": "5886dd7a79e8702a",
@@ -9383,7 +9383,7 @@
     },
     "it::ui::reach": {
       "sourceHash": "ed4561f685f13353",
-      "translationHash": "2269c0be009b610c"
+      "translationHash": "8b7754ac1741373d"
     },
     "it::ui::tech, tutorial, social media": {
       "sourceHash": "eb9e2ba680610cde",
@@ -11327,15 +11327,15 @@
     },
     "pt-BR::ui::{count} of {total} ordered": {
       "sourceHash": "0c83c29da6045349",
-      "translationHash": "779a91788dbd7d6e"
+      "translationHash": "e79cb7834a1e5a10"
     },
     "pt-BR::ui::{count} ordered": {
       "sourceHash": "80fd0057b4195181",
-      "translationHash": "e2c06837b4a2547f"
+      "translationHash": "400b52b753ad3b6a"
     },
     "pt-BR::ui::{count} ordered attachment(s)": {
       "sourceHash": "0ec60f33d6e8d86e",
-      "translationHash": "09475029a50cdb1e"
+      "translationHash": "4b748763cc59e9e8"
     },
     "pt-BR::ui::Cancel all pending": {
       "sourceHash": "13877dd9a16ef3dc",
@@ -12175,7 +12175,7 @@
     },
     "vi::status::pending_upload": {
       "sourceHash": "fed0fa9a795408f8",
-      "translationHash": "c19b41f879f47981"
+      "translationHash": "f0fa3ef96520c4b2"
     },
     "vi::status::processing": {
       "sourceHash": "c8e3e92a62ecf181",
@@ -12767,11 +12767,11 @@
     },
     "vi::ui::Impressions": {
       "sourceHash": "c6310e909e403a79",
-      "translationHash": "30b5233cc501516d"
+      "translationHash": "096885eb13617830"
     },
     "vi::ui::Reach": {
       "sourceHash": "2068b81b75d4b2b1",
-      "translationHash": "30b5233cc501516d"
+      "translationHash": "9017bdc4b62a946e"
     },
     "vi::ui::Username copied": {
       "sourceHash": "5886dd7a79e8702a",
@@ -13735,7 +13735,7 @@
     },
     "vi::ui::Attached Media ({count})": {
       "sourceHash": "8d6b2ebe47d81b71",
-      "translationHash": "d9c79bdf4f54c525"
+      "translationHash": "7a0bfe51750c7a0f"
     },
     "vi::ui::Brand Content": {
       "sourceHash": "bd976072edc08f33",
@@ -13755,15 +13755,15 @@
     },
     "vi::ui::{count} of {total} ordered": {
       "sourceHash": "0c83c29da6045349",
-      "translationHash": "eb14065288401edc"
+      "translationHash": "66e12148772ef5a1"
     },
     "vi::ui::{count} ordered": {
       "sourceHash": "80fd0057b4195181",
-      "translationHash": "69e93a1e24c14187"
+      "translationHash": "7cb237222d705239"
     },
     "vi::ui::{count} ordered attachment(s)": {
       "sourceHash": "0ec60f33d6e8d86e",
-      "translationHash": "a97b268e21f3c050"
+      "translationHash": "5bf848d3cd49835f"
     },
     "vi::ui::Cancel all pending": {
       "sourceHash": "13877dd9a16ef3dc",
@@ -14239,7 +14239,7 @@
     },
     "vi::ui::reach": {
       "sourceHash": "ed4561f685f13353",
-      "translationHash": "f2e83b1c7d349e49"
+      "translationHash": "9017bdc4b62a946e"
     },
     "vi::ui::tech, tutorial, social media": {
       "sourceHash": "eb9e2ba680610cde",
@@ -16183,15 +16183,15 @@
     },
     "zh::ui::{count} of {total} ordered": {
       "sourceHash": "0c83c29da6045349",
-      "translationHash": "14de092bedfd0137"
+      "translationHash": "4941c4a54d1e06fb"
     },
     "zh::ui::{count} ordered": {
       "sourceHash": "80fd0057b4195181",
-      "translationHash": "b3790595f66654ab"
+      "translationHash": "4175a1f24cc905ac"
     },
     "zh::ui::{count} ordered attachment(s)": {
       "sourceHash": "0ec60f33d6e8d86e",
-      "translationHash": "184c552245745173"
+      "translationHash": "c5fe7659f25312d7"
     },
     "zh::ui::Cancel all pending": {
       "sourceHash": "13877dd9a16ef3dc",

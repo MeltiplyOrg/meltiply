@@ -51,6 +51,7 @@ test("calls a local Ollama server without credentials", async () => {
   const body = JSON.parse(requests[0].init.body);
   assert.equal(body.model, "qwen3:8b");
   assert.equal(body.stream, false);
+  assert.equal(body.think, false);
   assert.deepEqual(body.messages, [
     { role: "system", content: "System context" },
     { role: "user", content: "Translate this" },

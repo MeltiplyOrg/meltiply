@@ -75,7 +75,8 @@ function statusError(status, body, model) {
 /**
  * Creates a credential-free `TranslationProvider` backed by a local Ollama
  * server. The request fixes `temperature: 0`, the supplied seed, a bounded
- * prediction length, and a context window sized for a translation batch. No
+ * prediction length, a context window sized for a translation batch, and
+ * `think: false` so reasoning models answer without analysis tokens. No
  * account, API key, or network egress is involved.
  *
  * @param {object} options
@@ -121,6 +122,7 @@ export function createOllamaProvider({
             model,
             messages,
             stream: false,
+            think: false,
             options: {
               temperature: 0,
               seed,

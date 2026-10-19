@@ -40,6 +40,24 @@ function parsePositiveInteger(value, fallback, name) {
 }
 
 /**
+ * Reads the operand for a value-taking flag and rejects a missing value or one
+ * that looks like another option.
+ *
+ * @param {string[]} argv Process arguments after the script name.
+ * @param {number} index Index of the flag itself.
+ * @param {string} option Flag name used in the error message.
+ * @returns {{value: string, index: number}} Operand and the index it occupies.
+ * @throws {Error} When the operand is missing or starts with `-`.
+ */
+function optionValue(argv, index, option) {
+  const value = argv[index + 1];
+  if (value === undefined || value.startsWith("-")) {
+    throw new Error(`${option} requires a value`);
+  }
+  return { value, index: index + 1 };
+}
+
+/**
  * Parses generation flags. `--dry-run`, `--force`, `--target`, `--model`, and
  * `--provider` are the supported developer options; `--locales` exists for
  * tests and alternate checkouts.
@@ -59,17 +77,21 @@ function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--target") {
-      options.target = argv[index + 1];
-      index += 1;
+      const parsed = optionValue(argv, index, argument);
+      options.target = parsed.value;
+      index = parsed.index;
     } else if (argument === "--model") {
-      options.model = argv[index + 1];
-      index += 1;
+      const parsed = optionValue(argv, index, argument);
+      options.model = parsed.value;
+      index = parsed.index;
     } else if (argument === "--provider") {
-      options.provider = argv[index + 1];
-      index += 1;
+      const parsed = optionValue(argv, index, argument);
+      options.provider = parsed.value;
+      index = parsed.index;
     } else if (argument === "--locales") {
-      options.localeRoot = argv[index + 1];
-      index += 1;
+      const parsed = optionValue(argv, index, argument);
+      options.localeRoot = parsed.value;
+      index = parsed.index;
     } else if (argument === "--dry-run") {
       options.dryRun = true;
     } else if (argument === "--force") {
@@ -79,11 +101,6 @@ function parseArguments(argv) {
     }
   }
   if (!options.target) throw new Error("--target <language> is required");
-  if (!options.localeRoot) throw new Error("--locales requires a path");
-  if (options.model !== undefined && !options.model) throw new Error("--model requires a value");
-  if (options.provider !== undefined && !options.provider) {
-    throw new Error("--provider requires a value");
-  }
   return options;
 }
 

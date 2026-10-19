@@ -21,12 +21,8 @@
     "Stitch": "TikTok feature name",
     "English": "Language name shown in the language selector",
     "Español": "Language name shown in the language selector",
-    "Hashtags": "Feature label",
-    "Plan": "Product label",
-    "General": "Settings section label",
     "ID": "Identifier label",
     "ID: {id}": "Identifier label with a placeholder",
-    "Impr.": "Abbreviated impressions label",
     "sk_live_…": "Example secret; never a real credential",
     "#viral #shorts": "Hashtag example",
     "{start}–{end}": "Time range placeholder"
@@ -67,6 +63,15 @@
       "it": "spazio di lavoro",
       "zh": "工作区",
       "vi": "không gian làm việc"
+    },
+    "Impr.": {
+      "es": "Impr.",
+      "pt-BR": "Impr.",
+      "fr": "Impr.",
+      "de": "Impress.",
+      "it": "Impr.",
+      "zh": "Impr.",
+      "vi": "Hiển thị"
     }
   },
   "intentionallyIdentical": ["⌘K", "s", "M", "P", "OAuth 2.0 Direct", "Status: {status}"]

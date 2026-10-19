@@ -572,11 +572,19 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await statusControl.click();
   await page.getByRole("option", { name: "Drafts", exact: true }).click();
   await expect(postsFilterPanel).toBeVisible();
-  await expect(statusControl).toHaveText("Drafts");
   await statusControl.click();
+  await expect(page.getByRole("option", { name: "Drafts", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   await page.getByRole("option", { name: "All statuses", exact: true }).click();
   await expect(postsFilterPanel).toBeVisible();
-  await expect(statusControl).toHaveText("All statuses");
+  await statusControl.click();
+  await expect(page.getByRole("option", { name: "All statuses", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.keyboard.press("Escape");
 
   await postsFilterPanel
     .getByRole("button", { name: "Remove Post status filter", exact: true })

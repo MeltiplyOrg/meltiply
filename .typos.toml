@@ -1,5 +1,5 @@
 [files]
-extend-exclude = [".claude", "**/worker-configuration.d.ts", "frontend/app/src/lib/i18n.tsx"]
+extend-exclude = [".claude", "**/worker-configuration.d.ts", "frontend/app/src/lib/i18n.tsx", "frontend/app/src/locales"]
 
 [default]
 # Fumadocs owns the `nd-*` DOM ID prefix; preserve exact quoted selectors and lookups.
@@ -16,6 +16,8 @@ fpr = "fpr"
 publicaly = "publicaly"
 trak = "trak"
 unparseable = "unparseable"
+# German formal pronoun quoted in the i18n documentation.
+Sie = "Sie"
 # RFC 7515 JOSE header parameter; not an English identifier.
 typ = "typ"
 

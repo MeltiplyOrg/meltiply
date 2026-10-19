@@ -129,6 +129,7 @@ sections. Workspace identity stays read-only.
 - `CenterDialog` handles focused forms/search, `CenterAlertDialog` handles
   destructive confirmation, and `SideDialog` handles large Post inspection.
   Shared primitives own frames, focus, dismissal, scrolling, and transitions.
+  Phone navigation is a left-edge sidebar layer over the workspace.
 - Feedback uses the shared toast store/Sileo renderer. Name the affected object
   and useful recovery; clipboard feedback includes the copied value.
 - There is one animation implementation, without a separate motion mode,

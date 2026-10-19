@@ -283,6 +283,7 @@ const spanishTranslations: Record<string, string> = {
   "Choose an active workspace to continue.": "Elige un espacio de trabajo activo para continuar.",
   "Choose an organization": "Elige una organización",
   Close: "Cerrar",
+  "Close navigation menu": "Cerrar menú de navegación",
   Breadcrumb: "Ruta de navegación",
   Comments: "Comentarios",
   Connect: "Conectar",

@@ -43,9 +43,9 @@ Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. I
 
 ## Navigation, search, and filters
 
-`SidebarNav` and `NavigationShell` own the rail, header, mobile navigation, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations. Posts and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
+`SidebarNav`, `MobileNavigationSidebar`, and `NavigationShell` own the rail, header, mobile navigation layer, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations. Posts and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
 
-The phone navigation panel renders `SidebarNav` with `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
+The phone navigation panel is `MobileNavigationSidebar`: the same `SidebarNav` as the desktop rail, positioned as a fixed left-edge layer over the workspace with a fading scrim, sliding in from the left. It renders `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
 
 `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`) owns the rail's hover background: every `data-sidebar-item` row is a target, and one pill springs to the hovered row instead of rows painting their own hover fill. The Settings section rail reuses the same component with its own container and a tighter snap radius. Rows keep `relative z-10` so labels and the selected surface read above it, keyboard focus rings are unchanged, and the public docs rail reuses the same component with its nested Radix viewport.
 

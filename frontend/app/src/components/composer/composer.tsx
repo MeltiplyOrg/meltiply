@@ -709,18 +709,27 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const postQuery = usePost(scope, postId ?? "", postId !== null);
   const capabilitiesQuery = usePlatformCapabilities(scope);
 
-  // After sign-in settles, new compositions start under the first available
-  // profile; reopening from aggregate scope adopts the Post's actual owner.
-  // A concrete choice is never replaced, including after a query refresh.
+  // Adopt a default owner once per mounted composer session, after an existing
+  // Post has loaded. Later aggregate selections belong to the collection filter
+  // and must not be replaced by this initialization.
+  const hasAdoptedOwnerRef = useRef(false);
   useEffect(() => {
-    if (!scope.isSignedIn || selectedBrandProfileId !== null) return;
+    if (!scope.isSignedIn || hasAdoptedOwnerRef.current) return;
+    if (initialPostId !== undefined && !postQuery.data) return;
+    if (selectedBrandProfileId !== null) {
+      hasAdoptedOwnerRef.current = true;
+      return;
+    }
     const profileId =
       initialPostId !== undefined ? postQuery.data?.brand_profile_id : brandProfiles[0]?.id;
-    if (profileId) setSelectedBrandProfileId(profileId);
+    if (profileId) {
+      hasAdoptedOwnerRef.current = true;
+      setSelectedBrandProfileId(profileId);
+    }
   }, [
     brandProfiles,
     initialPostId,
-    postQuery.data?.brand_profile_id,
+    postQuery.data,
     scope.isSignedIn,
     selectedBrandProfileId,
     setSelectedBrandProfileId,

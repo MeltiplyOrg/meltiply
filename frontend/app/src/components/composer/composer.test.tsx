@@ -38,11 +38,12 @@ function neverSettlingUploadTask(): AssetUploadTask {
 
 /** Sidebar probe driving the same Brand Profile switch the workspace shell performs. */
 function ProfileSwitchProbe({ profileId }: { profileId: string }) {
-  const { setBrandProfileId } = useMeltiplyAuth();
+  const { brandProfileId, setBrandProfileId } = useMeltiplyAuth();
   return (
     <>
       <button onClick={() => setBrandProfileId(profileId)}>switch-profile</button>
       <button onClick={() => setBrandProfileId(null)}>switch-all</button>
+      <output aria-label="Collection profile">{brandProfileId ?? "all"}</output>
     </>
   );
 }
@@ -203,6 +204,10 @@ describe("Composer default ownership", () => {
     await waitFor(() => expect(composerTextarea()).toBeEnabled());
     fireEvent.change(composerTextarea(), { target: { value: "Draft for Beta" } });
     expect(composerTextarea()).toHaveValue("Draft for Beta");
+    fireEvent.click(screen.getByRole("button", { name: "switch-all" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Collection profile")).toHaveTextContent("all"),
+    );
   });
 
   it("uses a reopened Post's owner rather than assigning the first profile", async () => {

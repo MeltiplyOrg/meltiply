@@ -65,8 +65,8 @@ through workspace membership, or selects the personal workspace when absent.
 `/sign-in` owns first-run setup, owner sign-in, email verification recovery,
 password reset, and optional authenticator challenges. Setup requires the
 API-only `AUTH_SETUP_SECRET` and closes permanently when the single owner exists.
-There is no separate public registration route. Account security in desktop and
-mobile navigation provides password changes and complete authenticator enrollment,
+There is no separate public registration route. **Settings → Security** on desktop
+and mobile provides password changes and complete authenticator enrollment,
 backup-code replacement, and disabling with password reauthentication.
 
 The [cookie policy](https://meltiply.com/docs/cookies) governs optional

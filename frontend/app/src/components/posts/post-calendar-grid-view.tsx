@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   AlertCircle,
   ChevronLeft,
@@ -147,8 +147,7 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
   selectionActive = false,
 }: PostCalendarGridViewProps) {
   const { t, tStatus, language } = useI18n();
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  useSmoothScrollContainer(scrollRef);
+  const scrollRef = useSmoothScrollContainer();
   const [mode, setMode] = useState<"month" | "week">("month");
   const dateLabel = useMemo(
     () => new Intl.DateTimeFormat(language, { dateStyle: "full" }),

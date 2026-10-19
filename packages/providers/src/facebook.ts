@@ -216,7 +216,7 @@ function reelInput(input: PublishInput): {
     input.media.length !== 1 ||
     !media ||
     media.mode !== "remote_ingest" ||
-    [...description].length > 2_200 ||
+    [...description].length > FACEBOOK_MAX_CAPTION_LENGTH ||
     input.hashtags.length > 30
   ) {
     throw new ProviderAdapterError(

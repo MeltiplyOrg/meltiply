@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { PLATFORM_IDS } from "@meltiply/domain";
 import { useWorkspace } from "@/context/workspace.context";
@@ -189,10 +189,8 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   } = useWorkspace();
   const scope = useSessionScope();
   const { t, tStatus, language } = useI18n();
-  const accountsScrollRef = useRef<HTMLDivElement | null>(null);
-  const profilesScrollRef = useRef<HTMLDivElement | null>(null);
-  useSmoothScrollContainer(accountsScrollRef);
-  useSmoothScrollContainer(profilesScrollRef);
+  const accountsScrollRef = useSmoothScrollContainer();
+  const profilesScrollRef = useSmoothScrollContainer();
 
   const navigate = useNavigate();
   const location = useLocation();

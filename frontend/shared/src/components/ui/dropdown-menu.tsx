@@ -331,10 +331,10 @@ export const DropdownMenuSeparator = React.forwardRef<
 DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
 
 /**
- * Controlled filter checklist. Empty selection means all; choosing the aggregate
- * row clears the selection. Toggling concrete values keeps the menu open, while
- * Radix owns keyboard navigation, dismissal, and trigger focus restoration.
- * Callers own option identity, labels, ordering, and filtering semantics.
+ * Controlled checklist. An aggregate label adds a clearing row for collection
+ * filters, where empty means all. Omitting it leaves explicit choices only.
+ * Toggling values keeps the menu open; Radix owns keyboard navigation,
+ * dismissal, and trigger restoration. Callers own selection semantics.
  */
 export function FilterChecklist<Value extends string>({
   value,
@@ -348,7 +348,7 @@ export function FilterChecklist<Value extends string>({
   value: readonly Value[];
   onValueChange: (value: Value[]) => void;
   options: readonly { value: Value; label: React.ReactNode }[];
-  aggregateLabel: string;
+  aggregateLabel?: string;
   trigger: React.ReactElement;
   label?: string;
   className?: string;
@@ -361,14 +361,18 @@ export function FilterChecklist<Value extends string>({
         className={className}
         {...(label ? { "aria-label": label, "aria-labelledby": undefined } : {})}
       >
-        <DropdownMenuCheckboxItem
-          checked={value.length === 0}
-          onCheckedChange={() => onValueChange([])}
-          onSelect={(event) => event.preventDefault()}
-        >
-          {aggregateLabel}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuSeparator />
+        {aggregateLabel && (
+          <>
+            <DropdownMenuCheckboxItem
+              checked={value.length === 0}
+              onCheckedChange={() => onValueChange([])}
+              onSelect={(event) => event.preventDefault()}
+            >
+              {aggregateLabel}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         {options.map((option) => (
           <DropdownMenuCheckboxItem
             key={option.value}

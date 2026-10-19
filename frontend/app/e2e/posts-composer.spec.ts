@@ -16,6 +16,8 @@ import {
   closeComposer,
   editPostFromRow,
   provisionControlledChannels,
+  controlledProviderAccountId,
+  readLiveControlledCopies,
   type ControlledPlatform,
 } from "./publication-fixtures";
 import { signIn, openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
@@ -249,7 +251,8 @@ interface PostMutation {
   request: { attachment_ids?: string[]; default_text?: string; targets?: SavedTargetFields[] };
   response: {
     id: string;
-    attachments: Array<{ asset_id: string }>;
+    brand_profile_id: string;
+    attachments: Array<{ asset_id: string; asset: { brand_profile_id: string } }>;
     distributions: unknown[];
     targets: SavedTargetFields[];
   };
@@ -435,7 +438,7 @@ async function blobUrlCounts(page: Page): Promise<{ created: number; revoked: nu
  */
 async function composerRecoveryKeys(page: Page): Promise<string[]> {
   return page.evaluate(() =>
-    Object.keys(window.localStorage).filter((key) => key.startsWith("meltiply.composer.v1.")),
+    Object.keys(window.localStorage).filter((key) => key.startsWith("meltiply.composer.v2.")),
   );
 }
 
@@ -497,8 +500,8 @@ test("restores an unsaved new composition after a reload and clears it on save",
   await expect(composerTextarea(page)).toHaveValue(caption);
   await expect(page.getByText(/Unsaved changes are kept in this browser/i)).toBeVisible();
 
-  // A successful save supersedes the recovery copy in both the unsaved `new`
-  // namespace and the saved Post's, so a fresh composition starts empty.
+  // A successful save supersedes this composition's stable recovery namespace,
+  // so a fresh composition starts empty.
   await saveDraft(page);
   expect(await composerRecoveryKeys(page)).toHaveLength(0);
   await closeComposer(page);
@@ -570,6 +573,174 @@ test("uploads media in the composer and saves the ordered attachments", async ({
     [gif.name, "1. "],
     [png.name, "2. "],
   ]);
+});
+
+/**
+ * Cross-profile acceptance: real media and Posts retain distinct ownership,
+ * saved identities survive a reload after partial failure, and a failed queue
+ * operation can finish without resubmitting a profile already accepted.
+ */
+test("recovers independent profile copies and retries only unfinished publishing", async ({
+  page,
+  request,
+}) => {
+  test.slow();
+  const workspace = await openIsolatedOwnerWorkspace(page);
+  const secondaryName = `${workspace.profileName} secondary`;
+  await page.goto("/channels");
+  await page.getByRole("button", { name: "Create Brand Profile", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Create Brand Profile", exact: true });
+  await editor.getByLabel("Profile name", { exact: true }).fill(secondaryName);
+  await editor.getByRole("button", { name: "Create profile", exact: true }).click();
+  await expect(editor).not.toBeVisible();
+  const firstAccount = controlledProviderAccountId("threads");
+  const secondAccount = controlledProviderAccountId("threads");
+  const primary = await provisionControlledChannels(request, workspace.profileName, [
+    { platform: "threads", displayName: "Primary Threads", providerUserId: firstAccount },
+  ]);
+  const secondary = await provisionControlledChannels(request, secondaryName, [
+    { platform: "threads", displayName: "Secondary Threads", providerUserId: secondAccount },
+    {
+      platform: "instagram",
+      displayName: "Secondary Instagram",
+      providerUserId: controlledProviderAccountId("instagram"),
+    },
+  ]);
+  await page.goto("/posts");
+  await waitForWorkspace(page);
+  await activeBrandProfileName(page);
+  await openComposer(page);
+  await page.locator('[data-side-dialog] button[aria-haspopup="menu"]').click();
+  const profiles = page.getByRole("menu", { name: "Brand Profile", exact: true });
+  await profiles.getByRole("menuitemcheckbox", { name: secondaryName, exact: true }).click();
+  await expect(
+    profiles.getByRole("menuitemcheckbox", { name: workspace.profileName, exact: true }),
+  ).toBeChecked();
+  await expect(
+    profiles.getByRole("menuitemcheckbox", { name: secondaryName, exact: true }),
+  ).toBeChecked();
+  await page.keyboard.press("Escape");
+  const destinations = page.getByRole("region", { name: "Destinations", exact: true });
+  const threadsGroup = destinations.locator('section[aria-label="Threads"]');
+  await expect(threadsGroup.getByRole("button", { name: /Primary Threads/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(threadsGroup.getByRole("button", { name: /Secondary Threads/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(destinations.locator('section[aria-label="Instagram"]')).toBeVisible();
+  await destinations.getByRole("button", { name: /Secondary Instagram/ }).click();
+
+  const caption = "Independent profile copies";
+  const secondaryCaption = "Secondary profile caption";
+  await composerTextarea(page).fill(caption);
+  const png = pngFixture();
+  await composerFileInput(page).setInputFiles(png);
+  await expectAttachmentPhases(page, [[png.name, "Ready"]]);
+  const secondaryPanel = page.getByRole("region", { name: "Secondary Threads", exact: true });
+  await secondaryPanel.getByRole("textbox").fill(secondaryCaption);
+  await secondaryPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
+  await secondaryPanel
+    .getByRole("button", { name: attachmentControlName("1. ", png.name) })
+    .click();
+  const mutations = await watchPostMutations(page);
+  let rejectSecondaryDraft = true;
+  await page.route(/\/api\/v1\/posts$/, async (route) => {
+    const body: unknown = route.request().postDataJSON();
+    if (
+      rejectSecondaryDraft &&
+      route.request().method() === "POST" &&
+      typeof body === "object" &&
+      body !== null &&
+      "brand_profile_id" in body &&
+      body.brand_profile_id === secondary.brandProfileId
+    ) {
+      await route.fulfill({
+        status: 503,
+        json: {
+          error: { code: "internal_error", message: "Temporarily unavailable" },
+        },
+      });
+    } else await route.fallback();
+  });
+  await page.getByRole("button", { name: "Save Drafts", exact: true }).click();
+  await expect(page.getByRole("alert")).toBeVisible({ timeout: 60_000 });
+  const primaryBeforeRetry = mutations.find(
+    (mutation) => mutation.response.brand_profile_id === primary.brandProfileId,
+  )?.response;
+  expect(primaryBeforeRetry?.brand_profile_id).toBe(primary.brandProfileId);
+  rejectSecondaryDraft = false;
+  await reloadWithScopedProfile(page);
+  await openComposer(page);
+  await expect(composerTextarea(page)).toHaveValue(caption);
+  await expect(secondaryPanel.getByRole("textbox")).toHaveValue(secondaryCaption);
+  await page.getByRole("button", { name: "Save Drafts", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText(/Saved to your workspace at/i)).toBeVisible({ timeout: 60_000 });
+  const firstCopy = mutations.findLast(
+    (mutation) => mutation.response.brand_profile_id === primary.brandProfileId,
+  )?.response;
+  const secondCopy = mutations.findLast(
+    (mutation) => mutation.response.brand_profile_id === secondary.brandProfileId,
+  )?.response;
+  expect(firstCopy?.id).toBe(primaryBeforeRetry?.id);
+  expect(firstCopy?.attachments).toHaveLength(1);
+  expect(secondCopy?.attachments).toHaveLength(1);
+  expect(firstCopy?.attachments[0]?.asset.brand_profile_id).toBe(primary.brandProfileId);
+  expect(secondCopy?.attachments[0]?.asset.brand_profile_id).toBe(secondary.brandProfileId);
+  expect(secondCopy?.attachments[0]?.asset_id).not.toBe(firstCopy?.attachments[0]?.asset_id);
+  expect(
+    secondCopy?.targets.find((target) => target.platform_account_id === secondary.channels[0]?.id),
+  ).toMatchObject({
+    description_override: secondaryCaption,
+    attachment_ids: [secondCopy?.attachments[0]?.asset_id],
+  });
+  expect(new Set(mutations.map((mutation) => mutation.response.id))).toEqual(
+    new Set([firstCopy?.id, secondCopy?.id]),
+  );
+
+  let rejectSecondarySchedule = true;
+  const acceptedPrimarySchedules: string[] = [];
+  await page.route(/\/api\/v1\/posts\/[^/]+\/schedule$/, async (route) => {
+    if (route.request().url().includes(`/${secondCopy?.id}/`) && rejectSecondarySchedule) {
+      await route.fulfill({
+        status: 503,
+        json: {
+          error: { code: "internal_error", message: "Temporarily unavailable" },
+        },
+      });
+    } else {
+      if (route.request().url().includes(`/${firstCopy?.id}/`))
+        acceptedPrimarySchedules.push(route.request().url());
+      await route.fallback();
+    }
+  });
+  await choosePublishingMode(page, "Now");
+  await page.getByRole("button", { name: "Publish Posts", exact: true }).click();
+  await expect(page.getByRole("alert")).toBeVisible({ timeout: processingTimeoutMs });
+  expect(acceptedPrimarySchedules).toHaveLength(1);
+  rejectSecondarySchedule = false;
+  await page.getByRole("button", { name: "Publish Posts", exact: true }).click();
+  await expect(composerTextarea(page)).toBeHidden({ timeout: 60_000 });
+  expect(acceptedPrimarySchedules).toHaveLength(1);
+  for (const [account, content] of [
+    [firstAccount, caption],
+    [secondAccount, secondaryCaption],
+  ] as const) {
+    await expect
+      .poll(async () => readLiveControlledCopies(request, account), {
+        timeout: processingTimeoutMs,
+      })
+      .toMatchObject([
+        {
+          caption: content,
+          media: [expect.objectContaining({ contentType: expect.stringMatching(/^image\//) })],
+        },
+      ]);
+    expect(await readLiveControlledCopies(request, account)).toHaveLength(1);
+  }
 });
 
 /**

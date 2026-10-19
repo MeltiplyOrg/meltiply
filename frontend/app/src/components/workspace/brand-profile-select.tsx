@@ -165,9 +165,9 @@ function useBrandProfileOptions(
 }
 
 /**
- * Multi-profile collection filter using the same option roster as ownership
- * selection. Empty means all profiles; selections are OR-matched by the caller.
- * This does not assign multiple owners to a composed Post.
+ * Multi-profile checklist sharing the canonical resolved/unknown option roster.
+ * Collection filters include aggregate clearing (empty means all). Composition
+ * omits it: empty means no profiles, and each selected profile owns its own Post.
  */
 export function BrandProfileFilterSelect({
   value,
@@ -175,12 +175,14 @@ export function BrandProfileFilterSelect({
   brandProfiles,
   unresolvedProfileIds,
   trigger,
+  includeAggregate = true,
 }: {
   value: readonly string[];
   onValueChange: (value: string[]) => void;
   brandProfiles: readonly BrandProfile[];
   unresolvedProfileIds?: readonly string[];
   trigger: ReactElement;
+  includeAggregate?: boolean;
 }) {
   const { t } = useI18n();
   const options = useBrandProfileOptions(brandProfiles, unresolvedProfileIds);
@@ -190,7 +192,7 @@ export function BrandProfileFilterSelect({
       onValueChange={onValueChange}
       trigger={trigger}
       label={t("Brand Profile")}
-      aggregateLabel={t("All Brand Profiles")}
+      aggregateLabel={includeAggregate ? t("All Brand Profiles") : undefined}
       className="w-max max-w-80"
       options={options.map((option) => ({ value: option.id, label: option.name }))}
     />

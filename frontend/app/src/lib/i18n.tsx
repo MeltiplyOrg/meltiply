@@ -631,6 +631,25 @@ const spanishTranslations: Record<string, string> = {
   "{count} platforms": "{count} plataformas",
   "{count} statuses": "{count} estados",
   "{count} Brand Profiles": "{count} perfiles de marca",
+  "Choose Brand Profiles": "Elegir perfiles de marca",
+  "Choose Brand Profiles to see their channels.": "Elige perfiles de marca para ver sus canales.",
+  "No social channels connected for the selected profiles.":
+    "No hay canales conectados para los perfiles seleccionados.",
+  "Creates one independent Post per selected Brand Profile. Media is copied into each profile.":
+    "Crea una publicación independiente por perfil de marca seleccionado. Los medios se copian en cada perfil.",
+  "Saved one independent Post per selected Brand Profile.":
+    "Se guardó una publicación independiente por perfil de marca seleccionado.",
+  "Brand Profile progress": "Progreso por perfil de marca",
+  "Preparing profile media…": "Preparando medios del perfil…",
+  "Save Drafts": "Guardar borradores",
+  "Drafts saved": "Borradores guardados",
+  "Schedule Posts": "Programar publicaciones",
+  "Publish Posts": "Publicar publicaciones",
+  "Posts queued": "Publicaciones en cola",
+  "{name}: select at least one destination channel.":
+    "{name}: selecciona al menos un canal de destino.",
+  "Some profiles could not be completed. Completed profiles are kept; retry to finish the remaining work.":
+    "No se pudieron completar algunos perfiles. Los completados se conservan; vuelve a intentarlo para finalizar los restantes.",
   "{count} post(s) scheduled or published on this date.":
     "{count} publicación(es) programada(s) o publicada(s) en esta fecha.",
   "{name} Configuration": "Configuración de {name}",

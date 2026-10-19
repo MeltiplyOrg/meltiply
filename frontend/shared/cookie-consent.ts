@@ -16,7 +16,7 @@ export const functionalStorageKeys = [
   "meltiply.devbox",
 ] as const;
 export const functionalStoragePrefixes = [
-  "meltiply.composer.v1.",
+  "meltiply.composer.",
   "meltiply.upload.v1.",
   "meltiply.upload.create.v1.",
 ] as const;

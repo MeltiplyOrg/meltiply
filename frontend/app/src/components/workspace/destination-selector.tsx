@@ -1,9 +1,10 @@
 import { useCallback } from "react";
+import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { useWorkspace, type ChannelStatusInfo } from "@/context/workspace.context";
 import type { ChannelIntegration } from "@/api/types";
 import type { WorkspaceView } from "@/components/layout/navigation-shell";
 import {
-  BrandProfileSelect,
+  BrandProfileFilterSelect,
   brandProfileFilterLabel,
 } from "@/components/workspace/brand-profile-select";
 import { TopToolbarButton } from "@/components/primitives/top-toolbar-button";
@@ -22,6 +23,8 @@ import { Trans, useI18n } from "@/lib/i18n";
  * Optional callback configuration for the DestinationSelector toolbar.
  */
 export interface DestinationSelectorProps {
+  selectedProfileIds: string[];
+  onProfilesChange: (ids: string[]) => void;
   /**
    * Optional navigation handler to transition between workspace views.
    * Accepts optional query options (e.g. `{ search: '?tab=add' }`) to deep link into sub-tabs.
@@ -36,32 +39,23 @@ export interface DestinationSelectorProps {
 /**
  * Destination channel selector toolbar for choosing target social media accounts.
  *
- * Owns the composer's own Brand Profile picker: publishing targets exactly one
- * profile, so the block leads with the canonical `BrandProfileSelect` (without
- * the aggregate row, which cannot publish) and the profile choice lands in the
- * shared workspace selection the rest of the drawer already reads. Every
- * profile-owned destination shows a row-filling square account photo or initials,
- * with a small provider badge, display name, separate username and provider channel ID rows,
- * and explicit selection or connection state. Missing usernames are stated, not
- * inferred from an id or display name.
- *
- * Filters connected integrations to the channels owned by the currently selected
- * Brand Profile (the aggregate "All Brand Profiles" view lists every channel but
- * is read-only for publishing), displays real-time connection status badges
- * (disabled, expired token, incomplete setup) driven by `channelStatuses` from
- * the workspace context, handles multi-select toggling via workspace context,
- * and provides quick navigation buttons to seamlessly transition into adding or
- * connecting new social channels.
+ * The composer owns the selected Brand Profiles. Their channels are grouped by
+ * provider, with account identity and owning profile shown on each row. Channel
+ * toggles retain their explicit selection independently of profile visibility;
+ * unavailable connections remain visible but cannot be selected for publishing.
  *
  * @param props - Navigation and channel addition action handlers.
  * @returns The rendered destination toolbar with the profile picker, selection pills, and quick-add actions.
  */
-export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSelectorProps = {}) {
+export function DestinationSelector({
+  selectedProfileIds,
+  onProfilesChange,
+  onNavigate,
+  onAddChannel,
+}: DestinationSelectorProps) {
   const {
     brandProfiles,
     integrations,
-    selectedBrandProfileId,
-    setSelectedBrandProfileId,
     selectedChannelIds,
     channelStatuses,
     toggleChannelSelection,
@@ -83,19 +77,18 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
     onNavigate?.("channels", { search: "?tab=add" });
   }, [onAddChannel, onNavigate]);
 
-  // Channels to display: the aggregate view lists every channel; a selected
-  // Brand Profile strictly filters to the channels it owns.
-  const displayedChannels = integrations.filter((ch: ChannelIntegration) => {
-    if (selectedBrandProfileId === null) return true;
-    return ch.brandProfileId === selectedBrandProfileId;
-  });
-
-  /**
-   * Publishing targets exactly one Brand Profile. In the aggregate view the
-   * directory still lists every account, but none of them can be selected, so
-   * the block shows why instead of accepting a selection nothing can publish.
-   */
-  const canPublish = selectedBrandProfileId !== null;
+  const profileIds = new Set(selectedProfileIds);
+  const displayedChannels = integrations.filter(
+    (channel) => channel.brandProfileId !== null && profileIds.has(channel.brandProfileId),
+  );
+  const groupedChannels = new Map<string, ChannelIntegration[]>();
+  for (const channel of displayedChannels) {
+    const provider = channel.providerIdentifier.toLowerCase();
+    const group = groupedChannels.get(provider);
+    if (group) group.push(channel);
+    else groupedChannels.set(provider, [channel]);
+  }
+  const profileNames = new Map(brandProfiles.map((profile) => [profile.id, profile.name]));
   // Both loops below read these two collections per channel, so index them once
   // rather than scanning either list inside the render map. First occurrence wins,
   // matching the `find` calls they replace.
@@ -110,20 +103,16 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
     selectedChannelIdSet.has(ch.id),
   ).length;
 
-  /**
-   * Trigger text for the profile picker. The aggregate sentinels are reported as
-   * a missing choice rather than "All Brand Profiles", because publishing always
-   * needs one owning profile; a concrete id resolves through the shared filter
-   * label so the drawer, the Channels directory, and the Posts toolbar name the
-   * same profile identically.
-   */
-  const profileLabel = selectedBrandProfileId
-    ? brandProfileFilterLabel(selectedBrandProfileId, brandProfiles, t)
-    : t("Choose a Brand Profile");
+  const profileLabel =
+    selectedProfileIds.length > 1
+      ? t("{count} Brand Profiles", { count: selectedProfileIds.length })
+      : selectedProfileIds.length === 1
+        ? brandProfileFilterLabel(selectedProfileIds[0], brandProfiles, t)
+        : t("Choose Brand Profiles");
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col gap-3">
+      <section aria-label={t("Destinations")} className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <Share2 className="size-3.5 shrink-0 text-ink-3" aria-hidden="true" />
@@ -149,21 +138,26 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
           </Button>
         </div>
 
-        {/* The profile is the destination's own first choice: the list below can
-            only offer selectable channels once one profile owns the post. */}
-        <BrandProfileSelect
-          value={selectedBrandProfileId ?? ""}
-          onValueChange={(id) => setSelectedBrandProfileId(id === "" ? null : id)}
+        <BrandProfileFilterSelect
+          value={selectedProfileIds}
+          onValueChange={onProfilesChange}
           brandProfiles={brandProfiles}
-          label={t("Brand Profile")}
+          unresolvedProfileIds={selectedProfileIds}
           includeAggregate={false}
           trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
         />
+        <p className="text-(length:--font-size-micro) leading-relaxed text-ink-3">
+          {t(
+            "Creates one independent Post per selected Brand Profile. Media is copied into each profile.",
+          )}
+        </p>
 
         {displayedChannels.length === 0 ? (
           <div className="flex flex-col items-center gap-2.5 rounded-control border border-dashed border-line px-3 py-4 text-center">
             <p className="text-(length:--font-size-ui) text-ink-3">
-              {t("No social channels connected for this profile.")}
+              {selectedProfileIds.length === 0
+                ? t("Choose Brand Profiles to see their channels.")
+                : t("No social channels connected for the selected profiles.")}
             </p>
             <Button
               type="button"
@@ -178,138 +172,145 @@ export function DestinationSelector({ onNavigate, onAddChannel }: DestinationSel
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {displayedChannels.map((channel: ChannelIntegration) => {
-              const statusInfo = statusByChannelId.get(channel.id);
-              const isAvailable = statusInfo?.isAvailable ?? true;
-              const isSelected = selectedChannelIdSet.has(channel.id);
-              const isUngrouped = channel.brandProfileId == null;
-              const username = formatUsername(channel.username);
-              const usernameLabel = username
-                ? t("Username: {username}", { username })
-                : t("Username not provided");
-              const avatar = (
-                <span aria-hidden="true" className="shrink-0">
-                  <ChannelAvatar
-                    provider={channel.providerIdentifier}
-                    channelName={channel.name}
-                    picture={channel.picture}
-                    size="card"
-                  />
-                </span>
-              );
+            {[...groupedChannels].map(([provider, channels]) => (
+              <section
+                key={provider}
+                aria-label={platformDisplayName(provider)}
+                className="flex flex-col gap-1.5"
+              >
+                <h4 className="flex items-center gap-2 pt-2 text-xs font-medium text-ink-3">
+                  <PlatformIcon provider={provider} className="size-3.5" />
+                  {platformDisplayName(provider)}
+                </h4>
+                {channels.map((channel: ChannelIntegration) => {
+                  const statusInfo = statusByChannelId.get(channel.id);
+                  const isAvailable = statusInfo?.isAvailable ?? true;
+                  const isSelected = selectedChannelIdSet.has(channel.id);
+                  const username = formatUsername(channel.username);
+                  const usernameLabel = username
+                    ? t("Username: {username}", { username })
+                    : t("Username not provided");
+                  const avatar = (
+                    <span aria-hidden="true" className="shrink-0">
+                      <ChannelAvatar
+                        provider={channel.providerIdentifier}
+                        channelName={channel.name}
+                        picture={channel.picture}
+                        size="card"
+                      />
+                    </span>
+                  );
 
-              // Unavailable accounts and the aggregate view share one
-              // treatment: the row states the account's identity, and the
-              // tooltip states the one reason it cannot be chosen.
-              if (!isAvailable || !canPublish) {
-                return (
-                  <Tooltip key={channel.id}>
-                    <TooltipTrigger asChild>
-                      <div className="flex cursor-not-allowed select-none items-center gap-2 rounded-control border border-line bg-inset p-2 text-(length:--font-size-control) text-ink-3">
-                        {avatar}
-                        <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                          <span className="flex w-full min-w-0 items-baseline gap-2">
-                            <span className="min-w-0 flex-1 truncate font-medium">
-                              {channel.name}
+                  // Unavailable connections stay visible with their actual reason.
+                  if (!isAvailable) {
+                    return (
+                      <Tooltip key={channel.id}>
+                        <TooltipTrigger asChild>
+                          <div className="flex cursor-not-allowed select-none items-center gap-2 rounded-control border border-line bg-inset p-2 text-(length:--font-size-control) text-ink-3">
+                            {avatar}
+                            <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                              <span className="flex w-full min-w-0 items-baseline gap-2">
+                                <span className="min-w-0 flex-1 truncate font-medium">
+                                  {channel.name}
+                                </span>
+                                <span className="shrink-0 text-(length:--font-size-micro)">
+                                  {platformDisplayName(channel.providerIdentifier)}
+                                </span>
+                              </span>
+                              <span className="w-full whitespace-normal break-all text-left text-(length:--font-size-micro)">
+                                {usernameLabel}
+                              </span>
+                              <span className="text-left text-(length:--font-size-micro)">
+                                {profileNames.get(channel.brandProfileId ?? "") ??
+                                  t("Unknown profile")}
+                              </span>
+                              <span className="w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)">
+                                {t("ID: {id}", { id: channel.platformUserId })}
+                              </span>
                             </span>
-                            <span className="shrink-0 text-(length:--font-size-micro)">
-                              {platformDisplayName(channel.providerIdentifier)}
-                            </span>
+                            {(channel.disabled || channel.refreshNeeded) && (
+                              <span className="flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-red">
+                                {channel.disabled ? t("Disabled") : t("Expired")}
+                              </span>
+                            )}
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{statusInfo?.reason ?? t("Channel is unavailable")}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+
+                  return (
+                    <Button
+                      key={channel.id}
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-pressed={isSelected}
+                      onClick={() => toggleChannelSelection(channel.id)}
+                      className={cn(
+                        "h-auto w-full justify-start gap-2 rounded-control border p-2 text-(length:--font-size-control) font-normal",
+                        // Selected rows pin their own hover colors so the ghost
+                        // variant's default hover cannot repaint the active state.
+                        isSelected
+                          ? "border-accent bg-accent-tint text-accent-ink hover:bg-accent-tint hover:text-accent-ink"
+                          : "border-line bg-surface text-ink-2 hover:bg-hover hover:text-ink",
+                      )}
+                    >
+                      {avatar}
+                      <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                        <span className="flex w-full min-w-0 items-baseline gap-2">
+                          <span className="min-w-0 flex-1 truncate text-left font-medium">
+                            {channel.name}
                           </span>
-                          <span className="w-full whitespace-normal break-all text-left text-(length:--font-size-micro)">
-                            {usernameLabel}
-                          </span>
-                          <span className="w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)">
-                            {t("ID: {id}", { id: channel.platformUserId })}
+                          <span
+                            className={cn(
+                              "shrink-0 text-(length:--font-size-micro)",
+                              isSelected ? "text-accent-ink/70" : "text-ink-3",
+                            )}
+                          >
+                            {platformDisplayName(channel.providerIdentifier)}
                           </span>
                         </span>
-                        {(channel.disabled || channel.refreshNeeded) && (
-                          <span className="flex shrink-0 items-center gap-1 text-(length:--font-size-micro) text-red">
-                            {channel.disabled ? t("Disabled") : t("Expired")}
-                          </span>
-                        )}
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>
-                        {isAvailable
-                          ? t("Choose a Brand Profile to pick publish destinations.")
-                          : (statusInfo?.reason ?? t("Channel is unavailable"))}
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              }
-
-              return (
-                <Button
-                  key={channel.id}
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-pressed={isSelected}
-                  onClick={() => toggleChannelSelection(channel.id)}
-                  className={cn(
-                    "h-auto w-full justify-start gap-2 rounded-control border p-2 text-(length:--font-size-control) font-normal",
-                    // Selected rows pin their own hover colors so the ghost
-                    // variant's default hover cannot repaint the active state.
-                    isSelected
-                      ? "border-accent bg-accent-tint text-accent-ink hover:bg-accent-tint hover:text-accent-ink"
-                      : "border-line bg-surface text-ink-2 hover:bg-hover hover:text-ink",
-                  )}
-                >
-                  {avatar}
-                  <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                    <span className="flex w-full min-w-0 items-baseline gap-2">
-                      <span className="min-w-0 flex-1 truncate text-left font-medium">
-                        {channel.name}
+                        <span
+                          className={cn(
+                            "w-full whitespace-normal break-all text-left text-(length:--font-size-micro)",
+                            isSelected ? "text-accent-ink/70" : "text-ink-3",
+                          )}
+                        >
+                          {usernameLabel}
+                        </span>
+                        <span className="text-left text-(length:--font-size-micro)">
+                          {profileNames.get(channel.brandProfileId ?? "") ?? t("Unknown profile")}
+                        </span>
+                        <span
+                          className={cn(
+                            "w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)",
+                            isSelected ? "text-accent-ink/70" : "text-ink-3",
+                          )}
+                        >
+                          {t("ID: {id}", { id: channel.platformUserId })}
+                        </span>
                       </span>
                       <span
+                        aria-hidden="true"
                         className={cn(
-                          "shrink-0 text-(length:--font-size-micro)",
-                          isSelected ? "text-accent-ink/70" : "text-ink-3",
+                          "flex size-3.5 shrink-0 items-center justify-center",
+                          isSelected ? "text-accent-ink" : "text-ink-3",
                         )}
                       >
-                        {platformDisplayName(channel.providerIdentifier)}
+                        {isSelected && <Check className="size-3.5" />}
                       </span>
-                    </span>
-                    <span
-                      className={cn(
-                        "w-full whitespace-normal break-all text-left text-(length:--font-size-micro)",
-                        isSelected ? "text-accent-ink/70" : "text-ink-3",
-                      )}
-                    >
-                      {usernameLabel}
-                    </span>
-                    <span
-                      className={cn(
-                        "w-full whitespace-normal break-all text-left font-mono text-(length:--font-size-micro)",
-                        isSelected ? "text-accent-ink/70" : "text-ink-3",
-                      )}
-                    >
-                      {t("ID: {id}", { id: channel.platformUserId })}
-                    </span>
-                  </span>
-                  {isUngrouped && (
-                    <span className="shrink-0 text-(length:--font-size-micro) text-ink-3">
-                      {t("(ungrouped)")}
-                    </span>
-                  )}
-                  <span
-                    aria-hidden="true"
-                    className={cn(
-                      "flex size-3.5 shrink-0 items-center justify-center",
-                      isSelected ? "text-accent-ink" : "text-ink-3",
-                    )}
-                  >
-                    {isSelected && <Check className="size-3.5" />}
-                  </span>
-                </Button>
-              );
-            })}
+                    </Button>
+                  );
+                })}
+              </section>
+            ))}
           </div>
         )}
-      </div>
+      </section>
     </TooltipProvider>
   );
 }

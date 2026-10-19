@@ -14,11 +14,7 @@ const owners = new WeakMap<HTMLElement, () => void>();
  * Returns observer cleanup; reinitialization releases the previous owner without
  * hiding its painted rail. Missing decoration returns no cleanup.
  */
-export function initializeReadingRail(
-  root: HTMLElement,
-  lowMotion: boolean,
-  beforeHydration = false,
-) {
+export function initializeReadingRail(root: HTMLElement, beforeHydration = false) {
   owners.get(root)?.();
   const track = root.querySelector<SVGPathElement>(".docs-reading-remaining");
   const progress = root.querySelector<SVGPathElement>(".docs-reading-progress");
@@ -26,7 +22,6 @@ export function initializeReadingRail(
   if (!track || !progress || !plane) return;
   const links = Array.from(root.querySelectorAll<HTMLAnchorElement>("a"));
   const minDepth = Math.min(...links.map((link) => Number(link.parentElement?.dataset.depth)));
-  root.dataset.lowMotion = String(lowMotion);
   const rail = root.closest<HTMLElement>("#nd-toc");
   let stops: RailStop[] = [];
   let length = 0;
@@ -52,12 +47,9 @@ export function initializeReadingRail(
       : 0;
     const distance = current.distance + (next ? (next.distance - current.distance) * fraction : 0);
     const point = track.getPointAtLength(distance);
-    let rotation = 0;
-    if (!lowMotion) {
-      const ahead = track.getPointAtLength(Math.min(length, distance + 1));
-      const behind = track.getPointAtLength(Math.max(0, distance - 1));
-      rotation = (Math.atan2(ahead.y - behind.y, ahead.x - behind.x) * 180) / Math.PI + 45;
-    }
+    const ahead = track.getPointAtLength(Math.min(length, distance + 1));
+    const behind = track.getPointAtLength(Math.max(0, distance - 1));
+    const rotation = (Math.atan2(ahead.y - behind.y, ahead.x - behind.x) * 180) / Math.PI + 45;
     const transform = `translate(${point.x}px, ${point.y}px) rotate(${rotation}deg)`;
     if (beforeHydration) {
       // Match React's inline-style serialization when adopting the prepainted DOM.

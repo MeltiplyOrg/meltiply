@@ -344,12 +344,13 @@ export function DevBox(): React.ReactElement | null {
               <TabsList
                 aria-label="DevBox tools"
                 className="h-auto justify-start gap-1 rounded-none border-b border-line bg-transparent px-2 py-1.5 text-inherit"
+                indicatorClassName="inset-y-1.5 rounded-control border-transparent bg-ink shadow-none"
               >
                 {devBoxTabs.map((tab) => (
                   <TabsTrigger
                     key={tab}
                     value={tab}
-                    className="rounded-control px-2 py-1 text-[12px] font-medium text-ink-3 transition-colors hover:bg-hover hover:text-ink-2 data-[state=active]:bg-ink data-[state=active]:text-surface data-[state=active]:shadow-none"
+                    className="rounded-control px-2 py-1 text-[12px] font-medium text-ink-3 transition-colors hover:bg-hover hover:text-ink-2 data-[state=active]:text-surface data-[state=active]:hover:bg-transparent"
                   >
                     {tabLabels[tab]}
                   </TabsTrigger>

@@ -1,45 +1,77 @@
 import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
+import { SlidingHighlight } from "../primitives/sliding-highlight";
 import { cn } from "@meltiply/ui/utils";
 
-/**
- * Root state container for tab navigation built on `@radix-ui/react-tabs`.
- *
- * Manages active tab state, keyboard navigation (arrow keys), and ARIA tablist/tab/tabpanel
- * associations. Can be used controlled (`value`, `onValueChange`) or uncontrolled (`defaultValue`).
- */
+/** Radix owns tab selection, arrow-key navigation, and tab/panel relationships. */
 export const Tabs = TabsPrimitive.Root;
 
+type TabsListProps = React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> & {
+  variant?: "segment" | "line" | "navigation";
+  /**
+   * Styling for the sliding selection indicator, merged over the variant's own
+   * look (a surface pill for `segment`, an accent underline for `line`). DevBox
+   * inverts its strip, so it recolors the pill instead of painting a second fill.
+   */
+  indicatorClassName?: string;
+};
+const listStyles = {
+  segment:
+    "relative inline-flex h-7 items-center justify-center gap-0.5 rounded-control bg-hover-2 p-0.5",
+  line: "relative flex h-10 items-center justify-start gap-6 border-b border-line",
+  navigation: "flex flex-col items-stretch gap-1",
+};
+const indicatorStyles = {
+  segment: "inset-y-0.5 border-transparent bg-surface shadow-btn",
+  line: "-bottom-px h-0.5 rounded-none border-transparent bg-accent shadow-none",
+};
+
 /**
- * Container grouping individual tab triggers in a pill-styled muted bar.
- *
- * @param props - Radix TabsList props and forwarded ref, merging custom styling with flex centering and muted background.
- * @returns The rendered tab list container.
+ * One tab owner supports compact segments, directory underlines, and settings
+ * navigation without page CSS. The horizontal variants hand their selection to a
+ * shared partial: the highlight travels to the selected trigger instead of each
+ * trigger painting the fill in place, so switching sections slides.
  */
 export const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
->(({ className, ...props }, ref) => (
-  <TabsPrimitive.List
-    ref={ref}
-    className={cn(
-      "inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground",
-      className,
-    )}
-    {...props}
-  />
-));
+  TabsListProps
+>(({ variant = "segment", className, indicatorClassName, children, ...props }, ref) => {
+  const listRef = React.useRef<React.ElementRef<typeof TabsPrimitive.List> | null>(null);
+  const setRefs = React.useCallback(
+    (node: React.ElementRef<typeof TabsPrimitive.List> | null) => {
+      listRef.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) ref.current = node;
+    },
+    [ref],
+  );
+
+  return (
+    <TabsPrimitive.List
+      ref={setRefs}
+      data-variant={variant}
+      className={cn("group/tabs text-ink-2", listStyles[variant], className)}
+      {...props}
+    >
+      {variant !== "navigation" && (
+        <SlidingHighlight
+          containerRef={listRef}
+          itemSelector='[role="tab"]'
+          activeSelector='[data-state="active"]'
+          axis="x"
+          className={cn(indicatorStyles[variant], indicatorClassName)}
+        />
+      )}
+      {children}
+    </TabsPrimitive.List>
+  );
+});
 TabsList.displayName = TabsPrimitive.List.displayName;
 
 /**
- * Interactive tab trigger button activating a corresponding tab panel.
- *
- * Automatically reflects active state via `data-[state=active]` with background highlight,
- * foreground contrast, elevation shadow, and focus-visible ring styles.
- *
- * @param props - Radix TabsTrigger props (must include `value` string matching a `TabsContent`),
- *                forwarding element ref and merging custom class names.
- * @returns An accessible interactive tab button.
+ * Named tab with one focus contract; its containing list selects the shared visual
+ * variant. The active label color lives here while the selection's fill and
+ * underline belong to the list's sliding indicator, so the two never paint twice.
  */
 export const TabsTrigger = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Trigger>,
@@ -48,7 +80,7 @@ export const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow",
+      "relative z-10 inline-flex h-6 items-center justify-center gap-1 whitespace-nowrap rounded-control px-2.5 text-xs font-medium outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45 data-[state=active]:text-ink group-data-[variant=line]/tabs:h-10 group-data-[variant=line]/tabs:rounded-none group-data-[variant=line]/tabs:border-b-2 group-data-[variant=line]/tabs:border-transparent group-data-[variant=line]/tabs:px-0 group-data-[variant=navigation]/tabs:h-8 group-data-[variant=navigation]/tabs:justify-start group-data-[variant=navigation]/tabs:data-[state=active]:bg-hover-2",
       className,
     )}
     {...props}
@@ -56,26 +88,14 @@ export const TabsTrigger = React.forwardRef<
 ));
 TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
 
-/**
- * Tab content panel displayed conditionally when its `value` matches the active tab.
- *
- * Mounts/unmounts or reveals content corresponding to the selected tab with focus outline rings
- * and top margin spacing.
- *
- * @param props - Radix TabsContent props (must include `value` matching a `TabsTrigger`),
- *                forwarding element ref and merging custom class names.
- * @returns The active tab panel element.
- */
+/** Native tab panel semantics with a shared focus ring; callers own layout and scrolling. */
 export const TabsContent = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.Content
     ref={ref}
-    className={cn(
-      "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-      className,
-    )}
+    className={cn("mt-4 outline-none focus-visible:ring-2 focus-visible:ring-ring", className)}
     {...props}
   />
 ));

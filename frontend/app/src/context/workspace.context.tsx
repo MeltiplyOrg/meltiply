@@ -42,7 +42,12 @@ export interface WorkspaceContextValue {
   /** Selects the active Brand Profile; `null` returns to the aggregate view. */
   setSelectedBrandProfileId: (id: string | null) => void;
   toggleChannelSelection: (channelId: string) => void;
-  setSelectedChannelIds: (ids: string[]) => void;
+  /**
+   * Replaces the selected destination set. `null` restores the eligible-default
+   * selection a fresh workspace starts from; `[]` stays an intentional empty
+   * selection the creator asked for, so the two are never collapsed.
+   */
+  setSelectedChannelIds: (ids: string[] | null) => void;
   refreshWorkspace: () => Promise<void>;
   logout: () => Promise<void>;
   /** Selected platform filter across the workspace (`[]` means all platforms). */
@@ -78,7 +83,10 @@ function toSourceUser(profile: ContractUserProfile): UserProfile {
  * disabled, `expired`/`reconnect_required` read as needing re-authentication, and
  * `expiring` stays available while still surfacing through `channelStatuses`.
  * `brand_profile_id` carries the owning Brand Profile so views can filter and
- * label channels by profile.
+ * label channels by profile; `platform_user_id` preserves the provider's channel
+ * identifier for identity rows, separately from Meltiply's internal account id.
+ * `username` remains the real optional handle; never infer it from either id or
+ * the display name, which can independently contain an @-prefixed label.
  *
  * @param account Contract platform account from `GET /platforms`.
  * @returns Source-shaped channel integration for workspace consumers.
@@ -88,13 +96,14 @@ function toSourceIntegration(account: PlatformAccount): ChannelIntegration {
     account.connection_status === "expired" || account.connection_status === "reconnect_required";
   return {
     id: account.id,
+    platformUserId: account.platform_user_id,
+    username: account.username,
     name: account.display_name ?? account.platform_user_id,
     picture: account.avatar_url,
     providerIdentifier: account.platform,
     type: account.platform,
     disabled: account.connection_status === "revoked",
     refreshNeeded,
-    inBetweenSteps: false,
     brandProfileId: account.brand_profile_id,
   };
 }
@@ -191,10 +200,7 @@ export function WorkspaceProvider({
   const isAdmin = user?.role === "admin";
 
   const defaultSelectedChannelIds = useMemo(
-    () =>
-      integrations
-        .filter((ch) => !ch.disabled && !ch.refreshNeeded && !ch.inBetweenSteps)
-        .map((ch) => ch.id),
+    () => integrations.filter((ch) => !ch.disabled && !ch.refreshNeeded).map((ch) => ch.id),
     [integrations],
   );
   const effectiveSelectedChannelIds = selectedChannelIds ?? defaultSelectedChannelIds;
@@ -210,13 +216,6 @@ export function WorkspaceProvider({
             integration: ch,
             isAvailable: false,
             reason: "Authentication expired — reconnection required",
-          };
-        }
-        if (ch.inBetweenSteps) {
-          return {
-            integration: ch,
-            isAvailable: false,
-            reason: "Setup incomplete — finishing connection required",
           };
         }
         return { integration: ch, isAvailable: true };
@@ -240,18 +239,9 @@ export function WorkspaceProvider({
     [defaultSelectedChannelIds],
   );
 
-  /** Stores an explicit channel set, including [] instead of restoring defaults. */
-  const setSelectedChannelIdsTracked = useCallback((ids: string[]) => {
-    setSelectedChannelIds(ids);
-  }, []);
-
   const refreshWorkspace = useCallback(async () => {
     await queryClient.invalidateQueries();
   }, [queryClient]);
-
-  const logout = useCallback(async () => {
-    await signOut();
-  }, [signOut]);
 
   const isLoading =
     !isLoaded || (isSignedIn === true && (userQuery.isPending || brandProfilesQuery.isPending));
@@ -279,9 +269,9 @@ export function WorkspaceProvider({
       error,
       setSelectedBrandProfileId: setBrandProfileId,
       toggleChannelSelection,
-      setSelectedChannelIds: setSelectedChannelIdsTracked,
+      setSelectedChannelIds,
       refreshWorkspace,
-      logout,
+      logout: signOut,
       selectedPlatforms,
       setSelectedPlatforms,
     }),
@@ -299,9 +289,8 @@ export function WorkspaceProvider({
       error,
       setBrandProfileId,
       toggleChannelSelection,
-      setSelectedChannelIdsTracked,
       refreshWorkspace,
-      logout,
+      signOut,
       selectedPlatforms,
       setSelectedPlatforms,
     ],

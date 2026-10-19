@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { AppAuthProvider, useMeltiplyAuth } from "@/components/auth/auth-provider";
 import { WorkspaceProvider } from "@/context/workspace.context";
 import { createAssetUpload, type AssetUploadTask } from "@/lib/upload";
-import type { Asset, Post } from "@/types";
+import type { Asset, BrandProfile, PlatformAccount, Post } from "@/types";
 
 import { Composer } from "./composer";
 import { authClient } from "@/lib/auth-client";
@@ -38,11 +38,12 @@ function neverSettlingUploadTask(): AssetUploadTask {
 
 /** Sidebar probe driving the same Brand Profile switch the workspace shell performs. */
 function ProfileSwitchProbe({ profileId }: { profileId: string }) {
-  const { setBrandProfileId } = useMeltiplyAuth();
+  const { brandProfileId, setBrandProfileId } = useMeltiplyAuth();
   return (
     <>
       <button onClick={() => setBrandProfileId(profileId)}>switch-profile</button>
       <button onClick={() => setBrandProfileId(null)}>switch-all</button>
+      <output aria-label="Collection profile">{brandProfileId ?? "all"}</output>
     </>
   );
 }
@@ -53,13 +54,31 @@ function composerTextarea() {
 }
 
 /** Mounts the composer inside the real auth, workspace, i18n, and query providers. */
-function renderComposer(options: { initialPostId?: string; post?: Post } = {}) {
+function renderComposer(
+  options: {
+    initialPostId?: string;
+    post?: Post;
+    /** Connected accounts the workspace sees; the composer selects eligible ones. */
+    accounts?: PlatformAccount[];
+    /** Published platform capabilities, keyed by platform like the API response. */
+    capabilities?: ReturnType<typeof platformCapability>[];
+    /** Ordered real profile records used to exercise default owner selection. */
+    brandProfiles?: BrandProfile[];
+  } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   // Seeded data stays fresh so focused tests never hit the network for it.
   queryClient.setQueryDefaults(queryKeys.posts(), { staleTime: Infinity });
-  queryClient.setQueryData(queryKeys.platforms(), []);
+  queryClient.setQueryDefaults(queryKeys.platforms(), { staleTime: Infinity });
+  queryClient.setQueryDefaults(queryKeys.platformCapabilities(), { staleTime: Infinity });
+  queryClient.setQueryData(queryKeys.platforms(), options.accounts ?? []);
+  queryClient.setQueryData(queryKeys.platformCapabilities(), options.capabilities ?? []);
+  if (options.brandProfiles) {
+    queryClient.setQueryDefaults(queryKeys.brandProfiles(), { staleTime: Infinity });
+    queryClient.setQueryData(queryKeys.brandProfiles(), options.brandProfiles);
+  }
   if (options.post) queryClient.setQueryData(queryKeys.post(options.post.id), options.post);
   return render(
     <QueryClientProvider client={queryClient}>
@@ -94,6 +113,7 @@ afterEach(() => {
 });
 
 const hydratedPost: Post = {
+  analytics: null,
   id: "post-hydrated",
   org_id: "org-1",
   brand_profile_id: "profile-a",
@@ -107,6 +127,101 @@ const hydratedPost: Post = {
   created_at: "2026-10-01T10:00:00.000Z",
   updated_at: "2026-10-01T10:00:00.000Z",
 };
+
+/**
+ * One published capability record as the API sends it, with the caption bound
+ * under test. Everything else is inert so a caption assertion reads one number.
+ */
+function platformCapability(
+  platform: PlatformAccount["platform"],
+  maxCaptionLength: number | null,
+) {
+  return {
+    accepted_mime_types: [],
+    analytics: false,
+    asset_types: [],
+    comments: false,
+    connect_available: true,
+    max_caption_length: maxCaptionLength,
+    max_file_size: null,
+    max_hashtags: null,
+    max_media_count: null,
+    max_video_duration_sec: null,
+    min_media_count: 0,
+    multi_asset_types: [],
+    notes: [],
+    platform,
+    publish: true,
+    reply: false,
+  };
+}
+
+/** Connected Instagram account owned by the switched identity (`profile-b`). */
+const instagramAccount: PlatformAccount = {
+  avatar_url: null,
+  username: null,
+  brand_profile_id: "profile-b",
+  capabilities: platformCapability("instagram", 12),
+  connection_status: "connected",
+  created_at: "2026-01-01T00:00:00.000Z",
+  display_name: "Alpha Instagram",
+  id: "00000000-0000-4000-8000-000000000021",
+  last_synced_at: null,
+  org_id: "org-1",
+  platform: "instagram",
+  platform_user_id: "alpha-instagram",
+  rate_limit_budget: null,
+  scopes: [],
+  token_expires_at: null,
+  updated_at: "2026-01-01T00:00:00.000Z",
+};
+
+/** Two ordered owners make default selection distinguishable from saved ownership. */
+const composerProfiles: BrandProfile[] = ["profile-a", "profile-b"].map((id, index) => ({
+  id,
+  name: index === 0 ? "Alpha Brand" : "Beta Brand",
+  org_id: "org-1",
+  description: null,
+  color: "#b91c1c",
+  deleted_at: null,
+  purge_at: null,
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z",
+}));
+
+describe("Composer default ownership", () => {
+  it("selects the first profile for a new Post without replacing a later choice", async () => {
+    renderComposer({ brandProfiles: composerProfiles });
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Alpha Brand" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Alpha Brand" })).toBeChecked();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Beta Brand" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Beta Brand" })).toBeChecked();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Alpha Brand" })).not.toBeChecked();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(composerTextarea()).toBeEnabled());
+    fireEvent.change(composerTextarea(), { target: { value: "Draft for Beta" } });
+    expect(composerTextarea()).toHaveValue("Draft for Beta");
+    fireEvent.click(screen.getByRole("button", { name: "switch-all" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Collection profile")).toHaveTextContent("all"),
+    );
+  });
+
+  it("uses a reopened Post's owner rather than assigning the first profile", async () => {
+    renderComposer({
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      post: { ...hydratedPost, brand_profile_id: "profile-b" },
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Beta Brand" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Beta Brand" })).toBeChecked();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Alpha Brand" })).not.toBeChecked();
+  });
+});
 
 describe("Composer recovery consent", () => {
   /**
@@ -147,9 +262,9 @@ describe("Composer recovery consent", () => {
     await waitFor(() => expect(textarea).toBeEnabled());
 
     window.localStorage.setItem(
-      "meltiply.composer.v1.personal::all::new",
+      "meltiply.composer.v2.personal::all::new",
       JSON.stringify({
-        version: 1,
+        version: 2,
         updatedAt: "2026-10-01T12:00:00.000Z",
         sharedContent: "Recovered paragraph",
         scheduleDate: "",
@@ -157,6 +272,9 @@ describe("Composer recovery consent", () => {
         removedAssetIds: [],
         channelOverrides: {},
         attachmentOverrides: {},
+        profileIds: [],
+        selectedChannelIds: [],
+        profileCopies: {},
       }),
     );
     act(() => {
@@ -212,5 +330,97 @@ describe("Composer identity switching", () => {
     fireEvent.click(screen.getByRole("button", { name: "switch-all" }));
     await waitFor(() => expect(task.cancel).toHaveBeenCalled());
     expect(screen.queryByText(/clip\.mp4/)).not.toBeInTheDocument();
+  });
+});
+
+/** Inline captions inherit live shared text until edited, including intentional blanks. */
+describe("Composer channel captions", () => {
+  it("keeps blank channel edits independent and restores live inheritance on reset", async () => {
+    renderComposer({
+      brandProfiles: [composerProfiles[1]!],
+      accounts: [instagramAccount],
+      capabilities: [platformCapability("instagram", 12)],
+    });
+    const channelCaption = await screen.findByLabelText("Custom Text for Alpha Instagram");
+    const sharedCaption = composerTextarea();
+    await waitFor(() => expect(sharedCaption).toBeEnabled());
+
+    fireEvent.change(sharedCaption, { target: { value: "Shared" } });
+    expect(channelCaption).toHaveValue("Shared");
+    fireEvent.change(channelCaption, { target: { value: "" } });
+    fireEvent.change(sharedCaption, { target: { value: "Changed" } });
+    expect(channelCaption).toHaveValue("");
+    expect(sharedCaption).toHaveValue("Changed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Custom Override" }));
+    expect(channelCaption).toHaveValue("Changed");
+    fireEvent.change(sharedCaption, { target: { value: "Next" } });
+    expect(channelCaption).toHaveValue("Next");
+  });
+});
+
+describe("Composer caption bound", () => {
+  /**
+   * The shared caption reaches every selected Channel, so the field locks at the
+   * tightest selected platform's limit and states it beside the count instead of
+   * letting the creator write text the API will reject per Channel.
+   */
+  it("locks the shared caption at the tightest selected platform limit", async () => {
+    renderComposer({
+      accounts: [instagramAccount],
+      capabilities: [platformCapability("instagram", 12)],
+    });
+    const textarea = composerTextarea();
+    // The probe switches the identity the composer composes under; wait for the
+    // providers to settle first, or the switch is dropped while auth loads.
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
+    await waitFor(() => expect(textarea).toBeEnabled());
+
+    await screen.findByLabelText("Custom Text for Alpha Instagram");
+
+    fireEvent.change(textarea, { target: { value: "x".repeat(20) } });
+    expect(textarea).toHaveValue("x".repeat(12));
+  });
+
+  /**
+   * Regression: the lock counts code points, exactly like the provider
+   * validator, so a caption of emoji is not cut at half its real limit — and the
+   * field reports one character per emoji rather than two.
+   */
+  it("counts an emoji as one character when locking the caption", async () => {
+    renderComposer({
+      accounts: [instagramAccount],
+      capabilities: [platformCapability("instagram", 12)],
+    });
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
+    await waitFor(() => expect(textarea).toBeEnabled());
+    await screen.findByLabelText("Custom Text for Alpha Instagram");
+
+    fireEvent.change(textarea, { target: { value: "🎉".repeat(15) } });
+    const value = (textarea as HTMLTextAreaElement).value;
+    expect([...value]).toHaveLength(12);
+    expect(value.length).toBe(24);
+  });
+
+  /**
+   * A platform that publishes no caption bound leaves the field unbounded: the
+   * counter drops the limit and the caption keeps every character the creator
+   * types.
+   */
+  it("leaves the caption unbounded when the platform publishes no limit", async () => {
+    renderComposer({
+      accounts: [instagramAccount],
+      capabilities: [platformCapability("instagram", null)],
+    });
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
+    await waitFor(() => expect(textarea).toBeEnabled());
+
+    fireEvent.change(textarea, { target: { value: "x".repeat(20) } });
+    expect(textarea).toHaveValue("x".repeat(20));
   });
 });

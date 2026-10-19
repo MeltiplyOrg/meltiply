@@ -1,67 +1,60 @@
 ---
 title: Media
-description: Upload, attach, preview, and manage images and videos directly in the Meltiply composer — including upload progress, ordering, and channel overrides.
+description: Upload, preview, order, replace, and customize images/videos inside the Post composer.
 section: Publishing
 order: 5
 ---
 
-Media in Meltiply is composer-owned: there is no standalone Media Library route in the application navigation. Images and videos are uploaded, managed, and attached directly inside the post composer on [Posts](/docs/publishing).
+Media belongs to a Post composition. There is no standalone Media Library route: use **Posts → Create post** or edit an eligible Post, then manage its attachments in the composer.
 
-## Before you upload
+## Add attachments
 
-Media uploads belong to the **Brand Profile** active in the composer.
+1. Choose the Post's owning Brand Profile. All Brand Profiles is aggregate review; uploads require one owner.
+2. Select **Add Media** or drag images/videos into the attachment area.
+3. Review each attachment's upload and processing state before publishing.
+4. Select destination channels when scheduling or publishing. Draft saving does not require a selected destination.
 
-- If "All Brand Profiles" is active, select a specific Brand Profile before composing or uploading media.
-- Uploaded attachments are scoped to that Brand Profile and can never leak across brand scopes.
-- New to Brand Profiles? See [Workspaces & Brand Profiles](/docs/workspaces).
+The Attached Media grid preserves the ordered Post attachment list. Platform validation uses the actual selected channels and their capabilities, not a generic promise that every platform accepts every format.
 
-## Uploading media in the composer
+## Read attachment state
 
-To add media to a post:
+| State      | Meaning                                                  |
+| ---------- | -------------------------------------------------------- |
+| Preparing  | The upload session is being created.                     |
+| Uploading  | Bytes are transferring; progress is shown.               |
+| Paused     | You paused the transfer.                                 |
+| Offline    | Connectivity interrupted the transfer.                   |
+| Processing | The server is verifying media and preparing previews.    |
+| Ready      | The asset is ready for scheduling/publication.           |
+| Failed     | Upload or processing failed; read the actionable reason. |
+| Cancelled  | The transfer was stopped.                                |
 
-1. Go to **Posts** and select **Create post** (or edit an existing draft).
-2. Ensure an active Brand Profile is selected and select one or more destination channels.
-3. Select **Add Media** to open your device file picker, or **drag and drop** images or videos onto the attachments area.
+## Manage attachments
 
-You can attach multiple media items. Each file displays as a card in the **Attached Media** grid.
+Hover or focus an attachment to reach its available controls:
 
-### Upload lifecycle and stages
+- **Reorder** moves it earlier/later in delivery order.
+- **Replace** changes the file while preserving its position and per-channel assignments.
+- **Pause / Resume** controls an in-flight upload.
+- **Retry** retries a failed transfer using its local file.
+- **Remove** takes it out of the composition; removing an in-flight upload cancels that transfer.
 
-Each attachment row tracks its live status:
+Previews and actions remain part of the composer, not a separate reusable asset browser. Saving a Post retains its ordered relationships so reopening it restores the same composition.
 
-- **Preparing** — initializing the upload session.
-- **Uploading** — transferring bytes to storage, with a live percentage progress bar.
-- **Paused** — upload paused by the user.
-- **Offline** — connection interrupted; the transfer resumes automatically once reconnected.
-- **Processing** — bytes transferred; the server is verifying the asset and preparing previews.
-- **Ready** — asset verified and ready to be scheduled or published.
-- **Failed** — upload or processing failed; an actionable message describes the failure.
-- **Cancelled** — upload stopped by the user.
+## Customize for a channel
 
-### Attachment controls
+Selected channels inherit the Post's attachment order by default. Each channel's section has a **Use post attachments** switch: turn it off for a text-only target, or turn it on to restore all current and future Post attachments in their shared order. Choose individual attachments to keep a channel-specific subset; the switch remains on while that subset contains media. Other channels' selections are unchanged.
 
-Hover or focus any attachment card in the composer to access controls:
+The composer validates channel-specific media types, counts, file limits, and other publishing requirements. Fix a blocked channel's selection, replace the file, or deselect that destination; one platform's rules do not change another channel's saved selection.
 
-- **Reorder** — move an attachment earlier or later to set the exact delivery order.
-- **Replace** — swap an attachment with a new file while keeping its position and per-channel assignments intact.
-- **Pause / Resume** — halt and restart in-flight uploads.
-- **Retry** — retry a failed upload using the local file.
-- **Remove** — remove an attachment from the post. Removing an in-flight upload cancels the transfer server-side so unused storage is reclaimed.
+## Recovery and errors
 
-## Per-channel attachment customization
+With functional cookie consent, browser-local recovery can retain in-progress text, attachment references, and channel overrides for the active workspace/profile. Without optional storage, composition and server-backed draft saving still work, but browser recovery is not available after leaving.
 
-By default, selected destination channels inherit all attachments added to the post. When channels have different media requirements:
-
-1. Switch to a destination channel's tab in the composer.
-2. Toggle individual attachments on or off for that channel, or select **Use all post attachments** to restore inheritance.
-3. The composer validates media constraints against platform capabilities (for example, video duration, format restrictions, or maximum attachment limits).
-
-## Browser recovery
-
-The composer keeps an in-progress copy of your draft text, attachments, and per-channel overrides in your browser, namespaced to your workspace and active Brand Profile. If you navigate away or refresh, your composition restores automatically. The local copy is cleared when the post is successfully scheduled or published.
+Returning to an in-progress upload may require the original local file. A failed server processing result is not a ready attachment; read the error and retry or replace it as offered. See [Cookies and storage](/docs/cookies) for persistence and [Resource limits](/docs/resource-limits) for quotas.
 
 ## Related guides
 
-- [Publishing](/docs/publishing) — compose, schedule, and ship posts
-- [Channels](/docs/channels) — connect social channels and inspect capabilities
-- [Troubleshooting](/docs/troubleshooting) — fixes for upload and publishing errors
+- [Publishing](/docs/publishing) — save, schedule, publish, and inspect outcomes.
+- [Channels](/docs/channels) — connected accounts and platform requirements.
+- [Troubleshooting](/docs/troubleshooting) — upload and delivery recovery.

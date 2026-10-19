@@ -58,19 +58,21 @@ Use `bun run local:teardown` only when the local database and volumes can be dis
 
 Meltiply is a Bun monorepo. Cloudflare Workers provide the API and asynchronous publishing pipeline; PostgreSQL runs through Hyperdrive, and media is stored in R2 or any S3-compatible object store.
 
-| Directory            | Responsibility                                                          |
-| -------------------- | ----------------------------------------------------------------------- |
-| `frontend/app`       | Authenticated React application                                         |
-| `frontend/public`    | Astro landing page and user documentation                               |
-| `workers/api`        | HTTP API and provider webhooks                                          |
-| `workers/automation` | Scheduled publishing and background jobs                                |
-| `workers/state`      | OAuth coordination                                                      |
-| `packages`           | Shared domain, database, provider, storage, auth, and API-contract code |
+| Directory            | Responsibility                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `frontend/app`       | Authenticated React application                                                       |
+| `frontend/public`    | Astro landing page and user documentation                                             |
+| `frontend/shared`    | Canonical UI controls, fonts/palette, icons, dialogs, feedback, and animation recipes |
+| `workers/api`        | HTTP API and provider webhooks                                                        |
+| `workers/automation` | Scheduled publishing and background jobs                                              |
+| `workers/state`      | OAuth coordination                                                                    |
+| `packages`           | Shared domain, database, provider, storage, auth, and API-contract code               |
 
 ## Contributors and coding agents
 
 - **Contributors:** Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, development workflow, and pull requests.
 - **Coding agents:** Follow [`AGENTS.md`](AGENTS.md) for repository rules and verification. Read [`CONTEXT.md`](CONTEXT.md) for domain terms, [`PRODUCT.md`](PRODUCT.md) for product intent, and [`STATE.md`](STATE.md) before refactors, schema changes, or data resets.
+- **UI work:** Read [shared UI ownership](docs/frontend-ui.md), [layout](docs/frontend-layout.md), and the [capability inventory](docs/frontend-capabilities.md). App components use the current shared TypeScript/React/Tailwind system; public Astro adapters share its tokens.
 - **API work:** See [`packages/contracts/README.md`](packages/contracts/README.md) for OpenAPI and generated-client workflow.
 - **UI translations:** See [`docs/i18n.md`](docs/i18n.md) for the catalog layout, offline generation, and the CI check.
 - **Deployment:** See [`infra/cloudflare/README.md`](infra/cloudflare/README.md) for infrastructure ownership and release safety.

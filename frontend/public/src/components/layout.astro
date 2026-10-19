@@ -1,13 +1,12 @@
 ---
 import { ClientRouter } from "astro:transitions";
 import ConsentBootstrap from "@meltiply/ui/consent-bootstrap";
-import MotionBootstrap from "@meltiply/ui/public/motion-bootstrap";
 import ThemeBootstrap from "@meltiply/ui/theme-bootstrap";
 import favicon from "@meltiply/ui/favicon.svg?url";
 /**
  * Document shell for the landing page and public guides. Consent runs before
- * the shared class-based palette and motion bootstrap; optional stores remain
- * gated, while Astro swaps retain unsaved page intent without a flash.
+ * the shared class-based palette; optional stores remain gated, while Astro
+ * swaps retain unsaved page intent without a flash.
  * Markdown discovery is emitted only for guides. Only app links need
  * cross-origin theme transfer; landing-to-docs navigation stays on this origin.
  */
@@ -31,10 +30,9 @@ const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
       import { themePreferenceAttribute } from "@meltiply/ui/theme-preference";
 
       /**
-       * Carries the live preference and consent attributes into Astro's
-       * incoming root. The retained theme provider and motion island do not
-       * remount or reapply unchanged choices across swaps, so the new root must
-       * inherit the explicit page intent, palette, consent gate, and motion flags.
+       * Carries live theme and consent attributes into Astro's incoming root.
+       * The retained theme provider does not remount or reapply unchanged
+       * choices across swaps, so the root inherits explicit palette intent.
        */
       document.addEventListener("astro:before-swap", (event) => {
         const currentRoot = document.documentElement;
@@ -51,14 +49,6 @@ const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
         );
         nextRoot.style.colorScheme = currentRoot.style.colorScheme;
         nextRoot.toggleAttribute(
-          "data-low-motion",
-          currentRoot.hasAttribute("data-low-motion"),
-        );
-        nextRoot.toggleAttribute(
-          "data-theme-ink",
-          currentRoot.hasAttribute("data-theme-ink"),
-        );
-        nextRoot.toggleAttribute(
           "data-cookie-functional",
           currentRoot.hasAttribute("data-cookie-functional"),
         );
@@ -70,7 +60,6 @@ const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
     </script>
     <ConsentBootstrap />
     <ThemeBootstrap mode="class" siteUrls={[appUrl]} />
-    <MotionBootstrap />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
@@ -96,7 +85,25 @@ const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
     <meta name="twitter:card" content="summary" />
     <link rel="icon" type="image/svg+xml" href={favicon} />
   </head>
-  <body>
+  <body class="public-canvas">
+    <!-- THESIS: Meltiply's public surfaces share the publishing workspace's visual system.
+         OWN-WORLD: Warm stone surfaces, indigo actions, Geist, compact controls.
+         STORY: Understand publishing, then find setup and recovery guidance.
+         FIRST VIEWPORT: Clear navigation, product content, and reachable search.
+         FORM: User-pinned Gr8r Studio adaptation, 904205c626918ee96054eb35495c394a60c0c601.
+         FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance -->
     <slot />
   </body>
 </html>
+
+<style>
+  /* One public-only canvas, painted beneath content rather than as an overlay.
+     Shared ink keeps its quiet contrast consistent across both palettes. */
+  .public-canvas {
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent 0 7px,
+      color-mix(in srgb, var(--ink) 6%, transparent) 7px 8px
+    );
+  }
+</style>

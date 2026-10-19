@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useEffect, useState } from "react";
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { contractSuccessBody } from "@/test/contract-fixtures";
@@ -287,10 +287,31 @@ function renderChannels() {
 }
 
 /**
+ * Opens the profile editor through its surviving entry point: the Channels
+ * directory card action. The toolbar Brand Profile picker is selection-only.
+ * Radix tabs activate on pointer down, so the tab needs a real press.
+ */
+function openProfileEditorFromDirectory(name: string) {
+  const tab = screen.getByRole("tab", { name: /Brand Profiles/ });
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+  fireEvent.click(screen.getByRole("button", { name: `Edit ${name}` }));
+}
+
+/** Opens the field-row builder and adds the supported channel filters through its visible chips. */
+function openChannelFilters() {
+  fireEvent.click(screen.getByText("Filter").closest("summary")!);
+  for (const label of ["Platform", "Brand Profile"]) {
+    const add = screen.queryByRole("button", { name: `Add ${label} filter` });
+    if (add) fireEvent.click(add);
+  }
+}
+
+/**
  * Renders the posts view inside a router context at the requested mode, with a
  * profile selected so channel mutations stay affordanced.
  */
-function renderPosts(initialViewMode: "list" | "grid" | "calendar" = "list") {
+function renderPosts(initialViewMode: "table" | "grid" | "calendar" = "table") {
   workspace.selectedBrandProfile = alphaProfile;
   workspace.selectedBrandProfileId = alphaProfile.id;
   return render(
@@ -339,6 +360,15 @@ const METRIC_LABELS = [
   "Analytics",
 ];
 
+/**
+ * The selection dock's count, once the roll that announces a change has settled:
+ * a `RollingCount` splits the sentence across nodes while it plays.
+ */
+async function settleSelection(text: string) {
+  const region = screen.getByRole("region", { name: "Selection actions" });
+  await waitFor(() => expect(within(region).getByRole("status")).toHaveTextContent(text));
+}
+
 beforeAll(() => {
   // jsdom does not implement scrollIntoView; Radix Select calls it when its
   // popover content mounts and focuses the selected item.
@@ -347,12 +377,8 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
-  document.documentElement.removeAttribute("data-low-motion");
 });
 beforeEach(() => {
-  // jsdom never settles the bulk pill's motion transitions; the real low-motion
-  // attribute makes entrance/exit instant instead of mocking components.
-  document.documentElement.setAttribute("data-low-motion", "");
   resetScope();
 });
 
@@ -416,9 +442,7 @@ describe("Channels table contract", () => {
         name: "Select channel",
       }),
     ).toBeChecked();
-    expect(screen.getByRole("region", { name: "Selection actions" })).toHaveTextContent(
-      "1 selected",
-    );
+    await settleSelection("1 selected");
   });
 
   /** Channel settings expose granted scopes and require confirmation before disconnecting. */
@@ -448,11 +472,8 @@ describe("Channels table contract", () => {
     expect(screen.getByText("No channels connected yet")).toBeVisible();
     const search = screen.getByLabelText("Search accounts");
     expect(search).toBeVisible();
-    expect(screen.getByRole("button", { name: "All platforms" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "All Brand Profiles" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Connection status" })).toBeVisible();
     fireEvent.change(search, { target: { value: "nothing connected" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
     expect(search).toHaveValue("");
     const header = within(screen.getByRole("banner"));
     expect(header.getByRole("button", { name: "Add account" })).toBeDisabled();
@@ -626,35 +647,15 @@ describe("Channels table contract", () => {
   });
 
   /**
-   * Keeps the normal Channels workspace chrome when a profile has no accounts:
-   * the selected profile's saved summary must orient the empty board while the
-   * Posts-style filter toolbar remains available for the next connected account.
+   * Reproduces the empty-directory profile edit path: the card action must open
+   * the same dialog exposing edit and deletion before any accounts are connected.
    */
-  it("shows selected profile context in the Channels empty board", () => {
+  it("opens the profile editor from the empty Channels directory action", () => {
     workspace.selectedBrandProfile = alphaProfile;
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
-    expect(screen.getByText(alphaProfile.description!)).toBeVisible();
-    expect(screen.getByLabelText("Search accounts")).toBeVisible();
-    expect(screen.getByRole("combobox", { name: alphaProfile.name })).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Add account" })).toHaveLength(1);
-  });
-
-  /**
-   * Reproduces the empty-board profile-list edit path: the pencil must close
-   * the selector and open the same dialog that exposes both edit and deletion
-   * controls, even before any account has been connected.
-   */
-  it("opens the profile editor from the empty Channels board pencil", () => {
-    workspace.selectedBrandProfile = alphaProfile;
-    workspace.selectedBrandProfileId = alphaProfile.id;
-    renderChannels();
-
-    fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
-    const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
-    fireEvent.pointerDown(editProfileButton);
-    fireEvent.click(editProfileButton);
+    openProfileEditorFromDirectory(alphaProfile.name);
 
     const dialog = screen.getByRole("dialog", { name: "Update Brand Profile" });
     expect(within(dialog).getByLabelText("Profile name")).toHaveValue(alphaProfile.name);
@@ -670,10 +671,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
-    fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
-    const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
-    fireEvent.pointerDown(editProfileButton);
-    fireEvent.click(editProfileButton);
+    openProfileEditorFromDirectory(alphaProfile.name);
 
     const dialog = screen.getByRole("dialog", { name: "Update Brand Profile" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
@@ -698,10 +696,7 @@ describe("Channels table contract", () => {
     workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
-    fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
-    const editProfileButton = screen.getByRole("button", { name: "Edit profile" });
-    fireEvent.pointerDown(editProfileButton);
-    fireEvent.click(editProfileButton);
+    openProfileEditorFromDirectory(alphaProfile.name);
 
     const dialog = screen.getByRole("dialog", { name: "Update Brand Profile" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
@@ -720,30 +715,12 @@ describe("Channels table contract", () => {
     );
   });
 
-  /**
-   * Keeps the profile description discoverable without making the context icon
-   * another selectable or destructive control in the profile list.
-   */
-  it("shows the selected profile description from the static info indicator", async () => {
-    workspace.selectedBrandProfile = alphaProfile;
-    workspace.selectedBrandProfileId = alphaProfile.id;
-    renderChannels();
-
-    fireEvent.click(screen.getByRole("combobox", { name: alphaProfile.name }));
-    const info = screen.getByLabelText("Profile description");
-    expect(info.tagName).toBe("SPAN");
-    fireEvent.pointerEnter(info);
-
-    expect(await screen.findByText(alphaProfile.description!)).toBeVisible();
-  });
-
   /** Toolbar editing preserves the selected profile while saving its changed name. */
   it("edits a profile from the toolbar editor", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    openProfileEditorFromDirectory("Alpha Brand");
 
     const dialog = screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ });
     expect(within(dialog).getByLabelText("Profile name")).toHaveValue("Alpha Brand");
@@ -777,8 +754,7 @@ describe("Channels table contract", () => {
     queryResults.platforms.data = [connectedAccount];
     renderChannels();
 
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    openProfileEditorFromDirectory("Alpha Brand");
 
     const dialog = screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ });
     fireEvent.change(within(dialog).getByLabelText("Profile name"), {
@@ -798,85 +774,24 @@ describe("Channels table contract", () => {
   });
 
   /**
-   * Guards the admin-only edit affordance in the Channels toolbar: non-admin
-   * members get no edit callback, so profile rows render as plain selectable
-   * options that keep the standard selected checkmark instead of reserving
-   * space for a pencil that could never fire.
+   * Guards the selection-only contract of the toolbar Brand Profile picker:
+   * the list carries profiles and the aggregate row, nothing else — profile
+   * rows stay plain selectable options that keep the standard selected
+   * checkmark, and no editing affordance lives inside the dropdown.
    */
-  it("hides the profile edit pencil and keeps selection indicators for non-admins", () => {
-    workspace.isAdmin = false;
-    workspace.selectedBrandProfileId = alphaProfile.id;
+  it("keeps profile rows selection-only with the standard check indicator", () => {
     queryResults.platforms.data = [connectedAccount];
+    workspace.selectedBrandProfileId = alphaProfile.id;
     renderChannels();
 
+    openChannelFilters();
     fireEvent.click(screen.getByRole("combobox", { name: "Alpha Brand" }));
 
     expect(screen.queryByRole("button", { name: "Edit profile" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
     const selectedOption = screen.getByRole("option", { name: "Alpha Brand" });
     expect(selectedOption).toHaveAttribute("data-state", "checked");
     expect(selectedOption.querySelector("svg")).not.toBeNull();
-  });
-
-  /**
-   * Guards the admin affordance in the Channels toolbar: admins receive the
-   * edit callback, so resolved profile rows expose the pencil that opens the
-   * in-place Brand Profile editor.
-   */
-  it("shows the profile edit pencil for admins", () => {
-    queryResults.platforms.data = [connectedAccount];
-    renderChannels();
-
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-
-    expect(screen.getByRole("button", { name: "Edit profile" })).toBeVisible();
-  });
-
-  /**
-   * Guards the edit-affordance dismissal contract: the pencil sits outside the
-   * option element, so Radix never closes the menu on its own — the select must
-   * close its dropdown before the editor opens, leaving no listbox behind it.
-   */
-  it("closes the profile dropdown before opening the editor from the pencil", () => {
-    queryResults.platforms.data = [connectedAccount];
-    renderChannels();
-
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-    expect(screen.getByRole("listbox")).toBeVisible();
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
-
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ })).toBeVisible();
-    expect(workspace.setSelectedBrandProfileId).not.toHaveBeenCalled();
-  });
-
-  /**
-   * Confirms profile deletion from the Brand Profile editor confirmation flow.
-   */
-  it("confirms profile deletion from the Brand Profile editor delete confirmation", async () => {
-    queryResults.platforms.data = [connectedAccount];
-    renderChannels();
-
-    fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
-
-    const dialog = screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ });
-    const deleteButton = within(dialog).getByRole("button", { name: "Delete profile" });
-    expect(deleteButton).toBeVisible();
-
-    fireEvent.click(deleteButton);
-
-    const confirmation = await screen.findByRole("alertdialog", {
-      name: "Delete Brand Profile",
-    });
-    await act(async () => {
-      fireEvent.click(within(confirmation).getByRole("button", { name: "Delete profile" }));
-    });
-
-    expect(queryMutations.delete.mutate).toHaveBeenCalledWith(
-      alphaProfile.id,
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    );
   });
 
   /**
@@ -888,8 +803,7 @@ describe("Channels table contract", () => {
       queryResults.platforms.data = [connectedAccount];
       renderChannels();
 
-      fireEvent.click(screen.getByRole("combobox", { name: "All Brand Profiles" }));
-      fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+      openProfileEditorFromDirectory("Alpha Brand");
 
       const dialog = screen.getByRole("dialog", { name: /(?:Edit|Update) Brand Profile/ });
       fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
@@ -931,11 +845,12 @@ describe("Channels table contract", () => {
     workspace.brandProfiles = [alphaProfile, betaProfile];
     queryResults.platforms.data = [connectedAccount, expiredAccount, betaAccount];
     renderChannels();
+    openChannelFilters();
 
     expect(screen.getByLabelText("Search accounts")).toBeVisible();
     const platformControl = screen.getByRole("button", { name: "All platforms" });
     const profileControl = screen.getByRole("combobox", { name: "All Brand Profiles" });
-    const statusControl = screen.getByRole("combobox", { name: "Connection status" });
+    const statusControl = screen.getByRole("group", { name: "Connection status" });
     expect(platformControl).toBeVisible();
     expect(profileControl).toBeVisible();
     expect(statusControl).toBeVisible();
@@ -989,12 +904,7 @@ describe("Channels table contract", () => {
       "All Brand Profiles",
     );
     expect(screen.getByRole("combobox", { name: "All Brand Profiles" })).toBe(profileControl);
-    fireEvent.click(statusControl);
-    fireEvent.click(screen.getByRole("option", { name: /^expired$/i }));
-    expect(screen.getByRole("combobox", { name: "Connection status" })).toBe(statusControl);
-    expect(screen.getByRole("combobox", { name: "Connection status" })).toHaveTextContent(
-      "expired",
-    );
+    fireEvent.click(within(statusControl).getByRole("button", { name: /^expired$/i }));
     expect(screen.getByText("Alpha YouTube")).toBeVisible();
     expect(screen.queryByText("Alpha TikTok")).not.toBeInTheDocument();
     expect(screen.queryByText("Beta Instagram")).not.toBeInTheDocument();
@@ -1010,6 +920,7 @@ describe("Channels table contract", () => {
   it("keeps checkbox-menu semantics in the platform multi-select", () => {
     queryResults.platforms.data = [connectedAccount, betaAccount];
     renderChannels();
+    openChannelFilters();
 
     const platformFilter = screen.getByRole("button", { name: "All platforms" });
     fireEvent.pointerDown(platformFilter);
@@ -1094,6 +1005,12 @@ describe("Posts surfaces", () => {
       </MemoryRouter>,
     );
 
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Select post" })[0]!);
+    expect(screen.getByRole("checkbox", { name: "Select all visible posts" })).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Select all visible posts" }),
+    ).not.toBePartiallyChecked();
+    await settleSelection("1 selected");
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all visible posts" }));
     const pill = await screen.findByRole("region", { name: "Selection actions" });
     fireEvent.click(within(pill).getByRole("button", { name: "Delete" }));
@@ -1110,36 +1027,64 @@ describe("Posts surfaces", () => {
       { id: first.id, brandProfileId: first.brand_profile_id },
       { id: second.id, brandProfileId: second.brand_profile_id },
     ]);
-    expect(screen.getByRole("region", { name: "Selection actions" })).toHaveTextContent(
-      "1 selected",
-    );
+    await settleSelection("1 selected");
     const rows = screen.getAllByRole("checkbox", { name: "Select post" });
     expect(rows.filter((row) => (row as HTMLInputElement).checked)).toHaveLength(1);
   });
 
-  /**
-   * Guards the published Post row in list view: caption, status, and edit/delete
-   * actions stay while every metric column is gone — there is no engagement
-   * data path, so no metric header or value may render.
-   */
-  it("renders the published Post row without metric columns in list view", () => {
+  /** Measured zero is data; drafts, missing snapshots, and unsupported metrics are not. */
+  it("shows published measurements and keeps untracked metrics as dashes", () => {
     seedPublishedPost();
+    const source = queryResults.posts.data.posts[0]!;
+    const published = {
+      ...source,
+      distributions: source.distributions.map((distribution) => ({
+        ...distribution,
+        publication: null,
+      })),
+    };
+    queryResults.posts.data.posts = [
+      {
+        ...published,
+        default_text: "Measured Post",
+        analytics: {
+          likes: 0,
+          comments: 2,
+          shares: 3,
+          saves: null,
+          clicks: null,
+          views: 210,
+          impressions: 320,
+          reach: 108,
+        },
+      },
+      { ...published, id: "unmeasured-post", default_text: "Unmeasured Post", analytics: null },
+      {
+        ...published,
+        id: "draft-post",
+        default_text: "Draft Post",
+        status: "draft",
+        distributions: [],
+        analytics: null,
+      },
+    ];
     renderPosts();
-
-    const row = screen.getByRole("row", { name: /Launch note/ });
-    expect(within(row).getByText("published")).toBeVisible();
-    expect(screen.getByRole("columnheader", { name: "Date" })).toBeVisible();
-    expect(screen.getByRole("columnheader", { name: "Status" })).toBeVisible();
-    for (const label of METRIC_LABELS) {
+    const measured = screen.getByRole("row", { name: /Measured Post/ });
+    expect(
+      within(measured)
+        .getAllByRole("cell")
+        .slice(-8)
+        .map((cell) => cell.textContent),
+    ).toEqual(["0", "2", "3", "-", "-", "210", "320", "108"]);
+    for (const name of [/Unmeasured Post/, /Draft Post/]) {
+      const row = screen.getByRole("row", { name });
       expect(
-        screen.queryByRole("columnheader", { name: label }),
-        `${label} column must not render`,
-      ).not.toBeInTheDocument();
-      expect(screen.queryByText(label), `${label} must not render`).not.toBeInTheDocument();
+        within(row)
+          .getAllByRole("cell")
+          .slice(-8)
+          .map((cell) => cell.textContent),
+      ).toEqual(["-", "-", "-", "-", "-", "-", "-", "-"]);
     }
-    expect(within(row).getByRole("button", { name: "Edit post" })).toBeVisible();
-    expect(within(row).getByRole("button", { name: "Delete post" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Create post" })).toBeVisible();
   });
 
   /**
@@ -1168,7 +1113,11 @@ describe("Posts surfaces", () => {
     seedPublishedPost();
     renderPosts("calendar");
 
-    fireEvent.click(screen.getByText("Launch note"));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `View posts on ${new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(new Date())}`,
+      }),
+    );
 
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Launch note")).toBeVisible();

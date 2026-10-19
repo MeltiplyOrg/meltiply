@@ -11,7 +11,7 @@ import { Navigate } from "react-router";
 
 import { authClient, type AuthUser } from "@/lib/auth-client";
 import { authSessionRefreshedEvent } from "@/lib/runtime-events";
-import { useI18n } from "@/lib/i18n";
+import { WorkspaceLoadingSkeleton } from "@/components/layout/workspace-loading-skeleton";
 
 export interface MeltiplyAuthContextValue {
   /** Active Brand Profile selection; `null` is the aggregate "All Brand Profiles" view. */
@@ -184,9 +184,8 @@ export function useMeltiplyAuth(): MeltiplyAuthContextValue {
  */
 export function RequireAuth({ children }: { children: React.ReactNode }): React.ReactElement {
   const { isLoaded, isSignedIn } = useMeltiplyAuth();
-  const { t } = useI18n();
   if (!isLoaded) {
-    return <p className="p-6 text-[11px] font-medium text-ink-2">{t("Loading account…")}</p>;
+    return <WorkspaceLoadingSkeleton />;
   }
   return isSignedIn ? <>{children}</> : <Navigate to="/sign-in" replace />;
 }

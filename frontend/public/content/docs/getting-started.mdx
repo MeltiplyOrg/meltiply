@@ -1,85 +1,65 @@
 ---
 title: Getting started
-description: Set up your installation's single owner, sign in securely, and prepare your Brand Profile, channel, and first post.
+description: Create the installation owner, sign in, and prepare your first Brand Profile, channel, and Post.
 section: Getting started
 order: 2
 ---
 
-Each Meltiply installation has one owner. First-run setup appears only until that owner is created; it does not change how Workspaces and Brand Profiles organize publishing.
+Each Meltiply installation has one owner. Workspaces and Brand Profiles organize that owner's publishing data; they are not separate sign-up or workspace-switching flows.
 
-## Create an account
+## Create the installation owner
 
-1. Open the app at `/sign-in` on an empty installation.
-2. Enter the private **Setup secret** supplied by your deployment administrator, **Your name**, **Email address**, and a unique **Password** of 8–128 characters.
+1. Open `/sign-in` on an empty installation.
+2. Enter the deployment administrator's private **Setup secret**, **Your name**, **Email address**, and a unique **Password** of 8–128 characters.
 3. Select **Create owner account**.
-4. Follow the verification link sent to your email, then return to sign in.
+4. Follow the email verification link, then return to sign in.
 
-After setup, registration closes and the page becomes the owner's sign-in form. The setup secret is not your login password. If the verification email is missing, use **Resend verification** on the sign-in form.
+After setup, registration closes. The setup secret is not your login password. Use **Resend verification** if the verification email is missing.
 
-## Sign in
+## Sign in and recover access
 
-1. Go to `/sign-in`.
-2. Enter your **Email address** and **Password**.
-3. Select **Sign in**. If an authenticator is enabled, enter its current code or a saved, unused backup code.
+Enter your email and password on `/sign-in`, then select **Sign in**. If an authenticator is enabled, supply its current code or an unused backup code. Successful sign-in opens **Posts**.
 
-Successful sign-in lands on **Posts**. Use **Forgot password?** to request an expiring reset link; password reset does not bypass an enabled authenticator.
+**Forgot password?** requests an expiring reset link; it does not bypass an enabled authenticator. Manage passwords, authenticator enrollment, and recovery codes in [Settings → Security](/docs/settings#security). Sensitive actions require current-password verification.
 
-Open **Account security** in desktop or mobile navigation to change your password or enable an authenticator. Enrollment requires a live code before activation. Save the backup codes offline: each works once, and replacing them invalidates the previous set. Password reauthentication is required for sensitive security changes.
+Sign out from **Account menu → Sign out** at the bottom of the sidebar or **Settings → Account**. Signing out ends the session; it does not cancel already scheduled publishing.
 
-To sign out, select the sign-out control beside your account identity. Signing out revokes your session, but does not cancel already scheduled publishing.
+## Prepare your first Post
 
-## Your first five minutes
+1. **Create a Brand Profile.** In Channels, workspace admins select **Create Brand Profile**, enter its details, and save. The connection dialog opens for the new profile. Members should ask an admin when no profile exists.
+2. **Connect an account.** Use **Channels → Add account**, select the owning profile, and complete platform authorization. Facebook additionally requires explicit Page selection. See [Channels](/docs/channels).
+3. **Compose.** Use **Posts → Create post**. Select one or several Brand Profiles, enter shared content, and add optional [media](/docs/media). Several profiles receive independent Posts and media copies. Choose destination channels grouped by provider; drafts need no channels, while scheduling/publishing needs a channel per selected profile.
+4. **Save, schedule, or publish.** Save a draft to return later, choose a publication time, or use Publish Now. Accepted delivery is reported separately for each channel. See [Publishing](/docs/publishing).
 
-Work through these steps in order — each builds on the previous one:
+## Learn the workspace
 
-1. **Create a Brand Profile.** Everything you publish, upload, and connect belongs to a Brand Profile. On the **Channels** board, admins can select **Create Brand Profile** in the action bar, or use the pencil icon in the Brand Profile filter dropdown on Channels or Posts. See [Workspaces & Brand Profiles](/docs/workspaces).
-2. **Connect a channel.** Go to **Channels → Add account**, pick the Brand Profile, and connect a social account. See [Channels](/docs/channels).
-3. **Attach media and compose.** Open **Posts → Create post**, select your Brand Profile and destination channels, and add your text and media (via file picker or drag and drop directly in the composer). See [Publishing](/docs/publishing) and [Media](/docs/media).
-4. **Publish or schedule.** Save as a draft, schedule for a specific date and time, or publish immediately from **Posts**. See [Publishing](/docs/publishing).
+| Control                            | What it does                                                                                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------- |
+| Posts                              | Opens one collection with **Table → Calendar → Grid** in its toolbar. Table is the default. |
+| Channels                           | Opens the Accounts directory and Brand Profiles tab.                                        |
+| Settings                           | Opens Appearance, Language, Account, and Security.                                          |
+| Top-bar search / Command-Control-K | Jumps to a supported destination or loaded Brand Profile.                                   |
+| Collection search and Filter       | Narrows the current Posts or Channels data.                                                 |
+| Post row/card/chip                 | Opens its publishing details in the side drawer.                                            |
 
-> Creating Brand Profiles requires a **workspace admin** role. If you're a member, ask your admin to create the profile — the Channels board tells you when this is needed.
+The desktop rail can collapse to icons. Its workspace name is a read-only identity label. Brand Profiles are collection scope, not sidebar sections. Select **All Brand Profiles** to return to aggregate review.
 
-## Find your way around
+Jump search is not a global Post index. Search captions or accounts in their collection toolbar. The Filter builder adds supported fields; active chips remove individual values and Clear all resets its rows.
 
-### Sidebar
+## Selection and inspection
 
-The left sidebar lists the primary destinations in the workspace:
+Select individual Posts or accounts with their checkboxes. Select-all is checked only when every visible item is selected; the floating pill shows the real count for partial selections too. Confirm destructive batches before proceeding; failed items remain selected for retry.
 
-- **Channels** (`/channels`) — connected social accounts, organized by Brand Profile
-- **Posts** (`/posts`) — your publishing hub for drafting, scheduling, and tracking posts
+Post details use a right-side drawer with real properties, caption, attachments, and Channel outcomes. **Expand panel** provides more space; **Restore side panel** returns to the edge. Close returns focus to the opening control. Editing and destructive actions remain in the supported Post workflow.
 
-Select **Search** near the top of the sidebar to open a quick-jump field that filters the navigation list as you type.
+## Preferences and phones
 
-### Workspace name
+Appearance offers **Light**, **Dark**, and **System**; System follows device palette changes. Language supports English and Spanish. Current-page changes work immediately; persistence requires [functional cookie consent](/docs/cookies). Security controls appear directly in their Settings section. There is no separate motion mode.
 
-The top of the sidebar displays your current workspace (organization) name and active plan as a static label — the app does not offer an in-app workspace switcher.
-
-### Footer controls
-
-At the bottom of the sidebar you can:
-
-- Switch between **light and dark** themes
-- Turn **Low motion** on or off (Meltiply also follows your device's reduced-motion setting)
-- **Collapse** the sidebar to an icon rail
-- Open **Account security**, see your account name and email, and **sign out**
-
-### On smaller screens
-
-On phones and tablets the sidebar is replaced by a top bar with a **menu button** that opens the same navigation in a panel, along with your account email, **Account security**, and a **Log out** option.
-
-## Where things live
-
-| You want to…                           | Go to                                                                  |
-| -------------------------------------- | ---------------------------------------------------------------------- |
-| Connect a social account               | [Channels](/docs/channels)                                             |
-| Organize clients or brands             | [Workspaces & Brand Profiles](/docs/workspaces)                        |
-| Attach an image or video for a post    | [Publishing](/docs/publishing) (see [Media](/docs/media))              |
-| Schedule or publish a post             | [Publishing](/docs/publishing)                                         |
-| Change theme or low motion preferences | Sidebar footer controls                                                |
-| Fix a connection that stopped working  | [Channels](/docs/channels) or [Troubleshooting](/docs/troubleshooting) |
+On smaller screens, open navigation from the persistent header. The full-height panel includes Posts, Channels, Help and resources, Settings, and the same Account menu used on desktop, including theme choices and Sign out. Collection controls wrap, wide tables/calendars scroll within their working area, Settings sections become a horizontal row, and Post inspection fills the viewport. Focused dialogs scroll within the available screen height, including landscape orientation.
 
 ## Next steps
 
-- [Workspaces & Brand Profiles](/docs/workspaces) — set up your structure before connecting accounts
-- [Channels](/docs/channels) — connect your first platform
-- [Troubleshooting](/docs/troubleshooting) — when something doesn't work as expected
+- [Workspaces & Brand Profiles](/docs/workspaces) — ownership and permissions.
+- [Publishing](/docs/publishing) — views, composer, and delivery actions.
+- [Troubleshooting](/docs/troubleshooting) — recover from failures without losing your work.

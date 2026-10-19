@@ -8,14 +8,14 @@ import {
   type RefObject,
 } from "react";
 import {
+  LazyMotion,
   animate,
   domAnimation,
-  LazyMotion,
   m,
   useMotionValue,
   type MotionValue,
 } from "motion/react";
-import { useMotionPreference } from "./motion-preference";
+import { useLatchedValue } from "./use-latched-value";
 
 /** Avoids React's server-render warning; commit-time FLIP needs a layout effect on the client. */
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
@@ -45,17 +45,20 @@ interface ClipInsets {
 }
 
 /**
- * Configuration for `SidebarGlideHighlight`. The app passes only its scrolling
- * `<nav>` via `containerRef`; the docs adapter additionally resolves its
- * enclosing `aside` as container plus the nested Radix ScrollArea viewport.
+ * Configuration for `SidebarGlideHighlight`. Both consumers pass their rail
+ * `<aside>` as the container: the workspace rail adds no `viewportSelector`
+ * because its rows live in one scrolling `<nav>` under a short header (scroll
+ * re-measures the hovered row), while the docs rail adds a Radix ScrollArea
+ * viewport so the pill stays clipped to that column.
  */
 export interface SidebarGlideHighlightProps {
   /**
-   * Element that establishes the positioning containing block rows are measured
-   * against. When it scrolls itself (the app `<nav>`), the rendered pill rides
-   * the scroll content and the container's own overflow clips it. When it does
-   * not (the docs `aside`), pass `viewportSelector` so the overlay can clip to
-   * and follow the nested scroller's visible region.
+   * Element that establishes the positioning containing block rows are
+   * measured against; it must be a positioned ancestor of the rendered pill.
+   * When it scrolls itself, the pill rides the scroll content and the
+   * container's own overflow clips it. When it does not, pass
+   * `viewportSelector` so the overlay can clip to and follow the nested
+   * scroller's visible region.
    */
   containerRef: RefObject<HTMLElement | null>;
   /** CSS selector identifying navigable item elements within the container. Defaults to `[data-sidebar-item]`. */
@@ -84,8 +87,15 @@ const SPRING = {
 };
 /** Short opacity fade for entry/exit; independent of the position spring. */
 const FADE = { duration: 0.2, ease: "easeOut" as const };
+
 /**
- * Attributes that can change the highlighted row or its geometry without a
+ * Selector for interactive rows that own their hover fill and must not attract
+ * the pill, even through the snap radius (the sidebar's account block).
+ */
+const GLIDE_IGNORE_SELECTOR = "[data-glide-ignore]";
+
+/**
+ * Attributes that can change the highlighted item or its geometry without a
  * childList mutation. `style` is deliberately absent: the pill's own motion
  * writes would retrigger the observer every frame.
  */
@@ -94,15 +104,9 @@ const OBSERVED_ATTRIBUTES = ["data-active", "aria-current", "aria-selected", "cl
 /**
  * Drives one motion value through a velocity-preserving spring: retargeting
  * mid-flight seeds the animation with the captured velocity, so rapid pointer
- * hops chain momentum instead of restarting at rest. `lowMotion` `jump()`s the
- * value to its destination synchronously, which also cancels any in-flight
- * animation — the preference's snap behaviour.
+ * hops chain momentum instead of restarting at rest.
  */
-function springTo(mv: MotionValue<number>, to: number, velocity: number, lowMotion: boolean): void {
-  if (lowMotion) {
-    mv.jump(to);
-    return;
-  }
+function springTo(mv: MotionValue<number>, to: number, velocity: number): void {
   animate(mv, to, { ...SPRING, velocity });
 }
 
@@ -245,12 +249,18 @@ function useGlideTracking({
     const scroller = viewport ?? container;
 
     const nearest = (clientX: number, clientY: number): HTMLElement | null => {
+      // A row that opts out (`data-glide-ignore`) keeps its own hover fill and
+      // must not attract the pill through the snap radius either: while the
+      // pointer is inside one, nothing is highlighted.
+      const underPointer = document.elementFromPoint(clientX, clientY);
+      if (underPointer?.closest(GLIDE_IGNORE_SELECTOR)) return null;
       let closest: HTMLElement | null = null;
       let minDistance = Infinity;
       for (const item of container.querySelectorAll<HTMLElement>(itemSelector)) {
         const r = item.getBoundingClientRect();
-        // Exclude hidden elements (e.g. display: none in collapsed mode).
-        if (r.height <= 0 && item.offsetParent === null) continue;
+        // Exclude items with no visible box: `display: none` in a collapsed
+        // rail, and any item another owner has animated to zero size.
+        if (r.height <= 0 || r.width <= 0) continue;
         if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
           return item;
         }
@@ -356,12 +366,19 @@ function useGlideTracking({
  * paint layers. Entry fades in at the hovered row; exit fades out in place.
  * Tracking drops unchanged geometry before state writes; this renderer owns
  * clipping and FLIP projection, preserving position and velocity on retargets.
- * Manual/OS low motion jumps to rest instead of interpolating.
+ * Consumers mark their rows with `itemSelector` and must keep them painted above
+ * the pill (a positioned row with a higher stacking order).
  */
 export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
   const { className, viewportSelector } = props;
-  const { lowMotion } = useMotionPreference();
+
   const { target, clip, scrollOffsetX, scrollOffsetY } = useGlideTracking(props);
+  /**
+   * Geometry stays latched for the exit: clearing the target starts the opacity
+   * fade, and resetting the box at the same commit would collapse the pill to a
+   * point and read as an instant disappearance instead of a fade.
+   */
+  const box = useLatchedValue(target);
 
   const x = useMotionValue(0);
   const y = useMotionValue(0);
@@ -375,18 +392,13 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
    * Commits the measured box and drives every motion value to rest at it.
    * Velocities are captured *before* the FLIP `set()`s so retargets preserve
    * momentum; scale velocities are re-expressed in the new unit box so visual
-   * growth speed survives the projection. Low motion `jump()`s everything,
-   * instantly settling the pill and cancelling in-flight movement.
+   * growth speed survives the projection.
    */
   useIsomorphicLayoutEffect(() => {
     const prev = committedRef.current;
     committedRef.current = target;
     if (!target) {
-      if (lowMotion) {
-        opacity.jump(0);
-      } else {
-        animate(opacity, 0, FADE);
-      }
+      animate(opacity, 0, FADE);
       return;
     }
     if (!prev) {
@@ -395,11 +407,7 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
       y.jump(0);
       scaleX.jump(1);
       scaleY.jump(1);
-      if (lowMotion) {
-        opacity.jump(1);
-      } else {
-        animate(opacity, 1, FADE);
-      }
+      animate(opacity, 1, FADE);
       return;
     }
     const velocityX = x.getVelocity();
@@ -416,16 +424,12 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
     y.set(visualTop - target.top);
     scaleX.set(target.width > 0 ? visualWidth / target.width : 1);
     scaleY.set(target.height > 0 ? visualHeight / target.height : 1);
-    springTo(x, 0, velocityX, lowMotion);
-    springTo(y, 0, velocityY, lowMotion);
-    springTo(scaleX, 1, velocitySX, lowMotion);
-    springTo(scaleY, 1, velocitySY, lowMotion);
-    if (lowMotion) {
-      opacity.jump(1);
-    } else {
-      animate(opacity, 1, FADE);
-    }
-  }, [target, lowMotion, x, y, scaleX, scaleY, opacity]);
+    springTo(x, 0, velocityX);
+    springTo(y, 0, velocityY);
+    springTo(scaleX, 1, velocitySX);
+    springTo(scaleY, 1, velocitySY);
+    animate(opacity, 1, FADE);
+  }, [target, x, y, scaleX, scaleY, opacity]);
 
   /**
    * Static paint and layer roles come from shared data hooks in
@@ -436,11 +440,11 @@ export function SidebarGlideHighlight(props: SidebarGlideHighlightProps) {
    * style keys straight to `style.setProperty`.
    */
   const pillVars = {
-    "--glide-top": `${target?.top ?? 0}px`,
-    "--glide-left": `${target?.left ?? 0}px`,
-    "--glide-width": `${target?.width ?? 0}px`,
-    "--glide-height": `${target?.height ?? 0}px`,
-    "--glide-radius": target?.borderRadius ?? "7px",
+    "--glide-top": `${box?.top ?? 0}px`,
+    "--glide-left": `${box?.left ?? 0}px`,
+    "--glide-width": `${box?.width ?? 0}px`,
+    "--glide-height": `${box?.height ?? 0}px`,
+    "--glide-radius": box?.borderRadius ?? "7px",
     "--glide-x": x,
     "--glide-y": y,
     "--glide-scale-x": scaleX,

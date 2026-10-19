@@ -102,6 +102,8 @@ does not destroy that bucket or copy its data.
 
 See [object storage requirements](../../docs/self-hosting.md#object-storage)
 for conditional operations, browser CORS, and provider cutover requirements.
+The default R2 bucket's CORS rule permits GET for signed original-media reads and
+PUT for direct browser uploads, restricted to the configured application origins.
 
 ## Release and rollback
 

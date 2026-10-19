@@ -1,8 +1,6 @@
-import { useMemo, useRef, useState, type ReactElement } from "react";
-import { Info, Pencil } from "lucide-react";
+import { useMemo, type ReactElement } from "react";
 import type { BrandProfile } from "@/types";
 import { useI18n } from "@/lib/i18n";
-import { Button } from "@meltiply/ui/button";
 import {
   Select,
   SelectContent,
@@ -10,7 +8,7 @@ import {
   SelectSeparator,
   SelectTrigger,
 } from "@meltiply/ui/select";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
+import { FilterChecklist } from "@meltiply/ui/dropdown-menu";
 
 /**
  * Props for {@link BrandProfileSelect}, the canonical Brand Profile picker
@@ -24,10 +22,7 @@ export interface BrandProfileSelectProps {
   value: string;
   /** Invoked with the chosen value (`"all"` or a profile id) when selection changes. */
   onValueChange: (value: string) => void;
-  /**
-   * Resolved workspace Brand Profiles rendered first, in input order, each with
-   * its color swatch and edit affordance.
-   */
+  /** Resolved workspace Brand Profiles rendered first, in input order. */
   brandProfiles: BrandProfile[];
   /**
    * Profile ids still referenced by visible content but absent from
@@ -35,8 +30,6 @@ export interface BrandProfileSelectProps {
    * stale references stay selectable instead of silently dropping out.
    */
   unresolvedProfileIds?: readonly string[];
-  /** Invoked with a resolved profile when its edit affordance is activated. */
-  onEditProfile?: (profile: BrandProfile) => void;
   /**
    * Trigger element rendered inside `SelectTrigger asChild` (typically a
    * `TopToolbarButton`), preserving each screen's toolbar trigger geometry.
@@ -53,16 +46,13 @@ export interface BrandProfileSelectProps {
    * `label` prop.
    */
   label: string;
-}
-
-/**
- * A single option in the Brand Profile dropdown: a resolved profile carries its
- * record for the swatch and edit affordance; an unresolved id is name-only.
- */
-interface BrandProfileOption {
-  id: string;
-  name: string;
-  profile?: BrandProfile;
+  /**
+   * Whether the aggregate "All Brand Profiles" row stays in the list. Filters
+   * keep it so a view can show every profile at once; surfaces that must act on
+   * one profile (composing or publishing) pass `false` and let the trigger
+   * state the profile instead.
+   */
+  includeAggregate?: boolean;
 }
 
 /**
@@ -89,146 +79,30 @@ export function brandProfileFilterLabel(
   }
   return brandProfiles.find((profile) => profile.id === selection)?.name ?? t("Unknown profile");
 }
-/**
- * One Brand Profile option row: the selectable {@link SelectItem} (name plus,
- * for resolved profiles, a color swatch), a static description indicator, and
- * an edit affordance.
- *
- * The sibling edit button intercepts pointer-down before Radix Select can
- * consume it as an option selection, then invokes the editor from `onClick`;
- * keyboard activation remains native. It closes the menu before opening the
- * dialog through the parent handler. A noninteractive Info icon exposes the
- * optional description in a tooltip without changing selection behavior.
- * @param props.option - Option descriptor; `profile` present only for resolved profiles.
- * @param props.onEditProfile - Invoked with the resolved profile on edit activation;
- * omit to render a plain non-editable row.
- * @returns The option row with profile context and editing affordances.
- */
-function ProfileOptionRow({
-  option,
-  onEditProfile,
-}: {
-  option: BrandProfileOption;
-  onEditProfile?: (profile: BrandProfile) => void;
-}) {
-  const { t } = useI18n();
-  const itemRef = useRef<HTMLDivElement | null>(null);
-  const editRef = useRef<HTMLButtonElement | null>(null);
-  const pointerActivationRef = useRef(false);
-  const profile = option.profile;
-  const canEdit = profile !== undefined && onEditProfile !== undefined;
 
-  return (
-    <div className="relative">
-      <SelectItem
-        ref={itemRef}
-        value={option.id}
-        hideIndicator={canEdit}
-        onKeyDown={(e) => {
-          if (e.key === "Tab" && !e.shiftKey && editRef.current) {
-            e.preventDefault();
-            e.stopPropagation();
-            editRef.current.focus();
-          }
-        }}
-      >
-        <span className="flex w-full min-w-0 items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-left">{option.name}</span>
-          {profile ? <span className="ml-auto w-16 shrink-0" aria-hidden="true" /> : null}
-        </span>
-      </SelectItem>
-      {profile ? (
-        <span className="absolute right-2 top-1/2 z-30 flex -translate-y-1/2 items-center gap-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span
-                aria-label={t("Profile description")}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                className="flex size-6 cursor-help items-center justify-center"
-              >
-                <Info className="size-3.5" color={profile.color} aria-hidden="true" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-64 leading-relaxed">
-              {profile.description ?? t("No profile description")}
-            </TooltipContent>
-          </Tooltip>
-          {canEdit ? (
-            <Button
-              ref={editRef}
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={t("Edit profile")}
-              title={t("Edit profile")}
-              onPointerDown={(event) => {
-                pointerActivationRef.current = true;
-                event.preventDefault();
-                event.stopPropagation();
-                onEditProfile(profile);
-              }}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                if (pointerActivationRef.current) {
-                  pointerActivationRef.current = false;
-                  return;
-                }
-                onEditProfile(profile);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Tab" && event.shiftKey) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  itemRef.current?.focus();
-                }
-              }}
-              onPointerEnter={(event) => {
-                if (document.activeElement !== event.currentTarget) {
-                  itemRef.current?.focus({ preventScroll: true });
-                }
-              }}
-              onPointerLeave={(event) => {
-                if (itemRef.current === document.activeElement) {
-                  event.currentTarget.closest<HTMLElement>('[role="listbox"]')?.focus();
-                }
-              }}
-              className="size-7 rounded-full text-ink-3 transition-all duration-150 hover:scale-105 hover:bg-hover hover:text-ink active:scale-95 [&_svg]:size-3.5"
-            >
-              <Pencil />
-            </Button>
-          ) : null}
-        </span>
-      ) : null}
-    </div>
-  );
+/** One selectable Brand Profile row: the aggregate choice, a profile, or an unresolved id. */
+interface BrandProfileOption {
+  id: string;
+  name: string;
 }
 
 /**
  * Canonical controlled Brand Profile Select for the Channels and Posts toolbars.
  *
- * Owns the entire dropdown: the `Select` root, the caller-supplied trigger, the
- * aggregate "All Brand Profiles" row, the separator, and one row per option.
+ * Owns the dropdown's whole construction: the `Select` root, the caller-supplied
+ * trigger, the aggregate "All Brand Profiles" row, the separator, and one
+ * plain option per profile. Selection is the only interaction — profile
+ * details and editing live in the Channels directory cards and the
+ * profile editor, never inside this list.
+ *
  * Options are built here as the single construction path — resolved profiles in
  * input order followed by unique unresolved ids as name-only "Unknown profile"
- * rows — so both screens share identical ordering and layout semantics.
+ * rows — so both screens share identical ordering and layout semantics. The
+ * trigger's accessible name is the trigger element's own `label` (the
+ * selected-value text); `label` names the listbox instead of masking that
+ * selection.
  *
- * Each profile row is a full-width flex container directly under the item text:
- * the name truncates flexibly on the left while the color swatch and edit
- * affordance stay pinned to the right edge via `ml-auto`. The edit affordance
- * appears only when `onEditProfile` is supplied (admins); editable rows opt out
- * of the selected checkmark (`hideIndicator`) so it cannot collide with the
- * pinned accessories, while non-editable rows keep the standard indicator. The
- * affordance is a sibling overlay button (see {@link ProfileOptionRow}), so
- * activating it never selects the row; the select controls its own open state
- * and closes the menu before invoking `onEditProfile`, so the dropdown never
- * remains mounted behind the profile editor. The trigger's accessible name is
- * the trigger element's own `label` (the selected-value text); `label` names
- * the listbox instead of masking that selection.
- * @param props - Selection state, profile data, edit handler, trigger, and label.
+ * @param props - Selection state, profile data, trigger, and label.
  * @returns A complete Select dropdown ready to drop into a toolbar.
  */
 export function BrandProfileSelect({
@@ -236,40 +110,48 @@ export function BrandProfileSelect({
   onValueChange,
   brandProfiles,
   unresolvedProfileIds,
-  onEditProfile,
   trigger,
   label,
+  includeAggregate = true,
 }: BrandProfileSelectProps) {
   const { t } = useI18n();
 
-  /**
-   * Internal open state for the dropdown. The select must close itself before
-   * the edit affordance fires — Radix never closes on the overlay button's
-   * click because it sits outside every option — so `open` is controlled here
-   * rather than left to Radix's uncontrolled default.
-   */
-  const [open, setOpen] = useState(false);
+  const options = useBrandProfileOptions(brandProfiles, unresolvedProfileIds);
 
-  /**
-   * Closes the dropdown, then hands the resolved profile to the caller's edit
-   * callback. Ordering matters: the editor dialog opens inside the callback,
-   * so the menu must already be closing to guarantee no listbox remains
-   * mounted behind it. Passed to rows only when `onEditProfile` exists.
-   */
-  const handleEditProfile = (profile: BrandProfile) => {
-    setOpen(false);
-    onEditProfile?.(profile);
-  };
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger asChild aria-label={trigger.props.label ?? label}>
+        {trigger}
+      </SelectTrigger>
+      <SelectContent align="start" className="w-max max-w-80" aria-label={label}>
+        {includeAggregate && (
+          <>
+            <SelectItem value="all">
+              <span className="block truncate text-left">{t("All Brand Profiles")}</span>
+            </SelectItem>
+            <SelectSeparator />
+          </>
+        )}
+        {options.map((option) => (
+          <SelectItem key={option.id} value={option.id}>
+            <span className="block truncate text-left">{option.name}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
-  /**
-   * Canonical option list: resolved profiles first, followed by any unique
-   * unresolved ids, so profile context and edit affordances remain consistent.
-   */
-  const options = useMemo(() => {
+/** Builds resolved profiles followed by unique unknown references for either selection mode. */
+function useBrandProfileOptions(
+  brandProfiles: readonly BrandProfile[],
+  unresolvedProfileIds?: readonly string[],
+) {
+  const { t } = useI18n();
+  return useMemo(() => {
     const list: BrandProfileOption[] = brandProfiles.map((profile) => ({
       id: profile.id,
       name: profile.name,
-      profile,
     }));
     const known = new Set(list.map((option) => option.id));
     for (const id of unresolvedProfileIds ?? []) {
@@ -280,25 +162,39 @@ export function BrandProfileSelect({
     }
     return list;
   }, [brandProfiles, unresolvedProfileIds, t]);
+}
 
+/**
+ * Multi-profile checklist sharing the canonical resolved/unknown option roster.
+ * Collection filters include aggregate clearing (empty means all). Composition
+ * omits it: empty means no profiles, and each selected profile owns its own Post.
+ */
+export function BrandProfileFilterSelect({
+  value,
+  onValueChange,
+  brandProfiles,
+  unresolvedProfileIds,
+  trigger,
+  includeAggregate = true,
+}: {
+  value: readonly string[];
+  onValueChange: (value: string[]) => void;
+  brandProfiles: readonly BrandProfile[];
+  unresolvedProfileIds?: readonly string[];
+  trigger: ReactElement;
+  includeAggregate?: boolean;
+}) {
+  const { t } = useI18n();
+  const options = useBrandProfileOptions(brandProfiles, unresolvedProfileIds);
   return (
-    <TooltipProvider delayDuration={300}>
-      <Select value={value} onValueChange={onValueChange} open={open} onOpenChange={setOpen}>
-        <SelectTrigger asChild aria-label={trigger.props.label ?? label}>
-          {trigger}
-        </SelectTrigger>
-        <SelectContent align="start" className="w-56" aria-label={label}>
-          <SelectItem value="all">{t("All Brand Profiles")}</SelectItem>
-          <SelectSeparator />
-          {options.map((option) => (
-            <ProfileOptionRow
-              key={option.id}
-              option={option}
-              onEditProfile={onEditProfile ? handleEditProfile : undefined}
-            />
-          ))}
-        </SelectContent>
-      </Select>
-    </TooltipProvider>
+    <FilterChecklist
+      value={value}
+      onValueChange={onValueChange}
+      trigger={trigger}
+      label={t("Brand Profile")}
+      aggregateLabel={includeAggregate ? t("All Brand Profiles") : undefined}
+      className="w-max max-w-80"
+      options={options.map((option) => ({ value: option.id, label: option.name }))}
+    />
   );
 }

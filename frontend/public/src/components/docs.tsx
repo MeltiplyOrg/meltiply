@@ -4,7 +4,6 @@ import type { Root } from "fumadocs-core/page-tree";
 import type { ComponentProps } from "react";
 import { RootProvider } from "fumadocs-ui/provider/astro";
 import type { AstroProviderProps } from "fumadocs-core/framework/astro";
-import { MotionPreferenceProvider } from "@meltiply/ui/motion-preference";
 import { BrandMark } from "@meltiply/ui/brand-mark";
 import SearchDialog from "./search";
 import { DocsPreferences } from "./docs-preferences";
@@ -52,7 +51,7 @@ function SiteFooter() {
         <a href="/docs/privacy">Privacy</a>
         <a href="/docs/cookies">Cookies</a>
         <a href="/third-party-notices.txt" data-astro-reload>
-          Third-party notices
+          Licenses
         </a>
       </nav>
     </footer>
@@ -62,7 +61,7 @@ function SiteFooter() {
 /**
  * Persistent sidebar around replaceable, build-time article HTML. Astro swaps
  * pathname, metadata, TOC and content while navigation and preferences stay
- * mounted. Theme and motion preferences live in the sidebar; the single
+ * mounted. Theme controls live in the sidebar; the single
  * shell-owned `CookieNotice` and app-style `Toaster` stay outside the keyed page
  * so route updates retain consent drafts, confirmation deadlines, and copy feedback.
  * Saved consent leaves no shell or article control for reopening preferences.
@@ -94,64 +93,62 @@ export function Docs({
 }) {
   return (
     <DocsPathnameContext value={pathname}>
-      <MotionPreferenceProvider>
-        <RootProvider
-          pathname={pathname}
-          params={params}
-          navigate={navigate}
-          theme={{ enabled: false }}
-          search={{ SearchDialog }}
-        >
-          <DocsThemeProvider>
-            <DocsLayout
-              tree={tree}
-              containerProps={{ className: "docs-shell" }}
-              themeSwitch={{ enabled: false }}
-              sidebar={{
-                components: { Separator: NavSection, Item: NavItem },
-                banner: <DocsNavGlide />,
-                footer: <DocsPreferences includeSearch />,
-              }}
-              nav={{
-                title: DocsBrand,
-                url: "/docs/",
-              }}
-              links={[
-                {
-                  text: "Meltiply.com",
-                  url: "/",
-                },
-                {
-                  type: "button",
-                  text: "Open app",
-                  url: appUrl,
-                  external: true,
-                },
-              ]}
+      <RootProvider
+        pathname={pathname}
+        params={params}
+        navigate={navigate}
+        theme={{ enabled: false }}
+        search={{ SearchDialog }}
+      >
+        <DocsThemeProvider>
+          <DocsLayout
+            tree={tree}
+            containerProps={{ className: "docs-shell" }}
+            themeSwitch={{ enabled: false }}
+            sidebar={{
+              components: { Separator: NavSection, Item: NavItem },
+              banner: <DocsNavGlide />,
+              footer: <DocsPreferences includeSearch />,
+            }}
+            nav={{
+              title: DocsBrand,
+              url: "/docs/",
+            }}
+            links={[
+              {
+                text: "Meltiply.com",
+                url: "/",
+              },
+              {
+                type: "button",
+                text: "Open app",
+                url: appUrl,
+                external: true,
+              },
+            ]}
+          >
+            <DocsTocTransition pathname={pathname} />
+            <DocsArticleTransition pathname={pathname} />
+            <DocsPage
+              key={pathname}
+              {...page}
+              slots={{ ...page?.slots, toc: docsRailTocSlots }}
+              footer={{ children: <SiteFooter /> }}
             >
-              <DocsTocTransition pathname={pathname} />
-              <DocsArticleTransition pathname={pathname} />
-              <DocsPage
-                key={pathname}
-                {...page}
-                slots={{ ...page?.slots, toc: docsRailTocSlots }}
-                footer={{ children: <SiteFooter /> }}
-              >
-                <div
-                  className="contents"
-                  dangerouslySetInnerHTML={{
-                    __html: typeof window === "undefined" ? content : DOMPurify.sanitize(content),
-                  }}
-                />
-              </DocsPage>
-            </DocsLayout>
-            <div className="docs-feedback">
-              <CookieNotice policyUrl="/docs/cookies" />
-              <Toaster />
-            </div>
-          </DocsThemeProvider>
-        </RootProvider>
-      </MotionPreferenceProvider>
+              <div
+                className="contents"
+                dangerouslySetInnerHTML={{
+                  __html: typeof window === "undefined" ? content : DOMPurify.sanitize(content),
+                }}
+              />
+            </DocsPage>
+          </DocsLayout>
+          <div className="docs-feedback">
+            <CookieNotice policyUrl="/docs/cookies" />
+            <Toaster />
+          </div>
+        </DocsThemeProvider>
+      </RootProvider>
     </DocsPathnameContext>
   );
 }

@@ -85,6 +85,8 @@ let currentUsageBefore:
     }
   | undefined;
 
+let baselineDistributionIds: string[] = [];
+
 const send = vi.fn(async () => ({
   metadata: { metrics: { backlogBytes: 0, backlogCount: 0 } },
 }));
@@ -127,6 +129,33 @@ function runRelay(relayEnv: AutomationEnv, batchSize?: number): Promise<OutboxRe
       ),
     ),
   );
+}
+
+/**
+ * Runs the real global scheduler against this suite's newly inserted fixtures.
+ * Pre-existing in-flight demo rows are skip-locked on a separate connection
+ * only for this claim, without changing their statuses or clocks. The optional
+ * limit retains the production default. Errors propagate after rollback/release,
+ * so later provider-sync fixtures can freely update the baseline rows.
+ */
+async function enqueueFixtureDistributions(limit?: number): Promise<number> {
+  const client = await systemPoolFor(env).connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `SELECT id FROM distributions
+       WHERE id = ANY($1::uuid[])
+       FOR UPDATE SKIP LOCKED`,
+      [baselineDistributionIds],
+    );
+    return await Effect.runPromise(enqueueDueDistributions(env, limit));
+  } finally {
+    try {
+      await client.query("ROLLBACK");
+    } finally {
+      client.release();
+    }
+  }
 }
 
 const apiEnv = {
@@ -1317,6 +1346,11 @@ function youtubeSyncRegistry(
 describeIntegration("Automation jobs with PostgreSQL", () => {
   beforeAll(async () => {
     await runSystemTransaction(env, async (client) => {
+      const baseline = await client.query<{ id: string }>(
+        `SELECT id FROM distributions
+         WHERE status NOT IN ('published', 'cancelled')`,
+      );
+      baselineDistributionIds = baseline.rows.map((row) => row.id);
       const usage = await client.query<{
         api_calls: string;
         distributions: string;
@@ -5431,8 +5465,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       );
     });
 
-    await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(1);
-    await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(0);
+    await expect(enqueueFixtureDistributions()).resolves.toBe(1);
+    await expect(enqueueFixtureDistributions()).resolves.toBe(0);
     await expect(runRelay(env, 100)).resolves.toMatchObject({
       failed: 0,
       published: expect.any(Number),
@@ -5563,8 +5597,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         );
       });
 
-      await expect(Effect.runPromise(enqueueDueDistributions(env, 5))).resolves.toBe(5);
-      await expect(Effect.runPromise(enqueueDueDistributions(env, 5))).resolves.toBe(0);
+      await expect(enqueueFixtureDistributions(5)).resolves.toBe(5);
+      await expect(enqueueFixtureDistributions(5)).resolves.toBe(0);
 
       await runSystemTransaction(env, async (client) => {
         const result = await client.query<{
@@ -5697,7 +5731,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         );
       });
 
-      await expect(Effect.runPromise(enqueueDueDistributions(env, 10))).resolves.toBe(1);
+      await expect(enqueueFixtureDistributions(10)).resolves.toBe(1);
 
       await runSystemTransaction(env, async (client) => {
         const distributions = await client.query<{
@@ -5823,7 +5857,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       });
 
       // Within grace period, scheduled scan does NOT pick it up
-      await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(0);
+      await expect(enqueueFixtureDistributions()).resolves.toBe(0);
 
       // Simulate time advancing past the grace period
       await runSystemTransaction(env, (client) =>
@@ -5835,7 +5869,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
 
       // Stalled due scan picks it up and arms reconciliation — never a fresh
       // publish command, since the provider side effect is unknown (#256).
-      await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(1);
+      await expect(enqueueFixtureDistributions()).resolves.toBe(1);
 
       await runSystemTransaction(env, async (client) => {
         const row = await client.query<{
@@ -5982,7 +6016,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     );
     expect(rescheduled.rowCount).toBe(1);
 
-    await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(1);
+    await expect(enqueueFixtureDistributions()).resolves.toBe(1);
 
     const staleReschedule = await runSystemTransaction(env, (client) =>
       client.query(
@@ -6308,7 +6342,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       );
     });
 
-    await expect(Effect.runPromise(enqueueDueDistributions(env, 2))).resolves.toBe(0);
+    await expect(enqueueFixtureDistributions(2)).resolves.toBe(0);
     await runSystemTransaction(env, async (client) => {
       const result = await client.query<{
         failure_code: string | null;
@@ -6493,7 +6527,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       expect(result.rows[0]!.retry_in_seconds).toBeGreaterThanOrEqual(28);
       expect(result.rows[0]!.retry_in_seconds).toBeLessThanOrEqual(30);
     });
-    await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(0);
+    await expect(enqueueFixtureDistributions()).resolves.toBe(0);
 
     await runSystemTransaction(env, (client) =>
       client.query(
@@ -6503,8 +6537,8 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         [distributionId],
       ),
     );
-    await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(1);
-    await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(0);
+    await expect(enqueueFixtureDistributions()).resolves.toBe(1);
+    await expect(enqueueFixtureDistributions()).resolves.toBe(0);
     await runSystemTransaction(env, async (client) => {
       const result = await client.query<{
         dedupe_key: string;
@@ -6783,7 +6817,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         [distributionId],
       ),
     );
-    await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(1);
+    await expect(enqueueFixtureDistributions()).resolves.toBe(1);
 
     await runSystemTransaction(env, async (client) => {
       const result = await client.query<{
@@ -7209,7 +7243,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
       );
     });
 
-    await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(0);
+    await expect(enqueueFixtureDistributions()).resolves.toBe(0);
     await runSystemTransaction(env, async (client) => {
       const result = await client.query<{
         dedupe_key: string;
@@ -7276,7 +7310,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
     // recordReconciliationOutcome already armed the live reconcile:2 event.
     // The scanner must not create a duplicate claim merely because the due
     // timestamp elapsed before that event's queue delivery completes.
-    await expect(Effect.runPromise(enqueueDueDistributions(env))).resolves.toBe(0);
+    await expect(enqueueFixtureDistributions()).resolves.toBe(0);
     const secondMessage = {
       ...firstMessage,
       event_id: "automation-integration-provider-reconcile-2",

@@ -3,19 +3,17 @@ import {
   disclosureEffect,
   morphHeightEffect,
   revealEffect,
-  watchMotionSuppression,
 } from "@meltiply/ui/effects";
 
 /*
  * Landing motion orchestration on top of the shared WAAPI engine in
- * `@meltiply/ui/effects`. The engine owns the shared manual-OR-OS low-motion
- * rule, ink-capture suppression, per-element replacement, and tracked
- * cancellation; this file only maps landing selectors onto those recipes.
+ * `@meltiply/ui/effects`. The engine owns per-element replacement and tracked
+ * cancellation; this file maps landing selectors onto the existing recipes.
  */
 
 /**
  * Gives the mobile disclosure a short entrance without delaying visibility,
- * focus, or native hidden-state dismissal; low motion uses the resting layout.
+ * focus, or native hidden-state dismissal.
  */
 export function animateDisclosure(element: HTMLElement): void {
   disclosureEffect(element);
@@ -39,11 +37,9 @@ export function animatePanel(panel: HTMLElement, previousHeight?: number): void 
 
 /**
  * Orchestrates one-time viewport entrances for every landing component family.
- * Content stays visible without JS/IntersectionObserver. Preference or
- * ink-capture changes cancel active WAAPI effects back to their normal styles,
- * including height morphs; new entrances always recheck the shared manual OR
- * live OS rule inside the engine. Returns cleanup for Astro route swaps so
- * observers and suppression subscriptions cannot retain a detached homepage.
+ * Content stays visible without JS/IntersectionObserver. Astro route swaps
+ * cancel active effects and release observers, so detached pages retain no
+ * animation layers or subscriptions.
  */
 export function initializeMotion(): () => void {
   const targets = document.querySelectorAll(
@@ -70,8 +66,7 @@ export function initializeMotion(): () => void {
       ".copyright",
     ].join(","),
   );
-  const stopWatching = watchMotionSuppression(cancelEffects);
-  if (typeof IntersectionObserver === "undefined") return stopWatching;
+  if (typeof IntersectionObserver === "undefined") return cancelEffects;
   const observer = new IntersectionObserver(
     (entries) => {
       let stagger = 0;
@@ -86,7 +81,6 @@ export function initializeMotion(): () => void {
   for (const target of targets) observer.observe(target);
   return () => {
     observer.disconnect();
-    stopWatching();
     cancelEffects();
   };
 }

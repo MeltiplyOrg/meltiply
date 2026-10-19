@@ -2,7 +2,7 @@ import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
-import { SlidingMenuHighlight } from "../primitives/sliding-menu-highlight";
+import { SlidingHighlight } from "../primitives/sliding-highlight";
 
 /**
  * Root context container for custom select dropdowns built on Radix Select.
@@ -39,11 +39,14 @@ export const SelectValue = SelectPrimitive.Value;
 /**
  * Interactive trigger button that toggles the select dropdown menu.
  *
- * Displays the current value, truncates overflowing text with `line-clamp-1`, renders a trailing
- * chevron icon, and handles keyboard interactions (Space, Enter, Arrow keys).
+ * Carries the canonical field vocabulary (30px control height, control radius,
+ * strong field boundary, 13px text, accent focus ring) so a select sitting
+ * beside an {@link import("./input").Input} reads as the same control family.
+ * Coarse pointers get a 44px minimum target without changing desktop density.
  *
  * @param className - Optional CSS classes for custom sizing, background, or borders.
  * @param children - Trigger content, usually {@link SelectValue}.
+ * @param asChild - Delegates rendering to the child, keeping its own geometry.
  * @param props - Radix Trigger props forwarded to the button element.
  * @param ref - Forwarded ref to the underlying HTML button element.
  * @returns Styled select trigger button.
@@ -63,14 +66,14 @@ export const SelectTrigger = React.forwardRef<
     <SelectPrimitive.Trigger
       ref={ref}
       className={cn(
-        "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-border bg-background px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+        "flex h-control min-w-0 w-full touch-manipulation items-center justify-between gap-2 whitespace-nowrap rounded-control border border-line-strong bg-field px-2.5 text-[13px] transition-colors duration-150 pointer-coarse:min-h-11 placeholder:text-ink-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45 [&>span]:line-clamp-1",
         className,
       )}
       {...props}
     >
       {children}
       <SelectPrimitive.Icon asChild>
-        <ChevronDown className="size-3.5 text-ink-3 shrink-0" />
+        <ChevronDown className="size-3.5 shrink-0 text-ink-3" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
@@ -128,9 +131,10 @@ SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayNam
 /**
  * Floating popover container holding the selectable listbox items.
  *
- * Portalled to `document.body` to avoid parent clipping/overflow issues. Configured by default
- * with `position="popper"` for floating alignment, dynamic viewport sizing, and animated
- * entrance/exit transitions (`animate-in`, `zoom-in-95`, directional slide).
+ * Portalled to `document.body` to avoid parent clipping/overflow issues. The
+ * chrome comes from the shared `[data-menu-surface]` vocabulary, so a select
+ * list matches the account menu, row actions, and every other floating menu;
+ * only the opacity fade animates, keeping clear of Radix's popper transform.
  *
  * @param className - Optional CSS classes for custom dimensions or padding.
  * @param children - Group, Item, Label, and Separator children.
@@ -149,8 +153,9 @@ export const SelectContent = React.forwardRef<
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         ref={ref}
+        data-menu-surface=""
         className={cn(
-          "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 select-none",
+          "relative z-50 select-none",
           position === "popper" &&
             "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className,
@@ -162,12 +167,16 @@ export const SelectContent = React.forwardRef<
         <SelectPrimitive.Viewport
           ref={viewportRef}
           className={cn(
-            "relative p-1",
+            "relative",
             position === "popper" &&
               "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
           )}
         >
-          <SlidingMenuHighlight containerRef={viewportRef} itemSelector="[data-dropdown-item]" />
+          <SlidingHighlight
+            containerRef={viewportRef}
+            itemSelector="[data-dropdown-item]"
+            deferUntilInteraction
+          />
           {children}
         </SelectPrimitive.Viewport>
         <SelectScrollDownButton />
@@ -178,7 +187,8 @@ export const SelectContent = React.forwardRef<
 SelectContent.displayName = SelectPrimitive.Content.displayName;
 
 /**
- * Non-interactive label heading for grouping items within {@link SelectGroup}.
+ * Non-interactive label heading for grouping items within {@link SelectGroup};
+ * styled by the shared `[data-menu-label]` menu vocabulary.
  *
  * @param className - Optional CSS classes.
  * @param props - Radix Label props.
@@ -189,19 +199,14 @@ const SelectLabel = React.forwardRef<
   React.ComponentRef<typeof SelectPrimitive.Label>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Label>
 >(({ className, ...props }, ref) => (
-  <SelectPrimitive.Label
-    ref={ref}
-    className={cn("px-2 py-1.5 text-xs font-semibold text-muted-foreground", className)}
-    {...props}
-  />
+  <SelectPrimitive.Label ref={ref} data-menu-label="" className={className} {...props} />
 ));
 SelectLabel.displayName = SelectPrimitive.Label.displayName;
 
 /**
- * Selectable item option within {@link SelectContent}.
- *
- * Includes keyboard navigation support, focus highlighting (`focus:bg-accent`), disabled state
- * handling, and an absolute right-aligned checkmark indicator when selected.
+ * Selectable option row within {@link SelectContent}, styled by the shared
+ * `[data-menu-item]` menu vocabulary and finished with a right-aligned accent
+ * checkmark when selected.
  *
  * The item text is rendered through `ItemText asChild` onto a `block w-full flex-1` span:
  * Radix `SelectItemText` deliberately discards `className`/`style`, so styling the primitive
@@ -211,9 +216,6 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName;
  *
  * @param value - Unique string value assigned to this option.
  * @param disabled - Optional boolean to disable selection of this option.
- * @param hideIndicator - Opts out of the selected checkmark and its `pr-8` padding; reserved
- * for rows that pin their own accessories at the right edge (e.g. Brand Profile rows), where
- * the indicator would collide. Defaults to `false` so plain options keep the indicator.
  * @param className - Optional CSS classes.
  * @param children - Display label or custom JSX rendered inside the option.
  * @param props - Radix Item props.
@@ -222,27 +224,20 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName;
  */
 export const SelectItem = React.forwardRef<
   React.ComponentRef<typeof SelectPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
-    hideIndicator?: boolean;
-  }
->(({ className, children, hideIndicator = false, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
+>(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
     data-dropdown-item
-    className={cn(
-      "relative z-10 flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-2 text-sm outline-none transition-colors focus:bg-transparent data-[highlighted]:bg-transparent hover:bg-transparent text-ink focus:text-ink data-[highlighted]:text-ink data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      !hideIndicator && "pr-8",
-      className,
-    )}
+    data-menu-item=""
+    className={cn("cursor-default select-none pr-8", className)}
     {...props}
   >
-    {!hideIndicator && (
-      <span className="absolute right-2 flex size-3.5 items-center justify-center">
-        <SelectPrimitive.ItemIndicator>
-          <Check className="size-4" />
-        </SelectPrimitive.ItemIndicator>
-      </span>
-    )}
+    <span data-menu-indicator="">
+      <SelectPrimitive.ItemIndicator>
+        <Check className="size-4" />
+      </SelectPrimitive.ItemIndicator>
+    </span>
     <SelectPrimitive.ItemText asChild>
       <span className="block w-full min-w-0 flex-1">{children}</span>
     </SelectPrimitive.ItemText>
@@ -251,7 +246,8 @@ export const SelectItem = React.forwardRef<
 SelectItem.displayName = SelectPrimitive.Item.displayName;
 
 /**
- * Visual separator divider line placed between select options or groups.
+ * Visual separator divider line placed between select options or groups; styled
+ * by the shared `[data-menu-separator]` menu vocabulary.
  *
  * @param className - Optional CSS classes.
  * @param props - Radix Separator props.
@@ -262,11 +258,7 @@ export const SelectSeparator = React.forwardRef<
   React.ComponentRef<typeof SelectPrimitive.Separator>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Separator>
 >(({ className, ...props }, ref) => (
-  <SelectPrimitive.Separator
-    ref={ref}
-    className={cn("-mx-1 my-1 h-px bg-muted", className)}
-    {...props}
-  />
+  <SelectPrimitive.Separator ref={ref} data-menu-separator="" className={className} {...props} />
 ));
 SelectSeparator.displayName = SelectPrimitive.Separator.displayName;
 

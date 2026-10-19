@@ -26,10 +26,7 @@ export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDi
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn(
-        "rounded-xl border border-border bg-card text-card-foreground shadow-sm",
-        className,
-      )}
+      className={cn("rounded-card border border-line bg-surface text-ink shadow-card", className)}
       {...props}
     />
   ),
@@ -61,15 +58,12 @@ CardHeader.displayName = "CardHeader";
  * @param props - HTML heading element attributes forwarded to the `<h3>`.
  * @param ref - Forwarded DOM reference to the `<h3>` heading element.
  */
-const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
-  ({ className, ...props }, ref) => (
-    <h3
-      ref={ref}
-      className={cn("font-semibold leading-none tracking-tight", className)}
-      {...props}
-    />
-  ),
-);
+export const CardTitle = React.forwardRef<
+  HTMLHeadingElement,
+  React.HTMLAttributes<HTMLHeadingElement>
+>(({ className, ...props }, ref) => (
+  <h3 ref={ref} className={cn("font-semibold leading-none tracking-tight", className)} {...props} />
+));
 CardTitle.displayName = "CardTitle";
 
 /**
@@ -81,7 +75,7 @@ CardTitle.displayName = "CardTitle";
  * @param props - HTML paragraph attributes forwarded to the `<p>` element.
  * @param ref - Forwarded DOM reference to the `<p>` paragraph element.
  */
-const CardDescription = React.forwardRef<
+export const CardDescription = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLParagraphElement>
 >(({ className, ...props }, ref) => (
@@ -116,7 +110,7 @@ CardContent.displayName = "CardContent";
  * @param props - HTML div attributes forwarded to the footer container.
  * @param ref - Forwarded DOM reference to the footer div element.
  */
-const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+export const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div ref={ref} className={cn("flex items-center p-6 pt-0", className)} {...props} />
   ),

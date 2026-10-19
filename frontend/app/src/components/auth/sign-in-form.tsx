@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { ArrowRight, KeyRound, ShieldCheck } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
 import { BrandMark } from "@meltiply/ui/brand-mark";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
@@ -236,17 +236,14 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
   }, [mode]);
 
   return (
-    <section className="grid w-full max-w-5xl overflow-hidden rounded-window border border-line bg-surface shadow-card lg:grid-cols-[0.95fr_1fr]">
-      <aside className="flex flex-col justify-between gap-6 border-b border-line bg-inset p-6 sm:p-8 lg:gap-12 lg:border-r lg:border-b-0 lg:p-12">
+    <section className="grid w-full max-w-3xl overflow-hidden rounded-window border border-line bg-surface lg:grid-cols-[0.8fr_1fr]">
+      <aside className="flex flex-col justify-between gap-6 border-b border-line bg-canvas p-6 lg:gap-12 lg:border-r lg:border-b-0 lg:p-8">
         <div className="flex items-center gap-3 text-lg font-semibold tracking-tight text-ink">
           <BrandMark className="size-8" />
           Meltiply
         </div>
         <div className="hidden max-w-sm space-y-5 lg:block">
-          <p className="text-xs font-medium uppercase tracking-widest text-ink-3">
-            {t("Your private publishing workspace")}
-          </p>
-          <p className="text-3xl font-semibold leading-tight tracking-tight text-ink sm:text-4xl">
+          <p className="text-(length:--text-title) font-semibold leading-8 tracking-page-title text-ink">
             {t("One place to shape what’s next.")}
           </p>
           <p className="text-sm leading-relaxed text-ink-2">
@@ -260,16 +257,12 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
           </p>
         </div>
       </aside>
-      <div className="flex flex-col justify-center p-6 sm:p-8 lg:p-12">
-        <div className="mb-8 space-y-3">
-          <span className="inline-flex items-center gap-2 text-xs font-medium text-ink-3">
-            <KeyRound className="size-3.5" aria-hidden="true" />
-            {mode === "setup" ? t("INITIAL SETUP") : t("OWNER ACCESS")}
-          </span>
+      <div className="flex flex-col justify-center p-6 sm:p-8">
+        <div className="mb-6 space-y-2">
           <h1
             ref={headingRef}
             tabIndex={-1}
-            className="text-3xl font-semibold tracking-tight text-ink"
+            className="text-(length:--text-title) leading-8 font-semibold tracking-page-title text-ink"
           >
             {heading}
           </h1>
@@ -413,7 +406,7 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
                 />
               </div>
             )}
-            <Button type="submit" className="w-full" disabled={busy}>
+            <Button type="submit" size="lg" className="w-full" disabled={busy}>
               {busy
                 ? t("Please wait…")
                 : mode === "setup"

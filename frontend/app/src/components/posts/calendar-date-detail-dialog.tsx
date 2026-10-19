@@ -1,6 +1,7 @@
 import React from "react";
 import { CalendarDays, Edit3, Trash2, Plus, Info } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
+import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Input } from "@meltiply/ui/input";
 import {
   CenterDialog,
@@ -12,7 +13,7 @@ import {
 } from "@meltiply/ui/center-dialog";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { StatusBadge } from "./status-badge";
-import { useI18n } from "@/lib/i18n";
+import { Trans, useI18n } from "@/lib/i18n";
 import { useLatchedValue } from "@meltiply/ui/use-latched-value";
 import {
   normalizePostStatus,
@@ -76,7 +77,7 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
   const allDaySelected = dayIds.length > 0 && dayIds.every((id) => selectedIds.has(id));
   return (
     <CenterDialog open={liveDate !== null} onOpenChange={(open) => !open && onClose()}>
-      <CenterDialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+      <CenterDialogContent className="sm:max-w-2xl">
         <CenterDialogHeader>
           <CenterDialogTitle className="flex items-center gap-2 text-lg">
             <CalendarDays className="size-5 text-accent" />
@@ -88,7 +89,10 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
             })}
           </CenterDialogTitle>
           <CenterDialogDescription>
-            {t("{count} post(s) scheduled or published on this date.", { count: posts.length })}
+            <Trans
+              message="{count} post(s) scheduled or published on this date."
+              values={{ count: <RollingCount value={posts.length} /> }}
+            />
           </CenterDialogDescription>
         </CenterDialogHeader>
 
@@ -100,11 +104,6 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
                 aria-label={t("Select all posts for this day")}
                 checked={allDaySelected}
                 disabled={selectionDisabled}
-                ref={(el) => {
-                  if (el) {
-                    el.indeterminate = !allDaySelected && dayIds.some((id) => selectedIds.has(id));
-                  }
-                }}
                 onChange={() => onSetSelection(dayIds, !allDaySelected)}
               />
               <span className="text-xs font-medium text-ink-2 select-none">

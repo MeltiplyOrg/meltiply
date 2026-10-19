@@ -1,6 +1,4 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
-import { motionAllowed } from "@meltiply/ui/motion-state";
 import { createLoadingPlane, DocsTocPlane } from "./docs-toc-plane";
 
 const useClientLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
@@ -20,8 +18,16 @@ const scrollBudgetMs = 250;
 
 interface ContentsTransition {
   reveal: () => void;
-  settleMotion: () => void;
   dispose: () => void;
+}
+
+/** One navigation owns its transient rail; completing the exit releases its animation before the route commits. */
+interface ContentsCycle {
+  rail: HTMLElement;
+  list: HTMLElement;
+  exit: TocMotion | null;
+  signal: AbortSignal;
+  abort: () => void;
 }
 
 interface TocMotion {
@@ -169,7 +175,7 @@ function animateContents(
  */
 function scrollGuideToTop(signal: AbortSignal, maxMs: number): Promise<void> {
   if (signal.aborted || (window.scrollY === 0 && window.scrollX === 0)) return Promise.resolve();
-  if (!motionAllowed() || document.hidden) {
+  if (document.hidden) {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     return Promise.resolve();
   }
@@ -238,17 +244,11 @@ function scrollGuideToTop(signal: AbortSignal, maxMs: number): Promise<void> {
  * the plane's return flight. A shell-owned loading marker survives the guide
  * swap; its ring→plane morph starts the moment the fetch lands so incoming
  * rows only wait for two paint frames before unfolding. Stale or aborted
- * loaders cannot own another navigation; reduced motion settles at once.
+ * loaders cannot own another navigation.
  */
 function createContentsTransition(marker: HTMLElement): ContentsTransition {
   const loadingPlane = createLoadingPlane(marker);
-  let pending: {
-    rail: HTMLElement;
-    list: HTMLElement;
-    exit: TocMotion | null;
-    signal: AbortSignal;
-    abort: () => void;
-  } | null = null;
+  let pending: ContentsCycle | null = null;
   let entrance: TocMotion | null = null;
   let enteringList: HTMLElement | null = null;
   let entranceFrame = 0;
@@ -319,12 +319,11 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
     rail.dataset.tocTransition = "closing";
     rail.setAttribute("aria-busy", "true");
     list.inert = true;
-    const exit = motionAllowed() ? animateContents(list, false, rowStarts, planeStart) : null;
-    if (!exit) list.style.visibility = "hidden";
+    const exit = animateContents(list, false, rowStarts, planeStart);
     const abort = () => {
       if (pending === cycle) reset();
     };
-    const cycle = { rail, list, exit, signal: event.signal, abort };
+    const cycle: ContentsCycle = { rail, list, exit, signal: event.signal, abort };
     pending = cycle;
     event.signal.addEventListener("abort", abort, { once: true });
     const loader = event.loader;
@@ -344,13 +343,13 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
         await Promise.all([
           loading.then(startRestore),
           scrolling,
-          (exit?.finished ?? Promise.resolve()).then(() => {
+          exit.finished.then(() => {
             if (pending !== cycle || event.signal.aborted) return;
             loadingPlane.show(list, !loaded);
             markerShown = true;
             if (loaded) startRestore();
             list.style.visibility = "hidden";
-            exit?.cancel();
+            exit.cancel();
             cycle.exit = null;
             rail.dataset.tocTransition = loaded ? "closing" : "loading";
           }),
@@ -369,7 +368,7 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
     reset(true);
     const rail = document.getElementById("nd-toc");
     const list = rail?.querySelector<HTMLElement>("[data-docs-toc-list]");
-    if (!rail || !list || rail.getClientRects().length === 0 || !motionAllowed()) {
+    if (!rail || !list || rail.getClientRects().length === 0) {
       loadingPlane.hide();
       return;
     }
@@ -388,8 +387,7 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
           if (entrance !== animation) return;
           plane?.style.removeProperty("visibility");
           loadingPlane.hide();
-          if (motionAllowed()) animation.play();
-          else animation.finish();
+          animation.play();
         });
       });
     });
@@ -403,19 +401,9 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
     });
   };
 
-  /** Finishes marker and row motion, and the native scroll, when manual or OS motion reduction turns on. */
-  const settleMotion = () => {
-    cancelAnimationFrame(entranceFrame);
-    entranceFrame = 0;
-    pending?.exit?.finish();
-    loadingPlane.finish();
-    if (pending) window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-    entrance?.finish();
-  };
   document.addEventListener("astro:before-preparation", prepare);
   return {
     reveal,
-    settleMotion,
     /** Releases navigation listeners, queued frames and native animation layers on unmount. */
     dispose: () => {
       document.removeEventListener("astro:before-preparation", prepare);
@@ -432,7 +420,7 @@ function createContentsTransition(marker: HTMLElement): ContentsTransition {
 export function DocsTocTransition({ pathname }: { pathname: string }) {
   const controller = useRef<ContentsTransition | null>(null);
   const marker = useRef<HTMLSpanElement>(null);
-  const { lowMotion } = useMotionPreference();
+
   useEffect(() => {
     if (!marker.current) return;
     controller.current = createContentsTransition(marker.current);
@@ -444,9 +432,6 @@ export function DocsTocTransition({ pathname }: { pathname: string }) {
   useClientLayoutEffect(() => {
     controller.current?.reveal();
   }, [pathname]);
-  useClientLayoutEffect(() => {
-    if (lowMotion) controller.current?.settleMotion();
-  }, [lowMotion]);
   return (
     <span
       ref={marker}

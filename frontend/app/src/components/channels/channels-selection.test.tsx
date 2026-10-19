@@ -220,6 +220,19 @@ function bulkActionButton() {
   return screen.getByRole("button", { name: "Disconnect" });
 }
 
+/**
+ * The selection dock. Its live count is a `RollingCount`, so the sentence is split
+ * across nodes — read it as the text a person sees rather than as one element's label.
+ */
+function selectionDock() {
+  const region = screen.queryByRole("region", { name: "Selection actions" });
+  return region ? within(region).queryByRole("status") : null;
+}
+
+async function expectSelection(text: string) {
+  await waitFor(() => expect(selectionDock()?.textContent).toBe(text));
+}
+
 beforeAll(() => {
   // jsdom does not implement scrollIntoView; Radix Select calls it when its
   // popover content mounts and focuses the selected item.
@@ -228,12 +241,8 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
-  document.documentElement.removeAttribute("data-low-motion");
 });
 beforeEach(() => {
-  // jsdom never settles the pill's motion transitions; the real low-motion
-  // attribute makes entrance/exit instant instead of mocking components.
-  document.documentElement.setAttribute("data-low-motion", "");
   resetScope();
 });
 
@@ -253,13 +262,13 @@ describe("Channels selection", () => {
     expect(screen.queryByText("Alpha YouTube")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all visible channels" }));
-    expect(await screen.findByText("1 selected")).toBeVisible();
+    await expectSelection("1 selected");
     expect(screen.getByTestId(`channel-row-${connectedAccount.id}`)).toHaveAttribute(
       "data-selected",
     );
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all visible channels" }));
-    await waitFor(() => expect(screen.queryByText("1 selected")).not.toBeInTheDocument());
+    await waitFor(() => expect(selectionDock()).toBeNull());
   });
 
   /**
@@ -274,14 +283,14 @@ describe("Channels selection", () => {
     fireEvent.click(within(tiktokRow).getByRole("checkbox", { name: "Select channel" }));
     const youtubeRow = screen.getByTestId(`channel-row-${youtubeAccount.id}`);
     fireEvent.click(within(youtubeRow).getByRole("checkbox", { name: "Select channel" }));
-    expect(await screen.findByText("2 selected")).toBeVisible();
+    await expectSelection("2 selected");
 
     // Hiding a selected channel does not shrink the pill count.
     fireEvent.change(screen.getByLabelText("Search accounts"), {
       target: { value: "tiktok" },
     });
     expect(screen.queryByTestId(`channel-row-${youtubeAccount.id}`)).not.toBeInTheDocument();
-    expect(screen.getByText("2 selected")).toBeVisible();
+    await expectSelection("2 selected");
     expect(
       within(screen.getByTestId(`channel-row-${connectedAccount.id}`)).getByRole("checkbox", {
         name: "Select channel",
@@ -310,13 +319,13 @@ describe("Channels selection", () => {
         name: "Select channel",
       }),
     );
-    expect(await screen.findByText("1 selected")).toBeVisible();
+    await expectSelection("1 selected");
 
     act(() => {
       workspace.setSelectedBrandProfileId(betaProfile.id);
     });
 
-    await waitFor(() => expect(screen.queryByText("1 selected")).not.toBeInTheDocument());
+    await waitFor(() => expect(selectionDock()).toBeNull());
     expect(
       within(screen.getByTestId(`channel-row-${betaAccount.id}`)).getByRole("checkbox", {
         name: "Select channel",
@@ -353,7 +362,7 @@ describe("Channels selection", () => {
     ]);
 
     // The successful id left the selection; both failures remain selected.
-    expect(screen.getByText("2 selected")).toBeVisible();
+    await expectSelection("2 selected");
     expect(
       within(screen.getByTestId(`channel-row-${connectedAccount.id}`)).getByRole("checkbox", {
         name: "Select channel",
@@ -411,7 +420,7 @@ describe("Channels selection", () => {
 
     expect(queryMutations.disconnect.mutateAsync).toHaveBeenCalledTimes(1);
     expect(queryMutations.disconnect.mutateAsync).toHaveBeenCalledWith(connectedAccount.id);
-    await waitFor(() => expect(screen.queryByText("1 selected")).not.toBeInTheDocument());
+    await waitFor(() => expect(selectionDock()).toBeNull());
     expect(toastMock).toHaveBeenCalledWith(
       "Channel disconnected",
       expect.objectContaining({ variant: "success" }),
@@ -427,10 +436,10 @@ describe("Channels selection", () => {
     renderChannels();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all visible channels" }));
-    expect(await screen.findByText("1 selected")).toBeVisible();
+    await expectSelection("1 selected");
     fireEvent.click(screen.getByRole("button", { name: "Deselect" }));
 
-    await waitFor(() => expect(screen.queryByText("1 selected")).not.toBeInTheDocument());
+    await waitFor(() => expect(selectionDock()).toBeNull());
     expect(queryMutations.disconnect.mutateAsync).not.toHaveBeenCalled();
     expect(
       within(screen.getByTestId(`channel-row-${connectedAccount.id}`)).getByRole("checkbox", {

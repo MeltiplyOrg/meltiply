@@ -2168,10 +2168,33 @@ export interface components {
             attachments: components["schemas"]["PostAttachment"][];
             targets: components["schemas"]["PostTarget"][];
             distributions: components["schemas"]["Distribution"][];
+            /**
+             * @description Sum of each published Distribution's latest analytics snapshot,
+             *     read in the same scoped Post batch. Null when no published Channel
+             *     has measurements. Missing measurements do not become zero; an
+             *     explicitly measured zero remains zero. Unsupported metrics are null.
+             */
+            analytics: components["schemas"]["PostAnalytics"] | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /**
+         * @description Latest measured counters summed across a Post's published Channels.
+         *     Channels without snapshots do not contribute; these are not
+         *     deduplicated cross-platform audience counts. Saves and clicks are
+         *     currently untracked and returned as null.
+         */
+        PostAnalytics: {
+            likes: number | null;
+            comments: number | null;
+            shares: number | null;
+            saves: number | null;
+            clicks: number | null;
+            views: number | null;
+            impressions: number | null;
+            reach: number | null;
         };
         PostListResponse: {
             posts: components["schemas"]["Post"][];

@@ -28,22 +28,24 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
  * Mapping of visual intent variants to corresponding Tailwind token classes.
  */
 const variantStyles: Record<NonNullable<ButtonProps["variant"]>, string> = {
-  default: "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90",
-  destructive: "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
-  outline: "border border-border bg-background hover:bg-muted hover:text-foreground",
-  secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-  ghost: "hover:bg-muted hover:text-foreground",
-  link: "text-foreground underline-offset-4 hover:underline",
+  default: "bg-primary text-primary-foreground shadow-btn hover:bg-primary/90 active:bg-primary/80",
+  destructive:
+    "bg-destructive text-destructive-foreground shadow-btn hover:bg-destructive/90 active:bg-destructive/80",
+  outline:
+    "border border-line-strong bg-surface text-ink shadow-btn hover:bg-hover active:bg-hover-2",
+  secondary: "bg-secondary text-secondary-foreground hover:bg-hover-2 active:bg-hover-2",
+  ghost: "text-ink-2 hover:bg-hover hover:text-ink active:bg-hover-2",
+  link: "text-accent-ink underline-offset-4 hover:underline",
 };
 
 /**
  * Mapping of button size presets to layout and padding classes.
  */
 const sizeStyles: Record<NonNullable<ButtonProps["size"]>, string> = {
-  default: "h-9 px-4 py-2",
-  sm: "h-8 rounded-md px-3 text-xs",
-  lg: "h-10 rounded-md px-8 text-base",
-  icon: "size-9",
+  default: "h-[30px] px-[11px] text-[12.5px]",
+  sm: "h-[26px] px-2 text-xs",
+  lg: "h-9 px-3.5 text-[13.5px]",
+  icon: "size-[30px] pointer-coarse:min-w-11",
 };
 
 /**
@@ -55,6 +57,8 @@ const sizeStyles: Record<NonNullable<ButtonProps["size"]>, string> = {
  * only matches icons without an authored `size-*` utility, so callers keep
  * compact icons (e.g. `size-3`, `size-full`) at their exact dimensions while
  * unsized icons still get the standard default.
+ * Coarse pointers get a 44px minimum height (and square icon targets); compact
+ * fine-pointer geometry stays unchanged even on a narrow desktop window.
  *
  * @param options.variant - Visual style variant; defaults to `default`.
  * @param options.size - Size preset; defaults to `default`.
@@ -67,7 +71,7 @@ export function buttonVariants(options?: {
   className?: string;
 }): string {
   return cn(
-    "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0",
+    "inline-flex touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-colors duration-150 pointer-coarse:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-45 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0",
     variantStyles[options?.variant ?? "default"],
     sizeStyles[options?.size ?? "default"],
     options?.className,
@@ -77,7 +81,7 @@ export function buttonVariants(options?: {
 /**
  * Core interactive button component supporting multiple variants, sizes, and slot composition.
  *
- * Handles focus-visible rings, disabled opacity/pointer states, active micro-scaling,
+ * Handles focus-visible rings, disabled opacity/pointer states, active color feedback,
  * and SVG icon sizing that defaults unsized icons to 16px while preserving authored
  * `size-*` utilities. When `asChild` is enabled, delegates rendering to the direct child.
  *

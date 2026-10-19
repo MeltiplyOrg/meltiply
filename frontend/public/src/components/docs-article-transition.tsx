@@ -1,13 +1,10 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
-import { motionAllowed } from "@meltiply/ui/motion-state";
 import { effectEasing } from "@meltiply/ui/effects";
 
 const useClientLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 interface ArticleTransition {
   reveal: () => void;
-  settle: () => void;
   dispose: () => void;
 }
 
@@ -90,7 +87,7 @@ function articleSkeleton(article: HTMLElement): HTMLElement {
  * Owns article-only navigation effects while Astro and the TOC controller own
  * fetching, scrolling and route commits. Abort, failure and supersession restore
  * the outgoing article; initial hydration remains static. Sections cascade in
- * over a bounded ~200ms stagger; reduced motion settles immediately.
+ * over a bounded ~200ms stagger.
  */
 function createArticleTransition(): ArticleTransition {
   let pending: {
@@ -130,7 +127,7 @@ function createArticleTransition(): ArticleTransition {
     article.setAttribute("aria-busy", "true");
     article.inert = true;
     article.append(overlay);
-    const duration = motionAllowed() ? 140 : 0;
+    const duration = 140;
     for (const section of sections)
       for (const block of section) {
         const style = getComputedStyle(block);
@@ -177,7 +174,7 @@ function createArticleTransition(): ArticleTransition {
     if (!pending) return;
     reset();
     const article = document.getElementById("nd-page");
-    if (!article || !motionAllowed()) return;
+    if (!article) return;
     const sections = articleSections(article);
     const sectionDuration = 160;
     // Fixed stagger budget: sections still cascade top-down, but the whole
@@ -211,10 +208,6 @@ function createArticleTransition(): ArticleTransition {
   document.addEventListener("astro:before-preparation", prepare);
   return {
     reveal,
-    /** Ends spatial effects when manual/OS low motion is enabled during a transition. */
-    settle: () => {
-      for (const animation of animations) animation.finish();
-    },
     /** Removes the route listener and all transient effects when the persisted shell unmounts. */
     dispose: () => {
       document.removeEventListener("astro:before-preparation", prepare);
@@ -226,11 +219,11 @@ function createArticleTransition(): ArticleTransition {
 /**
  * Persists article animation ownership across keyed guide replacements. The
  * pathname layout effect stages entrances before paint; ordinary first loads
- * do not animate or wait for the controller. Low motion also stops live effects.
+ * do not animate or wait for the controller.
  */
 export function DocsArticleTransition({ pathname }: { pathname: string }) {
   const controller = useRef<ArticleTransition | null>(null);
-  const { lowMotion } = useMotionPreference();
+
   useEffect(() => {
     controller.current = createArticleTransition();
     return () => {
@@ -241,8 +234,5 @@ export function DocsArticleTransition({ pathname }: { pathname: string }) {
   useClientLayoutEffect(() => {
     controller.current?.reveal();
   }, [pathname]);
-  useClientLayoutEffect(() => {
-    if (lowMotion) controller.current?.settle();
-  }, [lowMotion]);
   return null;
 }

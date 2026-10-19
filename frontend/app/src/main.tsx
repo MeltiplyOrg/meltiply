@@ -1,18 +1,26 @@
-import { CookieNotice } from "@meltiply/ui/cookie-notice";
-
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router";
+import { createBrowserRouter, RouterProvider } from "react-router";
 
-import { FrontendErrorBoundary } from "@/components/layout/frontend-error-boundary";
+import {
+  FrontendErrorBoundary,
+  FrontendErrorFallback,
+} from "@/components/layout/frontend-error-boundary";
 import { SmoothScroll } from "@/components/layout/smooth-scroll";
 import { I18nProvider } from "@/lib/i18n";
-import { MotionPreferenceProvider } from "@meltiply/ui/motion-preference";
 import { ThemeProvider } from "@/lib/theme";
 import { isDevMode } from "@/lib/env";
 import { installFrontendErrorLogging } from "@/lib/frontend-telemetry";
 import { AppRouter } from "@/app-router";
 import favicon from "@meltiply/ui/favicon.svg?url";
+
+// Consent defaults are applied by the inline bootstrap before React. Load the
+// interactive notice separately so its toast animation dependencies do not block
+// the workspace/authentication first paint; a missing chunk never grants consent.
+const CookieNotice = lazy(async () => {
+  const { CookieNotice } = await import("@meltiply/ui/cookie-notice");
+  return { default: CookieNotice };
+});
 
 const DevBox = isDevMode()
   ? lazy(async () => {
@@ -20,6 +28,11 @@ const DevBox = isDevMode()
       return { default: DevBox };
     })
   : null;
+
+/** A data router lets security enrollment block SPA departures, including browser history. */
+const router = createBrowserRouter([
+  { path: "*", element: <AppRouter />, errorElement: <FrontendErrorFallback /> },
+]);
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Meltiply root element is missing.");
@@ -29,23 +42,21 @@ installFrontendErrorLogging();
 createRoot(root).render(
   <StrictMode>
     <link rel="icon" type="image/svg+xml" href={favicon} />
-    <MotionPreferenceProvider>
-      <ThemeProvider>
-        <I18nProvider>
-          <FrontendErrorBoundary>
-            <SmoothScroll />
+    <ThemeProvider>
+      <I18nProvider>
+        <FrontendErrorBoundary>
+          <SmoothScroll />
+          <Suspense fallback={null}>
             <CookieNotice policyUrl="https://meltiply.com/docs/cookies" />
-            <BrowserRouter>
-              <AppRouter />
-            </BrowserRouter>
-            {DevBox && (
-              <Suspense fallback={null}>
-                <DevBox />
-              </Suspense>
-            )}
-          </FrontendErrorBoundary>
-        </I18nProvider>
-      </ThemeProvider>
-    </MotionPreferenceProvider>
+          </Suspense>
+          <RouterProvider router={router} />
+          {DevBox && (
+            <Suspense fallback={null}>
+              <DevBox />
+            </Suspense>
+          )}
+        </FrontendErrorBoundary>
+      </I18nProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

@@ -923,7 +923,7 @@ SET uploads = EXCLUDED.uploads,
 -- media-only compositions, ordered multi-attachment Posts, a caption that is
 -- only a long unbroken token, an empty caption, and attachments that are
 -- processing or failed. The `e300…`/`e400…` accounts cover all five connection
--- states across all six Providers, and `c400…0001` adds a third Brand Profile so
+-- states across all five Providers, and `c400…0001` adds a third Brand Profile so
 -- profile grouping and the profile scope have more than two rows to show.
 --
 -- Ids are disjoint from the canonical team fixtures (orgs …0001/…0002), from
@@ -947,6 +947,21 @@ SET name = EXCLUDED.name,
 -- expired, revoked, and reconnect-required accounts. `e300…0002` deliberately
 -- carries no display name: the directory must fall back to the platform user id
 -- rather than rendering an empty name cell.
+--
+-- LinkedIn is not a supported Provider — the roster, the API contract, and the
+-- frontend label map carry the five platforms above — so retire the accounts an
+-- earlier seed created with that slug. `platform` is part of the upsert key
+-- below, so a retired row would collide on its primary key instead of
+-- converging. Its Post targets cascade away and its Distributions are re-pointed
+-- by the upserts later in this transaction; both ids are re-inserted on
+-- supported platforms.
+DELETE FROM platform_accounts
+WHERE platform = 'linkedin'
+  AND id IN (
+    'e3000000-0000-4000-8000-000000000002',
+    'e4000000-0000-4000-8000-000000000002'
+  );
+
 INSERT INTO platform_accounts (
   id, org_id, brand_profile_id, platform, platform_user_id, display_name,
   access_token, scopes, metadata, connection_status, last_synced_at, revoked_at
@@ -970,8 +985,8 @@ VALUES
     'e3000000-0000-4000-8000-000000000002',
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
-    'linkedin',
-    'local-linkedin-alpha',
+    'instagram',
+    'local-instagram-alpha',
     NULL,
     'local-only-not-a-provider-credential',
     ARRAY['upload'],
@@ -1054,8 +1069,8 @@ VALUES
     'e4000000-0000-4000-8000-000000000002',
     '20000000-0000-4000-8000-000000000005',
     'c4000000-0000-4000-8000-000000000001',
-    'linkedin',
-    'local-linkedin-labs',
+    'facebook',
+    'local-facebook-labs',
     'Alpha Labs',
     'local-only-not-a-provider-credential',
     ARRAY['upload'],
@@ -1668,12 +1683,12 @@ VALUES
     'c0000000-0000-4000-8000-000000000001',
     '49000000-0000-4000-8000-000000000004',
     'e3000000-0000-4000-8000-000000000002',
-    'linkedin',
+    'instagram',
     'published',
     NULL,
     now() - interval '8 days',
-    'local-post-everywhere-linkedin',
-    'https://example.invalid/linkedin/local-post-everywhere-linkedin',
+    'local-post-everywhere-instagram',
+    'https://example.invalid/instagram/local-post-everywhere-instagram',
     'Everything, everywhere',
     NULL,
     NULL, 0, 1, now() - interval '8 days', NULL, NULL,
@@ -1763,7 +1778,7 @@ VALUES
     'c4000000-0000-4000-8000-000000000001',
     '49000000-0000-4000-8000-000000000008',
     'e4000000-0000-4000-8000-000000000002',
-    'linkedin',
+    'facebook',
     'scheduled',
     now() + interval '28 days',
     NULL, NULL, NULL,
@@ -1823,7 +1838,7 @@ VALUES
     'c0000000-0000-4000-8000-000000000001',
     '49000000-0000-4000-8000-000000000012',
     'e3000000-0000-4000-8000-000000000002',
-    'linkedin',
+    'instagram',
     'cancel_requested',
     now() + interval '2 days',
     NULL, NULL, NULL,

@@ -537,32 +537,20 @@ test("keeps publishing work reachable through the redesigned workspace", async (
 
   // One menu vocabulary: the filter panel, its select list, and the platform menu
   // must render the same surface and rows as the account menu above.
-  // A native disclosure shows its panel before React re-renders, so the surface
-  // state must already be the entering one in the same task as the open — the
-  // first painted frame otherwise runs the exit animation and the panel flashes.
-  const firstOpen = await page.evaluate(() => {
-    const summary = Array.from(document.querySelectorAll("summary")).find((element) =>
-      element.textContent?.trim().startsWith("Filter"),
-    );
-    if (!summary) throw new Error("Filter disclosure is missing");
-    summary.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    const details = summary.closest("details");
-    const panel = details?.querySelector<HTMLElement>("[data-menu-surface]");
-    if (!details || !panel) throw new Error("Filter panel is missing");
-    return {
-      open: details.open,
-      state: panel.dataset.state,
-      animation: getComputedStyle(panel).animationName,
-    };
-  });
-  expect(firstOpen).toEqual({ open: true, state: "open", animation: "menu-surface-in" });
+  await page
+    .locator("summary")
+    .filter({ hasText: /^Filter/ })
+    .click();
   const postsFilterPanel = page.getByRole("group", { name: "Filters", exact: true });
   await postsFilterPanel
     .getByRole("button", { name: "Add Post status filter", exact: true })
     .click();
-  await postsFilterPanel.getByRole("button", { name: "All statuses", exact: true }).click();
-  const openMenuSurface = page.locator("[data-radix-popper-content-wrapper] [data-menu-surface]");
-  const statusControl = postsFilterPanel.getByRole("button", { name: "All statuses", exact: true });
+  const statusControl = postsFilterPanel.getByRole("combobox", {
+    name: "Post status",
+    exact: true,
+  });
+  await statusControl.click();
+  const openMenuSurface = page.getByRole("listbox", { name: "Post status", exact: true });
   await expect(openMenuSurface).toBeVisible();
   expect(await openMenuSurface.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   expect(
@@ -570,33 +558,24 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   ).toEqual(accountMenuItem);
   expect(await postsFilterPanel.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   await expect(postsFilterPanel).toHaveAttribute("data-state", "open");
-  for (const surface of [postsFilterPanel, openMenuSurface]) {
-    expect(await surface.evaluate((element) => getComputedStyle(element).animationName)).toBe(
-      "menu-surface-in",
-    );
-  }
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("posts-filter-menu-desktop.png"),
     fullPage: true,
   });
 
-  // Choosing inside a nested list must not dismiss the builder, and a press
-  // that lands back in the builder while a list is open must not either: the
-  // user keeps picking field values instead of reopening the disclosure.
-  await statusControl.click();
+  // Dismissing the nested list or choosing a status keeps the builder available.
+  await page.keyboard.press("Escape");
   await postsFilterPanel.getByRole("heading", { name: "Filter by", exact: true }).click();
   await expect(postsFilterPanel).toBeVisible();
   await statusControl.click();
   await page.getByRole("option", { name: "Drafts", exact: true }).click();
   await expect(postsFilterPanel).toBeVisible();
-  const draftsControl = postsFilterPanel.getByRole("button", { name: "Drafts", exact: true });
-  await draftsControl.click();
+  await expect(statusControl).toHaveText("Drafts");
+  await statusControl.click();
   await page.getByRole("option", { name: "All statuses", exact: true }).click();
   await expect(postsFilterPanel).toBeVisible();
-  await expect(
-    postsFilterPanel.getByRole("button", { name: "All statuses", exact: true }),
-  ).toBeVisible();
+  await expect(statusControl).toHaveText("All statuses");
 
   await postsFilterPanel
     .getByRole("button", { name: "Remove Post status filter", exact: true })

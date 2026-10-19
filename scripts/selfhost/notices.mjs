@@ -12,6 +12,14 @@ const output = resolve(root, "dist/selfhost/notices");
 const policy = JSON.parse(readFileSync(join(root, "scripts/ci/allowed-licenses.json"), "utf8"));
 const components = [];
 
+/**
+ * Canonical texts for native packages whose prebuilt platform artifacts omit a
+ * license file. LGPLv3 incorporates GPLv3 by reference, so both ship together.
+ */
+const fallbackLicenses = {
+  "LGPL-3.0-or-later": ["LGPL-3.0-or-later.txt", "GPL-3.0-or-later.txt"],
+};
+
 /** Retains original upstream notices and metadata for every reachable production dependency, never development tool code. */
 function onPackage({ manifestPath, metadata, license }) {
   const directory = dirname(manifestPath);
@@ -31,6 +39,7 @@ function onPackage({ manifestPath, metadata, license }) {
       2,
     ),
   );
+  let copiedLicense = false;
   for (const path of globSync(
     [
       "LICENSE*",
@@ -51,6 +60,14 @@ function onPackage({ manifestPath, metadata, license }) {
     const target = join(destination, relative(directory, source));
     mkdirSync(dirname(target), { recursive: true });
     cpSync(source, target);
+    if (/^(LICENSE|license|LICENCE|licence|COPYING|licenses\/|LICENSES\/)/.test(path)) {
+      copiedLicense = true;
+    }
+  }
+  if (!copiedLicense) {
+    for (const file of fallbackLicenses[license] ?? []) {
+      cpSync(join(root, "LICENSES", file), join(destination, file));
+    }
   }
 }
 

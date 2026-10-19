@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "vp dev",
     "dev:staging": "CLOUDFLARE_ENV=staging vp dev --mode staging",
-    "build": "tsc -b && vp build",
-    "build:staging": "tsc -b && CLOUDFLARE_ENV=staging vp build --mode staging",
-    "build:production": "tsc -b && CLOUDFLARE_ENV=production vp build --mode production",
+    "notices": "node ../../scripts/ci/notices.mjs --project frontend/app --output frontend/app/public/third-party-notices.txt",
+    "build": "bun run notices && tsc -b && vp build",
+    "build:staging": "bun run notices && tsc -b && CLOUDFLARE_ENV=staging vp build --mode staging",
+    "build:production": "bun run notices && tsc -b && CLOUDFLARE_ENV=production vp build --mode production",
     "start": "vp preview",
     "preview:cloudflare": "bun run build && vp preview",
     "upload:staging": "bun run build:staging && CLOUDFLARE_ENV=staging wrangler versions upload",

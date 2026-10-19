@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
-    "check": "bun run format-check && node scripts/check-content.mjs && astro check && astro build",
+    "notices": "node ../../scripts/ci/notices.mjs --project frontend/public --output frontend/public/public/third-party-notices.txt",
+    "build": "bun run notices && astro build",
+    "check": "bun run format-check && node scripts/check-content.mjs && astro check && bun run build",
     "check:content": "node scripts/check-content.mjs",
     "format": "vp fmt",
     "format-check": "vp fmt --check",

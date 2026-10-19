@@ -37,9 +37,11 @@ Agentation 3.0.2 and React Doctor/plugin 0.9.14 remain restricted development to
 
 A source-only checkout does not include installed `node_modules`. A production build, browser-delivered JavaScript, Worker bundle, or archive that includes dependencies does redistribute their code.
 
-For each actual release artifact, preserve the copyright/license notices for the dependencies it contains, including bundled transitive code. Include required Apache notices and changes; provide source for modified MPL-covered files when required. Selecting Apache-2.0 for dual-licensed DOMPurify requires preserving its Apache terms and applicable notices, not simply deleting the MPL label. Keep development-only tools out of production artifacts. The existing public-site selected notices are not a complete generated release notice bundle.
+For each actual release artifact, preserve the copyright/license notices for the dependencies it contains, including bundled transitive code. Include required Apache notices and changes; provide source for modified MPL-covered files when required. Selecting Apache-2.0 for dual-licensed DOMPurify requires preserving its Apache terms and applicable notices, not simply deleting the MPL label. Keep development-only tools out of production artifacts.
 
-The JavaScript gate is a review aid, not artifact-level clearance. This change does not certify prebuilt frontend/Worker artifacts, and its SBOM alone is not a notice or source-compliance package.
+Run `bun run notices` to regenerate the checked-in browser and public-site bundles at `frontend/app/public/third-party-notices.txt` and `frontend/public/public/third-party-notices.txt`. The app HTML declares the bundle with `rel="license"`; the public footer links to it. Each bundle reproduces Meltiply's [Sustainable Use License](../LICENSE.md) first, so the permissive dependency notices cannot be mistaken for a grant to Meltiply material. The generator then reads the installed production graph, embeds shipped license files, includes copied interface code (shadcn, sileo, Lucide/Feather, and the permission-only Gr8r adaptation), and supplies canonical LGPL/GPL text for native `libvips`. Regenerate after every dependency change.
+
+The JavaScript gate is a review aid, not artifact-level clearance. The generated bundles cover npm and copied-interface works; they do not certify native binaries, container base images, or FFmpeg codecs. The SBOM alone is not a notice or source-compliance package.
 
 ## Native binaries and container images
 
@@ -48,7 +50,7 @@ The media-processor Dockerfile installs FFmpeg and libvips through Alpine; JavaS
 For every image/binary release:
 
 - Record the exact image digest, OS, architecture, installed package versions, build configuration, and dependencies from the **built artifact**, not just an Alpine release name.
-- Preserve copyright and license texts for FFmpeg, libvips, codecs, and their transitive native libraries. Alpine's FFmpeg package can contain GPL- and LGPL-covered code; do not label the whole image LGPL or SUL.
+- Preserve copyright and license texts for FFmpeg, libvips, codecs, and their transitive native libraries. Alpine's FFmpeg package can contain GPL- and LGPL-covered code; do not label the whole image LGPL or SUL. The canonical [`LGPL-3.0-or-later`](../LICENSES/LGPL-3.0-or-later.txt) and [`GPL-3.0-or-later`](../LICENSES/GPL-3.0-or-later.txt) texts cover the libvips fallback used by the notice generator; they do not replace the corresponding-source obligation.
 - Provide the exact corresponding source, patches, build/install scripts, and any relinking/install information required by the applicable GPL/LGPL versions using a license-compliant distribution method. A package URL, generic upstream checkout, SBOM, or unsupported promise to supply source is not automatically sufficient.
 - Keep those third-party rights separate from Meltiply's terms. Review the actual subprocess/linking boundaries; invocation of FFmpeg as a separate executable does not by itself determine every combined-work question.
 - Review codec patents and trademark permissions separately from copyright licensing.

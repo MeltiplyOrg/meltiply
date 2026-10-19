@@ -39,19 +39,39 @@ function statusError(status, body) {
 }
 
 /**
+ * Extracts model text from either Workers AI response shape: the legacy
+ * `result.response` string or the OpenAI-compatible
+ * `result.choices[0].message.content`. A reasoning-only response is malformed:
+ * the analysis text is not a translation.
+ *
+ * @param {any} payload Parsed Workers AI envelope.
+ * @returns {string | undefined} Trimmed model text when present.
+ */
+function modelText(payload) {
+  const result = payload?.result;
+  const content = result?.choices?.[0]?.message?.content;
+  if (typeof content === "string" && content.trim() !== "") return content.trim();
+  const legacy = result?.response;
+  if (typeof legacy === "string" && legacy.trim() !== "") return legacy.trim();
+  return undefined;
+}
+
+/**
  * Creates a `TranslationProvider` backed by the direct Workers AI run endpoint.
  *
  * The request fixes `temperature: 0` and the supplied seed, bounded
- * `max_tokens`, and a request timeout. `complete` makes one model call and
- * classifies failures; retry and model fallback compose around it.
+ * `max_tokens`, and a request timeout. `requestOptions` supplies
+ * model-specific flags such as disabling reasoning. `complete` makes one model
+ * call and classifies failures; retry and model fallback compose around it.
  *
  * @param {object} options
  * @param {string} options.accountId Cloudflare account identifier.
  * @param {string} options.apiToken Workers AI-scoped API token.
- * @param {string} options.model Workers AI model id, e.g. `@cf/qwen/qwen3-30b-a3b-fp8`.
+ * @param {string} options.model Workers AI model id, e.g. `@cf/zai-org/glm-4.7-flash`.
  * @param {string} [options.systemPrompt] Product context, style, and glossary.
  * @param {number} [options.seed] Sampling seed; the same input and model aim for repeatable drafts.
  * @param {number} [options.timeoutMs] Per-request timeout.
+ * @param {Record<string, unknown>} [options.requestOptions] Model-specific body flags, merged before the fixed request fields.
  * @param {typeof fetch} [options.fetchImpl] Injectable fetch for tests.
  * @returns {{name: string, complete: (prompt: string, options?: {maxTokens?: number}) => Promise<string>}}
  */
@@ -62,6 +82,7 @@ export function createWorkersAiProvider({
   systemPrompt = "",
   seed,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  requestOptions = {},
   fetchImpl = fetch,
 }) {
   for (const [name, value] of Object.entries({ accountId, apiToken, model })) {
@@ -87,6 +108,7 @@ export function createWorkersAiProvider({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
+            ...requestOptions,
             messages,
             temperature: 0,
             seed,
@@ -122,15 +144,15 @@ export function createWorkersAiProvider({
           retryable: false,
         });
       }
-      const text = payload?.result?.response;
-      if (typeof text !== "string" || text.trim() === "") {
+      const text = modelText(payload);
+      if (!text) {
         throw new ProviderError("Workers AI response did not contain model text", {
           kind: "malformed",
           retryable: true,
         });
       }
-      assertTranslationArray(text.trim(), expectedTranslationCount(prompt));
-      return text.trim();
+      assertTranslationArray(text, expectedTranslationCount(prompt));
+      return text;
     },
   };
 }

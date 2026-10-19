@@ -72,10 +72,11 @@ test("calls Workers AI with a fixed seed, zero temperature, and a system message
   const provider = createWorkersAiProvider({
     accountId: "account",
     apiToken: "secret-token",
-    model: "@cf/qwen/qwen3-30b-a3b-fp8",
+    model: "@cf/zai-org/glm-4.7-flash",
     systemPrompt: "System context",
     seed: 4242,
     timeoutMs: 5000,
+    requestOptions: { chat_template_kwargs: { enable_thinking: false } },
     fetchImpl: async (url, init) => {
       requests.push({ url, init });
       return jsonResponse({ success: true, result: { response: '["Hola"]' } });
@@ -86,16 +87,51 @@ test("calls Workers AI with a fixed seed, zero temperature, and a system message
 
   assert.equal(output, '["Hola"]');
   assert.equal(requests.length, 1);
-  assert.match(requests[0].url, /\/accounts\/account\/ai\/run\/@cf\/qwen\/qwen3-30b-a3b-fp8$/u);
+  assert.match(requests[0].url, /\/accounts\/account\/ai\/run\/@cf\/zai-org\/glm-4\.7-flash$/u);
   assert.equal(requests[0].init.headers.Authorization, "Bearer secret-token");
   const body = JSON.parse(requests[0].init.body);
   assert.equal(body.temperature, 0);
   assert.equal(body.seed, 4242);
   assert.equal(body.max_tokens, 8192);
+  assert.deepEqual(body.chat_template_kwargs, { enable_thinking: false });
   assert.deepEqual(body.messages, [
     { role: "system", content: "System context" },
     { role: "user", content: "Translate this" },
   ]);
+});
+
+test("reads the OpenAI-compatible chat response shape", async () => {
+  const provider = createWorkersAiProvider({
+    accountId: "account",
+    apiToken: "token",
+    model: "@cf/test/model",
+    fetchImpl: async () =>
+      jsonResponse({
+        success: true,
+        result: { choices: [{ message: { content: '["Hola"]' } }], usage: {} },
+      }),
+  });
+
+  assert.equal(await provider.complete("prompt"), '["Hola"]');
+});
+
+test("rejects a reasoning-only response as malformed", async () => {
+  const provider = createWorkersAiProvider({
+    accountId: "account",
+    apiToken: "token",
+    model: "@cf/test/model",
+    fetchImpl: async () =>
+      jsonResponse({
+        success: true,
+        result: { choices: [{ message: { content: null, reasoning_content: "analysis" } }] },
+      }),
+  });
+
+  await assert.rejects(provider.complete("prompt"), (error) => {
+    assert.ok(error instanceof ProviderError);
+    assert.equal(error.kind, "malformed");
+    return true;
+  });
 });
 
 test("rejects prose or fenced output as malformed", async () => {
@@ -252,6 +288,39 @@ test("auto selects local Ollama when Workers AI credentials are absent", async (
     assert.equal(calls[0].url, "http://ollama.test:11434/api/chat");
     assert.equal(calls[0].init.headers.Authorization, undefined);
     assert.equal(JSON.parse(calls[0].init.body).model, "qwen3:8b");
+  } finally {
+    restore();
+  }
+});
+
+test("defaults to GLM with reasoning disabled", async () => {
+  const restore = temporaryEnvironment({
+    WORKERS_AI_ACCOUNT_ID: "account",
+    WORKERS_AI_API_TOKEN: "token",
+    I18N_PROVIDER: null,
+    I18N_MODEL: null,
+    I18N_FALLBACK_MODEL: null,
+    I18N_SEED: "1",
+    I18N_TIMEOUT_MS: "1000",
+  });
+  const calls = [];
+  try {
+    const provider = createProvider({
+      systemPrompt: "",
+      fetchImpl: async (url, init) => {
+        calls.push({ url, body: JSON.parse(init.body) });
+        return jsonResponse({
+          success: true,
+          result: { choices: [{ message: { content: '["Hola"]' } }] },
+        });
+      },
+      retryOptions: { retries: 0, baseDelayMs: 0, sleep: async () => {} },
+    });
+
+    assert.equal(await provider.complete("prompt"), '["Hola"]');
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /@cf\/zai-org\/glm-4\.7-flash$/u);
+    assert.deepEqual(calls[0].body.chat_template_kwargs, { enable_thinking: false });
   } finally {
     restore();
   }

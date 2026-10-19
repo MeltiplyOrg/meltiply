@@ -12,8 +12,11 @@ import { createWorkersAiProvider, withFallback } from "./workers-ai.mjs";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const defaultLocaleRoot = join(repositoryRoot, "frontend/app/src/locales");
 
-const DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const DEFAULT_FALLBACK_MODEL = "@cf/google/gemma-3-12b-it";
+const DEFAULT_MODEL = "@cf/zai-org/glm-4.7-flash";
+const DEFAULT_FALLBACK_MODEL = "@cf/google/gemma-4-26b-a4b-it";
+// Both defaults are reasoning models. Thinking is analysis text that would be
+// billed as output and discarded; translation needs the JSON answer only.
+const DISABLE_REASONING = { chat_template_kwargs: { enable_thinking: false } };
 const DEFAULT_SEED = 20261019;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const PROVIDER_MODES = new Set(["auto", "workers-ai", "ollama"]);
@@ -175,6 +178,7 @@ export function createProvider({ model, provider, systemPrompt, fetchImpl, retry
       systemPrompt,
       seed,
       timeoutMs,
+      requestOptions: DISABLE_REASONING,
       fetchImpl,
     }),
     retry,
@@ -190,6 +194,7 @@ export function createProvider({ model, provider, systemPrompt, fetchImpl, retry
         systemPrompt,
         seed,
         timeoutMs,
+        requestOptions: DISABLE_REASONING,
         fetchImpl,
       }),
       retry,

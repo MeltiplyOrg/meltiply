@@ -27,16 +27,16 @@
   },
   "preferredTranslations": {
     "Brand Profile": {
-      "es": "Perfil de marca"
+      "es": "perfil de marca"
     },
     "Post": {
-      "es": "Publicación"
+      "es": "publicación"
     },
     "Channel": {
-      "es": "Canal"
+      "es": "canal"
     },
     "Workspace": {
-      "es": "Espacio de trabajo"
+      "es": "espacio de trabajo"
     }
   },
   "intentionallyIdentical": ["⌘K", "s", "M", "P"]

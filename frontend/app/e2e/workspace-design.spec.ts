@@ -549,6 +549,9 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     name: "Post status",
     exact: true,
   });
+  // Radix Select hides its peers from the accessibility tree while its list is open.
+  expect(await postsFilterPanel.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
+  await expect(postsFilterPanel).toHaveAttribute("data-state", "open");
   await statusControl.click();
   const openMenuSurface = page.getByRole("listbox", { name: "Post status", exact: true });
   await expect(openMenuSurface).toBeVisible();
@@ -556,8 +559,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   expect(
     await openMenuSurface.locator("[data-menu-item]").first().evaluate(menuItemChrome),
   ).toEqual(accountMenuItem);
-  expect(await postsFilterPanel.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
-  await expect(postsFilterPanel).toHaveAttribute("data-state", "open");
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("posts-filter-menu-desktop.png"),

@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { mediaUploadExtension } from "@meltiply/domain";
 import { getAsset, getAssetBlob } from "@/lib/api";
 import { runQueryEffect } from "@/lib/effect";
 import { createAssetUpload } from "@/lib/upload";
@@ -101,9 +102,12 @@ export async function persistProfileCopies({
           const blob = await runQueryEffect(getAssetBlob(workspaceId, attachment.assetId), {
             signal,
           });
-          file = new File([blob], attachment.name, {
-            type: attachment.mimeType ?? (blob.type || "application/octet-stream"),
-          });
+          const mimeType = attachment.mimeType ?? blob.type;
+          const extension = mediaUploadExtension(mimeType);
+          if (!extension) throw new Error("The original media has an unsupported content type.");
+          // Asset titles omit the upload suffix; reconstruct it from the same
+          // domain policy the upload endpoint validates, preserving the title.
+          file = new File([blob], `${attachment.name}.${extension}`, { type: mimeType });
         }
         const task = createAssetUpload({ workspaceId, brandProfileId: profileId, file });
         const cancel = () => {

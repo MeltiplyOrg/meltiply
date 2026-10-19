@@ -2224,7 +2224,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                   }`}
                 >
                   {attachments.length > 0 && (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                    <div className="grid grid-cols-2 gap-3 @sm:grid-cols-3 @xl:grid-cols-4">
                       {attachments.map((attachment, index) => {
                         const phase = attachmentPhase(attachment, t);
                         const isActive =
@@ -2309,7 +2309,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                 {phase.message}
                               </p>
                             )}
-                            <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100">
+                            <div className="absolute top-1 right-1 flex max-w-full flex-wrap justify-end gap-0.5 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100">
                               <Button
                                 type="button"
                                 variant="default"
@@ -2692,9 +2692,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       {/* The action bar carries the draft's real save state and the one primary
           action; the publishing selector in the rail decides what it submits, so
           the bar never repeats a control the body owns. */}
-      <div className="sticky bottom-0 -mx-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line bg-surface px-4 py-2.5 sm:-mx-6 sm:px-6">
+      <div className="sticky bottom-0 -mx-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line bg-surface px-4 pb-(--safe-control-bottom) pt-2.5 sm:-mx-6 sm:px-6">
         <p
-          className="min-w-0 flex-1 truncate text-(length:--font-size-micro) text-ink-3"
+          className="min-w-0 basis-full text-(length:--font-size-micro) text-ink-3 @sm:basis-0 @sm:flex-1"
           role="status"
         >
           {savedAt && !isDirty
@@ -2711,7 +2711,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           size="sm"
           onClick={() => void handleSubmit(publishMode)}
           disabled={submitDisabled || (publishMode === "schedule" && !scheduleDate)}
-          className="h-8 shrink-0 gap-1.5"
+          className="h-8 w-full shrink-0 gap-1.5 @sm:w-auto"
           title={
             publishMode === "draft"
               ? t("Saves this post's text, attachments, and channel settings without publishing")

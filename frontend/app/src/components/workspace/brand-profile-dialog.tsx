@@ -164,7 +164,7 @@ function BrandProfileDialogForm({
   ]);
 
   return (
-    <CenterDialogContent data-lenis-prevent className="max-h-[90vh] overflow-y-auto">
+    <CenterDialogContent>
       <CenterDialogHeader>
         <CenterDialogTitle>
           {isEditing ? t("Update Brand Profile") : t("Create Brand Profile")}

@@ -142,7 +142,7 @@ function FacebookPageSelectionDialogContent({
         if (!nextOpen) handleCancel();
       }}
     >
-      <CenterDialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[480px]">
+      <CenterDialogContent className="sm:max-w-[480px]">
         <CenterDialogHeader>
           <CenterDialogTitle>{t("Select Facebook Page")}</CenterDialogTitle>
           <CenterDialogDescription>

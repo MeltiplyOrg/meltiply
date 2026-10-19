@@ -77,7 +77,7 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
   const allDaySelected = dayIds.length > 0 && dayIds.every((id) => selectedIds.has(id));
   return (
     <CenterDialog open={liveDate !== null} onOpenChange={(open) => !open && onClose()}>
-      <CenterDialogContent data-lenis-prevent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+      <CenterDialogContent className="sm:max-w-2xl">
         <CenterDialogHeader>
           <CenterDialogTitle className="flex items-center gap-2 text-lg">
             <CalendarDays className="size-5 text-accent" />

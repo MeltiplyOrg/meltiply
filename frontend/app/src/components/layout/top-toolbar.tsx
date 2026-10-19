@@ -71,7 +71,7 @@ export function TopToolbarSearch({
         <Button
           variant="ghost"
           size="icon"
-          className="absolute right-0.5 top-0.5 size-5.5"
+          className="absolute right-0.5 top-1/2 size-5.5 -translate-y-1/2 pointer-coarse:min-w-11"
           onClick={() => onChange("")}
           aria-label={t("Clear search")}
         >
@@ -185,7 +185,7 @@ export function TopToolbarFilters({
     <TooltipProvider>
       <details
         ref={ref}
-        className="group/filter relative"
+        className="group/filter"
         onToggle={(event) => setOpen(event.currentTarget.open)}
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
@@ -199,7 +199,7 @@ export function TopToolbarFilters({
         }}
       >
         <summary
-          className="flex h-control-sm cursor-pointer list-none items-center gap-1.5 rounded-control px-2 text-xs text-ink-2 hover:bg-hover group-open/filter:bg-hover [&::-webkit-details-marker]:hidden"
+          className="flex h-control-sm cursor-pointer list-none items-center gap-1.5 rounded-control px-2 text-xs text-ink-2 hover:bg-hover pointer-coarse:min-h-11 group-open/filter:bg-hover [&::-webkit-details-marker]:hidden"
           onClick={(event) => {
             event.preventDefault();
             if (ref.current?.open === false) {
@@ -230,7 +230,7 @@ export function TopToolbarFilters({
           aria-label={t("Filters")}
           data-menu-surface=""
           data-state={open && !closing ? "open" : "closed"}
-          className="absolute left-0 top-full z-30 mt-1 max-h-none w-140 max-w-[calc(100vw-32px)] overflow-hidden"
+          className="absolute left-4 top-full z-30 mt-1 max-h-none w-140 max-w-[calc(100%-2rem)] overflow-hidden sm:left-6 sm:max-w-[calc(100%-3rem)]"
         >
           <div className="flex min-h-8 items-center justify-between px-2 py-1">
             <h2 data-menu-label="" className="flex-1">

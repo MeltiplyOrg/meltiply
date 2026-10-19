@@ -419,98 +419,86 @@ export const PostTableView = React.memo(function PostTableView({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {isLoading ? (
-            SKELETON_TABLE_KEYS.map((key) => (
-              <PostRowSkeleton
-                key={key}
-                showStatus={showStatus}
-                showChannels={showChannels}
-                showDate={showDate}
-                showProfile={showProfile}
-                analyticsColumns={analyticsColumns}
-              />
-            ))
-          ) : posts.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={columnCount}>
-                <Empty className="min-h-60 gap-3.5 border-0">
-                  <EmptyDescription>
-                    {t("No posts found matching the active filters.")}
-                  </EmptyDescription>
-                  <Button variant="outline" onClick={onCreatePost}>
-                    <Plus className="size-3.5" />
-                    {t("Create post")}
-                  </Button>
-                </Empty>
-              </TableCell>
-            </TableRow>
-          ) : (
-            groups.map((group) => {
-              const isCollapsed = collapsed.has(group.id);
-              const label = group.status
-                ? tStatus(group.status)
-                : group.id === "all"
-                  ? t("All posts")
-                  : group.label;
-              return (
-                <Fragment key={group.id}>
-                  {groupBy !== "none" && (
-                    <TableRow
-                      data-post-group-row=""
-                      data-collapsed={isCollapsed || undefined}
-                      className="hover:bg-surface"
-                    >
-                      <TableCell
-                        colSpan={columnCount}
-                        className="h-11.5 border-line pt-2.5 group-data-[variant=spreadsheet]/table:h-11.5"
-                      >
-                        {/* The row is a label, not a target: it keeps the quiet
+          {isLoading
+            ? SKELETON_TABLE_KEYS.map((key) => (
+                <PostRowSkeleton
+                  key={key}
+                  showStatus={showStatus}
+                  showChannels={showChannels}
+                  showDate={showDate}
+                  showProfile={showProfile}
+                  analyticsColumns={analyticsColumns}
+                />
+              ))
+            : posts.length === 0
+              ? null
+              : groups.map((group) => {
+                  const isCollapsed = collapsed.has(group.id);
+                  const label = group.status
+                    ? tStatus(group.status)
+                    : group.id === "all"
+                      ? t("All posts")
+                      : group.label;
+                  return (
+                    <Fragment key={group.id}>
+                      {groupBy !== "none" && (
+                        <TableRow
+                          data-post-group-row=""
+                          data-collapsed={isCollapsed || undefined}
+                          className="hover:bg-surface"
+                        >
+                          <TableCell
+                            colSpan={columnCount}
+                            className="h-11.5 border-line pt-2.5 group-data-[variant=spreadsheet]/table:h-11.5"
+                          >
+                            {/* The row is a label, not a target: it keeps the quiet
                             surface hover and never paints a pressed fill. The
                             chevron states the group's phase and turns. */}
-                        <Button
-                          variant="ghost"
-                          className="h-9 justify-start gap-2 p-0 text-(length:--font-size-control) font-semibold text-ink hover:bg-transparent active:bg-transparent"
-                          aria-expanded={!isCollapsed}
-                          aria-label={t("Toggle {label} group", { label })}
-                          onClick={() =>
-                            setCollapsed((previous) => {
-                              const next = new Set(previous);
-                              if (next.has(group.id)) next.delete(group.id);
-                              else next.add(group.id);
-                              return next;
-                            })
+                            <Button
+                              variant="ghost"
+                              className="h-9 justify-start gap-2 p-0 text-(length:--font-size-control) font-semibold text-ink hover:bg-transparent active:bg-transparent"
+                              aria-expanded={!isCollapsed}
+                              aria-label={t("Toggle {label} group", { label })}
+                              onClick={() =>
+                                setCollapsed((previous) => {
+                                  const next = new Set(previous);
+                                  if (next.has(group.id)) next.delete(group.id);
+                                  else next.add(group.id);
+                                  return next;
+                                })
+                              }
+                            >
+                              <ChevronDown data-post-group-chevron="" className="size-3.5" />
+                              {group.status ? <StatusBadge status={group.status} compact /> : label}
+                              <span className="text-xs font-normal tabular-nums text-ink-3">
+                                <RollingCount value={group.posts.length} />
+                              </span>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {group.posts.map((post) => (
+                        <PostTableRow
+                          key={post.id}
+                          post={post}
+                          selected={selectedIds.has(post.id)}
+                          collapsed={Boolean(isCollapsed)}
+                          selectionDisabled={selectionDisabled}
+                          profileName={
+                            profileNames.get(post.brandProfileId) ?? t("Unknown profile")
                           }
-                        >
-                          <ChevronDown data-post-group-chevron="" className="size-3.5" />
-                          {group.status ? <StatusBadge status={group.status} compact /> : label}
-                          <span className="text-xs font-normal tabular-nums text-ink-3">
-                            <RollingCount value={group.posts.length} />
-                          </span>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {group.posts.map((post) => (
-                    <PostTableRow
-                      key={post.id}
-                      post={post}
-                      selected={selectedIds.has(post.id)}
-                      collapsed={Boolean(isCollapsed)}
-                      selectionDisabled={selectionDisabled}
-                      profileName={profileNames.get(post.brandProfileId) ?? t("Unknown profile")}
-                      showStatus={showStatus}
-                      showChannels={showChannels}
-                      showDate={showDate}
-                      showProfile={showProfile}
-                      analyticsColumns={analyticsColumns}
-                      onToggleSelection={onToggleSelection}
-                      onViewDetails={onViewDetails}
-                    />
-                  ))}
-                </Fragment>
-              );
-            })
-          )}
+                          showStatus={showStatus}
+                          showChannels={showChannels}
+                          showDate={showDate}
+                          showProfile={showProfile}
+                          analyticsColumns={analyticsColumns}
+                          onToggleSelection={onToggleSelection}
+                          onViewDetails={onViewDetails}
+                        />
+                      ))}
+                    </Fragment>
+                  );
+                })}
           {posts.length > 0 && (
             <TableRow>
               <TableCell colSpan={columnCount}>
@@ -527,6 +515,15 @@ export const PostTableView = React.memo(function PostTableView({
           )}
         </TableBody>
       </Table>
+      {!isLoading && posts.length === 0 && (
+        <Empty className="sticky left-0 min-h-60 w-full gap-3.5 border-0 px-4">
+          <EmptyDescription>{t("No posts found matching the active filters.")}</EmptyDescription>
+          <Button variant="outline" onClick={onCreatePost}>
+            <Plus className="size-3.5" />
+            {t("Create post")}
+          </Button>
+        </Empty>
+      )}
     </div>
   );
 });

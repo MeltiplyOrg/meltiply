@@ -179,8 +179,12 @@ export function ScheduleDateTime({
   }
 
   return (
-    <fieldset className="flex min-w-0 flex-col gap-3" aria-label={t("Date & time")} ref={pickerRef}>
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+    <fieldset
+      className="@container/schedule flex min-w-0 flex-col gap-3"
+      aria-label={t("Date & time")}
+      ref={pickerRef}
+    >
+      <div className="grid grid-cols-1 items-end gap-3 @sm/schedule:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 flex-col gap-1.5">
           <span
             id={`${id}-date-label`}
@@ -263,7 +267,7 @@ export function ScheduleDateTime({
 
       {open && (
         <div id={`${id}-calendar`} className="rounded-control border border-line bg-surface p-3">
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p
               id={`${id}-month`}
               aria-live="polite"

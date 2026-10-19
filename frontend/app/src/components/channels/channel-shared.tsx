@@ -230,7 +230,7 @@ export function ChannelSettingsAction({
         </TooltipTrigger>
         <TooltipContent>{t("Channel settings")}</TooltipContent>
       </Tooltip>
-      <CenterDialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md" data-lenis-prevent>
+      <CenterDialogContent className="sm:max-w-md">
         <CenterDialogHeader>
           <CenterDialogTitle>{channelName}</CenterDialogTitle>
           <CenterDialogDescription>

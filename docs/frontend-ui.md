@@ -27,6 +27,8 @@ Read [`@meltiply/ui` exports](../frontend/shared/package.json), the implementati
 
 Rewritten app components use strict TypeScript/TSX, React, Tailwind utilities, semantic tokens, and `cn`. Extend a canonical variant or compose a page from existing primitives. Keep finite style maps outside render functions. Shared CSS owns global reset/focus, tokens, and browser interoperability; public Astro/Fumadocs adapters use the same tokens within their framework.
 
+Canonical `Button`, `Input`, `Textarea`, `SelectTrigger`, and menu-row styles adapt to coarse pointers rather than guessing input type from screen width. Buttons/selects/menu rows have 44px minimum heights; text inputs and textareas retain 16px text. The shared safe-area tokens supply shell/drawer insets without page-specific spacing values.
+
 Remove replaced callers, aliases, local re-exports, duplicate wrappers, and unconsumed selectors during cutovers. Preserve feature behavior and the user-approved visual state during cleanup. Keep real API adapters distinct when endpoint contracts differ; deduplication is not a reason to invent a generic abstraction.
 
 The interface has one implemented animation path. Existing animations remain; new animation work extends their shared owners. There is no motion provider, preference hook, mode state/props, root flag, stored motion setting, alternate-mode branch, or lint rule requiring those guards.
@@ -40,6 +42,8 @@ Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. I
 ## Navigation, search, and filters
 
 `SidebarNav` and `NavigationShell` own the rail, header, mobile navigation, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations. Posts and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
+
+The phone navigation panel renders `SidebarNav` with `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
 
 `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`) owns the rail's hover background: every `data-sidebar-item` row is a target, and one pill springs to the hovered row instead of rows painting their own hover fill. The Settings section rail reuses the same component with its own container and a tighter snap radius. Rows keep `relative z-10` so labels and the selected surface read above it, keyboard focus rings are unchanged, and the public docs rail reuses the same component with its nested Radix viewport.
 
@@ -61,9 +65,13 @@ Posts orders **Table → Calendar → Grid**, with Table as default. All three s
 
 Posts Table and its Columns menu share `postAnalyticsColumns`: Likes, Cmts, Shrs, Saves, Clicks, Views, Impr., and Reach. The existing spreadsheet Table retains horizontal scrolling, including on phones, and full metric names label abbreviated headers accessibly. `Post.analytics` carries one batched sum of each published Channel's latest stored snapshot, not the sum of historical snapshots or a request per row. Real zeros render as zero; drafts, non-published Posts, absent snapshots, and null/untracked counters render `-`. Saves/Clicks currently stay null. Refresh follows the normal Post query lifecycle rather than pretending measurements are live or audience-deduplicated.
 
+The empty Table message and Create post action belong to the visible viewport outside the wide table body, so they do not disappear offscreen with analytics columns. Calendar navigation is outside its independently scrolling date canvas; horizontal or vertical calendar movement cannot carry Today, period navigation, or Month/Week away.
+
 Post deletion soft-deletes composition and stops only pending delivery; it does not delete platform copies or retained publication history. Both Post and Calendar collection reads exclude soft-deleted Posts, so view switching and reloads cannot reconstruct them from retained Distributions.
 
 Channels follows the Members directory composition: Accounts/Brand Profiles tabs, account search, status segments, field-row filters, identity table, and real profile cards. The section tabs' accent rule and the status segments' surface pill are each one travelling `SlidingHighlight`, so switching a section or a status slides the selection instead of repainting two controls. Connection cells contain one accessible health icon; recovery remains available without duplicate status text. Its background and controls match Posts.
+
+Connection cards stack platform identity above saved-account status and connection actions on phones. The connection dialog uses one outer native scroller at narrow widths; its platform list gets its own bounded scroller only when the panel has room.
 
 `BulkSelectionBar` owns the inverse-ink floating pill, separators, count, action icon/label, and icon-only Deselect. Callers own selection, confirmation, and mutations. Select-all is visually checked only when the entire visible collection is selected. Partial selection stays unchecked while the pill reports the real count. Confirm a stable batch; remove successful targets and retain failures for retry.
 
@@ -88,6 +96,8 @@ Destination rows show separate **Username: @handle** and **ID: provider-assigned
 Each Channel's attachment mode uses the canonical `Switch`: off persists a text-only target, on restores inheritance of all current/future Post attachments, and an explicit non-empty attachment subset keeps the switch on. Individual attachment choices remain available. `ProviderPanel` supplies an inline-size container so all six TikTok interaction/disclosure switches share one flat grid: two columns when the panel has room, one on narrow panels, with full-row labels and unchanged creator-availability gates. Provider capability metadata keeps the adapters' canonical caption ceilings even when credentials/live acceptance are absent; publish/connect flags remain false, and the composer does not invent a fallback limit.
 
 `ScheduleDateTime` (`frontend/app/src/components/composer/schedule-date-time.tsx`) owns the composer's compact date disclosure, Monday-first calendar, and exact 24-hour hour/minute selectors. It composes canonical `Button`/`Select` controls and the Posts local-date formatter, without a native date popup, new dialog, or dependency. Browsing does not commit a date; choosing one preserves time, and changing time preserves the local date. The browser's time zone stays visible. Calendar arrows, Home/End, Page Up/Down (Shift for years), Enter/Space, and Escape retain roving focus and return focus to the date button after selection or dismissal. The composer still owns seed/hydration/recovery, local-to-ISO conversion, and submit validation.
+
+The date/time row follows its own container width: narrow panels stack the complete date above the time selectors. Month headings/actions wrap independently. Composer media columns likewise follow the panel, not the viewport; touch devices retain visible media actions even at tablet widths. The pinned action bar wraps its save explanation above a full-width action on narrow panels and clears the home indicator.
 
 Primitives own accessible names, focus trapping, Escape/dismissal, scroll lock, and transitions. Preserve stable content through exits with `useLatchedValue` where needed; clear secrets according to the security lifecycle. Features compose a dialog rather than implementing another frame.
 

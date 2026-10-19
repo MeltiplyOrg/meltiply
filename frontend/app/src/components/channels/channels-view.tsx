@@ -936,7 +936,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
 
       {/* Connect social account dialog */}
       <CenterDialog open={addAccountOpen} onOpenChange={setAddAccountOpen}>
-        <CenterDialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" data-lenis-prevent>
+        <CenterDialogContent className="max-w-xl">
           <CenterDialogHeader>
             <CenterDialogTitle>{t("Connect social account")}</CenterDialogTitle>
             <CenterDialogDescription>
@@ -1000,7 +1000,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                   {t("No platforms match “{query}”.", { query: search })}
                 </div>
               ) : (
-                <div className="flex flex-col gap-2.5 max-h-[48vh] overflow-y-auto overscroll-contain pr-1">
+                <div className="flex flex-col gap-2.5 sm:max-h-[48dvh] sm:overflow-y-auto sm:overscroll-contain sm:pr-1">
                   {filteredPlatforms.map((platform) => {
                     // The directory is the contract roster, so every row is a
                     // connectable Platform. The guard only narrows `id` to the
@@ -1020,12 +1020,12 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                     return (
                       <div
                         key={platform.id}
-                        className="flex items-center justify-between gap-3 rounded-card border border-line bg-surface p-3 transition-colors hover:border-line-strong"
+                        className="flex min-w-0 flex-col gap-3 rounded-card border border-line bg-surface p-3 transition-colors hover:border-line-strong sm:flex-row sm:items-center sm:justify-between"
                       >
-                        <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex min-w-0 flex-1 items-center gap-3">
                           <PlatformIcon provider={platform.id} className="size-8 shrink-0" />
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className="font-semibold text-ink text-[13.5px]">
                                 {platformDisplayName(platform.id)}
                               </span>
@@ -1039,11 +1039,11 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                           </div>
                         </div>
 
-                        <div className="flex max-w-[45%] shrink-0 flex-col items-end gap-2">
+                        <div className="flex min-w-0 flex-col items-start gap-2 sm:max-w-[45%] sm:shrink-0 sm:items-end">
                           {platformAccounts.map((account) => (
                             <div
                               key={account.id}
-                              className="flex max-w-full items-center gap-1.5 text-xs"
+                              className="flex max-w-full flex-wrap items-center gap-1.5 text-xs"
                             >
                               {account.connection_status === "connected" ? (
                                 <Check

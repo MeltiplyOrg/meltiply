@@ -10,6 +10,12 @@ import type { AnalyticsSummary } from "@/types";
 const COMPACT_FORMATS: Record<Language, Intl.NumberFormat> = {
   en: new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, notation: "compact" }),
   es: new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1, notation: "compact" }),
+  "pt-BR": new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1, notation: "compact" }),
+  fr: new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1, notation: "compact" }),
+  de: new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1, notation: "compact" }),
+  it: new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1, notation: "compact" }),
+  zh: new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1, notation: "compact" }),
+  vi: new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1, notation: "compact" }),
 };
 
 const CARDS = [

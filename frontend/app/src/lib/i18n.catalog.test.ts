@@ -5,42 +5,23 @@ import { parseSync } from "oxc-parser";
 import type { Node } from "oxc-parser";
 import { describe, expect, it } from "vite-plus/test";
 
+import glossary from "../locales/glossary.json";
+import sourceCatalog from "../locales/en/ui.json";
 import { translate } from "./i18n";
 
 const sourceRoot = fileURLToPath(new URL("../", import.meta.url));
 
-// These values are deliberately identical in Spanish: product names, proper names,
-// technical identifiers, and the hashtag example are not translated.
-const intentionalIdenticalValues: Record<string, true> = {
-  "#viral #shorts": true,
-  "{start}–{end}": true,
-  Duet: true,
-  English: true,
-  Español: true,
-  Hashtags: true,
-  Plan: true,
-  Stitch: true,
-  General: true,
-  ID: true,
-  "ID: {id}": true,
-  "Impr.": true,
-  "sk_live_…": true,
-  YouTube: true,
-  Facebook: true,
-  Instagram: true,
-  Threads: true,
-};
+// The shared glossary is the single source for terms that are deliberately
+// identical across languages. It also feeds generation and the Shipi18n check.
+const intentionalIdenticalValues: Record<string, true> = Object.fromEntries(
+  [...Object.keys(glossary.keepVerbatim), ...glossary.intentionallyIdentical].map((term) => [
+    term,
+    true,
+  ]),
+);
 
-const intentionalJsxValues: Record<string, true> = {
-  MELTIPLY: true,
-  Meltiply: true,
-  TikTok: true,
-  "⌘K": true,
-  s: true,
-  M: true,
-  P: true,
-  "sk_live_…": true,
-};
+// English is the translation key: every translatable callsite must be present
+// in the source catalog, which the locale check then requires in each target.
 
 // Dynamic keys are finite values selected by application state. Their source
 // expressions are reviewed here so a new dynamic callsite cannot bypass the catalog guard.
@@ -81,11 +62,24 @@ async function sourceFiles(directory: string): Promise<string[]> {
   return nested.flat();
 }
 
+/**
+ * Reports whether a translatable callsite is registered in the English source
+ * catalog or explicitly allowed to stay identical by the shared glossary.
+ *
+ * @param message English source string found in the app.
+ * @returns True when the catalog guard may accept the string.
+ */
 function isCovered(message: string): boolean {
-  return translate("es", message) !== message || Boolean(intentionalIdenticalValues[message]);
+  return Object.hasOwn(sourceCatalog, message) || Boolean(intentionalIdenticalValues[message]);
 }
 
 describe("Spanish i18n catalog", () => {
+  it("resolves Spanish from locale data and falls back to the English key", () => {
+    expect(translate("es", "Dashboard")).toBe("Panel");
+    expect(translate("en", "Dashboard")).toBe("Dashboard");
+    expect(translate("es", "Not a catalog key")).toBe("Not a catalog key");
+  });
+
   it("covers literal translation calls, accessible attributes, and user-facing JSX text", async () => {
     const missing: string[] = [];
     const dynamic: string[] = [];
@@ -143,7 +137,7 @@ describe("Spanish i18n catalog", () => {
 
         if (node.type === "JSXText") {
           const text = node.value.replace(/\s+/g, " ").trim();
-          if (/[A-Za-zÀ-ÿ]/.test(text) && !isCovered(text) && !intentionalJsxValues[text]) {
+          if (/[A-Za-zÀ-ÿ]/.test(text) && !isCovered(text) && !intentionalIdenticalValues[text]) {
             missing.push(`${file}: ${text}`);
           }
         }
@@ -163,6 +157,6 @@ describe("Spanish i18n catalog", () => {
     }
 
     expect(dynamic, "unapproved dynamic translation callsites").toEqual([]);
-    expect(missing, "untranslated Spanish literals").toEqual([]);
+    expect(missing, "unregistered translatable literals").toEqual([]);
   });
 });

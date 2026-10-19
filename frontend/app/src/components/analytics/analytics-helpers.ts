@@ -137,6 +137,12 @@ export function isAnalyticsStale(lastSyncedAt: string | null, now = Date.now()):
 const INTEGER_FORMATS: Record<Language, Intl.NumberFormat> = {
   en: new Intl.NumberFormat("en-US"),
   es: new Intl.NumberFormat("es-ES"),
+  "pt-BR": new Intl.NumberFormat("pt-BR"),
+  fr: new Intl.NumberFormat("fr-FR"),
+  de: new Intl.NumberFormat("de-DE"),
+  it: new Intl.NumberFormat("it-IT"),
+  zh: new Intl.NumberFormat("zh-CN"),
+  vi: new Intl.NumberFormat("vi-VN"),
 };
 
 /** Formats an exact analytics integer with locale thousands separators. */
@@ -144,21 +150,23 @@ export function formatAnalyticsInteger(value: number, language: Language = "en")
   return INTEGER_FORMATS[language].format(value);
 }
 
+const TIMESTAMP_OPTIONS: Intl.DateTimeFormatOptions = {
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  month: "short",
+  year: "numeric",
+};
+
 const TIMESTAMP_FORMATS: Record<Language, Intl.DateTimeFormat> = {
-  en: new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-    year: "numeric",
-  }),
-  es: new Intl.DateTimeFormat("es-ES", {
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "short",
-    year: "numeric",
-  }),
+  en: new Intl.DateTimeFormat("en-US", { ...TIMESTAMP_OPTIONS, hour: "numeric" }),
+  es: new Intl.DateTimeFormat("es-ES", TIMESTAMP_OPTIONS),
+  "pt-BR": new Intl.DateTimeFormat("pt-BR", TIMESTAMP_OPTIONS),
+  fr: new Intl.DateTimeFormat("fr-FR", TIMESTAMP_OPTIONS),
+  de: new Intl.DateTimeFormat("de-DE", TIMESTAMP_OPTIONS),
+  it: new Intl.DateTimeFormat("it-IT", TIMESTAMP_OPTIONS),
+  zh: new Intl.DateTimeFormat("zh-CN", TIMESTAMP_OPTIONS),
+  vi: new Intl.DateTimeFormat("vi-VN", TIMESTAMP_OPTIONS),
 };
 
 /** Formats an exact timestamp for `title`, tooltips, and the freshness label. */

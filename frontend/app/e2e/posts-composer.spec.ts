@@ -647,7 +647,7 @@ test("recovers independent profile copies and retries only unfinished publishing
     .click();
   const mutations = await watchPostMutations(page);
   let rejectSecondaryDraft = true;
-  await page.route(/\/api\/v1\/posts$/, async (route) => {
+  await page.route(/\/api\/v1\/asset-upload-sessions$/, async (route) => {
     const body: unknown = route.request().postDataJSON();
     if (
       rejectSecondaryDraft &&

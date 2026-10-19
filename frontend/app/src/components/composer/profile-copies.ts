@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { getAsset, getAssetDownloadUrl } from "@/lib/api";
+import { getAsset, getAssetBlob } from "@/lib/api";
 import { runQueryEffect } from "@/lib/effect";
 import { createAssetUpload } from "@/lib/upload";
 import type { Asset, CreatePostInput, Post, SchedulePostInput, UpdatePostInput } from "@/types";
@@ -88,14 +88,11 @@ export async function persistProfileCopies({
         }
         let file = attachment.file;
         if (!file) {
-          const signed = await runQueryEffect(
-            getAssetDownloadUrl(workspaceId, attachment.assetId),
-            { signal },
-          );
-          const response = await fetch(signed.url, { signal });
-          if (!response.ok) throw new Error("Could not read the source attachment.");
-          file = new File([await response.blob()], attachment.name, {
-            type: attachment.mimeType ?? "application/octet-stream",
+          const blob = await runQueryEffect(getAssetBlob(workspaceId, attachment.assetId), {
+            signal,
+          });
+          file = new File([blob], attachment.name, {
+            type: attachment.mimeType ?? (blob.type || "application/octet-stream"),
           });
         }
         const task = createAssetUpload({ workspaceId, brandProfileId: profileId, file });
@@ -107,6 +104,9 @@ export async function persistProfileCopies({
           signal.throwIfAborted();
           const asset = await task.result;
           copy.assets.set(attachment.assetId, asset.id);
+        } catch (error) {
+          await task.cancel();
+          throw error;
         } finally {
           signal.removeEventListener("abort", cancel);
         }
@@ -143,6 +143,8 @@ export async function persistProfileCopies({
       const saved = id ? await update({ id, input: profileInput }) : await create(profileInput);
       copy.postId = saved.id;
       copy.updatedAt = saved.updated_at;
+      // A new draft write supersedes/cancels the previous delivery intent.
+      delete copy.scheduledIntent;
       onProgress({ profileId, phase: "saved" });
     } catch (error) {
       signal.throwIfAborted();

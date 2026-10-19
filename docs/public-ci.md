@@ -66,6 +66,8 @@ User-facing journeys and screenshots use production assets without DevBox chrome
 documentation links, React review, development CSS/font HTTP smoke, and the
 controlled-backend workspace/public browser journey. Artifacts include desktop,
 phone, and reported-user-width captures plus failure traces.
+The React Doctor invocation is pinned in the workflow and receives no GitHub token.
+Its changed-scope comparison fetches the public base branch without credentials.
 The topology lane owns a separate backend process for load checks after smoke exits.
 
 The existing self-hosted image smoke includes Chromium owner journeys: first-run

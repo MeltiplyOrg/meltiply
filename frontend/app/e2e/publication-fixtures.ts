@@ -131,21 +131,25 @@ export async function activeBrandProfileName(page: Page): Promise<string> {
   }
   const addProfile = page.getByRole("button", { name: "Add Brand Profile filter", exact: true });
   if (await addProfile.isVisible()) await addProfile.click();
-  const combobox = page
-    .getByRole("group", { name: "Filters", exact: true })
-    .getByRole("combobox")
-    .first();
-  await expect(combobox).toBeVisible({ timeout: 30_000 });
-  await combobox.click();
-  const options = page.getByRole("option");
+  const trigger = page
+    .getByRole("button", { name: "Remove Brand Profile filter", exact: true })
+    .locator("..")
+    .locator('button[aria-haspopup="menu"]');
+  await expect(trigger).toBeVisible({ timeout: 30_000 });
+  await trigger.click();
+  const menu = page.getByRole("menu", { name: "Brand Profile", exact: true });
+  const options = menu.getByRole("menuitemcheckbox");
   await expect(options.first()).toBeVisible({ timeout: 30_000 });
   const names = (await options.allInnerTexts()).map((value) => value.trim());
   const name = names.find((value) => value.length > 0 && !/^all brand profiles$/i.test(value));
   if (!name) {
     throw new Error(`workspace has no selectable Brand Profile; options were ${names.join(", ")}`);
   }
-  await page.getByRole("option", { name, exact: true }).click();
+  await menu.getByRole("menuitemcheckbox", { name: "All Brand Profiles", exact: true }).click();
+  await menu.getByRole("menuitemcheckbox", { name, exact: true }).click();
+  await page.keyboard.press("Escape");
   await disclosure.click();
+  await expect(page.getByRole("group", { name: "Filters", exact: true })).toBeHidden();
   return name;
 }
 

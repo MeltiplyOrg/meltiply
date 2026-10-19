@@ -629,6 +629,8 @@ const spanishTranslations: Record<string, string> = {
   "Character limit unavailable": "Límite de caracteres no disponible",
   "{count}/{limit} characters": "{count}/{limit} caracteres",
   "{count} platforms": "{count} plataformas",
+  "{count} statuses": "{count} estados",
+  "{count} Brand Profiles": "{count} perfiles de marca",
   "{count} post(s) scheduled or published on this date.":
     "{count} publicación(es) programada(s) o publicada(s) en esta fecha.",
   "{name} Configuration": "Configuración de {name}",

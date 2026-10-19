@@ -1,12 +1,6 @@
-import { useCallback, type ReactElement } from "react";
+import type { ReactElement } from "react";
 import { PLATFORM_IDS } from "@meltiply/domain";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@meltiply/ui/dropdown-menu";
+import { FilterChecklist } from "@meltiply/ui/dropdown-menu";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
@@ -82,46 +76,22 @@ export function platformFilterLabel(
 export function PlatformFilterSelect({ value, onValueChange, trigger }: PlatformFilterSelectProps) {
   const { t } = useI18n();
 
-  /**
-   * Toggles one platform id in the selection, preserving the caller's array
-   * semantics: removing the last selected id naturally returns the filter to
-   * the aggregate "All platforms" state.
-   */
-  const handlePlatformToggle = useCallback(
-    (platform: string) => {
-      onValueChange(
-        value.includes(platform)
-          ? value.filter((selected) => selected !== platform)
-          : [...value, platform],
-      );
-    },
-    [value, onValueChange],
-  );
-
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-44">
-        <DropdownMenuCheckboxItem
-          checked={value.length === 0}
-          onCheckedChange={() => onValueChange([])}
-          onSelect={(event) => event.preventDefault()}
-        >
-          {t("All platforms")}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuSeparator />
-        {PLATFORM_IDS.map((platform) => (
-          <DropdownMenuCheckboxItem
-            key={platform}
-            checked={value.includes(platform)}
-            onCheckedChange={() => handlePlatformToggle(platform)}
-            onSelect={(event) => event.preventDefault()}
-          >
+    <FilterChecklist
+      value={value}
+      onValueChange={onValueChange}
+      trigger={trigger}
+      aggregateLabel={t("All platforms")}
+      className="w-44"
+      options={PLATFORM_IDS.map((platform) => ({
+        value: platform,
+        label: (
+          <>
             <PlatformIcon provider={platform} className="size-3.5 mr-2" />
             {platformDisplayName(platform)}
-          </DropdownMenuCheckboxItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          </>
+        ),
+      }))}
+    />
   );
 }

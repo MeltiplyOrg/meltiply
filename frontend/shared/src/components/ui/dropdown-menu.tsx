@@ -329,3 +329,63 @@ export const DropdownMenuSeparator = React.forwardRef<
   />
 ));
 DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
+
+/**
+ * Controlled filter checklist. Empty selection means all; choosing the aggregate
+ * row clears the selection. Toggling concrete values keeps the menu open, while
+ * Radix owns keyboard navigation, dismissal, and trigger focus restoration.
+ * Callers own option identity, labels, ordering, and filtering semantics.
+ */
+export function FilterChecklist<Value extends string>({
+  value,
+  onValueChange,
+  options,
+  aggregateLabel,
+  trigger,
+  label,
+  className,
+}: {
+  value: readonly Value[];
+  onValueChange: (value: Value[]) => void;
+  options: readonly { value: Value; label: React.ReactNode }[];
+  aggregateLabel: string;
+  trigger: React.ReactElement;
+  label?: string;
+  className?: string;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className={className}
+        {...(label ? { "aria-label": label, "aria-labelledby": undefined } : {})}
+      >
+        <DropdownMenuCheckboxItem
+          checked={value.length === 0}
+          onCheckedChange={() => onValueChange([])}
+          onSelect={(event) => event.preventDefault()}
+        >
+          {aggregateLabel}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        {options.map((option) => (
+          <DropdownMenuCheckboxItem
+            key={option.value}
+            checked={value.includes(option.value)}
+            onCheckedChange={() =>
+              onValueChange(
+                value.includes(option.value)
+                  ? value.filter((selected) => selected !== option.value)
+                  : [...value, option.value],
+              )
+            }
+            onSelect={(event) => event.preventDefault()}
+          >
+            {option.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

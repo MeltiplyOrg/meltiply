@@ -63,6 +63,8 @@ Centered forms and confirmations have 16px viewport gutters and a maximum height
 
 Keep control identity, unsaved content, selection, and keyboard focus stable as labels or state change. Hidden columns retain underlying data; filters operate only on loaded, authorized records. Scope changes clear selection according to the owning feature's contract.
 
+Drawer focus entry and opener restoration use `preventScroll`; neither may move the underlying collection. A non-modal inspection can remain open while the list scrolls, so dismissal preserves the current viewport rather than rewinding to where inspection began.
+
 Inspecting a background Post hides rather than unmounts the live composer; returning preserves its local inputs and upload tasks. Only explicit composition dismissal or a deliberate identity/scope change releases it. URL-backed composer intent opens and closes on same-route navigation as well as reload.
 
 At the composer's wide split, independently scrolling columns reserve a 4px focus gutter so textarea, input, select, and button rings remain visible at every edge. The editor compensates its gutter with margins to retain the shared content alignment; phone layouts keep the drawer's existing outer padding. Do not remove the clipping boundary or shrink a shared focus ring to work around a column's missing space.

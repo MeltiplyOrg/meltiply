@@ -285,9 +285,24 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await inspectAnotherPost("Second draft — selection review.");
   await expect(inspector).toBeVisible();
   await inspectAnotherPost("Studio update — ready for the next publishing window.");
+  // Background scrolling while inspecting must survive dismissal, even when
+  // restoring focus to the original row would normally scroll it into view.
+  await page.setViewportSize({ width: 1440, height: 360 });
+  const collectionViewport = page
+    .getByRole("table", { name: "Posts table", exact: true })
+    .locator("..");
+  const inspectionScrollTop = await collectionViewport.evaluate((element) => {
+    element.scrollTop = element.scrollHeight - element.clientHeight;
+    return element.scrollTop;
+  });
+  expect(inspectionScrollTop).toBeGreaterThan(0);
   await page.keyboard.press("Escape");
   await expect(inspector).toBeHidden();
   await expect(inspectTrigger).toBeFocused();
+  await expect
+    .poll(() => collectionViewport.evaluate((element) => element.scrollTop))
+    .toBe(inspectionScrollTop);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: "Studio update" }));
   await expect(page.getByPlaceholder(/what do you want to publish/i)).toHaveValue(
     "Studio update — ready for the next publishing window.",
@@ -545,15 +560,14 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await postsFilterPanel
     .getByRole("button", { name: "Add Post status filter", exact: true })
     .click();
-  const statusControl = postsFilterPanel.getByRole("combobox", {
-    name: "Post status",
-    exact: true,
-  });
-  // Radix Select hides its peers from the accessibility tree while its list is open.
+  const statusControl = postsFilterPanel
+    .getByRole("button", { name: "Remove Post status filter", exact: true })
+    .locator("..")
+    .locator('button[aria-haspopup="menu"]');
   expect(await postsFilterPanel.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   await expect(postsFilterPanel).toHaveAttribute("data-state", "open");
   await statusControl.click();
-  const openMenuSurface = page.getByRole("listbox", { name: "Post status", exact: true });
+  const openMenuSurface = page.getByRole("menu", { name: "Post status", exact: true });
   await expect(openMenuSurface).toBeVisible();
   expect(await openMenuSurface.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   expect(
@@ -570,20 +584,24 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await postsFilterPanel.getByRole("heading", { name: "Filter by", exact: true }).click();
   await expect(postsFilterPanel).toBeVisible();
   await statusControl.click();
-  await page.getByRole("option", { name: "Drafts", exact: true }).click();
-  await expect(postsFilterPanel).toBeVisible();
-  await statusControl.click();
-  await expect(page.getByRole("option", { name: "Drafts", exact: true })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  await page.getByRole("option", { name: "All statuses", exact: true }).click();
-  await expect(postsFilterPanel).toBeVisible();
-  await statusControl.click();
-  await expect(page.getByRole("option", { name: "All statuses", exact: true })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  const draftsOption = openMenuSurface.getByRole("menuitemcheckbox", {
+    name: "Drafts",
+    exact: true,
+  });
+  const publishedOption = openMenuSurface.getByRole("menuitemcheckbox", {
+    name: "Published",
+    exact: true,
+  });
+  await draftsOption.click();
+  await publishedOption.click();
+  await expect(draftsOption).toBeChecked();
+  await expect(publishedOption).toBeChecked();
+  await expect(openMenuSurface).toBeVisible();
+  await openMenuSurface
+    .getByRole("menuitemcheckbox", { name: "All statuses", exact: true })
+    .click();
+  await expect(draftsOption).not.toBeChecked();
+  await expect(publishedOption).not.toBeChecked();
   await page.keyboard.press("Escape");
 
   await postsFilterPanel

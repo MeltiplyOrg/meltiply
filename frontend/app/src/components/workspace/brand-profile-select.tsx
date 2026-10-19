@@ -8,6 +8,7 @@ import {
   SelectSeparator,
   SelectTrigger,
 } from "@meltiply/ui/select";
+import { FilterChecklist } from "@meltiply/ui/dropdown-menu";
 
 /**
  * Props for {@link BrandProfileSelect}, the canonical Brand Profile picker
@@ -115,21 +116,7 @@ export function BrandProfileSelect({
 }: BrandProfileSelectProps) {
   const { t } = useI18n();
 
-  /** Canonical option list: resolved profiles first, then any unique unresolved ids. */
-  const options = useMemo(() => {
-    const list: BrandProfileOption[] = brandProfiles.map((profile) => ({
-      id: profile.id,
-      name: profile.name,
-    }));
-    const known = new Set(list.map((option) => option.id));
-    for (const id of unresolvedProfileIds ?? []) {
-      if (!known.has(id)) {
-        known.add(id);
-        list.push({ id, name: t("Unknown profile") });
-      }
-    }
-    return list;
-  }, [brandProfiles, unresolvedProfileIds, t]);
+  const options = useBrandProfileOptions(brandProfiles, unresolvedProfileIds);
 
   return (
     <Select value={value} onValueChange={onValueChange}>
@@ -152,5 +139,60 @@ export function BrandProfileSelect({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+/** Builds resolved profiles followed by unique unknown references for either selection mode. */
+function useBrandProfileOptions(
+  brandProfiles: readonly BrandProfile[],
+  unresolvedProfileIds?: readonly string[],
+) {
+  const { t } = useI18n();
+  return useMemo(() => {
+    const list: BrandProfileOption[] = brandProfiles.map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+    }));
+    const known = new Set(list.map((option) => option.id));
+    for (const id of unresolvedProfileIds ?? []) {
+      if (!known.has(id)) {
+        known.add(id);
+        list.push({ id, name: t("Unknown profile") });
+      }
+    }
+    return list;
+  }, [brandProfiles, unresolvedProfileIds, t]);
+}
+
+/**
+ * Multi-profile collection filter using the same option roster as ownership
+ * selection. Empty means all profiles; selections are OR-matched by the caller.
+ * This does not assign multiple owners to a composed Post.
+ */
+export function BrandProfileFilterSelect({
+  value,
+  onValueChange,
+  brandProfiles,
+  unresolvedProfileIds,
+  trigger,
+}: {
+  value: readonly string[];
+  onValueChange: (value: string[]) => void;
+  brandProfiles: readonly BrandProfile[];
+  unresolvedProfileIds?: readonly string[];
+  trigger: ReactElement;
+}) {
+  const { t } = useI18n();
+  const options = useBrandProfileOptions(brandProfiles, unresolvedProfileIds);
+  return (
+    <FilterChecklist
+      value={value}
+      onValueChange={onValueChange}
+      trigger={trigger}
+      label={t("Brand Profile")}
+      aggregateLabel={t("All Brand Profiles")}
+      className="w-max max-w-80"
+      options={options.map((option) => ({ value: option.id, label: option.name }))}
+    />
   );
 }

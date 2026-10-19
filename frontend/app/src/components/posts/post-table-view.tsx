@@ -150,7 +150,9 @@ const PostTableRow = React.memo(function PostTableRow({
       data-selected={selected || undefined}
       onClick={(event) => {
         if (event.target instanceof Element && event.target.closest("button, input, a")) return;
-        event.currentTarget.querySelector<HTMLButtonElement>("[data-post-details]")?.focus();
+        event.currentTarget
+          .querySelector<HTMLButtonElement>("[data-post-details]")
+          ?.focus({ preventScroll: true });
         onViewDetails(post.id);
       }}
     >

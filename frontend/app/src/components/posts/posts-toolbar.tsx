@@ -8,6 +8,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuCheckboxItem,
+  FilterChecklist,
 } from "@meltiply/ui/dropdown-menu";
 import { FilterSelect } from "@meltiply/ui/select";
 import {
@@ -20,7 +21,7 @@ import {
   TopToolbarReset,
 } from "@/components/layout/top-toolbar";
 import {
-  BrandProfileSelect,
+  BrandProfileFilterSelect,
   brandProfileFilterLabel,
 } from "@/components/workspace/brand-profile-select";
 import {
@@ -58,12 +59,12 @@ export interface PostsToolbarProps {
   onColumnsChange: (updater: (columns: number) => number) => void;
   hiddenColumns: ReadonlySet<string>;
   onToggleColumn: (column: string) => void;
-  statusFilter: PostStatusFilter;
-  onStatusChange: (status: PostStatusFilter) => void;
+  statusFilter: Exclude<PostStatusFilter, "all">[];
+  onStatusChange: (status: Exclude<PostStatusFilter, "all">[]) => void;
   platformFilter: string[];
   onPlatformChange: (platforms: string[]) => void;
-  profileFilter: string;
-  onProfileChange: (profile: string) => void;
+  profileFilter: string[];
+  onProfileChange: (profiles: string[]) => void;
   dateFilter: string;
   onDateChange: (date: string) => void;
   sortKey: PostSortKey;
@@ -106,11 +107,20 @@ export const PostsToolbar = React.memo(function PostsToolbar({
     ...postAnalyticsColumns(t).map((column) => ({ id: column.id, label: column.name })),
   ];
   const activeCount =
-    Number(statusFilter !== "all") +
+    Number(statusFilter.length > 0) +
     Number(platformFilter.length > 0) +
-    Number(profileFilter !== "all") +
+    Number(profileFilter.length > 0) +
     Number(dateFilter !== "all");
-  const profileLabel = brandProfileFilterLabel(profileFilter, brandProfiles, t);
+  const profileLabel =
+    profileFilter.length > 1
+      ? t("{count} Brand Profiles", { count: profileFilter.length })
+      : brandProfileFilterLabel(profileFilter[0] ?? null, brandProfiles, t);
+  const statusLabel =
+    statusFilter.length === 0
+      ? t("All statuses")
+      : statusFilter.length === 1
+        ? tStatus(statusFilter[0])
+        : t("{count} statuses", { count: statusFilter.length });
   const platformLabel = platformFilterLabel(platformFilter, t);
   const dateLabel =
     dateFilter === "today"
@@ -121,9 +131,9 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           ? t("Past 30 days")
           : t("All dates");
   const reset = () => {
-    onStatusChange("all");
+    onStatusChange([]);
     onPlatformChange([]);
-    onProfileChange("all");
+    onProfileChange([]);
     onDateChange("all");
   };
   return (
@@ -156,15 +166,14 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             {
               id: "profile",
               label: t("Brand Profile"),
-              active: profileFilter !== "all",
-              onClear: () => onProfileChange("all"),
+              active: profileFilter.length > 0,
+              onClear: () => onProfileChange([]),
               control: (
-                <BrandProfileSelect
+                <BrandProfileFilterSelect
                   value={profileFilter}
                   onValueChange={onProfileChange}
                   brandProfiles={brandProfiles}
                   unresolvedProfileIds={unresolvedProfileIds}
-                  label={t("Brand Profile")}
                   trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
                 />
               ),
@@ -172,26 +181,21 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             {
               id: "status",
               label: t("Post status"),
-              active: statusFilter !== "all",
-              onClear: () => onStatusChange("all"),
+              active: statusFilter.length > 0,
+              onClear: () => onStatusChange([]),
               control: (
-                <FilterSelect
+                <FilterChecklist<Exclude<PostStatusFilter, "all">>
                   value={statusFilter}
                   onValueChange={onStatusChange}
-                  aggregateOption={{ value: "all", label: t("All statuses") }}
+                  aggregateLabel={t("All statuses")}
                   options={[
                     { value: "scheduled", label: t("Scheduled") },
                     { value: "published", label: t("Published") },
                     { value: "draft", label: t("Drafts") },
                     { value: "failed", label: t("Failed") },
                   ]}
-                  ariaLabel={t("Post status")}
-                  trigger={
-                    <TopToolbarButton
-                      label={statusFilter === "all" ? t("All statuses") : tStatus(statusFilter)}
-                      className="w-full"
-                    />
-                  }
+                  label={t("Post status")}
+                  trigger={<TopToolbarButton label={statusLabel} className="w-full" />}
                 />
               ),
             },
@@ -328,17 +332,17 @@ export const PostsToolbar = React.memo(function PostsToolbar({
       </TopToolbar>
       {activeCount > 0 && (
         <TopToolbarFilterChips>
-          {statusFilter !== "all" && (
+          {statusFilter.length > 0 && (
             <TopToolbarFilterChip
-              label={`${t("Status")}: ${tStatus(statusFilter)}`}
-              onClear={() => onStatusChange("all")}
+              label={`${t("Status")}: ${statusLabel}`}
+              onClear={() => onStatusChange([])}
             />
           )}
           {platformFilter.length > 0 && (
             <TopToolbarFilterChip label={platformLabel} onClear={() => onPlatformChange([])} />
           )}
-          {profileFilter !== "all" && (
-            <TopToolbarFilterChip label={profileLabel} onClear={() => onProfileChange("all")} />
+          {profileFilter.length > 0 && (
+            <TopToolbarFilterChip label={profileLabel} onClear={() => onProfileChange([])} />
           )}
           {dateFilter !== "all" && (
             <TopToolbarFilterChip label={dateLabel} onClear={() => onDateChange("all")} />

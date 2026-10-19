@@ -17,6 +17,8 @@ The page toolbar orders **Table → Calendar → Grid**. **Table** is the defaul
 
 Open **Filter** to add Platform, Brand Profile, Post status, or Publish date rows, then choose their values. Empty added rows do not change results; supported filters combine with **and**. Remove a row with its trash control, reset the builder with **Clear all**, or remove an applied value through its chip. Collection search stays separate from top-bar jump search. Sort by newest/oldest; Table grouping and column visibility change presentation without changing Post data.
 
+Platform, Brand Profile, and Post status use checkbox lists that stay open while you select several values. A Post matches **any** selected value within one field, and must also match the other active fields. **All Brand Profiles**, **All statuses**, or clearing the last check restores that field's full collection. Selecting exactly one Brand Profile also scopes new composition; several profiles remain a review filter, not multiple owners for one Post.
+
 On phones, swipe the Table or Calendar date canvas sideways to reach additional columns or days; the page itself stays within the screen. The Table's empty message and Create post action stay visible without horizontal scrolling. Calendar's Today, date navigation, and Month/Week controls stay outside the scrolling dates.
 
 Checkboxes select Posts in Table and Grid; Calendar day details expose the same
@@ -97,7 +99,7 @@ Each post shows a status per channel in the post details (open any post to see t
 
 Click a Table row, Grid card, or Calendar Post chip—or choose **Details** in a Calendar day's list—to open the side drawer. Its compact header identifies the Post and exposes supported actions. Flat properties, the full caption, ordered attachments, and real Channel outcomes share one scrollable body; this is not an editable task/status panel.
 
-The inspector is a non-modal edge panel, filling the viewport on phones. Close with its header's **Close** icon or **Escape**; the workspace stays clickable, and outside clicks do not dismiss it. Closing inspection returns to an interrupted composition when one exists; otherwise focus returns to its opener.
+The inspector is a non-modal edge panel, filling the viewport on phones. Close with its header's **Close** icon or **Escape**; the workspace stays clickable, and outside clicks do not dismiss it. Closing inspection returns to an interrupted composition when one exists; otherwise focus returns to its opener without moving the collection's scroll position, even if you scrolled the list while inspecting.
 
 Table has no trailing actions column. Open Details and choose **Edit post** for an editable Post; its header exposes deletion and, when applicable, **Cancel all pending**, with confirmation. Grid cards and Calendar day entries retain direct Edit/Delete shortcuts. Provider publication outcomes cannot be manually marked complete.
 

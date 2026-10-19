@@ -1,5 +1,6 @@
 import { forwardRef, useRef, useState, type ComponentType } from "react";
 import {
+  ChartColumn,
   CircleHelp,
   ChevronsUpDown,
   LogOut,
@@ -35,7 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@meltiply/ui/dropdown-menu";
 
-export type WorkspaceView = "posts" | "channels" | "settings";
+export type WorkspaceView = "posts" | "analytics" | "channels" | "settings";
 
 /** Canonical real destinations shared by the rail, mobile drawer, and jump search. */
 export interface WorkspaceNavItem {
@@ -48,6 +49,7 @@ export interface WorkspaceNavItem {
 /** Reference demo routes are deliberately absent; every destination opens a real publishing surface. */
 export const WORKSPACE_NAV_ITEMS: readonly WorkspaceNavItem[] = [
   { id: "posts", path: "/posts", label: "Posts", icon: PenSquare },
+  { id: "analytics", path: "/analytics", label: "Analytics", icon: ChartColumn },
   { id: "channels", path: "/channels", label: "Channels", icon: Share2 },
   { id: "settings", path: "/settings", label: "Settings", icon: Settings },
 ];

@@ -38,6 +38,12 @@ Channels uses the Members-style directory composition, not a copy of Posts group
 
 The directory header row stays pinned to the top of the accounts viewport, and that viewport owns both scroll axes, so the wide table scrolls sideways without capturing the sticky header in an inner scroller. Accounts show identity, platform, owning profile, a single accessible health icon, and channel settings. The Brand Profiles tab shows real profile cards and connection counts. Both tabs use the same background and canonical controls as Posts. Table horizontal overflow stays inside the directory viewport.
 
+### Analytics
+
+`/analytics` is a read-only operational page inside the shared `WorkspaceSurface`. Its toolbar carries the range preset, platform filter, metric segments, and Refresh; the toolbar itself scrolls horizontally below the small breakpoint instead of wrapping or hiding controls. The body scrolls independently and uses a centered 1200px content maximum, a KPI grid of two, three, or five columns, then the platform-comparison card and the top-Posts card.
+
+The standard table collapses to stacked Post rows below `md`, with metric labels beside each value; only the toolbar may scroll horizontally. The chart keeps its documented `role="img"` summary and a visually hidden equivalent table. Loading skeletons preserve the KPI, chart, and table heights, and refreshing keeps prior data mounted.
+
 ## Settings
 
 All sections share one layout; Security does not get a separate width rule.

@@ -4,6 +4,7 @@ import { Navigate, Route, Routes } from "react-router";
 import { AuthenticatedShell } from "@/app/authenticated-shell";
 import { WorkspaceLoadingSkeleton } from "@/components/layout/workspace-loading-skeleton";
 
+const AnalyticsPage = lazy(() => import("@/app/(dashboard)/analytics/page"));
 const ChannelsPage = lazy(() => import("@/app/(dashboard)/channels/page"));
 const PostsPage = lazy(() => import("@/app/(dashboard)/posts/page"));
 const SettingsPage = lazy(() => import("@/components/layout/workspace-settings"));
@@ -32,6 +33,7 @@ export function AppRouter(): React.ReactElement {
         <Route path="/sign-in/*" element={<SignInRoute />} />
         <Route element={<AuthenticatedShell />}>
           <Route path="/posts" element={<PostsPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/channels" element={<ChannelsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

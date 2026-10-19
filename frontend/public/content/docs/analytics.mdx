@@ -1,40 +1,96 @@
 ---
 title: Analytics
-description: Published Post counters, aggregation, and measurement availability.
+description: Published-cohort views, likes, comments, shares, and platform comparison.
 section: Publishing
 order: 7
 ---
 
-Meltiply does not provide a dedicated `/analytics` screen or sidebar Analytics navigation item. Visiting `/analytics` redirects to the posts hub on the [Publishing](/docs/publishing) screen.
+**Analytics** is a standalone workspace page at `/analytics`, listed between
+**Posts** and **Channels**. It is read-only and follows the active Brand
+Profile; choose **All Brand Profiles** through the workspace scope to compare
+the whole workspace.
 
-All mock preview panels — including illustrative Link Clicks, Net Growth cards, and AI Insights — have been removed from the application.
+## Read the cohort, not activity in the range
 
-## Current availability
+The page measures Posts published inside the selected range. Each published
+destination contributes its latest stored snapshot at or before the range end.
 
-The Posts **Table** shows **Likes**, **Cmts** (Comments), **Shrs** (Shares),
-**Saves**, **Clicks**, **Views**, **Impr.** (Impressions), and **Reach**. Use the
-**Columns** menu to hide or restore individual counters. Wide tables scroll
-horizontally on desktop and phone.
+- A Post published before the range is excluded, even if it still receives
+  engagement during the range.
+- A Post published inside the range shows cumulative metrics as of the range
+  end, not the change since the range started.
+- If one Post published to several Channels, their latest snapshots are summed.
+- **Published destinations** counts each published Distribution once, so one
+  Post may contribute several destinations.
+- Analytics sync stops after 366 days. An older Distribution keeps contributing
+  its latest retained snapshot.
+- Range boundaries are rolling UTC instants. The page does not bucket by day,
+  so there is no workspace timezone setting.
 
-Only published Channels contribute measurements. Each Post sums the latest
-stored snapshot for each measured published Channel; it never adds historical
-snapshots together. Channels without snapshots contribute no invented values.
-Drafts, unpublished Posts, missing snapshots, and unsupported/untracked counters
-show `-`. A measured zero remains `0`. **Saves** and **Clicks** are currently
-untracked, so those columns show `-`.
+The page states this under the totals. The range presets are the last 7, 30,
+90, and 366 days; the default is 30 days. Range, platform, and metric are kept
+in the URL so a view can be bookmarked and restored with browser back/forward.
 
-These are the latest stored provider measurements, not guaranteed live counters.
-They refresh with Post data after the backend synchronizes. Reach is summed per
-Channel, not deduplicated across audiences or platforms. For metrics the
-connected provider does not supply, use its native reporting tools.
+## Metrics
 
-## Backend analytics capabilities
+| Metric                 | Meaning                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------- |
+| Views                  | Views reported by the selected platforms.                                        |
+| Likes                  | Likes reported for the cohort.                                                   |
+| Comments               | Comments reported for the cohort.                                                |
+| Shares                 | Shares, reposts, and quotes reported for the cohort.                             |
+| Published destinations | Published Distributions in the cohort; each Post-to-Channel outcome counts once. |
 
-Backend provider synchronization services and the API endpoints `/api/v1/analytics` and `/api/v1/analytics/{distribution_id}` retain aggregate and per-distribution platform metrics for supported channels.
+Reach, impressions, watch time, saves, clicks, and a derived engagement rate are
+not shown. Provider coverage is limited to Instagram and Threads today, and
+Threads engagement reporting can be disabled by the deployment's acceptance
+configuration. The page never fabricates data for Facebook, TikTok, or YouTube.
 
-An interactive front-of-house analytics reporting dashboard and aggregate charts are not exposed in the web interface.
+## Coverage and freshness
+
+Missing measurement is never displayed as zero:
+
+- **Not supported** means every destination in that row belongs to a platform
+  whose Provider does not report analytics.
+- **Partial** means a row mixes supported and unsupported destinations; the
+  shown sum covers only the supported destinations.
+- **Awaiting sync** means a published destination has no stored snapshot yet.
+- **Awaiting first sync** lists supported platforms whose snapshots have not
+  arrived.
+
+A partial-data banner names any unsupported platforms in scope. The page shows
+the exact last successful sync time and warns when it is older than 26 hours,
+the daily sync cadence plus margin. **Refresh** re-reads stored metrics; it does
+not trigger a Provider sync.
+
+## Chart and table
+
+**Platform comparison** is a horizontal bar chart for the selected metric. The
+same values are available in the chart's table for screen readers, and each bar
+tooltip shows the platform, metric, and published-destination count.
+
+**Top posts** ranks the cohort by the selected metric, then publication time,
+then Post identity. Each row shows the Post title or excerpt, platforms and
+destination count, publication time, and all four metrics. Metric column
+headers re-rank the table. **Load more** raises the top-N window in steps of ten
+up to fifty. On phones the table becomes stacked rows instead of scrolling the
+whole page sideways.
+
+## API consumers
+
+The same read model is available to API clients:
+
+- `GET /api/v1/analytics` — platform-level totals for a published cohort.
+- `GET /api/v1/analytics/posts` — ranked Posts with stable `limit`/`offset`
+  pagination.
+- `GET /api/v1/analytics/{distribution_id}` — retained snapshots for one
+  Distribution.
+
+All three are scoped to the authenticated Workspace and respect the optional
+`brand_profile_id` filter.
 
 ## Related
 
-- [Publishing](/docs/publishing) — review post statuses, table columns, and calendar entries.
-- [Channels](/docs/channels) — connect and verify social platform accounts.
+- [Publishing](/docs/publishing) — compose Posts and review publication outcomes.
+- [Channels](/docs/channels) — connect the accounts that report analytics.
+- [Settings](/docs/settings) — choose the interface language and palette.

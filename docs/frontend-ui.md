@@ -43,7 +43,7 @@ Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. I
 
 ## Navigation, search, and filters
 
-`SidebarNav` and `NavigationShell` own the rail, header, mobile navigation, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations. Posts and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
+`SidebarNav` and `NavigationShell` own the rail, header, mobile navigation, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations in Posts → Analytics → Channels order. Posts, Analytics, and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
 
 The phone navigation panel renders `SidebarNav` with `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
 

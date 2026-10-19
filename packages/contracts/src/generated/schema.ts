@@ -1444,6 +1444,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/posts": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional workspace selection for the authenticated caller. When
+                 *     present, the server resolves the caller's org_members membership and
+                 *     role for this workspace before it becomes the actor and RLS claims;
+                 *     when absent, the caller's personal workspace is used. A UUID that is
+                 *     not a workspace the caller belongs to fails with 403
+                 *     `inaccessible_workspace`.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Posts ranked by stored analytics in a published cohort
+         * @description Ranks Posts by their selected stored metric for Distributions published
+         *     inside the requested range. Each Distribution contributes its latest
+         *     analytics snapshot at or before the range end; a Distribution without a
+         *     snapshot still counts as a destination and contributes zero. Ordering is
+         *     the selected metric descending, then publication time descending, then
+         *     Post id ascending. Soft-deleted Posts and Brand Profiles are excluded.
+         */
+        get: operations["getAnalyticsPosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics/{distribution_id}": {
         parameters: {
             query?: never;
@@ -2478,7 +2513,19 @@ export interface components {
             reach: number;
             impressions: number;
             post_count: number;
+            /**
+             * Format: date-time
+             * @description Latest snapshot time for this Platform's published Distributions in
+             *     scope, or null when no snapshot has been stored yet. Null
+             *     distinguishes an unsynced Platform from a measured zero.
+             */
+            last_synced_at: string | null;
         };
+        /**
+         * @description Stored metric that ranks the Post analytics rows.
+         * @enum {string}
+         */
+        AnalyticsMetric: "views" | "likes" | "comments" | "shares";
         AnalyticsSummary: {
             range: components["schemas"]["AnalyticsRange"];
             totals: components["schemas"]["MetricTotals"];
@@ -2487,6 +2534,42 @@ export interface components {
             last_synced_at: string | null;
             partial: boolean;
             unsupported_platforms: components["schemas"]["Platform"][];
+        };
+        AnalyticsPostRow: {
+            /** Format: uuid */
+            post_id: string;
+            /** @description Post title; may be empty when the composition has no title. */
+            title: string;
+            /**
+             * @description First 140 characters of the Post's default text with whitespace
+             *     collapsed; may be empty.
+             */
+            excerpt: string;
+            /**
+             * Format: date-time
+             * @description Earliest publication time among the included Distributions.
+             */
+            published_at: string;
+            /** @description Number of published Distributions included for this Post. */
+            destination_count: number;
+            platforms: components["schemas"]["Platform"][];
+            unsupported_platforms: components["schemas"]["Platform"][];
+            /**
+             * Format: date-time
+             * @description Latest snapshot time among the Post's included Distributions, or
+             *     null when none has been stored yet.
+             */
+            last_synced_at: string | null;
+            views: number;
+            likes: number;
+            comments: number;
+            shares: number;
+        };
+        AnalyticsPostsResponse: {
+            posts: components["schemas"]["AnalyticsPostRow"][];
+            has_more: boolean;
+            limit: number;
+            offset: number;
         };
         AnalyticsSnapshot: {
             /** Format: uuid */
@@ -4993,6 +5076,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnalyticsSummary"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getAnalyticsPosts: {
+        parameters: {
+            query: {
+                start: components["parameters"]["RequiredStart"];
+                end: components["parameters"]["RequiredEnd"];
+                platform?: components["schemas"]["Platform"];
+                /**
+                 * @description Restricts the result to one Brand Profile. When omitted, the operation
+                 *     returns the workspace-wide aggregate across all active Brand Profiles
+                 *     (the read-only All Brand Profiles view).
+                 */
+                brand_profile_id?: components["parameters"]["BrandProfileId"];
+                metric?: components["schemas"]["AnalyticsMetric"];
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                /**
+                 * @description Optional workspace selection for the authenticated caller. When
+                 *     present, the server resolves the caller's org_members membership and
+                 *     role for this workspace before it becomes the actor and RLS claims;
+                 *     when absent, the caller's personal workspace is used. A UUID that is
+                 *     not a workspace the caller belongs to fails with 403
+                 *     `inaccessible_workspace`.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ranked Posts and pagination metadata. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsPostsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

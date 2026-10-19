@@ -217,7 +217,7 @@ jobs:
           bun run --cwd frontend/public preview --host 127.0.0.1 --port 4321 &
           public_pid=$!
           trap 'kill "$public_pid" 2>/dev/null || true' EXIT
-          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project workspace --trace on
+          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts e2e/analytics.spec.ts --project workspace --trace on
       - name: Inspect UI design mechanics
         if: inputs.lane == 'frontend-ui'
         run: node .agents/skills/impeccable/scripts/detect.mjs --json frontend/app/src/components/layout frontend/app/src/components/primitives/sidebar-nav.tsx frontend/shared/tokens.css frontend/public/src/styles

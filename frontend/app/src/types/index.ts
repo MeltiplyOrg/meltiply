@@ -204,4 +204,40 @@ export type CalendarQueryParams = NonNullable<
   operations["listCalendarEvents"]["parameters"]["query"]
 >;
 
+/**
+ * One stored metric the Analytics page may rank and chart. The page never
+ * derives engagement rates or offers metrics the Providers do not report.
+ */
+export type AnalyticsMetric = components["schemas"]["AnalyticsMetric"];
+/** Range presets offered by the Analytics toolbar and URL state. */
+export type AnalyticsRangePreset = "7d" | "30d" | "90d" | "366d";
+export type PlatformMetrics = components["schemas"]["PlatformMetrics"];
+export type AnalyticsSummary = components["schemas"]["AnalyticsSummary"];
+export type AnalyticsPostRow = components["schemas"]["AnalyticsPostRow"];
+export type AnalyticsPostsResponse = components["schemas"]["AnalyticsPostsResponse"];
+export type AnalyticsSummaryQueryParams = NonNullable<
+  operations["getAnalyticsSummary"]["parameters"]["query"]
+>;
+export type AnalyticsPostsQueryParams = NonNullable<
+  operations["getAnalyticsPosts"]["parameters"]["query"]
+>;
+
+/**
+ * Cache-key inputs shared by both Analytics reads. `range` is part of the key
+ * but never sent to the API; the rolling start/end window is recomputed inside
+ * each query function so the key stays stable between renders.
+ */
+export interface AnalyticsScopeParams {
+  brand_profile_id?: string;
+  platform?: Platform;
+  range: AnalyticsRangePreset;
+}
+
+/** Analytics Post read inputs plus the ranking metric and requested page. */
+export interface AnalyticsPostScopeParams extends AnalyticsScopeParams {
+  limit: number;
+  metric: AnalyticsMetric;
+  offset?: number;
+}
+
 export type SignedUrlResponse = components["schemas"]["SignedUrlResponse"];

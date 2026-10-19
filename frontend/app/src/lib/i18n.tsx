@@ -728,6 +728,70 @@ const spanishTranslations: Record<string, string> = {
   "No permissions granted": "Sin permisos otorgados",
   "ID: {id}": "ID: {id}",
   "Facebook connected successfully.": "Facebook se conectó correctamente.",
+  Platforms: "Plataformas",
+  "Loading…": "Cargando…",
+  Refresh: "Actualizar",
+  "Refresh analytics": "Actualizar analíticas",
+  "Reloads stored metrics. Provider syncing runs on its own schedule.":
+    "Vuelve a leer las métricas almacenadas. La sincronización con el proveedor sigue su propio calendario.",
+  "Last 7 days": "Últimos 7 días",
+  "Last 30 days": "Últimos 30 días",
+  "Last 90 days": "Últimos 90 días",
+  "Last 12 months": "Últimos 12 meses",
+  Metric: "Métrica",
+  "Published destinations": "Destinos publicados",
+  "About {metric}": "Acerca de {metric}",
+  "Views reported for posts published in this range.":
+    "Visualizaciones registradas para las publicaciones publicadas en este intervalo.",
+  "Likes reported for those posts.": "Me gusta registrados para esas publicaciones.",
+  "Comments reported for those posts.": "Comentarios registrados para esas publicaciones.",
+  "Shares, reposts, and quotes reported for those posts.":
+    "Compartidos, reposteos y citas registrados para esas publicaciones.",
+  "One Post can publish to multiple Channels; each published Distribution counts once.":
+    "Una publicación puede publicarse en varios canales; cada distribución publicada cuenta una vez.",
+  "{count} published destinations": "{count} destinos publicados",
+  "{count} destinations": "{count} destinos",
+  "No platform metrics recorded in this range yet.":
+    "Aún no hay métricas de plataforma registradas en este intervalo.",
+  "Awaiting first sync: {platforms}": "Esperando la primera sincronización: {platforms}",
+  "{metric} by platform for {range}": "{metric} por plataforma para {range}",
+  "Platform comparison": "Comparación por plataforma",
+  Partial: "Parcial",
+  "Not supported": "No compatible",
+  "Awaiting sync": "Esperando sincronización",
+  "Sort by {metric}": "Ordenar por {metric}",
+  "Load more": "Cargar más",
+  "No published posts in this range.": "No hay publicaciones publicadas en este intervalo.",
+  "Open Channels": "Abrir canales",
+  "Analytics needs an Instagram or Threads channel.":
+    "Las analíticas necesitan un canal de Instagram o Threads.",
+  "Connect a platform account that reports analytics to see performance for published posts.":
+    "Conecta una cuenta de plataforma que informe analíticas para ver el rendimiento de las publicaciones publicadas.",
+  "{profile} · Performance for published posts across connected channels.":
+    "{profile} · Rendimiento de las publicaciones publicadas en los canales conectados.",
+  "Not synced yet": "Aún sin sincronizar",
+  "Last synced {time}": "Última sincronización: {time}",
+  "Refreshing…": "Actualizando…",
+  "Analytics could not be loaded": "No se pudieron cargar las analíticas",
+  "We could not load analytics.": "No pudimos cargar las analíticas.",
+  "No analytics-capable published destinations in this range.":
+    "No hay destinos publicados compatibles con analíticas en este intervalo.",
+  "Metrics appear after the first provider sync.":
+    "Las métricas aparecen después de la primera sincronización con el proveedor.",
+  "Choose another range or publish a Post to build this cohort.":
+    "Elige otro intervalo o publica una publicación para formar esta cohorte.",
+  "The published destinations in this range do not report analytics yet. Publish to an Instagram or Threads channel, or choose another range.":
+    "Los destinos publicados en este intervalo aún no informan analíticas. Publica en un canal de Instagram o Threads o elige otro intervalo.",
+  "Stored metrics will appear here after the next scheduled sync.":
+    "Las métricas almacenadas aparecerán aquí tras la próxima sincronización programada.",
+  "Partial data: no analytics are available for {platforms}.":
+    "Datos parciales: no hay analíticas disponibles para {platforms}.",
+  "Analytics may be behind: the last sync was {time}.":
+    "Las analíticas pueden estar desactualizadas: la última sincronización fue {time}.",
+  "Published {range} · measured as of {end}": "Publicado {range} · medido hasta {end}",
+  "Metrics are cumulative snapshots for posts published in this range, not activity during it.":
+    "Las métricas son instantáneas acumuladas de las publicaciones publicadas en este intervalo, no la actividad durante el mismo.",
+  "Top posts": "Publicaciones destacadas",
 };
 
 const statusTranslations: Record<Language, Record<string, string>> = {

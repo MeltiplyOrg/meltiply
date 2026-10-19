@@ -3,6 +3,10 @@ import type { components } from "@meltiply/contracts/schema";
 import { Effect } from "effect";
 
 import type {
+  AnalyticsPostsQueryParams,
+  AnalyticsPostsResponse,
+  AnalyticsSummary,
+  AnalyticsSummaryQueryParams,
   Asset,
   BrandProfile,
   BrandProfileListResponse,
@@ -1187,6 +1191,63 @@ export function getCalendar(
   return unwrap<CalendarResponse>(
     (signal) =>
       client().GET("/calendar", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the workspace's platform-level analytics for a published cohort.
+ *
+ * The window is a rolling pair of UTC instants; `brand_profile_id` omitted is
+ * the read-only All Brand Profiles aggregate. The response carries per-platform
+ * sums, published destination counts, coverage, and sync freshness.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param params Cohort bounds plus optional Platform and Brand Profile scope.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the summary response.
+ */
+export function getAnalyticsSummary(
+  workspaceId: string | null,
+  params: AnalyticsSummaryQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AnalyticsSummary>(
+    (signal) =>
+      client().GET("/analytics", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the ranked per-Post analytics rows for a published cohort.
+ *
+ * Ranking uses the requested stored metric; each row carries its platforms,
+ * unsupported subset, destination count, and latest sync time so unsupported or
+ * unsynced values are never rendered as measured zero.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param params Cohort bounds, optional Platform/Brand Profile scope, ranking
+ *   metric, and limit/offset pagination.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the ranked Posts and pagination metadata.
+ */
+export function getAnalyticsPosts(
+  workspaceId: string | null,
+  params: AnalyticsPostsQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AnalyticsPostsResponse>(
+    (signal) =>
+      client().GET("/analytics/posts", {
         headers: workspaceHeaders(workspaceId),
         params: { query: params },
         signal,

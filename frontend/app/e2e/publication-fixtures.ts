@@ -208,9 +208,10 @@ export async function provisionControlledChannels(
       profile_name: profileName,
     },
   });
+  const failureDetail = response.status() === 201 ? "" : await response.text();
   expect(
     response.status(),
-    `provisioning ${channels.length} controlled channel(s) for "${profileName}"`,
+    `provisioning ${channels.length} controlled channel(s) for "${profileName}": ${failureDetail}`,
   ).toBe(201);
   return Schema.decodeUnknownSync(provisionedChannelsSchema)(await response.json());
 }

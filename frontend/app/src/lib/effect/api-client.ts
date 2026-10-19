@@ -2,6 +2,10 @@ import { Context, Effect, Layer } from "effect";
 import type { components } from "@meltiply/contracts/schema";
 
 import type {
+  AnalyticsPostsQueryParams,
+  AnalyticsPostsResponse,
+  AnalyticsSummary,
+  AnalyticsSummaryQueryParams,
   Asset,
   BrandProfile,
   BrandProfileListResponse,
@@ -52,6 +56,8 @@ import {
   getAsset,
   getAssetDownloadUrl,
   getAssetPreviewUrl,
+  getAnalyticsPosts,
+  getAnalyticsSummary,
   getCalendar,
   getCurrentUser,
   getOAuthSelection,
@@ -252,6 +258,14 @@ export interface ApiClientServiceShape {
     params: CalendarQueryParams,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<CalendarResponse>;
+  readonly getAnalyticsSummary: (
+    params: AnalyticsSummaryQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AnalyticsSummary>;
+  readonly getAnalyticsPosts: (
+    params: AnalyticsPostsQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AnalyticsPostsResponse>;
 }
 
 /**
@@ -296,6 +310,8 @@ export function createApiClientServiceTest(
     getAssetDownloadUrl: unstubbed("getAssetDownloadUrl"),
     getAssetPreviewUrl: unstubbed("getAssetPreviewUrl"),
     getCalendar: unstubbed("getCalendar"),
+    getAnalyticsPosts: unstubbed("getAnalyticsPosts"),
+    getAnalyticsSummary: unstubbed("getAnalyticsSummary"),
     getCurrentUser: unstubbed("getCurrentUser"),
     getDistribution: unstubbed("getDistribution"),
     getPlatformPublishingRequirements: unstubbed("getPlatformPublishingRequirements"),
@@ -362,6 +378,10 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => getAssetPreviewUrl(workspaceId, id, options)),
     getCalendar: (params, options) =>
       inWorkspace((workspaceId) => getCalendar(workspaceId, params, options)),
+    getAnalyticsPosts: (params, options) =>
+      inWorkspace((workspaceId) => getAnalyticsPosts(workspaceId, params, options)),
+    getAnalyticsSummary: (params, options) =>
+      inWorkspace((workspaceId) => getAnalyticsSummary(workspaceId, params, options)),
     getCurrentUser: () => inWorkspace((workspaceId) => getCurrentUser(workspaceId)),
     getDistribution: (id, options) =>
       inWorkspace((workspaceId) => getDistribution(workspaceId, id, options)),

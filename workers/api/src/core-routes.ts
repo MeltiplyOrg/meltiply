@@ -36,6 +36,7 @@ import {
 } from "./workspace-lifecycle";
 import { errorResponse, jsonResponse } from "./responses";
 import {
+  analyticsMetricParam,
   booleanParam,
   brandProfileColorField,
   brandProfileDescriptionField,
@@ -2311,6 +2312,39 @@ export function registerCoreRoutes(
           ...(brandProfileId ? { brandProfileId } : {}),
         });
         return jsonResponse(summary, 200, requestId(c));
+      }),
+    ),
+  );
+
+  app.get("/api/v1/analytics/posts", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const requested = yield* fromPromise(() =>
+          dateRange(c.req.query("start"), c.req.query("end"), 366),
+        );
+        const platformValue = c.req.query("platform");
+        const platform = platformValue
+          ? yield* fromPromise(() => platformParam(platformValue))
+          : undefined;
+        const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
+        const metric = yield* fromPromise(() => analyticsMetricParam(c.req.query("metric")));
+        const limit = yield* fromPromise(() =>
+          integerParam(c.req.query("limit"), "limit", 10, 1, 100),
+        );
+        const offset = yield* fromPromise(() =>
+          integerParam(c.req.query("offset"), "offset", 0, 0, 2_147_483_647),
+        );
+        const core = yield* fromPromise(service);
+        const posts = yield* core.analyticsPosts(c.env, c.get("actor").claims, {
+          ...requested,
+          limit,
+          metric,
+          offset,
+          ...(platform ? { platform } : {}),
+          ...(brandProfileId ? { brandProfileId } : {}),
+        });
+        return jsonResponse(posts, 200, requestId(c));
       }),
     ),
   );

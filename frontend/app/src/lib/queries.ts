@@ -17,8 +17,11 @@ import {
   type WorkspaceService,
 } from "./effect";
 import { useMutationKeyTracker } from "./mutation-idempotency";
+import { analyticsRangeWindow } from "./analytics-range";
 import { pollingInterval } from "./query-defaults";
 import type {
+  AnalyticsPostScopeParams,
+  AnalyticsScopeParams,
   CalendarQueryParams,
   CreateBrandProfileInput,
   CreatePostInput,
@@ -104,6 +107,14 @@ export const queryKeys = {
     params === undefined
       ? (["calendar"] as const)
       : (["calendar", normalizeParams(params)] as const),
+  analyticsSummary: (params?: AnalyticsScopeParams) =>
+    params === undefined
+      ? (["analytics", "summary"] as const)
+      : (["analytics", "summary", normalizeParams(params)] as const),
+  analyticsPosts: (params?: AnalyticsPostScopeParams) =>
+    params === undefined
+      ? (["analytics", "posts"] as const)
+      : (["analytics", "posts", normalizeParams(params)] as const),
 };
 
 /**
@@ -697,5 +708,75 @@ export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
     },
     refetchInterval: (query) => pollingInterval(query.state.data),
     enabled: scope.isSignedIn && Boolean(scopedParams),
+  });
+}
+
+/**
+ * Reads the platform-level analytics cohort summary.
+ *
+ * The range preset belongs to the cache key, while the rolling start/end
+ * instants are recomputed inside the query function so a re-render never
+ * changes the key. Prior data stays visible while a range, platform, or Brand
+ * Profile change streams in, and stored metrics are considered fresh for 60
+ * seconds without polling: provider syncing runs on its own schedule.
+ *
+ * @param scope Session scope: `isSignedIn` gates execution, `workspaceId`
+ *   selects the Workspace, and `brandProfileId` selects the profile scope.
+ * @param params Range preset plus optional Platform filter.
+ * @returns Query result with the analytics summary.
+ */
+export function useAnalyticsSummary(scope: SessionScope, params: AnalyticsScopeParams) {
+  const scopedParams = withBrandProfile(scope, { platform: params.platform });
+  const keyParams = { ...scopedParams, range: params.range };
+  return useQuery({
+    queryKey: queryKeys.analyticsSummary(keyParams),
+    queryFn: ({ signal }) =>
+      runApiQuery(
+        scope,
+        (api) =>
+          api.getAnalyticsSummary({ ...scopedParams, ...analyticsRangeWindow(params.range) }),
+        signal,
+      ),
+    placeholderData: keepPreviousData,
+    staleTime: 60 * 1_000,
+    enabled: scope.isSignedIn,
+  });
+}
+
+/**
+ * Reads the ranked per-Post analytics rows for the same cohort.
+ *
+ * Limit, metric, and offset participate in the cache key; the rolling window
+ * is recomputed inside the query function. Keeping previous data avoids
+ * collapsing the table while Load more or a metric switch refetches the top N.
+ *
+ * @param scope Session scope: `isSignedIn` gates execution, `workspaceId`
+ *   selects the Workspace, and `brandProfileId` selects the profile scope.
+ * @param params Range preset, optional Platform filter, ranking metric, and
+ *   the requested top-N window.
+ * @returns Query result with the ranked Posts and pagination metadata.
+ */
+export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScopeParams) {
+  const { range, ...filters } = params;
+  const scopedParams = withBrandProfile(scope, filters);
+  const keyParams: AnalyticsPostScopeParams = {
+    brand_profile_id: scopedParams?.brand_profile_id,
+    limit: params.limit,
+    metric: params.metric,
+    offset: params.offset,
+    platform: params.platform,
+    range,
+  };
+  return useQuery({
+    queryKey: queryKeys.analyticsPosts(keyParams),
+    queryFn: ({ signal }) =>
+      runApiQuery(
+        scope,
+        (api) => api.getAnalyticsPosts({ ...scopedParams, ...analyticsRangeWindow(range) }),
+        signal,
+      ),
+    placeholderData: keepPreviousData,
+    staleTime: 60 * 1_000,
+    enabled: scope.isSignedIn,
   });
 }

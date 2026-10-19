@@ -118,6 +118,7 @@ function service(overrides: Partial<CoreApiService> = {}): CoreApiService {
   const notImplemented = () => Effect.die(new Error("unexpected service call"));
   return {
     activeOrganization: notImplemented,
+    analyticsPosts: notImplemented,
     calendar: notImplemented,
     cancelDistribution: notImplemented,
     disconnectPlatform: notImplemented,
@@ -1768,6 +1769,83 @@ describe("core API routes", () => {
     );
     expect(excessive.status).toBe(400);
     expect(calendar).toHaveBeenCalledTimes(2);
+  });
+
+  it("validates analytics cohort bounds, metric, and pagination before storage", async () => {
+    const analyticsPosts = vi.fn(() =>
+      Effect.succeed({ has_more: false, limit: 10, offset: 0, posts: [] }),
+    );
+    const app = authenticatedApp(service({ analyticsPosts }));
+    const range = "start=2026-01-01T00:00:00Z&end=2026-01-31T00:00:00Z";
+    for (const query of [
+      "start=2026-02-01T00:00:00Z&end=2026-01-01T00:00:00Z",
+      "start=2025-01-01T00:00:00Z&end=2026-02-01T00:00:00Z",
+      `${range}&metric=reach`,
+      `${range}&limit=0`,
+      `${range}&limit=101`,
+      `${range}&offset=-1`,
+    ]) {
+      const response = await app.request(
+        `/api/v1/analytics/posts?${query}`,
+        { headers: bearerHeaders },
+        env,
+      );
+      expect(response.status, query).toBe(400);
+    }
+    expect(analyticsPosts).not.toHaveBeenCalled();
+  });
+
+  it("forwards the analytics cohort, metric, pagination, and scope filters", async () => {
+    const analyticsPosts = vi.fn(() =>
+      Effect.succeed({
+        has_more: true,
+        limit: 25,
+        offset: 50,
+        posts: [],
+      }),
+    );
+    const app = authenticatedApp(service({ analyticsPosts }));
+    const response = await app.request(
+      `/api/v1/analytics/posts?start=2026-01-01T00:00:00Z&end=2026-01-31T00:00:00Z&platform=threads&brand_profile_id=${brandProfileId}&metric=shares&limit=25&offset=50`,
+      { headers: bearerHeaders },
+      env,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      has_more: true,
+      limit: 25,
+      offset: 50,
+      posts: [],
+    });
+    expect(analyticsPosts).toHaveBeenCalledWith(env, session, {
+      brandProfileId,
+      end: new Date("2026-01-31T00:00:00Z"),
+      limit: 25,
+      metric: "shares",
+      offset: 50,
+      platform: "threads",
+      start: new Date("2026-01-01T00:00:00Z"),
+    });
+  });
+
+  it("defaults the analytics metric and pagination to views, ten, and zero", async () => {
+    const analyticsPosts = vi.fn(() =>
+      Effect.succeed({ has_more: false, limit: 10, offset: 0, posts: [] }),
+    );
+    const app = authenticatedApp(service({ analyticsPosts }));
+    const response = await app.request(
+      "/api/v1/analytics/posts?start=2026-01-01T00:00:00Z&end=2026-01-31T00:00:00Z",
+      { headers: bearerHeaders },
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(analyticsPosts).toHaveBeenCalledWith(env, session, {
+      end: new Date("2026-01-31T00:00:00Z"),
+      limit: 10,
+      metric: "views",
+      offset: 0,
+      start: new Date("2026-01-01T00:00:00Z"),
+    });
   });
 
   it("rejects reversed and over-366-day distribution analytics ranges", async () => {

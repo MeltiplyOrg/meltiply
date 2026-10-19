@@ -1994,6 +1994,57 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /analytics/posts:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Analytics]
+      operationId: getAnalyticsPosts
+      summary: List Posts ranked by stored analytics in a published cohort
+      description: |
+        Ranks Posts by their selected stored metric for Distributions published
+        inside the requested range. Each Distribution contributes its latest
+        analytics snapshot at or before the range end; a Distribution without a
+        snapshot still counts as a destination and contributes zero. Ordering is
+        the selected metric descending, then publication time descending, then
+        Post id ascending. Soft-deleted Posts and Brand Profiles are excluded.
+      parameters:
+        - $ref: "#/components/parameters/RequiredStart"
+        - $ref: "#/components/parameters/RequiredEnd"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/Platform"
+        - $ref: "#/components/parameters/BrandProfileId"
+        - name: metric
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsMetric"
+            default: views
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Ranked Posts and pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsPostsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /analytics/{distribution_id}:
     parameters:
       - $ref: "#/components/parameters/DistributionId"
@@ -4447,7 +4498,18 @@ components:
       type: object
       additionalProperties: false
       required:
-        [platform, views, likes, comments, shares, watch_time_sec, reach, impressions, post_count]
+        [
+          platform,
+          views,
+          likes,
+          comments,
+          shares,
+          watch_time_sec,
+          reach,
+          impressions,
+          post_count,
+          last_synced_at,
+        ]
       properties:
         platform:
           $ref: "#/components/schemas/Platform"
@@ -4475,6 +4537,17 @@ components:
         post_count:
           type: integer
           minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            Latest snapshot time for this Platform's published Distributions in
+            scope, or null when no snapshot has been stored yet. Null
+            distinguishes an unsynced Platform from a measured zero.
+    AnalyticsMetric:
+      type: string
+      enum: [views, likes, comments, shares]
+      description: Stored metric that ranks the Post analytics rows.
     AnalyticsSummary:
       type: object
       additionalProperties: false
@@ -4498,6 +4571,90 @@ components:
           uniqueItems: true
           items:
             $ref: "#/components/schemas/Platform"
+    AnalyticsPostRow:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          post_id,
+          title,
+          excerpt,
+          published_at,
+          destination_count,
+          platforms,
+          unsupported_platforms,
+          last_synced_at,
+          views,
+          likes,
+          comments,
+          shares,
+        ]
+      properties:
+        post_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          description: Post title; may be empty when the composition has no title.
+        excerpt:
+          type: string
+          description: |
+            First 140 characters of the Post's default text with whitespace
+            collapsed; may be empty.
+        published_at:
+          type: string
+          format: date-time
+          description: Earliest publication time among the included Distributions.
+        destination_count:
+          type: integer
+          minimum: 0
+          description: Number of published Distributions included for this Post.
+        platforms:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Platform"
+        unsupported_platforms:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Platform"
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            Latest snapshot time among the Post's included Distributions, or
+            null when none has been stored yet.
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+    AnalyticsPostsResponse:
+      type: object
+      additionalProperties: false
+      required: [posts, has_more, limit, offset]
+      properties:
+        posts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsPostRow"
+        has_more:
+          type: boolean
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          minimum: 0
     AnalyticsSnapshot:
       type: object
       additionalProperties: false

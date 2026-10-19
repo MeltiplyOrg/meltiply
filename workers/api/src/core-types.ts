@@ -63,6 +63,12 @@ interface AnalyticsFilters {
   start: Date;
 }
 
+interface AnalyticsPostsFilters extends AnalyticsFilters {
+  limit: number;
+  metric: Schemas["AnalyticsMetric"];
+  offset: number;
+}
+
 interface SnapshotFilters {
   end?: Date;
   limit: number;
@@ -85,6 +91,11 @@ export interface CoreApiService {
     env: ApiWorkerEnv,
     session: SessionClaims,
   ): Effect.Effect<string, CoreServiceError>;
+  analyticsPosts(
+    env: ApiWorkerEnv,
+    session: SessionClaims,
+    filters: AnalyticsPostsFilters,
+  ): Effect.Effect<Schemas["AnalyticsPostsResponse"], CoreServiceError>;
   calendar(
     env: ApiWorkerEnv,
     session: SessionClaims,

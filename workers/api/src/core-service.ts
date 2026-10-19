@@ -74,6 +74,20 @@ interface AnalyticsRow extends Record<string, unknown> {
   watch_time_sec: number | string;
 }
 
+interface AnalyticsPostRow extends Record<string, unknown> {
+  comments: number | string;
+  destination_count: number | string;
+  excerpt: string;
+  last_synced_at: Date | string | null;
+  likes: number | string;
+  platforms: Platform[];
+  post_id: string;
+  published_at: Date | string;
+  shares: number | string;
+  title: string;
+  views: number | string;
+}
+
 interface AnalyticsSnapshotRow extends Record<string, unknown> {
   comments: number | string;
   distribution_id: string;
@@ -152,6 +166,18 @@ function number(value: number | string | null): number {
 function optionalDateTime(value: Date | string | null): string | null {
   return value === null ? null : isoDateTime(value);
 }
+
+/**
+ * Maps each contract analytics metric to its already-aggregated `per_post`
+ * column. A typed whitelist keeps the ranking column out of interpolated SQL;
+ * the service never accepts a caller-provided column name.
+ */
+const ANALYTICS_POST_SORT_COLUMNS = {
+  comments: "pp.comments",
+  likes: "pp.likes",
+  shares: "pp.shares",
+  views: "pp.views",
+} as const satisfies Record<Schemas["AnalyticsMetric"], string>;
 
 /**
  * Builds an immutable lookup map from social platform identifier to capability descriptor.
@@ -549,11 +575,15 @@ export function createCoreApiService(
     },
 
     /**
-     * Aggregates platform-level performance analytics for published distributions over a date range via Effect.
+     * Aggregates platform-level performance analytics for Distributions
+     * published inside a date range via Effect.
      *
-     * Employs a set-based Common Table Expression (CTE) with `DISTINCT ON` to select the latest
-     * snapshot per distribution within the window, computing sums for views, likes, comments, shares,
-     * watch time, reach, and impressions.
+     * Cohorts on `published_at` (never the calendar's scheduled `event_at`)
+     * and derives coverage from the Platforms actually published in scope.
+     * Employs a set-based Common Table Expression (CTE) with `DISTINCT ON` to
+     * select the latest snapshot per Distribution at or before the range end,
+     * computing sums for views, likes, comments, shares, watch time, reach, and
+     * impressions.
      *
      * @param env - Worker environment bindings.
      * @param session - Authenticated user session claims.
@@ -568,8 +598,8 @@ export function createCoreApiService(
                SELECT id, platform
                FROM distributions
                WHERE status = 'published'
-                 AND event_at >= $1
-                 AND event_at <= $2
+                 AND published_at >= $1
+                 AND published_at <= $2
                  AND ($3::text IS NULL OR platform = $3)
                  AND ($4::uuid IS NULL OR brand_profile_id = $4)
                  AND ${activeBrandProfilePredicate("brand_profile_id")}
@@ -601,11 +631,9 @@ export function createCoreApiService(
              ORDER BY c.platform ASC`,
             [filters.start, filters.end, filters.platform ?? null, filters.brandProfileId ?? null],
           );
-          const unsupportedPlatforms = platforms.filter(
-            (platform) =>
-              (!filters.platform || platform === filters.platform) &&
-              !capabilities.get(platform)?.analytics,
-          );
+          const unsupportedPlatforms = result.rows
+            .map((row) => row.platform)
+            .filter((platform) => !capabilities.get(platform)?.analytics);
           const lastSynced = result.rows.reduce<number | null>((latest, row) => {
             if (!row.last_synced_at) return latest;
             const timestamp = new Date(row.last_synced_at).getTime();
@@ -614,6 +642,7 @@ export function createCoreApiService(
           const byPlatform = result.rows.map((row) => ({
             comments: number(row.comments),
             impressions: number(row.impressions),
+            last_synced_at: optionalDateTime(row.last_synced_at),
             likes: number(row.likes),
             platform: row.platform,
             post_count: number(row.post_count),
@@ -653,6 +682,112 @@ export function createCoreApiService(
               },
             ),
             unsupported_platforms: unsupportedPlatforms,
+          };
+        }),
+      );
+    },
+
+    /**
+     * Ranks Posts by one stored metric over Distributions published inside the
+     * requested cohort.
+     *
+     * Each included Distribution contributes its latest snapshot at or before
+     * the range end; an unsynced Distribution still counts as a destination and
+     * contributes zero. Rows exclude soft-deleted Posts and Brand Profiles,
+     * order by the selected metric, publication time, then Post id, and fetch
+     * one extra row to report `has_more` without a second count query.
+     *
+     * @param env - Worker environment bindings.
+     * @param session - Authenticated user session claims.
+     * @param filters - Cohort dates, optional Platform/Brand Profile scope,
+     *   ranking metric, and limit/offset pagination.
+     * @returns Effect resolving to the ranked Post rows and pagination metadata.
+     */
+    analyticsPosts(env, session, filters) {
+      return withTenantTransactionEffect(env, session, (client) =>
+        Effect.gen(function* () {
+          const result = yield* client.query<AnalyticsPostRow>(
+            `WITH candidates AS (
+               SELECT d.id AS distribution_id, d.post_id, d.platform, d.published_at
+               FROM distributions d
+               WHERE d.status = 'published'
+                 AND d.published_at >= $1
+                 AND d.published_at <= $2
+                 AND ($3::text IS NULL OR d.platform = $3)
+                 AND ($4::uuid IS NULL OR d.brand_profile_id = $4)
+                 AND ${activeBrandProfilePredicate("d.brand_profile_id")}
+             ),
+             latest AS (
+               SELECT DISTINCT ON (s.distribution_id)
+                 s.distribution_id,
+                 s.views, s.likes, s.comments, s.shares, s.snapshot_at
+               FROM analytics_snapshots s
+               JOIN candidates c ON c.distribution_id = s.distribution_id
+               WHERE s.snapshot_at <= $2
+               ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC
+             ),
+             per_post AS (
+               SELECT
+                 c.post_id,
+                 MIN(c.published_at) AS published_at,
+                 COUNT(*) AS destination_count,
+                 ARRAY_AGG(DISTINCT c.platform ORDER BY c.platform) AS platforms,
+                 MAX(l.snapshot_at) AS last_synced_at,
+                 COALESCE(SUM(l.views), 0) AS views,
+                 COALESCE(SUM(l.likes), 0) AS likes,
+                 COALESCE(SUM(l.comments), 0) AS comments,
+                 COALESCE(SUM(l.shares), 0) AS shares
+               FROM candidates c
+               LEFT JOIN latest l ON l.distribution_id = c.distribution_id
+               GROUP BY c.post_id
+             )
+             SELECT
+               p.id AS post_id,
+               p.title,
+               LEFT(btrim(regexp_replace(p.default_text, '\\s+', ' ', 'g')), 140) AS excerpt,
+               pp.published_at,
+               pp.destination_count,
+               pp.platforms,
+               pp.last_synced_at,
+               pp.views,
+               pp.likes,
+               pp.comments,
+               pp.shares
+             FROM per_post pp
+             JOIN posts p ON p.id = pp.post_id AND p.deleted_at IS NULL
+             ORDER BY ${ANALYTICS_POST_SORT_COLUMNS[filters.metric]} DESC,
+                      pp.published_at DESC,
+                      pp.post_id ASC
+             LIMIT $5 OFFSET $6`,
+            [
+              filters.start,
+              filters.end,
+              filters.platform ?? null,
+              filters.brandProfileId ?? null,
+              filters.limit + 1,
+              filters.offset,
+            ],
+          );
+          return {
+            has_more: result.rows.length > filters.limit,
+            limit: filters.limit,
+            offset: filters.offset,
+            posts: result.rows.slice(0, filters.limit).map((row) => ({
+              comments: number(row.comments),
+              destination_count: number(row.destination_count),
+              excerpt: row.excerpt,
+              last_synced_at: optionalDateTime(row.last_synced_at),
+              likes: number(row.likes),
+              platforms: row.platforms,
+              post_id: row.post_id,
+              published_at: isoDateTime(row.published_at),
+              shares: number(row.shares),
+              title: row.title,
+              unsupported_platforms: row.platforms.filter(
+                (platform) => !capabilities.get(platform)?.analytics,
+              ),
+              views: number(row.views),
+            })),
           };
         }),
       );

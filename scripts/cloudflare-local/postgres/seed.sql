@@ -240,6 +240,32 @@ VALUES
     '{"fixture": true}'::jsonb,
     'connected',
     now() - interval '3 days'
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000007',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'instagram',
+    'local-instagram-alpha',
+    '@alpha.studio',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload', 'analytics'],
+    '{"fixture": true}'::jsonb,
+    'connected',
+    now() - interval '2 hours'
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000008',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'threads',
+    'local-threads-analytics-alpha',
+    '@alpha.threads',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload', 'analytics'],
+    '{"fixture": true}'::jsonb,
+    'connected',
+    now() - interval '2 hours'
   )
 ON CONFLICT (platform, platform_user_id) DO UPDATE
 SET display_name = EXCLUDED.display_name,
@@ -607,6 +633,14 @@ VALUES
     'Nights campaign key visual',
     'Key visual for the Alpha Nights campaign.',
     'active'
+  ),
+  (
+    '48000000-0000-4000-8000-000000000007',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Analytics cohort launch',
+    'Two supported destinations published in the retained analytics cohort.',
+    'active'
   )
 ON CONFLICT (id) DO UPDATE
 SET title = EXCLUDED.title,
@@ -754,6 +788,38 @@ VALUES
     NULL,
     'Provider rejected the publish request: rate limited.',
     1, 1, now() - interval '5 hours', 'provider_rate_limited', TRUE
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000006',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '48000000-0000-4000-8000-000000000007',
+    'e3000000-0000-4000-8000-000000000007',
+    'instagram',
+    'published',
+    NULL,
+    now() - interval '3 days',
+    'local-post-analytics-instagram',
+    'https://example.invalid/instagram/local-post-analytics-instagram',
+    'Analytics cohort launch',
+    NULL,
+    NULL, 0, 1, now() - interval '3 days', NULL, NULL
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000007',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '48000000-0000-4000-8000-000000000007',
+    'e3000000-0000-4000-8000-000000000008',
+    'threads',
+    'published',
+    NULL,
+    now() - interval '4 days',
+    'local-post-analytics-threads',
+    'https://example.invalid/threads/local-post-analytics-threads',
+    'Analytics cohort launch',
+    NULL,
+    NULL, 0, 1, now() - interval '4 days', NULL, NULL
   )
 -- `post_id` and the frozen `attachment_ids` are re-asserted on reseed: a
 -- database seeded before the Post-owned-media cutover holds distribution rows
@@ -786,7 +852,9 @@ VALUES
   ('aa000000-0000-4000-8000-000000000003', 'f0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 3910, 260, 34, 51, 12400, 3050, 4700, now() - interval '2 days'),
   ('aa000000-0000-4000-8000-000000000004', 'f0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 4525, 298, 41, 60, 14900, 3520, 5400, now() - interval '12 hours'),
   ('aa000000-0000-4000-8000-000000000005', 'f0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 820, 64, 7, 19, 1500, 700, 980, now() - interval '2 days'),
-  ('aa000000-0000-4000-8000-000000000006', 'f0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 1935, 148, 18, 44, 3900, 1600, 2200, now() - interval '8 hours')
+  ('aa000000-0000-4000-8000-000000000006', 'f0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 1935, 148, 18, 44, 3900, 1600, 2200, now() - interval '8 hours'),
+  ('aa000000-0000-4000-8000-000000000007', 'f0000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', 640, 42, 6, 8, 0, 0, 0, now() - interval '12 hours'),
+  ('aa000000-0000-4000-8000-000000000008', 'f0000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 310, 19, 4, 3, 0, 0, 0, now() - interval '10 hours')
 ON CONFLICT (id) DO UPDATE
 SET views = EXCLUDED.views,
     likes = EXCLUDED.likes,

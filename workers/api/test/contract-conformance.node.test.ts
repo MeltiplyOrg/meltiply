@@ -340,6 +340,11 @@ const cases: ConformanceCase[] = [
   },
   {
     method: "GET",
+    operationId: "getAnalyticsPosts",
+    path: "/api/v1/analytics/posts?start=2026-01-01T00%3A00%3A00Z&end=2026-01-31T00%3A00%3A00Z",
+  },
+  {
+    method: "GET",
     operationId: "getDistributionAnalytics",
     path: "/api/v1/analytics/00000000-0000-4000-8000-000000000301",
   },
@@ -357,6 +362,7 @@ function body<T>(operationId: string): T {
 
 const coreService = {
   activeOrganization: () => Effect.succeed("20000000-0000-4000-8000-000000000001"),
+  analyticsPosts: () => Effect.succeed(body("getAnalyticsPosts")),
   calendar: () => Effect.succeed(body<{ events: unknown[] }>("listCalendarEvents").events),
   cancelDistribution: () =>
     Effect.succeed({
@@ -832,6 +838,8 @@ const errorPathOverrides: Record<string, string> = {
   completePlatformOAuth: "/api/v1/platforms/threads/callback?state=short-state",
   getAnalyticsSummary:
     "/api/v1/analytics?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",
+  getAnalyticsPosts:
+    "/api/v1/analytics/posts?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",
   getReadiness: "/api/v1/ready",
   listCalendarEvents:
     "/api/v1/calendar?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",

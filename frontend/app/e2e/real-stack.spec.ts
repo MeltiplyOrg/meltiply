@@ -1,9 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-const protectedRoutes = ["/posts", "/channels"] as const;
+const protectedRoutes = ["/posts", "/analytics", "/channels"] as const;
 
 const retiredRoutes = [
-  "/analytics",
   "/inbox",
   "/billing",
   "/agent",

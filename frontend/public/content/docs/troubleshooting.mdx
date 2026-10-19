@@ -81,7 +81,11 @@ For information on comment processing, see [Inbox](/docs/inbox).
 
 ## Performance analytics
 
-Posts **Table** includes stored engagement counters; use **Columns** to show or hide them. A `-` means the Post is not published, has no collected measurement, or that metric is untracked—not a measured zero. Saves and Clicks are currently untracked. Values follow backend synchronization rather than updating live. There is no dedicated analytics dashboard; use native platform reports for unsupported metrics.
+Open **Analytics** in the sidebar to review published-cohort performance. The page uses stored provider snapshots for Posts published in the selected range; it does not show activity that happened during the range for older Posts. See [Analytics](/docs/analytics) for cohort, coverage, and freshness semantics.
+
+Posts **Table** also includes stored engagement counters; use **Columns** to show or hide them. A `-` means the Post is not published, has no collected measurement, or that metric is untracked—not a measured zero. Saves and Clicks are currently untracked. Values follow backend synchronization rather than updating live.
+
+If the Analytics page shows **Partial data**, a published platform in scope does not report analytics; its destinations still count, but their metrics are not included. **Awaiting sync** means the destination is published but no snapshot has arrived yet. If the last sync time is old, wait for the next scheduled sync or use **Refresh** to re-read stored metrics; Refresh does not start a Provider sync. Connect an Instagram or Threads channel to make the page available.
 
 For details on how analytics processing operates, see [Analytics](/docs/analytics).
 

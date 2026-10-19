@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `GET /analytics/posts` (`getAnalyticsPosts`), the documented per-Post
+  analytics read ranked by `views`, `likes`, `comments`, or `shares` with stable
+  `limit`/`offset` pagination. Add nullable `PlatformMetrics.last_synced_at` so
+  a Platform awaiting its first snapshot is distinguishable from a measured
+  zero. `getAnalyticsSummary` now cohorts on `published_at` and derives
+  `partial`/`unsupported_platforms` from the published Platforms actually in
+  scope rather than every registered Platform. All changes are additive at the
+  contract boundary.
+
 - Add required nullable `Post.analytics`, with latest-snapshot totals across
   published Channels for likes, comments, shares, views, impressions, and reach.
   Missing snapshots produce null rather than invented zeros; saves and clicks

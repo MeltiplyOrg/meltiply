@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { Pool } from "pg";
 import { expect, type Page } from "@playwright/test";
 import { activeBrandProfileName } from "./publication-fixtures";
 
 export type GeneratedCredentials = Readonly<{ name: string; email: string; password: string }>;
 
-/** A test's empty owner Workspace and selected Brand Profile, not an extra login account. */
+/** A test's selected Brand Profile and owner credentials, not an extra login account. */
 export interface IsolatedWorkspace {
   credentials: GeneratedCredentials;
   profileName: string;
@@ -52,29 +51,14 @@ export async function allowFunctionalConsent(page: Page): Promise<void> {
 }
 
 /**
- * Starts a serial local journey with the same single owner and an empty personal
- * Workspace. Resets only that fixture's domain rows in the dedicated loopback test
- * database; auth tables, owner credentials, and other RLS users are untouched.
- * Requires explicit MELTIPLY_DATABASE_TEST_ADMIN_URL. Remote/staging resets are
- * forbidden. A second browser uses signIn, never reset.
+ * Signs the seeded Installation Owner into the single shared Workspace.
+ *
+ * The shared Workspace and its seed fixtures are installation data, so a local
+ * journey must not delete them. Auth tables, owner credentials, and other RLS
+ * users are untouched. A second browser uses signIn, never a reset.
  */
 export async function openOwnerWorkspace(page: Page, credentials: GeneratedCredentials) {
   if (process.env.STAGING_E2E_BASE_URL) throw new Error("Owner fixture reset is local-only");
-  const connectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL;
-  if (!connectionString?.trim())
-    throw new Error("MELTIPLY_DATABASE_TEST_ADMIN_URL is required for owner fixture resets");
-  const url = new URL(connectionString);
-  if (!["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/meltiply")
-    throw new Error("Owner fixtures require the dedicated loopback test database");
-  const pool = new Pool({ connectionString });
-  try {
-    await pool.query(
-      `DELETE FROM organizations o USING users u WHERE o.personal_user_id = u.id AND u.auth_user_id = $1`,
-      ["auth_user_local_alpha"],
-    );
-  } finally {
-    await pool.end();
-  }
   await signIn(page, credentials);
 }
 
@@ -94,7 +78,7 @@ export async function waitForWorkspace(page: Page) {
   await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible({ timeout: 30_000 });
 }
 
-/** Creates a selected Brand Profile in an empty owner Workspace through the real Channels dialog. */
+/** Creates a uniquely named Brand Profile in the shared Workspace through the real Channels dialog. */
 export async function openIsolatedOwnerWorkspace(page: Page): Promise<IsolatedWorkspace> {
   const credentials = ownerCredentials();
   await openOwnerWorkspace(page, credentials);
@@ -102,7 +86,8 @@ export async function openIsolatedOwnerWorkspace(page: Page): Promise<IsolatedWo
   await page.goto("/channels");
   await page.getByRole("button", { name: "Create Brand Profile", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Create Brand Profile", exact: true });
-  await editor.getByLabel("Profile name", { exact: true }).fill(`${credentials.name} profile`);
+  const profileName = `${credentials.name} profile ${randomUUID().slice(0, 6)}`;
+  await editor.getByLabel("Profile name", { exact: true }).fill(profileName);
   await editor.getByRole("button", { name: "Create profile", exact: true }).click();
   await expect(editor).not.toBeVisible({ timeout: 30_000 });
   await page.goto("/posts");

@@ -47,9 +47,12 @@ interface NavigationShellProps {
  * @param props.children - Main view content rendered inside the animated, scrollable content canvas.
  */
 export function NavigationShell({ currentView, onNavigate, children }: NavigationShellProps) {
-  const { user, logout } = useWorkspace();
+  const { user, logout, canManageSettings } = useWorkspace();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const workspaceContentRef = useRef<HTMLElement>(null);
+  const visibleNavItems = canManageSettings
+    ? WORKSPACE_NAV_ITEMS
+    : WORKSPACE_NAV_ITEMS.filter((item) => !item.requiresAdmin);
 
   /**
    * Captures route-shared toolbar slots before changing workspace views, then
@@ -105,7 +108,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
           >
             <CenterDialogTitle className="sr-only">Navigation</CenterDialogTitle>
             <nav className="grid grid-cols-2 gap-1.5">
-              {WORKSPACE_NAV_ITEMS.map((item) => {
+              {visibleNavItems.map((item) => {
                 const Icon = item.mobileIcon;
                 const isActive = currentView === item.id;
                 return (

@@ -2,11 +2,12 @@ import { createHmac } from "node:crypto";
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import { createHyperdrivePool } from "@meltiply/database";
-import { activeOwnerIdentity } from "../src/auth-policy";
+import { activeIdentity } from "../src/auth-policy";
 import { createJwtVerifier, jwtClaims } from "@meltiply/auth";
 import { createApiApp } from "../src/app";
 
 import { betterAuthFor, checkAuthRateLimit } from "../src/better-auth";
+import { sha256Hex } from "../src/crypto";
 import { systemPoolFor } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 
@@ -54,7 +55,16 @@ beforeAll(async () => {
   }
   await adminPool.query(`DROP SCHEMA IF EXISTS auth_lifecycle CASCADE`);
   await adminPool.query(`CREATE SCHEMA auth_lifecycle AUTHORIZATION meltiply_system`);
-  for (const table of ["user", "session", "account", "verification", "jwks", "twoFactor"]) {
+  for (const table of [
+    "user",
+    "session",
+    "account",
+    "verification",
+    "jwks",
+    "twoFactor",
+    "users",
+    "workspace_invitations",
+  ]) {
     await adminPool.query(
       `CREATE TABLE auth_lifecycle."${table}" (LIKE public."${table}" INCLUDING ALL)`,
     );
@@ -63,14 +73,14 @@ beforeAll(async () => {
   await adminPool.query(`
     CREATE TRIGGER revoke_password_sessions AFTER UPDATE OF password ON auth_lifecycle."account"
       FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
-    CREATE TRIGGER revoke_account_sessions AFTER UPDATE OF "twoFactorEnabled", email, "emailVerified", "installationOwner" ON auth_lifecycle."user"
+    CREATE TRIGGER revoke_account_sessions AFTER UPDATE OF "twoFactorEnabled", email, "emailVerified" ON auth_lifecycle."user"
       FOR EACH ROW EXECUTE FUNCTION public.revoke_security_sessions();
   `);
 });
 
 beforeEach(async () => {
   await systemPoolFor(systemEnv()).query(
-    `TRUNCATE "user", "session", "account", "verification", "twoFactor"`,
+    `TRUNCATE "user", "session", "account", "verification", "twoFactor", users, workspace_invitations`,
   );
 });
 
@@ -629,7 +639,7 @@ describe("session cookie, bearer JWT, and sign-out", () => {
     expect(
       (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
     ).toBe(true);
-    await expect(activeOwnerIdentity(stagingEnv(mail), jwtClaims(payload))).rejects.toMatchObject({
+    await expect(activeIdentity(stagingEnv(mail), jwtClaims(payload))).rejects.toMatchObject({
       status: 401,
     });
     const published = recordOf(
@@ -650,7 +660,7 @@ describe("session cookie, bearer JWT, and sign-out", () => {
     expect(typeof (await verifier(jwt)).sessionId).toBe("string");
     let relays = 0;
     const app = createApiApp({
-      verifyJwtToken: async (env, token) => activeOwnerIdentity(env, await verifier(token)),
+      verifyJwtToken: async (env, token) => activeIdentity(env, await verifier(token)),
       resolveActor: async () => {
         throw new Error("Revoked authority reached actor resolution");
       },
@@ -678,8 +688,8 @@ describe("session cookie, bearer JWT, and sign-out", () => {
   });
 });
 
-describe("single-owner bootstrap and security changes", () => {
-  it("requires the setup secret, rejects invalid profile data, and admits exactly one racing registration", async () => {
+describe("bootstrap and invite-only sign-up", () => {
+  it("requires the setup secret, validates profile data, and closes public sign-up after bootstrap", async () => {
     const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
     const body = { email: emails.localUnverified, name: "Owner", password: crypto.randomUUID() };
     const noSecret = await authPost(auth, "/api/auth/sign-up/email", body, {
@@ -688,25 +698,88 @@ describe("single-owner bootstrap and security changes", () => {
     expect(noSecret.status).toBe(403);
     const invalid = await authPost(auth, "/api/auth/sign-up/email", { ...body, name: "\u0000" });
     expect(invalid.status).toBe(400);
-    const responses = await Promise.all([
-      authPost(auth, "/api/auth/sign-up/email", body),
-      authPost(auth, "/api/auth/sign-up/email", { ...body, email: emails.stagingVerified }),
-    ]);
-    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
-    const count = await systemPoolFor(systemEnv()).query<{ count: string }>(
-      `SELECT count(*)::text AS count FROM "user" WHERE "installationOwner"`,
+    const first = await authPost(auth, "/api/auth/sign-up/email", body);
+    expect(first.status).toBe(200);
+
+    // Once actor resolution has claimed the first account, public sign-up is
+    // closed. Simulate that durable state directly: the auth surface reads the
+    // internal owner marker, not a Better Auth column.
+    await systemPoolFor(systemEnv()).query(
+      `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
+       VALUES ($1, $2, $3, 'Owner', TRUE)`,
+      ["10000000-0000-4000-8000-000000000099", "auth_bootstrap_owner", "owner@example.test"],
     );
-    expect(count.rows[0]?.count).toBe("1");
-    expect(
-      (await authPost(auth, "/api/auth/sign-up/email", { ...body, email: emails.reset })).status,
-    ).toBe(403);
+
     const status = await auth.handler(new Request(`${baseURL}/api/auth/setup-status`));
     expect(await status.json()).toEqual({ initialized: true });
+
+    const closed = await authPost(auth, "/api/auth/sign-up/email", {
+      ...body,
+      email: emails.stagingVerified,
+    });
+    expect(closed.status).toBe(403);
+    expect(await closed.json()).toMatchObject({ code: "INVITATION_REQUIRED" });
+
+    const token = crypto.randomUUID() + crypto.randomUUID();
+    const tokenHash = await sha256Hex(token);
+    await systemPoolFor(systemEnv()).query(
+      `INSERT INTO workspace_invitations
+         (org_id, email, role, invited_by, token_hash, expires_at)
+       VALUES ($1, $2, 'editor', $3, $4, now() + interval '7 days')`,
+      [
+        "20000000-0000-4000-8000-000000000001",
+        emails.stagingVerified,
+        "10000000-0000-4000-8000-000000000099",
+        tokenHash,
+      ],
+    );
+    const invited = await authPost(
+      auth,
+      "/api/auth/sign-up/email",
+      { ...body, email: emails.stagingVerified },
+      { "X-Invitation-Token": token },
+    );
+    expect(invited.status).toBe(200);
+
+    const wrongEmail = await authPost(
+      auth,
+      "/api/auth/sign-up/email",
+      { ...body, email: emails.reset },
+      { "X-Invitation-Token": token },
+    );
+    expect(wrongEmail.status).toBe(403);
+    expect(await wrongEmail.json()).toMatchObject({ code: "INVITATION_EMAIL_MISMATCH" });
+
     const stored = await systemPoolFor(systemEnv()).query<{ plaintext: boolean; stored: boolean }>(
-      `SELECT password = $1 AS plaintext, password IS NOT NULL AS stored FROM "account" WHERE "providerId" = 'credential'`,
-      [body.password],
+      `SELECT password = $1 AS plaintext, password IS NOT NULL AS stored
+       FROM "account"
+       WHERE "providerId" = 'credential'
+         AND "userId" = (SELECT id FROM "user" WHERE email = $2)`,
+      [body.password, emails.stagingVerified],
     );
     expect(stored.rows).toEqual([{ plaintext: false, stored: true }]);
+  });
+
+  it("serializes concurrent first registrations so only one account is created", async () => {
+    const auth = await betterAuthFor(localTestEnv(recordingMailBinding()));
+    const password = crypto.randomUUID();
+    const responses = await Promise.all([
+      authPost(auth, "/api/auth/sign-up/email", {
+        email: emails.localUnverified,
+        name: "First Setup",
+        password,
+      }),
+      authPost(auth, "/api/auth/sign-up/email", {
+        email: emails.stagingVerified,
+        name: "Second Setup",
+        password,
+      }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 403]);
+    const count = await systemPoolFor(systemEnv()).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "user"`,
+    );
+    expect(count.rows[0]?.count).toBe("1");
   });
 
   it("revokes old bearer and cookie authority on password change and password reset", async () => {
@@ -730,7 +803,7 @@ describe("single-owner bootstrap and security changes", () => {
       );
     };
     const first = await mintIdentity();
-    await activeOwnerIdentity(env, first);
+    await activeIdentity(env, first);
     const nextPassword = crypto.randomUUID();
     expect(
       (
@@ -742,7 +815,7 @@ describe("single-owner bootstrap and security changes", () => {
         )
       ).status,
     ).toBe(200);
-    await expect(activeOwnerIdentity(env, first)).rejects.toMatchObject({ status: 401 });
+    await expect(activeIdentity(env, first)).rejects.toMatchObject({ status: 401 });
     expect(
       (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
     ).toBe(true);
@@ -768,7 +841,7 @@ describe("single-owner bootstrap and security changes", () => {
         })
       ).status,
     ).toBe(200);
-    await expect(activeOwnerIdentity(env, second)).rejects.toMatchObject({ status: 401 });
+    await expect(activeIdentity(env, second)).rejects.toMatchObject({ status: 401 });
   });
 });
 

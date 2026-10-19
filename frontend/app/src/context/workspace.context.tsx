@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { can, isWorkspaceRole } from "@meltiply/domain";
 import React, {
   createContext,
   useCallback,
@@ -33,8 +34,16 @@ export interface WorkspaceContextValue {
   selectedBrandProfile: BrandProfile | null;
   /** Display name of the active workspace organization. */
   workspaceName: string | null;
-  /** True when the signed-in user holds the workspace `admin` role. */
+  /** True when the signed-in user holds the workspace `admin` role (or owns the installation). */
   isAdmin: boolean;
+  /** True when the caller is the Installation Owner. */
+  isInstallationOwner: boolean;
+  /** True when the caller may read member, invitation, and audit administration. */
+  canManageSettings: boolean;
+  /** True when the caller may create and edit content. */
+  canWriteContent: boolean;
+  /** True when the caller may manage Brand Profiles and Channels. */
+  canManageConfiguration: boolean;
   selectedChannelIds: string[];
   channelStatuses: ChannelStatusInfo[];
   isLoading: boolean;
@@ -69,6 +78,7 @@ function toSourceUser(profile: ContractUserProfile): UserProfile {
     avatarUrl: profile.avatar_url,
     orgId: profile.active_organization.id,
     role: profile.active_organization.role,
+    isInstallationOwner: profile.is_installation_owner,
   };
 }
 
@@ -188,7 +198,12 @@ export function WorkspaceProvider({
   }, [brandProfilesQuery.data, selectedBrandProfileId, setBrandProfileId]);
 
   const workspaceName = userQuery.data?.active_organization.name ?? null;
-  const isAdmin = user?.role === "admin";
+  const role = isWorkspaceRole(user?.role) ? user.role : "viewer";
+  const isInstallationOwner = user?.isInstallationOwner === true;
+  const isAdmin = role === "admin" || isInstallationOwner;
+  const canManageSettings = can(role, isInstallationOwner, "member:read");
+  const canWriteContent = can(role, isInstallationOwner, "content:write");
+  const canManageConfiguration = can(role, isInstallationOwner, "brand-profile:manage");
 
   const defaultSelectedChannelIds = useMemo(
     () =>
@@ -273,6 +288,10 @@ export function WorkspaceProvider({
       selectedBrandProfile,
       workspaceName,
       isAdmin,
+      isInstallationOwner,
+      canManageSettings,
+      canWriteContent,
+      canManageConfiguration,
       selectedChannelIds: effectiveSelectedChannelIds,
       channelStatuses,
       isLoading,
@@ -293,6 +312,10 @@ export function WorkspaceProvider({
       selectedBrandProfile,
       workspaceName,
       isAdmin,
+      isInstallationOwner,
+      canManageSettings,
+      canWriteContent,
+      canManageConfiguration,
       effectiveSelectedChannelIds,
       channelStatuses,
       isLoading,

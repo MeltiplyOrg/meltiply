@@ -51,11 +51,13 @@ const session = {
 const actor: ResolvedActor = {
   authUserId: session.subject,
   claims: session,
+  displayName: "Alpha Admin",
+  email: "alpha@example.com",
+  isInstallationOwner: false,
   role: "admin",
   userId: session.userId,
   workspace: {
     id: session.organizationId,
-    isPersonal: false,
     name: "Alpha",
     slug: "alpha",
   },

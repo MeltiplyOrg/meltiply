@@ -19,7 +19,8 @@ import { matchedRoutes } from "hono/route";
 import { bodyLimit } from "hono/body-limit";
 
 import { resolveActor, type ResolvedActor } from "./actor-resolution";
-import { activeOwnerIdentity } from "./auth-policy";
+import { enforceWorkspaceCapabilities } from "./authorization";
+import { activeIdentity } from "./auth-policy";
 import { checkAuthRateLimit, type AuthRateLimitResult } from "./better-auth";
 import {
   providerMediaRoutePrefix,
@@ -40,6 +41,7 @@ import {
   flowRecorderFor,
   registerFlowRoutes,
 } from "./flow-observability";
+import { registerInstallationRoutes } from "./installation-routes";
 import { registerOperatorRoutes, type OperatorRouteDependencies } from "./operator-routes";
 import { scheduleEagerOutboxRelay } from "./outbox-relay";
 import { Effect, type Layer } from "effect";
@@ -262,7 +264,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         throw new CoreApiError(401, "authentication_required", "Authentication is required.");
       }
       // Session lookup failures are infrastructure errors, not invalid credentials.
-      return activeOwnerIdentity(env, identity);
+      return activeIdentity(env, identity);
     });
   const resolveRequestActor =
     dependencies.resolveActor ??
@@ -374,7 +376,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         applyCorsHeaders();
         c.header(
           "Access-Control-Allow-Headers",
-          "Authorization, Content-Type, X-Request-ID, X-Workspace-ID, X-Setup-Secret, Idempotency-Key, If-None-Match",
+          "Authorization, Content-Type, X-Request-ID, X-Workspace-ID, X-Setup-Secret, X-Invitation-Token, Idempotency-Key, If-None-Match",
         );
         c.header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
         c.header("Access-Control-Max-Age", "600");
@@ -438,6 +440,31 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     return auth.handler(c.req.raw);
   });
 
+  // Invitation acceptance consumes a bearer-like token, so it shares the
+  // database-backed fixed-window abuse control used by credential endpoints.
+  app.use("/api/v1/workspace-invitations/*", async (c, next) => {
+    if (
+      c.req.method === "POST" &&
+      c.req.path.endsWith("/accept") &&
+      authRateLimitAvailable(c.env)
+    ) {
+      const result = await authRateLimiter(c.env, "invitation-accept", c.req.raw);
+      if (result.status === "limited") {
+        return errorResponse(
+          c.get("requestId"),
+          429,
+          "rate_limited",
+          "Too many invitation attempts. Retry later.",
+          [],
+          result.retryAfterSeconds !== undefined
+            ? { "Retry-After": String(result.retryAfterSeconds) }
+            : undefined,
+        );
+      }
+    }
+    await next();
+  });
+
   // Tenant authentication: the Better Auth JWT bearer credential is verified
   // against the plugin-managed JWKS and the actor — internal user, workspace
   // membership, and role — is resolved server-side. Requests without a
@@ -450,6 +477,9 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     const publicPath =
       c.req.path === "/api/v1/health" ||
       c.req.path === "/api/v1/ready" ||
+      // The invitation acceptance page inspects a token before the visitor
+      // has an account or session. Token possession is the credential.
+      (c.req.method === "GET" && /^\/api\/v1\/workspace-invitations\/[^/]+$/.test(c.req.path)) ||
       // Provider-media URLs carry their own HMAC bearer credential; the route
       // verifies it before touching R2, so no user session is required.
       c.req.path.startsWith(providerMediaRoutePrefix) ||
@@ -496,6 +526,10 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     }
     await next();
   });
+
+  // Role-gate content and configuration mutations. Services and RLS remain the
+  // authoritative checks; this produces the stable forbidden error early.
+  app.use("/api/v1/*", enforceWorkspaceCapabilities);
 
   app.get("/api/v1/health", (c) =>
     jsonResponse(
@@ -714,6 +748,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   });
 
   registerCoreRoutes(app, dependencies);
+  registerInstallationRoutes(app);
   registerOperatorRoutes(app, dependencies);
   registerFlowRoutes(app);
 

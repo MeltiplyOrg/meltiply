@@ -30,10 +30,15 @@ tags:
     description: Authenticated user and active workspace.
   - name: Workspaces
     description: |
-      Native workspace, membership, and invitation lifecycle. These operations
-      resolve the workspace from the path (or the invitation token), not from
-      X-Workspace-ID; the caller must be a member of the addressed workspace,
-      and manager actions require the admin role.
+      The single shared Workspace, member and invitation administration, and
+      the readable audit trail. Management actions require the Workspace Admin
+      role; only the Installation Owner may assign Admins or transfer
+      ownership. Content access follows the Workspace role.
+  - name: Installation
+    description: |
+      Installation-level settings: Seat usage, account suspension,
+      reactivation, hard deletion, and ownership transfer. Mutating operations
+      require the Installation Owner.
   - name: Brand Profiles
     description: |
       Named, color-labelled ownership scopes inside a workspace. Every Asset,
@@ -680,40 +685,6 @@ paths:
           $ref: "#/components/responses/ServiceUnavailable"
         "429":
           $ref: "#/components/responses/RateLimited"
-  /workspaces:
-    post:
-      tags: [Workspaces]
-      operationId: createWorkspace
-      summary: Create a team workspace
-      description: |
-        Creates a team workspace owned by the authenticated user, who becomes
-        its admin member. Personal workspaces are provisioned automatically at
-        sign-up and cannot be created through this operation.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateWorkspaceRequest"
-      responses:
-        "201":
-          description: Created workspace with the caller's admin membership.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Workspace"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/Unprocessable"
-        "429":
-          $ref: "#/components/responses/RateLimited"
   /workspaces/{workspaceId}:
     parameters:
       - $ref: "#/components/parameters/WorkspaceIdPath"
@@ -756,6 +727,26 @@ paths:
   /workspaces/{workspaceId}/invitations:
     parameters:
       - $ref: "#/components/parameters/WorkspaceIdPath"
+    get:
+      tags: [Workspaces]
+      operationId: listWorkspaceInvitations
+      summary: List pending invitations
+      description: |
+        Returns pending, unexpired invitations in reverse creation order.
+        Requires the Workspace Admin role.
+      responses:
+        "200":
+          description: Pending invitations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceInvitationListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       tags: [Workspaces]
       operationId: createWorkspaceInvitation
@@ -820,6 +811,59 @@ paths:
           $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /workspaces/{workspaceId}/invitations/{invitationId}/resend:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceIdPath"
+      - $ref: "#/components/parameters/InvitationId"
+    post:
+      tags: [Workspaces]
+      operationId: resendWorkspaceInvitation
+      summary: Resend a pending invitation
+      description: |
+        Rotates the invitation token, extends the expiry by seven days, and
+        delivers a fresh acceptance link. The previous link stops working.
+        Requires the Workspace Admin role.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Reissued pending invitation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceInvitation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /workspace-invitations/{token}:
+    parameters:
+      - $ref: "#/components/parameters/InvitationToken"
+    get:
+      tags: [Workspaces]
+      operationId: getWorkspaceInvitation
+      summary: Inspect an invitation token
+      description: |
+        Returns the invited email, role, Workspace name, and lifecycle status
+        so the acceptance page can render before the visitor signs in. Token
+        possession is the credential; no account is required.
+      responses:
+        "200":
+          description: Invitation preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationPreview"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /workspace-invitations/{token}/accept:
     parameters:
       - $ref: "#/components/parameters/InvitationToken"
@@ -851,6 +895,29 @@ paths:
           $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /workspaces/{workspaceId}/members:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceIdPath"
+    get:
+      tags: [Workspaces]
+      operationId: listWorkspaceMembers
+      summary: List workspace members
+      description: |
+        Returns every member with role, status, and join date. Requires the
+        Workspace Admin role.
+      responses:
+        "200":
+          description: Workspace members.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceMemberListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /workspaces/{workspaceId}/members/{memberId}:
     parameters:
       - $ref: "#/components/parameters/WorkspaceIdPath"
@@ -914,6 +981,186 @@ paths:
           $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /installation:
+    get:
+      tags: [Installation]
+      operationId: getInstallation
+      summary: Read installation settings and Seat usage
+      description: |
+        Returns the Seat limit, active members, pending invitations, and the
+        shared Workspace. Requires the Workspace Admin role or Installation
+        Ownership.
+      responses:
+        "200":
+          description: Installation summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallationSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /installation/members/{memberId}/suspend:
+    parameters:
+      - $ref: "#/components/parameters/MemberId"
+    post:
+      tags: [Installation]
+      operationId: suspendInstallationMember
+      summary: Suspend a member
+      description: |
+        Immediately revokes every session and releases the member's Seat while
+        preserving their membership and content attribution. Installation
+        Owner only.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuspendMemberRequest"
+      responses:
+        "200":
+          description: Suspended account state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLifecycle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /installation/members/{memberId}/reactivate:
+    parameters:
+      - $ref: "#/components/parameters/MemberId"
+    post:
+      tags: [Installation]
+      operationId: reactivateInstallationMember
+      summary: Reactivate a suspended member
+      description: |
+        Restores sign-in when a Seat is free. Installation Owner only.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Active account state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLifecycle"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /installation/members/{memberId}:
+    parameters:
+      - $ref: "#/components/parameters/MemberId"
+    delete:
+      tags: [Installation]
+      operationId: deleteInstallationMember
+      summary: Permanently delete a member account
+      description: |
+        Removes the auth account, sessions, and membership while leaving
+        Workspace content intact. The confirmation email must match. The
+        Installation Owner cannot delete their own account. Owner only.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HardDeleteMemberRequest"
+      responses:
+        "204":
+          description: Account deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /installation/ownership-transfer:
+    post:
+      tags: [Installation]
+      operationId: transferInstallationOwnership
+      summary: Transfer installation ownership
+      description: |
+        Reauthenticates the current Owner with their password and transfers
+        ownership to an active Workspace Admin. The previous Owner remains a
+        Workspace Admin. Owner only.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnershipTransferRequest"
+      responses:
+        "200":
+          description: New Installation Owner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnershipTransferResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /workspaces/{workspaceId}/audit:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceIdPath"
+    get:
+      tags: [Workspaces]
+      operationId: listWorkspaceAudit
+      summary: Read the workspace audit trail
+      description: |
+        Returns administrative Audit entries in reverse chronological order.
+        Requires the Workspace Admin role or Installation Ownership.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Audit entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /brand-profiles:
     parameters:
       - $ref: "#/components/parameters/XWorkspaceId"
@@ -2169,12 +2416,11 @@ components:
       in: header
       required: false
       description: |
-        Optional workspace selection for the authenticated caller. When
-        present, the server resolves the caller's org_members membership and
-        role for this workspace before it becomes the actor and RLS claims;
-        when absent, the caller's personal workspace is used. A UUID that is
-        not a workspace the caller belongs to fails with 403
-        `inaccessible_workspace`.
+        Optional shared-Workspace selection for the authenticated caller. The
+        server validates the caller's org_members membership before it becomes
+        the actor and RLS claim. An installation has exactly one shared
+        Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+        When absent, the shared Workspace is selected automatically.
       schema:
         type: string
         format: uuid
@@ -2761,7 +3007,17 @@ components:
     UserProfile:
       type: object
       additionalProperties: false
-      required: [id, email, display_name, avatar_url, active_organization, created_at, updated_at]
+      required:
+        [
+          id,
+          email,
+          display_name,
+          avatar_url,
+          active_organization,
+          is_installation_owner,
+          created_at,
+          updated_at,
+        ]
       properties:
         id:
           type: string
@@ -2776,6 +3032,12 @@ components:
           format: uri
         active_organization:
           $ref: "#/components/schemas/OrganizationSummary"
+        is_installation_owner:
+          type: boolean
+          description: |
+            True for the installation's single Owner. Ownership is
+            installation-level authority and is separate from the Workspace
+            role; content access still follows the Workspace membership.
         created_at:
           type: string
           format: date-time
@@ -2784,11 +3046,11 @@ components:
           format: date-time
     WorkspaceRole:
       type: string
-      enum: [admin, member]
+      enum: [admin, editor, viewer]
     Workspace:
       type: object
       additionalProperties: false
-      required: [id, name, slug, is_personal, role, created_at, updated_at]
+      required: [id, name, slug, role, created_at, updated_at]
       properties:
         id:
           type: string
@@ -2797,11 +3059,6 @@ components:
           type: string
         slug:
           type: string
-        is_personal:
-          type: boolean
-          description: |
-            True for the auto-provisioned personal workspace; personal
-            workspaces cannot be renamed, invite members, or change roles.
         role:
           $ref: "#/components/schemas/WorkspaceRole"
           description: Caller's membership role in this workspace.
@@ -2814,7 +3071,19 @@ components:
     WorkspaceMember:
       type: object
       additionalProperties: false
-      required: [user_id, email, display_name, avatar_url, role, created_at, updated_at]
+      required:
+        [
+          user_id,
+          email,
+          display_name,
+          avatar_url,
+          role,
+          status,
+          suspended_at,
+          is_installation_owner,
+          created_at,
+          updated_at,
+        ]
       properties:
         user_id:
           type: string
@@ -2830,12 +3099,30 @@ components:
           format: uri
         role:
           $ref: "#/components/schemas/WorkspaceRole"
+        status:
+          type: string
+          enum: [active, suspended]
+        suspended_at:
+          type: [string, "null"]
+          format: date-time
+        is_installation_owner:
+          type: boolean
         created_at:
           type: string
           format: date-time
+          description: Membership join date.
         updated_at:
           type: string
           format: date-time
+    WorkspaceMemberListResponse:
+      type: object
+      additionalProperties: false
+      required: [members]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceMember"
     WorkspaceInvitationStatus:
       type: string
       enum: [pending, accepted, revoked, expired]
@@ -2866,21 +3153,6 @@ components:
         updated_at:
           type: string
           format: date-time
-    CreateWorkspaceRequest:
-      type: object
-      additionalProperties: false
-      required: [name]
-      properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 200
-        slug:
-          type: string
-          minLength: 1
-          maxLength: 100
-          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-          description: URL-safe slug; derived from name when omitted.
     UpdateWorkspaceRequest:
       type: object
       additionalProperties: false
@@ -2898,14 +3170,16 @@ components:
     CreateWorkspaceInvitationRequest:
       type: object
       additionalProperties: false
-      required: [email]
+      required: [email, role]
       properties:
         email:
           type: string
           format: email
         role:
           $ref: "#/components/schemas/WorkspaceRole"
-          default: member
+          description: |
+            Editor or Viewer for Workspace Admins; only the Installation Owner
+            may invite an Admin.
     UpdateWorkspaceMemberRequest:
       type: object
       additionalProperties: false
@@ -2922,6 +3196,209 @@ components:
           $ref: "#/components/schemas/Workspace"
         member:
           $ref: "#/components/schemas/WorkspaceMember"
+    WorkspaceInvitationListResponse:
+      type: object
+      additionalProperties: false
+      required: [invitations]
+      properties:
+        invitations:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceInvitation"
+    InvitationPreview:
+      type: object
+      additionalProperties: false
+      required: [email, role, status, expires_at, workspace_name]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+        status:
+          $ref: "#/components/schemas/WorkspaceInvitationStatus"
+        expires_at:
+          type: string
+          format: date-time
+        workspace_name:
+          type: string
+    InstallationSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          installation_owner_user_id,
+          seat_limit,
+          seats_used,
+          members_active,
+          invitations_pending,
+          workspace,
+        ]
+      properties:
+        installation_owner_user_id:
+          type: string
+          format: uuid
+        seat_limit:
+          type: integer
+          minimum: 1
+        seats_used:
+          type: integer
+          minimum: 0
+        members_active:
+          type: integer
+          minimum: 0
+        invitations_pending:
+          type: integer
+          minimum: 0
+        workspace:
+          $ref: "#/components/schemas/Workspace"
+    AccountLifecycle:
+      type: object
+      additionalProperties: false
+      required: [user_id, status, suspended_at, suspension_reason]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, suspended]
+        suspended_at:
+          type: [string, "null"]
+          format: date-time
+        suspension_reason:
+          type: [string, "null"]
+    SuspendMemberRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+    HardDeleteMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm_email]
+      properties:
+        confirm_email:
+          type: string
+          format: email
+          description: Must match the member's email address.
+    OwnershipTransferRequest:
+      type: object
+      additionalProperties: false
+      required: [target_user_id, password]
+      properties:
+        target_user_id:
+          type: string
+          format: uuid
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Current Owner's password, required to reauthenticate.
+    OwnershipTransferResponse:
+      type: object
+      additionalProperties: false
+      required: [installation_owner_user_id]
+      properties:
+        installation_owner_user_id:
+          type: string
+          format: uuid
+    AuditEntry:
+      type: object
+      additionalProperties: false
+      required: [id, actor, action, target_type, target_id, before, after, request_id, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        actor:
+          type: object
+          additionalProperties: false
+          required: [email, display_name]
+          properties:
+            email:
+              type: string
+              format: email
+            display_name:
+              type: [string, "null"]
+        action:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        before:
+          oneOf:
+            - $ref: "#/components/schemas/AuditState"
+            - type: "null"
+        after:
+          oneOf:
+            - $ref: "#/components/schemas/AuditState"
+            - type: "null"
+        request_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    AuditState:
+      type: object
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        brand_profile_id:
+          type: string
+        color:
+          $ref: "#/components/schemas/BrandProfileColor"
+        created_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: [string, "null"]
+          format: date-time
+        description:
+          type: [string, "null"]
+        email:
+          type: string
+          format: email
+        id:
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+          format: uuid
+        owner_user_id:
+          type: string
+          format: uuid
+        platform:
+          type: string
+        purge_at:
+          type: [string, "null"]
+          format: date-time
+        reason:
+          type: [string, "null"]
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+        slug:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended]
+        updated_at:
+          type: string
+          format: date-time
+    AuditListResponse:
+      type: object
+      additionalProperties: false
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEntry"
     BrandProfileColor:
       type: string
       description: |

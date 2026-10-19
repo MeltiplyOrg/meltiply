@@ -130,6 +130,17 @@ export function brandProfileColorClass(color: BrandProfileColor): string {
 }
 
 export type UserProfile = components["schemas"]["UserProfile"];
+export type WorkspaceRole = components["schemas"]["WorkspaceRole"];
+export type WorkspaceMember = components["schemas"]["WorkspaceMember"];
+export type WorkspaceMemberListResponse = components["schemas"]["WorkspaceMemberListResponse"];
+export type WorkspaceInvitation = components["schemas"]["WorkspaceInvitation"];
+export type WorkspaceInvitationListResponse =
+  components["schemas"]["WorkspaceInvitationListResponse"];
+export type InvitationPreview = components["schemas"]["InvitationPreview"];
+export type InstallationSummary = components["schemas"]["InstallationSummary"];
+export type AccountLifecycle = components["schemas"]["AccountLifecycle"];
+export type AuditEntry = components["schemas"]["AuditEntry"];
+export type AuditListResponse = components["schemas"]["AuditListResponse"];
 
 export type Platform = components["schemas"]["Platform"];
 export type PlatformCapability = components["schemas"]["PlatformCapability"];

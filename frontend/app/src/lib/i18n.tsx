@@ -1357,6 +1357,138 @@ const spanishTranslations: Record<string, string> = {
   "No permissions granted": "Sin permisos otorgados",
   "ID: {id}": "ID: {id}",
   "Facebook connected successfully.": "Facebook se conectó correctamente.",
+  Administration: "Administración",
+  "Manage who can access this installation, the shared workspace, and its audit trail.":
+    "Gestiona quién puede acceder a esta instalación, al espacio de trabajo compartido y a su registro de auditoría.",
+  Members: "Miembros",
+  Audit: "Auditoría",
+  "Roles decide who can publish, configure channels, and administer access.":
+    "Los roles deciden quién puede publicar, configurar canales y administrar el acceso.",
+  Invite: "Invitar",
+  "Loading members…": "Cargando miembros…",
+  "Loading settings…": "Cargando ajustes…",
+  "No members yet.": "Todavía no hay miembros.",
+  Suspended: "Suspendido",
+  "Installation Owner": "Propietario de la instalación",
+  Admin: "Administrador",
+  Editor: "Redactor",
+  Viewer: "Lector",
+  Suspend: "Suspender",
+  Reactivate: "Reactivar",
+  Remove: "Quitar",
+  You: "Tú",
+  "Role for {name}": "Rol de {name}",
+  "Pending invitations": "Invitaciones pendientes",
+  "Pending invitations reserve a Seat until they are accepted or revoked.":
+    "Las invitaciones pendientes reservan una plaza hasta que se aceptan o se revocan.",
+  "No pending invitations.": "No hay invitaciones pendientes.",
+  Resend: "Reenviar",
+  Revoke: "Revocar",
+  "Every member shares this workspace. There is no personal workspace.":
+    "Todos los miembros comparten este espacio de trabajo. No hay espacios personales.",
+  "Workspace name": "Nombre del espacio de trabajo",
+  "Save name": "Guardar nombre",
+  "Seats used": "Plazas usadas",
+  "Active members": "Miembros activos",
+  "Installation ownership": "Propiedad de la instalación",
+  "Transfer ownership to an active Workspace Admin after confirming your password.":
+    "Transfiere la propiedad a un administrador activo del espacio de trabajo después de confirmar tu contraseña.",
+  "Transfer ownership": "Transferir propiedad",
+  "Administrative actions are recorded with the actor, target, and request id.":
+    "Las acciones administrativas se registran con el actor, el objetivo y el identificador de la solicitud.",
+  "Loading audit entries…": "Cargando entradas de auditoría…",
+  "No audit entries yet.": "Todavía no hay entradas de auditoría.",
+  "Invite a member": "Invitar a un miembro",
+  "The invitation is bound to this email and expires in seven days.":
+    "La invitación está vinculada a este correo y caduca en siete días.",
+  "Send invitation": "Enviar invitación",
+  "Remove this member?": "¿Quitar a este miembro?",
+  "Their Workspace membership is removed and the Seat is freed. The account and its content attribution remain.":
+    "Se elimina su membresía del espacio de trabajo y se libera la plaza. La cuenta y la atribución de contenido permanecen.",
+  "Remove member": "Quitar miembro",
+  "Removing…": "Quitando…",
+  "Delete this account?": "¿Eliminar esta cuenta?",
+  "This permanently removes the account and its sessions. Workspace content stays intact.":
+    "Esto elimina permanentemente la cuenta y sus sesiones. El contenido del espacio de trabajo permanece intacto.",
+  "Type {email} to confirm": "Escribe {email} para confirmar",
+  "Delete account": "Eliminar cuenta",
+  "Transfer installation ownership": "Transferir la propiedad de la instalación",
+  "You remain a Workspace Admin after the transfer.":
+    "Seguirás siendo administrador del espacio de trabajo después de la transferencia.",
+  "New Installation Owner": "Nuevo propietario de la instalación",
+  "Your password": "Tu contraseña",
+  "Transferring…": "Transfiriendo…",
+  "Invitation sent": "Invitación enviada",
+  "The invitation email carries a single-use acceptance link.":
+    "El correo de invitación incluye un enlace de aceptación de un solo uso.",
+  "The invitation could not be sent": "No se pudo enviar la invitación",
+  "Try again in a moment.": "Inténtalo de nuevo en un momento.",
+  "Workspace renamed": "Espacio de trabajo renombrado",
+  "The new name is visible to every member.": "El nuevo nombre es visible para todos los miembros.",
+  "The workspace could not be renamed": "No se pudo renombrar el espacio de trabajo",
+  "The member could not be reactivated": "No se pudo reactivar al miembro",
+  "Member reactivated": "Miembro reactivado",
+  "The member can sign in again.": "El miembro puede volver a iniciar sesión.",
+  "The role could not be changed": "No se pudo cambiar el rol",
+  "Role updated": "Rol actualizado",
+  "The change applies on the member’s next request.":
+    "El cambio se aplica en la próxima solicitud del miembro.",
+  "The member could not be suspended": "No se pudo suspender al miembro",
+  "Member suspended": "Miembro suspendido",
+  "Their sessions were revoked and the Seat was freed.":
+    "Se revocaron sus sesiones y se liberó la plaza.",
+  "The invitation could not be resent": "No se pudo reenviar la invitación",
+  "Invitation resent": "Invitación reenviada",
+  "The previous link no longer works.": "El enlace anterior ya no funciona.",
+  "The invitation could not be revoked": "No se pudo revocar la invitación",
+  "Invitation revoked": "Invitación revocada",
+  "The reserved Seat is free again.": "La plaza reservada vuelve a estar libre.",
+  "The member could not be removed": "No se pudo quitar al miembro",
+  "Member removed": "Miembro quitado",
+  "The Workspace membership was removed.": "Se eliminó la membresía del espacio de trabajo.",
+  "The account could not be deleted": "No se pudo eliminar la cuenta",
+  "Account deleted": "Cuenta eliminada",
+  "The membership and credentials were removed.": "Se eliminaron la membresía y las credenciales.",
+  "Ownership could not be transferred": "No se pudo transferir la propiedad",
+  "Ownership transferred": "Propiedad transferida",
+  "You remain a Workspace Admin.": "Sigues siendo administrador del espacio de trabajo.",
+  "Some settings could not be loaded. Try again in a moment.":
+    "No se pudieron cargar algunos ajustes. Inténtalo de nuevo en un momento.",
+  "This invitation link is missing its token.": "A este enlace de invitación le falta el token.",
+  "Checking invitation…": "Comprobando la invitación…",
+  "This invitation is invalid, expired, or already used.":
+    "Esta invitación no es válida, ha caducado o ya se ha utilizado.",
+  "Workspace invitation": "Invitación al espacio de trabajo",
+  "Join {workspace}": "Únete a {workspace}",
+  "You were invited as {role} for {email}.": "Te invitaron como {role} para {email}.",
+  "This invitation is no longer pending. Ask an administrator to resend it.":
+    "Esta invitación ya no está pendiente. Pide a un administrador que la reenvíe.",
+  "You joined the workspace.": "Te uniste al espacio de trabajo.",
+  "Open the workspace": "Abrir el espacio de trabajo",
+  "Joining the workspace…": "Uniéndote al espacio de trabajo…",
+  "Accepting your invitation…": "Aceptando tu invitación…",
+  "The invitation could not be accepted.": "No se pudo aceptar la invitación.",
+  "Verify your email address, then return to this page to join.":
+    "Verifica tu correo electrónico y vuelve a esta página para unirte.",
+  "Account created. Joining the workspace…": "Cuenta creada. Uniéndote al espacio de trabajo…",
+  "Check your email to verify your address. Membership activates automatically after verification.":
+    "Revisa tu correo para verificar tu dirección. La membresía se activa automáticamente después de la verificación.",
+  "The account could not be created.": "No se pudo crear la cuenta.",
+  "The invitation is locked to this email address.":
+    "La invitación está vinculada a esta dirección de correo.",
+  "Create account": "Crear cuenta",
+  "Email verification is required before joining.":
+    "Se requiere verificar el correo antes de unirte.",
+  "I already have an account": "Ya tengo una cuenta",
+  "Create the installation owner account. You’ll need the setup secret from your deployment configuration.":
+    "Crea la cuenta del propietario de la instalación. Necesitarás el secreto de configuración de tu despliegue.",
+  "We’ll send a reset link to your account email address.":
+    "Enviaremos un enlace de restablecimiento a la dirección de correo de tu cuenta.",
+  "Sign in with your account to continue to your workspace.":
+    "Inicia sesión con tu cuenta para continuar a tu espacio de trabajo.",
+  "Self-hosted. Invite-only. Only invited email addresses can join this installation.":
+    "Autoalojado. Solo por invitación. Solo las direcciones de correo invitadas pueden unirse a esta instalación.",
+  "ACCOUNT ACCESS": "ACCESO A LA CUENTA",
 };
 
 const statusTranslations: Record<Language, Record<string, string>> = {

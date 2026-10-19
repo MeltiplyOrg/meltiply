@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { ownerCredentials, openOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 
-const protectedRoutes = ["/posts", "/channels"] as const;
+const protectedRoutes = ["/posts", "/channels", "/settings"] as const;
 
 const retiredRoutes = [
   "/analytics",
@@ -10,7 +10,6 @@ const retiredRoutes = [
   "/billing",
   "/agent",
   "/plugs",
-  "/settings",
   "/dashboard",
   "/home",
   "/distribute",
@@ -89,7 +88,7 @@ test("shows Workspace identity without offering unsupported switching", async ({
   const sidebar = page.locator("aside").first();
   const identity = sidebar
     .locator("[title]")
-    .filter({ hasText: /Workspace Admin|Workspace|Plan/ })
+    .filter({ hasText: /Installation Owner|Workspace Admin|Workspace|Plan/ })
     .first();
   await expect(identity).toBeVisible();
   const workspaceName = await identity.getAttribute("title");

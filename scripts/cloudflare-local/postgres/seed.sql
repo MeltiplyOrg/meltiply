@@ -22,18 +22,20 @@
 BEGIN;
 
 -- Better Auth subjects backing the seeded internal users. The API worker and
--- RLS integration tests authenticate as these session subjects.
+-- RLS integration tests authenticate as these session subjects. Alpha is the
+-- Installation Owner; Beta is a Workspace Admin; Gamma and Delta exercise the
+-- Editor and Viewer roles.
 INSERT INTO "user" (id, name, email, "emailVerified")
 VALUES
   ('auth_user_local_alpha', 'Alpha Creator', 'alpha@meltiply.local', TRUE),
-  ('auth_user_local_beta', 'Beta Creator', 'beta@meltiply.local', TRUE)
+  ('auth_user_local_beta', 'Beta Admin', 'beta@meltiply.local', TRUE),
+  ('auth_user_local_gamma', 'Gamma Editor', 'gamma@meltiply.local', TRUE),
+  ('auth_user_local_delta', 'Delta Viewer', 'delta@meltiply.local', TRUE)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     email = EXCLUDED.email,
     "emailVerified" = EXCLUDED."emailVerified",
     "updatedAt" = now();
-UPDATE "user" SET "installationOwner" = (id = 'auth_user_local_alpha')
-WHERE id IN ('auth_user_local_alpha', 'auth_user_local_beta');
 
 -- Credential accounts so the seeded users can sign in through the real
 -- /sign-in UI instead of bypassing auth. accountId mirrors Better Auth's
@@ -53,6 +55,20 @@ VALUES
     'credential',
     'auth_user_local_beta',
     '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914'
+  ),
+  (
+    'auth_account_local_gamma',
+    'auth_user_local_gamma',
+    'credential',
+    'auth_user_local_gamma',
+    '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914'
+  ),
+  (
+    'auth_account_local_delta',
+    'auth_user_local_delta',
+    'credential',
+    'auth_user_local_delta',
+    '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914'
   )
 ON CONFLICT (id) DO UPDATE
 SET "accountId" = EXCLUDED."accountId",
@@ -60,15 +76,25 @@ SET "accountId" = EXCLUDED."accountId",
     password = EXCLUDED.password,
     "updatedAt" = now();
 
-INSERT INTO users (id, auth_user_id, email, display_name)
+INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
 VALUES
-  ('10000000-0000-4000-8000-000000000001', 'auth_user_local_alpha', 'alpha@meltiply.local', 'Alpha Creator'),
-  ('10000000-0000-4000-8000-000000000002', 'auth_user_local_beta', 'beta@meltiply.local', 'Beta Creator')
+  ('10000000-0000-4000-8000-000000000001', 'auth_user_local_alpha', 'alpha@meltiply.local', 'Alpha Creator', TRUE),
+  ('10000000-0000-4000-8000-000000000002', 'auth_user_local_beta', 'beta@meltiply.local', 'Beta Admin', FALSE),
+  ('10000000-0000-4000-8000-000000000003', 'auth_user_local_gamma', 'gamma@meltiply.local', 'Gamma Editor', FALSE),
+  ('10000000-0000-4000-8000-000000000004', 'auth_user_local_delta', 'delta@meltiply.local', 'Delta Viewer', FALSE)
 ON CONFLICT (id) DO UPDATE
 SET auth_user_id = EXCLUDED.auth_user_id,
     email = EXCLUDED.email,
     display_name = EXCLUDED.display_name,
     updated_at = now();
+
+UPDATE users
+SET installation_owner = FALSE
+WHERE installation_owner
+  AND id <> '10000000-0000-4000-8000-000000000001';
+UPDATE users
+SET installation_owner = TRUE
+WHERE id = '10000000-0000-4000-8000-000000000001';
 
 INSERT INTO organizations (
   id, name, slug, plan, billing_status,
@@ -88,41 +114,33 @@ SET name = EXCLUDED.name,
     billing_event_at = EXCLUDED.billing_event_at,
     updated_at = now();
 
--- The API auto-provisions a personal workspace (random id) on first sign-in.
--- Reseeding must address it by a stable id, so retire any random-id personal
--- workspace for the seeded users and replace it with the deterministic row.
--- Children cascade; this is fixture-only data on an ephemeral local database.
-DELETE FROM organizations
-WHERE personal_user_id IN (
-    '10000000-0000-4000-8000-000000000001',
-    '10000000-0000-4000-8000-000000000002'
-  )
-  AND id NOT IN (
-    '20000000-0000-4000-8000-000000000005',
-    '20000000-0000-4000-8000-000000000006'
-  );
+-- Exactly one shared Workspace. The deterministic id …0005 remains the
+-- day-to-day demo workspace and now holds every seeded role.
+UPDATE organizations
+SET is_shared = FALSE
+WHERE is_shared
+  AND id <> '20000000-0000-4000-8000-000000000005';
 
-INSERT INTO organizations (id, personal_user_id, name, slug, plan, billing_status)
+INSERT INTO organizations (id, name, slug, plan, billing_status, is_shared)
 VALUES
   (
     '20000000-0000-4000-8000-000000000005',
-    '10000000-0000-4000-8000-000000000001',
     'Alpha Creator''s workspace',
-    'personal-10000000000040008000000000000001',
+    'workspace-10000000000040008000000000000001',
     'creator',
-    'free'
+    'free',
+    TRUE
   ),
   (
     '20000000-0000-4000-8000-000000000006',
-    '10000000-0000-4000-8000-000000000002',
-    'Beta Creator''s workspace',
-    'personal-10000000000040008000000000000002',
+    'Beta Studio Archive',
+    'workspace-10000000000040008000000000000002',
     'free',
-    'free'
+    'free',
+    FALSE
   )
 ON CONFLICT (id) DO UPDATE
-SET personal_user_id = EXCLUDED.personal_user_id,
-    name = EXCLUDED.name,
+SET name = EXCLUDED.name,
     slug = EXCLUDED.slug,
     plan = EXCLUDED.plan,
     billing_status = EXCLUDED.billing_status,
@@ -138,8 +156,13 @@ VALUES
   ('30000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'admin'),
   ('30000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'admin'),
   ('30000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000001', 'admin'),
-  ('30000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000002', 'admin')
+  ('30000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000002', 'admin'),
+  ('30000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000003', 'editor'),
+  ('30000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000004', 'viewer')
 ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
+UPDATE organizations SET is_shared = TRUE
+WHERE id = '20000000-0000-4000-8000-000000000005';
 
 -- Brand Profiles are the mandatory ownership boundary for assets, platform
 -- accounts, and distributions. The team-workspace profiles (a000…0001/0002)

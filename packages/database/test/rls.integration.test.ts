@@ -205,92 +205,110 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
     );
   });
 
-  it("resolves a private workspace for a personal session", async () => {
-    const personal = await Effect.runPromise(
-      withAuthenticatedTransactionEffect(pool, { sub: alphaSubject }, (client) =>
-        client.query<{
-          active_user_id: string | null;
-          is_personal: boolean;
-          own_assets: string;
-          foreign_assets: string;
-          visible_memberships: string;
-          visible_users: string;
-        }>(
-          `SELECT
-             o.personal_user_id IS NOT NULL AS is_personal,
+  it("resolves the shared workspace from the org claim", async () => {
+    const sharedOrgId = "20000000-0000-4000-8000-000000000005";
+    const shared = await Effect.runPromise(
+      withAuthenticatedTransactionEffect(
+        pool,
+        { org_id: sharedOrgId, sub: alphaSubject },
+        (client) =>
+          client.query<{
+            active_user_id: string | null;
+            is_shared: boolean;
+            role: string | null;
+            visible_memberships: string;
+            visible_users: string;
+          }>(
+            `SELECT
+             o.is_shared,
              public.auth_active_user_id()::text AS active_user_id,
-            (SELECT count(*)::text FROM assets
-              WHERE org_id = public.auth_active_org_id()) AS own_assets,
-            (SELECT count(*)::text FROM assets
-              WHERE org_id <> public.auth_active_org_id()) AS foreign_assets,
+             public.auth_active_org_role() AS role,
              (SELECT count(*)::text FROM users) AS visible_users,
              (SELECT count(*)::text FROM org_members) AS visible_memberships
            FROM organizations o
            WHERE o.id = public.auth_active_org_id()`,
-        ),
+          ),
       ),
     );
 
-    // A personal session must resolve its own identity and membership so
-    // GET /users/me can read them under RLS.
-    const row = personal.rows[0];
-    expect({
-      active_user_id: row?.active_user_id,
-      is_personal: row?.is_personal,
-      visible_memberships: row?.visible_memberships,
-      visible_users: row?.visible_users,
-    }).toEqual({
+    expect(shared.rows[0]).toEqual({
       active_user_id: alphaUserId,
-      is_personal: true,
+      is_shared: true,
+      role: "admin",
       visible_memberships: "1",
       visible_users: "1",
     });
-    // Isolation invariant, not a fixture count: the seeded personal workspace
-    // owns assets, so RLS proves itself via zero foreign-tenant visibility.
-    expect(row?.foreign_assets).toBe("0");
-    expect(Number(row?.own_assets)).toBeGreaterThan(0);
   });
 
-  it("resolves a private workspace for a session with internal UUID subject", async () => {
-    const personal = await Effect.runPromise(
-      withAuthenticatedTransactionEffect(pool, { sub: alphaUserId }, (client) =>
-        client.query<{
-          active_user_id: string | null;
-          is_personal: boolean;
-          own_assets: string;
-          foreign_assets: string;
-          visible_memberships: string;
-          visible_users: string;
-        }>(
-          `SELECT
-             o.personal_user_id IS NOT NULL AS is_personal,
-             public.auth_active_user_id()::text AS active_user_id,
-             (SELECT count(*)::text FROM assets
-               WHERE org_id = public.auth_active_org_id()) AS own_assets,
-             (SELECT count(*)::text FROM assets
-               WHERE org_id <> public.auth_active_org_id()) AS foreign_assets,
-             (SELECT count(*)::text FROM users) AS visible_users,
-             (SELECT count(*)::text FROM org_members) AS visible_memberships
-           FROM organizations o
-           WHERE o.id = public.auth_active_org_id()`,
-        ),
+  it("enforces Editor and Viewer content policies", async () => {
+    const sharedOrgId = "20000000-0000-4000-8000-000000000005";
+    const gammaSubject = "auth_user_local_gamma";
+    const gammaUserId = "10000000-0000-4000-8000-000000000003";
+    const deltaSubject = "auth_user_local_delta";
+    const deltaUserId = "10000000-0000-4000-8000-000000000004";
+
+    // Editor may write content.
+    const inserted = await Effect.runPromise(
+      withAuthenticatedTransactionEffect(
+        pool,
+        { org_id: sharedOrgId, sub: gammaSubject },
+        (client) =>
+          client.query<{ id: string }>(
+            `INSERT INTO assets (org_id, brand_profile_id, uploaded_by, asset_type, title, status)
+             VALUES ($1, 'c0000000-0000-4000-8000-000000000001', $2, 'image', 'rls-editor-fixture', 'ready')
+             RETURNING id::text AS id`,
+            [sharedOrgId, gammaUserId],
+          ),
+      ),
+    );
+    const assetId = inserted.rows[0]!.id;
+    await Effect.runPromise(
+      withAuthenticatedTransactionEffect(
+        pool,
+        { org_id: sharedOrgId, sub: gammaSubject },
+        (client) => client.query("DELETE FROM assets WHERE id = $1", [assetId]),
       ),
     );
 
-    const row = personal.rows[0];
-    expect({
-      active_user_id: row?.active_user_id,
-      is_personal: row?.is_personal,
-      visible_memberships: row?.visible_memberships,
-      visible_users: row?.visible_users,
-    }).toEqual({
-      active_user_id: alphaUserId,
-      is_personal: true,
-      visible_memberships: "1",
-      visible_users: "1",
-    });
-    expect(row?.foreign_assets).toBe("0");
-    expect(Number(row?.own_assets)).toBeGreaterThan(0);
+    // Editor may not manage Brand Profiles.
+    const editorBrandWrite = await Effect.runPromiseExit(
+      withAuthenticatedTransactionEffect(
+        pool,
+        { org_id: sharedOrgId, sub: gammaSubject },
+        (client) =>
+          client.query(
+            `INSERT INTO brand_profiles (org_id, name, color)
+             VALUES ($1, 'rls-editor-forbidden', '#b91c1c')`,
+            [sharedOrgId],
+          ),
+      ),
+    );
+    expect(editorBrandWrite._tag).toBe("Failure");
+
+    // Viewer cannot write content.
+    const viewerWrite = await Effect.runPromiseExit(
+      withAuthenticatedTransactionEffect(
+        pool,
+        { org_id: sharedOrgId, sub: deltaSubject },
+        (client) =>
+          client.query(
+            `INSERT INTO assets (org_id, brand_profile_id, uploaded_by, asset_type, title, status)
+             VALUES ($1, 'c0000000-0000-4000-8000-000000000001', $2, 'image', 'rls-viewer-forbidden', 'ready')`,
+            [sharedOrgId, deltaUserId],
+          ),
+      ),
+    );
+    expect(viewerWrite._tag).toBe("Failure");
+
+    // Viewer reads remain available.
+    const viewerRead = await Effect.runPromise(
+      withAuthenticatedTransactionEffect(
+        pool,
+        { org_id: sharedOrgId, sub: deltaSubject },
+        (client) => client.query<{ count: string }>("SELECT count(*)::text AS count FROM assets"),
+      ),
+    );
+    expect(Number(viewerRead.rows[0]?.count)).toBeGreaterThanOrEqual(0);
   });
 
   it("destroys connections after use when destroy-after-use is enabled", async () => {

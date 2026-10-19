@@ -256,7 +256,9 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
         <div className="hidden items-start gap-3 border-t border-line pt-6 text-xs leading-relaxed text-ink-2 lg:flex">
           <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           <p>
-            {t("Self-hosted. Single owner. Your account is the only way into this installation.")}
+            {t(
+              "Self-hosted. Invite-only. Only invited email addresses can join this installation.",
+            )}
           </p>
         </div>
       </aside>
@@ -264,7 +266,7 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
         <div className="mb-8 space-y-3">
           <span className="inline-flex items-center gap-2 text-xs font-medium text-ink-3">
             <KeyRound className="size-3.5" aria-hidden="true" />
-            {mode === "setup" ? t("INITIAL SETUP") : t("OWNER ACCESS")}
+            {mode === "setup" ? t("INITIAL SETUP") : t("ACCOUNT ACCESS")}
           </span>
           <h1
             ref={headingRef}
@@ -276,17 +278,17 @@ export function SignInForm(props: SignInFormProps): React.ReactElement {
           <p className="text-sm leading-relaxed text-ink-2">
             {mode === "setup"
               ? t(
-                  "Create the only account for this installation. You’ll need the setup secret from your deployment configuration.",
+                  "Create the installation owner account. You’ll need the setup secret from your deployment configuration.",
                 )
               : mode === "factor"
                 ? t("Enter a code from your authenticator, or use a saved backup code.")
                 : mode === "recovery"
-                  ? t("We’ll send a reset link to the owner’s email address.")
+                  ? t("We’ll send a reset link to your account email address.")
                   : mode === "reset"
                     ? t(
                         "Use a unique password or a long passphrase. All previous sessions will be signed out.",
                       )
-                    : t("Sign in with the owner account to continue to your workspace.")}
+                    : t("Sign in with your account to continue to your workspace.")}
           </p>
         </div>
         {error && (

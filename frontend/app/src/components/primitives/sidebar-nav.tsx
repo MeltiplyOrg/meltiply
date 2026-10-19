@@ -17,8 +17,9 @@ import {
   AnimatedLogOut,
   AnimatedX,
   AnimatedLayoutGrid,
+  AnimatedSettings,
 } from "@meltiply/ui/animated-icons";
-import { PenSquare, Share2, UserRound } from "lucide-react";
+import { PenSquare, Settings, Share2, UserRound } from "lucide-react";
 import { BrandMark } from "@meltiply/ui/brand-mark";
 import { Avatar, AvatarFallback, AvatarImage } from "@meltiply/ui/avatar";
 import { SidebarGlideHighlight } from "@meltiply/ui/sidebar-glide-highlight";
@@ -39,7 +40,7 @@ const MotionButton = motion.create(Button);
  * Identifier union of all navigable top-level workspace views.
  * Each member maps one-to-one to a canonical route in `app-router.tsx`.
  */
-export type WorkspaceView = "posts" | "channels";
+export type WorkspaceView = "posts" | "channels" | "settings";
 
 /**
  * Specification for a secondary sub-navigation item.
@@ -96,6 +97,8 @@ export interface WorkspaceNavItem {
   badge?: string;
   /** Optional nested sub-navigation destinations (desktop sidebar only). */
   subItems?: NavSubItem[];
+  /** When true, only Workspace Admins and the Installation Owner see the item. */
+  requiresAdmin?: boolean;
 }
 
 /**
@@ -118,6 +121,14 @@ export const WORKSPACE_NAV_ITEMS: readonly WorkspaceNavItem[] = [
     icon: AnimatedSquarePen,
     mobileIcon: PenSquare,
     subItems: [{ id: "overview", label: "Overview", icon: AnimatedLayoutGrid, view: "posts" }],
+  },
+  {
+    id: "settings",
+    path: "/settings",
+    label: "Settings",
+    icon: AnimatedSettings,
+    mobileIcon: Settings,
+    requiresAdmin: true,
   },
 ];
 
@@ -497,7 +508,7 @@ export function SidebarNav({
   onSelectRecent: _onSelectRecent,
   className = "",
 }: SidebarNavProps) {
-  const { user, workspaceName, logout } = useWorkspace();
+  const { user, workspaceName, logout, canManageSettings, isInstallationOwner } = useWorkspace();
   const { requestedTheme, toggleTheme } = useTheme();
   const { t } = useI18n();
   const { lowMotion, manualLowMotion, setManualLowMotion, systemLowMotion } = useMotionPreference();
@@ -535,14 +546,21 @@ export function SidebarNav({
     setTimeout(() => searchInputRef.current?.focus(), 50);
   };
 
+  const visibleNavItems = canManageSettings
+    ? WORKSPACE_NAV_ITEMS
+    : WORKSPACE_NAV_ITEMS.filter((item) => !item.requiresAdmin);
   const filteredNavItems = searchQuery
-    ? WORKSPACE_NAV_ITEMS.filter((item) =>
-        item.label.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : WORKSPACE_NAV_ITEMS;
+    ? visibleNavItems.filter((item) => item.label.toLowerCase().includes(searchQuery.toLowerCase()))
+    : visibleNavItems;
 
   const activeWorkspaceName = workspaceName ?? "Meltiply Workspace";
-  const workspaceSubtitle = user?.role === "admin" ? t("Workspace Admin") : t("Workspace");
+  const workspaceSubtitle = isInstallationOwner
+    ? t("Installation Owner")
+    : user?.role === "admin"
+      ? t("Workspace Admin")
+      : user?.role === "editor"
+        ? t("Editor")
+        : t("Viewer");
 
   return (
     <aside

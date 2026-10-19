@@ -10,6 +10,12 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey, type JWTPayload } 
  */
 export interface JwtIdentity {
   email: string;
+  /**
+   * Live account verification state resolved from the database session. The
+   * JWT itself does not carry it; session validation fills it so actor
+   * resolution can require a verified mailbox in deployed environments.
+   */
+  emailVerified?: boolean;
   name?: string;
   subject: string;
   sessionId?: string;
@@ -289,6 +295,13 @@ export interface BetterAuthConfig {
   baseURL?: string;
   database: unknown;
   email?: BetterAuthEmailConfig;
+  /**
+   * Live account-activity check invoked before a session is created. The host
+   * resolves suspension from its own account record; returning false blocks
+   * sign-in for a suspended account. Omitting the callback permits sessions
+   * (identity creation is separately gated by the host's invite-only policy).
+   */
+  isAccountActive?: (userId: string) => Promise<boolean>;
   jwt?: {
     audience?: string;
     issuer?: string;
@@ -359,17 +372,11 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
     logger: { disabled: true },
     // The API owns authoritative PostgreSQL rate limits; no isolate-local limit.
     rateLimit: { enabled: false },
-    user: {
-      additionalFields: {
-        installationOwner: { type: "boolean", defaultValue: true, input: false, returned: false },
-      },
-    },
     databaseHooks: {
       session: {
         create: {
-          before: async (session, ctx) => {
-            const user = await ctx?.context.internalAdapter.findUserById(session.userId);
-            if (!user || !("installationOwner" in user) || user.installationOwner !== true) {
+          before: async (session) => {
+            if (config.isAccountActive && !(await config.isAccountActive(session.userId))) {
               return false;
             }
             return { data: session };

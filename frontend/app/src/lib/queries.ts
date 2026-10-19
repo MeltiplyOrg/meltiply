@@ -31,6 +31,7 @@ import type {
   UpdateBrandProfileInput,
   UpdateDistributionInput,
   UpdatePostInput,
+  WorkspaceRole,
 } from "@/types";
 
 /**
@@ -79,6 +80,13 @@ function withBrandProfile<T extends object>(
 /** Cache identities for reads; assets() is only an invalidation prefix, not a library query. */
 export const queryKeys = {
   currentUser: () => ["current-user"] as const,
+  installation: () => ["installation"] as const,
+  workspaceMembers: () => ["workspace-members"] as const,
+  workspaceInvitations: () => ["workspace-invitations"] as const,
+  workspaceAudit: (params?: { limit?: number; offset?: number }) =>
+    params === undefined
+      ? (["workspace-audit"] as const)
+      : (["workspace-audit", normalizeParams(params)] as const),
   posts: (params?: PostQueryParams) =>
     params === undefined ? (["posts"] as const) : (["posts", normalizeParams(params)] as const),
   post: (id: string) => ["posts", id] as const,
@@ -186,6 +194,12 @@ export const mutationInvalidations = {
     queryKeys.brandProfiles(),
     queryKeys.deletedBrandProfiles(),
     ...brandProfileResourceInvalidations(),
+  ],
+  workspaceSettings: () => [
+    queryKeys.installation(),
+    queryKeys.workspaceMembers(),
+    queryKeys.workspaceInvitations(),
+    queryKeys.currentUser(),
   ],
 } satisfies Record<string, (...args: string[]) => QueryKey[]>;
 
@@ -697,5 +711,294 @@ export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
     },
     refetchInterval: (query) => pollingInterval(query.state.data),
     enabled: scope.isSignedIn && Boolean(scopedParams),
+  });
+}
+
+/**
+ * Reads installation Seat usage and the shared Workspace metadata.
+ *
+ * @param scope Session scope gating execution.
+ * @param workspaceId Shared Workspace UUID from the current profile.
+ * @param enabled Whether the query may run.
+ * @returns Query result with installation settings.
+ */
+export function useInstallation(scope: SessionScope, workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.installation(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getInstallation(workspaceId), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Lists Workspace members with role, status, and join date.
+ *
+ * @param scope Session scope gating execution.
+ * @param workspaceId Shared Workspace UUID.
+ * @param enabled Whether the query may run.
+ * @returns Query result with the member list.
+ */
+export function useWorkspaceMembers(scope: SessionScope, workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.workspaceMembers(),
+    queryFn: ({ signal }) =>
+      runApiQuery(scope, (api) => api.listWorkspaceMembers(workspaceId), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Lists pending Workspace invitations.
+ *
+ * @param scope Session scope gating execution.
+ * @param workspaceId Shared Workspace UUID.
+ * @param enabled Whether the query may run.
+ * @returns Query result with pending invitations.
+ */
+export function useWorkspaceInvitations(scope: SessionScope, workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.workspaceInvitations(),
+    queryFn: ({ signal }) =>
+      runApiQuery(scope, (api) => api.listWorkspaceInvitations(workspaceId), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Reads the reverse-chronological Workspace Audit trail.
+ *
+ * @param scope Session scope gating execution.
+ * @param workspaceId Shared Workspace UUID.
+ * @param params Pagination window.
+ * @param enabled Whether the query may run.
+ * @returns Query result with audit entries.
+ */
+export function useWorkspaceAudit(
+  scope: SessionScope,
+  workspaceId: string,
+  params: { limit?: number; offset?: number },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.workspaceAudit(params),
+    queryFn: ({ signal }) =>
+      runApiQuery(scope, (api) => api.listWorkspaceAudit(workspaceId, params), signal),
+    enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Invites an address with an assignable Workspace role.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, email, role }`.
+ */
+export function useCreateWorkspaceInvitation(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; email: string; role: WorkspaceRole }, key) =>
+      api.createWorkspaceInvitation(
+        variables.workspaceId,
+        { email: variables.email, role: variables.role },
+        { idempotencyKey: key },
+      ),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Rotates and resends an invitation.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, invitationId }`.
+ */
+export function useResendWorkspaceInvitation(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; invitationId: string }, key) =>
+      api.resendWorkspaceInvitation(variables.workspaceId, variables.invitationId, {
+        idempotencyKey: key,
+      }),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Revokes a pending invitation and frees its Seat.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, invitationId }`.
+ */
+export function useRevokeWorkspaceInvitation(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; invitationId: string }, key) =>
+      api.revokeWorkspaceInvitation(variables.workspaceId, variables.invitationId, {
+        idempotencyKey: key,
+      }),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Changes a member's Workspace role.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, memberId, role }`.
+ */
+export function useUpdateWorkspaceMember(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; memberId: string; role: WorkspaceRole }, key) =>
+      api.updateWorkspaceMember(variables.workspaceId, variables.memberId, variables.role, {
+        idempotencyKey: key,
+      }),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Removes a member's Workspace membership.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, memberId }`.
+ */
+export function useRemoveWorkspaceMember(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; memberId: string }, key) =>
+      api.removeWorkspaceMember(variables.workspaceId, variables.memberId, {
+        idempotencyKey: key,
+      }),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Suspends a member account.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, memberId, reason }`.
+ */
+export function useSuspendInstallationMember(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; memberId: string; reason?: string }, key) =>
+      api.suspendInstallationMember(variables.workspaceId, variables.memberId, variables.reason, {
+        idempotencyKey: key,
+      }),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Reactivates a suspended member.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, memberId }`.
+ */
+export function useReactivateInstallationMember(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; memberId: string }, key) =>
+      api.reactivateInstallationMember(variables.workspaceId, variables.memberId, {
+        idempotencyKey: key,
+      }),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Hard-deletes a member account after email confirmation.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, memberId, confirmEmail }`.
+ */
+export function useDeleteInstallationMember(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; memberId: string; confirmEmail: string }, key) =>
+      api.deleteInstallationMember(
+        variables.workspaceId,
+        variables.memberId,
+        variables.confirmEmail,
+        { idempotencyKey: key },
+      ),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Transfers installation ownership after password reauthentication.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, targetUserId, password }`.
+ */
+export function useTransferInstallationOwnership(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; targetUserId: string; password: string }, key) =>
+      api.transferInstallationOwnership(
+        variables.workspaceId,
+        variables.targetUserId,
+        variables.password,
+        { idempotencyKey: key },
+      ),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Renames the shared Workspace.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting `{ workspaceId, name }`.
+ */
+export function useRenameWorkspace(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { workspaceId: string; name: string }, key) =>
+      api.updateWorkspaceName(
+        variables.workspaceId,
+        { name: variables.name },
+        {
+          idempotencyKey: key,
+        },
+      ),
+    mutationInvalidations.workspaceSettings,
+  );
+}
+
+/**
+ * Accepts an invitation for the authenticated account. The server verifies
+ * that the token is pending and bound to the caller's email, then returns the
+ * joined Workspace and member.
+ *
+ * @param scope Session scope gating execution.
+ * @returns Mutation accepting the invitation token.
+ */
+export function useAcceptWorkspaceInvitation(scope: SessionScope) {
+  return useMutation({
+    mutationFn: (token: string) =>
+      runApiQuery(scope, (api) => api.acceptWorkspaceInvitation(token)),
+  });
+}
+
+/**
+ * Inspects an invitation token before the visitor has an account.
+ *
+ * @param token Raw invitation token, or null while absent.
+ * @returns Query result with the invitation preview.
+ */
+export function useInvitationPreview(token: string | null) {
+  return useQuery({
+    queryKey: ["invitation-preview", token],
+    queryFn: ({ signal }) =>
+      runFrontendEffect(
+        { brandProfileId: null, isSignedIn: false, workspaceId: null },
+        Effect.flatMap(ApiClientService, (api) => api.getInvitationPreview(token ?? "")),
+        { signal },
+      ),
+    enabled: token !== null && token.length >= 16,
   });
 }

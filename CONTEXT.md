@@ -62,8 +62,57 @@ _Avoid_: engagement view, messages, feed
 
 **Workspace**:
 The tenant that contains Brand Profiles and Usage records, and the unit that all
-tenant-scoped access is isolated by.
+tenant-scoped access is isolated by. An installation has exactly one shared
+Workspace; there are no personal Workspaces.
 _Avoid_: organization, org, team, tenant, account
+
+**Installation Owner**:
+The single account that bootstrapped the installation and holds
+installation-level authority: transferring ownership and suspending,
+reactivating, or deleting accounts. Ownership is separate from Workspace
+roles; the Owner always holds the Admin role in the shared Workspace.
+_Avoid_: superadmin, root, owner account, personal workspace owner
+
+**Workspace member**:
+An account with an active membership in the shared Workspace.
+_Avoid_: user, seat, teammate
+
+**Workspace Admin**:
+The Workspace role that manages Brand Profiles, Channels, members, invitations,
+settings, and Audit. Admins cannot assign or modify another Admin.
+_Avoid_: owner, superadmin
+
+**Editor**:
+The Workspace role that creates and edits Posts, uploads Assets, schedules and
+publishes, retries or cancels Distributions, and replies to Comments. Editors
+read Channels and Brand Profiles but cannot configure them.
+_Avoid_: member, creator, writer
+
+**Viewer**:
+The Workspace role with read-only access to Posts, Channels, analytics, and
+Inbox.
+_Avoid_: guest, read-only member
+
+**Invitation**:
+A single-use, seven-day, hashed-token offer to join the shared Workspace at a
+specific email address and role. Pending invitations reserve Seats.
+_Avoid_: invite, request, onboarding link
+
+**Seat**:
+One unit of installation capacity. The limit is ten active members including
+the Installation Owner; pending invitations reserve Seats and suspension or
+revocation releases them.
+_Avoid_: license, user limit, quota
+
+**Suspended member**:
+A member whose sign-in and sessions are blocked while their membership and
+content attribution remain. Suspension releases the Seat.
+_Avoid_: banned user, disabled account, deleted account
+
+**Audit entry**:
+An append-only Workspace record of an administrative action: actor identity
+snapshot, action, target, before/after state, request id, and timestamp.
+_Avoid_: log line, activity, event
 
 > **Naming seam.** Use Workspace in module names, types, variables, UI copy, and
 > documentation. Below the persistence seam the established internal names are

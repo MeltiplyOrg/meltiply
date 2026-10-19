@@ -295,6 +295,7 @@ export function PostsView({
     selectedPlatforms,
     setSelectedPlatforms,
     isAdmin,
+    canWriteContent,
   } = useWorkspace();
   const scope = useSessionScope();
   const { t } = useI18n();
@@ -944,7 +945,7 @@ export function PostsView({
         isLoading={isLoading}
         gridColumnClass={gridColumnClass}
         brandProfiles={brandProfiles}
-        canMutate={selectedBrandProfileId !== null}
+        canMutate={canWriteContent && selectedBrandProfileId !== null}
         onEdit={handleEditPost}
         onDelete={handleDeletePostAction}
         onCreatePost={handleCreatePost}
@@ -960,7 +961,7 @@ export function PostsView({
         isLoading={isLoading}
         sortKey={sortKey}
         brandProfiles={brandProfiles}
-        canMutate={selectedBrandProfileId !== null}
+        canMutate={canWriteContent && selectedBrandProfileId !== null}
         onSortChange={setSortKey}
         onEdit={handleEditPost}
         onDelete={handleDeletePostAction}
@@ -1056,7 +1057,7 @@ export function PostsView({
       <CalendarDateDetailDialog
         selectedDate={selectedCalendarDate}
         posts={calendarDatePosts}
-        canMutate={selectedBrandProfileId !== null}
+        canMutate={canWriteContent && selectedBrandProfileId !== null}
         onClose={handleCloseCalendarDialog}
         onEdit={handleEditPost}
         onDelete={handleDeletePostAction}
@@ -1070,7 +1071,7 @@ export function PostsView({
 
       <PostDetailDialog
         post={detailPost}
-        canMutate={selectedBrandProfileId !== null}
+        canMutate={canWriteContent && selectedBrandProfileId !== null}
         onClose={handleCloseDetail}
         onEdit={handleEditPost}
         onRequestDelete={handleModalRequestDelete}

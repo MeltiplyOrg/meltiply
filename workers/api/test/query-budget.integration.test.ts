@@ -55,11 +55,13 @@ const queryBudgetClaims = {
 const queryBudgetActor: ResolvedActor = {
   authUserId: queryBudgetClaims.subject,
   claims: queryBudgetClaims,
+  displayName: "Query Budget User",
+  email: "query-budget@meltiply.local",
+  isInstallationOwner: false,
   role: "admin",
   userId: queryBudgetClaims.userId,
   workspace: {
     id: queryBudgetClaims.organizationId,
-    isPersonal: false,
     name: "Query Budget Studio",
     slug: "query-budget-studio",
   },

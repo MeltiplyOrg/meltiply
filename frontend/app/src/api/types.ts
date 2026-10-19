@@ -6,6 +6,8 @@ export interface UserProfile {
   avatarUrl?: string | null;
   orgId: string;
   role?: string;
+  /** True when this account owns the installation. */
+  isInstallationOwner?: boolean;
 }
 /**
  * Source-shaped channel row consumed by the frontend views. `brandProfileId`

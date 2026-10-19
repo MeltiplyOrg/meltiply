@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { chmod, rm } from "node:fs/promises";
 import { createHmac } from "node:crypto";
+import pg from "pg";
 import { z } from "zod";
 
 const commandSchema = z.discriminatedUnion("action", [
@@ -8,6 +9,7 @@ const commandSchema = z.discriminatedUnion("action", [
   z
     .object({ action: z.literal("token"), email: z.email(), subject: z.string().min(1).max(200) })
     .strict(),
+  z.object({ action: z.literal("promote-owner"), email: z.email() }).strict(),
   z
     .object({
       action: z.literal("replay"),
@@ -25,7 +27,7 @@ const commandSchema = z.discriminatedUnion("action", [
  * identifiers; they cannot call a Provider. Read verifies restart recovery and
  * removes probe objects. The same socket supports queue recovery and token minting.
  */
-export async function startControl(runtime, jobs, queuePolicies, secret) {
+export async function startControl(runtime, jobs, queuePolicies, secret, systemDatabaseUrl) {
   const socket = "/tmp/meltiply-admin.sock";
   await rm(socket, { force: true });
   const server = createServer(async (request, response) => {
@@ -57,6 +59,40 @@ export async function startControl(runtime, jobs, queuePolicies, secret) {
           .update(`${header}.${payload}`)
           .digest("base64url");
         result = { token: `${header}.${payload}.${signature}`, expiresAt: now + 900 };
+      } else if (command.action === "promote-owner") {
+        const client = new pg.Client({ connectionString: systemDatabaseUrl });
+        await client.connect();
+        try {
+          await client.query("BEGIN");
+          const target = await client.query(
+            `SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`,
+            [command.email],
+          );
+          const userId = target.rows[0]?.id;
+          if (!userId) throw new Error("No account exists for that email");
+          await client.query(
+            `UPDATE users SET installation_owner = FALSE
+             WHERE installation_owner AND id <> $1`,
+            [userId],
+          );
+          await client.query(
+            `UPDATE users SET installation_owner = TRUE, updated_at = now() WHERE id = $1`,
+            [userId],
+          );
+          await client.query(
+            `INSERT INTO org_members (org_id, user_id, role)
+             SELECT o.id, $1, 'admin' FROM organizations o WHERE o.is_shared
+             ON CONFLICT (org_id, user_id) DO UPDATE SET role = 'admin', updated_at = now()`,
+            [userId],
+          );
+          await client.query("COMMIT");
+          result = { promoted: userId };
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally {
+          await client.end();
+        }
       } else if (command.action === "replay")
         result = { replayed: jobs.replay(command.queue, command.limit) };
       else {

@@ -175,6 +175,10 @@ export function AnalyticsView(): React.ReactElement {
   const comparableRowCount = summary
     ? comparablePlatformRows(summary.by_platform, summary.unsupported_platforms).length
     : 0;
+  // Hide immediately when the filter narrows to one Platform; placeholder data
+  // from the aggregate view must not leave the old card title on screen while
+  // the filtered summary loads.
+  const showComparison = platform === undefined && comparableRowCount > 1;
   const rangeLabel = analyticsRangeLabel(range, t);
 
   const refresh = () => {
@@ -303,7 +307,7 @@ export function AnalyticsView(): React.ReactElement {
                 "Metrics are cumulative snapshots for posts published in this range, not activity during it.",
               )}
             </p>
-            {comparableRowCount > 1 && (
+            {showComparison && (
               <Card>
                 <CardHeader className="p-4 pb-0">
                   <div className="flex items-baseline justify-between gap-2">

@@ -83,8 +83,9 @@ Below the header:
    control, refresh button.
 2. **KPI row**: Views, Likes, Comments, Shares, Published destinations.
 3. **Platform comparison** card: EvilCharts horizontal bar chart of the selected
-   metric by platform. Omitted when fewer than two supported platforms have a
-   stored snapshot; a single platform has nothing to compare.
+   metric by platform. Omitted for a single Platform filter or when fewer than
+   two supported platforms have a stored snapshot; one platform has nothing to
+   compare.
 4. **Top Posts** card: table of the ten highest Posts for the selected metric,
    with a Load more action when the API reports more rows.
 
@@ -119,9 +120,10 @@ No percentage, delta, or target is shown. Do not compute an engagement rate.
 
 ### 4.5 Platform comparison chart
 
-- EvilCharts Recharts horizontal bar chart, shown only when at least two
-  supported platforms have a snapshot. With one platform the card is omitted
-  instead of rendering a single bar against empty space.
+- EvilCharts Recharts horizontal bar chart, shown only for the All platforms
+  aggregate with at least two supported platforms holding a snapshot. A single
+  Platform filter or a one-platform cohort omits the card immediately instead of
+  rendering a single bar against empty space.
 - Bars are sorted by the selected metric descending, capped at a slim 28px
   thickness, and labeled with their exact value. The chart height follows the
   number of bars instead of reserving a fixed large canvas.

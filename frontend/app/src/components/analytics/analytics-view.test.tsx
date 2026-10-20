@@ -224,8 +224,18 @@ describe("analytics view", () => {
     expect(screen.getByText(/Last synced/)).toBeInTheDocument();
   });
 
-  it("omits the comparison card when only one platform has stored metrics", () => {
+  it("omits the comparison card when the filter narrows to one platform", () => {
     state.searchParams = new URLSearchParams("metric=views&range=30d&platform=instagram");
+    // Placeholder data can still carry the aggregate rows while the filtered
+    // summary loads; the card must already be gone.
+    state.summary = {
+      data: summary({
+        by_platform: [platformRow(), platformRow({ platform: "threads", views: 80 })],
+      }),
+      error: null,
+      isFetching: true,
+      isPending: false,
+    };
     renderView();
     expect(screen.queryByRole("heading", { name: "Platform comparison" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Top posts" })).toBeInTheDocument();

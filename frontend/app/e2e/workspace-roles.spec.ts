@@ -28,7 +28,6 @@ test("limits installation lifecycle controls to the Installation Owner", async (
   await expect(admin.page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(admin.page.getByText("gamma@meltiply.local")).toBeVisible();
   await expect(admin.page.getByText("epsilon@meltiply.local")).toBeVisible();
-  await expect(admin.page.getByText("pending.invitee@meltiply.local")).toBeVisible();
   await expect(admin.page.getByText("Suspended", { exact: true })).toBeVisible();
   await expect(admin.page.getByRole("button", { name: "Invite" })).toBeVisible();
   await expect(admin.page.getByRole("button", { name: "Suspend" })).toHaveCount(0);

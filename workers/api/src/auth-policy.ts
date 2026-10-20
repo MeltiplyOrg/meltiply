@@ -304,7 +304,10 @@ export async function activeIdentity(
   return {
     ...identity,
     email: account.email,
-    emailVerified: account.email_verified,
+    // Deployed policy requires a verified mailbox. Local/test explicitly admits
+    // unverified accounts, so report the same effective state to actor
+    // resolution; otherwise a local invited signup never activates membership.
+    emailVerified: account.email_verified || localOrTest,
     name: account.name,
   };
 }

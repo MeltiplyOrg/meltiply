@@ -27,6 +27,7 @@ import {
   auditActorFrom,
   recordWorkspaceAuditBestEffort,
   recordWorkspaceAuditForUserBestEffort,
+  recordWorkspaceAuditOnceBestEffort,
 } from "./audit";
 import type { BrandProfileApiService } from "./brand-profile-service";
 import type { AssetApiService } from "./asset-types";
@@ -856,9 +857,10 @@ export function registerCoreRoutes(
           { color, description, name },
           key,
         );
-        if (!result.replayed) {
-          const actor = c.get("actor");
-          yield* recordWorkspaceAuditBestEffort(c.env, {
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
             action: "brand_profile.created",
             actor: auditActorFrom({
               display_name: actor.displayName,
@@ -867,11 +869,12 @@ export function registerCoreRoutes(
             }),
             after: result.value,
             orgId: actor.workspace.id,
-            requestId: requestId(c),
             targetId: result.value.id,
             targetType: "brand_profile",
-          });
-        }
+          },
+          "brand-profile.create",
+          key,
+        );
         return jsonResponse(result.value, 201, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
@@ -950,9 +953,10 @@ export function registerCoreRoutes(
           { color, description, name },
           key,
         );
-        if (!result.replayed) {
-          const actor = c.get("actor");
-          yield* recordWorkspaceAuditBestEffort(c.env, {
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
             action: "brand_profile.updated",
             actor: auditActorFrom({
               display_name: actor.displayName,
@@ -961,11 +965,12 @@ export function registerCoreRoutes(
             }),
             after: result.value,
             orgId: actor.workspace.id,
-            requestId: requestId(c),
             targetId: profileId,
             targetType: "brand_profile",
-          });
-        }
+          },
+          "brand-profile.update",
+          key,
+        );
         return jsonResponse(result.value, 200, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
@@ -988,9 +993,10 @@ export function registerCoreRoutes(
           profileId,
           key,
         );
-        if (!result.replayed) {
-          const actor = c.get("actor");
-          yield* recordWorkspaceAuditBestEffort(c.env, {
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
             action: "brand_profile.deleted",
             actor: auditActorFrom({
               display_name: actor.displayName,
@@ -999,11 +1005,12 @@ export function registerCoreRoutes(
             }),
             after: result.value,
             orgId: actor.workspace.id,
-            requestId: requestId(c),
             targetId: profileId,
             targetType: "brand_profile",
-          });
-        }
+          },
+          "brand-profile.delete",
+          key,
+        );
         return jsonResponse(result.value, 200, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
@@ -1026,9 +1033,10 @@ export function registerCoreRoutes(
           profileId,
           key,
         );
-        if (!result.replayed) {
-          const actor = c.get("actor");
-          yield* recordWorkspaceAuditBestEffort(c.env, {
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
             action: "brand_profile.restored",
             actor: auditActorFrom({
               display_name: actor.displayName,
@@ -1037,11 +1045,12 @@ export function registerCoreRoutes(
             }),
             after: result.value,
             orgId: actor.workspace.id,
-            requestId: requestId(c),
             targetId: profileId,
             targetType: "brand_profile",
-          });
-        }
+          },
+          "brand-profile.restore",
+          key,
+        );
         return jsonResponse(result.value, 200, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
@@ -1744,9 +1753,10 @@ export function registerCoreRoutes(
           accountId,
           disconnectKey,
         );
-        if (!result.replayed) {
-          const actor = c.get("actor");
-          yield* recordWorkspaceAuditBestEffort(c.env, {
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
             action: "channel.disconnected",
             actor: auditActorFrom({
               display_name: actor.displayName,
@@ -1755,11 +1765,12 @@ export function registerCoreRoutes(
             }),
             before: { account_id: accountId },
             orgId: actor.workspace.id,
-            requestId: requestId(c),
             targetId: accountId,
             targetType: "channel",
-          });
-        }
+          },
+          "channel.disconnect",
+          disconnectKey,
+        );
         return new Response(null, {
           headers: {
             ...idempotencyHeaders(result.replayed),

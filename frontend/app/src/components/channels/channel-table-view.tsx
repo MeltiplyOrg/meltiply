@@ -46,8 +46,10 @@ export interface ChannelTableViewProps {
   /** Disables every selection control while a bulk operation runs. */
   selectionDisabled?: boolean;
   lowMotion: boolean;
-  onReconnect: (account: PlatformAccount) => void;
-  onDisconnect: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles. */
+  onReconnect?: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles. */
+  onDisconnect?: (account: PlatformAccount) => void;
 }
 
 /**

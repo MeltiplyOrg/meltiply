@@ -183,7 +183,8 @@ export interface ChannelHealthControlProps {
   statusReason?: string | null;
   isReconnecting?: boolean;
   lowMotion: boolean;
-  onReconnect: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles, leaving the status passive. */
+  onReconnect?: (account: PlatformAccount) => void;
 }
 
 /**
@@ -215,30 +216,32 @@ export function ChannelHealthControl({
       {healthy ? <Check aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}
     </Button>
   );
+  if (healthy || onReconnect === undefined) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{statusControl}</TooltipTrigger>
+        <TooltipContent className="max-w-64">{healthDescription}</TooltipContent>
+      </Tooltip>
+    );
+  }
   return (
     <DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
-          {healthy ? (
-            statusControl
-          ) : (
-            <DropdownMenuTrigger asChild>{statusControl}</DropdownMenuTrigger>
-          )}
+          <DropdownMenuTrigger asChild>{statusControl}</DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent className="max-w-64">{healthDescription}</TooltipContent>
       </Tooltip>
-      {!healthy && (
-        <DropdownMenuContent align="end" className="max-w-72">
-          <p className="px-2 py-1.5 text-xs text-ink-2">{healthDescription}</p>
-          <DropdownMenuItem disabled={isReconnecting} onSelect={() => onReconnect(account)}>
-            <RefreshCw
-              className={cn("size-3.5", isReconnecting && !lowMotion && "animate-spin")}
-              aria-hidden="true"
-            />
-            {isReconnecting ? t("Redirecting…") : t("Re-authenticate")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      )}
+      <DropdownMenuContent align="end" className="max-w-72">
+        <p className="px-2 py-1.5 text-xs text-ink-2">{healthDescription}</p>
+        <DropdownMenuItem disabled={isReconnecting} onSelect={() => onReconnect(account)}>
+          <RefreshCw
+            className={cn("size-3.5", isReconnecting && !lowMotion && "animate-spin")}
+            aria-hidden="true"
+          />
+          {isReconnecting ? t("Redirecting…") : t("Re-authenticate")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 }
@@ -249,7 +252,8 @@ export interface ChannelSettingsActionProps {
   profile?: BrandProfile | null;
   /** Resolved display title used as the dialog's accessible name. */
   channelName: string;
-  onDisconnect: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles, leaving settings informational. */
+  onDisconnect?: (account: PlatformAccount) => void;
 }
 
 /**
@@ -321,20 +325,22 @@ export function ChannelSettingsAction({
               <p className="text-sm text-ink-3">{t("No permissions granted")}</p>
             )}
           </section>
-          <div className="border-t border-line-soft pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              className="text-red hover:bg-red-tint hover:text-red"
-              onClick={() => {
-                setSettingsOpen(false);
-                onDisconnect(account);
-              }}
-            >
-              <Trash2 className="size-3.5" aria-hidden="true" />
-              {t("Disconnect")}
-            </Button>
-          </div>
+          {onDisconnect !== undefined && (
+            <div className="border-t border-line-soft pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                className="text-red hover:bg-red-tint hover:text-red"
+                onClick={() => {
+                  setSettingsOpen(false);
+                  onDisconnect(account);
+                }}
+              >
+                <Trash2 className="size-3.5" aria-hidden="true" />
+                {t("Disconnect")}
+              </Button>
+            </div>
+          )}
         </div>
       </CenterDialogContent>
     </CenterDialog>

@@ -30,8 +30,8 @@ export interface PostGridCardViewProps extends PostSelectionProps {
   brandProfiles: BrandProfile[];
   /**
    * Whether scope-owned mutations are allowed; `false` in the aggregate
-   * "All Brand Profiles" view. Deletion no longer consumes this flag — the
-   * Post's own `brand_profile_id` authorizes it — so only edits stay gated.
+   * "All Brand Profiles" view. Edit stays behind this flag; delete additionally
+   * uses `canSelect`, which encodes the role and published-state rule.
    */
   canMutate: boolean;
   onEdit: (postId: string) => void;
@@ -56,9 +56,9 @@ export interface PostGridCardViewProps extends PostSelectionProps {
  * dialog restores focus to a real control, and edit/delete keep stopPropagation.
  * A checkbox strip above the grid is the honest select-all — it applies only to
  * the rendered filtered cards — while per-card checkboxes live in the footer
- * action row with stopPropagation. Single deletes are not scope-gated — the
- * card's own Brand Profile id authorizes them — while edit stays behind
- * `canMutate`.
+ * action row with stopPropagation. Delete and its selection are gated by
+ * `canSelect`, which encodes the role and published-state rule; edit stays
+ * behind `canMutate`.
  * Wrapped in `React.memo` to eliminate re-renders when parent states change
  * outside the cards.
  */
@@ -76,10 +76,13 @@ export const PostGridCardView = React.memo(function PostGridCardView({
   onToggleSelection,
   onSetSelection,
   selectionDisabled,
+  canSelect,
 }: PostGridCardViewProps) {
   const { t } = useI18n();
-  const visibleIds = posts.map((row) => row.id);
-  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const selectablePosts = canSelect ? posts.filter(canSelect) : posts;
+  const selectableIds = selectablePosts.map((row) => row.id);
+  const allVisibleSelected =
+    selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
   if (isLoading) {
     return (
       <div className="flex-1 min-h-0 overflow-y-auto pr-1">
@@ -126,14 +129,14 @@ export const PostGridCardView = React.memo(function PostGridCardView({
           type="checkbox"
           aria-label={t("Select all visible posts")}
           checked={allVisibleSelected}
-          disabled={selectionDisabled}
+          disabled={selectionDisabled || selectableIds.length === 0}
           ref={(el) => {
             if (el) {
               el.indeterminate =
-                !allVisibleSelected && visibleIds.some((id) => selectedIds.has(id));
+                !allVisibleSelected && selectableIds.some((id) => selectedIds.has(id));
             }
           }}
-          onChange={() => onSetSelection(visibleIds, !allVisibleSelected)}
+          onChange={() => onSetSelection(selectableIds, !allVisibleSelected)}
         />
         <span className="text-xs font-medium text-ink-2 select-none">{t("Select all posts")}</span>
       </div>
@@ -224,7 +227,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
                       type="checkbox"
                       aria-label={t("Select post")}
                       checked={selectedIds.has(row.id)}
-                      disabled={selectionDisabled}
+                      disabled={selectionDisabled || !(canSelect?.(row) ?? true)}
                       onClick={(e) => e.stopPropagation()}
                       onChange={() => onToggleSelection(row.id)}
                     />
@@ -255,18 +258,20 @@ export const PostGridCardView = React.memo(function PostGridCardView({
                         <Edit3 className="size-3.5" />
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 rounded-control text-ink-3 hover:text-destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(row.id);
-                      }}
-                      title={t("Delete post")}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
+                    {(canSelect?.(row) ?? true) && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 rounded-control text-ink-3 hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(row.id);
+                        }}
+                        title={t("Delete post")}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>

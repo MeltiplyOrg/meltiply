@@ -520,25 +520,47 @@ export function PostsView({
   }
 
   /**
-   * Requests deletion for a Post row. The contract's Post deletion soft-deletes
-   * the composition and stops its pending Channels, so it is offered even for a
-   * fully published Post and the confirmation states plainly that live platform
-   * copies are not removed. The owning profile is captured from the row at
-   * request time — never the active scope — so aggregate-view deletions resolve
-   * the right profile and a scope switch while the dialog is open cannot
-   * redirect the call.
+   * True when this row has a distribution that makes deletion Admin-only.
+   * Mirrors the server rule for published and provider-claimed outcomes.
+   */
+  const hasPublishedDistribution = useCallback(
+    (row: PostRow) =>
+      row.channels.some((channel) => {
+        const status = channel.distribution?.status ?? channel.status;
+        return status === "published" || status === "awaiting_provider";
+      }),
+    [],
+  );
+
+  /**
+   * Role/published-state predicate shared by single delete, detail delete, and
+   * bulk selection. Viewers never delete; Editors may delete drafts and
+   * scheduled Posts; Admins may also delete Posts with published work.
+   */
+  const canDeletePost = useCallback(
+    (row: PostRow) => canWriteContent && (isAdmin || !hasPublishedDistribution(row)),
+    [canWriteContent, hasPublishedDistribution, isAdmin],
+  );
+
+  /**
+   * Requests deletion for a Post row the caller may delete. The contract's Post
+   * deletion soft-deletes the composition and stops its pending Channels; the
+   * confirmation states plainly that live platform copies are not removed. The
+   * owning profile is captured from the row at request time — never the active
+   * scope — so aggregate-view deletions resolve the right profile.
    */
   const handleDeletePostAction = useCallback(
     (postId: string) => {
       const row = posts.find((r) => r.id === postId);
+      if (!row || !canDeletePost(row)) return;
       setPendingAction({
         kind: "delete-post",
         postId,
-        brandProfileId: row?.brandProfileId ?? "",
+        brandProfileId: row.brandProfileId,
         distributionIds: [],
       });
     },
-    [posts],
+    [posts, canDeletePost],
   );
 
   /**
@@ -607,7 +629,7 @@ export function PostsView({
           next.delete(postId);
         } else {
           const row = posts.find((r) => r.id === postId);
-          if (!row) return prev;
+          if (!row || !canDeletePost(row)) return prev;
           next.set(postId, {
             id: postId,
             brandProfileId: row.brandProfileId,
@@ -617,7 +639,7 @@ export function PostsView({
         return next;
       });
     },
-    [posts, postById],
+    [posts, postById, canDeletePost],
   );
 
   /**
@@ -634,7 +656,7 @@ export function PostsView({
         for (const postId of postIds) {
           if (selected) {
             const row = posts.find((r) => r.id === postId);
-            if (!row) continue;
+            if (!row || !canDeletePost(row)) continue;
             next.set(postId, {
               id: postId,
               brandProfileId: row.brandProfileId,
@@ -647,7 +669,7 @@ export function PostsView({
         return next;
       });
     },
-    [posts, postById],
+    [posts, postById, canDeletePost],
   );
 
   /** Clears the whole selection — the bulk bar's Deselect action. */
@@ -662,9 +684,13 @@ export function PostsView({
    * shrink the confirmed set.
    */
   const openBulkDelete = useCallback(() => {
-    if (selectedPosts.size === 0) return;
-    setBulkDeleteTargets([...selectedPosts.values()]);
-  }, [selectedPosts]);
+    const targets = [...selectedPosts.values()].filter((entry) => {
+      const row = posts.find((candidate) => candidate.id === entry.id);
+      return row !== undefined && canDeletePost(row);
+    });
+    if (targets.length === 0) return;
+    setBulkDeleteTargets(targets);
+  }, [selectedPosts, posts, canDeletePost]);
 
   /**
    * Executes the confirmed bulk delete sequentially over the snapshot latched
@@ -954,6 +980,7 @@ export function PostsView({
         onToggleSelection={handleTogglePostSelection}
         onSetSelection={handleSetPostSelection}
         selectionDisabled={bulkDeleteBusy}
+        canSelect={canDeletePost}
       />
     ) : (
       <PostListTableView
@@ -970,6 +997,7 @@ export function PostsView({
         onToggleSelection={handleTogglePostSelection}
         onSetSelection={handleSetPostSelection}
         selectionDisabled={bulkDeleteBusy}
+        canSelect={canDeletePost}
       />
     );
 
@@ -1067,11 +1095,13 @@ export function PostsView({
         onToggleSelection={handleTogglePostSelection}
         onSetSelection={handleSetPostSelection}
         selectionDisabled={bulkDeleteBusy}
+        canSelect={canDeletePost}
       />
 
       <PostDetailDialog
         post={detailPost}
         canMutate={canWriteContent && selectedBrandProfileId !== null}
+        canDelete={detailPost !== null && canDeletePost(detailPost)}
         onClose={handleCloseDetail}
         onEdit={handleEditPost}
         onRequestDelete={handleModalRequestDelete}
@@ -1115,14 +1145,16 @@ export function PostsView({
         </CenterAlertDialogContent>
       </CenterAlertDialog>
 
-      <BulkSelectionBar
-        count={selectedIds.size}
-        actionLabel={t("Delete")}
-        busyLabel={t("Deleting…")}
-        onClear={handleClearPostSelection}
-        onAction={openBulkDelete}
-        busy={bulkDeleteBusy}
-      />
+      {canWriteContent && selectedIds.size > 0 && (
+        <BulkSelectionBar
+          count={selectedIds.size}
+          actionLabel={t("Delete")}
+          busyLabel={t("Deleting…")}
+          onClear={handleClearPostSelection}
+          onAction={openBulkDelete}
+          busy={bulkDeleteBusy}
+        />
+      )}
 
       <CenterAlertDialog
         open={bulkDeleteTargets !== null}

@@ -18,6 +18,7 @@ import { jsonResponse } from "./responses";
 import { requireSeatCapacityEffect, seatUsageEffect } from "./seats";
 import {
   idempotencyKey,
+  integerParam,
   jsonBody,
   onlyKeys,
   optionalStringField,
@@ -315,8 +316,12 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
             new CoreApiError(404, "workspace_not_found", "The workspace was not found."),
           );
         }
-        const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 100);
-        const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
+        const limit = yield* fromPromise(() =>
+          integerParam(c.req.query("limit"), "limit", 50, 1, 100),
+        );
+        const offset = yield* fromPromise(() =>
+          integerParam(c.req.query("offset"), "offset", 0, 0, 1_000_000),
+        );
         const entries = yield* withSystemTransactionEffect(c.env, (client) =>
           client
             .query<AuditRow>(

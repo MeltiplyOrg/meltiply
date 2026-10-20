@@ -12,7 +12,7 @@
       ]
     },
     "frontend/app": {
-      "entry": ["src/app/globals.css"]
+      "entry": ["src/app/globals.css", "e2e/support/invitation-db.mjs"]
     },
     "workers/api": {
       "entry": ["test-support/index.ts"],

@@ -395,6 +395,7 @@ describe("betterAuthFor staging policy", () => {
     const verified = await auth.handler(new Request(verifyLink));
     expect(verified.status).toBe(302);
     expect(verified.headers.get("location")).toBe("http://app.test/verified");
+    expect(sessionCookiePair(verified)).toBeTruthy();
 
     const signIn = await authPost(auth, "/api/auth/sign-in/email", {
       email: emails.stagingVerified,
@@ -623,7 +624,8 @@ describe("session cookie, bearer JWT, and sign-out", () => {
     expect(payload.email).toBe(emails.session);
     expect(typeof payload.exp).toBe("number");
 
-    expect(await sessionRowsFor(sessionUserId)).toBeGreaterThan(0);
+    const sessionsBeforeSignOut = await sessionRowsFor(sessionUserId);
+    expect(sessionsBeforeSignOut).toBeGreaterThan(0);
 
     const signOut = await auth.handler(
       new Request(`${baseURL}/api/auth/sign-out`, {
@@ -635,7 +637,9 @@ describe("session cookie, bearer JWT, and sign-out", () => {
 
     // Revocation is observed on both cookie reads and the protected API's
     // authoritative session lookup, including the already-minted bearer JWT.
-    expect(await sessionRowsFor(sessionUserId)).toBe(0);
+    // Auto-sign-in after verification may leave another browser session, so
+    // assert the signed-out session itself is gone rather than every session.
+    expect(await sessionRowsFor(sessionUserId)).toBe(sessionsBeforeSignOut - 1);
     expect(
       (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
     ).toBe(true);

@@ -29,8 +29,8 @@ export interface PostListTableViewProps extends PostSelectionProps {
   brandProfiles: BrandProfile[];
   /**
    * Whether scope-owned mutations are allowed; `false` in the aggregate
-   * "All Brand Profiles" view. Deletion no longer consumes this flag — the
-   * Post's own `brand_profile_id` authorizes it — so only edits stay gated.
+   * "All Brand Profiles" view. Edit stays behind this flag; delete additionally
+   * uses `canSelect`, which encodes the role and published-state rule.
    */
   canMutate: boolean;
   onSortChange: (key: PostSortKey) => void;
@@ -58,9 +58,9 @@ export interface PostListTableViewProps extends PostSelectionProps {
  * The leading column carries the selection checkboxes: the header checkbox is
  * the honest select-all (it applies only to the currently rendered filtered
  * rows, never hidden pages) and flips indeterminate on partial selection.
- * Checkbox cells stopPropagation so a toggle never opens details. Single
- * deletes are not scope-gated — the row's own Brand Profile id authorizes them —
- * while edit stays behind `canMutate`.
+ * Checkbox cells stopPropagation so a toggle never opens details. Delete and
+ * its selection are gated by `canSelect`, which encodes the role and
+ * published-state rule; edit stays behind `canMutate`.
  * Wrapped in `React.memo` to eliminate table re-renders when parent toolbar or modal states change.
  */
 export const PostListTableView = React.memo(function PostListTableView({
@@ -77,11 +77,17 @@ export const PostListTableView = React.memo(function PostListTableView({
   onToggleSelection,
   onSetSelection,
   selectionDisabled,
+  canSelect,
 }: PostListTableViewProps) {
   const { t } = useI18n();
-  const visibleIds = posts.map((row) => row.id);
-  const selectedVisibleCount = visibleIds.reduce((n, id) => (selectedIds.has(id) ? n + 1 : n), 0);
-  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+  const selectablePosts = canSelect ? posts.filter(canSelect) : posts;
+  const selectableIds = selectablePosts.map((row) => row.id);
+  const selectedVisibleCount = selectableIds.reduce(
+    (n, id) => (selectedIds.has(id) ? n + 1 : n),
+    0,
+  );
+  const allVisibleSelected =
+    selectableIds.length > 0 && selectedVisibleCount === selectableIds.length;
   return (
     <div
       className={cn(
@@ -98,13 +104,13 @@ export const PostListTableView = React.memo(function PostListTableView({
                   type="checkbox"
                   aria-label={t("Select all visible posts")}
                   checked={allVisibleSelected}
-                  disabled={selectionDisabled || visibleIds.length === 0}
+                  disabled={selectionDisabled || selectableIds.length === 0}
                   ref={(el) => {
                     if (el) {
                       el.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
                     }
                   }}
-                  onChange={() => onSetSelection(visibleIds, !allVisibleSelected)}
+                  onChange={() => onSetSelection(selectableIds, !allVisibleSelected)}
                   className="align-middle"
                 />
               </th>
@@ -180,7 +186,7 @@ export const PostListTableView = React.memo(function PostListTableView({
                         type="checkbox"
                         aria-label={t("Select post")}
                         checked={selectedIds.has(row.id)}
-                        disabled={selectionDisabled}
+                        disabled={selectionDisabled || !(canSelect?.(row) ?? true)}
                         onChange={() => onToggleSelection(row.id)}
                         className="align-middle"
                       />
@@ -253,18 +259,20 @@ export const PostListTableView = React.memo(function PostListTableView({
                             <Edit3 className="size-3.5" />
                           </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 rounded-control text-ink-3 hover:text-destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(row.id);
-                          }}
-                          title={t("Delete post")}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
+                        {(canSelect?.(row) ?? true) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-7 rounded-control text-ink-3 hover:text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(row.id);
+                            }}
+                            title={t("Delete post")}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>

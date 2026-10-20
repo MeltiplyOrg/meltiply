@@ -33,11 +33,13 @@ export interface PostDetailDialogProps {
   post: PostRow | null;
   /**
    * Whether scope-owned mutations are allowed; `false` in the aggregate
-   * "All Brand Profiles" view. Post deletion no longer consumes this flag —
-   * the Post's own `brand_profile_id` authorizes it — so only edit, retry,
-   * reschedule, and channel cancels stay gated.
+   * "All Brand Profiles" view. Edit, retry, reschedule, and channel cancels stay
+   * behind this flag; delete uses `canDelete`, which encodes the role and
+   * published-state rule.
    */
   canMutate: boolean;
+  /** Whether the owning row may be deleted by the current role. */
+  canDelete: boolean;
   onClose: () => void;
   /** Opens the composer for a Post that still has an editable surface. */
   onEdit: (postId: string) => void;
@@ -355,6 +357,7 @@ function ChannelOutcomeRow({
 export const PostDetailDialog = React.memo(function PostDetailDialog({
   post: livePost,
   canMutate,
+  canDelete,
   onClose,
   onEdit,
   onRequestDelete,
@@ -428,23 +431,25 @@ export const PostDetailDialog = React.memo(function PostDetailDialog({
                 {t("Cancel all pending")}
               </Button>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                post &&
-                onRequestDelete({
-                  kind: "delete-post",
-                  postId: post.id,
-                  brandProfileId: post.brandProfileId,
-                  distributionIds: [],
-                })
-              }
-              className="h-8 text-xs rounded-control text-destructive border-destructive/30 hover:bg-destructive/10 gap-1"
-            >
-              <Trash2 className="size-3" />
-              {isDraft ? t("Delete draft") : t("Delete post")}
-            </Button>
+            {canDelete && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  post &&
+                  onRequestDelete({
+                    kind: "delete-post",
+                    postId: post.id,
+                    brandProfileId: post.brandProfileId,
+                    distributionIds: [],
+                  })
+                }
+                className="h-8 text-xs rounded-control text-destructive border-destructive/30 hover:bg-destructive/10 gap-1"
+              >
+                <Trash2 className="size-3" />
+                {isDraft ? t("Delete draft") : t("Delete post")}
+              </Button>
+            )}
           </div>
           <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <Button variant="outline" onClick={onClose} className="rounded-control">

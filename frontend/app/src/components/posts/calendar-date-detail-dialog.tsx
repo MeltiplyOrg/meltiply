@@ -27,9 +27,9 @@ export interface CalendarDateDetailDialogProps extends PostSelectionProps {
   posts: PostRow[];
   /**
    * Whether scope-owned mutations are allowed; `false` in the aggregate
-   * "All Brand Profiles" view. Deletion no longer consumes this flag — the
-   * Post's own `brand_profile_id` authorizes it — so only edit and
-   * schedule-for-this-date stay gated.
+   * "All Brand Profiles" view. Edit and schedule-for-this-date stay behind this
+   * flag; delete uses `canSelect`, which encodes the role and published-state
+   * rule.
    */
   canMutate: boolean;
   onClose: () => void;
@@ -67,13 +67,15 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
   onToggleSelection,
   onSetSelection,
   selectionDisabled,
+  canSelect,
 }: CalendarDateDetailDialogProps) {
   const { t } = useI18n();
   // Closing clears the date and empties `posts`; keep both through the pop-out.
   const selectedDate = useLatchedValue(liveDate);
   const posts = useLatchedValue(liveDate ? livePosts : null) ?? livePosts;
-  const dayIds = posts.map((row) => row.id);
-  const allDaySelected = dayIds.length > 0 && dayIds.every((id) => selectedIds.has(id));
+  const selectableIds = (canSelect ? posts.filter(canSelect) : posts).map((row) => row.id);
+  const allDaySelected =
+    selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
   return (
     <CenterDialog open={liveDate !== null} onOpenChange={(open) => !open && onClose()}>
       <CenterDialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -93,7 +95,7 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
         </CenterDialogHeader>
 
         <div className="flex flex-col gap-3 py-3">
-          {dayIds.length > 0 && (
+          {selectableIds.length > 0 && (
             <div className="flex items-center gap-2">
               <Input
                 type="checkbox"
@@ -102,10 +104,11 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
                 disabled={selectionDisabled}
                 ref={(el) => {
                   if (el) {
-                    el.indeterminate = !allDaySelected && dayIds.some((id) => selectedIds.has(id));
+                    el.indeterminate =
+                      !allDaySelected && selectableIds.some((id) => selectedIds.has(id));
                   }
                 }}
-                onChange={() => onSetSelection(dayIds, !allDaySelected)}
+                onChange={() => onSetSelection(selectableIds, !allDaySelected)}
               />
               <span className="text-xs font-medium text-ink-2 select-none">
                 {t("Select all posts")}
@@ -135,7 +138,7 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
                         type="checkbox"
                         aria-label={t("Select post")}
                         checked={selectedIds.has(row.id)}
-                        disabled={selectionDisabled}
+                        disabled={selectionDisabled || !(canSelect?.(row) ?? true)}
                         onChange={() => onToggleSelection(row.id)}
                         className="mt-0.5"
                       />
@@ -185,15 +188,17 @@ export const CalendarDateDetailDialog = React.memo(function CalendarDateDetailDi
                         {t("Edit")}
                       </Button>
                     )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onDelete(row.id)}
-                      className="h-7 text-xs rounded-control text-destructive border-destructive/30 hover:bg-destructive/10"
-                    >
-                      <Trash2 className="size-3" />
-                      {t("Delete")}
-                    </Button>
+                    {(canSelect?.(row) ?? true) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onDelete(row.id)}
+                        className="h-7 text-xs rounded-control text-destructive border-destructive/30 hover:bg-destructive/10"
+                      >
+                        <Trash2 className="size-3" />
+                        {t("Delete")}
+                      </Button>
+                    )}
                   </div>
                 </div>
               );

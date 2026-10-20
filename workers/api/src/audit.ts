@@ -3,6 +3,7 @@ import type { EffectTransactionClient } from "@meltiply/database";
 import type { DatabaseError } from "@meltiply/domain";
 
 import { withSystemTransactionEffect } from "./database";
+import { sha256Hex } from "./crypto";
 import type { ApiWorkerEnv } from "./env";
 
 /** Actor identity snapshot persisted on every Workspace Audit entry. */
@@ -119,6 +120,49 @@ export function recordWorkspaceAuditBestEffort(
 ): Effect.Effect<void, DatabaseError> {
   if (!env.DB_SYSTEM?.connectionString) return Effect.void;
   return recordWorkspaceAudit(env, entry);
+}
+
+/**
+ * Records an Audit entry for a service-owned idempotent mutation.
+ *
+ * The entry is keyed by the operation and Idempotency-Key, so an earlier
+ * committed mutation whose Audit insert failed can be repaired by replaying the
+ * request. Concurrent retries serialize on a transaction-scoped advisory lock
+ * and the second sees the existing row. The deterministic request id is
+ * distinct from the transport request id because retries legitimately carry a
+ * new one.
+ *
+ * @param env - Worker environment bindings.
+ * @param entry - Audit fields without a request id.
+ * @param operation - Stable idempotent operation name.
+ * @param idempotencyKey - Client-supplied Idempotency-Key.
+ * @returns Effect resolving after the audit row exists or the write is skipped.
+ */
+export function recordWorkspaceAuditOnceBestEffort(
+  env: ApiWorkerEnv,
+  entry: Omit<WorkspaceAuditEntry, "requestId">,
+  operation: string,
+  idempotencyKey: string,
+): Effect.Effect<void, DatabaseError> {
+  if (!env.DB_SYSTEM?.connectionString) return Effect.void;
+  return Effect.gen(function* () {
+    const digest = yield* Effect.promise(() => sha256Hex(`${operation}\u0000${idempotencyKey}`));
+    const requestId = `idempotency:${digest}`;
+    yield* withSystemTransactionEffect(env, (client) =>
+      Effect.gen(function* () {
+        yield* client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [requestId]);
+        const existing = yield* client.query(
+          `SELECT 1 FROM workspace_audit_entries
+           WHERE org_id = $1 AND request_id = $2 AND action = $3 AND target_id = $4
+           LIMIT 1`,
+          [entry.orgId, requestId, entry.action, entry.targetId],
+        );
+        if (existing.rows.length === 0) {
+          yield* recordWorkspaceAuditEffect(client, { ...entry, requestId });
+        }
+      }),
+    );
+  });
 }
 
 /**

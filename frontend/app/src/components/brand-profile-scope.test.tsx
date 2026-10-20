@@ -22,6 +22,7 @@ function notifyWorkspace() {
 
 const workspace = vi.hoisted(() => ({
   brandProfiles: [] as BrandProfile[],
+  canWriteContent: true,
   channelStatuses: [],
   integrations: [],
   isAdmin: true,
@@ -97,7 +98,7 @@ vi.mock("@/context/workspace.context", () => ({
       ...workspace,
       canManageConfiguration: true,
       canManageSettings: true,
-      canWriteContent: true,
+      canWriteContent: workspace.canWriteContent,
       isInstallationOwner: false,
       logout: vi.fn(),
     };
@@ -256,6 +257,7 @@ const publishedEvent: CalendarEvent = {
 /** Resets mocked workspace and query state so each rendered surface starts independent. */
 function resetScope() {
   workspace.brandProfiles = [alphaProfile];
+  workspace.canWriteContent = true;
   workspace.channelStatuses = [];
   workspace.integrations = [];
   workspace.isAdmin = true;
@@ -482,7 +484,7 @@ describe("Channels table contract", () => {
     workspace.isAdmin = false;
     renderChannels();
 
-    expect(screen.getByRole("button", { name: "Add account" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Add account" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create Brand Profile" })).not.toBeInTheDocument();
     expect(screen.getByText("Ask a workspace admin to create a Brand Profile.")).toBeVisible();
   });
@@ -493,9 +495,24 @@ describe("Channels table contract", () => {
     renderChannels();
 
     expect(screen.queryByRole("button", { name: /Add Channels/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add account" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Add account" })).not.toBeInTheDocument();
     expect(screen.getByText("Ask a workspace admin to create a Brand Profile.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Create Brand Profile" })).not.toBeInTheDocument();
+  });
+
+  it("keeps channel connection controls read-only for non-admins", () => {
+    workspace.isAdmin = false;
+    queryResults.platforms.data = [expiredAccount];
+    renderChannels();
+
+    const row = within(screen.getByTestId(`channel-row-${expiredAccount.id}`));
+    expect(row.getByRole("checkbox", { name: "Select channel" })).toBeDisabled();
+    fireEvent.click(row.getByRole("button", { name: "expired" }));
+    expect(screen.queryByRole("menuitem", { name: /Re-authenticate/ })).not.toBeInTheDocument();
+    fireEvent.click(row.getByRole("button", { name: "Channel settings" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Permissions")).toBeVisible();
   });
 
   it("creates a Brand Profile in place and selects it for the platform directory", () => {
@@ -1122,6 +1139,55 @@ describe("Posts surfaces", () => {
     );
     const rows = screen.getAllByRole("checkbox", { name: "Select post" });
     expect(rows.filter((row) => (row as HTMLInputElement).checked)).toHaveLength(1);
+  });
+
+  it("hides delete controls and selection from a viewer", () => {
+    workspace.isAdmin = false;
+    workspace.canWriteContent = false;
+    seedPublishedPost();
+    renderPosts();
+
+    const row = screen.getByRole("row", { name: /Launch note/ });
+    expect(within(row).queryByRole("button", { name: "Edit post" })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Delete post" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select all visible posts" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Select post" })).toBeDisabled();
+    expect(screen.queryByRole("region", { name: "Selection actions" })).not.toBeInTheDocument();
+  });
+
+  it("hides published-Post deletion from an Editor but keeps draft deletion", () => {
+    workspace.isAdmin = false;
+    seedPublishedPost();
+    renderPosts();
+
+    const publishedRow = screen.getByRole("row", { name: /Launch note/ });
+    expect(within(publishedRow).getByRole("button", { name: "Edit post" })).toBeVisible();
+    expect(
+      within(publishedRow).queryByRole("button", { name: "Delete post" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select post" })).toBeDisabled();
+
+    cleanup();
+    queryResults.posts.data = {
+      posts: [{ ...publishedPost, status: "draft", distributions: [] }],
+      has_more: false,
+      limit: 100,
+      offset: 0,
+    };
+    renderPosts();
+    expect(screen.getByRole("button", { name: "Delete post" })).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "Select post" })).toBeEnabled();
+  });
+
+  it("hides published-Post deletion in the detail dialog for an Editor", () => {
+    workspace.isAdmin = false;
+    seedPublishedPost();
+    renderPosts();
+
+    fireEvent.click(screen.getByRole("button", { name: "View details" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByRole("button", { name: "Delete post" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Edit post" })).toBeVisible();
   });
 
   /**

@@ -508,7 +508,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
    * @param brandProfileId - Brand Profile UUID that will own the connection.
    */
   const handleConnect = async (platformId: string, brandProfileId: string | null) => {
-    if (!isContractPlatform(platformId) || brandProfileId === null) return;
+    if (!isAdmin || !isContractPlatform(platformId) || brandProfileId === null) return;
     setConnectingPlatform(platformId);
     setConnectError(null);
     try {
@@ -536,7 +536,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
    */
   const handleConfirmDisconnect = async () => {
     const target = disconnectTarget;
-    if (!target) return;
+    if (!isAdmin || !target) return;
     try {
       await disconnectMutation.mutateAsync(target.id);
       toast(t("Channel disconnected"), {
@@ -559,6 +559,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
    * filter selections are included and ids disconnected elsewhere are skipped.
    */
   const openBulkDisconnect = () => {
+    if (!isAdmin) return;
     const targets = accounts.filter((account) => selectedIds.has(account.id));
     if (targets.length === 0) return;
     setBulkTargets(targets);
@@ -575,7 +576,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
    */
   const handleConfirmBulkDisconnect = async () => {
     const targets = bulkTargets;
-    if (!targets || bulkRunning) return;
+    if (!isAdmin || !targets || bulkRunning) return;
     setBulkRunning(true);
     let succeeded = 0;
     let failed = 0;
@@ -652,26 +653,28 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
       description={t("Manage social accounts and publishing channels organized by Brand Profile.")}
       actions={
         <>
-          <motion.div
-            layout={lowMotion ? false : "position"}
-            layoutId={lowMotion ? undefined : "workspace-primary-action"}
-            transition={{ layout: { duration: 0.22, ease: [0.16, 1, 0.3, 1] } }}
-          >
-            <Button
-              variant="default"
-              onClick={() => setAddAccountOpen(true)}
-              disabled={brandProfiles.length === 0}
-              aria-describedby={
-                !isLoading && accounts.length === 0 && brandProfiles.length === 0
-                  ? "add-account-disabled-note"
-                  : undefined
-              }
-              className="rounded-control bg-foreground text-background font-semibold shadow-btn"
+          {isAdmin && (
+            <motion.div
+              layout={lowMotion ? false : "position"}
+              layoutId={lowMotion ? undefined : "workspace-primary-action"}
+              transition={{ layout: { duration: 0.22, ease: [0.16, 1, 0.3, 1] } }}
             >
-              <Plus className="size-4" />
-              <TopToolbarLabel label={t("Add account")} />
-            </Button>
-          </motion.div>
+              <Button
+                variant="default"
+                onClick={() => setAddAccountOpen(true)}
+                disabled={brandProfiles.length === 0}
+                aria-describedby={
+                  !isLoading && accounts.length === 0 && brandProfiles.length === 0
+                    ? "add-account-disabled-note"
+                    : undefined
+                }
+                className="rounded-control bg-foreground text-background font-semibold shadow-btn"
+              >
+                <Plus className="size-4" />
+                <TopToolbarLabel label={t("Add account")} />
+              </Button>
+            </motion.div>
+          )}
           {isAdmin && (
             <motion.div
               layout={lowMotion ? false : "position"}
@@ -886,10 +889,14 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 visibleSelectionIndeterminate={visibleSelectionIndeterminate}
                 onToggleVisibleSelection={handleToggleVisibleSelection}
                 onToggleSelection={handleToggleSelection}
-                selectionDisabled={bulkRunning}
+                selectionDisabled={bulkRunning || !isAdmin}
                 lowMotion={lowMotion}
-                onReconnect={(acct) => void handleConnect(acct.platform, acct.brand_profile_id)}
-                onDisconnect={(acct) => setDisconnectTarget(acct)}
+                onReconnect={
+                  isAdmin
+                    ? (acct) => void handleConnect(acct.platform, acct.brand_profile_id)
+                    : undefined
+                }
+                onDisconnect={isAdmin ? (acct) => setDisconnectTarget(acct) : undefined}
               />
             </div>
           )}
@@ -925,7 +932,10 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
       />
 
       {/* Connect social account dialog */}
-      <CenterDialog open={addAccountOpen} onOpenChange={setAddAccountOpen}>
+      <CenterDialog
+        open={isAdmin && addAccountOpen}
+        onOpenChange={(open) => setAddAccountOpen(isAdmin && open)}
+      >
         <CenterDialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" data-lenis-prevent>
           <CenterDialogHeader>
             <CenterDialogTitle>{t("Connect social account")}</CenterDialogTitle>
@@ -1161,14 +1171,16 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         </CenterAlertDialogContent>
       </CenterAlertDialog>
 
-      <BulkSelectionBar
-        count={selectedIds.size}
-        actionLabel={t("Disconnect")}
-        busyLabel={t("Disconnecting…")}
-        busy={bulkRunning}
-        onClear={() => setSelection((prev) => ({ ...prev, ids: new Set<string>() }))}
-        onAction={openBulkDisconnect}
-      />
+      {isAdmin && (
+        <BulkSelectionBar
+          count={selectedIds.size}
+          actionLabel={t("Disconnect")}
+          busyLabel={t("Disconnecting…")}
+          busy={bulkRunning}
+          onClear={() => setSelection((prev) => ({ ...prev, ids: new Set<string>() }))}
+          onAction={openBulkDisconnect}
+        />
+      )}
     </WorkspaceSurface>
   );
 }

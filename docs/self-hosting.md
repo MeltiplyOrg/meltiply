@@ -286,7 +286,9 @@ docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T runtime 
 
 # Break-glass: promote an existing account to Installation Owner. Use this only
 # when the Owner session and recovery path are lost; the target must already have
-# an account. It also restores that account to Workspace Admin.
+# an account. It also restores that account to Workspace Admin, clears any
+# suspension so the new Owner can authenticate, and records the ownership,
+# membership, and reactivation changes in the Workspace Audit trail.
 docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T runtime \
   node scripts/selfhost/admin.mjs promote-owner owner@example.com
 ```

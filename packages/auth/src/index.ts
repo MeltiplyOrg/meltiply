@@ -411,6 +411,10 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
     ...(email
       ? {
           emailVerification: {
+            // An invitation's callback returns to the acceptance route. The
+            // verified browser needs a session there so membership can activate
+            // without asking the invitee to sign in a second time.
+            autoSignInAfterVerification: true,
             // sendOnSignUp decouples delivery from the enforcement flag: with a
             // sender configured, sign-up always emits a verification message —
             // required in deployed environments where verification is enforced,

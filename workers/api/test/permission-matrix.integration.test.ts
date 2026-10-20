@@ -602,6 +602,71 @@ describe("role permission matrix", () => {
     expect(errorCode(await selfTransfer.json())).toBe("owner_transfer_invalid");
   });
 
+  it("validates Audit pagination and repairs an Audit entry on idempotent replay", async () => {
+    for (const query of ["limit=1.5", "offset=Infinity", "limit=0"]) {
+      const response = await request(
+        `/api/v1/workspaces/${sharedWorkspaceId}/audit?${query}`,
+        { method: "GET" },
+        "owner",
+      );
+      expect(response.status, query).toBe(400);
+      expect(errorCode(await response.json())).toBe("invalid_request");
+    }
+
+    const key = `permission-audit-replay-${crypto.randomUUID()}`;
+    const body = JSON.stringify({ color: "#1d4ed8", name: `audit-replay-${crypto.randomUUID()}` });
+    const created = await request(
+      "/api/v1/brand-profiles",
+      { body, headers: { "Idempotency-Key": key }, method: "POST" },
+      "admin",
+    );
+    expect(created.status).toBe(201);
+    const profileId = idFrom(await created.json());
+    try {
+      const auditRows = async () => {
+        const rows = await systemPoolFor(env).query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM workspace_audit_entries
+           WHERE action = 'brand_profile.created' AND target_id = $1`,
+          [profileId],
+        );
+        return rows.rows[0]?.count;
+      };
+      expect(await auditRows()).toBe("1");
+      await systemPoolFor(env).query(
+        `DELETE FROM workspace_audit_entries
+         WHERE action = 'brand_profile.created' AND target_id = $1`,
+        [profileId],
+      );
+
+      const replay = await request(
+        "/api/v1/brand-profiles",
+        { body, headers: { "Idempotency-Key": key }, method: "POST" },
+        "admin",
+      );
+      expect(replay.status).toBe(201);
+      expect(await auditRows()).toBe("1");
+      const again = await request(
+        "/api/v1/brand-profiles",
+        { body, headers: { "Idempotency-Key": key }, method: "POST" },
+        "admin",
+      );
+      expect(again.status).toBe(201);
+      expect(await auditRows()).toBe("1");
+    } finally {
+      await systemPoolFor(env).query(
+        `DELETE FROM workspace_audit_entries
+         WHERE action = 'brand_profile.created' AND target_id = $1`,
+        [profileId],
+      );
+      await systemPoolFor(env).query("DELETE FROM brand_profiles WHERE id = $1", [profileId]);
+      await systemPoolFor(env).query(
+        `DELETE FROM idempotency_keys
+         WHERE org_id = $1 AND operation = 'brand-profile.create' AND idempotency_key = $2`,
+        [sharedWorkspaceId, key],
+      );
+    }
+  });
+
   it("previews invitations and rejects used, expired, revoked, and mismatched tokens", async () => {
     const invitationId = crypto.randomUUID();
     const token = `permission-preview-${crypto.randomUUID().replaceAll("-", "")}`;

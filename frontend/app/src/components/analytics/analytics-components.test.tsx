@@ -201,7 +201,12 @@ describe("platform comparison chart", () => {
         unsupportedPlatforms={["tiktok"]}
       />,
     );
-    const table = within(screen.getByRole("table"));
+    const hiddenTable = screen.getByRole("table");
+    // sr-only belongs on a block wrapper: table layout ignores its 1px sizing
+    // and can leave the caption visibly floating.
+    expect(hiddenTable.closest(".sr-only")).not.toBeNull();
+    expect(hiddenTable).not.toHaveClass("sr-only");
+    const table = within(hiddenTable);
     expect(table.getByRole("rowheader", { name: "Instagram" })).toBeInTheDocument();
     expect(table.getByText("300")).toBeInTheDocument();
     expect(table.queryByText("TikTok")).not.toBeInTheDocument();

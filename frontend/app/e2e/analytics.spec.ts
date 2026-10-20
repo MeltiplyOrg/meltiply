@@ -66,7 +66,7 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page.getByText(/Metrics are cumulative snapshots/)).toBeVisible();
 
   // The chart exposes the same values as a table and omits unsupported TikTok.
-  const chartTable = page.locator("table.sr-only");
+  const chartTable = page.locator("div.sr-only table");
   await expect(chartTable).toContainText("Instagram");
   await expect(chartTable).toContainText("3,820");
   await expect(chartTable).toContainText("Threads");

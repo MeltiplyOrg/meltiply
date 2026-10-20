@@ -184,25 +184,29 @@ export function PlatformMetricChart({
           />
         </EvilBarChart>
       </div>
-      <table className="sr-only">
-        <caption>{t("Platform comparison")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t("Platform")}</th>
-            <th scope="col">{metricLabel}</th>
-            <th scope="col">{t("Published destinations")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row) => (
-            <tr key={row.platform}>
-              <th scope="row">{row.label}</th>
-              <td>{formatAnalyticsInteger(row.metric, language)}</td>
-              <td>{formatAnalyticsInteger(row.destinations, language)}</td>
+      {/* The hidden table needs a block wrapper: table layout ignores sr-only's
+          1px sizing, leaving its caption visually exposed in some browsers. */}
+      <div className="sr-only">
+        <table>
+          <caption>{t("Platform comparison")}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{t("Platform")}</th>
+              <th scope="col">{metricLabel}</th>
+              <th scope="col">{t("Published destinations")}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.map((row) => (
+              <tr key={row.platform}>
+                <th scope="row">{row.label}</th>
+                <td>{formatAnalyticsInteger(row.metric, language)}</td>
+                <td>{formatAnalyticsInteger(row.destinations, language)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {awaiting.length > 0 && (
         <p className="text-xs text-ink-3">
           {t("Awaiting first sync: {platforms}", {

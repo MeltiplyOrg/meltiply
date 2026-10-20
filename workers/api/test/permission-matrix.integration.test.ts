@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
+
 import { Effect } from "effect";
 import type { JwtIdentity } from "@meltiply/auth";
-import { afterAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import type { ApiWorkerEnv } from "../src/env";
 import { createApiApp } from "../src/app";
@@ -130,6 +132,44 @@ function errorCode(value: unknown): string | undefined {
 }
 
 /**
+ * Reads the Seat count from an installation response.
+ *
+ * @param value - Parsed JSON response.
+ * @returns The number of Seats in use.
+ * @throws Error when the payload does not carry a numeric `seats_used`.
+ */
+function seatsUsedFrom(value: unknown): number {
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    "seats_used" in value &&
+    typeof value.seats_used === "number"
+  ) {
+    return value.seats_used;
+  }
+  throw new Error("Installation response must include a numeric seats_used");
+}
+
+/**
+ * Reads Audit entries from an audit response.
+ *
+ * @param value - Parsed JSON response.
+ * @returns The Audit entries.
+ * @throws Error when the payload does not carry an entries array.
+ */
+function auditEntriesFrom(value: unknown): { action: string; target_id: string }[] {
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    "entries" in value &&
+    Array.isArray(value.entries)
+  ) {
+    return value.entries;
+  }
+  throw new Error("Audit response must include an entries array");
+}
+
+/**
  * Reads a string `id` from a decoded response object.
  *
  * @param value - Parsed JSON response.
@@ -190,6 +230,12 @@ async function createTemporaryProfile(as: "admin" | "owner") {
   expect(response.status).toBe(201);
   return { id: idFrom(await response.json()) };
 }
+
+beforeAll(async () => {
+  // A manually rerun suite shares the local database with earlier attempts;
+  // clear rate-limit buckets so repeat runs observe authorization, not 429s.
+  await systemPoolFor(env).query("DELETE FROM auth_rate_limits");
+});
 
 afterAll(async () => {
   await systemPoolFor(env).query(
@@ -397,6 +443,17 @@ describe("role permission matrix", () => {
         )
       ).status,
     ).toBe(200);
+    const resent = await request(
+      `/api/v1/workspaces/${sharedWorkspaceId}/invitations/${invitationId}/resend`,
+      {
+        headers: { "Idempotency-Key": `permission-admin-resend-${invitationId}` },
+        method: "POST",
+      },
+      "admin",
+    );
+    expect(resent.status).toBe(200);
+    expect(await resent.json()).toMatchObject({ id: invitationId, status: "pending" });
+    expect(mailed.filter((entry) => entry.to === inviteEmail)).toHaveLength(2);
     expect(
       (
         await request(
@@ -531,9 +588,114 @@ describe("role permission matrix", () => {
       expect(response.status).toBe(409);
       expect(errorCode(await response.json())).toBe("owner_self_removal");
     }
+
+    const selfTransfer = await request(
+      "/api/v1/installation/ownership-transfer",
+      {
+        body: JSON.stringify({ password: "wrong", target_user_id: ownerId }),
+        headers: { "Idempotency-Key": "owner-self-transfer" },
+        method: "POST",
+      },
+      "owner",
+    );
+    expect(selfTransfer.status).toBe(409);
+    expect(errorCode(await selfTransfer.json())).toBe("owner_transfer_invalid");
+  });
+
+  it("previews invitations and rejects used, expired, revoked, and mismatched tokens", async () => {
+    const invitationId = crypto.randomUUID();
+    const token = `permission-preview-${crypto.randomUUID().replaceAll("-", "")}`;
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    const previewPath = `/api/v1/workspace-invitations/${token}`;
+    await systemPoolFor(env).query(
+      `DELETE FROM workspace_invitations
+       WHERE org_id = $1 AND lower(email) = 'gamma@meltiply.local'
+         AND accepted_at IS NULL AND revoked_at IS NULL`,
+      [sharedWorkspaceId],
+    );
+    await systemPoolFor(env).query(
+      `INSERT INTO workspace_invitations
+         (id, org_id, email, role, invited_by, token_hash, expires_at)
+       VALUES ($1, $2, 'gamma@meltiply.local', 'viewer', $3, $4, now() + interval '1 day')`,
+      [invitationId, sharedWorkspaceId, ownerId, tokenHash],
+    );
+    try {
+      const pending = await request(previewPath, { method: "GET" });
+      expect(pending.status).toBe(200);
+      await expect(pending.json()).resolves.toMatchObject({
+        email: "gamma@meltiply.local",
+        role: "viewer",
+        status: "pending",
+        workspace_name: expect.any(String),
+      });
+
+      expect((await request("/api/v1/workspace-invitations/short", { method: "GET" })).status).toBe(
+        400,
+      );
+      expect(
+        (await request(`/api/v1/workspace-invitations/${"x".repeat(32)}`, { method: "GET" }))
+          .status,
+      ).toBe(404);
+
+      const mismatch = await request(`${previewPath}/accept`, { method: "POST" }, "admin");
+      expect(mismatch.status).toBe(403);
+      expect(errorCode(await mismatch.json())).toBe("invitation_email_mismatch");
+
+      await systemPoolFor(env).query(
+        `UPDATE workspace_invitations SET expires_at = now() - interval '1 day' WHERE id = $1`,
+        [invitationId],
+      );
+      await expect((await request(previewPath, { method: "GET" })).json()).resolves.toMatchObject({
+        status: "expired",
+      });
+      const expired = await request(`${previewPath}/accept`, { method: "POST" }, "editor");
+      expect(expired.status).toBe(410);
+      expect(errorCode(await expired.json())).toBe("invitation_expired");
+
+      await systemPoolFor(env).query(
+        `UPDATE workspace_invitations
+         SET expires_at = now() + interval '1 day', revoked_at = now()
+         WHERE id = $1`,
+        [invitationId],
+      );
+      await expect((await request(previewPath, { method: "GET" })).json()).resolves.toMatchObject({
+        status: "revoked",
+      });
+      const revoked = await request(`${previewPath}/accept`, { method: "POST" }, "editor");
+      expect(revoked.status).toBe(410);
+      expect(errorCode(await revoked.json())).toBe("invitation_revoked");
+
+      await systemPoolFor(env).query(
+        `UPDATE workspace_invitations SET revoked_at = NULL WHERE id = $1`,
+        [invitationId],
+      );
+      const accepted = await request(`${previewPath}/accept`, { method: "POST" }, "editor");
+      expect(accepted.status).toBe(200);
+      await expect(accepted.json()).resolves.toMatchObject({
+        member: { user_id: editorId },
+      });
+      await expect((await request(previewPath, { method: "GET" })).json()).resolves.toMatchObject({
+        status: "accepted",
+      });
+      const replay = await request(`${previewPath}/accept`, { method: "POST" }, "editor");
+      expect(replay.status).toBe(200);
+      await expect(replay.json()).resolves.toMatchObject({
+        member: { user_id: editorId },
+      });
+    } finally {
+      await systemPoolFor(env).query("DELETE FROM workspace_invitations WHERE id = $1", [
+        invitationId,
+      ]);
+    }
   });
 
   it("suspends, blocks, reactivates, and hard-deletes an invited account", async () => {
+    const seatsUsed = async () => {
+      const response = await request("/api/v1/installation", { method: "GET" }, "owner");
+      expect(response.status).toBe(200);
+      return seatsUsedFrom(await response.json());
+    };
+    const baselineSeats = await seatsUsed();
     await systemPoolFor(env).query(
       `INSERT INTO "user" (id, name, email, "emailVerified")
        VALUES ($1, 'Invitee', $2, TRUE)
@@ -555,6 +717,7 @@ describe("role permission matrix", () => {
       "owner",
     );
     expect(invited.status).toBe(201);
+    expect(await seatsUsed()).toBe(baselineSeats + 1);
     const invitationId = idFrom(await invited.json());
     const message = mailed.find((entry) => entry.to === inviteeEmail);
     expect(message).toBeDefined();
@@ -567,6 +730,7 @@ describe("role permission matrix", () => {
       "invitee",
     );
     expect(accepted.status).toBe(200);
+    expect(await seatsUsed()).toBe(baselineSeats + 1);
     const memberId = memberUserIdFrom(await accepted.json());
 
     expect(
@@ -582,6 +746,7 @@ describe("role permission matrix", () => {
         )
       ).status,
     ).toBe(200);
+    expect(await seatsUsed()).toBe(baselineSeats);
     const blocked = await request("/api/v1/users/me", { method: "GET" }, "invitee");
     expect(blocked.status).toBe(403);
     expect(errorCode(await blocked.json())).toBe("account_suspended");
@@ -598,6 +763,7 @@ describe("role permission matrix", () => {
         )
       ).status,
     ).toBe(200);
+    expect(await seatsUsed()).toBe(baselineSeats + 1);
     expect((await request("/api/v1/users/me", { method: "GET" }, "invitee")).status).toBe(200);
 
     expect(
@@ -613,6 +779,19 @@ describe("role permission matrix", () => {
         )
       ).status,
     ).toBe(204);
+    expect(await seatsUsed()).toBe(baselineSeats);
+    const audit = await request(
+      `/api/v1/workspaces/${sharedWorkspaceId}/audit`,
+      { method: "GET" },
+      "owner",
+    );
+    expect(audit.status).toBe(200);
+    const auditBody = auditEntriesFrom(await audit.json());
+    expect(
+      auditBody.filter((entry) => entry.target_id === memberId).map((entry) => entry.action),
+    ).toEqual(
+      expect.arrayContaining(["account.suspended", "account.reactivated", "account.deleted"]),
+    );
     expect(
       (
         await systemPoolFor(env).query<{ count: string }>(

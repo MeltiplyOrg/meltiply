@@ -190,6 +190,25 @@ describe("settings administration surface", () => {
     expect(screen.getByText(/alpha@meltiply.local/)).toBeInTheDocument();
   });
 
+  it("hides installation lifecycle actions from a non-owner admin", () => {
+    const original = { ...workspace, user: workspace.user };
+    workspace.isInstallationOwner = false;
+    workspace.user = { ...workspace.user, isInstallationOwner: false };
+    try {
+      renderSettings();
+
+      expect(screen.getByRole("button", { name: "Invite" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Audit" })).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Remove" }).length).toBeGreaterThan(0);
+      expect(screen.queryByRole("button", { name: "Transfer ownership" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Suspend" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Reactivate" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    } finally {
+      Object.assign(workspace, original);
+    }
+  });
+
   it("redirects a caller without administration capability to posts", () => {
     const original = workspace.canManageSettings;
     workspace.canManageSettings = false;

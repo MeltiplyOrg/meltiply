@@ -6,7 +6,7 @@ import {
   type QueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
-import { Effect, Result } from "effect";
+import { Cause, Effect, Exit } from "effect";
 
 import {
   ApiClientService,
@@ -456,6 +456,73 @@ export interface BulkDeleteOutcome {
  */
 const BULK_DELETE_CONCURRENCY = 4;
 
+/** One Post deletion addressed by its owning Brand Profile. */
+export interface DeletePostTarget {
+  id: string;
+  brandProfileId: string;
+}
+
+/** Extracts a retry-facing message from a typed failure, defect, or interruption. */
+function deletionFailureMessage(cause: unknown): string {
+  if (cause instanceof Error) return cause.message;
+  if (
+    typeof cause === "object" &&
+    cause !== null &&
+    "message" in cause &&
+    typeof cause.message === "string"
+  ) {
+    return cause.message;
+  }
+  return String(cause);
+}
+
+/**
+ * Deletes a batch of Posts with bounded concurrency and per-item isolation.
+ *
+ * Every request uses the batch idempotency key plus the target position, so a
+ * retried batch reuses the same keys. `Effect.exit` captures both typed API
+ * failures and transport defects: a rejected request becomes one failed item
+ * instead of aborting the batch and discarding deletions that already
+ * committed. The caller receives successful identities and retryable failures
+ * as data.
+ *
+ * @param deleteOne Operation issuing one authenticated Post deletion.
+ * @param targets Posts to delete, in selection order.
+ * @param idempotencyKey Stable key for this batch.
+ * @returns Effect resolving to successful ids and per-target failures.
+ */
+export function runBulkDelete(
+  deleteOne: (
+    target: DeletePostTarget,
+    idempotencyKey: string,
+  ) => Effect.Effect<unknown, ApiClientError, WorkspaceService>,
+  targets: readonly DeletePostTarget[],
+  idempotencyKey: string,
+): Effect.Effect<BulkDeleteOutcome, never, WorkspaceService> {
+  return Effect.forEach(
+    targets,
+    (target, index) => Effect.exit(deleteOne(target, `${idempotencyKey}:${index}`)),
+    { concurrency: BULK_DELETE_CONCURRENCY },
+  ).pipe(
+    Effect.map((exits) => {
+      const deletedIds: string[] = [];
+      const failed: BulkDeleteFailure[] = [];
+      exits.forEach((exit, index) => {
+        const target = targets[index]!;
+        if (Exit.isSuccess(exit)) {
+          deletedIds.push(target.id);
+        } else {
+          failed.push({
+            id: target.id,
+            message: deletionFailureMessage(Cause.squash(exit.cause)),
+          });
+        }
+      });
+      return { deletedIds, failed };
+    }),
+  );
+}
+
 /**
  * TanStack mutation hook deleting a batch of Posts with bounded concurrency and
  * one cache invalidation after the batch settles.
@@ -472,34 +539,12 @@ const BULK_DELETE_CONCURRENCY = 4;
 export function useDeletePostsBatch(scope: SessionScope) {
   return useIdempotentMutation(
     scope,
-    (
-      api,
-      variables: { targets: readonly { id: string; brandProfileId: string }[] },
-      idempotencyKey,
-    ) =>
-      Effect.forEach(
+    (api, variables: { targets: readonly DeletePostTarget[] }, idempotencyKey) =>
+      runBulkDelete(
+        (target, itemKey) =>
+          api.deletePost(target.id, target.brandProfileId, { idempotencyKey: itemKey }),
         variables.targets,
-        (target, index) =>
-          Effect.result(
-            api.deletePost(target.id, target.brandProfileId, {
-              idempotencyKey: `${idempotencyKey}:${index}`,
-            }),
-          ),
-        { concurrency: BULK_DELETE_CONCURRENCY },
-      ).pipe(
-        Effect.map((results) => {
-          const deletedIds: string[] = [];
-          const failed: BulkDeleteFailure[] = [];
-          results.forEach((result, index) => {
-            const target = variables.targets[index]!;
-            if (Result.isSuccess(result)) {
-              deletedIds.push(target.id);
-            } else {
-              failed.push({ id: target.id, message: result.failure.message });
-            }
-          });
-          return { deletedIds, failed };
-        }),
+        idempotencyKey,
       ),
     mutationInvalidations.deletePost,
   );

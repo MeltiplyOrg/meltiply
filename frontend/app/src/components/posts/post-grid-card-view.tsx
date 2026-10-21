@@ -25,6 +25,7 @@ export interface PostGridCardViewProps extends PostSelectionProps {
   canDelete: (post: PostRow) => boolean;
   onEdit: (postId: string) => void;
   onDelete: (postId: string) => void;
+  canCreate: boolean;
   onCreatePost: () => void;
   onViewDetails: (postId: string) => void;
 }
@@ -45,6 +46,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
   canDelete,
   onEdit,
   onDelete,
+  canCreate,
   onCreatePost,
   onViewDetails,
   selectedIds,
@@ -95,10 +97,12 @@ export const PostGridCardView = React.memo(function PostGridCardView({
         <EmptyDescription>
           {t("Try adjusting your search query, status, or date range filters.")}
         </EmptyDescription>
-        <Button variant="outline" onClick={onCreatePost} className="mt-3">
-          <Plus className="size-3.5" />
-          {t("Create post")}
-        </Button>
+        {canCreate && (
+          <Button variant="outline" onClick={onCreatePost} className="mt-3">
+            <Plus className="size-3.5" />
+            {t("Create post")}
+          </Button>
+        )}
       </Empty>
     );
   return (

@@ -992,7 +992,7 @@ export function PostsView({
         onWeekNavigate={handleWeekNavigate}
         onScheduleDate={handleScheduleCalendarDate}
         onViewDetails={handleViewDetails}
-        canSchedule={selectedBrandProfileId !== null}
+        canSchedule={canWriteContent && selectedBrandProfileId !== null}
         selectionActive={selectedIds.size > 0}
       />
     ) : viewMode === "grid" ? (
@@ -1002,6 +1002,7 @@ export function PostsView({
         gridColumnClass={gridColumnClass}
         brandProfiles={brandProfiles}
         canMutate={canWriteContent && selectedBrandProfileId !== null}
+        canCreate={canWriteContent}
         canDelete={canDeletePost}
         onEdit={handleEditPost}
         onDelete={handleDeletePostAction}
@@ -1021,6 +1022,7 @@ export function PostsView({
         brandProfiles={brandProfiles}
         groupBy={groupBy}
         hiddenColumns={hiddenColumns}
+        canCreate={canWriteContent}
         onCreatePost={handleCreatePost}
         onSortChange={setSortKey}
         onViewDetails={handleViewDetails}
@@ -1046,10 +1048,12 @@ export function PostsView({
         )
       }
       actions={
-        <Button variant="default" onClick={handleCreatePost}>
-          <Plus className="size-4" />
-          {t("Create post")}
-        </Button>
+        canWriteContent ? (
+          <Button variant="default" onClick={handleCreatePost}>
+            <Plus className="size-4" />
+            {t("Create post")}
+          </Button>
+        ) : undefined
       }
     >
       {queryError && (
@@ -1120,7 +1124,7 @@ export function PostsView({
         detail={detailSurface}
         composer={composerSurface}
         headerAction={
-          composerOpen && !detailPost ? undefined : (
+          canWriteContent && !(composerOpen && !detailPost) ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -1135,7 +1139,7 @@ export function PostsView({
               </TooltipTrigger>
               <TooltipContent>{t("New Post")}</TooltipContent>
             </Tooltip>
-          )
+          ) : undefined
         }
       />
 

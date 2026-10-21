@@ -32,6 +32,7 @@ export interface PostTableViewProps extends PostSelectionProps {
   hiddenColumns: ReadonlySet<string>;
   onSortChange: (key: PostSortKey) => void;
   onViewDetails: (postId: string) => void;
+  canCreate: boolean;
   onCreatePost: () => void;
 }
 
@@ -320,6 +321,7 @@ export const PostTableView = React.memo(function PostTableView({
   hiddenColumns,
   onSortChange,
   onViewDetails,
+  canCreate,
   onCreatePost,
   selectedIds,
   onToggleSelection,
@@ -501,7 +503,7 @@ export const PostTableView = React.memo(function PostTableView({
                     </Fragment>
                   );
                 })}
-          {posts.length > 0 && (
+          {canCreate && posts.length > 0 && (
             <TableRow>
               <TableCell colSpan={columnCount}>
                 <Button
@@ -520,10 +522,12 @@ export const PostTableView = React.memo(function PostTableView({
       {!isLoading && posts.length === 0 && (
         <Empty className="sticky left-0 min-h-60 w-full gap-3.5 border-0 px-4">
           <EmptyDescription>{t("No posts found matching the active filters.")}</EmptyDescription>
-          <Button variant="outline" onClick={onCreatePost}>
-            <Plus className="size-3.5" />
-            {t("Create post")}
-          </Button>
+          {canCreate && (
+            <Button variant="outline" onClick={onCreatePost}>
+              <Plus className="size-3.5" />
+              {t("Create post")}
+            </Button>
+          )}
         </Empty>
       )}
     </div>

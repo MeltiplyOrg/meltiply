@@ -1,21 +1,19 @@
-import { lazy, Suspense, useState, useCallback, useMemo } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { useState, useCallback, useMemo } from "react";
 import { useWorkspace } from "@/context/workspace.context";
 import { Button } from "@meltiply/ui/button";
 import { WorkspaceSurface } from "@/components/layout/workspace-surface";
 import { BulkSelectionBar } from "@/components/layout/bulk-selection-bar";
-import { TopToolbarLabel } from "@/components/layout/top-toolbar";
-import { AlertCircle, Plus, ArrowLeft } from "lucide-react";
-import { RouteFallback } from "@/components/layout/route-fallback";
+import { AlertCircle, Plus, Trash2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@meltiply/ui/tooltip";
+
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useCalendar, useCancelDistribution, useDeletePost, usePosts } from "@/lib/queries";
-import { useI18n } from "@/lib/i18n";
+import { RollingCount } from "@meltiply/ui/rolling-count";
+import { Trans, useI18n } from "@/lib/i18n";
 import { useSearchParams } from "@/lib/navigation";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
 import { toast } from "@meltiply/ui/toast";
 import { Alert } from "@meltiply/ui/alert";
 import { useLatchedValue } from "@meltiply/ui/use-latched-value";
-import { BrandProfileDialog } from "@/components/workspace/brand-profile-dialog";
 import {
   CenterAlertDialog,
   CenterAlertDialogContent,
@@ -27,20 +25,16 @@ import {
   CenterAlertDialogCancel,
 } from "@meltiply/ui/center-alert-dialog";
 import type { ChannelIntegration, MediaItem } from "@/api/types";
-import type {
-  BrandProfile,
-  CalendarEvent,
-  Distribution,
-  Post,
-  PostQueryParams,
-  PostTarget,
-} from "@/types";
+import type { CalendarEvent, Distribution, Post, PostQueryParams, PostTarget } from "@/types";
 
-import { PostListTableView } from "./post-list-table-view";
+import { PostTableView } from "./post-table-view";
 import { PostCalendarGridView } from "./post-calendar-grid-view";
 import { PostGridCardView } from "./post-grid-card-view";
+import type { PostGroupBy } from "./post-groups";
 import { CalendarDateDetailDialog } from "./calendar-date-detail-dialog";
-import { PostDetailDialog } from "./post-detail-dialog";
+import { PostsDrawer } from "./posts-drawer";
+import { usePostComposerSurface } from "./post-composer-surface";
+import { usePostDetailSurface } from "./post-detail-surface";
 import { PostsToolbar } from "./posts-toolbar";
 import {
   filterAndSortPosts,
@@ -65,12 +59,6 @@ import type {
   PostSelectionEntry,
   ChannelMediaItem,
 } from "./types";
-
-/** Keep editing and upload dependencies out of list, grid, and calendar startup. */
-const Composer = lazy(async () => {
-  const { Composer } = await import("@/components/composer/composer");
-  return { default: Composer };
-});
 
 /** Page size for the Post list, which every view mode projects into rows. */
 const POSTS_PAGE_LIMIT = 100;
@@ -142,8 +130,8 @@ function toChannelEntry(
 }
 
 /**
- * Projects a durable Post into exactly one row, so list, grid, calendar, and
- * detail all agree on identity. Channel entries follow the Post's saved target
+ * Projects a durable Post into one collection row, so Table, Grid, Calendar,
+ * and Details agree on identity. Channel entries follow the Post's saved target
  * order first and then any outcome without a target, and the row's display
  * status is aggregated from those outcomes only — never from `Post.status`,
  * which is a lifecycle marker rather than a global success flag.
@@ -155,12 +143,17 @@ function toChannelEntry(
 function toPostRow(post: Post, integrationById: IntegrationById): PostRow {
   const channels: PostDetailItem[] = [];
   const seen = new Set<string>();
+  const distributionByAccount = new Map<string, Distribution>();
+  for (const distribution of post.distributions) {
+    const accountId = distribution.platform_account_id;
+    if (accountId && !distributionByAccount.has(accountId)) {
+      distributionByAccount.set(accountId, distribution);
+    }
+  }
   for (const target of post.targets) {
     if (seen.has(target.platform_account_id)) continue;
     seen.add(target.platform_account_id);
-    const distribution = post.distributions.find(
-      (d) => d.platform_account_id === target.platform_account_id,
-    );
+    const distribution = distributionByAccount.get(target.platform_account_id);
     channels.push(toChannelEntry(post, target, distribution, integrationById));
   }
   for (const distribution of post.distributions) {
@@ -243,48 +236,32 @@ function toCalendarRows(
 }
 
 /**
- * Unified Posts section component managing List, Calendar, Grid, and Composer views.
+ * Unified Posts page over one durable Post pipeline and three real collection
+ * views. `usePosts` supplies each Post, its ordered attachments, targets, and
+ * independent Channel outcomes; `useCalendar` folds events by Post identity
+ * without merging or splitting compositions. Status filters derive from those
+ * outcomes; provider status is observed, never locally edited.
  *
- * Data flows through the contract hooks only: `usePosts` feeds list/grid — one
- * row per durable `Post.id` carrying its ordered attachments, saved per-Channel
- * targets, and independent outcomes — and `useCalendar` feeds the month grid,
- * folding its events back onto `post_id` so the calendar never splits a Post
- * across days or regroups two Posts into one. `post.status === "draft"` scopes
- * the draft filter to stored draft Posts; the scheduled, published, and failed
- * buckets derive from each row's Channel outcomes. Destructive row actions
- * confirm through `CenterAlertDialog` and dispatch `useDeletePost` or
- * `useCancelDistribution`; creation uses the shared foreground primary action.
+ * Table and Grid share Post selection and action callbacks;
+ * Calendar day detail uses the same identity map. Selection snapshots each
+ * owner's `brand_profile_id`, survives view/filter/group changes within its
+ * scope, clears on scope changes, and is pruned when settled data no longer
+ * contains an entry. Bulk deletion confirms a fixed target snapshot, removes
+ * successes immediately, retains failures for retry, and reports real counts.
  *
- * Multi-select lives on every surface: the table's header/row checkboxes, the
- * grid's select-all strip and card checkboxes, and the calendar's day-detail
- * rows all toggle one identity map keyed by `Post.id`, so a selection survives
- * List/Grid/Calendar and filter changes in the same scope. Each selected entry
- * snapshots its owning `brand_profile_id`, which authorizes deletion even in
- * the aggregate view; scope switches clear the map and settled query data
- * prunes ids that no longer load. The shared `BulkSelectionBar` opens a
- * snapshot confirmation that deletes sequentially — successes drop out
- * immediately, failures stay selected, and the toast reports real counts.
- * `WorkspaceSurface` aligns the header, toolbar, and working area with other
- * operational routes so navigation can preserve their geometry.
+ * The view renders directly with no snapshot or route-transition layer.
+ * Composer code loads only when editing begins; its local Suspense boundary
+ * leaves navigation and collection controls usable while that chunk downloads.
  *
- * The working area is always wrapped in the same `AnimatePresence`/`motion.div` keyed by
- * `viewMode`, so toggling the low-motion preference (manual or OS) never remounts the
- * subtree: the Composer keeps its local draft state and focus in both directions. Low
- * motion disables movement through props instead of swapping element types — `initial`
- * is suppressed, the exit is opacity-only, and the transition duration is zero — so view
- * switches settle immediately with no lingering exit content, while normal motion keeps
- * the wait-mode crossfade.
- * Composer code loads only when editing begins; its local Suspense boundary keeps
- * the workspace navigation and Posts controls usable while that chunk downloads.
- *
- * @param props - Initial view mode, default status filter, the `Post.id` to edit,
- * and navigation callback.
- * @returns Complete unified Posts management view with responsive controls.
+ * @param props - Initial view mode, default status filter, Post id to edit,
+ * and workspace navigation callback.
+ * @returns Complete unified Posts page with responsive collection controls.
  */
 export function PostsView({
-  initialViewMode = "list",
+  initialViewMode = "table",
   initialStatusFilter = "all",
   initialPostId,
+  initialComposerOpen = false,
   onNavigate,
 }: PostsViewProps) {
   const {
@@ -294,26 +271,52 @@ export function PostsView({
     setSelectedBrandProfileId,
     selectedPlatforms,
     setSelectedPlatforms,
-    isAdmin,
     canWriteContent,
+    isAdmin,
   } = useWorkspace();
   const scope = useSessionScope();
   const { t } = useI18n();
   const searchParams = useSearchParams();
-  const { lowMotion } = useMotionPreference();
 
   const [viewMode, setViewMode] = useState<PostViewMode>(initialViewMode);
-  const [statusFilter, setStatusFilter] = useState<PostStatusFilter>(initialStatusFilter);
-  const profileFilter = selectedBrandProfileId ?? "all";
+  const [statusFilter, setStatusFilter] = useState<Exclude<PostStatusFilter, "all">[]>(() =>
+    initialStatusFilter === "all" ? [] : [initialStatusFilter],
+  );
+  const [profileFilter, setProfileFilter] = useState<string[]>(() =>
+    selectedBrandProfileId ? [selectedBrandProfileId] : [],
+  );
+  const [previousProfileId, setPreviousProfileId] = useState(selectedBrandProfileId);
+  if (previousProfileId !== selectedBrandProfileId) {
+    setPreviousProfileId(selectedBrandProfileId);
+    setProfileFilter(selectedBrandProfileId ? [selectedBrandProfileId] : []);
+  }
+  /**
+   * One selected profile remains the mutation/composer owner. Zero or several
+   * profiles query the aggregate scope and filter locally without inventing a
+   * multi-owner Post; external scope changes replace this collection selection.
+   */
+  const handleProfileFilterChange = useCallback(
+    (profiles: string[]) => {
+      const owner = profiles.length === 1 ? profiles[0] : null;
+      setProfileFilter(profiles);
+      setPreviousProfileId(owner);
+      setSelectedBrandProfileId(owner);
+    },
+    [setSelectedBrandProfileId],
+  );
   const [dateFilter, setDateFilter] = useState<string>("all");
-  const [editingProfile, setEditingProfile] = useState<BrandProfile | null>(null);
-  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortKey, setSortKey] = useState<PostSortKey>("date-desc");
   const [columns, setColumns] = useState<number>(4);
+  const [groupBy, setGroupBy] = useState<PostGroupBy>("status");
+  const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<string>>(new Set());
   const [editingPostId, setEditingPostId] = useState<string | undefined>(initialPostId);
   const [schedulingDate, setSchedulingDate] = useState<Date | undefined>(undefined);
   const [composerKey, setComposerKey] = useState<number>(0);
+  /** Composition lives in the shared drawer, seeded by a compose deep link. */
+  const [composerOpen, setComposerOpen] = useState<boolean>(
+    initialComposerOpen || Boolean(initialPostId),
+  );
 
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
@@ -341,20 +344,29 @@ export function PostsView({
     initialViewMode,
     initialStatusFilter,
     initialPostId,
+    initialComposerOpen,
   });
 
   if (
     prevInputs.initialViewMode !== initialViewMode ||
     prevInputs.initialStatusFilter !== initialStatusFilter ||
-    prevInputs.initialPostId !== initialPostId
+    prevInputs.initialPostId !== initialPostId ||
+    prevInputs.initialComposerOpen !== initialComposerOpen
   ) {
-    setPrevInputs({ initialViewMode, initialStatusFilter, initialPostId });
+    const compositionChanged =
+      prevInputs.initialPostId !== initialPostId ||
+      prevInputs.initialComposerOpen !== initialComposerOpen;
+    setPrevInputs({ initialViewMode, initialStatusFilter, initialPostId, initialComposerOpen });
     if (initialViewMode) setViewMode(initialViewMode);
-    if (initialStatusFilter) setStatusFilter(initialStatusFilter);
-    if (initialPostId) {
+    if (initialStatusFilter) {
+      setStatusFilter(initialStatusFilter === "all" ? [] : [initialStatusFilter]);
+    }
+    if (compositionChanged) {
       setEditingPostId(initialPostId);
+      setSchedulingDate(undefined);
+      setDetailPostId(null);
       setComposerKey((k) => k + 1);
-      setViewMode("composer");
+      setComposerOpen(initialComposerOpen || Boolean(initialPostId));
     }
   }
 
@@ -386,7 +398,7 @@ export function PostsView({
     };
   }, [calendarMonth]);
 
-  const isDraftFilter = statusFilter === "draft";
+  const isDraftFilter = statusFilter.length === 1 && statusFilter[0] === "draft";
   const isCalendarMode = viewMode === "calendar";
 
   /**
@@ -425,7 +437,7 @@ export function PostsView({
 
   /**
    * Raw Post rows for the active mode: calendar events folded onto `post_id`
-   * for the month grid, or one row per loaded Post for list and grid. Drafts are
+   * for the month grid, or one row per loaded Post in Table and Grid. Drafts are
    * stored Posts, so the draft filter needs no client-side reconstruction of
    * "content without outcomes".
    */
@@ -436,9 +448,29 @@ export function PostsView({
     return loadedPosts.map((post) => toPostRow(post, integrationById));
   }, [isCalendarMode, calendarQuery.data, loadedPosts, postById, integrationById]);
 
+  /** True when a row already reached a Provider and deletion is Admin-only. */
+  const hasPublishedDistribution = useCallback(
+    (row: PostRow) =>
+      row.channels.some((channel) => {
+        const status = channel.distribution?.status ?? channel.status;
+        return status === "published" || status === "awaiting_provider";
+      }),
+    [],
+  );
+
+  /**
+   * Shared by single delete, detail delete, and bulk selection. Viewers never
+   * delete; Editors may delete drafts and scheduled Posts; Admins may also
+   * delete Posts with published work.
+   */
+  const canDeletePost = useCallback(
+    (row: PostRow) => canWriteContent && (isAdmin || !hasPublishedDistribution(row)),
+    [canWriteContent, hasPublishedDistribution, isAdmin],
+  );
+
   /**
    * Distinct Brand Profile ids carried by the rendered Post rows, forwarded to
-   * the toolbar's `BrandProfileSelect` as `unresolvedProfileIds`. The select
+   * the toolbar's profile checklist as `unresolvedProfileIds`. The checklist
    * keeps only ids missing from `brandProfiles` and renders them as name-only
    * "Unknown profile" rows, so posts whose owning profile was deleted or left
    * scope keep their profile selectable instead of silently dropping out of the
@@ -520,34 +552,13 @@ export function PostsView({
   }
 
   /**
-   * True when this row has a distribution that makes deletion Admin-only.
-   * Mirrors the server rule for published and provider-claimed outcomes.
-   */
-  const hasPublishedDistribution = useCallback(
-    (row: PostRow) =>
-      row.channels.some((channel) => {
-        const status = channel.distribution?.status ?? channel.status;
-        return status === "published" || status === "awaiting_provider";
-      }),
-    [],
-  );
-
-  /**
-   * Role/published-state predicate shared by single delete, detail delete, and
-   * bulk selection. Viewers never delete; Editors may delete drafts and
-   * scheduled Posts; Admins may also delete Posts with published work.
-   */
-  const canDeletePost = useCallback(
-    (row: PostRow) => canWriteContent && (isAdmin || !hasPublishedDistribution(row)),
-    [canWriteContent, hasPublishedDistribution, isAdmin],
-  );
-
-  /**
-   * Requests deletion for a Post row the caller may delete. The contract's Post
-   * deletion soft-deletes the composition and stops its pending Channels; the
-   * confirmation states plainly that live platform copies are not removed. The
-   * owning profile is captured from the row at request time — never the active
-   * scope — so aggregate-view deletions resolve the right profile.
+   * Requests deletion for a Post row. The contract's Post deletion soft-deletes
+   * the composition and stops its pending Channels, so it is offered even for a
+   * fully published Post and the confirmation states plainly that live platform
+   * copies are not removed. The owning profile is captured from the row at
+   * request time — never the active scope — so aggregate-view deletions resolve
+   * the right profile and a scope switch while the dialog is open cannot
+   * redirect the call.
    */
   const handleDeletePostAction = useCallback(
     (postId: string) => {
@@ -653,9 +664,10 @@ export function PostsView({
     (postIds: string[], selected: boolean) => {
       setSelectedPosts((prev) => {
         const next = new Map(prev);
+        const rowsById = new Map(posts.map((row) => [row.id, row]));
         for (const postId of postIds) {
           if (selected) {
-            const row = posts.find((r) => r.id === postId);
+            const row = rowsById.get(postId);
             if (!row || !canDeletePost(row)) continue;
             next.set(postId, {
               id: postId,
@@ -750,10 +762,11 @@ export function PostsView({
   }, [bulkDeleteTargets, bulkDeleteBusy, deletePost, t]);
 
   /**
-   * Opens the composer for a Post that still has an editable surface: a stored
-   * draft, or a Post with at least one pending Channel whose targets can still
-   * be added, removed, or rescheduled. Increments the composer session key so
-   * an existing composer instance resets and hydrates the selected Post identity.
+   * Opens the composer drawer for a Post that still has an editable surface: a
+   * stored draft, or a Post with at least one pending Channel whose targets can
+   * still be added, removed, or rescheduled. Increments the composer session key
+   * so an existing composer instance resets and hydrates the selected Post
+   * identity. The drawer replaces the inspection rather than navigating away.
    */
   const handleEditPost = useCallback(
     (postId: string) => {
@@ -772,47 +785,35 @@ export function PostsView({
       setEditingPostId(postId);
       setSchedulingDate(undefined);
       setComposerKey((k) => k + 1);
-      setViewMode("composer");
+      setComposerOpen(true);
     },
     [posts, t],
   );
 
   /**
-   * Opens the composer for authoring a new Post. Increments the composer session
-   * key so the composer starts with fresh component state, unmounting any previous
-   * composition without retaining a completed save or clearing unsaved recovery.
+   * Presents the live composition when inspection interrupted it; otherwise
+   * starts a fresh Post session. A background inspection never discards drafts.
    */
   const handleCreatePost = useCallback(() => {
+    setDetailPostId(null);
+    if (composerOpen) return;
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
     setComposerKey((k) => k + 1);
-    setViewMode("composer");
-  }, []);
+    setComposerOpen(true);
+  }, [composerOpen]);
 
-  /**
-   * Opens the in-place Brand Profile editor for the toolbar's edit affordance.
-   *
-   * Forwarded to {@link PostsToolbar} only for workspace admins, so the shared
-   * `BrandProfileSelect` renders its pencil solely when this callback exists;
-   * the latched `editingProfile` drives the dialog's edit mode.
-   *
-   * @param profile - Resolved Brand Profile whose edit affordance was activated.
-   */
-  const handleEditProfile = useCallback((profile: BrandProfile) => {
-    setEditingProfile(profile);
-    setProfileEditorOpen(true);
-  }, []);
-
-  const handleBackToPosts = useCallback(() => {
+  const handleComposerOpenChange = useCallback((open: boolean) => {
+    if (open) return;
+    setComposerOpen(false);
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
-    setViewMode("list");
   }, []);
 
   const handlePostSuccess = useCallback(() => {
+    setComposerOpen(false);
     setEditingPostId(undefined);
     setSchedulingDate(undefined);
-    setViewMode("list");
     refetchActive().catch(() => {});
   }, [refetchActive]);
 
@@ -826,6 +827,14 @@ export function PostsView({
 
   const handleToday = useCallback(() => {
     setCalendarMonth(new Date());
+  }, []);
+
+  /** Moves the query anchor by local calendar weeks, including DST and month boundaries. */
+  const handleWeekNavigate = useCallback((offset: number) => {
+    setCalendarMonth(
+      (previous) =>
+        new Date(previous.getFullYear(), previous.getMonth(), previous.getDate() + offset * 7),
+    );
   }, []);
 
   const processedPosts = useMemo(() => {
@@ -848,8 +857,29 @@ export function PostsView({
   /** Selected `Post.id`s projected for the checkbox surfaces; the entry map stays the source of truth. */
   const selectedIds = useMemo(() => new Set(selectedPosts.keys()), [selectedPosts]);
 
-  /** Post row currently shown in the detail dialog, resolved live so mutations refresh it. */
+  /** Post row currently shown in the inspector surface, resolved live so mutations refresh it. */
   const detailPost = detailPostId ? (rowByPostId.get(detailPostId) ?? null) : null;
+
+  // The panel presents one surface at a time: composing and inspecting share it,
+  // so a click that asks for the other swaps content in place. Handlers declared
+  // below are called through closures so the descriptors stay declaration-ordered.
+  const detailSurface = usePostDetailSurface({
+    post: detailPost,
+    canMutate: canWriteContent && selectedBrandProfileId !== null,
+    canDelete: detailPost !== null && canDeletePost(detailPost),
+    onClose: () => handleCloseDetail(),
+    onEdit: handleEditPost,
+    onRequestDelete: handleModalRequestDelete,
+  });
+  const composerSurface = usePostComposerSurface({
+    open: composerOpen,
+    initialPostId: editingPostId,
+    initialDate: schedulingDate,
+    sessionKey: composerKey,
+    onClose: () => handleComposerOpenChange(false),
+    onPostSuccess: handlePostSuccess,
+    onNavigate,
+  });
 
   /**
    * Post rows matching the selected calendar day, derived from the processed list
@@ -869,21 +899,27 @@ export function PostsView({
     setSelectedCalendarDate(null);
   }, []);
 
-  /**
-   * Opens a fresh composition seeded with a clicked calendar date slot.
-   * Increments the composer session key to ensure clean initial composer state.
-   */
-  const handleScheduleNewFromCalendar = useCallback(() => {
-    if (selectedCalendarDate) {
-      setSchedulingDate(selectedCalendarDate);
-    }
+  /** Opens a fresh composition in the drawer, seeded with a calendar slot. */
+  const handleScheduleCalendarDate = useCallback((date: Date) => {
+    setDetailPostId(null);
+    setSchedulingDate(date);
     setSelectedCalendarDate(null);
     setEditingPostId(undefined);
-    setComposerKey((k) => k + 1);
-    setViewMode("composer");
-  }, [selectedCalendarDate]);
+    setComposerKey((key) => key + 1);
+    setComposerOpen(true);
+  }, []);
 
-  /** Opens the right-side post detail dialog for a Post row/card click. */
+  /** Uses the same calendar composer entrypoint from the selectable day-detail list. */
+  const handleScheduleNewFromCalendar = useCallback(() => {
+    if (selectedCalendarDate) handleScheduleCalendarDate(selectedCalendarDate);
+  }, [selectedCalendarDate, handleScheduleCalendarDate]);
+
+  /**
+   * Opens the inspector surface. The panel shows one surface at a time, so an
+   * in-progress composition steps aside rather than stacking a second drawer;
+   * its target, session key, and recoverable draft are kept, so returning to it
+   * resumes the same composition.
+   */
   const handleViewDetails = useCallback((postId: string) => {
     setDetailPostId(postId);
   }, []);
@@ -893,10 +929,11 @@ export function PostsView({
     setDetailPostId(null);
   }, []);
 
+  /** Builds Monday-first 35/42-day month rows, including the reference's inset adjacent dates. */
   const calendarDays = useMemo(() => {
     const year = calendarMonth.getFullYear();
     const month = calendarMonth.getMonth();
-    const firstDayIndex = new Date(year, month, 1).getDay();
+    const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7;
     const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
     const totalDaysInPrevMonth = new Date(year, month, 0).getDate();
 
@@ -918,7 +955,7 @@ export function PostsView({
       });
     }
 
-    const remainingDays = (7 - (days.length % 7)) % 7;
+    const remainingDays = Math.max(35, Math.ceil(days.length / 7) * 7) - days.length;
     for (let i = 1; i <= remainingDays; i++) {
       days.push({
         date: new Date(year, month + 1, i),
@@ -942,27 +979,20 @@ export function PostsView({
             : "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4";
 
   const viewModeContent =
-    viewMode === "composer" ? (
-      <div className="flex-1 min-h-0 overflow-y-auto rounded-card border border-line bg-surface p-4 shadow-card">
-        <Suspense fallback={<RouteFallback />}>
-          <Composer
-            key={composerKey}
-            initialPostId={editingPostId}
-            initialDate={schedulingDate}
-            onPostSuccess={handlePostSuccess}
-            onNavigate={onNavigate}
-          />
-        </Suspense>
-      </div>
-    ) : viewMode === "calendar" ? (
+    viewMode === "calendar" ? (
       <PostCalendarGridView
         posts={processedPosts}
+        isLoading={isLoading}
         calendarMonth={calendarMonth}
         calendarDays={calendarDays}
         onPrevMonth={handlePrevMonth}
         onNextMonth={handleNextMonth}
         onToday={handleToday}
         onCellClick={handleCalendarCellClick}
+        onWeekNavigate={handleWeekNavigate}
+        onScheduleDate={handleScheduleCalendarDate}
+        onViewDetails={handleViewDetails}
+        canSchedule={selectedBrandProfileId !== null}
         selectionActive={selectedIds.size > 0}
       />
     ) : viewMode === "grid" ? (
@@ -972,6 +1002,7 @@ export function PostsView({
         gridColumnClass={gridColumnClass}
         brandProfiles={brandProfiles}
         canMutate={canWriteContent && selectedBrandProfileId !== null}
+        canDelete={canDeletePost}
         onEdit={handleEditPost}
         onDelete={handleDeletePostAction}
         onCreatePost={handleCreatePost}
@@ -983,15 +1014,15 @@ export function PostsView({
         canSelect={canDeletePost}
       />
     ) : (
-      <PostListTableView
+      <PostTableView
         posts={processedPosts}
         isLoading={isLoading}
         sortKey={sortKey}
         brandProfiles={brandProfiles}
-        canMutate={canWriteContent && selectedBrandProfileId !== null}
+        groupBy={groupBy}
+        hiddenColumns={hiddenColumns}
+        onCreatePost={handleCreatePost}
         onSortChange={setSortKey}
-        onEdit={handleEditPost}
-        onDelete={handleDeletePostAction}
         onViewDetails={handleViewDetails}
         selectedIds={selectedIds}
         onToggleSelection={handleTogglePostSelection}
@@ -1004,33 +1035,21 @@ export function PostsView({
   return (
     <WorkspaceSurface
       title={t("Posts")}
-      description={t("Manage your drafts, scheduled posts, and publications in one place")}
-      actions={
-        viewMode === "composer" ? (
-          <Button
-            variant="outline"
-            onClick={handleBackToPosts}
-            className="rounded-control border-line bg-surface text-ink shadow-hairline hover:bg-hover"
-          >
-            <ArrowLeft className="size-4" />
-            {t("Back to posts")}
-          </Button>
+      description={
+        isLoading ? (
+          <span role="status">{t("Loading posts…")}</span>
         ) : (
-          <motion.div
-            layout={lowMotion ? false : "position"}
-            layoutId={lowMotion ? undefined : "workspace-primary-action"}
-            transition={{ layout: { duration: 0.22, ease: [0.16, 1, 0.3, 1] } }}
-          >
-            <Button
-              variant="default"
-              onClick={handleCreatePost}
-              className="rounded-control bg-foreground text-background font-semibold shadow-btn"
-            >
-              <Plus className="size-4" />
-              <TopToolbarLabel label={t("Create post")} />
-            </Button>
-          </motion.div>
+          <Trans
+            message="Showing {count} posts across your Brand Profiles."
+            values={{ count: <RollingCount value={processedPosts.length} /> }}
+          />
         )
+      }
+      actions={
+        <Button variant="default" onClick={handleCreatePost}>
+          <Plus className="size-4" />
+          {t("Create post")}
+        </Button>
       }
     >
       {queryError && (
@@ -1043,44 +1062,39 @@ export function PostsView({
         </Alert>
       )}
 
-      {viewMode !== "composer" && (
-        <PostsToolbar
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          columns={columns}
-          onColumnsChange={setColumns}
-          statusFilter={statusFilter}
-          onStatusChange={setStatusFilter}
-          platformFilter={selectedPlatforms}
-          onPlatformChange={setSelectedPlatforms}
-          profileFilter={profileFilter}
-          onProfileChange={(id) => setSelectedBrandProfileId(id === "all" ? null : id)}
-          dateFilter={dateFilter}
-          onDateChange={setDateFilter}
-          sortKey={sortKey}
-          onSortChange={setSortKey}
-          brandProfiles={brandProfiles}
-          unresolvedProfileIds={postProfileIds}
-          onEditProfile={isAdmin ? handleEditProfile : undefined}
-        />
-      )}
+      <PostsToolbar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        groupBy={groupBy}
+        onGroupByChange={setGroupBy}
+        hiddenColumns={hiddenColumns}
+        onToggleColumn={(column) =>
+          setHiddenColumns((previous) => {
+            const next = new Set(previous);
+            if (next.has(column)) next.delete(column);
+            else next.add(column);
+            return next;
+          })
+        }
+        columns={columns}
+        onColumnsChange={setColumns}
+        statusFilter={statusFilter}
+        onStatusChange={setStatusFilter}
+        platformFilter={selectedPlatforms}
+        onPlatformChange={setSelectedPlatforms}
+        profileFilter={profileFilter}
+        onProfileChange={handleProfileFilterChange}
+        dateFilter={dateFilter}
+        onDateChange={setDateFilter}
+        sortKey={sortKey}
+        onSortChange={setSortKey}
+        brandProfiles={brandProfiles}
+        unresolvedProfileIds={postProfileIds}
+      />
 
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col relative">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={viewMode}
-            initial={lowMotion ? false : { opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={lowMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
-            transition={{ duration: lowMotion ? 0 : 0.16, ease: [0.16, 1, 0.3, 1] }}
-            className="flex-1 min-h-0 flex flex-col overflow-hidden"
-          >
-            {viewModeContent}
-          </motion.div>
-        </AnimatePresence>
-      </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{viewModeContent}</div>
 
       <CalendarDateDetailDialog
         selectedDate={selectedCalendarDate}
@@ -1098,23 +1112,33 @@ export function PostsView({
         canSelect={canDeletePost}
       />
 
-      <PostDetailDialog
-        post={detailPost}
-        canMutate={canWriteContent && selectedBrandProfileId !== null}
-        canDelete={detailPost !== null && canDeletePost(detailPost)}
-        onClose={handleCloseDetail}
-        onEdit={handleEditPost}
-        onRequestDelete={handleModalRequestDelete}
+      {/* The open panel covers the page's create action, so the drawer carries it
+          in its own toolbar: an icon-only control beside the record actions, which
+          leaves the breadcrumb intact. While composing, the panel is already
+          creating, so the affordance steps aside. */}
+      <PostsDrawer
+        detail={detailSurface}
+        composer={composerSurface}
+        headerAction={
+          composerOpen && !detailPost ? undefined : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  aria-label={t("New Post")}
+                  onClick={handleCreatePost}
+                >
+                  <Plus className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("New Post")}</TooltipContent>
+            </Tooltip>
+          )
+        }
       />
 
-      <BrandProfileDialog
-        open={profileEditorOpen}
-        onOpenChange={(open) => {
-          setProfileEditorOpen(open);
-          if (!open) setEditingProfile(null);
-        }}
-        profile={editingProfile}
-      />
       <CenterAlertDialog
         open={Boolean(pendingAction)}
         onOpenChange={(open) => !open && setPendingAction(null)}
@@ -1149,6 +1173,7 @@ export function PostsView({
         <BulkSelectionBar
           count={selectedIds.size}
           actionLabel={t("Delete")}
+          actionIcon={Trash2}
           busyLabel={t("Deleting…")}
           onClear={handleClearPostSelection}
           onAction={openBulkDelete}

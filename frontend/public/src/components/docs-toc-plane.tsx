@@ -1,5 +1,4 @@
 import type { CSSProperties } from "react";
-import { motionAllowed } from "@meltiply/ui/motion-state";
 
 const planePath =
   "M21 3 C18.67 9 16.33 15 14 21 C13 18.67 12 16.33 11 14 C8.33 12.67 5.67 11.33 3 10 C9 7.67 15 5.33 21 3 Z";
@@ -51,7 +50,7 @@ export function createLoadingPlane(marker: HTMLElement) {
     animations = [];
   };
 
-  /** Restores the plane from the currently painted ring and rotation, including an interrupted return. Low motion settles immediately. */
+  /** Restores the plane from the currently painted ring and rotation, including an interrupted return. */
   const restore = async () => {
     const outlineStyle = getComputedStyle(outline);
     const start = {
@@ -65,7 +64,7 @@ export function createLoadingPlane(marker: HTMLElement) {
     const owner = generation;
     marker.dataset.state = "returning";
     const options = {
-      duration: motionAllowed() ? 180 : 0,
+      duration: 180,
       easing: "cubic-bezier(0.4, 0, 0.2, 1)",
       fill: "both" as const,
     };
@@ -117,10 +116,6 @@ export function createLoadingPlane(marker: HTMLElement) {
       cancel();
       marker.dataset.state = "idle";
       label.textContent = "";
-    },
-    /** Settles the current shape when reduced motion changes mid-navigation; CSS also disables the ring's rotation. */
-    finish: () => {
-      for (const animation of animations) animation.finish();
     },
   };
 }

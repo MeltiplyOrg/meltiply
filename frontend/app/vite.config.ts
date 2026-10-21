@@ -10,6 +10,7 @@ import { defineConfig, type Plugin, lazyPlugins } from "vite-plus";
 // CLOUDFLARE_-prefixed vars from the app directory, so without this define
 // the root .env would not reach the app at all.
 const rootEnvFile = fileURLToPath(new URL("../../.env", import.meta.url));
+const sharedUiManifest = fileURLToPath(new URL("../shared/package.json", import.meta.url));
 /**
  * Synchronously reads and parses key-value environment pairs from an ini-style `.env` file.
  *
@@ -34,7 +35,7 @@ function parseEnvFile(filePath: string): Record<string, string> {
 }
 
 /**
- * Vite plugin that watches the repository root `.env` file and restarts the Vite dev server on changes.
+ * Restarts Vite when root environment values or shared UI package exports change.
  *
  * @returns Vite `Plugin` object configuring server file watch hooks.
  */
@@ -42,11 +43,12 @@ function rootEnvReloadPlugin(): Plugin {
   return {
     name: "meltiply-root-env-reload",
     configureServer(server) {
-      // Vite only watches .env files inside the project root; restart the dev
-      // server when the repo root .env changes so new values apply on save.
-      server.watcher.add(rootEnvFile);
+      // Workspace export maps are cached by the resolver. Watch the owning
+      // manifest as well as root environment values so live edits cannot leave
+      // newly exported fonts or controls unresolved until a manual restart.
+      server.watcher.add([rootEnvFile, sharedUiManifest]);
       server.watcher.on("change", (changed) => {
-        if (changed === rootEnvFile) server.restart();
+        if (changed === rootEnvFile || changed === sharedUiManifest) void server.restart();
       });
     },
   };

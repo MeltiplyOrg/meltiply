@@ -215,6 +215,16 @@ export function mediaUploadMaximum(contentType: string | null | undefined): numb
   return mediaRules[contentType as AcceptedMediaType].maximum;
 }
 
+/**
+ * Resolves the canonical upload extension for an accepted media MIME type.
+ * Used when restoring original bytes whose display title has no file suffix.
+ * Exact own MIME keys only; unknown types return null rather than guessing.
+ */
+export function mediaUploadExtension(contentType: string): string | null {
+  if (!Object.hasOwn(mediaRules, contentType)) return null;
+  return mediaRules[contentType as AcceptedMediaType].extensions[0];
+}
+
 export class AssetPolicyError extends Error {
   constructor(
     readonly code:

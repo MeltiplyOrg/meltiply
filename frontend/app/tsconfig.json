@@ -19,6 +19,6 @@
       "@meltiply/ui": ["../shared/src/components/ui"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", "**/*.mts", "../shared/motion-preference.tsx"],
+  "include": ["**/*.ts", "**/*.tsx", "**/*.mts"],
   "exclude": ["node_modules"]
 }

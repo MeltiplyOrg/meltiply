@@ -46,7 +46,8 @@ function totp(uri) {
 /**
  * Exercises the production images in Chromium: guarded first setup, real SMTP
  * verification, closed signup, owner login, password change/reset, TOTP enrollment
- * and backup recovery. Never records traces, filled forms, or secret artifacts.
+ * and backup recovery. Sign-out follows the canonical sidebar account menu.
+ * Never records traces, filled forms, or secret artifacts.
  * Returns only the current cookie to the API smoke in the same process.
  */
 export async function ownerBrowserSession({ origin, email, password, setupSecret }) {
@@ -65,7 +66,11 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
   };
   const signOut = async () => {
-    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await page.getByRole("button", { name: "Account menu", exact: true }).click();
+    await page
+      .getByRole("menu", { name: "Account menu", exact: true })
+      .getByRole("menuitem", { name: "Sign out", exact: true })
+      .click();
     await page.waitForURL(/\/sign-in/);
   };
   try {
@@ -112,12 +117,14 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await signIn(password);
     await page.waitForURL(/\/posts/);
     phase = "password change";
-    await page.getByRole("button", { name: "Account security", exact: true }).click();
-    let dialog = page.getByRole("dialog", { name: "Account security" });
-    await dialog.getByLabel("Current password", { exact: true }).fill(password);
+    await page.goto(`${origin}/settings?section=security`);
+    let security = page.getByRole("region", { name: "Account security" });
+    await security.getByLabel("Current password", { exact: true }).fill(password);
     const changedPassword = randomUUID() + randomUUID();
-    await dialog.getByLabel("New password", { exact: true }).fill(changedPassword);
-    await dialog.getByRole("button", { name: "Change password and sign out", exact: true }).click();
+    await security.getByLabel("New password", { exact: true }).fill(changedPassword);
+    await security
+      .getByRole("button", { name: "Change password and sign out", exact: true })
+      .click();
     await page.waitForURL(/\/sign-in/);
     await signIn(changedPassword);
     await page.waitForURL(/\/posts/);
@@ -154,18 +161,18 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await signIn(recoveredPassword);
     await page.waitForURL(/\/posts/);
     phase = "authenticator enrollment";
-    await page.getByRole("button", { name: "Account security", exact: true }).click();
-    dialog = page.getByRole("dialog", { name: "Account security" });
-    await dialog.getByLabel("Current password", { exact: true }).fill(recoveredPassword);
-    await dialog.getByRole("button", { name: "Set up authenticator", exact: true }).click();
-    const setupKey = await dialog
+    await page.goto(`${origin}/settings?section=security`);
+    security = page.getByRole("region", { name: "Account security" });
+    await security.getByLabel("Current password", { exact: true }).fill(recoveredPassword);
+    await security.getByRole("button", { name: "Set up authenticator", exact: true }).click();
+    const setupKey = await security
       .getByLabel("Authenticator setup key", { exact: true })
       .inputValue();
-    const backupCodes = (await dialog.locator("pre").textContent()).trim().split("\n");
-    await dialog
+    const backupCodes = (await security.locator("pre").textContent()).trim().split("\n");
+    await security
       .getByLabel("Authenticator code", { exact: true })
       .fill(totp(`otpauth://totp/Meltiply?secret=${setupKey}`));
-    await dialog.getByRole("button", { name: "I saved my codes — verify", exact: true }).click();
+    await security.getByRole("button", { name: "I saved my codes — verify", exact: true }).click();
     await page.waitForURL(/\/sign-in/);
     phase = "backup recovery";
     await signIn(recoveredPassword);
@@ -179,10 +186,10 @@ export async function ownerBrowserSession({ origin, email, password, setupSecret
     await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
     await page.waitForURL(/\/posts/);
     phase = "authenticator removal";
-    await page.getByRole("button", { name: "Account security", exact: true }).click();
-    dialog = page.getByRole("dialog", { name: "Account security" });
-    await dialog.getByLabel("Current password", { exact: true }).fill(recoveredPassword);
-    await dialog.getByRole("button", { name: "Disable two-factor", exact: true }).click();
+    await page.goto(`${origin}/settings?section=security`);
+    security = page.getByRole("region", { name: "Account security" });
+    await security.getByLabel("Current password", { exact: true }).fill(recoveredPassword);
+    await security.getByRole("button", { name: "Disable two-factor", exact: true }).click();
     await page.waitForURL(/\/sign-in/);
     await signIn(recoveredPassword);
     await page.waitForURL(/\/posts/);

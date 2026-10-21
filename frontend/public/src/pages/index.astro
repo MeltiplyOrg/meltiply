@@ -12,7 +12,6 @@ import "../styles/docs.css";
 const appUrl = new URL(
   process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com",
 );
-const docsUrl = "/docs/";
 const signInUrl = new URL("/sign-in", appUrl);
 const title = "Meltiply — Your social content. Finally, in sync.";
 const description =
@@ -837,7 +836,7 @@ const posts = [
           if (returnFocus) menuButton.focus();
         }
         // Native disclosure keeps links accessible immediately; its entrance
-        // respects low motion and closing never delays Escape or focus restoration.
+        // never delays Escape or focus restoration on closing.
         menuButton?.addEventListener("click", () => {
           if (!mobileNav || !menuButton) return;
           const open = mobileNav.hidden;

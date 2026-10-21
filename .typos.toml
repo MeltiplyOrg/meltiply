@@ -1,5 +1,5 @@
 [files]
-extend-exclude = [".claude", "**/worker-configuration.d.ts", "frontend/app/src/lib/i18n.tsx"]
+extend-exclude = [".claude", "**/worker-configuration.d.ts", "frontend/app/src/lib/i18n.tsx", "frontend/app/src/locales"]
 
 [default]
 # Fumadocs owns the `nd-*` DOM ID prefix; preserve exact quoted selectors and lookups.
@@ -16,6 +16,8 @@ fpr = "fpr"
 publicaly = "publicaly"
 trak = "trak"
 unparseable = "unparseable"
+# German formal pronoun quoted in the i18n documentation.
+Sie = "Sie"
 # RFC 7515 JOSE header parameter; not an English identifier.
 typ = "typ"
 
@@ -32,3 +34,10 @@ extend-glob = ["python-argparse.txt"]
 [type.python-license.extend-words]
 Stichting = "Stichting"
 Mathematisch = "Mathematisch"
+
+# The generated bundles reproduce third-party attribution verbatim.
+[type.third-party-notices]
+extend-glob = ["third-party-notices.txt"]
+
+[type.third-party-notices.extend-words]
+Friedly = "Friedly"

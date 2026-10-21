@@ -9,8 +9,10 @@ on:
         type: choice
         options:
           - frontend-full
+          - frontend-ui
           - cloudflare-integration
           - cloudflare-extended
+          - cloudflare-full
           - object-storage
 
 permissions:
@@ -23,7 +25,6 @@ concurrency:
 env:
   CI: "true"
   WRANGLER_SEND_METRICS: "false"
-  MELTIPLY_DEV_TUNNEL: "0"
 
 jobs:
   check:
@@ -33,8 +34,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6.1.0
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Prepare full gate database
+        if: inputs.lane == 'cloudflare-full'
+        run: bun run setup --skip-dependencies --skip-image-pull
+      - name: Validate complete application contract
+        if: inputs.lane == 'cloudflare-full'
+        run: bun run cloudflare:check
       - uses: actions/setup-go@v6
         if: inputs.lane == 'object-storage'
         with:
@@ -130,6 +138,55 @@ jobs:
           backend_pid=$!
           trap 'kill -TERM -- "-$backend_pid" 2>/dev/null || true' EXIT
           bun run local:k6:ci
+      - name: Review changed UI and required frontend gates
+        if: inputs.lane == 'frontend-ui'
+        run: |
+          cd frontend/app
+          git fetch origin ${{ github.event.repository.default_branch }}:refs/remotes/origin/${{ github.event.repository.default_branch }}
+          npx --yes react-doctor@0.9.14 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+          cd ../..
+          bun run lint:dead
+          bun run --filter frontend-app check
+          bun run --filter frontend-public check
+          bun run docs:links
+      - name: Prepare focused UI browser journey
+        if: inputs.lane == 'frontend-ui'
+        run: |
+          bun run setup --skip-dependencies --skip-image-pull
+          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Smoke development stylesheet and self-hosted fonts
+        if: inputs.lane == 'frontend-ui'
+        run: |
+          mkdir -p artifacts
+          setsid bun run --cwd frontend/app dev --host 127.0.0.1 --port 3011 --strictPort >artifacts/frontend-dev.log 2>&1 &
+          dev_pid=$!
+          trap 'kill -TERM -- "-$dev_pid" 2>/dev/null || true' EXIT
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { setTimeout } from "node:timers/promises";
+          const origin = "http://127.0.0.1:3011";
+          let response;
+          for (let attempt = 0; attempt < 60; attempt++) {
+            try {
+              response = await fetch(`${origin}/src/app/globals.css?direct`);
+              break;
+            } catch {
+              await setTimeout(1000);
+            }
+          }
+          assert(response, "Development server did not become reachable");
+          const css = await response.text();
+          assert.equal(response.status, 200, css);
+          const fonts = [...css.matchAll(/url\(["']?([^"')]*geist[^"')]*\.woff2[^"')]*)["']?\)/g)];
+          assert.equal(fonts.length, 4, "Stylesheet must resolve all four self-hosted Geist faces");
+          for (const [, path] of fonts) {
+            const font = await fetch(new URL(path, origin));
+            assert.equal(font.status, 200, `Font request failed: ${path}`);
+            const bytes = new Uint8Array(await font.arrayBuffer());
+            assert.deepEqual([...bytes.slice(0, 4)], [0x77, 0x4f, 0x46, 0x32], `Invalid WOFF2 response: ${path}`);
+            console.log(`Loaded development font: ${path}`);
+          }
+          NODE
       - name: Validate frontend and install Chromium
         if: inputs.lane == 'frontend-full'
         working-directory: frontend/app
@@ -147,7 +204,23 @@ jobs:
         working-directory: frontend/app
         env:
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
-        run: bun run test:e2e --trace on
+        run: |
+          bun run test:e2e --trace on
+          MELTIPLY_E2E_ACCEPTANCE=1 bun run test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies and retries only unfinished publishing" --trace on
+      - name: Exercise redesigned workspace and public pages
+        if: inputs.lane == 'frontend-ui'
+        env:
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+          MELTIPLY_E2E_PUBLIC_URL: http://127.0.0.1:4321
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+        run: |
+          bun run --cwd frontend/public preview --host 127.0.0.1 --port 4321 &
+          public_pid=$!
+          trap 'kill "$public_pid" 2>/dev/null || true' EXIT
+          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project workspace --trace on
+      - name: Inspect UI design mechanics
+        if: inputs.lane == 'frontend-ui'
+        run: node .agents/skills/impeccable/scripts/detect.mjs --json frontend/app/src/components/layout frontend/app/src/components/primitives/sidebar-nav.tsx frontend/shared/tokens.css frontend/public/src/styles
       - name: Check production performance without rebuilding
         if: inputs.lane == 'frontend-full'
         working-directory: frontend/app

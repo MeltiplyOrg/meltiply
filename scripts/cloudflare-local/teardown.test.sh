@@ -2,14 +2,26 @@
 # Hermetic checks for shared-runner teardown behavior.
 set -euo pipefail
 
+# Baseline cases model a host checkout; later cases inject container identity.
+# Never inherit a real stack's topology or CI cleanup handles into the fixture.
+unset COMPOSE_PROJECT_NAME MELTIPLY_DEVCONTAINER MELTIPLY_DEVCONTAINER_CONFIG \
+  MELTIPLY_TEARDOWN_DOCKER_READY MELTIPLY_CI_KEEP_LOCK \
+  MELTIPLY_CI_CLEANUP_MARKER MELTIPLY_CI_LOCK_RELEASE MELTIPLY_CI_LOCK_HOLDER \
+  STUB_LISTENER_PID
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture="$(mktemp -d)"
 leaked_pid=
+port_pid=
+# Reap only fixture-owned process groups, including failures in the port case.
 cleanup_fixture() {
-  if [[ -n "${leaked_pid:-}" ]]; then
-    kill -- "-$leaked_pid" 2>/dev/null || kill "$leaked_pid" 2>/dev/null || true
-    wait "$leaked_pid" 2>/dev/null || true
-  fi
+  local pid
+  for pid in "${leaked_pid:-}" "${port_pid:-}"; do
+    if [[ -n "$pid" ]]; then
+      kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
   rm -rf "$fixture"
 }
 trap cleanup_fixture EXIT HUP INT TERM
@@ -179,6 +191,28 @@ esac
 EOF
 chmod +x "$fixture/bin/docker"
 
+# Keep real port listeners and generic tunnel/processor process matches out of
+# this hermetic suite. Only fixture-rooted patterns reach the native pgrep.
+export TEARDOWN_FIXTURE_ROOT="$fixture"
+TEARDOWN_REAL_PGREP="$(command -v pgrep)"
+export TEARDOWN_REAL_PGREP
+cat >"$fixture/bin/pgrep" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${2:-}" == "${TEARDOWN_FIXTURE_ROOT:?}/"* ]]; then
+  exec "${TEARDOWN_REAL_PGREP:?}" "$@"
+fi
+exit 1
+EOF
+cat >"$fixture/bin/ss" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${STUB_LISTENER_PID:-}" ]]; then
+  printf 'LISTEN 0 128 127.0.0.1:8787 0.0.0.0:* users:(("workerd",pid=%s,fd=13))\n' "$STUB_LISTENER_PID"
+fi
+EOF
+chmod +x "$fixture/bin/pgrep" "$fixture/bin/ss"
+
 export PATH="$fixture/bin:$PATH"
 export COMMAND_LOG="$fixture/commands.log"
 export RESOURCES="$fixture/resources.tsv"
@@ -341,26 +375,18 @@ leaked_pid=
 
 # A wedged listener on a fixed stack port (argv no longer matching wrangler/
 # workerd) must still be reaped by the port-based net.
-fake_ss="$fixture/bin/ss"
 setsid bash -c 'exec -a /tmp/wedged-listener sleep 30' &
 port_pid=$!
-cat >"$fake_ss" <<EOF
-#!/usr/bin/env bash
-cat <<'OUT'
-LISTEN 0 128 127.0.0.1:8787 0.0.0.0:* users:(("workerd",pid=$port_pid,fd=13))
-OUT
-EOF
-chmod +x "$fake_ss"
 (
   cd "$repo_fixture"
-  ./scripts/cloudflare-local/teardown.sh
+  STUB_LISTENER_PID="$port_pid" ./scripts/cloudflare-local/teardown.sh
 ) >/dev/null
 if kill -0 "$port_pid" 2>/dev/null; then
   echo "teardown left wedged stack-port listener running" >&2
   exit 1
 fi
 wait "$port_pid" 2>/dev/null || true
-rm -f "$fake_ss"
+port_pid=
 
 # Teardown must disarm the cancellation trap before doing Docker work.
 marker="$fixture/cloudflare-active"

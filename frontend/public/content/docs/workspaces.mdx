@@ -1,100 +1,64 @@
 ---
 title: Workspaces & Brand Profiles
-description: How Meltiply organizes work — your workspace (organization), Brand Profiles, roles, and what profile selection changes across the app.
+description: Understand the workspace boundary, Brand Profile ownership, profile selection, and profile management.
 section: Workspace
 order: 3
 ---
 
-Meltiply organizes everything you do into two levels: a **workspace** at the top, and **Brand Profiles** inside it. Understanding this structure makes every other screen easier to use.
+A **Workspace** is the organization boundary resolved by your sign-in. A **Brand Profile** is a named, color-labeled scope inside that workspace. Every Channel connection, Post, and uploaded asset belongs to one profile.
 
-## Workspaces
+## Workspace identity
 
-Your workspace is the organization your account belongs to — typically your company, agency, or personal business. Its name appears at the top of the sidebar, with your plan or role underneath.
+The workspace name appears at the top of the sidebar as a read-only label. The current app has no workspace switcher or plan-tier selector. Review identity in **Settings → Account**, and sign out there or from **Account menu → Sign out** at the bottom of the sidebar.
 
-- The name and plan tier appear as a static label; the app does not offer an in-app workspace switcher.
+Use Brand Profiles for independently managed clients, brands, product lines, or regions. Selecting a profile changes collection scope; it does not switch organizations or accounts.
 
-Each person's account belongs to a workspace; the active session always operates inside the organization your sign-in resolves to. Your account profile details and sign-out control are located in the sidebar footer.
+## Select a Brand Profile
 
-## Brand Profiles
+On Posts or Channels, open **Filter**, add **Brand Profile** if its row is not present, and choose the profile. Top-bar jump search can also find a loaded profile.
 
-A **Brand Profile** is a named, color-labeled scope inside your workspace. Every channel connection, media asset, and post belongs to exactly one Brand Profile.
+- **All Brand Profiles** is aggregate review.
+- A selected profile scopes both Posts and Channels and remains selected when moving between them.
+- The composer requires one owning profile; it does not publish on behalf of every profile in the aggregate view.
+- Individual/bulk Post deletion and account disconnect use each item's actual owner, so those actions can work in aggregate review too.
 
-Use Brand Profiles to separate things you manage independently — for example, one profile per client, brand, product line, or region. Because ownership is per-profile, you can filter every board to just the work for one brand and avoid cross-posting to the wrong audience.
+Profiles are not sidebar sections. On Channels, the **Brand Profiles** tab shows real cards and connection counts; **View channels** applies that profile and returns to Accounts. A record whose owner no longer resolves remains visible as **Unknown profile** rather than silently disappearing.
 
-Each profile has:
+## Create a profile
 
-- **Profile name** (required, up to 100 characters)
-- **Description** (optional, up to 280 characters — shown as a tooltip and in empty states)
-- **Color** — a swatch that identifies the profile's channels, posts, and assets across the app
+Workspace admins can create, edit, and delete profiles. Members can view/select them but should ask an admin to make ownership changes.
 
-### Who can manage profiles
+1. Open Channels and select **Create Brand Profile** in the header. The Brand Profiles tab is also where existing profile cards are reviewed.
+2. Enter a required **Profile name** (up to 100 characters), optional **Description** (up to 280 characters), and choose a color swatch.
+3. Select **Create profile**.
+4. After saving, the new profile is selected and account connection opens for it.
 
-- **Workspace admins** can create, edit, and delete Brand Profiles.
-- **Members** can view, select, and filter by the active profile using the Brand Profile dropdown on Channels or Posts, but cannot create, edit, or delete profiles. If you need a new profile, ask an admin — the Channels board indicates when an admin is needed.
+Creating a profile does not itself connect a platform account. Complete authorization and any required Facebook Page selection separately.
 
-### Create a Brand Profile
+## Edit a profile
 
-Workspace admins create Brand Profiles directly on the Channels board:
+Edit a profile from its directory card in **Channels → Brand Profiles**. Update the name, description, or color and save. Editing metadata does not replace its Channels or Posts. The Brand Profile filter is selection-only; the directory card is the only edit entry point. Members can select profiles but cannot edit them.
 
-1. Select **Create Brand Profile** in the top action bar on **Channels**.
-2. Enter a **Profile name** (required), an optional **Description**, and choose a color swatch from the honeycomb color palette.
-3. Select **Create profile** to save.
+## Delete a profile
 
-Upon saving, Meltiply automatically selects the new profile and opens the account connection dialog so you can link a channel right away.
+Open the profile editor, select **Delete profile**, and review the destructive confirmation. It states that deletion cancels scheduled Posts, disconnects Channels, and blocks new work, with permanent purging after 7 days and restoration possible until then. This restoration window is described by the confirmation; the current interface has no deleted-profile browser or restore control.
 
-### Edit a profile
-
-Admins can edit any Brand Profile from the toolbar:
-
-1. Open the **Brand Profile** filter dropdown on the **Channels** board or **Posts** toolbar.
-2. Select the pencil icon next to the profile name.
-3. Update the name, description, or color in the dialog, then save.
-
-Editing updates profile metadata immediately and does not alter connected channels or existing posts.
-
-### Delete a profile
-
-Deleting a Brand Profile permanently removes the profile and its associated channels, media assets, and posts:
-
-1. Open the profile editor dialog via the pencil icon in the Brand Profile filter on Channels or Posts.
-2. Select **Delete** and confirm the irreversible action.
-
-Deleting stops scheduled and queued posts on that profile's channels.
-
-### Soft-deleted profiles
-
-The backend retains soft-deleted Brand Profiles for 7 days before permanent purge. Backend restore operations can restore profile records, but disconnected channels require re-authorization on the Channels board. Explicit deletion confirms permanent removal.
-
-## The active Brand Profile selection
-
-The Brand Profile filter in the toolbar on **Channels** and **Posts** controls which profile's work you see:
-
-- **All Brand Profiles** — the default aggregate view showing everything
-- A specific profile — the board filters to that profile's items, and several actions become profile-scoped
-
-The selection matters because some actions only work with a profile chosen:
-
-- **Uploading media** requires an active profile in the composer.
-- **Creating or editing posts, scheduling, and channel-outcome changes** require an active profile.
-
-Channel disconnect and Post deletion, individually or in selected batches, use
-each item's owning Brand Profile and also work in **All Brand Profiles**. Deleting
-a Post stops its pending channels but leaves already-published platform copies intact.
-
-The selection is shared across screens — picking a profile on Channels keeps it active on Posts. Choose **All Brand Profiles** to return to the aggregate view.
-If a channel or post still refers to a profile that no longer resolves in your workspace — for example one awaiting purge — it appears under **Unknown profile** so the item never disappears silently.
+Deleting a stored Post or disconnecting a Channel does not remove copies already published on social platforms. Remove those copies on their platform. Backend retention operations do not imply a self-service restore control in this interface.
 
 ## Roles at a glance
 
-| Action                          | Admin | Member |
-| ------------------------------- | ----- | ------ |
-| Select a Brand Profile filter   | Yes   | Yes    |
-| Create / edit / delete profiles | Yes   | No     |
-| Connect and reconnect channels  | Yes   | Yes    |
-| Attach and upload media         | Yes   | Yes    |
+| Action                           | Admin | Member |
+| -------------------------------- | ----- | ------ |
+| View/select a Brand Profile      | Yes   | Yes    |
+| Create/edit/delete profiles      | Yes   | No     |
+| Connect/re-authenticate accounts | Yes   | Yes    |
+| Attach media in the composer     | Yes   | Yes    |
+
+Actions remain subject to the current session, ownership, provider readiness, and resource limits.
 
 ## Related guides
 
-- [Channels](/docs/channels) — connect accounts under a profile
-- [Media](/docs/media) — attach media in the composer
-- [Settings](/docs/settings) — workspace organization and preference controls
+- [Channels](/docs/channels) — connection and profile directory workflows.
+- [Publishing](/docs/publishing) — composition, collection views, and outcomes.
+- [Media](/docs/media) — composer-owned attachments.
+- [Settings](/docs/settings) — preferences, account identity, and security.

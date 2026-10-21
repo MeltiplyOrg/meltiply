@@ -9,7 +9,7 @@ export type UpdateBrandProfileInput = components["schemas"]["UpdateBrandProfileR
  * Fixed accessible palette for Brand Profile color labels, mirroring the
  * `BrandProfileColor` enum in the OpenAPI contract. The compile-time exhaustiveness
  * check below fails the build if the contract palette gains a color this list
- * does not carry; `types/index.test.ts` asserts the reverse direction.
+ * does not carry; `satisfies` rejects values outside the contract.
  */
 export const BRAND_PROFILE_COLORS = [
   "#b91c1c",
@@ -139,7 +139,6 @@ export type WorkspaceInvitationListResponse =
 export type InvitationPreview = components["schemas"]["InvitationPreview"];
 export type InstallationSummary = components["schemas"]["InstallationSummary"];
 export type AccountLifecycle = components["schemas"]["AccountLifecycle"];
-export type AuditEntry = components["schemas"]["AuditEntry"];
 export type AuditListResponse = components["schemas"]["AuditListResponse"];
 
 export type Platform = components["schemas"]["Platform"];
@@ -152,10 +151,8 @@ export type PlatformQueryParams = NonNullable<
   operations["listPlatformAccounts"]["parameters"]["query"]
 >;
 export type PublishingRequirements = components["schemas"]["PublishingRequirements"];
-export type TikTokCreatorProfile = components["schemas"]["TikTokCreatorProfile"];
 export type TikTokPrivacyLevel = components["schemas"]["TikTokPrivacyLevel"];
 export type TikTokPublishingRequirements = components["schemas"]["TikTokPublishingRequirements"];
-export type TikTokPublishOptions = components["schemas"]["TikTokPublishOptions"];
 
 export type OAuthSelectionAccount = components["schemas"]["OAuthSelectionAccount"];
 export type OAuthSelection = components["schemas"]["OAuthSelection"];
@@ -185,7 +182,6 @@ export type CompletedPart = components["schemas"]["CompletedPart"];
  * `Post.status`, which only marks draft versus active lifecycle.
  */
 export type Post = components["schemas"]["Post"];
-export type PostStatus = components["schemas"]["PostStatus"];
 export type PostListResponse = components["schemas"]["PostListResponse"];
 /**
  * One ordered Post-to-Asset relationship. `position` is the creator's
@@ -204,25 +200,6 @@ export type CreatePostInput = components["schemas"]["CreatePostRequest"];
 export type UpdatePostInput = components["schemas"]["UpdatePostRequest"];
 export type SchedulePostInput = components["schemas"]["SchedulePostRequest"];
 export type PostQueryParams = NonNullable<operations["listPosts"]["parameters"]["query"]>;
-
-/**
- * Offset pagination window shared by the paginated list surfaces, taken from
- * the Posts list operation so the limit/offset bounds stay contract-derived.
- */
-export type PaginationParams = Pick<PostQueryParams, "limit" | "offset">;
-
-export type DistributionStatus = components["schemas"]["DistributionStatus"];
-export const distributionStatuses = [
-  "scheduled",
-  "queued",
-  "processing",
-  "awaiting_provider",
-  "published",
-  "failed",
-  "cancel_requested",
-  "cancelled",
-  "needs_reconciliation",
-] as const satisfies readonly DistributionStatus[];
 
 export type Distribution = components["schemas"]["Distribution"];
 export type DistributionListResponse = components["schemas"]["DistributionListResponse"];

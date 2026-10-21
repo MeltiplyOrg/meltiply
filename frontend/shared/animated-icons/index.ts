@@ -1,6 +1,3 @@
-export * from "./types";
-export * from "./nav-icons";
-export * from "./utility-icons";
-export * from "./toggle-icons";
-export * from "./use-icon-loop";
-export * from "./control-icon";
+export { AnimatedSquarePen, AnimatedImage, AnimatedShare, AnimatedLayers } from "./nav-icons";
+export { AnimatedPlus, AnimatedCalendar, AnimatedClock } from "./utility-icons";
+export { ControlIcon } from "./control-icon";

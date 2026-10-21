@@ -5,6 +5,12 @@
 # erroring (exit 1) environments without touching real processes or ports.
 set -euo pipefail
 
+# Model the declared host checkout, regardless of the caller's devcontainer,
+# staged overlay, or custom stack ports. Container cases belong to compose tests.
+unset COMPOSE_PROJECT_NAME MELTIPLY_DEVCONTAINER MELTIPLY_DEVCONTAINER_CONFIG \
+  WRANGLER_DEV_PORT MELTIPLY_FRONTEND_PORT FRONTEND_DEV_PORT \
+  MELTIPLY_CLOUDFLARE_POSTGRES_PORT
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM
@@ -243,6 +249,8 @@ chmod +x "$fixture/bin/uname"
 # MELTIPLY_CGROUP_ROOT so the cgroup domain check reads this hierarchy — a
 # domain root with a domain daemon cgroup — rather than the host kernel's.
 export HOME="$fixture/home"
+export TUNNEL_ORIGIN_CERT="$HOME/.cloudflared/cert.pem"
+export MELTIPLY_CLOUDFLARED_BIN="$fixture/bin/cloudflared"
 mkdir -p "$HOME" "$fixture/cgroup/docker"
 export MELTIPLY_CGROUP_ROOT="$fixture/cgroup"
 printf 'domain\n' >"$MELTIPLY_CGROUP_ROOT/cgroup.type"
@@ -252,24 +260,27 @@ run_doctor() {
   (cd "$fixture" && ./scripts/cloudflare-local/doctor.sh)
 }
 
+# Assert a required diagnostic and print its actual stream pair on failure.
 expect_output() {
-  local file=$1 expected=$2 label=$3
+  # Both streams share the supplied path's basename; do not append twice.
+  local file=$1 expected=$2 label=$3 base=${1%.*}
   if ! grep -Fq "$expected" "$file"; then
     printf 'doctor output missing %s in run: %s\n' "$label" "$expected" >&2
     printf 'captured stdout:\n' >&2
-    cat "$file.stdout" >&2 2>/dev/null || true
+    cat "$base.stdout" >&2 2>/dev/null || true
     printf 'captured stderr:\n' >&2
-    cat "$file.stderr" >&2 2>/dev/null || true
+    cat "$base.stderr" >&2 2>/dev/null || true
     exit 1
   fi
 }
 
+# Reject an unexpected diagnostic and print its actual stream pair on failure.
 expect_absent() {
-  local file=$1 unexpected=$2 label=$3
+  local file=$1 unexpected=$2 label=$3 base=${1%.*}
   if grep -Fq "$unexpected" "$file"; then
     printf 'doctor output unexpectedly contains (%s): %s\n' "$label" "$unexpected" >&2
-    cat "$file.stdout" >&2 2>/dev/null || true
-    cat "$file.stderr" >&2 2>/dev/null || true
+    cat "$base.stdout" >&2 2>/dev/null || true
+    cat "$base.stderr" >&2 2>/dev/null || true
     exit 1
   fi
 }

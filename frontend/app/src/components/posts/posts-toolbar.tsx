@@ -1,108 +1,90 @@
 import React from "react";
-import { motion } from "motion/react";
-import {
-  CalendarDays,
-  ArrowUpDown,
-  List,
-  Calendar as CalendarIcon,
-  LayoutGrid,
-} from "lucide-react";
+import { ArrowDownUp, Columns3, Minus, Plus, Rows3 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
-import {
-  TopToolbar,
-  TopToolbarSearch,
-  TopToolbarReset,
-  TopToolbarButton,
-  TopToolbarFilterGroup,
-  TopToolbarFilterSlot,
-} from "@/components/layout/top-toolbar";
+import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
+  DropdownMenuCheckboxItem,
+  FilterChecklist,
 } from "@meltiply/ui/dropdown-menu";
 import { FilterSelect } from "@meltiply/ui/select";
-import { cn } from "@meltiply/ui/utils";
-import { useI18n } from "@/lib/i18n";
-import { useMotionPreference } from "@meltiply/ui/motion-preference";
-import { type PostViewMode, type PostStatusFilter, type PostSortKey } from "./types";
-import type { BrandProfile } from "./types";
 import {
-  BrandProfileSelect,
+  TopToolbar,
+  TopToolbarSearch,
+  TopToolbarFilters,
+  TopToolbarFilterChips,
+  TopToolbarFilterChip,
+  TopToolbarButton,
+  TopToolbarReset,
+} from "@/components/layout/top-toolbar";
+import {
+  BrandProfileFilterSelect,
   brandProfileFilterLabel,
 } from "@/components/workspace/brand-profile-select";
 import {
   PlatformFilterSelect,
   platformFilterLabel,
 } from "@/components/workspace/platform-filter-select";
+import { effectMoveEasing, playEffect } from "@meltiply/ui/effects";
+import { RollingCount } from "@meltiply/ui/rolling-count";
+import { useI18n } from "@/lib/i18n";
+import type { PostGroupBy } from "./post-groups";
+import type { PostViewMode, PostStatusFilter, PostSortKey, BrandProfile } from "./types";
+import {
+  POST_COLLECTION_MODES,
+  POST_VIEW_OPTIONS,
+  postAnalyticsColumns,
+  type PostCollectionMode,
+} from "./post-view-options";
 
-const VIEW_MODES = [
-  { id: "list", label: "List", icon: List },
-  { id: "calendar", label: "Calendar", icon: CalendarIcon },
-  { id: "grid", label: "Grid", icon: LayoutGrid },
-] as const;
+/**
+ * Grid column bounds: the narrowest and widest card row the collection supports.
+ */
+const GRID_COLUMN_MIN = 2;
+const GRID_COLUMN_MAX = 5;
+/** How long a revealed view control takes to grow in or out, in milliseconds. */
+const VIEW_CONTROL_MORPH_MS = 220;
 
 export interface PostsToolbarProps {
   searchQuery: string;
-  onSearchChange: (q: string) => void;
-  viewMode: PostViewMode;
-  onViewModeChange: (m: PostViewMode) => void;
+  onSearchChange: (query: string) => void;
+  viewMode: PostCollectionMode;
+  onViewModeChange: (mode: PostViewMode) => void;
+  groupBy: PostGroupBy;
+  onGroupByChange: (group: PostGroupBy) => void;
   columns: number;
-  onColumnsChange: (updater: (c: number) => number) => void;
-  statusFilter: PostStatusFilter;
-  onStatusChange: (s: PostStatusFilter) => void;
+  onColumnsChange: (updater: (columns: number) => number) => void;
+  hiddenColumns: ReadonlySet<string>;
+  onToggleColumn: (column: string) => void;
+  statusFilter: Exclude<PostStatusFilter, "all">[];
+  onStatusChange: (status: Exclude<PostStatusFilter, "all">[]) => void;
   platformFilter: string[];
   onPlatformChange: (platforms: string[]) => void;
-  profileFilter: string;
-  onProfileChange: (pr: string) => void;
+  profileFilter: string[];
+  onProfileChange: (profiles: string[]) => void;
   dateFilter: string;
-  onDateChange: (d: string) => void;
+  onDateChange: (date: string) => void;
   sortKey: PostSortKey;
-  onSortChange: (k: PostSortKey) => void;
+  onSortChange: (key: PostSortKey) => void;
   brandProfiles: BrandProfile[];
-  /**
-   * Brand Profile ids referenced by rendered Post rows, derived by the parent
-   * view. Forwarded unchanged to {@link BrandProfileSelect}, which keeps only
-   * ids missing from `brandProfiles` as selectable "Unknown profile" rows so a
-   * persisted selection or post reference to a deleted profile stays visible.
-   */
   unresolvedProfileIds: readonly string[];
-  onEditProfile?: (profile: BrandProfile) => void;
 }
-/**
- * Presenter component for the top filter toolbar, view switcher, and multi-dimensional sort control.
- *
- * Crossfades every changing filter and sort label while each persistent trigger interpolates its
- * geometry, preventing text or sibling controls from jumping. The filter pills compose inside
- * `TopToolbarFilterGroup`/`TopToolbarFilterSlot`, which mark snapshot participants.
- * The date slot morphs against Channels' collapsed stand-in; Sort and the view
- * switcher register independent entry/exit snapshots on route changes. Preserves the
- * view mode's spring-animated layout pill and grid density stepper; inactive view modes use the
- * `ghost` button variant so they retain the muted ink role instead of inheriting the primary
- * action fill. The Brand Profile filter is the shared `BrandProfileSelect`; `unresolvedProfileIds`
- * (derived by the parent from rendered Post rows) keeps profile ids referenced by posts but
- * missing from `brandProfiles` selectable as "Unknown profile" rows. Status uses the
- * location-independent `FilterSelect`; date keeps its established dropdown composition inside the
- * shared date slot. The density stepper mounts at the selected mode's width
- * (zero for List/Calendar), so route snapshots never capture a transient grid control.
- * Under the shared low-motion preference the view-mode pill, stepper, and column
- * counter all land at their resting state instantly — no spring, no width morph.
- * The left group's intrinsic width is preserved: when controls exceed the
- * viewport, the shared toolbar scrolls instead of letting Sort cover filters.
- *
- * @param props - Toolbar state handlers for search, filters, view mode, density, and sorting. An
- * empty `platformFilter` shows posts from every platform.
- * @returns Fluid interactive toolbar card with tactile button feedback and morphing layout.
- */
+
+/** Gr8r Tasks controls composed from the reusable toolbar, filter, selector, and segment implementations. */
 export const PostsToolbar = React.memo(function PostsToolbar({
   searchQuery,
   onSearchChange,
   viewMode,
   onViewModeChange,
+  groupBy,
+  onGroupByChange,
   columns,
   onColumnsChange,
+  hiddenColumns,
+  onToggleColumn,
   statusFilter,
   onStatusChange,
   platformFilter,
@@ -115,29 +97,32 @@ export const PostsToolbar = React.memo(function PostsToolbar({
   onSortChange,
   brandProfiles,
   unresolvedProfileIds,
-  onEditProfile,
 }: PostsToolbarProps) {
-  const { t } = useI18n();
-  const { lowMotion } = useMotionPreference();
-
-  const hasActiveFilters =
-    statusFilter !== "all" ||
-    platformFilter.length > 0 ||
-    profileFilter !== "all" ||
-    dateFilter !== "all";
-  const platformFilterText = platformFilterLabel(platformFilter, t);
-  const statusFilterLabel =
-    statusFilter === "all"
+  const { t, tStatus } = useI18n();
+  const columnOptions = [
+    { id: "status", label: t("Status") },
+    { id: "channels", label: t("Channels") },
+    { id: "date", label: t("Publish date") },
+    { id: "profile", label: t("Brand Profile") },
+    ...postAnalyticsColumns(t).map((column) => ({ id: column.id, label: column.name })),
+  ];
+  const activeCount =
+    Number(statusFilter.length > 0) +
+    Number(platformFilter.length > 0) +
+    Number(profileFilter.length > 0) +
+    Number(dateFilter !== "all");
+  const profileLabel =
+    profileFilter.length > 1
+      ? t("{count} Brand Profiles", { count: profileFilter.length })
+      : brandProfileFilterLabel(profileFilter[0] ?? null, brandProfiles, t);
+  const statusLabel =
+    statusFilter.length === 0
       ? t("All statuses")
-      : statusFilter === "scheduled"
-        ? t("Scheduled")
-        : statusFilter === "published"
-          ? t("Published")
-          : statusFilter === "draft"
-            ? t("Drafts")
-            : t("Failed");
-  const profileFilterLabel = brandProfileFilterLabel(profileFilter, brandProfiles, t);
-  const dateFilterLabel =
+      : statusFilter.length === 1
+        ? tStatus(statusFilter[0])
+        : t("{count} statuses", { count: statusFilter.length });
+  const platformLabel = platformFilterLabel(platformFilter, t);
+  const dateLabel =
     dateFilter === "today"
       ? t("Today")
       : dateFilter === "next7"
@@ -145,246 +130,327 @@ export const PostsToolbar = React.memo(function PostsToolbar({
         : dateFilter === "past30"
           ? t("Past 30 days")
           : t("All dates");
-  const sortKeyLabel =
-    sortKey === "date-desc"
-      ? t("Time: Newest first")
-      : sortKey === "date-asc"
-        ? t("Time: Oldest first")
-        : t("Sorted");
-
-  const handleResetFilters = React.useCallback(() => {
-    onStatusChange("all");
+  const reset = () => {
+    onStatusChange([]);
     onPlatformChange([]);
-    onProfileChange("all");
+    onProfileChange([]);
     onDateChange("all");
-  }, [onStatusChange, onPlatformChange, onProfileChange, onDateChange]);
+  };
   return (
-    <TopToolbar>
-      {/* Left: Search input + Filter pills all in one line */}
-      <div className="flex items-center gap-2 min-w-max shrink-0 flex-1">
+    <>
+      <TopToolbar>
         <TopToolbarSearch
-          placeholder={t("Search posts...")}
+          key="search"
           value={searchQuery}
           onChange={onSearchChange}
+          placeholder={t("Search posts...")}
         />
-        <TopToolbarFilterGroup>
-          <TopToolbarFilterSlot id="platform">
-            <PlatformFilterSelect
-              value={platformFilter}
-              onValueChange={onPlatformChange}
-              trigger={
-                <TopToolbarButton
-                  label={platformFilterText}
-                  isActive={platformFilter.length > 0}
-                  width="w-36"
-                  className="capitalize"
+        <TopToolbarFilters
+          key="filters"
+          activeCount={activeCount}
+          onClearAll={reset}
+          fields={[
+            {
+              id: "platform",
+              label: t("Platform"),
+              active: platformFilter.length > 0,
+              onClear: () => onPlatformChange([]),
+              control: (
+                <PlatformFilterSelect
+                  value={platformFilter}
+                  onValueChange={onPlatformChange}
+                  trigger={<TopToolbarButton label={platformLabel} className="w-full" />}
                 />
-              }
-            />
-          </TopToolbarFilterSlot>
-
-          <TopToolbarFilterSlot id="profile">
-            <BrandProfileSelect
-              value={profileFilter}
-              onValueChange={onProfileChange}
-              brandProfiles={brandProfiles}
-              unresolvedProfileIds={unresolvedProfileIds}
-              onEditProfile={onEditProfile}
-              label={t("Brand Profile")}
-              trigger={
-                <TopToolbarButton
-                  label={profileFilterLabel}
-                  isActive={profileFilter !== "all"}
-                  width="w-44"
+              ),
+            },
+            {
+              id: "profile",
+              label: t("Brand Profile"),
+              active: profileFilter.length > 0,
+              onClear: () => onProfileChange([]),
+              control: (
+                <BrandProfileFilterSelect
+                  value={profileFilter}
+                  onValueChange={onProfileChange}
+                  brandProfiles={brandProfiles}
+                  unresolvedProfileIds={unresolvedProfileIds}
+                  trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
                 />
-              }
-            />
-          </TopToolbarFilterSlot>
-
-          <TopToolbarFilterSlot id="status">
-            <FilterSelect
-              value={statusFilter}
-              onValueChange={onStatusChange}
-              aggregateOption={{ value: "all", label: t("All statuses") }}
-              options={[
-                { value: "scheduled", label: t("Scheduled") },
-                { value: "published", label: t("Published") },
-                { value: "draft", label: t("Drafts") },
-                { value: "failed", label: t("Failed") },
-              ]}
-              ariaLabel={t("Post status")}
-              contentClassName="w-40"
-              trigger={
-                <TopToolbarButton
-                  label={statusFilterLabel}
-                  isActive={statusFilter !== "all"}
-                  width="w-36"
-                  className="capitalize"
+              ),
+            },
+            {
+              id: "status",
+              label: t("Post status"),
+              active: statusFilter.length > 0,
+              onClear: () => onStatusChange([]),
+              control: (
+                <FilterChecklist<Exclude<PostStatusFilter, "all">>
+                  value={statusFilter}
+                  onValueChange={onStatusChange}
+                  aggregateLabel={t("All statuses")}
+                  options={[
+                    { value: "scheduled", label: t("Scheduled") },
+                    { value: "published", label: t("Published") },
+                    { value: "draft", label: t("Drafts") },
+                    { value: "failed", label: t("Failed") },
+                  ]}
+                  label={t("Post status")}
+                  trigger={<TopToolbarButton label={statusLabel} className="w-full" />}
                 />
-              }
-            />
-          </TopToolbarFilterSlot>
-
-          <TopToolbarFilterSlot id="date">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <TopToolbarButton
-                  label={dateFilterLabel}
-                  isActive={dateFilter !== "all"}
-                  width="w-40"
-                  icon={<CalendarDays className="size-3.5 text-ink-3 shrink-0" />}
+              ),
+            },
+            {
+              id: "date",
+              label: t("Publish date"),
+              active: dateFilter !== "all",
+              onClear: () => onDateChange("all"),
+              control: (
+                <FilterSelect
+                  value={dateFilter}
+                  onValueChange={onDateChange}
+                  aggregateOption={{ value: "all", label: t("All dates") }}
+                  options={[
+                    { value: "today", label: t("Today") },
+                    { value: "next7", label: t("Next 7 days") },
+                    { value: "past30", label: t("Past 30 days") },
+                  ]}
+                  ariaLabel={t("Publish date")}
+                  trigger={<TopToolbarButton label={dateLabel} className="w-full" />}
                 />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-40">
-                <DropdownMenuItem onClick={() => onDateChange("all")}>
-                  {t("All dates")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => onDateChange("today")}>
-                  {t("Today")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onDateChange("next7")}>
-                  {t("Next 7 days")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onDateChange("past30")}>
-                  {t("Past 30 days")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </TopToolbarFilterSlot>
-          <TopToolbarFilterSlot id="reset">
-            <TopToolbarReset hasActiveFilters={hasActiveFilters} onReset={handleResetFilters} />
-          </TopToolbarFilterSlot>
-        </TopToolbarFilterGroup>
-      </div>
-      {/* Right: Sort dropdown + View Mode Switcher + Density Stepper */}
-      <div className="flex items-center gap-2 shrink-0">
-        <TopToolbarFilterSlot id="sort">
-          <DropdownMenu>
+              ),
+            },
+          ]}
+        />
+        <DropdownMenu key="sort">
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm">
+              <ArrowDownUp className="size-3.5" />
+              {t("Sort:")} {sortKey === "date-desc" ? t("Newest") : t("Oldest")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => onSortChange("date-desc")}>
+              {t("Time: Newest first")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onSortChange("date-asc")}>
+              {t("Time: Oldest first")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {viewMode === "table" && (
+          <DropdownMenu key="group">
             <DropdownMenuTrigger asChild>
-              <TopToolbarButton
-                label={sortKeyLabel}
-                width="w-44"
-                icon={<ArrowUpDown className="size-3 text-ink-3 shrink-0" />}
-              />
+              <Button variant="ghost" size="sm">
+                <Rows3 className="size-3.5" />
+                {t("Group:")}{" "}
+                {groupBy === "status"
+                  ? t("Status")
+                  : groupBy === "profile"
+                    ? t("Brand Profile")
+                    : t("None")}
+              </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => onSortChange("date-desc")}>
-                {t("Time: Newest first")}
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => onGroupByChange("status")}>
+                {t("Status")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onSortChange("date-asc")}>
-                {t("Time: Oldest first")}
+              <DropdownMenuItem onClick={() => onGroupByChange("profile")}>
+                {t("Brand Profile")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onGroupByChange("none")}>
+                {t("None")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </TopToolbarFilterSlot>
-        <div
-          data-workspace-transition-slot="view-mode"
-          className="relative flex items-center rounded-control border border-line bg-page p-0.5 shadow-hairline shrink-0"
-        >
-          {VIEW_MODES.map((mode) => {
-            const Icon = mode.icon;
-            const isActive = viewMode === mode.id;
+        )}
+        {viewMode === "table" && (
+          <DropdownMenu key="columns">
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm">
+                <Columns3 className="size-3.5" />
+                {t("Columns")}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {columnOptions.map((column) => (
+                <DropdownMenuCheckboxItem
+                  key={column.id}
+                  checked={!hiddenColumns.has(column.id)}
+                  onCheckedChange={() => onToggleColumn(column.id)}
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  {column.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        <SegmentedControl
+          key="view"
+          options={POST_COLLECTION_MODES}
+          value={viewMode}
+          onChange={onViewModeChange}
+          label={t("Post view")}
+          className="w-full overflow-x-auto sm:ml-auto sm:w-auto"
+          renderOption={(mode) => {
+            const Icon = POST_VIEW_OPTIONS[mode].icon;
             return (
-              <Button
-                key={mode.id}
-                type="button"
-                variant="ghost"
-                onClick={() => onViewModeChange(mode.id)}
-                className={cn(
-                  "relative flex h-7 items-center gap-1.5 px-2.5 rounded-chip text-xs font-semibold select-none transition-colors duration-150 outline-none active:scale-95",
-                  isActive ? "text-ink" : "text-ink-3 hover:text-ink-2",
-                )}
-                title={
-                  mode.id === "list"
-                    ? t("List View")
-                    : mode.id === "calendar"
-                      ? t("Calendar View")
-                      : t("Grid View")
-                }
-              >
-                {isActive && (
-                  <motion.span
-                    layoutId={lowMotion ? undefined : "posts-view-mode-pill"}
-                    className="absolute inset-0 rounded-chip bg-surface shadow-sm border border-line/60"
-                    transition={
-                      lowMotion
-                        ? { duration: 0 }
-                        : {
-                            type: "spring",
-                            stiffness: 450,
-                            damping: 35,
-                          }
-                    }
-                  />
-                )}
-                <span className="relative z-10 flex items-center gap-1.5">
-                  <Icon className="size-3.5" />
-                  <span>
-                    {mode.id === "list"
-                      ? t("List")
-                      : mode.id === "calendar"
-                        ? t("Calendar")
-                        : t("Grid")}
-                  </span>
+              <>
+                <Icon className="size-3.5" />
+                <span>
+                  {mode === "table" ? t("Table") : mode === "grid" ? t("Grid") : t("Calendar")}
                 </span>
-              </Button>
+              </>
             );
-          })}
-
-          <motion.div
-            initial={false}
-            animate={{
-              width: viewMode === "grid" ? 72 : 0,
-              opacity: viewMode === "grid" ? 1 : 0,
-            }}
-            transition={{
-              duration: lowMotion ? 0 : 0.24,
-              ease: [0.16, 1, 0.3, 1],
-            }}
-            aria-hidden={viewMode !== "grid"}
-            className="h-7 shrink-0 overflow-hidden flex items-center justify-center self-center"
-          >
-            <div className="flex h-7 w-[72px] shrink-0 items-center justify-center border-l border-line/70 pl-1 px-0.5 text-ink text-xs font-mono select-none whitespace-nowrap">
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onColumnsChange((c) => Math.max(2, c - 1));
-                }}
-                disabled={columns <= 2 || viewMode !== "grid"}
-                className="flex h-7 items-center justify-center px-1 leading-none text-ink-3 hover:text-ink active:scale-90 transition-transform disabled:opacity-30 disabled:cursor-not-allowed text-xs"
-                title={t("Decrease grid columns")}
-              >
-                −
-              </Button>
-              <motion.span
-                key={columns}
-                initial={lowMotion ? false : { opacity: 0, y: -2 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: lowMotion ? 0 : 0.15 }}
-                className="flex h-7 min-w-[12px] items-center justify-center px-1 text-center font-semibold text-[11px] leading-none"
-              >
-                {columns}
-              </motion.span>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onColumnsChange((c) => Math.min(5, c + 1));
-                }}
-                disabled={columns >= 5 || viewMode !== "grid"}
-                className="flex h-7 items-center justify-center px-1 leading-none text-ink-3 hover:text-ink active:scale-90 transition-transform disabled:opacity-30 disabled:cursor-not-allowed text-xs"
-                title={t("Increase grid columns")}
-              >
-                +
-              </Button>
-            </div>
-          </motion.div>
-        </div>
-      </div>
-    </TopToolbar>
+          }}
+        />
+        <MorphingControl key="grid-columns" open={viewMode === "grid"}>
+          <div className="flex items-center text-(length:--font-size-micro) tabular-nums">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              aria-label={t("Decrease grid columns")}
+              disabled={columns <= GRID_COLUMN_MIN}
+              onClick={() => onColumnsChange((count) => Math.max(GRID_COLUMN_MIN, count - 1))}
+            >
+              <Minus className="size-3" />
+            </Button>
+            <RollingCount value={columns} />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              aria-label={t("Increase grid columns")}
+              disabled={columns >= GRID_COLUMN_MAX}
+              onClick={() => onColumnsChange((count) => Math.min(GRID_COLUMN_MAX, count + 1))}
+            >
+              <Plus className="size-3" />
+            </Button>
+          </div>
+        </MorphingControl>
+      </TopToolbar>
+      {activeCount > 0 && (
+        <TopToolbarFilterChips>
+          {statusFilter.length > 0 && (
+            <TopToolbarFilterChip
+              label={`${t("Status")}: ${statusLabel}`}
+              onClear={() => onStatusChange([])}
+            />
+          )}
+          {platformFilter.length > 0 && (
+            <TopToolbarFilterChip label={platformLabel} onClear={() => onPlatformChange([])} />
+          )}
+          {profileFilter.length > 0 && (
+            <TopToolbarFilterChip label={profileLabel} onClear={() => onProfileChange([])} />
+          )}
+          {dateFilter !== "all" && (
+            <TopToolbarFilterChip label={dateLabel} onClear={() => onDateChange("all")} />
+          )}
+          <TopToolbarReset hasActiveFilters onReset={reset} className="ml-auto" />
+        </TopToolbarFilterChips>
+      )}
+    </>
   );
 });
+
+/**
+ * A toolbar control that appears with the selected view. It stays mounted so its
+ * box can grow from nothing and push the controls beside it over smoothly — and
+ * shrink again on the way out — instead of the row snapping to a new layout.
+ *
+ * The growth is a WAAPI effect rather than a transition: switching to the Grid
+ * mounts a whole view, and that render can block the main thread past a
+ * transition's entire duration, so the morph would start and finish with no frame
+ * in between. The effect is created in a layout effect, after that render has
+ * finished and before the view's first paint, and rests on styles the browser
+ * resolves alone: the box's width is its content's, so nothing stale is kept.
+ * Intent changes cancel queued frames and the running effect; stale completion
+ * callbacks cannot hide a control that the current view has reopened.
+ *
+ * @param props.open - Whether the selected view uses this control.
+ * @param props.children - The control's content, unclipped inside the morphing box.
+ */
+function MorphingControl({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const boxRef = React.useRef<HTMLDivElement>(null);
+
+  React.useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const content = box.firstElementChild;
+    if (!(content instanceof HTMLElement)) return;
+    if ((box.dataset.morph === "open") === open) return;
+
+    let active = true;
+    let animation: Animation | null = null;
+
+    // The change lands in the frame after the view has settled. Switching views
+    // mounts a whole view, and its render, effects, and layout run as their own
+    // tasks: an effect created inside that work spends its whole duration there and
+    // the user sees the end state instead of the move.
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        // Hiding the box also drops the row gap before it, so the travel has to give
+        // that width back: the closing animation ends exactly where the row sits with
+        // no box at all, and the opening one starts there.
+        const gap = Number.parseFloat(getComputedStyle(box.parentElement ?? box).columnGap) || 0;
+        const closedEdge = { width: "0px", marginLeft: `-${gap}px` };
+
+        if (open) {
+          // The box is rendered before it is measured — hidden content has no width —
+          // and the effect starts from the row's closed edge in that same frame.
+          box.dataset.morph = "open";
+          const width = content.getBoundingClientRect().width;
+          if (width > 0) {
+            animation = playEffect(
+              box,
+              [closedEdge, { width: `${width}px`, marginLeft: "0px" }],
+              0,
+              {
+                duration: VIEW_CONTROL_MORPH_MS,
+                easing: effectMoveEasing,
+              },
+            );
+          }
+          return;
+        }
+
+        // Closing keeps the box rendered for the effect, then removes it in the same
+        // frame the effect's fill is released, so the row never sees the swap.
+        const width = content.getBoundingClientRect().width;
+        const effect =
+          width > 0
+            ? playEffect(box, [{ width: `${width}px`, marginLeft: "0px" }, closedEdge], 0, {
+                duration: VIEW_CONTROL_MORPH_MS,
+                easing: effectMoveEasing,
+                fill: "forwards",
+              })
+            : null;
+        animation = effect;
+        if (!effect) {
+          delete box.dataset.morph;
+          return;
+        }
+        const settle = () => {
+          if (!active) return;
+          delete box.dataset.morph;
+          effect.cancel();
+        };
+        effect.finished.then(settle, settle);
+      });
+    });
+    return () => {
+      active = false;
+      animation?.cancel();
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [open]);
+
+  return (
+    <div ref={boxRef} data-control-morph>
+      <div className="flex items-center">{children}</div>
+    </div>
+  );
+}

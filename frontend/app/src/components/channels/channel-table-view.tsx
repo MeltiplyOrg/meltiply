@@ -1,11 +1,14 @@
 import React from "react";
 import { TooltipProvider } from "@meltiply/ui/tooltip";
 import { Input } from "@meltiply/ui/input";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@meltiply/ui/table";
 import { useI18n } from "@/lib/i18n";
+import { platformDisplayName } from "@/lib/platforms";
+import { PlatformIcon } from "@/components/primitives/platform-icon";
+import { ChannelAvatar } from "@/components/channels/channel-avatar";
 import { brandProfileColorClass, type BrandProfile, type PlatformAccount } from "@/types";
 import { cn } from "@meltiply/ui/utils";
 import {
-  ChannelAvatar,
   ChannelCopyRows,
   ChannelHealthControl,
   ChannelSelectionCheckbox,
@@ -13,39 +16,23 @@ import {
   channelDisplayTitle,
 } from "./channel-shared";
 
-/**
- * Fully resolved presentation state for one connected channel row, derived by
- * the board so the table stays a pure projection of filtered data.
- */
+/** Resolved real account metadata; absent profiles remain visible as unknown ownership. */
 export interface ChannelTableEntry {
   account: PlatformAccount;
-  /** Owning Brand Profile, or null if it no longer resolves. */
   profile: BrandProfile | null;
-  /** Workspace integration display name override, else provider display name. */
   displayName?: string | null;
-  /** Workspace integration picture override, else provider avatar URL. */
   picture?: string | null;
-  /** Workspace health annotation; `null` defers to the contract status. */
   statusReason: string | null;
-  /** True while this channel's platform is mid OAuth redirect. */
   isReconnecting: boolean;
 }
 
 export interface ChannelTableViewProps {
   channels: ChannelTableEntry[];
-  /** Ids in the current bulk selection; may include channels hidden by filters. */
   selectedIds: ReadonlySet<string>;
-  /** Every visible row is selected. */
   allVisibleSelected: boolean;
-  /** Some, but not all, visible rows are selected (header indeterminate state). */
-  visibleSelectionIndeterminate: boolean;
-  /** Toggles selection across exactly the currently visible rows. */
   onToggleVisibleSelection: () => void;
-  /** Toggles one channel id in the bulk selection. */
   onToggleSelection: (id: string) => void;
-  /** Disables every selection control while a bulk operation runs. */
   selectionDisabled?: boolean;
-  lowMotion: boolean;
   /** Admin-only; omitted for read-only roles. */
   onReconnect?: (account: PlatformAccount) => void;
   /** Admin-only; omitted for read-only roles. */
@@ -53,77 +40,90 @@ export interface ChannelTableViewProps {
 }
 
 /**
- * Renders the connected channel directory with copy, health, and settings controls.
- * The header checkbox selects exactly the visible rows; hidden selected channels
- * keep their bulk-selection membership untouched as filters change.
+ * Gr8r Members' inset directory adapted to channel identity, platform, ownership,
+ * health, and real settings. Shared Table owns density and dividers; selection
+ * changes visible accounts without clearing hidden ids.
  */
 export function ChannelTableView({
   channels,
   selectedIds,
   allVisibleSelected,
-  visibleSelectionIndeterminate,
   onToggleVisibleSelection,
   onToggleSelection,
   selectionDisabled = false,
-  lowMotion,
   onReconnect,
   onDisconnect,
 }: ChannelTableViewProps): React.ReactElement {
-  const { t, tStatus } = useI18n();
+  const { t } = useI18n();
   return (
-    <TooltipProvider delayDuration={250}>
-      <div className="overflow-x-auto rounded-card border border-line bg-surface shadow-card">
-        <table className="w-full min-w-[720px] text-left text-xs text-ink">
-          <thead className="border-b border-line bg-page text-[11px] font-semibold uppercase tracking-wider text-ink-2 select-none">
-            <tr>
-              <th className="w-12 py-2.5 pl-4 pr-2">
+    <TooltipProvider>
+      {/* No scroll container of its own: an `overflow` here would capture the
+          table's `sticky` header, so the viewport above owns both axes and the
+          header row stays pinned while the directory scrolls. The card keeps
+          both side borders and its rounded bottom, but its top edge and top
+          corners belong to the pinned header's own top border: the card's top
+          border would scroll away with the content and leave the header edgeless,
+          and clipping the corners instead would stop the table scrolling sideways
+          on phones. */}
+      <div className="rounded-b-card border border-line border-t-0 bg-surface">
+        <Table variant="directory" className="min-w-220" aria-label={t("Connected accounts")}>
+          <colgroup>
+            <col className="w-12" />
+            <col />
+            <col className="w-30" />
+            <col className="w-42.5" />
+            <col className="w-42.5" />
+            <col className="w-14" />
+          </colgroup>
+          <TableHeader>
+            <TableRow>
+              <TableHead>
                 <Input
                   type="checkbox"
                   checked={allVisibleSelected}
                   disabled={selectionDisabled || channels.length === 0}
                   aria-label={t("Select all visible channels")}
-                  ref={(el) => {
-                    if (el) el.indeterminate = visibleSelectionIndeterminate;
-                  }}
                   onChange={onToggleVisibleSelection}
                 />
-              </th>
-              <th className="min-w-[240px] py-2.5 px-3">{t("Channel")}</th>
-              <th className="min-w-[140px] py-2.5 px-3">{t("Brand Profile")}</th>
-              <th className="min-w-[120px] py-2.5 px-3">{t("Status")}</th>
-              <th className="py-2.5 pl-3 pr-4 text-right">{t("Actions")}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
+              </TableHead>
+              <TableHead>{t("Channel")}</TableHead>
+              <TableHead>{t("Platform")}</TableHead>
+              <TableHead>{t("Brand Profile")}</TableHead>
+              <TableHead>{t("Connection")}</TableHead>
+              <TableHead>
+                <span className="sr-only">{t("Actions")}</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {channels.map((entry) => {
               const { account, profile, picture, statusReason, isReconnecting } = entry;
               const selected = selectedIds.has(account.id);
               const channelName = channelDisplayTitle(account, entry.displayName);
               return (
-                <tr
+                <TableRow
                   key={account.id}
                   data-testid={`channel-row-${account.id}`}
                   data-selected={selected || undefined}
-                  className={cn("transition-colors hover:bg-hover/50", selected && "bg-hover/40")}
                 >
-                  <td className="py-2.5 pl-4 pr-2">
+                  <TableCell>
                     <ChannelSelectionCheckbox
                       checked={selected}
                       disabled={selectionDisabled}
                       label={t("Select channel")}
                       onToggle={() => onToggleSelection(account.id)}
                     />
-                  </td>
-                  <td className="py-2.5 px-3">
-                    <div className="flex items-center gap-2.5">
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex min-w-0 items-center gap-2.5">
                       <ChannelAvatar
-                        account={account}
+                        provider={account.platform}
                         channelName={channelName}
-                        picture={picture}
+                        picture={picture ?? account.avatar_url}
                       />
                       <div className="min-w-0">
                         <div
-                          className="truncate text-[13px] font-semibold text-ink"
+                          className="truncate text-(length:--font-size-ui) font-medium text-ink"
                           title={channelName}
                         >
                           {channelName}
@@ -131,48 +131,46 @@ export function ChannelTableView({
                         <ChannelCopyRows account={account} />
                       </div>
                     </div>
-                  </td>
-                  <td className="py-2.5 px-3">
-                    <div className="flex min-w-0 items-center gap-2">
+                  </TableCell>
+                  <TableCell>
+                    <span className="flex items-center gap-1.5">
+                      <PlatformIcon provider={account.platform} className="size-3.5" />
+                      {platformDisplayName(account.platform)}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="flex min-w-0 items-center gap-1.5">
                       <span
                         className={cn(
-                          "size-2.5 shrink-0 rounded-full border border-line",
+                          "size-2 shrink-0 rounded-chip",
                           profile ? brandProfileColorClass(profile.color) : "bg-line",
                         )}
                         aria-hidden="true"
                       />
-                      <span className="truncate font-medium text-ink-2">
-                        {profile?.name ?? t("Unknown profile")}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2.5 px-3">
-                    <div className="flex items-center gap-1.5">
-                      <ChannelHealthControl
-                        account={account}
-                        statusReason={statusReason}
-                        isReconnecting={isReconnecting}
-                        lowMotion={lowMotion}
-                        onReconnect={onReconnect}
-                      />
-                      <span className="truncate capitalize text-ink-2">
-                        {tStatus(account.connection_status)}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2.5 pl-3 pr-4 text-right whitespace-nowrap">
+                      <span className="truncate">{profile?.name ?? t("Unknown profile")}</span>
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <ChannelHealthControl
+                      account={account}
+                      statusReason={statusReason}
+                      isReconnecting={isReconnecting}
+                      onReconnect={onReconnect}
+                    />
+                  </TableCell>
+                  <TableCell>
                     <ChannelSettingsAction
                       account={account}
                       profile={profile}
                       channelName={channelName}
                       onDisconnect={onDisconnect}
                     />
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </TooltipProvider>
   );

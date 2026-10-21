@@ -1,5 +1,5 @@
 {
-  "checked": "2026-10-15",
+  "checked": "2026-10-19",
   "upstreams": {
     "cloudflare-skills": {
       "source": "cloudflare/skills",
@@ -84,6 +84,14 @@
       "license_blob": "aef05f70226ae35a14de6643fc0dff0ea62e1efe",
       "source_url": "https://github.com/millionco/react-doctor/blob/main/LICENSE",
       "path": "LICENSES/react-doctor.txt"
+    },
+    "sileo": {
+      "source": "hiaaryan/sileo",
+      "license": "MIT",
+      "license_blob": null,
+      "source_url": "https://github.com/hiaaryan/sileo",
+      "path": "LICENSES/sileo.txt",
+      "note": "sileo@0.1.6 declares MIT in package metadata; the repository publishes no standalone license file."
     }
   }
 }

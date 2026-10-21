@@ -1,18 +1,3 @@
-/* Preserve animationend/final fills used by Radix while removing spatial motion. */
-html[data-low-motion],
-html[data-low-motion]::before,
-html[data-low-motion]::after,
-html[data-low-motion] *,
-html[data-low-motion] *::before,
-html[data-low-motion] *::after {
-  animation-delay: 0ms !important;
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
-  scroll-behavior: auto !important;
-  transition-delay: 0ms !important;
-  transition-duration: 0ms !important;
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -37,26 +22,6 @@ html.theme-changing *::after {
   transition-duration: 0ms !important;
 }
 
-/*
- * The live SVG mask has visible, connected ink-drop lobes and finer ripples.
- * Its contour morphs with travel, retraces on reversal and follows document
- * scrolling without a texture filter, image decoding or opacity feather.
- */
-.theme-ink-layer {
-  mask-image: var(--theme-ink-mask);
-  mask-mode: alpha;
-  mask-repeat: no-repeat;
-}
-
-/* Snapshot artwork must not run a second entrance or swallow live input. */
-.theme-ink-layer,
-.theme-ink-layer *,
-.theme-ink-layer *::before,
-.theme-ink-layer *::after {
-  pointer-events: none !important;
-  animation: none !important;
-  transition: none !important;
-}
 /* Every BrandMark surface resolves its accent diamond from the same token;
    sizing stays surface-owned (`public.css` defaults, Tailwind utilities). */
 [data-brand-mark] [data-brand-accent] {
@@ -75,40 +40,15 @@ html.theme-changing *::after {
   height: 1em;
 }
 [data-preference-icon="theme"] > [data-preference-glyph="moon"],
-[data-preference-icon="motion"] > [data-preference-glyph="pause"],
-:root:is(.dark, [data-theme="dark"]) [data-preference-icon="theme"] > [data-preference-glyph="sun"],
-html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="play"] {
+:root:is(.dark, [data-theme="dark"])
+  [data-preference-icon="theme"]
+  > [data-preference-glyph="sun"] {
   display: none;
 }
 :root:is(.dark, [data-theme="dark"])
   [data-preference-icon="theme"]
-  > [data-preference-glyph="moon"],
-html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="pause"] {
-  display: block;
-}
-
-/* The masked copy uses its target glyph without changing the live source control. */
-:root [data-theme-ink-layer="dark"] [data-preference-icon="theme"] > [data-preference-glyph="sun"],
-:root
-  [data-theme-ink-layer="light"]
-  [data-preference-icon="theme"]
   > [data-preference-glyph="moon"] {
-  display: none;
-}
-:root [data-theme-ink-layer="dark"] [data-preference-icon="theme"] > [data-preference-glyph="moon"],
-:root
-  [data-theme-ink-layer="light"]
-  [data-preference-icon="theme"]
-  > [data-preference-glyph="sun"] {
   display: block;
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-preference-icon="motion"] > [data-preference-glyph="play"] {
-    display: none;
-  }
-  [data-preference-icon="motion"] > [data-preference-glyph="pause"] {
-    display: block;
-  }
 }
 
 /*
@@ -117,88 +57,19 @@ html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="
  *
  * `--ease-enter` is mirrored as `effectEasing` in `effects.ts` because WAAPI
  * timing strings cannot resolve CSS variables; keep both values in sync.
- * Keyframes are referenced by the centered-dialog surface rules below and by
- * app utilities (`animate-dialog-slide-*`), app
- * component rules (`.stream-caret`), and inline `style`
- * animations; `effects.ts` supplies their imperative WAAPI twins.
+ * Centered-dialog keyframes are consumed by the surface rules below;
+ * `effects.ts` owns imperative WAAPI effects for the public surfaces.
  */
 :root {
   /* Emphatic entrance settle — long ease-out, used by entrances and dialog ascents. */
   --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
-  /* Damped overshoot settle for pop surfaces. */
-  --ease-pop: cubic-bezier(0.23, 1, 0.32, 1);
   /* Accelerating exit for dismissed surfaces. */
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
-}
-
-@keyframes fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes pop-in {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes shimmer-text {
-  from {
-    background-position: 150% center;
-  }
-  to {
-    background-position: -50% center;
-  }
-}
-
-@keyframes caret-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
-  }
-}
-
-@keyframes pixel-on {
-  0%,
-  100% {
-    opacity: 0.15;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@keyframes records-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 0.85;
-  }
+  /* The reference drawer curve: a soft pull off the edge that settles decisively.
+     `--ease-enter` jumps most of the distance on the first frames and then creeps
+     for the rest of the duration, which reads as a slow, translucent slide; a
+     drawer and its content rise both use this curve instead. */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @keyframes dialog-popup-from-bottom {
@@ -339,22 +210,162 @@ html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="
   animation: none;
 }
 
-/* SideDialog enters from and exits to the right edge; geometry stays anchored. */
-@keyframes dialog-slide-in-right {
-  0% {
-    translate: 100% 0;
+/*
+ * Edge inspector, ported from the reference drawer: the surface steps 48px in
+ * from its edge on the drawer curve while its content rises behind it, then the
+ * whole panel slides back out on dismissal.
+ */
+@keyframes side-dialog-enter {
+  from {
+    opacity: 0;
+    translate: 48px 0;
   }
-  100% {
+  to {
+    opacity: 1;
     translate: 0 0;
   }
 }
 
-@keyframes dialog-slide-out-right {
-  0% {
+@keyframes side-dialog-exit {
+  from {
+    opacity: 1;
     translate: 0 0;
   }
-  100% {
-    translate: 100% 0;
+  to {
+    opacity: 0;
+    translate: 48px 0;
+  }
+}
+
+@keyframes side-dialog-rise-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+[data-side-dialog][data-state="open"] {
+  animation: side-dialog-enter 340ms var(--ease-drawer) both;
+}
+
+/* One panel can present more than one surface: when the surface inside it
+ * changes, the panel keeps its identity and its width is interpolated to the new
+ * surface's width instead of one drawer replacing another. A single-surface
+ * drawer never changes width, so this only shows up as the morph. */
+[data-side-dialog] {
+  transition: max-width 320ms var(--ease-drawer);
+}
+
+/* Dismissal is shorter than the entrance and carries no lingering translucency. */
+[data-side-dialog][data-state="closed"] {
+  animation: side-dialog-exit 180ms var(--ease-exit) both;
+}
+
+/* The rise is scoped to the open panel: Radix sets `data-state` on the panel,
+ * not on its body. It runs for every record the panel shows — the first one and
+ * each replacement — because the body content is keyed by that record. The
+ * reference runs it for 380ms on its front-loaded entrance curve, which lands as
+ * a flash; the travel is spread over the drawer curve instead so each body block
+ * is catchable without the stagger feeling slow. */
+[data-side-dialog][data-state="open"] [data-side-dialog-body] > :not([data-side-dialog-section]),
+[data-side-dialog][data-state="open"] [data-side-dialog-section]:not([inert]) > * {
+  animation: side-dialog-rise-in 460ms var(--ease-drawer) both;
+}
+
+[data-side-dialog][data-state="open"]
+  [data-side-dialog-body]
+  > :not([data-side-dialog-section]):nth-child(2),
+[data-side-dialog][data-state="open"] [data-side-dialog-section]:not([inert]) > :nth-child(2) {
+  animation-delay: 55ms;
+}
+
+[data-side-dialog][data-state="open"]
+  [data-side-dialog-body]
+  > :not([data-side-dialog-section]):nth-child(3),
+[data-side-dialog][data-state="open"] [data-side-dialog-section]:not([inert]) > :nth-child(3) {
+  animation-delay: 105ms;
+}
+
+[data-side-dialog][data-state="open"]
+  [data-side-dialog-body]
+  > :not([data-side-dialog-section]):nth-child(n + 4),
+[data-side-dialog][data-state="open"] [data-side-dialog-section]:not([inert]) > :nth-child(n + 4) {
+  animation-delay: 150ms;
+}
+
+/*
+ * A count that changes in place rolls. The window is one line tall and clips, so
+ * the new value arrives from the side the count moved from while the previous one
+ * leaves the other way: a drum turning, not a swap. `rolling-count.tsx` marks the
+ * window `data-value-roll`, renders the current value in it, and appends the
+ * leaving value as a clone for the duration of its exit; both halves are one
+ * shared WAAPI effect on `translate` and `opacity`, so no CSS timing is duplicated
+ * here.
+ */
+@layer components {
+  [data-value-roll] {
+    position: relative;
+    display: inline-flex;
+    height: 1lh;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  [data-value-roll] > [data-value-roll] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  [data-value-roll] > [data-value-roll="out"] {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  /* Until the roll starts the previous value stands in, so a change that lands
+     while the collection around it re-renders shows the count it replaced rather
+     than jumping. */
+  [data-value-roll][data-roll-state="pending"] > [data-value-roll="in"] {
+    opacity: 0;
+  }
+}
+
+/*
+ * A control that appears with its view morphs in: its own box grows from nothing
+ * to the width it measures, so the controls beside it are pushed over smoothly in
+ * both directions and the arrival slides in from the trailing edge. The viewport
+ * clips while the content keeps its natural width instead of being squashed, and
+ * the box's resting width is its content's, so nothing carries a stale number.
+ *
+ * The growth itself is a WAAPI effect (`playEffect` from `MorphingControl`), not
+ * a transition, and it starts once the view's own render, effects, and layout have
+ * settled: those run as their own tasks, so an effect created while they run — or
+ * a transition, whose clock starts at the style change — spends its whole
+ * duration inside that work and the user only ever sees the end state. `display` keeps a control the view does not use from leaving a box
+ * — or a flex gap — behind.
+ */
+@layer components {
+  [data-control-morph] {
+    display: none;
+    /* A flex item's automatic minimum would clamp the box to its content width and
+       the growth would jump; the clip keeps the content intact instead. */
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  [data-control-morph][data-morph="open"] {
+    display: flex;
+  }
+
+  [data-control-morph] > * {
+    width: max-content;
+    flex-shrink: 0;
   }
 }
 
@@ -392,7 +403,10 @@ html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="
   height: var(--glide-height, 0);
   border: 0;
   border-radius: var(--glide-radius, 7px);
-  background-color: var(--hover);
+  /* The reference row hover (`--surface-3`): one visible step below the warm
+     rail canvas (`--canvas`) and below the white Settings rail, where `--hover`
+     sits only 2 units above the rail and reads as no highlight at all. */
+  background-color: var(--hover-2);
   box-shadow: none;
   transform-origin: 0 0;
   transform: translate3d(calc(var(--glide-x, 0) * 1px), calc(var(--glide-y, 0) * 1px), 0)
@@ -429,4 +443,142 @@ html[data-low-motion] [data-preference-icon="motion"] > [data-preference-glyph="
     calc(var(--glide-scroll-y, 0) * 1px),
     0
   );
+}
+
+/*
+ * One menu vocabulary for every floating list. `dropdown-menu.tsx` (account
+ * menu, row actions, platform multi-select), `select.tsx` (filter field/value
+ * lists), and page-composed disclosure panels mark their surface, rows, labels,
+ * and separators with these hooks, so the chrome cannot drift between them.
+ * Values map the reference popover (`--shadow-pop`, `--r-lg`/`--r-sm`, 4px panel
+ * padding, 30px rows, `--surface-2` hover, the `popIn` entrance) onto semantic
+ * tokens; Tailwind utilities still override any of it.
+ *
+ * `data-state` drives the shared entrance and exit for every surface: Radix
+ * writes it on its poppers, and a non-Radix disclosure sets it while it stays
+ * mounted for the exit. `scale`/`opacity` only — Radix owns the popper's
+ * `transform`, and `transform-origin` follows the popper's anchor.
+ */
+@keyframes menu-surface-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes menu-surface-out {
+  from {
+    opacity: 1;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+@layer components {
+  [data-menu-surface] {
+    min-width: 200px;
+    max-height: min(420px, 70dvh);
+    /* `overflow-y: auto` would otherwise force horizontal scrolling too; menus
+       never scroll sideways — long rows truncate instead. */
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 4px;
+    border-radius: var(--radius-window);
+    background-color: var(--surface);
+    color: var(--ink);
+    transform-origin: var(--radix-popper-transform-origin, top left);
+    box-shadow:
+      var(--shadow-overlay),
+      0 0 0 1px var(--line);
+  }
+
+  [data-menu-surface][data-state="open"] {
+    animation: menu-surface-in 160ms var(--ease-enter) both;
+  }
+
+  [data-menu-surface][data-state="closed"] {
+    animation: menu-surface-out 120ms var(--ease-exit) both;
+  }
+
+  /* A row never paints its own fill: `SlidingHighlight` owns the hover pill,
+     and it tracks the same `data-dropdown-item` attribute this hook styles. */
+  [data-menu-item] {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    width: 100%;
+    min-height: var(--control-height);
+    align-items: center;
+    gap: 9px;
+    padding: 0 8px;
+    border-radius: var(--radius-control);
+    color: var(--ink);
+    font-size: var(--font-size-ui);
+    text-align: left;
+    outline: none;
+    transition: color 150ms ease;
+  }
+
+  @media (pointer: coarse) {
+    [data-menu-item] {
+      min-height: 44px;
+    }
+  }
+
+  [data-menu-item][data-disabled] {
+    pointer-events: none;
+    opacity: 0.45;
+  }
+
+  /* A menu rendered without the travelling pill (`highlight={false}`) marks its
+     surface `data-menu-plain` and paints each row's own hover/active fill
+     instead: keyboard highlight and pointer hover read the same. */
+  [data-menu-plain] [data-menu-item]:hover,
+  [data-menu-plain] [data-menu-item][data-highlighted],
+  [data-menu-plain] [data-menu-item]:focus-visible {
+    background-color: var(--hover);
+  }
+
+  [data-menu-item] > svg {
+    pointer-events: none;
+    flex-shrink: 0;
+  }
+
+  [data-menu-item] > svg:not([class*="size-"]) {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  /* Right-aligned accent check, as the reference marks a chosen row. */
+  [data-menu-indicator] {
+    position: absolute;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-ink);
+  }
+
+  [data-menu-label] {
+    padding: 8px 8px 4px;
+    font-size: var(--font-size-micro);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  [data-menu-separator] {
+    height: 1px;
+    margin: 4px -4px;
+    background-color: var(--line);
+  }
 }

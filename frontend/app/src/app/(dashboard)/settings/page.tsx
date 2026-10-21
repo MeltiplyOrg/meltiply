@@ -81,9 +81,15 @@ function memberLabel(member: WorkspaceMember): string {
  * Owner. Every action is also authorized server-side; hiding controls is a
  * usability affordance, never the authorization boundary.
  *
+ * @param props.embedded - When true, render inside the master Settings shell
+ *   without repeating its page header.
  * @returns React element rendering the settings page or a redirect for non-admins.
  */
-export default function SettingsPage(): React.ReactElement {
+export default function SettingsPage({
+  embedded = false,
+}: {
+  embedded?: boolean;
+} = {}): React.ReactElement {
   const { t } = useI18n();
   const { canManageSettings, isInstallationOwner, isLoading, user } = useWorkspace();
   const scope = useSessionScope();
@@ -195,17 +201,21 @@ export default function SettingsPage(): React.ReactElement {
   };
 
   return (
-    <section className="mx-auto w-full max-w-5xl space-y-6">
-      <header className="space-y-2">
-        <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-ink-3">
-          <ShieldCheck className="size-3.5" aria-hidden="true" />
-          {t("Administration")}
-        </span>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">{t("Settings")}</h1>
-        <p className="text-sm leading-relaxed text-ink-2">
-          {t("Manage who can access this installation, the shared workspace, and its audit trail.")}
-        </p>
-      </header>
+    <section className={embedded ? "w-full space-y-6" : "mx-auto w-full max-w-5xl space-y-6"}>
+      {!embedded && (
+        <header className="space-y-2">
+          <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-ink-3">
+            <ShieldCheck className="size-3.5" aria-hidden="true" />
+            {t("Administration")}
+          </span>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">{t("Settings")}</h1>
+          <p className="text-sm leading-relaxed text-ink-2">
+            {t(
+              "Manage who can access this installation, the shared workspace, and its audit trail.",
+            )}
+          </p>
+        </header>
+      )}
 
       {error && (
         <Alert variant="destructive">

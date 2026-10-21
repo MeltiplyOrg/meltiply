@@ -75,6 +75,7 @@ test("Admin invites an address and the invitee joins through the link as an Edit
     });
     await waitForWorkspace(admin);
     await admin.goto("/settings");
+    await admin.getByRole("button", { name: "Administration", exact: true }).click();
     await admin.getByRole("button", { name: "Invite", exact: true }).click();
     const inviteDialog = admin.getByRole("dialog", { name: "Invite a member" });
     await inviteDialog.getByLabel("Email address").fill(email);
@@ -101,8 +102,11 @@ test("Admin invites an address and the invitee joins through the link as an Edit
     await invitee.getByRole("button", { name: "Open the workspace" }).click();
     await invitee.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
     await waitForWorkspace(invitee);
-    await expect(invitee.locator("aside").getByText("Editor", { exact: true })).toBeVisible();
-    await expect(invitee.locator("aside").getByText("Settings", { exact: true })).toHaveCount(0);
+    await invitee.goto("/settings");
+    await expect(invitee.getByRole("heading", { name: "Appearance" })).toBeVisible();
+    await expect(invitee.getByRole("button", { name: "Administration", exact: true })).toHaveCount(
+      0,
+    );
   } finally {
     await inviteeContext.close();
     await adminContext.close();

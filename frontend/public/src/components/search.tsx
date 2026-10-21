@@ -8,8 +8,8 @@ import {
   SearchDialogInput,
   SearchDialogList,
   SearchDialogOverlay,
-  type SharedProps,
 } from "fumadocs-ui/components/dialog/search";
+import type { SharedProps } from "fumadocs-ui/components/dialog/search";
 import { useDocsSearch } from "fumadocs-core/search/client";
 import { staticClient } from "fumadocs-core/search/client/orama-static";
 import { useI18n } from "fumadocs-ui/contexts/i18n";
@@ -20,8 +20,8 @@ import { navigate } from "astro:transitions/client";
 import { Search } from "lucide-react";
 import { useRef } from "react";
 
-/** Opens the canonical docs dialog from a compact homepage search icon. */
-function HomeSearchTrigger() {
+/** Opens the canonical article-index dialog from either public search entrypoint. */
+export function DocumentationSearchTrigger() {
   const { setOpenSearch } = useSearchContext();
   return (
     <button
@@ -50,7 +50,7 @@ export function HomeSearch() {
       theme={{ enabled: false }}
       search={{ SearchDialog: DefaultSearchDialog }}
     >
-      <HomeSearchTrigger />
+      <DocumentationSearchTrigger />
     </RootProvider>
   );
 }
@@ -62,6 +62,7 @@ export function HomeSearch() {
  * index only contains pages from the public `docs` collection. The opener is
  * restored on dismissal because Fumadocs' context triggers are outside Radix's
  * DialogTrigger tree; disconnected openers after result navigation are ignored.
+ * Only the browser creates the body portal; static rendering never reads the DOM.
  */
 export default function DefaultSearchDialog(props: SharedProps) {
   const { locale } = useI18n();
@@ -75,30 +76,31 @@ export default function DefaultSearchDialog(props: SharedProps) {
 
   return (
     <SearchDialog search={search} onSearchChange={setSearch} isLoading={query.isLoading} {...props}>
-      {createPortal(
-        <>
-          <SearchDialogOverlay />
-          <SearchDialogContent
-            onOpenAutoFocus={() => {
-              opener.current =
-                document.activeElement instanceof HTMLElement ? document.activeElement : null;
-            }}
-            onCloseAutoFocus={(event) => {
-              if (!opener.current?.isConnected) return;
-              event.preventDefault();
-              opener.current.focus();
-            }}
-          >
-            <SearchDialogHeader>
-              <SearchDialogIcon />
-              <SearchDialogInput />
-              <SearchDialogClose />
-            </SearchDialogHeader>
-            <SearchDialogList items={query.data !== "empty" ? query.data : null} />
-          </SearchDialogContent>
-        </>,
-        document.body,
-      )}
+      {typeof document !== "undefined" &&
+        createPortal(
+          <>
+            <SearchDialogOverlay />
+            <SearchDialogContent
+              onOpenAutoFocus={() => {
+                opener.current =
+                  document.activeElement instanceof HTMLElement ? document.activeElement : null;
+              }}
+              onCloseAutoFocus={(event) => {
+                if (!opener.current?.isConnected) return;
+                event.preventDefault();
+                opener.current.focus();
+              }}
+            >
+              <SearchDialogHeader>
+                <SearchDialogIcon />
+                <SearchDialogInput />
+                <SearchDialogClose />
+              </SearchDialogHeader>
+              <SearchDialogList items={query.data !== "empty" ? query.data : null} />
+            </SearchDialogContent>
+          </>,
+          document.body,
+        )}
     </SearchDialog>
   );
 }

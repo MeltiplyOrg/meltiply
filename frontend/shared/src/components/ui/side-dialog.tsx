@@ -2,114 +2,146 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { Button } from "./button";
-import { CenterDialogDescription, CenterDialogHeader, CenterDialogTitle } from "./center-dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
 import { cn } from "@meltiply/ui/utils";
 
-/**
- * Controlled content for a modal side panel; callers own its real title, body,
- * and optional actions while the component supplies accessible dialog chrome.
- */
+/** Record content and real actions for the shared Gr8r-style inspection drawer. */
 export interface SideDialogProps {
-  /** Whether the modal side panel is currently open. */
   open: boolean;
-  /** Receives Radix dismissal requests from Escape, the backdrop, or Close. */
+  /**
+   * Receives dismissal requests from Escape or Close; the drawer ignores outside
+   * clicks so the workspace stays live while a record is inspected.
+   */
   onOpenChange: (open: boolean) => void;
-  /** Required accessible heading displayed in the fixed header. */
+  /** Required accessible dialog heading, visually hidden when breadcrumb is supplied. */
   title: React.ReactNode;
-  /** Optional accessible supporting text; omitted without a description warning when absent. */
   description?: React.ReactNode;
-  /** Post details or other caller-owned content rendered in the scrollable body. */
+  /** Record context displayed at the left of the compact header. */
+  breadcrumb?: React.ReactNode;
+  /** Caller-owned supported actions; Close remains canonical. */
+  actions?: React.ReactNode;
   children: React.ReactNode;
-  /** Optional actions rendered in a fixed, wrapping footer. */
-  footer?: React.ReactNode;
-  /** Optional classes merged onto the dialog panel. */
+  /**
+   * Extra classes for the scrolling body, e.g. removing its bottom padding so a
+   * pinned action bar can sit flush against the drawer's bottom edge.
+   */
+  bodyClassName?: string;
   className?: string;
-  /** Accessible label for the Close control; localized callers pass their string. */
   closeLabel?: string;
 }
 
 /**
- * The side dialog type: a large modal panel anchored to the right edge, for
- * inspecting rich records such as Post details. Compact tasks use
- * `CenterDialog`. Fixed heading and optional footer frame a native scroll
- * region. Radix supplies dismissal and focus trapping; opening focuses the
- * safe Close control, while closing restores the pre-open element only if it
- * remains connected. Slides in from the right edge (300ms) and back out to it
- * (200ms) without fading; shared motion CSS collapses the slide when low
- * motion is active.
+ * Ports Gr8r's 620px edge drawer and 46px record toolbar. The drawer is a
+ * non-modal companion, as in the reference: the workspace keeps painting and
+ * taking input, so clicking another record re-inspects it in place instead of
+ * being swallowed by a scrim. Radix still owns Escape dismissal, the portal, and
+ * opener restoration without scrolling the workspace; the inspection container
+ * receives initial focus so a toolbar tooltip cannot consume the first Escape.
+ * Keyboard focus is deliberately not trapped: this companion panel lets Tab
+ * reach the workspace. Native body scrolling stays untouched. Motion is the
+ * reference drawer's: the panel steps 48px in on `--ease-drawer` and slides back
+ * out on dismissal (`side-dialog-enter`/`side-dialog-exit`), its body blocks rise
+ * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`).
+ * Feature-owned keyed sections replay the entrance when their record changes,
+ * while retained sections keep their state and effects.
  */
 export function SideDialog({
   open,
   onOpenChange,
   title,
   description,
+  breadcrumb,
+  actions,
   children,
-  footer,
+  bodyClassName,
   className,
   closeLabel = "Close",
 }: SideDialogProps): React.ReactElement {
   const previousActiveElement = React.useRef<HTMLElement | null>(null);
-  const closeButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
   const hasDescription = description !== undefined && description !== null && description !== false;
+  const hasBreadcrumb = breadcrumb !== undefined && breadcrumb !== null;
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-overlay/80 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <DialogPrimitive.Content
+          ref={contentRef}
+          data-side-dialog=""
           {...(!hasDescription ? { "aria-describedby": undefined } : {})}
-          onOpenAutoFocus={(event) => {
-            const activeElement = document.activeElement;
-            previousActiveElement.current =
-              activeElement instanceof HTMLElement ? activeElement : null;
+          onInteractOutside={(event) => {
+            // A companion panel ignores outside use: the workspace stays live so
+            // another record can be inspected in place.
             event.preventDefault();
-            closeButtonRef.current?.focus();
+          }}
+          onOpenAutoFocus={(event) => {
+            const active = document.activeElement;
+            previousActiveElement.current = active instanceof HTMLElement ? active : null;
+            event.preventDefault();
+            contentRef.current?.focus({ preventScroll: true });
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            const activeElement = previousActiveElement.current;
+            const active = previousActiveElement.current;
             previousActiveElement.current = null;
-            if (activeElement?.isConnected) activeElement.focus();
+            if (active?.isConnected) active.focus({ preventScroll: true });
           }}
           className={cn(
-            "fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 max-w-2xl flex-col overflow-hidden border-l border-border bg-background shadow-lg",
-            "data-[state=open]:animate-dialog-slide-in-right data-[state=closed]:animate-dialog-slide-out-right",
+            "fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 flex-col overflow-hidden border-l border-line bg-surface pt-(--safe-area-top) shadow-overlay outline-none sm:max-w-155",
             className,
           )}
         >
-          <CenterDialogHeader className="flex-row items-start justify-between gap-4 border-b border-border p-4 text-left sm:p-6">
-            <div className="min-w-0 flex-1">
-              <CenterDialogTitle>{title}</CenterDialogTitle>
-              {hasDescription ? (
-                <CenterDialogDescription>{description}</CenterDialogDescription>
-              ) : null}
-            </div>
-            <DialogPrimitive.Close asChild>
-              <Button
-                type="button"
-                ref={closeButtonRef}
-                variant="ghost"
-                size="icon"
-                aria-label={closeLabel}
-                className="shrink-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                <X aria-hidden="true" />
-              </Button>
-            </DialogPrimitive.Close>
-          </CenterDialogHeader>
+          <TooltipProvider>
+            <header className="flex min-h-11.5 shrink-0 flex-wrap items-center gap-1 border-b border-line py-1 pl-4 pr-2.5">
+              <div className="min-w-0 flex-1 truncate text-(length:--font-size-control) text-ink-2">
+                <DialogPrimitive.Title
+                  className={
+                    hasBreadcrumb
+                      ? "sr-only"
+                      : "text-(length:--font-size-control) font-medium text-ink"
+                  }
+                >
+                  {title}
+                </DialogPrimitive.Title>
+                {hasBreadcrumb && breadcrumb}
+                {hasDescription && (
+                  <DialogPrimitive.Description className="sr-only">
+                    {description}
+                  </DialogPrimitive.Description>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1">{actions}</div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DialogPrimitive.Close asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 shrink-0"
+                      aria-label={closeLabel}
+                    >
+                      <X className="size-4" aria-hidden="true" />
+                    </Button>
+                  </DialogPrimitive.Close>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {closeLabel}
+                  <kbd className="ml-2 text-tooltip-muted">Esc</kbd>
+                </TooltipContent>
+              </Tooltip>
+            </header>
+          </TooltipProvider>
           <div
             data-lenis-prevent=""
-            className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6"
+            data-side-dialog-body=""
+            className={cn(
+              "min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-(--safe-content-bottom) pt-4 sm:px-6 sm:pb-8 sm:pt-5",
+              bodyClassName,
+            )}
           >
             {children}
           </div>
-          {footer !== undefined && footer !== null ? (
-            <footer className="min-w-0 shrink-0 border-t border-border p-4 sm:p-6">
-              <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 [&>*]:max-w-full [&>*]:min-w-0">
-                {footer}
-              </div>
-            </footer>
-          ) : null}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

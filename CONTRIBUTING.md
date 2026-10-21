@@ -67,6 +67,17 @@ keep test databases isolated, and never point these commands at production data.
 Do not run standalone integration suites alongside browser-upload jobs; the outbox
 relay claims shared due work.
 
+Exact scheduler-count tests must exclude unrelated in-flight demo fixtures without
+changing production eligibility or relaxing assertions. The Automation asset suite
+uses a separate connection's row locks only during each scheduler call, letting
+the real `SKIP LOCKED` query skip baseline rows. Release those locks before later
+provider-sync fixtures update the shared data.
+
+Doctor and teardown regression scripts default to fixture-owned host topology;
+container scenarios set their identities explicitly. Keep process and port probes,
+Compose resources, tunnel credentials, home directories, and cgroup inputs inside
+the fixture so running these checks cannot inspect or reap a developer's live stack.
+
 The native media processor runs as a `linux/amd64` Cloudflare Container using
 FFmpeg/libvips. ARM hosts need working amd64 emulation. Verify a real image with
 `./scripts/cloudflare-local/processor-smoke.sh`; see the
@@ -78,6 +89,24 @@ Browser journeys use `make frontend-e2e-install` and `make frontend-test-e2e`.
 Provider-controlled publication/composer journeys require the separate acceptance
 backend and `MELTIPLY_E2E_ACCEPTANCE=1`; details live in the app guide. Use
 `make frontend-lighthouse` for the production-build performance budgets.
+
+## UI and public-guide changes
+
+Use the current Gr8r-adapted implementation as visual truth. Read
+[shared UI ownership](docs/frontend-ui.md), [layout/scroll boundaries](docs/frontend-layout.md),
+and the [capability inventory](docs/frontend-capabilities.md). Extend exported
+`@meltiply/ui` controls and existing feature compositions instead of copying
+components or building a page-specific CSS system.
+
+Keep feature data, authorization, selection, and async actions with their owners.
+Preserve the existing animation path; new animation work extends shared recipes
+without adding a separate mode or preference layer. Update public guides when
+controls, labels, navigation, or workflow entry points move.
+
+Follow the scoped completion gate and inspect actual desktop/phone states in both
+palettes. For agent-run verification, use GitHub-hosted runners unless local
+execution was explicitly requested. Record exact check/runtime outcomes; passing
+lint or a build alone does not prove the UI.
 
 ## Branches, commits, and pull requests
 

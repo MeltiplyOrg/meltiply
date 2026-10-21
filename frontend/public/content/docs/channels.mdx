@@ -1,135 +1,106 @@
 ---
 title: Channels
-description: Connect social accounts to Meltiply, keep connections healthy, reconnect expired authorizations, and safely disconnect channels.
+description: Connect accounts, filter the account directory, manage Brand Profiles, and recover or disconnect connections.
 section: Workspace
 order: 4
 ---
 
-The **Channels** board is where you connect social accounts and keep those connections healthy. Each card leads with the channel avatar, name, and available username, alongside its provider, status, Brand Profile, and permissions.
-
-## Before you connect
-
-Connecting a channel requires a **Brand Profile** — every connection belongs to exactly one profile. If your workspace has no profiles yet, the **Add account** button stays disabled:
-
-- **Admins** see a prompt to create a Brand Profile first (use **Create Brand Profile** in the header — see [Workspaces & Brand Profiles](/docs/workspaces)).
-- **Members** see a prompt to ask a workspace admin.
+Open **Channels** to manage the accounts used for publishing. The page has two tabs: **Accounts** for connected accounts and **Brand Profiles** for their owning profiles. Both use the same warm palette and shared controls as Posts.
 
 ## Connect an account
 
-1. Select **Add account** in the Channels header.
-2. Choose the **Brand Profile** that will own the connection.
-3. Find your platform — scroll inside the Social Channels list or use the search field to filter it.
-4. Select **Connect**. You're redirected to the platform to sign in and approve Meltiply's access.
-5. After approving, you're returned to the Channels board. For **Facebook**, choose a Page in **Select Facebook Page**, then select **Connect Page**; nothing is connected automatically, even when only one Page is eligible. Other platforms return their connection result directly. An account appears only after it is saved successfully.
+Every connection belongs to one Brand Profile. If none exists, workspace admins can select **Create Brand Profile** in the header; members must ask an admin. **Add account** becomes available once a profile exists.
 
-To connect a second account on the same platform under the same profile — for example, two TikTok accounts for one brand — select **Add Another** on that platform's row.
+1. Select **Add account**.
+2. Choose the owning Brand Profile.
+3. Find the platform in the Social Channels list, using its search field if needed.
+4. Select **Connect**, sign in on the platform, and approve the requested access.
+5. Return to Channels and review the result. The account appears only after the connection is saved.
 
-Facebook lists Pages for which you have content-creation access and have granted the required publishing permissions. The chooser expires after ten minutes. **Cancel**, the close button, or Escape discards an unconfirmed selection without adding an account.
+For another account on the same platform and profile, use **Add Another** in the connection dialog. A direct link to `/channels?tab=add` opens that dialog.
 
-If the chooser reports a connection limit, disconnect an existing account or upgrade the verified plan, then retry the same chosen Page while the selection is valid. Expired selections require starting **Connect** again.
+On phones, each platform's saved accounts and connection action appear below its identity instead of competing for the same row. Scroll the connection dialog to reach every platform; it stays within the available screen height, including landscape orientation.
 
-Already-linked accounts appear by their saved account name, or provider account ID
-when no name is available. A green tick marks a healthy connection; accounts that
-need attention show their connection status instead. If new connections are
-unavailable, these identities replace the disabled **Unavailable** button.
+Connection availability comes from the server and the platform's requirements. An unavailable provider is not a working connection action. Existing accounts remain identifiable by their saved name or provider account ID.
 
-You can also open the connect dialog directly at `/channels?tab=add`.
+### Facebook Page selection
 
-### Available platforms
+Facebook authorization opens **Select Facebook Page**. Choose one eligible Page and select **Connect Page**. Even a single eligible Page requires explicit confirmation; closing, cancelling, or pressing Escape does not add an account.
 
-You can connect accounts on:
+The selection expires after ten minutes. If it expires, start Connect again. For a connection-limit error, review [Resource limits](/docs/resource-limits), free capacity where appropriate, and retry while the selection is still valid. Meltiply does not provide a billing or upgrade flow.
 
-- **TikTok** — short-form videos with custom sound and caption settings
-- **YouTube** — long-form videos and Shorts
-- **Instagram** — feed posts, Reels, and carousels
-- **Facebook** — Pages with content-creation access
-- **Threads** — text threads, single photos, and link posts
+Eligible Pages require the necessary content-creation access and publishing permissions. Token revocation or a change in platform permissions can invalidate a previously working connection.
 
-### If connecting fails
+### Supported providers
 
-If you cancel the platform's permission prompt or the authorization can't be completed, no account is added — start the connection again from **Add account**. If it keeps failing, see [Troubleshooting](/docs/troubleshooting).
+The connection flow currently includes TikTok, YouTube, Instagram, Facebook Pages, and Threads. Supported publishing formats and account requirements are shown by the real platform capabilities and composer validation; a listed provider does not imply every feature of its native app.
 
-Facebook requires you to choose one eligible Page, rather than authorizing exactly
-one Page. When Facebook omits the user token's lifetime from its exchange
-response, Meltiply inspects the token to obtain its actual expiry. A valid token
-with an inspected expiry of zero has no time-based expiry; Meltiply stores no
-expiry date rather than treating it as 1970 or assuming a new 60-day lifetime.
-Such tokens can still lose access through revocation or Facebook's data-access
-rules. Invalid, expired, or unverifiable tokens are rejected.
+## Use the Accounts directory
 
-Unrecognized connection-result codes are ignored rather than shown as success or
-interrupting the Channels board.
+Each account row shows:
 
-## Read the board
+| Column        | What it contains                                                                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Account       | Avatar or initials, saved name, and available username/provider ID with copy controls.                                      |
+| Platform      | The provider's mark and name.                                                                                               |
+| Brand Profile | The owning profile, or Unknown profile when it no longer resolves.                                                          |
+| Connection    | One health icon. Its accessible name and tooltip expose the status; connections needing attention provide recovery actions. |
+| Settings      | The account's settings action, including permissions, publishing support, owning profile, and disconnect controls.          |
 
-Each channel table row shows:
+### Search and filters
 
-- **Circular avatar and title** — a missing avatar uses initials; the provider logo sits at the avatar's bottom-right corner.
-- **Username and provider ID** — shown when available, each with its own copy button. IDs never substitute for missing handles.
-- **Connection indicator** — a green tick for a healthy connection or an orange warning when attention is needed. Hover or focus it for the status and reason; select a warning to access **Re-authenticate**.
-- **Channel settings pencil** — opens a dialog with the owning Brand Profile, granted permissions, publishing support, and **Disconnect**. Backend analytics, comments, and reply capabilities are not advertised as available app workflows.
+Use account search to match account, platform, or profile names. The **Connection status** segments narrow the current health state.
 
-The directory uses a single table view, with Brand Profile ownership alongside
-channel identity, health, and settings.
+Open **Filter** to add **Platform** or **Brand Profile** rows. Choose a field with its Add filter chip, then select a value. Adding an empty row does not change results. Supported rows combine with **and**.
 
-Select channel checkboxes, or the table-header checkbox for all visible filtered
-channels. The bottom selection pill shows the total, **Deselect**, and **Disconnect**.
-Confirm the selected batch before disconnecting; successful channels leave the
-selection and failures remain selected for retry. Selection survives search/filter
-changes, but changing the Workspace or Brand Profile clears it.
+- A row's trash control removes that filter.
+- **Clear all** resets the builder.
+- Active-value chips remove individual applied filters.
+- **Clear filters** recovers a filtered-empty directory.
 
-### Connection statuses
+Selecting a Brand Profile scopes the shared Posts/Channels view. **All Brand Profiles** returns to aggregate review. Profiles are not sidebar sections; the top-bar jump search can also find a loaded profile.
 
-| Status             | Meaning                                                      |
-| ------------------ | ------------------------------------------------------------ |
-| Connected          | Working normally; shown with a green tick                    |
-| Expiring           | Authorization will expire soon — reconnect before it does    |
-| Expired            | Authorization lapsed — re-authenticate to restore publishing |
-| Reconnect required | Authorize the connection again before it can publish         |
-| Revoked            | Access was withdrawn — reconnect to use it again             |
+### Select accounts
 
-Every non-connected status uses an orange warning icon; the tooltip names the specific status.
+Select individual rows or use the header checkbox for all visible filtered accounts. The header is checked only when the entire visible set is selected; a partial selection leaves it visually unchecked.
 
-### Filter the board
+The floating selection pill reports the actual count and offers **Disconnect** and the icon-only **Deselect** control. Disconnect confirms a fixed batch: successful accounts leave the selection, failed accounts remain selected for retry. Filtering does not discard hidden selections; changing Workspace or Brand Profile clears selection.
 
-The toolbar lets you narrow the card list by:
+## Recover a connection
 
-- **Search** — matches platform name, account name, and Brand Profile name
-- **Platform** — show only selected platforms
-- **Brand Profile** — show one profile's channels, or **All Brand Profiles**
-- **Connection status** — for example, show everything needing reconnection
+| Status             | Meaning                                   |
+| ------------------ | ----------------------------------------- |
+| Connected          | Authorization is working.                 |
+| Expiring           | Authorization is nearing expiry.          |
+| Expired            | Authorization must be renewed.            |
+| Reconnect required | Authorize access again before publishing. |
+| Revoked            | Access was withdrawn.                     |
 
-Select **Reset** to clear all active filters. When filters hide every account, a **Clear filters** action restores the full list.
+For a connection needing attention:
 
-## Reconnect a channel
+1. Select its warning health icon and review the reason.
+2. Choose **Re-authenticate** and approve access on the platform.
+3. For Facebook, choose the same Page and confirm **Connect Page**.
+4. Review the saved status when you return.
 
-When a connection shows **Expiring**, **Expired**, **Reconnect required**, or **Revoked**:
+Re-authentication keeps the account's owning Brand Profile. An unrecognized connection-result code is not displayed as a success.
 
-1. In the channel row, select the warning icon, then **Re-authenticate**.
-2. You're redirected to the platform to approve access again.
-3. For Facebook, select the same Page to renew that channel, then select **Connect Page**. The row returns to **Connected** after the renewed connection is saved.
+## Disconnect accounts
 
-Re-authentication keeps the channel's existing Brand Profile — nothing needs to be reconfigured.
+Open an account's **Channel settings**, choose **Disconnect**, and confirm. This works in aggregate and profile-filtered views; selected batches use the same confirmation principle.
 
-## Disconnect a channel
+Disconnecting removes the connection and stops scheduled/queued publishing for that account. It does not remove already-published platform copies. To revoke provider-side access, use that platform's app settings. To connect again later, start **Add account**.
 
-Disconnecting removes Meltiply's link to the account.
+## Manage Brand Profiles
 
-1. In the channel row, select the **Channel settings** pencil, then **Disconnect**. Settings are available in **All Brand Profiles** as well as filtered views.
-2. Confirm in the **Disconnect** dialog.
+The **Brand Profiles** tab shows actual profiles and their connected-account counts. These counts describe the workspace's connections, not just the current account filters. **View channels** applies the profile and returns to Accounts.
 
-The confirmation warns that **scheduled and queued posts for that channel stop publishing**. Nothing is deleted — you can reconnect the account at any time through **Add account**. To remove it from the platform's side too, revoke Meltiply's access in that platform's own app settings.
+Admins can create a profile from the header or edit one from its card in the **Brand Profiles** tab. Creating a profile selects it and opens account connection. Deletion is in the profile editor and requires confirmation; read its consequences before proceeding.
 
-## Manage Brand Profiles from Channels
-
-Admins can manage profiles directly from Channels:
-
-- **Create Brand Profile** in the header — after saving, the connect dialog opens so you can link a channel immediately
-- **Edit profile** — select the pencil icon inside the Brand Profile filter
-- **Delete profile** — inside the profile editor; deleting permanently removes the profile's channels, assets, and posts (see [Workspaces & Brand Profiles](/docs/workspaces))
+See [Workspaces & Brand Profiles](/docs/workspaces) for ownership, permissions, and deletion behavior.
 
 ## Related guides
 
-- [Workspaces & Brand Profiles](/docs/workspaces) — the profiles your channels belong to
-- [Publishing](/docs/publishing) — use connected channels to post
-- [Troubleshooting](/docs/troubleshooting) — connection errors and fixes
+- [Publishing](/docs/publishing) — compose and monitor Posts.
+- [Settings](/docs/settings) — appearance, language, identity, and security.
+- [Troubleshooting](/docs/troubleshooting) — connection and publishing recovery.

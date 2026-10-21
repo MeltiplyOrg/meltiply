@@ -83,10 +83,9 @@ export interface PostDetailItem {
 }
 
 /**
- * One durable Post rendered as a single row in the list, grid, calendar, and
- * detail surfaces. Rows are keyed by `Post.id`, so differing per-channel
- * publication times and content overrides never split one composition, while
- * two identically composed but separately created Posts stay distinct rows.
+ * One durable Post rendered in Table, Grid, Calendar, and Details.
+ * Rows are keyed by `Post.id`, so per-channel publication times and content
+ * overrides never split a composition, while separate Posts stay distinct.
  */
 export interface PostRow {
   /** Stable `Post.id` — the single identity across every Posts surface. */
@@ -112,9 +111,10 @@ export interface PostRow {
 }
 
 /**
- * View mode options for the unified Posts section.
+ * Collection view mode options for the unified Posts section. Composition is a
+ * drawer workflow, not a collection view.
  */
-export type PostViewMode = "list" | "calendar" | "grid" | "composer";
+export type PostViewMode = "table" | "calendar" | "grid";
 
 /**
  * Status filter buckets for the Posts toolbar. `'draft'` matches the contract
@@ -132,13 +132,13 @@ export type PostSortKey = "date-desc" | "date-asc";
 /**
  * Filter and sorting criteria passed to the post processor.
  *
- * `platformFilter` contains zero or more provider identifiers. An empty array means all platforms;
- * multiple identifiers are OR-matched so a post from any selected platform remains visible.
+ * Empty selection arrays mean all values. Values within each field are
+ * OR-matched; separate fields are AND-matched.
  */
 export interface FilterCriteria {
-  statusFilter: PostStatusFilter;
-  platformFilter: string[];
-  profileFilter: string;
+  statusFilter: readonly Exclude<PostStatusFilter, "all">[];
+  platformFilter: readonly string[];
+  profileFilter: readonly string[];
   searchQuery: string;
   dateFilter: string;
   sortKey: PostSortKey;
@@ -220,22 +220,22 @@ export interface PostDestructiveRequest {
  * Props accepted by the unified `PostsView` workspace screen.
  */
 export interface PostsViewProps {
-  /** Initial view mode ('list', 'calendar', 'grid', 'composer'). Defaults to 'list'. */
+  /** Initial collection view. Defaults to the grouped Tasks-style List. */
   initialViewMode?: PostViewMode;
   /** Initial status filter ('all', 'scheduled', 'published', 'draft', 'failed'). Defaults to 'all'. */
   initialStatusFilter?: PostStatusFilter;
-  /** Stable `Post.id` to open in the composer for editing. */
+  /** Stable `Post.id` to open in the composer drawer for editing. */
   initialPostId?: string;
+  /** Opens the composer drawer on a new composition, as `?view=composer` requests. */
+  initialComposerOpen?: boolean;
   /** Callback for outer workspace navigation. */
   onNavigate?: (view: WorkspaceView, options?: { search?: string }) => void;
 }
 
-export const SKELETON_TABLE_KEYS = ["row-sk-1", "row-sk-2", "row-sk-3", "row-sk-4", "row-sk-5"];
-export const SKELETON_CARD_KEYS = [
-  "card-sk-1",
-  "card-sk-2",
-  "card-sk-3",
-  "card-sk-4",
-  "card-sk-5",
-  "card-sk-6",
-];
+/**
+ * Loading placeholder identities. Counts fill the workspace fold at both the
+ * desktop and phone viewport heights, so resolved content neither grows the page
+ * nor adds a scrollbar the placeholder did not already have.
+ */
+export const SKELETON_TABLE_KEYS = Array.from({ length: 18 }, (_, index) => `row-sk-${index + 1}`);
+export const SKELETON_CARD_KEYS = Array.from({ length: 8 }, (_, index) => `card-sk-${index + 1}`);

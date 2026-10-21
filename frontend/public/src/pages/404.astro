@@ -1,5 +1,6 @@
 ---
 import "@/styles/docs.css";
+import "@meltiply/ui/public.css";
 import Layout from "@/components/layout.astro";
 import BrandMark from "@meltiply/ui/public/brand-mark";
 import { CookieNotice } from "@meltiply/ui/cookie-notice";
@@ -12,7 +13,7 @@ const homeUrl = "/";
   title="Page not found — Meltiply"
   description="This Meltiply page does not exist."
 >
-  <main class="flex min-h-screen flex-col items-center justify-center gap-4 bg-fd-background px-6 text-center text-fd-foreground">
+  <main class="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center text-fd-foreground">
     <BrandMark class="size-10" />
     <h1 class="docs-title text-3xl font-semibold">Page not found</h1>
     <p class="max-w-md text-fd-muted-foreground">
@@ -21,19 +22,19 @@ const homeUrl = "/";
     <nav aria-label="Helpful links" class="flex flex-wrap justify-center gap-3">
       <a
         href="/docs/"
-        class="rounded-lg bg-fd-primary px-4 py-2 text-sm font-medium text-fd-primary-foreground transition-colors hover:bg-fd-primary/85"
+        class="button button-dark button-small"
       >
         Back to docs
       </a>
       <a
         href={appUrl}
-        class="rounded-lg border border-fd-border px-4 py-2 text-sm font-medium text-fd-foreground transition-colors hover:bg-fd-accent"
+        class="button button-light button-small"
       >
         Open app
       </a>
       <a
         href={homeUrl}
-        class="rounded-lg border border-fd-border px-4 py-2 text-sm font-medium text-fd-foreground transition-colors hover:bg-fd-accent"
+        class="button button-light button-small"
       >
         meltiply.com
       </a>

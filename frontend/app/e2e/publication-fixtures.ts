@@ -1,9 +1,10 @@
 import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 import { expect } from "@playwright/test";
+import { Schema } from "effect";
 
 /**
  * One durable publication the controlled external Provider holds for a Channel.
@@ -46,20 +47,22 @@ export interface ControlledChannelSpec {
   providerUserId: string;
 }
 
-/** The Channels a {@link provisionControlledChannels} call created. */
-interface ProvisionedControlledChannel {
-  displayName: string;
-  id: string;
-  platform: string;
-  providerUserId: string;
-}
+/** Validates the acceptance entry's wire names before ownership drives fault injection. */
+const provisionedChannelsSchema = Schema.Struct({
+  brand_profile_id: Schema.String,
+  channels: Schema.Array(
+    Schema.Struct({
+      display_name: Schema.String,
+      id: Schema.String,
+      platform: Schema.String,
+      platform_user_id: Schema.String,
+    }),
+  ),
+  organization_id: Schema.String,
+});
 
-/** Identity of the Brand Profile a provisioned Channel was attached to. */
-export interface ProvisionedChannelsResult {
-  brandProfileId: string;
-  channels: ProvisionedControlledChannel[];
-  organizationId: string;
-}
+/** Identity and real account records returned by controlled Channel provisioning. */
+export type ProvisionedChannelsResult = typeof provisionedChannelsSchema.Type;
 
 /** Stored attachment bytes as the controlled Provider returned them. */
 export interface ControlledMediaBytes {
@@ -115,31 +118,64 @@ export function controlledProviderAccountId(platform: ControlledPlatform): strin
 /**
  * Selects the workspace's active Brand Profile and reports its display name.
  *
- * The Posts toolbar's Brand Profile combobox is the control that both filters
- * the list and sets the workspace's active scope, so choosing an option here is
- * what makes the composer treat that profile as selected. `profile_name` — not a
- * profile id — is then enough for the fixture to attach Channels, which keeps
- * this helper free of any API shape the acceptance run does not already use.
- * The existing profile toolbar slot identifies the control independently of its
- * accessible name, which becomes the selected profile's display name.
+ * Opens the Posts Filter disclosure and selects a real Brand Profile. Choosing
+ * the profile scopes the composer; its name lets controlled fixture provisioning
+ * attach Channels without introducing another API shape. The disclosure closes
+ * afterward so subsequent page actions are not obscured by its floating panel.
  *
  * @param page - Playwright page bound to the signed-in `/posts` view.
  * @returns The active Brand Profile's display name.
  * @throws {Error} When the workspace exposes no selectable Brand Profile.
  */
 export async function activeBrandProfileName(page: Page): Promise<string> {
-  const combobox = page.locator('[data-workspace-transition-slot="profile"]').getByRole("combobox");
-  await expect(combobox).toBeVisible({ timeout: 30_000 });
-  await combobox.click();
-  const options = page.getByRole("option");
+  const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
+  if (!(await disclosure.locator("..").evaluate((element) => element.hasAttribute("open")))) {
+    await disclosure.click();
+  }
+  const addProfile = page.getByRole("button", { name: "Add Brand Profile filter", exact: true });
+  if (await addProfile.isVisible()) await addProfile.click();
+  const trigger = page
+    .getByRole("button", { name: "Remove Brand Profile filter", exact: true })
+    .locator("..")
+    .locator('button[aria-haspopup="menu"]');
+  await expect(trigger).toBeVisible({ timeout: 30_000 });
+  await trigger.click();
+  const menu = page.getByRole("menu", { name: "Brand Profile", exact: true });
+  const options = menu.getByRole("menuitemcheckbox");
   await expect(options.first()).toBeVisible({ timeout: 30_000 });
   const names = (await options.allInnerTexts()).map((value) => value.trim());
   const name = names.find((value) => value.length > 0 && !/^all brand profiles$/i.test(value));
   if (!name) {
     throw new Error(`workspace has no selectable Brand Profile; options were ${names.join(", ")}`);
   }
-  await page.getByRole("option", { name, exact: true }).click();
+  await menu.getByRole("menuitemcheckbox", { name: "All Brand Profiles", exact: true }).click();
+  await menu.getByRole("menuitemcheckbox", { name, exact: true }).click();
+  await page.keyboard.press("Escape");
+  await disclosure.click();
+  await expect(page.getByRole("group", { name: "Filters", exact: true })).toBeHidden();
   return name;
+}
+
+/** Opens a stored Post's editor through table row inspection; Table has no inline action column. */
+export async function editPostFromRow(page: Page, row: Locator): Promise<void> {
+  await row.getByTitle("View details").click();
+  await page
+    .getByRole("dialog", { name: "Post details", exact: true })
+    .getByRole("button", { name: "Edit post", exact: true })
+    .click();
+}
+
+/**
+ * Closes the composer drawer so the collection behind it is interactive again.
+ * Composing replaces inspection inside the same drawer instead of navigating to a
+ * composer page, so specs return to the collection through this dismissed state.
+ *
+ * @param page - Playwright page bound to the app under test.
+ */
+export async function closeComposer(page: Page): Promise<void> {
+  const composer = page.getByRole("dialog", { name: /^(?:new post|edit post)$/i });
+  await composer.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(composer).toBeHidden();
 }
 
 /**
@@ -155,7 +191,7 @@ export async function activeBrandProfileName(page: Page): Promise<string> {
  * @param profileName - Display name of the already-created Brand Profile.
  * @param channels - Channels to attach to that profile.
  * @returns The resolved profile identity plus the created Channels.
- * @throws {Error} When the fixture rejects the request.
+ * @throws {Error} When the fixture rejects the request or returns an invalid result.
  */
 export async function provisionControlledChannels(
   request: APIRequestContext,
@@ -176,7 +212,7 @@ export async function provisionControlledChannels(
     response.status(),
     `provisioning ${channels.length} controlled channel(s) for "${profileName}"`,
   ).toBe(201);
-  return (await response.json()) as ProvisionedChannelsResult;
+  return Schema.decodeUnknownSync(provisionedChannelsSchema)(await response.json());
 }
 
 /**

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add required nullable `Post.analytics`, with latest-snapshot totals across
+  published Channels for likes, comments, shares, views, impressions, and reach.
+  Missing snapshots produce null rather than invented zeros; saves and clicks
+  remain null until collected. Calendar reads exclude soft-deleted Posts while
+  preserving their Distribution history.
+
 - Add `GET /api/auth/setup-status` and require `X-Setup-Secret` for initial
   `POST /api/auth/sign-up/email`. Registration closes after the installation's
   sole owner exists; document closed-registration and missing-configuration errors.

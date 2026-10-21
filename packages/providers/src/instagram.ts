@@ -61,13 +61,16 @@ const engagementScopes = [
 /** Instagram's documented carousel ceiling for one API-published post. */
 const maximumCarouselItems = 10;
 
+/** Instagram's caption ceiling remains known even before live publishing is configured. */
+export const INSTAGRAM_MAX_CAPTION_LENGTH = 2_200;
+
 const capability: PlatformCapability = {
   accepted_mime_types: ["image/jpeg", "video/mp4", "video/quicktime"],
   analytics: true,
   asset_types: ["image", "video"],
   comments: true,
   connect_available: true,
-  max_caption_length: 2_200,
+  max_caption_length: INSTAGRAM_MAX_CAPTION_LENGTH,
   max_file_size: videoMaximumBytes,
   max_hashtags: 30,
   max_media_count: 10,

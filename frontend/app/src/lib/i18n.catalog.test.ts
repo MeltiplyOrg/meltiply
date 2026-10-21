@@ -5,89 +5,37 @@ import { parseSync } from "oxc-parser";
 import type { Node } from "oxc-parser";
 import { describe, expect, it } from "vite-plus/test";
 
+import glossary from "../locales/glossary.json";
+import sourceCatalog from "../locales/en/ui.json";
 import { translate } from "./i18n";
 
 const sourceRoot = fileURLToPath(new URL("../", import.meta.url));
 
-// These values are deliberately identical in Spanish: product names, proper names,
-// technical identifiers, and the hashtag example are not translated.
-const intentionalIdenticalValues: Record<string, true> = {
-  "#viral #shorts": true,
-  "{start}–{end}": true,
-  Duet: true,
-  English: true,
-  Español: true,
-  Hashtags: true,
-  Plan: true,
-  Stitch: true,
-  General: true,
-  ID: true,
-  "ID: {id}": true,
-  "Impr.": true,
-  "sk_live_…": true,
-  YouTube: true,
-  Facebook: true,
-  Instagram: true,
-  Threads: true,
-};
+// The shared glossary is the single source for terms that are deliberately
+// identical across languages. It also feeds generation and the Shipi18n check.
+const intentionalIdenticalValues: Record<string, true> = Object.fromEntries(
+  [...Object.keys(glossary.keepVerbatim), ...glossary.intentionallyIdentical].map((term) => [
+    term,
+    true,
+  ]),
+);
 
-const intentionalJsxValues: Record<string, true> = {
-  MELTIPLY: true,
-  Meltiply: true,
-  TikTok: true,
-  "⌘K": true,
-  s: true,
-  M: true,
-  P: true,
-  "sk_live_…": true,
-};
+// English is the translation key: every translatable callsite must be present
+// in the source catalog, which the locale check then requires in each target.
 
 // Dynamic keys are finite values selected by application state. Their source
 // expressions are reviewed here so a new dynamic callsite cannot bypass the catalog guard.
 const allowedDynamicTranslationExpressions: Record<string, true> = {
-  actionError: true,
-  'account.capabilities.notes[0] ?? "Provider actions are currently unavailable."': true,
   "asset.asset_type": true,
-  "card.description": true,
-  "card.title": true,
-  "crumb.label": true,
-  'capability.connect_available ? "Ready to connect" : (capability.notes[0] ?? "Connection is not available.")': true,
-  day: true,
   genericErrorMessage: true,
-  description: true,
-  'distribution.attempt_count === 1 ? "{count} attempt" : "{count} attempts"': true,
-  'distribution.status === "processing" || distribution.status === "awaiting_provider" ? "Request cancellation" : "Cancel distribution"': true,
   error: true,
-  fallback: true,
-  'isCancelling ? "Cancelling…" : distribution.status === "processing" || distribution.status === "awaiting_provider" ? "Request cancellation" : "Cancel distribution"': true,
-  'isDeleting ? "Deleting {title}" : "Delete {title}"': true,
-  'isReplying ? "Sending…" : "Send"': true,
-  'isRetrying ? "Retrying…" : "Retry distribution"': true,
-  'isUpdating ? "Saving…" : "Save schedule"': true,
   "item.label": true,
-  label: true,
   "action.label": true,
-  m: true,
-  "m.label": true,
   message: true,
-  metric: true,
-  oauthMessage: true,
   "oauthOutcomes[outcome]": true,
-  "privacyLabels[level]": true,
   "publicMessages[code]": true,
-  "rangeLabel[option]": true,
-  "seriesLabel[series]": true,
-  rescheduleError: true,
-  scheduleError: true,
   "status.message": true,
-  'STEP_LABELS[current] ?? ""': true,
-  'submitting ? "Publishing…" : failedIds.length > 0 ? "Retry failed" : "Publish"': true,
-  title: true,
   "titles[status.kind]": true,
-  'unreplied ? "No unreplied comments." : "No comments yet."': true,
-  validationError: true,
-  "workflow.description": true,
-  "workflow.title": true,
 };
 
 async function sourceFiles(directory: string): Promise<string[]> {
@@ -106,11 +54,24 @@ async function sourceFiles(directory: string): Promise<string[]> {
   return nested.flat();
 }
 
+/**
+ * Reports whether a translatable callsite is registered in the English source
+ * catalog or explicitly allowed to stay identical by the shared glossary.
+ *
+ * @param message English source string found in the app.
+ * @returns True when the catalog guard may accept the string.
+ */
 function isCovered(message: string): boolean {
-  return translate("es", message) !== message || Boolean(intentionalIdenticalValues[message]);
+  return Object.hasOwn(sourceCatalog, message) || Boolean(intentionalIdenticalValues[message]);
 }
 
 describe("Spanish i18n catalog", () => {
+  it("resolves Spanish from locale data and falls back to the English key", () => {
+    expect(translate("es", "Dashboard")).toBe("Panel");
+    expect(translate("en", "Dashboard")).toBe("Dashboard");
+    expect(translate("es", "Not a catalog key")).toBe("Not a catalog key");
+  });
+
   it("covers literal translation calls, accessible attributes, and user-facing JSX text", async () => {
     const missing: string[] = [];
     const dynamic: string[] = [];
@@ -168,7 +129,7 @@ describe("Spanish i18n catalog", () => {
 
         if (node.type === "JSXText") {
           const text = node.value.replace(/\s+/g, " ").trim();
-          if (/[A-Za-zÀ-ÿ]/.test(text) && !isCovered(text) && !intentionalJsxValues[text]) {
+          if (/[A-Za-zÀ-ÿ]/.test(text) && !isCovered(text) && !intentionalIdenticalValues[text]) {
             missing.push(`${file}: ${text}`);
           }
         }
@@ -188,6 +149,6 @@ describe("Spanish i18n catalog", () => {
     }
 
     expect(dynamic, "unapproved dynamic translation callsites").toEqual([]);
-    expect(missing, "untranslated Spanish literals").toEqual([]);
+    expect(missing, "unregistered translatable literals").toEqual([]);
   });
 });

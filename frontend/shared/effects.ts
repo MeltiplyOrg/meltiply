@@ -1,5 +1,3 @@
-import { motionAllowed, reducedMotionQuery } from "./motion-state";
-
 /*
  * Shared WAAPI effect engine and animation vocabulary for both frontends.
  * The CSS-facing keyframes live in `motion.css`; the recipes below are their
@@ -12,13 +10,21 @@ import { motionAllowed, reducedMotionQuery } from "./motion-state";
 /** Emphatic entrance settle; mirrors `--ease-enter` in `motion.css`. */
 export const effectEasing = "cubic-bezier(0.16, 1, 0.3, 1)";
 
+/**
+ * The reference drawer curve (`--ease-drawer` in `motion.css`), mirrored for the
+ * same reason as `effectEasing`: a soft pull that settles decisively, for an
+ * effect that moves or resizes something the user is already watching. The
+ * entrance curve above spends most of its travel in its first frames, which reads
+ * as a jump on a move.
+ */
+export const effectMoveEasing = "cubic-bezier(0.32, 0.72, 0, 1)";
+
 /** Default bounded duration for one shared effect, in milliseconds. */
 export const effectDurationMs = 240;
 
 /**
- * Lift-and-clear entrance: the WAAPI twin of the `fade-up` keyframe, extended
- * with a short blur settle. Elements keep their own styles as the final state,
- * so a cancelled reveal never hides content.
+ * Lift-and-clear entrance with a bounded blur settle. Elements keep their own
+ * styles as the final state, so a cancelled reveal never hides content.
  */
 export const revealEffectFrames: Keyframe[] = [
   { opacity: 0.45, transform: "translateY(10px)", filter: "blur(2px)" },
@@ -41,25 +47,20 @@ export interface EffectTiming {
   fill?: FillMode;
 }
 
-/** Every in-flight shared effect, so preference changes and ink capture can cancel them all. */
+/** Tracks shared effects so navigation can cancel them together. */
 const activeEffects = new Set<Animation>();
 
 /** Latest effect per element; a new effect on the same element replaces the previous one. */
 const elementEffects = new WeakMap<Element, Animation>();
-const suppressionCleanups = new Set<() => void>();
-let cancellingEffects = false;
 
 /**
  * Plays one bounded WAAPI effect on a mounted element, replacing any effect
- * already running on it. The shared `motionAllowed` rule — manual root
- * low-motion OR live OS `prefers-reduced-motion` OR an active `data-theme-ink`
- * capture — is evaluated at call time: when disallowed, the previous effect is
- * still cancelled but no new one starts, so underlying styles are the final
- * state and cancellation never hides content or leaves a fixed height behind.
- * Completion and cancellation both release tracking.
+ * already running on it. Underlying styles remain the final state, so
+ * cancellation never hides content or leaves a fixed height behind.
+ * Completion and cancellation both release tracking. Native reduced-motion
+ * preferences skip the effect and retain the caller's resting styles.
  *
- * @returns The started `Animation`, or `null` when suppressed or when the
- *   platform lacks `element.animate`.
+ * @returns The started animation, or null when reduced motion is requested or WAAPI is absent.
  */
 export function playEffect(
   element: Element,
@@ -68,7 +69,11 @@ export function playEffect(
   timing: EffectTiming = {},
 ): Animation | null {
   elementEffects.get(element)?.cancel();
-  if (!motionAllowed() || typeof element.animate !== "function") return null;
+  if (
+    element.ownerDocument.defaultView?.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
+    typeof element.animate !== "function"
+  )
+    return null;
   const animation = element.animate(frames, {
     duration: effectDurationMs,
     delay,
@@ -85,22 +90,10 @@ export function playEffect(
   return animation;
 }
 
-/**
- * Cancels tracked effects and synchronously restores their owners' live DOM.
- * Ink capture calls this before cloning, including held toolbar snapshots that
- * have not started WAAPI yet. The reentry guard permits an owner to register
- * cancelEffects itself without recursively flushing the same cancellation.
- */
+/** Cancels every tracked effect during navigation; resting styles remain visible. */
 export function cancelEffects(): void {
-  if (cancellingEffects) return;
-  cancellingEffects = true;
-  try {
-    for (const cleanup of suppressionCleanups) cleanup();
-  } finally {
-    for (const animation of activeEffects) animation.cancel();
-    activeEffects.clear();
-    cancellingEffects = false;
-  }
+  for (const animation of activeEffects) animation.cancel();
+  activeEffects.clear();
 }
 
 /**
@@ -136,40 +129,4 @@ export function morphHeightEffect(element: HTMLElement, previousHeight?: number)
  */
 export function riseEffect(element: Element, delay = 0): Animation | null {
   return playEffect(element, [{ transform: "scaleY(0.85)" }, { transform: "scaleY(1)" }], delay);
-}
-
-/**
- * Calls the owner's cleanup when root/OS policy suppresses spatial motion.
- * Explicit cancelEffects also flushes registered owners synchronously before
- * ink capture, so temporary snapshots and hidden live controls cannot leak
- * into the captured document. Returns a disposer for both policy observation
- * and the cancellation registration.
- */
-export function watchMotionSuppression(onSuppressed: () => void): () => void {
-  suppressionCleanups.add(onSuppressed);
-  const check = (): void => {
-    if (!motionAllowed()) onSuppressed();
-  };
-  const observer = new MutationObserver(check);
-  observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ["data-low-motion", "data-theme-ink"],
-  });
-  let media: MediaQueryList | null = null;
-  try {
-    media = window.matchMedia(reducedMotionQuery);
-    // Test stubs can provide `matches` without listener APIs.
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", check);
-    } else {
-      media = null;
-    }
-  } catch {
-    media = null;
-  }
-  return () => {
-    suppressionCleanups.delete(onSuppressed);
-    observer.disconnect();
-    if (media) media.removeEventListener("change", check);
-  };
 }

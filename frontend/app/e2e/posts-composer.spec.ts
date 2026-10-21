@@ -13,7 +13,11 @@ import {
 } from "./media-fixtures";
 import {
   activeBrandProfileName,
+  closeComposer,
+  editPostFromRow,
   provisionControlledChannels,
+  controlledProviderAccountId,
+  readLiveControlledCopies,
   type ControlledPlatform,
 } from "./publication-fixtures";
 import { signIn, openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
@@ -108,7 +112,7 @@ function attachmentPreview(page: Page, fileName: string) {
  * @param page - Playwright page bound to the app under test.
  */
 async function openComposer(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Create post" }).click();
+  await page.locator("main header").getByRole("button", { name: "Create post" }).click();
   await expect(composerTextarea(page)).toBeVisible();
 }
 
@@ -128,6 +132,21 @@ async function saveDraft(page: Page): Promise<void> {
     .first()
     .click();
   await expect(page.getByText(/Saved to your workspace at/i)).toBeVisible({ timeout: 60_000 });
+}
+
+/**
+ * Selects the publishing intent the composer's pinned action submits. The mode
+ * selector names the intent and the pinned bar names the action, so a test that
+ * publishes instead of saving picks the mode first.
+ *
+ * @param page - Playwright page bound to the app under test.
+ * @param mode - Publishing intent to select before submitting.
+ */
+async function choosePublishingMode(page: Page, mode: "Draft" | "Schedule" | "Now"): Promise<void> {
+  await page
+    .getByRole("group", { name: "Publishing", exact: true })
+    .getByRole("button", { name: mode, exact: true })
+    .click();
 }
 
 /**
@@ -153,10 +172,10 @@ async function saveAndSettle(
  * @param caption - Caption identifying the row to edit.
  */
 async function reopenDraft(page: Page, caption: string): Promise<void> {
-  await page.getByRole("button", { name: /back to posts/i }).click();
+  await closeComposer(page);
   const row = page.getByRole("row").filter({ hasText: caption });
   await expect(row).toBeVisible({ timeout: 30_000 });
-  await row.getByTitle("Edit post").click();
+  await editPostFromRow(page, row);
   await expect(composerTextarea(page)).toHaveValue(caption);
 }
 
@@ -212,16 +231,6 @@ async function reloadWithScopedProfile(page: Page): Promise<string> {
   return activeBrandProfileName(page);
 }
 
-/**
- * Switches the composer back to its shared tab. Only the active tab panel is
- * mounted, so the attachment strips are only reachable from here.
- *
- * @param page - Playwright page bound to the app under test.
- */
-async function openSharedTab(page: Page): Promise<void> {
-  await page.getByRole("tab", { name: /shared content/i }).click();
-}
-
 /** The saved-target fields these acceptance runs read off a recorded mutation. */
 interface SavedTargetFields {
   attachment_ids?: string[] | null;
@@ -242,7 +251,8 @@ interface PostMutation {
   request: { attachment_ids?: string[]; default_text?: string; targets?: SavedTargetFields[] };
   response: {
     id: string;
-    attachments: Array<{ asset_id: string }>;
+    brand_profile_id: string;
+    attachments: Array<{ asset_id: string; asset: { brand_profile_id: string } }>;
     distributions: unknown[];
     targets: SavedTargetFields[];
   };
@@ -428,7 +438,7 @@ async function blobUrlCounts(page: Page): Promise<{ created: number; revoked: nu
  */
 async function composerRecoveryKeys(page: Page): Promise<string[]> {
   return page.evaluate(() =>
-    Object.keys(window.localStorage).filter((key) => key.startsWith("meltiply.composer.v1.")),
+    Object.keys(window.localStorage).filter((key) => key.startsWith("meltiply.composer.v2.")),
   );
 }
 
@@ -490,11 +500,11 @@ test("restores an unsaved new composition after a reload and clears it on save",
   await expect(composerTextarea(page)).toHaveValue(caption);
   await expect(page.getByText(/Unsaved changes are kept in this browser/i)).toBeVisible();
 
-  // A successful save supersedes the recovery copy in both the unsaved `new`
-  // namespace and the saved Post's, so a fresh composition starts empty.
+  // A successful save supersedes this composition's stable recovery namespace,
+  // so a fresh composition starts empty.
   await saveDraft(page);
   expect(await composerRecoveryKeys(page)).toHaveLength(0);
-  await page.getByRole("button", { name: /back to posts/i }).click();
+  await closeComposer(page);
   await openComposer(page);
   await expect(composerTextarea(page)).toHaveValue("");
 });
@@ -524,7 +534,7 @@ test("restores unsaved edits on a reopened saved draft after a reload", async ({
   await reloadWithScopedProfile(page);
   const row = page.getByRole("row").filter({ hasText: savedCaption });
   await expect(row).toBeVisible({ timeout: 30_000 });
-  await row.getByTitle("Edit post").click();
+  await editPostFromRow(page, row);
   await expect(composerTextarea(page)).toHaveValue(unsavedCaption);
   await expect(page.getByText(/Unsaved changes are kept in this browser/i)).toBeVisible();
 });
@@ -563,6 +573,174 @@ test("uploads media in the composer and saves the ordered attachments", async ({
     [gif.name, "1. "],
     [png.name, "2. "],
   ]);
+});
+
+/**
+ * Cross-profile acceptance: real media and Posts retain distinct ownership,
+ * saved identities survive a reload after partial failure, and a failed queue
+ * operation can finish without resubmitting a profile already accepted.
+ */
+test("recovers independent profile copies and retries only unfinished publishing", async ({
+  page,
+  request,
+}) => {
+  test.slow();
+  const workspace = await openIsolatedOwnerWorkspace(page);
+  const secondaryName = `${workspace.profileName} secondary`;
+  await page.goto("/channels");
+  await page.getByRole("button", { name: "Create Brand Profile", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Create Brand Profile", exact: true });
+  await editor.getByLabel("Profile name", { exact: true }).fill(secondaryName);
+  await editor.getByRole("button", { name: "Create profile", exact: true }).click();
+  await expect(editor).not.toBeVisible();
+  const firstAccount = controlledProviderAccountId("threads");
+  const secondAccount = controlledProviderAccountId("threads");
+  const primary = await provisionControlledChannels(request, workspace.profileName, [
+    { platform: "threads", displayName: "Primary Threads", providerUserId: firstAccount },
+  ]);
+  const secondary = await provisionControlledChannels(request, secondaryName, [
+    { platform: "threads", displayName: "Secondary Threads", providerUserId: secondAccount },
+    {
+      platform: "instagram",
+      displayName: "Secondary Instagram",
+      providerUserId: controlledProviderAccountId("instagram"),
+    },
+  ]);
+  await page.goto("/posts");
+  await waitForWorkspace(page);
+  await activeBrandProfileName(page);
+  await openComposer(page);
+  await page.locator('[data-side-dialog] button[aria-haspopup="menu"]').click();
+  const profiles = page.getByRole("menu", { name: "Brand Profile", exact: true });
+  await profiles.getByRole("menuitemcheckbox", { name: secondaryName, exact: true }).click();
+  await expect(
+    profiles.getByRole("menuitemcheckbox", { name: workspace.profileName, exact: true }),
+  ).toBeChecked();
+  await expect(
+    profiles.getByRole("menuitemcheckbox", { name: secondaryName, exact: true }),
+  ).toBeChecked();
+  await page.keyboard.press("Escape");
+  const destinations = page.getByRole("region", { name: "Destinations", exact: true });
+  const threadsGroup = destinations.locator('section[aria-label="Threads"]');
+  await expect(threadsGroup.getByRole("button", { name: /Primary Threads/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(threadsGroup.getByRole("button", { name: /Secondary Threads/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(destinations.locator('section[aria-label="Instagram"]')).toBeVisible();
+  await destinations.getByRole("button", { name: /Secondary Instagram/ }).click();
+
+  const caption = "Independent profile copies";
+  const secondaryCaption = "Secondary profile caption";
+  await composerTextarea(page).fill(caption);
+  const png = pngFixture();
+  await composerFileInput(page).setInputFiles(png);
+  await expectAttachmentPhases(page, [[png.name, "Ready"]]);
+  const secondaryPanel = page.getByRole("region", { name: "Secondary Threads", exact: true });
+  await secondaryPanel.getByRole("textbox").fill(secondaryCaption);
+  await secondaryPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
+  await secondaryPanel
+    .getByRole("button", { name: attachmentControlName("1. ", png.name) })
+    .click();
+  const mutations = await watchPostMutations(page);
+  let rejectSecondaryDraft = true;
+  await page.route(/\/api\/v1\/asset-upload-sessions$/, async (route) => {
+    const body: unknown = route.request().postDataJSON();
+    if (
+      rejectSecondaryDraft &&
+      route.request().method() === "POST" &&
+      typeof body === "object" &&
+      body !== null &&
+      "brand_profile_id" in body &&
+      body.brand_profile_id === secondary.brand_profile_id
+    ) {
+      await route.fulfill({
+        status: 503,
+        json: {
+          error: { code: "internal_error", message: "Temporarily unavailable" },
+        },
+      });
+    } else await route.fallback();
+  });
+  await page.getByRole("button", { name: "Save Drafts", exact: true }).click();
+  await expect(page.getByRole("alert")).toBeVisible({ timeout: 60_000 });
+  const primaryBeforeRetry = mutations.find(
+    (mutation) => mutation.response.brand_profile_id === primary.brand_profile_id,
+  )?.response;
+  expect(primaryBeforeRetry?.brand_profile_id).toBe(primary.brand_profile_id);
+  rejectSecondaryDraft = false;
+  await reloadWithScopedProfile(page);
+  await openComposer(page);
+  await expect(composerTextarea(page)).toHaveValue(caption);
+  await expect(secondaryPanel.getByRole("textbox")).toHaveValue(secondaryCaption);
+  await page.getByRole("button", { name: "Save Drafts", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText(/Saved to your workspace at/i)).toBeVisible({ timeout: 60_000 });
+  const firstCopy = mutations.findLast(
+    (mutation) => mutation.response.brand_profile_id === primary.brand_profile_id,
+  )?.response;
+  const secondCopy = mutations.findLast(
+    (mutation) => mutation.response.brand_profile_id === secondary.brand_profile_id,
+  )?.response;
+  expect(firstCopy?.id).toBe(primaryBeforeRetry?.id);
+  expect(firstCopy?.attachments).toHaveLength(1);
+  expect(secondCopy?.attachments).toHaveLength(1);
+  expect(firstCopy?.attachments[0]?.asset.brand_profile_id).toBe(primary.brand_profile_id);
+  expect(secondCopy?.attachments[0]?.asset.brand_profile_id).toBe(secondary.brand_profile_id);
+  expect(secondCopy?.attachments[0]?.asset_id).not.toBe(firstCopy?.attachments[0]?.asset_id);
+  expect(
+    secondCopy?.targets.find((target) => target.platform_account_id === secondary.channels[0]?.id),
+  ).toMatchObject({
+    description_override: secondaryCaption,
+    attachment_ids: [secondCopy?.attachments[0]?.asset_id],
+  });
+  expect(new Set(mutations.map((mutation) => mutation.response.id))).toEqual(
+    new Set([firstCopy?.id, secondCopy?.id]),
+  );
+
+  let rejectSecondarySchedule = true;
+  const acceptedPrimarySchedules: string[] = [];
+  await page.route(/\/api\/v1\/posts\/[^/]+\/schedule$/, async (route) => {
+    if (route.request().url().includes(`/${secondCopy?.id}/`) && rejectSecondarySchedule) {
+      await route.fulfill({
+        status: 503,
+        json: {
+          error: { code: "internal_error", message: "Temporarily unavailable" },
+        },
+      });
+    } else {
+      if (route.request().url().includes(`/${firstCopy?.id}/`))
+        acceptedPrimarySchedules.push(route.request().url());
+      await route.fallback();
+    }
+  });
+  await choosePublishingMode(page, "Now");
+  await page.getByRole("button", { name: "Publish Posts", exact: true }).click();
+  await expect(page.getByRole("alert")).toBeVisible({ timeout: processingTimeoutMs });
+  expect(acceptedPrimarySchedules).toHaveLength(1);
+  rejectSecondarySchedule = false;
+  await page.getByRole("button", { name: "Publish Posts", exact: true }).click();
+  await expect(composerTextarea(page)).toBeHidden({ timeout: 60_000 });
+  expect(acceptedPrimarySchedules).toHaveLength(1);
+  for (const [account, content] of [
+    [firstAccount, caption],
+    [secondAccount, secondaryCaption],
+  ] as const) {
+    await expect
+      .poll(async () => readLiveControlledCopies(request, account), {
+        timeout: processingTimeoutMs,
+      })
+      .toMatchObject([
+        {
+          caption: content,
+          media: [expect.objectContaining({ contentType: expect.stringMatching(/^image\//) })],
+        },
+      ]);
+    expect(await readLiveControlledCopies(request, account)).toHaveLength(1);
+  }
 });
 
 /**
@@ -640,19 +818,17 @@ test("replaces one attachment without changing the count, order, or channel sele
 
   // The first Channel publishes the middle attachment and nothing else: text
   // only, then that one row, so its saved target names a single Asset.
-  const textOnly = page.getByRole("tabpanel").getByRole("button", { name: /text only/i });
-  await page.getByRole("tab", { name: narrow }).click();
-  await textOnly.click();
-  const narrowRow = page.getByRole("tabpanel").getByRole("button", {
+  const narrowPanel = page.getByRole("region", { name: narrow, exact: true });
+  const silentPanel = page.getByRole("region", { name: silent, exact: true });
+  await narrowPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
+  const narrowRow = narrowPanel.getByRole("button", {
     name: attachmentControlName("2. ", gif.name),
   });
   await expect(narrowRow).toBeVisible({ timeout: 60_000 });
   await narrowRow.click();
   await expect(narrowRow).toHaveAttribute("aria-pressed", "true");
   // The second Channel publishes no media at all, and a swap must not disturb it.
-  await page.getByRole("tab", { name: silent }).click();
-  await textOnly.click();
-  await openSharedTab(page);
+  await silentPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
 
   await page.getByRole("button", { name: "Replace attachment 2" }).click();
   await composerFileInput(page).setInputFiles({
@@ -674,8 +850,6 @@ test("replaces one attachment without changing the count, order, or channel sele
 
   // The Channel that selected the replaced Asset now selects its replacement,
   // and the other Channels' own selections are untouched.
-  await page.getByRole("tab", { name: narrow }).click();
-  const narrowPanel = page.getByRole("tabpanel");
   await expect(
     narrowPanel.getByRole("button", {
       name: attachmentControlName("2. ", camera.name),
@@ -686,10 +860,10 @@ test("replaces one attachment without changing the count, order, or channel sele
       name: attachmentControlName("1. ", png.name),
     }),
   ).toHaveAttribute("aria-pressed", "false");
-  await page.getByRole("tab", { name: silent }).click();
-  await expect(textOnly).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    silentPanel.getByRole("switch", { name: "Use post attachments", exact: true }),
+  ).toHaveAttribute("aria-checked", "false");
 
-  await openSharedTab(page);
   await saveAndSettle(page, [
     [png.name, "Ready"],
     [camera.name, "Ready"],
@@ -698,7 +872,7 @@ test("replaces one attachment without changing the count, order, or channel sele
 
   // The same composition rebuilt from the server after a reload.
   await reloadWithScopedProfile(page);
-  await page.getByRole("row").filter({ hasText: caption }).getByTitle("Edit post").click();
+  await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
   await expect(composerTextarea(page)).toHaveValue(caption);
   await expectAttachmentPhases(page, [
     [png.name, "1. "],
@@ -706,8 +880,7 @@ test("replaces one attachment without changing the count, order, or channel sele
     [clip.name, "3. "],
   ]);
   await expect(page.getByText(gif.name)).toHaveCount(0);
-  await page.getByRole("tab", { name: narrow }).click();
-  const reopenedPanel = page.getByRole("tabpanel");
+  const reopenedPanel = page.getByRole("region", { name: narrow, exact: true });
   await expect(
     reopenedPanel.getByRole("button", {
       name: attachmentControlName("2. ", camera.name),
@@ -718,8 +891,9 @@ test("replaces one attachment without changing the count, order, or channel sele
       name: attachmentControlName("1. ", png.name),
     }),
   ).toHaveAttribute("aria-pressed", "false");
-  await page.getByRole("tab", { name: silent }).click();
-  await expect(textOnly).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    silentPanel.getByRole("switch", { name: "Use post attachments", exact: true }),
+  ).toHaveAttribute("aria-checked", "false");
 });
 
 /**
@@ -951,6 +1125,7 @@ test("reports an actionable processing failure and blocks publishing", async ({
 
   // Publishing is refused with a per-Channel reason naming the unusable file.
   await composerTextarea(page).fill("Blocked by an unusable attachment");
+  await choosePublishingMode(page, "Now");
   await page.getByRole("button", { name: /publish now/i }).click();
   await expect(page.getByText(/Please fix the following before submitting/i)).toBeVisible({
     timeout: 30_000,
@@ -986,6 +1161,7 @@ test("identifies media-required channels before submitting text-only posts", asy
 
   const caption = "Text-only post attempting Instagram publish";
   await composerTextarea(page).fill(caption);
+  await choosePublishingMode(page, "Now");
 
   // Each click re-validates, so retrying the click until the Channel-scoped
   // violation renders absorbs any residual settle gap after the fetch lands.
@@ -1025,6 +1201,9 @@ test("keeps composer input and reports no saved state when saving fails", async 
   // Editing after a successful save is what makes the next save a claim the
   // composer has to earn; a failure here must not leave a saved indicator up.
   const caption = "Unsaved work survives a failed save";
+  // Filling does not move Playwright's pointer off the hover-paused saved toast.
+  // A real click into the editor leaves that notification before the next save.
+  await composerTextarea(page).click();
   await composerTextarea(page).fill(caption);
   await expect(page.getByText(/Unsaved changes are kept in this browser/i)).toBeVisible();
 
@@ -1088,14 +1267,10 @@ test("reopens one Post with its ordered attachments and channel targets", async 
 
   // Per-Channel target settings: one Channel publishes text only, the other
   // overrides the caption and still inherits the whole ordered attachment set.
-  await page.getByRole("tab", { name: instagram }).click();
-  await page
-    .getByRole("tabpanel")
-    .getByRole("button", { name: /text only/i })
-    .click();
-  await page.getByRole("tab", { name: threads }).click();
-  await page.getByRole("button", { name: /customize for this channel/i }).click();
-  await page.getByRole("tabpanel").getByRole("textbox").fill("Threads-only caption");
+  const instagramPanel = page.getByRole("region", { name: instagram, exact: true });
+  const threadsPanel = page.getByRole("region", { name: threads, exact: true });
+  await instagramPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
+  await threadsPanel.getByRole("textbox").fill("Threads-only caption");
   await saveDraft(page);
   const savedPreview = new RegExp(`${caption}|Threads-only caption`);
 
@@ -1103,18 +1278,16 @@ test("reopens one Post with its ordered attachments and channel targets", async 
   // scope must be restored first: the Posts surface keeps its mutating actions
   // hidden in the read-only aggregate view.
   await reloadWithScopedProfile(page);
-  await page.getByRole("row").filter({ hasText: savedPreview }).getByTitle("Edit post").click();
+  await editPostFromRow(page, page.getByRole("row").filter({ hasText: savedPreview }));
   await expect(composerTextarea(page)).toHaveValue(caption);
   await expectAttachmentPhases(page, [
     [gif.name, "1. "],
     [png.name, "2. "],
   ]);
-  await page.getByRole("tab", { name: instagram }).click();
   await expect(
-    page.getByRole("tabpanel").getByRole("button", { name: /text only/i }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("tab", { name: threads }).click();
-  await expect(page.getByRole("tabpanel").getByRole("textbox")).toHaveValue("Threads-only caption");
+    instagramPanel.getByRole("switch", { name: "Use post attachments", exact: true }),
+  ).toHaveAttribute("aria-checked", "false");
+  await expect(threadsPanel.getByRole("textbox")).toHaveValue("Threads-only caption");
 
   // A separate authenticated session must rebuild the same Post from the server,
   // after selecting the same profile scope a returning user would pick.
@@ -1123,20 +1296,15 @@ test("reopens one Post with its ordered attachments and channel targets", async 
   await signIn(secondPage, credentials);
   await waitForWorkspace(secondPage);
   await activeBrandProfileName(secondPage);
-  await secondPage
-    .getByRole("row")
-    .filter({ hasText: savedPreview })
-    .getByTitle("Edit post")
-    .click();
+  await editPostFromRow(secondPage, secondPage.getByRole("row").filter({ hasText: savedPreview }));
   await expect(composerTextarea(secondPage)).toHaveValue(caption);
   await expectAttachmentPhases(secondPage, [
     [gif.name, "1. "],
     [png.name, "2. "],
   ]);
-  await secondPage.getByRole("tab", { name: threads }).click();
-  await expect(secondPage.getByRole("tabpanel").getByRole("textbox")).toHaveValue(
-    "Threads-only caption",
-  );
+  await expect(
+    secondPage.getByRole("region", { name: threads, exact: true }).getByRole("textbox"),
+  ).toHaveValue("Threads-only caption");
   await second.close();
 });
 
@@ -1146,8 +1314,8 @@ test("reopens one Post with its ordered attachments and channel targets", async 
  * nothing but the workspace's Channel list can name its platform. The controls
  * must come back filled and the next save must carry them again, instead of
  * rebuilding the panel empty and quietly erasing the Post's own options.
- * Provider fields are edited in the channel tab; shared caption entry explicitly
- * returns to Shared Content instead of targeting its unmounted textarea.
+ * Provider fields and shared caption remain mounted in the same scrolling
+ * editor; changing one must not discard the other's unsaved values.
  * Reopening uses the API-returned Post identity, not its title-first preview.
  */
 test("reopens a draft whose provider options have no distribution", async ({ page, request }) => {
@@ -1161,17 +1329,10 @@ test("reopens a draft whose provider options have no distribution", async ({ pag
   const mutations = await watchPostMutations(page);
   const title = "Title without a distribution";
   const tags = "alpha, beta";
-  await page.getByRole("tab", { name: channel }).click();
-  await page
-    .getByRole("tabpanel")
-    .getByPlaceholder(/enter youtube title/i)
-    .fill(title);
-  await page
-    .getByRole("tabpanel")
-    .getByPlaceholder(/tech, tutorial/i)
-    .fill(tags);
+  const channelPanel = page.getByRole("region", { name: channel, exact: true });
+  await channelPanel.getByPlaceholder(/enter youtube title/i).fill(title);
+  await channelPanel.getByPlaceholder(/tech, tutorial/i).fill(tags);
   const caption = "Provider options without a distribution";
-  await openSharedTab(page);
   await composerTextarea(page).fill(caption);
   await saveDraft(page);
 
@@ -1191,17 +1352,13 @@ test("reopens a draft whose provider options have no distribution", async ({ pag
   // Reopened from the server after a reload: the composer resolved the
   // descriptor from the Channel list and rebuilt the controls it had emptied.
   await reloadWithScopedProfile(page);
-  await page
-    .getByRole("row")
-    .filter({ hasText: created.response.id.slice(0, 8) })
-    .getByTitle("Edit post")
-    .click();
-  await expect(composerTextarea(page)).toHaveValue(caption);
-  await page.getByRole("tab", { name: channel }).click();
-  await expect(page.getByRole("tabpanel").getByPlaceholder(/enter youtube title/i)).toHaveValue(
-    title,
+  await editPostFromRow(
+    page,
+    page.getByRole("row").filter({ hasText: created.response.id.slice(-6) }),
   );
-  await expect(page.getByRole("tabpanel").getByPlaceholder(/tech, tutorial/i)).toHaveValue(tags);
+  await expect(composerTextarea(page)).toHaveValue(caption);
+  await expect(channelPanel.getByPlaceholder(/enter youtube title/i)).toHaveValue(title);
+  await expect(channelPanel.getByPlaceholder(/tech, tutorial/i)).toHaveValue(tags);
 
   // Those options are still the Post's own, so saving again carries them on.
   const beforeSave = mutations.length;
@@ -1233,9 +1390,8 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
   const mutations = await watchPostMutations(page);
   const caption = "Blank override journey";
   await composerTextarea(page).fill(caption);
-  await page.getByRole("tab", { name: channel }).click();
-  await page.getByRole("button", { name: /customize for this channel/i }).click();
-  const override = page.getByRole("tabpanel").getByRole("textbox");
+  const channelPanel = page.getByRole("region", { name: channel, exact: true });
+  const override = channelPanel.getByRole("textbox");
   await expect(override).toHaveValue(caption);
   await override.fill("");
   await saveDraft(page);
@@ -1246,15 +1402,13 @@ test("keeps an enabled but blank channel caption blank across saves", async ({ p
   expect(saved.response.targets[0]?.description_override).toBe("");
 
   await reloadWithScopedProfile(page);
-  await page
-    .getByRole("row")
-    .filter({ hasText: saved.response.id.slice(0, 8) })
-    .getByTitle("Edit post")
-    .click();
+  await editPostFromRow(
+    page,
+    page.getByRole("row").filter({ hasText: saved.response.id.slice(-6) }),
+  );
   await expect(composerTextarea(page)).toHaveValue(caption);
-  await page.getByRole("tab", { name: channel }).click();
-  await expect(page.getByRole("button", { name: /remove custom override/i })).toBeVisible();
-  await expect(page.getByRole("tabpanel").getByRole("textbox")).toHaveValue("");
+  await expect(channelPanel.getByRole("button", { name: /remove custom override/i })).toBeVisible();
+  await expect(override).toHaveValue("");
 
   // Saving the reopened draft keeps the blank caption blank.
   const beforeSave = mutations.length;

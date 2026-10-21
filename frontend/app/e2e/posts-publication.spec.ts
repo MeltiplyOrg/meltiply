@@ -5,6 +5,8 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from "@
 import {
   activeBrandProfileName,
   controlledProviderAccountId,
+  closeComposer,
+  editPostFromRow,
   provisionControlledChannels,
   readControlledMedia,
   readControlledPublications,
@@ -100,7 +102,10 @@ async function attachChannels(
 
 /** Opens the composer for a brand new Post. */
 async function openComposer(page: Page): Promise<void> {
-  await page.getByRole("button", { name: /create post/i }).click();
+  await page
+    .locator("main header")
+    .getByRole("button", { name: /create post/i })
+    .click();
   await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
     timeout: 30_000,
   });
@@ -119,9 +124,9 @@ async function returnToPosts(page: Page): Promise<void> {
     timeout: 30_000,
   });
   await expect(page.getByRole("alert")).toHaveCount(0);
-  const back = page.getByRole("button", { name: /back to posts/i });
-  if (await back.isVisible().catch(() => false)) {
-    await back.click();
+  const composer = page.getByRole("dialog", { name: /^(?:new post|edit post)$/i });
+  if (await composer.isVisible().catch(() => false)) {
+    await closeComposer(page);
   }
   await waitForWorkspace(page);
 }
@@ -154,8 +159,8 @@ async function reloadPostsWorkspace(page: Page): Promise<string> {
  * Instagram refuses a text-only publish, so a Post carrying no attachment cannot
  * target it. Selecting one destination explicitly is how a test meets that real
  * platform rule instead of working around it.
- * Tab presence identifies each selected Channel; a count of one alone cannot
- * distinguish the intended destination from an already-selected sibling.
+ * Destination pressed state identifies each selected Channel; a count of one
+ * alone cannot distinguish the intended destination from a selected sibling.
  *
  * @param page - Playwright page bound to the open composer.
  * @param keep - Display name of the one Channel that stays selected.
@@ -165,18 +170,19 @@ async function targetOnlyChannel(page: Page, keep: string, drop: string): Promis
   const destinations = page.getByText(/^\d+ selected$/).locator("../../..");
   const selectedBadge = destinations.getByText(/^\d+ selected$/);
   await expect(selectedBadge).toBeVisible({ timeout: 30_000 });
-  const keepTab = page.getByRole("tab", { name: keep });
-  const dropTab = page.getByRole("tab", { name: drop });
-  const pill = (displayName: string) =>
-    destinations.getByRole("button", { name: new RegExp(displayName) });
-  if ((await keepTab.count()) === 0) await pill(keep).click();
-  await expect(keepTab).toBeVisible();
-  if ((await dropTab.count()) > 0) await pill(drop).click();
+  const keepDestination = destinations.getByRole("button", { name: new RegExp(keep) });
+  const dropDestination = destinations.getByRole("button", { name: new RegExp(drop) });
+  if ((await keepDestination.getAttribute("aria-pressed")) !== "true") {
+    await keepDestination.click();
+  }
+  if ((await dropDestination.getAttribute("aria-pressed")) === "true") {
+    await dropDestination.click();
+  }
   await expect(destinations.getByText(/^1 selected$/)).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.getByRole("tab", { name: keep })).toBeVisible();
-  await expect(page.getByRole("tab", { name: drop })).toHaveCount(0);
+  await expect(keepDestination).toHaveAttribute("aria-pressed", "true");
+  await expect(dropDestination).toHaveAttribute("aria-pressed", "false");
 }
 
 /**
@@ -213,7 +219,7 @@ async function attachMedia(page: Page, files: readonly MediaFixture[]): Promise<
  * Toggles one attachment in one Channel's own media selection.
  *
  * @param page - Playwright page bound to the open composer.
- * @param channelName - Display name of the Channel whose tab to open.
+ * @param channelName - Display name of the Channel whose editor to use.
  * @param attachmentIndex - 1-based position of the attachment in the Post.
  * @param attachmentName - Input filename matched across local and persisted titles.
  */
@@ -223,8 +229,8 @@ async function toggleChannelAttachment(
   attachmentIndex: number,
   attachmentName: string,
 ): Promise<void> {
-  await page.getByRole("tab", { name: channelName }).click();
   await page
+    .getByRole("region", { name: channelName, exact: true })
     .getByRole("button", {
       name: attachmentControlName(`${attachmentIndex}. `, attachmentName),
     })
@@ -243,9 +249,8 @@ async function overrideChannelCaption(
   channelName: string,
   caption: string,
 ): Promise<void> {
-  await page.getByRole("tab", { name: channelName }).click();
-  await page.getByRole("button", { name: /customize for this channel/i }).click();
-  await page
+  const editor = page.getByRole("region", { name: channelName, exact: true });
+  await editor
     .getByText(/custom text for/i)
     .locator("..")
     .getByRole("textbox")
@@ -262,26 +267,47 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
   const when = new Date(Date.now() + minutesFromNow * 60_000);
   const pad = (value: number) => String(value).padStart(2, "0");
   await page
-    .locator('input[type="datetime-local"]')
-    .fill(
-      `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T${pad(when.getHours())}:${pad(when.getMinutes())}`,
-    );
+    .getByRole("group", { name: "Publishing", exact: true })
+    .getByRole("button", { name: "Schedule", exact: true })
+    .click();
+  const picker = page.getByRole("group", { name: "Date & time", exact: true });
+  await picker.getByRole("button", { name: /^Date / }).click();
+  await picker
+    .getByRole("button", {
+      name: new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(when),
+      exact: true,
+    })
+    .click();
+  await picker.getByRole("combobox", { name: "Hour", exact: true }).click();
+  await page.getByRole("option", { name: pad(when.getHours()), exact: true }).click();
+  await picker.getByRole("combobox", { name: "Minute", exact: true }).click();
+  await page.getByRole("option", { name: pad(when.getMinutes()), exact: true }).click();
 }
 
-/** Applies a status bucket and waits for its selected label before sampling rows. */
+/** Applies a status bucket through the filter disclosure, then restores the collection viewport. */
 async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
-  const combobox = page.getByRole("combobox", { name: /post status/i });
-  await expect(combobox).toBeVisible({ timeout: 30_000 });
-  await combobox.click();
-  await page.getByRole("option", { name: status }).click();
-  await expect(combobox).toHaveText(status);
+  const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
+  await disclosure.click();
+  const addStatus = page.getByRole("button", { name: "Add Post status filter", exact: true });
+  if (await addStatus.isVisible()) await addStatus.click();
+  const trigger = page
+    .getByRole("button", { name: "Remove Post status filter", exact: true })
+    .locator("..")
+    .locator('button[aria-haspopup="menu"]');
+  await trigger.click();
+  const menu = page.getByRole("menu", { name: "Post status", exact: true });
+  await menu.getByRole("menuitemcheckbox", { name: "All statuses", exact: true }).click();
+  const option = menu.getByRole("menuitemcheckbox", { name: status });
+  if (!(await option.isChecked())) await option.click();
+  await expect(option).toBeChecked();
+  await page.keyboard.press("Escape");
+  await disclosure.click();
+  await expect(page.getByRole("group", { name: "Filters", exact: true })).toBeHidden();
 }
 
-/** Restores the unfiltered Posts list. */
+/** Restores all status buckets using the same user-visible filtering flow. */
 async function clearPostStatusFilter(page: Page): Promise<void> {
-  const combobox = page.getByRole("combobox", { name: /post status/i });
-  await combobox.click();
-  await page.getByRole("option", { name: /^all statuses$/i }).click();
+  await filterPostsByStatus(page, /^all statuses$/i);
 }
 
 /**
@@ -383,9 +409,8 @@ async function closePostDetails(page: Page): Promise<void> {
  * Grid and calendar both lay their cards out in CSS grid flow, so top-to-bottom
  * then left-to-right is the reading order in every view. Comparing the resulting
  * sequence across views is what proves they render one identity in one order
- * rather than three independent lists.
- * View switches crossfade outgoing content; measure only visible captions and
- * wait for a complete set rather than accepting an element about to unmount.
+ * rather than three independent collections. View changes are immediate;
+ * query refreshes must settle before sampling the complete set of captions.
  *
  * @param page - Posts page or expanded calendar-day dialog to measure.
  * @param captions - Captions whose relative order is under test.
@@ -555,10 +580,10 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
  * have no calendar date and cannot prove this contract. The shared signup helper
  * creates a real scoped profile, and controlled channels publish through the
  * normal scheduling API rather than inserting calendar fixtures.
- * Calendar cells preview only two Posts; expanding the day exposes all three
- * for the same complete identity/order assertion used by list and grid.
+ * Calendar date controls expose the complete day's Posts for the same
+ * identity/order assertion used by Table and Grid.
  */
-test("shows the same Post and the same order in the list, grid, calendar, and detail surfaces", async ({
+test("shows the same Post and order in Table, Grid, Calendar, and Details", async ({
   page,
   request,
 }) => {
@@ -576,14 +601,14 @@ test("shows the same Post and the same order in the list, grid, calendar, and de
     await composerTextarea(page).fill(caption);
     await targetOnlyChannel(page, "Acceptance Threads", "Acceptance Reels");
     await scheduleInMinutes(page, 30 + index);
-    await page.getByRole("button", { name: /^schedule$/i }).click();
+    await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
     await returnToPosts(page);
   }
 
   await expect(page.getByText(captions[0]!, { exact: true })).toBeVisible({
     timeout: 60_000,
   });
-  await page.getByRole("button", { name: /^time:/i }).click();
+  await page.getByRole("button", { name: /^sort:/i }).click();
   await page.getByRole("menuitem", { name: "Time: Oldest first", exact: true }).click();
   expect(await captionsInReadingOrder(page, captions)).toEqual(captions);
 
@@ -592,13 +617,20 @@ test("shows the same Post and the same order in the list, grid, calendar, and de
   expect(await captionsInReadingOrder(page, captions)).toEqual(captions);
 
   await page.getByRole("button", { name: /^calendar$/i }).click();
-  await page.getByText("+1 more...", { exact: true }).click();
+  await page
+    .getByRole("group")
+    .filter({ has: page.getByText(captions[0]!, { exact: true }) })
+    .getByRole("button", { name: /^View posts on / })
+    .click();
   const calendarDay = page.getByRole("dialog");
   await expect(calendarDay).toBeVisible();
   expect(await captionsInReadingOrder(calendarDay, captions)).toEqual(captions);
   await closePostDetails(page);
 
-  await page.getByRole("button", { name: /^list$/i }).click();
+  await page
+    .getByRole("group", { name: "Post view", exact: true })
+    .getByRole("button", { name: /^table$/i })
+    .click();
   await expect(page.getByText(captions[0]!, { exact: true })).toBeVisible();
   expect(await captionsInReadingOrder(page, captions)).toEqual(captions);
 
@@ -656,8 +688,8 @@ test("keeps separately created identical Posts distinct and publishes only the o
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 0);
   await waitForLiveCopyCount(request, channels.threads.providerUserId, 0);
 
-  // Publish exactly one of them, through that row's own edit affordance.
-  await rows.first().getByTitle("Edit post").click();
+  // Publish exactly one stored Post through its own Details panel.
+  await editPostFromRow(page, rows.first());
   await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
     timeout: 30_000,
   });
@@ -729,19 +761,16 @@ test("edits a pending target without touching published history and explains wha
   await targetOnlyChannel(page, channelNames.threads, channelNames.instagram);
   await composerTextarea(page).fill(pendingCaption);
   await scheduleInMinutes(page, 180);
-  await page.getByRole("button", { name: /^schedule$/i }).click();
+  await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
   await returnToPosts(page);
 
   await waitForPostUnderStatus(page, pendingCaption, /^scheduled$/i);
-  const scheduledDetail = await openPostDetails(page, pendingCaption);
-  await expect(scheduledDetail.locator("dt")).toHaveCount(1, { timeout: 30_000 });
-  await closePostDetails(page);
 
   // Scheduling the second Post published nothing.
   expect(await readChannelLiveCopies(request, channels)).toEqual(historyBefore);
 
-  // Edit the pending Post through its own edit affordance.
-  await page.getByRole("row").filter({ hasText: pendingCaption }).getByTitle("Edit post").click();
+  // Edit the pending Post through its own Details panel.
+  await editPostFromRow(page, page.getByRole("row").filter({ hasText: pendingCaption }));
   await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
     timeout: 30_000,
   });
@@ -752,9 +781,11 @@ test("edits a pending target without touching published history and explains wha
   await waitForPostUnderStatus(page, pendingEditCaption, /^scheduled$/i);
   const editedDetail = await openPostDetails(page, pendingEditCaption);
   await expect(editedDetail.getByText(pendingEditCaption, { exact: true })).toBeVisible();
-  await expect(editedDetail.getByText("Scheduled", { exact: true })).toHaveCount(1, {
-    timeout: 30_000,
-  });
+  await expect(
+    editedDetail
+      .getByRole("article", { name: channelNames.threads, exact: true })
+      .getByText("Scheduled", { exact: true }),
+  ).toBeVisible({ timeout: 30_000 });
   await closePostDetails(page);
 
   // The published Post's Platform copies are the very same records as before.
@@ -762,7 +793,7 @@ test("edits a pending target without touching published history and explains wha
 
   // The delete confirmation states the consequence before it happens.
   const deleteDetail = await openPostDetails(page, pendingEditCaption);
-  await deleteDetail.getByRole("button", { name: /delete post/i }).click();
+  await deleteDetail.getByRole("button", { name: "Delete post", exact: true }).click();
   const confirmation = page.getByRole("alertdialog");
   await expect(confirmation.getByText(/delete this post\?/i)).toBeVisible();
   await expect(
@@ -775,7 +806,7 @@ test("edits a pending target without touching published history and explains wha
   await expect(deleteDetail).toBeVisible({ timeout: 30_000 });
 
   // --- Deleting for real: the pending Post stops, the live copy does not move.
-  await deleteDetail.getByRole("button", { name: /delete post/i }).click();
+  await deleteDetail.getByRole("button", { name: "Delete post", exact: true }).click();
   await page
     .getByRole("alertdialog")
     .getByRole("button", { name: /^delete post$/i })

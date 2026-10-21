@@ -170,9 +170,21 @@ interface PendingTargetRow extends ResolvedTargetRow {
 }
 
 interface PostCollections {
+  analytics: Map<string, Schemas["PostAnalytics"]>;
   attachments: Map<string, Schemas["PostAttachment"][]>;
   distributions: Map<string, Schemas["Distribution"][]>;
   targets: Map<string, Schemas["PostTarget"][]>;
+}
+
+/** Latest measured counters grouped by Post; PostgreSQL SUM(bigint) returns numeric text. */
+interface PostAnalyticsRow extends Record<string, unknown> {
+  post_id: string;
+  likes: number | string;
+  comments: number | string;
+  shares: number | string;
+  views: number | string;
+  impressions: number | string;
+  reach: number | string;
 }
 
 /**
@@ -229,19 +241,19 @@ interface PostCollectionPreloads {
 }
 
 /**
- * Loads ordered attachments, saved targets, and publication outcomes for the
- * requested Posts and groups them per Post id.
+ * Loads ordered attachments, saved targets, publication outcomes, and measured
+ * analytics for requested Posts and groups them per Post id.
  *
- * One query per collection keeps the response free of join fan-out: a Post with
- * twenty attachments, twenty targets, and twenty publications still projects
- * each row exactly once, and no Post is assembled from a partially joined row.
- * A caller that already holds a collection in this transaction passes it as a
- * preload and that collection is not read again.
+ * One query per collection prevents join fan-out. Analytics uses one bounded
+ * latest-snapshot lookup per published Distribution inside a single statement,
+ * then sums per Post; older snapshots and unpublished Channels never contribute.
+ * No snapshot means no analytics object, not zero. Draft-only batches skip that
+ * statement. Caller-supplied attachment/target preloads are not read again.
  *
  * @param client - Active tenant transaction client.
  * @param postIds - Post identifiers already read and authorized by the caller.
  * @param preloads - Collections already loaded in this transaction, keyed by Post id.
- * @returns Effect resolving to the three collections grouped by Post id.
+ * @returns Effect resolving to the collections and latest measured Post analytics.
  */
 function loadPostCollectionsEffect(
   client: EffectTransactionClient,
@@ -250,6 +262,7 @@ function loadPostCollectionsEffect(
 ): Effect.Effect<PostCollections, PostServiceError> {
   return Effect.gen(function* () {
     const collections: PostCollections = {
+      analytics: new Map(),
       attachments: preloads.attachments ?? new Map(),
       distributions: new Map(),
       targets: preloads.targets ?? new Map(),
@@ -305,6 +318,40 @@ function loadPostCollectionsEffect(
       bucket.push(mapDistribution(row));
       collections.distributions.set(row.post_id, bucket);
     }
+    if (distributionRows.rows.some((row) => row.status === "published")) {
+      const analyticsRows = yield* client.query<PostAnalyticsRow>(
+        `SELECT d.post_id,
+                SUM(snapshot.likes) AS likes,
+                SUM(snapshot.comments) AS comments,
+                SUM(snapshot.shares) AS shares,
+                SUM(snapshot.views) AS views,
+                SUM(snapshot.impressions) AS impressions,
+                SUM(snapshot.reach) AS reach
+           FROM distributions d
+           JOIN LATERAL (
+             SELECT likes, comments, shares, views, impressions, reach
+               FROM analytics_snapshots
+              WHERE distribution_id = d.id
+              ORDER BY snapshot_at DESC, id DESC
+              LIMIT 1
+           ) snapshot ON true
+          WHERE d.post_id = ANY($1::uuid[]) AND d.status = 'published'
+          GROUP BY d.post_id`,
+        [postIds],
+      );
+      for (const row of analyticsRows.rows) {
+        collections.analytics.set(row.post_id, {
+          likes: Number(row.likes),
+          comments: Number(row.comments),
+          shares: Number(row.shares),
+          saves: null,
+          clicks: null,
+          views: Number(row.views),
+          impressions: Number(row.impressions),
+          reach: Number(row.reach),
+        });
+      }
+    }
     return collections;
   });
 }
@@ -322,6 +369,7 @@ function loadPostCollectionsEffect(
  */
 function assemblePost(row: PostRow, collections: PostCollections): Post {
   return {
+    analytics: collections.analytics.get(row.id) ?? null,
     attachments: collections.attachments.get(row.id) ?? [],
     brand_profile_id: row.brand_profile_id,
     created_at: isoDateTime(row.created_at),

@@ -67,138 +67,88 @@ do next.
 
 ### Palette
 
-The current application design system is authoritative for all Meltiply surfaces,
-including the landing page. Use the semantic OKLCH tokens in
-[`frontend/shared/tokens.css`](frontend/shared/tokens.css) — imported by both
-`frontend/app/src/app/globals.css` and `frontend/public/src/styles/global.css` —
-not a separate marketing palette. That stylesheet owns the exact light/dark
-values, texture, radii, elevation, and the shadcn-aligned aliases that the app's
-`@theme inline` block maps onto Tailwind utilities.
+Use [Gr8r Studio](https://github.com/gr8rstudio/gr8r-studio)'s warm, compact
+workspace language across app, landing, and docs. The user selected this visual
+world; reference task/team/billing examples do not become Meltiply capabilities.
+Keep Meltiply's faceted mark and actual provider identities.
 
-| Token family                                            | Role                                                                  |
-| ------------------------------------------------------- | --------------------------------------------------------------------- |
-| `--page`, `--canvas`, `--surface`, `--inset`, `--field` | Cool neutral backgrounds and layered surfaces                         |
-| `--ink`, `--ink-2`, `--ink-3`                           | Primary text, secondary copy, and subdued metadata                    |
-| `--line`, `--line-strong`, `--line-soft`                | Hairline boundaries and structural separators                         |
-| `--accent`, `--accent-ink`, `--accent-tint`             | Restrained blue accent, readable accent text, and selected-state tint |
-| `--green*`, `--orange*`, `--red*`                       | Semantic success, warning, and error states                           |
-| `--stripe-bg`, `--stripe`                               | Fixed diagonal canvas texture                                         |
-
-Light mode uses a cool near-white canvas and white surfaces; dark mode uses
-layered neutral surfaces with the same geometry. Primary filled controls use the
-neutral ink/surface pairing. Blue supports focus and intentional accents; orange
-is a semantic warning color, not a primary brand or CTA color. Provider colors
-identify external platforms, never product state.
+[`frontend/shared/tokens.css`](frontend/shared/tokens.css) owns the implemented
+palette, fonts, density, radius, and elevation. Light surfaces are warm white
+and stone; dark surfaces are layered warm charcoal. Indigo/periwinkle identifies
+actions and focus, neutral paint identifies navigation selection, and semantic
+status colors always have labels or accessible icons. Geometry is shared across
+palettes rather than redesigned per theme.
 
 ### Design Direction
 
-Follow the installed application UI rather than the retired industrial palette
-or a separate brand concept. The visual references are the
-[`@meltiply/ui` shared workspace](frontend/shared) and its application callers in
-[`frontend/app/src/components`](frontend/app/src/components). Follow the
-[shared UI ownership workflow](docs/frontend-ui.md) and reuse its component vocabulary and interaction
-patterns. Preserve the faceted Meltiply logo geometry: the main mark uses
-`--ink` and the small center diamond uses `--accent`, adapting to light and dark
-themes. The logo does not retain the retired industrial palette.
+The current interface is a compact publishing workbench: Geist typography,
+aligned working edges, quiet selection, thin separators, opaque surfaces, and
+clear outcomes. Preserve its established appearance during cleanup; remove
+duplicate implementations and obsolete code without substituting another design.
 
-Theme changes share a masked ink reveal across the app and landing. Light to
-dark expands in 1.2 seconds; every shrink toward light takes 0.6 seconds,
-including reversal of an unfinished expansion. Each retarget starts from the
-current coverage without replacing the mask or jumping its edge.
-The theme button's center anchors both pointer and keyboard activation.
-Withdrawal begins at the visible viewport boundary, not the document's bottom.
-The round ink silhouette retains fluid lobes, with stronger lower ripples on
-withdrawal, no directional stretching, feathering, or palette interpolation.
-One inert, target-themed full-document copy follows window and nested scrolling;
-fixed and sticky controls stay aligned. The mask's origin and silhouette remain
-document-anchored, so scrolling reveals real below-fold content rather than a
-stretched viewport snapshot. Repeated activation reverses or continues the same
-mask. Live controls retain identity, focus, and input; the palette commits only
-at the final endpoint, without staggered component color delays. Manual or
-device-requested low motion uses a 200ms opacity blink with a 100ms theme commit.
+Posts is one sidebar destination with **Table → Calendar → Grid** in its toolbar.
+Table is default and uses grouped spreadsheet presentation. Calendar supplies
+real Month/Week dates, inspection/day lists, and explicit scheduling entry. Grid
+uses real attachments. All views retain Post identity, authorized scope,
+selection, and supported actions.
 
-`frontend/shared/` owns the tokens, animated SVG icons, motion preferences, effect
-timings, and theme transition. React controls and native landing controls reuse
-these implementations rather than maintaining parallel animations. Landing
-content remains static HTML; decorative icon islands hydrate only when idle or
-visible, with their geometry reserved before JavaScript runs.
+Channels uses the Members-style account directory and actual Brand Profile
+cards. Its background and canonical controls match Posts; its directory
+composition stays distinct. Connection health is one accessible icon per row,
+with recovery beside the affected account.
+
+Settings is a full route with Appearance, Language, read-only Account, and
+inline Security. Every section shares one bounded content layout and background.
+Light/Dark/System and supported languages use the existing consent-aware owners.
+System follows live OS palette changes. Password verification, authenticator
+enrollment, and recovery-code handling retain their real security requirements.
+
+Top-bar jump search finds supported pages and loaded Brand Profiles. Collection
+toolbars search/filter their own data; profiles are scope rather than sidebar
+sections. Workspace identity stays read-only.
 
 #### Calm Workbench
 
-- Lead with the user's posts, schedule, distribution state, and next safe action.
-- Prefer one clear primary action over a field of competing buttons.
-- Use whitespace, alignment, and hierarchy to reduce cognitive load; do not use
-  decorative cards, gradients, or motion to manufacture importance.
-- Keep product language concise, concrete, and honest about partial or pending
-  work.
+- Lead with Posts, schedules, Channel health, and the next safe action.
+- Keep domain state explicit: saving/queuing is not publication, and one Channel's
+  result does not overwrite another's.
+- Use alignment, spacing, and separators for hierarchy; cards represent objects,
+  not layers of decorative framing.
+- Preserve unsaved work, selection, and useful focus through recoverable errors.
+- Confirm destructive scope and explain that published platform copies remain.
 
 #### Modular, Consistent Surfaces
 
-- Treat posts, distributions, comments, platform accounts, and usage records as
-  consistent content units with predictable states and actions.
-- Reuse the same spacing, control shapes, status treatment, and interaction rules
-  across routes. Consistency is more valuable than novelty.
-- Prefer existing primitives and composed patterns over one-off route-specific
-  widgets.
-- **Modal motion:** centered dialogs and confirmations pop up from the bottom edge and
-  pop out to it; when one hands off to another centered dialog, the box morphs between
-  the two sizes in place while the contents slide sideways, so the pair reads as one
-  surface reshaping. The side dialog slides in from and out to the right edge.
-  Preserve each surface's resting geometry, and honor the shared low-motion preference.
-- **Action feedback:** use the shared Sileo notification store (`@meltiply/ui/toast`,
-  rendered by `@meltiply/ui/sileo`). All transient notifications appear bottom-right and expand upward.
-  Pair an outcome headline with meaningful expandable detail: the affected object,
-  copied value, or recovery action. Clipboard confirmations explicitly name the
-  completed copy action and include the exact value, rather than bare profile text.
-
-#### Progressive Disclosure
-
-- Show the essential state and next action first; reveal provider constraints,
-  technical detail, and secondary controls when they become relevant.
-- Keep advanced options available without making first-use screens feel like
-  configuration panels.
-- Use inline expansion, contextual panels, and focused dialogs before sending a
-  user away from the work they are doing.
-
-#### Context and Flow
-
-- Actions should be placed beside the object they affect and labeled with their
-  real outcome.
-- Preserve filters, selections, drafts, and user intent across recoverable
-  errors and navigation within a workflow.
-- Keep related work in one workspace so users do not need to reconstruct context
-  across disconnected screens.
-- Use fast, reversible interactions for small changes; reserve confirmation for
-  destructive or externally consequential actions.
+- [`@meltiply/ui`](frontend/shared) owns canonical controls, tokens, icons,
+  dialogs, feedback, consent, and animation recipes. Extend the owner rather than
+  cloning controls or page CSS. See [shared UI ownership](docs/frontend-ui.md).
+- Rewritten app components use strict TypeScript/React and Tailwind; public
+  Astro/Fumadocs adapters share the same tokens within their framework.
+- Features own real data, permissions, selection, async outcomes, labels, and
+  actions. Reference-only fields and demo flows are not substitutes.
+- `CenterDialog` handles focused forms/search, `CenterAlertDialog` handles
+  destructive confirmation, and `SideDialog` handles large Post inspection.
+  Shared primitives own frames, focus, dismissal, scrolling, and transitions.
+- Feedback uses the shared toast store/Sileo renderer. Name the affected object
+  and useful recovery; clipboard feedback includes the copied value.
+- There is one animation implementation, without a separate motion mode,
+  provider, preference state, root flag, or alternate branches. Preserve current
+  animations and extend their shared owners when animation work is requested.
 
 #### Visual System
 
-- Use the app's system sans-serif hierarchy and three-step ink ramp. Create
-  emphasis with contrast, weight, and spacing rather than ornamental typography.
-- Use cool neutral surfaces, crisp hairline boundaries, and restrained layered
-  shadows. The fixed diagonal stripe texture belongs on the background canvas,
-  not inside controls or content.
-- Preserve the application radius scale: 6px chips, 8px controls, 10px cards,
-  and 14px windows. Use the named shadow tokens for elevation.
-- Reuse installed shared shadcn/Radix controls and generic patterns from
-  `@meltiply/ui` before introducing custom equivalents. Public-site components
-  share static Astro implementations without shipping the React application runtime.
-- Match light and dark themes without changing geometry. Keep semantic status
-  colors distinct from the blue accent and pair status with text or icons.
-- Keep focusable controls mounted during state changes. When label changes
-  resize adjacent controls, use the installed Motion layout and label transitions
-  to preserve spatial continuity and keyboard focus.
-- Motion should clarify state and provide tactile feedback. Respect reduced
-  motion; avoid decorative animation that competes with the work.
+Use the canonical palette, self-hosted Geist/Geist Mono, interface/provider icon
+system, compact controls, and named radius/elevation tokens. Apply consistent
+surface boundaries and ink hierarchy across routes. Detailed geometry and scroll
+ownership live in [the layout contract](docs/frontend-layout.md), not a second
+per-page style system.
 
 #### Responsive and Accessible by Default
 
-- Preserve the primary task and readable hierarchy from desktop to mobile rather
-  than shrinking every control into a dense layout.
-- Use semantic controls, visible focus, sufficient contrast, keyboard navigation,
-  and screen-reader announcements as part of the design—not as a later pass.
-- Never communicate state through color alone; pair color with text, icons,
-  labels, or structure.
+Preserve the primary task and readable hierarchy from desktop to phone. Keep
+controls named, keyboard-operable, visibly focused, and readable with long real
+content. Wide collections scroll within their working area; navigation and
+Settings remain reachable. Status never relies on color alone.
 
 ## Evidence on Hand
 

@@ -35,7 +35,7 @@ export function ownerCredentials(): GeneratedCredentials {
 }
 
 /** Grants functional consent before boot; analytics and marketing remain explicitly denied. */
-export async function allowFunctionalConsent(page: Page): Promise<void> {
+async function allowFunctionalConsent(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const consent = encodeURIComponent(
       JSON.stringify({

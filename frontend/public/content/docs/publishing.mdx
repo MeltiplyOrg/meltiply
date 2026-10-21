@@ -9,40 +9,48 @@ The **Posts** screen is the publishing hub. It lists everything you have drafted
 
 ## Views
 
-Switch between views with the List / Calendar / Grid control in the toolbar:
+The page toolbar orders **Table → Calendar → Grid**. **Table** is the default; Posts remains a single sidebar destination. Creating or editing a Post opens the composer workflow, not another collection view.
 
-- **List** — a table of posts with per-post status, platform, date, and actions.
-- **Calendar** — a month grid showing which days have posts scheduled or published. Click a day to see that day's posts, or use **Schedule post for this date** to open the composer with that date pre-filled.
-- **Grid** — a card gallery of the same posts, with an adjustable column count.
+- **Table** — a spreadsheet-density collection with a sticky metadata header and collapsible counted groups. Group by publication **Status**, **Brand Profile**, or **None**. Use **Columns** to show or hide Status, Channels, Publish date, Brand Profile, and the analytics columns **Likes**, **Cmts**, **Shrs**, **Saves**, **Clicks**, **Views**, **Impr.**, and **Reach**. Published Posts show stored measured values; drafts, unpublished Posts, missing measurements, and untracked metrics show `-`. See [Analytics](/docs/analytics) for aggregation and availability.
+- **Calendar** — Gr8r-style **Month** and **Week** layouts for actual publishing dates. Use **Today** or previous/next controls to navigate. Month shows up to three compact Post chips per day; **+N more** or the day number opens that day's selectable Post list. Week shows all Posts in seven date columns. Select a Post chip to inspect it; a day's **+** opens the composer with that date pre-filled when a Brand Profile is selected. Calendar does not drag-reschedule existing Posts.
+- **Grid** — a media-card gallery of the same Posts with an adjustable column count.
 
-The toolbar filters posts by platform, Brand Profile, status (**All statuses**, **Scheduled**, **Published**, **Drafts**, **Failed**), and date (**All dates**, **Today**, **Next 7 days**, **Past 30 days**), plus a text search and newest/oldest sorting. Choose **Scheduled** to review posts with manually selected publication times.
+Open **Filter** to add Platform, Brand Profile, Post status, or Publish date rows, then choose their values. Empty added rows do not change results; supported filters combine with **and**. Remove a row with its trash control, reset the builder with **Clear all**, or remove an applied value through its chip. Collection search stays separate from top-bar jump search. Sort by newest/oldest; Table grouping and column visibility change presentation without changing Post data.
 
-Checkboxes select Posts in List and Grid; Calendar day details expose the same
-selection controls. Select-all applies only to visible filtered Posts. Selection
-survives view and filter changes; the bottom pill shows the count, **Deselect**,
-and **Delete**. Confirm the exact selected batch before deletion. Successful
-deletions leave the selection; failed Posts remain selected for retry.
+Platform, Brand Profile, and Post status use checkbox lists that stay open while you select several values. A Post matches **any** selected value within one field, and must also match the other active fields. **All Brand Profiles**, **All statuses**, or clearing the last check restores that field's full collection. Selecting exactly one Brand Profile also scopes new composition; several profiles remain a review filter, not multiple owners for one Post.
+
+On phones, swipe the Table or Calendar date canvas sideways to reach additional columns or days; the page itself stays within the screen. The Table's empty message and Create post action stay visible without horizontal scrolling. Calendar's Today, date navigation, and Month/Week controls stay outside the scrolling dates.
+
+Checkboxes select Posts in Table and Grid; Calendar day details expose the same
+controls. A select-all checkbox is checked only when every visible filtered Post
+is selected; partial selections leave it visually unchecked. Selection survives
+view/filter changes and collapsing a group. The inverse-ink floating pill
+shows the actual count, **Delete**, and an icon-only **Deselect** button. Confirm the
+exact batch before deletion. Successful deletions leave the selection; failed
+Posts remain selected for retry.
 
 Deletion uses each Post's owning Brand Profile, so individual and bulk deletion
-also work in **All Brand Profiles**. Switching Workspace or Brand Profile clears
-selection. Already-published platform copies are never removed by deleting here.
+also work in **All Brand Profiles**. Changing the active Brand Profile clears
+selection. A successful deletion removes the Post from Table, Calendar, and Grid,
+including after switching views or reloading. It never removes published platform
+copies; retained publication history does not bring the Post back into Calendar.
 
 ## Before you publish
 
-Two things must be in place, or the action buttons stay disabled:
+A Post always has one owning Brand Profile. In **Destinations**, select one or several profiles using the checkbox list. Composing once for several profiles saves **one independent Post per selected profile**, not a Post with several owners. Each copy has its own media, channels, delivery outcomes, and subsequent edits. The composer preserves a concrete profile choice or initially selects the first available profile; reopening a Post selects its actual owner.
 
-1. **A Brand Profile selected** in the toolbar or composer. With "All Brand Profiles" selected, the composer shows an info banner asking you to pick one profile first — publishing is always done on behalf of a single profile.
-2. **At least one connected channel** under that profile. The **Destinations** bar at the top of the composer lists the profile's channels as toggleable pills. Channels marked **Disabled**, **Expired**, or **Incomplete** can't be selected — fix them on the [Channels](/docs/channels) screen, or use **Add Channel** to connect a new one.
+Drafts can be saved without destination channels. Scheduling and Publish Now require at least one eligible channel **for every selected profile**. Channels are grouped by provider across the selected profiles. Each card identifies its Brand Profile, account photo or initials, and provider. Separate **Username: @handle** and **ID: provider-assigned identifier** rows remain visible, including for unavailable connections. The ID is assigned by the platform; it is not the username or Meltiply's internal record ID. Missing usernames say **Username not provided** rather than guessing. Long values wrap on phones. Recover disabled, expired, or incomplete connections on [Channels](/docs/channels), or use **Add Channel**.
 
 ## Composing a post
 
 Click **Create post** (or **Edit** on an existing draft or scheduled post) to open the composer.
 
-- **Shared Content** is the text published to every selected channel. The counter under the editor shows the character count and how many channels you're targeting.
+- **Shared Content** is the text published to every selected channel. The counter under the editor shows used/maximum characters using the tightest selected platform limit, plus how many channels you're targeting. Supported providers retain their declared caption limits even before live publishing is enabled.
 - **Add Media** attaches images or videos directly from your device (via file picker or drag and drop). Attached media can be reordered, replaced, paused, resumed, or removed directly in the composer. See [Media](/docs/media).
+- With multiple Brand Profiles, each profile receives its own uploaded copy of every attachment. These copies count against the workspace's media limits; channels never reference another profile's media.
 - Media attachments are validated against each channel's constraints (accepted media types and allowed attachment counts).
-- **Per-channel tabs** appear for each selected channel. Use **Customize for This Channel** to write different text for that channel (a dot on the tab marks channels with custom text). **Remove Custom Override** reverts it to the shared text.
-- **Channel settings** — destination tabs provide persistent provider configuration:
+- **Per-channel sections** follow shared text and media in the same scrollable editor, with provider logos in their headings and no account-name tags or tabs. Each channel's caption is editable immediately and follows **Shared Content** until you change it, including clearing it intentionally. **Remove Custom Override** appears only for edited captions and restores the shared text.
+- **Channel settings** — each channel's section provides persistent provider configuration:
 
 | Platform | Controls configured with the post                                                                                                                                                                                                                                                                                |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -54,9 +62,11 @@ Facebook and Instagram channels publish using standard post text and attached me
 
 ### Validation
 
-When you submit, the composer checks the post before anything is sent: a Brand Profile must be selected and the post needs text or media. Scheduling or publishing additionally requires at least one selected channel (and a valid date/time for **Schedule**) — **Save Draft** has neither requirement. Each channel's text must also fit that platform's limits (caption length, hashtag count, accepted media type, YouTube title, TikTok privacy level, and so on). Every problem is listed in a banner — fix them and submit again. Your text, media, and settings are kept even if submission fails.
+When you submit, the composer checks that profiles are selected and the composition has text or media. Scheduling or publishing additionally requires at least one selected channel **per profile** and a valid date/time for **Schedule**; **Save Drafts** needs neither channels nor a schedule. Channel-specific text, media, and provider settings must satisfy their platform limits. Problems appear in a banner without discarding your work.
 
-The composer also keeps an in-progress copy of your text, media, and overrides in your browser for the active Brand Profile, so leaving and coming back restores what you were writing. The copy is cleared when the post is successfully scheduled or published.
+With functional cookie consent, browser-local recovery retains text, attachments, overrides, selected profiles/channels, and the saved copy identities for the active workspace/profile. Without that optional storage, composition and server-backed draft saving still work; do not rely on browser recovery after leaving. Successful saving clears the local recovery copy. See [Cookies and storage](/docs/cookies).
+
+Inspecting another Post does not discard your open composition: its text, settings, and active uploads stay in memory while Details is shown. Close Details or choose **New Post** in its header to resume that composition. This does not require cookie consent; closing the composer or leaving the Posts route still releases its live state.
 
 ## Draft, schedule, or publish now
 
@@ -66,7 +76,13 @@ The composer also keeps an in-progress copy of your text, media, and overrides i
 
 "Queued" means Meltiply accepted the post for each channel; delivery to each platform then proceeds per channel and is reported individually — one channel can publish while another is still processing or has failed.
 
-Scheduled times are selected manually using the date and time picker. Every post gets its own individual date and time — Meltiply does not currently offer recurring weekly time-slot Queues, and the composer has no Queue mode that auto-assigns publication times from a named schedule.
+For several profiles, all drafts are saved before any are queued. Per-profile progress identifies successes and failures. A failed save leaves completed drafts intact and queues nothing new. If queuing partially succeeds, retry the unchanged composition to finish the remaining profiles without sending completed copies again. Repeated draft saves update the same copies rather than creating duplicates. After closing the composition, manage each saved Post independently.
+
+Choose **Schedule**, then select the **Date** button to open the compact calendar. Use the month arrows to browse; keyboard users can move with arrow keys, Home/End, or Page Up/Down and select with Enter. Selecting a day closes the calendar; Escape dismisses it without changing the schedule or closing the composer. For **Time**, click the clock button to choose an hour and exact minute, then **Done**. Choices apply immediately. To type instead, click the field's left padding or hour digits and enter a 24-hour time such as `14:30`; click minute digits to edit only minutes. Up/Down adjusts the focused segment and Left/Right moves between segments. Your browser's local time zone stays visible underneath. Changing the date preserves the time, changing time preserves the date, and browsing the calendar does not change the selected schedule. Calendar entry points retain their pre-filled date and 10:00 local time.
+
+Wide composers give destinations and publishing a compact column, leaving more room for writing. On phones, the same sections stack; date and time remain together, and the calendar opens only when needed. Destination cards use compact rounded-square account portraits, with the name and platform together above the username and ID. The composer keeps its save explanation and primary action in a pinned bar; scroll the body to reach destinations, provider settings, and scheduling without losing that action.
+
+Every post gets its own individual date and time — Meltiply does not currently offer recurring weekly time-slot Queues, and the composer has no Queue mode that auto-assigns publication times from a named schedule.
 
 ## Post statuses
 
@@ -84,18 +100,18 @@ Each post shows a status per channel in the post details (open any post to see t
 
 ## Managing posts
 
-Click a list row or grid card, or choose **Details** from a calendar day's posts, to open the post's details in a panel that slides in from the right. It shows the full caption, ordered attachments, per-channel status, scheduled and published times, failure reasons, and live post links. On smaller screens the panel fills the width.
+Click a Table row, Grid card, or Calendar Post chip—or choose **Details** in a Calendar day's list—to open the side drawer. Its compact header identifies the Post and exposes supported actions. Flat properties, the full caption, ordered attachments, and real Channel outcomes share one scrollable body; this is not an editable task/status panel.
 
-The panel's content scrolls independently while its heading and actions stay visible. Action groups wrap on narrow screens so longer translated labels remain fully visible. Close it with **Close**, the close icon, **Escape**, or a click outside the panel. Keyboard users can activate **View details** on list rows and grid cards; focus returns to that control when the panel closes. Low-motion mode opens the panel without sliding.
+The inspector is a non-modal edge panel, filling the viewport on phones. Close with its header's **Close** icon or **Escape**; the workspace stays clickable, and outside clicks do not dismiss it. Closing inspection returns to an interrupted composition when one exists; otherwise focus returns to its opener without moving the collection's scroll position, even if you scrolled the list while inspecting.
 
-The same **Edit** and **Delete**/trash shortcuts remain on list rows, grid cards, and calendar day entries.
+Table has no trailing actions column. Open Details and choose **Edit post** for an editable Post; its header exposes deletion and, when applicable, **Cancel all pending**, with confirmation. Grid cards and Calendar day entries retain direct Edit/Delete shortcuts. Provider publication outcomes cannot be manually marked complete.
 
 Available actions depend on the channel's state:
 
 - **Retry** — re-queues delivery for a **Failed** channel. Not every failure is retryable; when it isn't, the retry is refused with an error toast and the failure stays on the post.
 - **Reschedule** — picks a new date and time for a delivery that hasn't published yet (also offered for unconfirmed deliveries).
 - **Cancel** / **Cancel all pending** — stops pending deliveries. For a channel already in flight, this sends a cancellation request rather than a guaranteed stop — watch the status and check the platform. A confirmation dialog explains that only pending channels are cancelled; channels that already published are unaffected and the post stays live there. Cancelling never unpublishes a post that already went out.
-- **Edit post** — opens drafts and not-yet-published posts in the composer. Removing a channel while editing removes that channel's pending delivery. Published posts can't be edited — the button tells you so.
+- **Edit post** — opens a draft or a Post with eligible pending channels in the composer. Removing a channel removes its pending delivery. Published Channel outcomes remain observed results and cannot be manually rewritten.
 - **Delete post / Delete draft** — removes the stored Post and stops its pending channels after confirmation. Anything already published remains on its platform; remove that copy on the platform itself.
 
 > **Heads-up on unconfirmed deliveries:** if a channel shows **Awaiting provider** or **Needs reconciliation**, check the post directly on that platform before sending it again — the delivery may have actually gone through, and reposting could create a duplicate.

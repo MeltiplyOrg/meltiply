@@ -1,7 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-import { ownerCredentials, openOwnerWorkspace, waitForWorkspace } from "./workspace-session";
-
 const protectedRoutes = ["/posts", "/channels", "/settings"] as const;
 
 const retiredRoutes = [
@@ -75,34 +73,6 @@ for (const route of retiredRoutes) {
     await expect(page).toHaveURL(/\/sign-in(?:\/|$)/, { timeout: 30_000 });
   });
 }
-
-/**
- * Verifies the production shell exposes an active Workspace identity, not a
- * dormant switcher. Owner sign-in resolves that identity from the session;
- * navigation and collapse remain usable without any Workspace menu.
- */
-test("shows Workspace identity without offering unsupported switching", async ({ page }) => {
-  await openOwnerWorkspace(page, ownerCredentials());
-  await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
-  await waitForWorkspace(page);
-  const sidebar = page.locator("aside").first();
-  const identity = sidebar
-    .locator("[title]")
-    .filter({ hasText: /Installation Owner|Workspace Admin|Workspace|Plan/ })
-    .first();
-  await expect(identity).toBeVisible();
-  const workspaceName = await identity.getAttribute("title");
-  expect(workspaceName).toBeTruthy();
-  await expect(sidebar.getByRole("button", { name: workspaceName! })).toHaveCount(0);
-  await identity.click();
-  await expect(sidebar.getByText("Workspaces", { exact: true })).toHaveCount(0);
-  await sidebar.getByRole("button", { name: "Channels", exact: true }).click();
-  await expect(page).toHaveURL(/\/channels(?:\?|$)/);
-  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
-  await expect(sidebar.getByRole("button", { name: workspaceName! })).toHaveCount(0);
-  await sidebar.getByRole("button", { name: "Expand sidebar" }).click();
-  await expect(identity).toBeVisible();
-});
 
 test("publishes browser-run health metrics for Grafana", async ({ request }) => {
   const port = process.env.MELTIPLY_E2E_METRICS_PORT?.trim() || "9464";

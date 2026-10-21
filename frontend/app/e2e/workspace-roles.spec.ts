@@ -19,13 +19,20 @@ async function openSeededAccount(browser: Browser, email: string) {
   return { context, page };
 }
 
+/**
+ * Opens the administration section inside the merged Settings surface.
+ *
+ * @param page - Signed-in page.
+ */
+async function openAdministration(page: import("@playwright/test").Page) {
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Administration", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+}
+
 test("limits installation lifecycle controls to the Installation Owner", async ({ browser }) => {
   const admin = await openSeededAccount(browser, "beta@meltiply.local");
-  await expect(
-    admin.page.locator("aside").getByText("Workspace Admin", { exact: true }),
-  ).toBeVisible();
-  await admin.page.goto("/settings");
-  await expect(admin.page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await openAdministration(admin.page);
   await expect(admin.page.getByText("gamma@meltiply.local")).toBeVisible();
   await expect(admin.page.getByText("epsilon@meltiply.local")).toBeVisible();
   await expect(admin.page.getByText("Suspended", { exact: true })).toBeVisible();
@@ -44,10 +51,7 @@ test("limits installation lifecycle controls to the Installation Owner", async (
   await admin.context.close();
 
   const owner = await openSeededAccount(browser, "alpha@meltiply.local");
-  await expect(
-    owner.page.locator("aside").getByText("Installation Owner", { exact: true }),
-  ).toBeVisible();
-  await owner.page.goto("/settings");
+  await openAdministration(owner.page);
   await expect(owner.page.getByRole("button", { name: "Reactivate" })).toBeVisible();
   await expect(owner.page.getByRole("button", { name: "Delete" }).first()).toBeVisible();
   await owner.page.getByRole("tab", { name: "Workspace" }).click();
@@ -59,13 +63,12 @@ for (const [role, email] of [
   ["Editor", "gamma@meltiply.local"],
   ["Viewer", "delta@meltiply.local"],
 ] as const) {
-  test(`keeps a ${role} out of Settings`, async ({ browser }) => {
+  test(`hides administration from a ${role}`, async ({ browser }) => {
     const { context, page } = await openSeededAccount(browser, email);
-    await expect(page.locator("aside").getByText(role, { exact: true })).toBeVisible();
-    await expect(page.locator("aside").getByText("Settings", { exact: true })).toHaveCount(0);
     await page.goto("/settings");
-    await expect(page).toHaveURL(/\/posts(?:\?|$)/);
-    await waitForWorkspace(page);
+    await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Administration", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Members" })).toHaveCount(0);
     await context.close();
   });
 }

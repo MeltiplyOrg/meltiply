@@ -1,4 +1,4 @@
-import { Moon, Pause, Play, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import type { ReactElement } from "react";
 
 /**
@@ -11,16 +11,6 @@ export function ThemeIcon({ className = "" }: { className?: string }): ReactElem
     <span className={className} data-preference-icon="theme" aria-hidden="true">
       <Sun data-preference-glyph="sun" />
       <Moon data-preference-glyph="moon" />
-    </span>
-  );
-}
-
-/** Shows manual/OS motion state through native data hooks, preserving caller utility classes without hydration. */
-export function MotionIcon({ className = "" }: { className?: string }): ReactElement {
-  return (
-    <span className={className} data-preference-icon="motion" aria-hidden="true">
-      <Play data-preference-glyph="play" />
-      <Pause data-preference-glyph="pause" />
     </span>
   );
 }

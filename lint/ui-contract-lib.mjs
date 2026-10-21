@@ -39,6 +39,7 @@ export const CANONICAL_FLAT_OWNERS = Object.freeze({
   dropdownmenu: "ui",
   empty: "ui",
   input: "ui",
+  popover: "ui",
   sidedialog: "ui",
   select: "ui",
   separator: "ui",
@@ -50,7 +51,8 @@ export const CANONICAL_FLAT_OWNERS = Object.freeze({
   tooltip: "ui",
   segmentedcontrol: "atoms",
   statuspill: "atoms",
-  slidingmenuhighlight: "primitives",
+  rollingcount: "atoms",
+  slidinghighlight: "primitives",
 });
 
 /**

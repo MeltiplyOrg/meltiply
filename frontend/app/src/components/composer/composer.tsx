@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Schema } from "effect";
+import { persistProfileCopies, type ProfileCopy, type ProfileCopyProgress } from "./profile-copies";
 import {
   hasCookieConsent,
   readFunctionalStorage,
@@ -10,15 +12,17 @@ import { useWorkspace } from "@/context/workspace.context";
 import { DestinationSelector } from "@/components/workspace/destination-selector";
 import type { WorkspaceView } from "@/components/layout/navigation-shell";
 import { PlatformSettings, providerDescriptorFor, type PostTargetDraft } from "./platform-settings";
+import { ScheduleDateTime } from "./schedule-date-time";
 import { MediaPreview } from "@/components/media/media-preview";
 import { Button } from "@meltiply/ui/button";
 import { Textarea } from "@meltiply/ui/textarea";
+import { Switch } from "@meltiply/ui/switch";
 import { Input } from "@meltiply/ui/input";
-import { Badge } from "@meltiply/ui/badge";
+import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { Alert } from "@meltiply/ui/alert";
-import { Separator } from "@meltiply/ui/separator";
-import { Card, CardContent, CardHeader } from "@meltiply/ui/card";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@meltiply/ui/tabs";
+
+import { SegmentedControl } from "@meltiply/ui/segmented-control";
+import { cn } from "@meltiply/ui/utils";
 import { toast } from "@meltiply/ui/toast";
 import {
   Image as ImageIcon,
@@ -36,9 +40,18 @@ import {
   ChevronUp,
   ChevronDown,
   Replace,
+  Plus,
+  type LucideIcon,
 } from "lucide-react";
 import type { ChannelIntegration } from "@/api/types";
-import type { Asset, CreatePostInput, Post, TikTokPublishingRequirements } from "@/types";
+import type {
+  Asset,
+  CreatePostInput,
+  Distribution,
+  PlatformCapability,
+  Post,
+  TikTokPublishingRequirements,
+} from "@/types";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import {
   useAsset,
@@ -50,7 +63,9 @@ import {
   useUpdatePost,
 } from "@/lib/queries";
 import { createAssetUpload, type AssetUploadStatus, type AssetUploadTask } from "@/lib/upload";
-import { useI18n } from "@/lib/i18n";
+import { RollingCount } from "@meltiply/ui/rolling-count";
+import { platformDisplayName } from "@/lib/platforms";
+import { Trans, useI18n } from "@/lib/i18n";
 import { ApiError } from "@/lib/api";
 import { userFacingErrorMessage } from "@/lib/frontend-errors";
 
@@ -64,6 +79,78 @@ interface ChannelOverride {
   content: string;
   hasOverride: boolean;
   settings: Record<string, unknown>;
+}
+
+/** Publishing intents the composer submits; the pinned bar acts on the chosen one. */
+const PUBLISH_MODES = ["draft", "schedule", "now"] as const;
+type PublishMode = (typeof PUBLISH_MODES)[number];
+
+/**
+ * Label of one publishing-mode option in the selector. Kept as literal calls so
+ * the translation catalog can still see every message statically.
+ *
+ * @param mode - Publishing intent the option selects.
+ * @param t - Active translator.
+ * @returns Localized option label.
+ */
+function publishModeOption(mode: PublishMode, t: (message: string) => string): string {
+  switch (mode) {
+    case "draft":
+      return t("Draft");
+    case "schedule":
+      return t("Schedule");
+    case "now":
+      return t("Now");
+  }
+}
+
+/**
+ * Label of the pinned action for a publishing mode: it names the action the
+ * button performs rather than repeating the mode's own label.
+ *
+ * @param mode - Selected publishing intent.
+ * @param postId - Existing Post id, which makes a draft submission a plain save.
+ * @param t - Active translator.
+ * @returns Localized action label.
+ */
+function publishModeAction(
+  mode: PublishMode,
+  postId: string | null,
+  t: (message: string) => string,
+): string {
+  if (mode === "draft") return postId === null ? t("Save Draft") : t("Save");
+  if (mode === "schedule") return t("Schedule Post");
+  return t("Publish Now");
+}
+
+/** Icon per publishing mode, matching the action the pinned bar performs. */
+const PUBLISH_MODE_ICONS = { draft: Save, schedule: Calendar, now: Send } as const;
+
+/**
+ * Number of characters a platform counts a caption by: code points, matching
+ * `captionLength` in `@meltiply/providers`, so one emoji costs one character
+ * here exactly as it does when the API validates the published text.
+ *
+ * @param text - Caption text as typed.
+ * @returns Character count in code points.
+ */
+function captionLength(text: string): number {
+  return [...text].length;
+}
+
+/**
+ * Locks a caption being typed to a platform limit. Only an incoming value is
+ * clamped: text restored from a saved draft or a switched Channel override stays
+ * intact, so nothing the creator wrote is destroyed silently. An over-limit
+ * restore is reported by the field's own counter and by submit validation.
+ *
+ * @param text - Value the input event produced.
+ * @param limit - Maximum length in code points, or null when the platform publishes none.
+ * @returns The caption to store.
+ */
+function clampCaption(text: string, limit: number | null): string {
+  if (limit === null || captionLength(text) <= limit) return text;
+  return [...text].slice(0, limit).join("");
 }
 
 /**
@@ -118,24 +205,45 @@ type ReplacedSelections = ReadonlyArray<readonly [string, number]>;
  * Workspace/Brand Profile/Post so it can never surface under another identity,
  * and a successful save deletes it.
  */
-interface ComposerRecoveryRecord {
-  attachmentOverrides: Record<string, string[]>;
-  attachments: Array<{
-    assetId: string;
-    assetType: Asset["asset_type"] | null;
-    mimeType: string | null;
-    name: string;
-  }>;
-  channelOverrides: Record<string, ChannelOverride>;
-  removedAssetIds: string[];
-  scheduleDate: string;
-  sharedContent: string;
-  updatedAt: string;
-  version: 1;
-}
+const composerRecoverySchema = Schema.Struct({
+  attachmentOverrides: Schema.Record(Schema.String, Schema.Array(Schema.String)),
+  attachments: Schema.Array(
+    Schema.Struct({
+      assetId: Schema.String,
+      assetType: Schema.NullOr(Schema.Literals(["image", "video"])),
+      mimeType: Schema.NullOr(Schema.String),
+      name: Schema.String,
+    }),
+  ),
+  channelOverrides: Schema.Record(
+    Schema.String,
+    Schema.Struct({
+      content: Schema.String,
+      hasOverride: Schema.Boolean,
+      settings: Schema.Record(Schema.String, Schema.Unknown),
+    }),
+  ),
+  removedAssetIds: Schema.Array(Schema.String),
+  scheduleDate: Schema.String,
+  sharedContent: Schema.String,
+  updatedAt: Schema.String,
+  profileIds: Schema.Array(Schema.String),
+  selectedChannelIds: Schema.Array(Schema.String),
+  profileCopies: Schema.Record(
+    Schema.String,
+    Schema.Struct({
+      postId: Schema.optional(Schema.String),
+      updatedAt: Schema.optional(Schema.String),
+      scheduledIntent: Schema.optional(Schema.String),
+      assets: Schema.Record(Schema.String, Schema.String),
+    }),
+  ),
+  version: Schema.Literal(2),
+});
+type ComposerRecoveryRecord = typeof composerRecoverySchema.Type;
 
 /** localStorage namespace for supplemental composer recovery. */
-const recoveryKeyPrefix = "meltiply.composer.v1.";
+const recoveryKeyPrefix = "meltiply.composer.v2.";
 
 /** Upload statuses whose lifecycle is finished: the file's bytes no longer need it. */
 const terminalUploadStatuses: ReadonlySet<AssetUploadStatus> = new Set([
@@ -166,7 +274,7 @@ function isUploadCancellation(error: unknown): boolean {
 }
 
 /**
- * Formats a Date or ISO string into a local HTML datetime-local value
+ * Formats a Date or ISO string into the composer's local minute-precision value
  * ('YYYY-MM-DDTHH:mm'). Midnight on the supplied day becomes 10:00 local so a
  * calendar click offers a realistic daytime slot instead of the past.
  *
@@ -303,12 +411,17 @@ function overridesFromPost(
   platformByAccountId: Readonly<Record<string, string | undefined>>,
 ): Record<string, ChannelOverride> {
   const overrides: Record<string, ChannelOverride> = {};
+  const distributionByAccount = new Map<string, Distribution>();
+  for (const distribution of post.distributions) {
+    const accountId = distribution.platform_account_id;
+    if (accountId && !distributionByAccount.has(accountId)) {
+      distributionByAccount.set(accountId, distribution);
+    }
+  }
   for (const target of post.targets) {
     const platform =
       platformByAccountId[target.platform_account_id] ??
-      post.distributions.find(
-        (distribution) => distribution.platform_account_id === target.platform_account_id,
-      )?.platform ??
+      distributionByAccount.get(target.platform_account_id)?.platform ??
       "";
     const descriptor = providerDescriptorFor(platform);
     const content = target.description_override ?? post.default_text;
@@ -389,14 +502,64 @@ function restoredAttachmentRows(
 }
 
 /**
+ * One titled section of the composer panel.
+ *
+ * The panel has a single section grammar — an optional leading icon, a
+ * `--font-size-ui` title, an optional right-aligned action cluster, and content
+ * below — so the compose column, the targeting rail, and the per-Channel panels
+ * read as one surface instead of three stacked widgets. The Destinations block
+ * owns the same header shape inside `DestinationSelector`, which is why this
+ * renderer mirrors its type scale rather than introducing a second convention.
+ *
+ * @param props.icon - Optional Lucide icon or provider id, sized by the renderer.
+ * @param props.title - Localized section title.
+ * @param props.action - Optional right-aligned action cluster (counts, buttons).
+ * @param props.className - Extra classes for the section wrapper.
+ * @param props.children - Section content.
+ * @returns The section element.
+ */
+function ComposerSection({
+  icon: Icon,
+  title,
+  action,
+  className,
+  children,
+}: {
+  icon?: LucideIcon | string;
+  title: string;
+  action?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={cn("flex min-w-0 shrink-0 flex-col gap-3", className)}>
+      <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {typeof Icon === "string" ? (
+            <PlatformIcon provider={Icon} className="size-4 shrink-0" />
+          ) : Icon ? (
+            <Icon className="size-3.5 shrink-0 text-ink-3" aria-hidden="true" />
+          ) : null}
+          <h3 className="min-w-0 truncate text-(length:--font-size-ui) font-semibold text-ink">
+            {title}
+          </h3>
+        </div>
+        {action}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+/**
  * Multi-Channel Post composer: shared text, composer-owned media uploads with
  * ordered attachments, per-Channel captions/options/attachment selections, and
- * authoritative save/schedule/publish against one stable Post identity.
+ * authoritative save/schedule/publish with one stable Post per selected profile.
  *
- * Saving writes the same Post every time — `useCreatePost` only for the first
- * save of a new composition, `useUpdatePost` afterwards — so text, ordered
- * `attachment_ids`, and saved targets form one persisted record. No server Post
- * is created merely by opening the composer.
+ * One profile keeps the existing single-Post path. Multi-profile composition
+ * uses `persistProfileCopies`: independent draft identities, profile-owned media,
+ * and per-profile delivery progress survive partial failures. Repeated saves
+ * update the same copies; opening the composer never creates a Post.
  *
  * Uploads run through `createAssetUpload` directly (file picker or drag and
  * drop), so per-file progress, processing state, pause/resume, cancel, and retry
@@ -433,6 +596,9 @@ export interface ComposerProps {
  * Renders the composer with one authoritative Post as its state boundary.
  * Controls remain disabled until server hydration and browser recovery settle,
  * so their deferred restores cannot overwrite a creator's first edit or save.
+ * Wide scroll columns reserve 4px for outward control focus rings. Compensated
+ * editor margins preserve the shared content edge while keeping rings inside
+ * each column's clipping boundary.
  *
  * @param props - Deep-link Post id, optional schedule seed, and navigation callbacks.
  * @returns The Post composer surface.
@@ -444,10 +610,17 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     selectedChannelIds,
     selectedBrandProfileId,
     setSelectedChannelIds,
+    setSelectedBrandProfileId,
     refreshWorkspace,
   } = useWorkspace();
   const scope = useSessionScope();
   const { t, tStatus, language } = useI18n();
+  // Share workspace-owned labels across validation, ownership guidance, and batch
+  // progress without re-scanning every profile for each destination/progress row.
+  const profileNames = useMemo(
+    () => new Map(brandProfiles.map((profile) => [profile.id, profile.name])),
+    [brandProfiles],
+  );
 
   // The deep link is the Post identity; a composition that has not been saved yet
   // has none, so the id only appears once the first save returns it.
@@ -457,7 +630,14 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [attachments, setAttachments] = useState<AttachmentEntry[]>([]);
   const [channelOverrides, setChannelOverrides] = useState<Record<string, ChannelOverride>>({});
   const [attachmentOverrides, setAttachmentOverrides] = useState<Record<string, string[]>>({});
-  const [activeTab, setActiveTab] = useState<string>("shared");
+  /**
+   * Publishing intent the composer submits: a calendar entry point seeds
+   * `schedule` so the seeded slot is editable on arrival, and everything else
+   * starts on the non-destructive draft mode.
+   */
+  const [publishMode, setPublishMode] = useState<PublishMode>(
+    initialDate !== undefined ? "schedule" : "draft",
+  );
   const [scheduleDate, setScheduleDate] = useState<string>(() => {
     const seeded = initialDate ? formatInitialScheduleDate(initialDate) : "";
     if (seeded) return seeded;
@@ -471,12 +651,22 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [hydratedPostId, setHydratedPostId] = useState<string | null>(null);
+  const [selectedProfileIds, setSelectedProfileIds] = useState<string[]>(() =>
+    selectedBrandProfileId ? [selectedBrandProfileId] : [],
+  );
+  const [profileProgress, setProfileProgress] = useState<ProfileCopyProgress[]>([]);
+  const profileCopiesRef = useRef(new Map<string, ProfileCopy>());
+  const batchAbortRef = useRef<AbortController | null>(null);
   // Recovery is neither read nor written until functional consent is active.
   const [functionalConsent, setFunctionalConsent] = useState(() => hasCookieConsent("functional"));
   const [recoveryReadNamespace, setRecoveryReadNamespace] = useState<string | null>(null);
-  const [tiktokRequirements, setTiktokRequirements] = useState<
-    Record<string, TikTokPublishingRequirements | null>
-  >({});
+  /**
+   * Live TikTok publishing requirements reported by a Channel's settings panel.
+   * Imperative scratch data: it is written by a child callback and read only when
+   * a submission is validated, so a ref keeps arriving requirements from
+   * re-rendering every composer surface.
+   */
+  const tiktokRequirementsRef = useRef<Record<string, TikTokPublishingRequirements | null>>({});
   const [pendingOwnershipAssetIds, setPendingOwnershipAssetIds] = useState<string[] | null>(null);
   const [isDragActive, setDragActive] = useState(false);
 
@@ -494,12 +684,17 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const persistedOwnershipRef = useRef(new Set<string>());
   const removedAssetIdsRef = useRef<Set<string>>(new Set());
 
-  // Identity of the composition the creator is working on. Switching it (another
-  // Brand Profile or another deep-linked Post) abandons the current rows; a first
-  // save only fills in `postId`, which moves the recovery namespace but not this
-  // identity, so saving a draft never discards the work in front of the creator.
+  // Session identity stays stable when the first single-Post save learns its id,
+  // but subsequent edits must recover under that Post's durable identity. A new
+  // batch keeps its copy ids in one new-composition record instead.
   const composerIdentity = `${scope.workspaceId ?? "personal"}::${selectedBrandProfileId ?? "all"}::${initialPostId ?? "new"}`;
   const recoveryNamespace = `${scope.workspaceId ?? "personal"}::${selectedBrandProfileId ?? "all"}::${postId ?? "new"}`;
+  const [previousComposerIdentity, setPreviousComposerIdentity] = useState(composerIdentity);
+  if (previousComposerIdentity !== composerIdentity) {
+    setPreviousComposerIdentity(composerIdentity);
+    setSelectedProfileIds(selectedBrandProfileId ? [selectedBrandProfileId] : []);
+    setProfileProgress([]);
+  }
   // Async upload callbacks need the *current* identity without re-subscribing,
   // so the refs are synced after commit rather than during render.
   useEffect(() => {
@@ -519,6 +714,32 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
   const postQuery = usePost(scope, postId ?? "", postId !== null);
   const capabilitiesQuery = usePlatformCapabilities(scope);
+
+  // Adopt a default owner once per mounted composer session, after an existing
+  // Post has loaded. Later aggregate selections belong to the collection filter
+  // and must not be replaced by this initialization.
+  const hasAdoptedOwnerRef = useRef(false);
+  useEffect(() => {
+    if (!scope.isSignedIn || hasAdoptedOwnerRef.current) return;
+    if (initialPostId !== undefined && !postQuery.data) return;
+    if (selectedBrandProfileId !== null) {
+      hasAdoptedOwnerRef.current = true;
+      return;
+    }
+    const profileId =
+      initialPostId !== undefined ? postQuery.data?.brand_profile_id : brandProfiles[0]?.id;
+    if (profileId) {
+      hasAdoptedOwnerRef.current = true;
+      setSelectedBrandProfileId(profileId);
+    }
+  }, [
+    brandProfiles,
+    initialPostId,
+    postQuery.data,
+    scope.isSignedIn,
+    selectedBrandProfileId,
+    setSelectedBrandProfileId,
+  ]);
   const createPost = useCreatePost(scope);
   const updatePost = useUpdatePost(scope);
   const schedulePost = useSchedulePost(scope);
@@ -555,6 +776,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     const tasks = tasksRef.current;
     const files = filesRef.current;
     return () => {
+      batchAbortRef.current?.abort();
       for (const url of urls) URL.revokeObjectURL(url);
       urls.clear();
       for (const task of tasks.values()) void task.cancel();
@@ -578,11 +800,17 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * @returns Nothing; performs the state resets.
    */
   const resetComposer = useCallback(() => {
+    batchAbortRef.current?.abort();
+    profileCopiesRef.current.clear();
     setSharedContent("");
     setAttachments([]);
     setChannelOverrides({});
     setAttachmentOverrides({});
-    setSelectedChannelIds([]);
+    // Back to the eligible defaults rather than an empty set: abandoning a
+    // composition (or finishing one) must not leave the next one with no
+    // destinations, which is what the previous explicit [] produced after a
+    // Brand Profile switch.
+    setSelectedChannelIds(null);
     setSavedAt(null);
     setHydratedPostId(null);
     setErrorMessage(null);
@@ -625,23 +853,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     try {
       const raw = readFunctionalStorage(recoveryKeyPrefix + recoveryNamespaceRef.current);
       if (!raw) return null;
-      const parsed: unknown = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") return null;
-      const record = parsed as Partial<ComposerRecoveryRecord>;
-      // Every field is applied unconditionally on restore, so a record missing
-      // any of them is treated as unrecoverable rather than half-applied.
-      return record.version === 1 &&
-        typeof record.updatedAt === "string" &&
-        typeof record.sharedContent === "string" &&
-        typeof record.scheduleDate === "string" &&
-        Array.isArray(record.attachments) &&
-        Array.isArray(record.removedAssetIds) &&
-        typeof record.channelOverrides === "object" &&
-        record.channelOverrides !== null &&
-        typeof record.attachmentOverrides === "object" &&
-        record.attachmentOverrides !== null
-        ? (record as ComposerRecoveryRecord)
-        : null;
+      return Schema.decodeUnknownSync(composerRecoverySchema)(JSON.parse(raw));
     } catch {
       return null;
     }
@@ -661,17 +873,15 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   }, []);
 
   /**
-   * Deletes every supplemental record a successful save supersedes: both the
-   * namespace active when the save began and the one the saved Post id moves to.
-   * Either copy could restore work the server now owns, including into the empty
-   * composer after a publish. Removal remains permitted after consent withdrawal.
+   * Deletes the supplemental record superseded by a successful save. A single
+   * Post's later edits use its durable id; new batches retain all copy ids together.
+   * Removal remains permitted after consent withdrawal and never clears another
+   * composition that became active while the request was in flight.
    *
    * @param namespaceAtSubmit - Recovery namespace active when the save started.
    */
   const clearRecoveryAfterSave = useCallback((namespaceAtSubmit: string) => {
-    for (const namespace of new Set([namespaceAtSubmit, recoveryNamespaceRef.current])) {
-      writeFunctionalStorage(recoveryKeyPrefix + namespace, null);
-    }
+    writeFunctionalStorage(recoveryKeyPrefix + namespaceAtSubmit, null);
   }, []);
 
   // Persist unsaved work only after functional consent and after the active
@@ -701,8 +911,16 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       removedAssetIds: [...removedAssetIdsRef.current],
       scheduleDate,
       sharedContent,
+      profileIds: selectedProfileIds,
+      selectedChannelIds,
+      profileCopies: Object.fromEntries(
+        [...profileCopiesRef.current].map(([id, copy]) => [
+          id,
+          { ...copy, assets: Object.fromEntries(copy.assets) },
+        ]),
+      ),
       updatedAt: new Date().toISOString(),
-      version: 1,
+      version: 2,
     });
   }, [
     attachmentOverrides,
@@ -714,15 +932,26 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     recoveryReadNamespace,
     scheduleDate,
     sharedContent,
+    selectedProfileIds,
+    selectedChannelIds,
+    profileProgress,
     writeRecovery,
   ]);
 
-  // Hydrate shared text, Channel selection, per-channel settings, attachment
-  // selection, and schedule slot from the authoritative Post exactly once per
-  // identity, so later polling never overwrites creator input.
+  // Hydrate shared text, Channel selection, settings, attachments, and schedule
+  // only after sign-in and profile selection settle. Aggregate-scope hydration
+  // could otherwise commit just before the owner switch clears composer state.
+  // Each Post hydrates once so later polling never overwrites creator input.
   useEffect(() => {
     const post = postQuery.data;
-    if (!post || !postId || hydratedPostId === postId) return;
+    if (
+      !scope.isSignedIn ||
+      selectedBrandProfileId === null ||
+      !post ||
+      !postId ||
+      hydratedPostId === postId
+    )
+      return;
     // Provider settings are rebuilt per saved target, and a draft that has never
     // been scheduled names no platform of its own, so hydration waits for the
     // Channel list instead of rebuilding every provider panel empty.
@@ -756,6 +985,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     platformsQuery.isPending,
     postId,
     postQuery.data,
+    scope.isSignedIn,
+    selectedBrandProfileId,
     setSelectedChannelIds,
   ]);
 
@@ -782,7 +1013,19 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         setAttachments((previous) => restoredAttachmentRows(previous, record, removedAssetIds));
         setSharedContent(record.sharedContent);
         setChannelOverrides(record.channelOverrides);
-        setAttachmentOverrides(record.attachmentOverrides);
+        setAttachmentOverrides(
+          Object.fromEntries(
+            Object.entries(record.attachmentOverrides).map(([id, assets]) => [id, [...assets]]),
+          ),
+        );
+        setSelectedProfileIds([...record.profileIds]);
+        setSelectedChannelIds([...record.selectedChannelIds]);
+        profileCopiesRef.current = new Map(
+          Object.entries(record.profileCopies).map(([id, copy]) => [
+            id,
+            { ...copy, assets: new Map(Object.entries(copy.assets)) },
+          ]),
+        );
         if (record.scheduleDate) setScheduleDate(record.scheduleDate);
         // Restored work is unsaved: it is reported as such and can be saved
         // over the server Post the creator was editing.
@@ -800,6 +1043,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     readRecovery,
     recoveryNamespace,
     recoveryReadNamespace,
+    setSelectedChannelIds,
   ]);
 
   // Merge server-owned attachment state into composer rows. Locally removed
@@ -899,7 +1143,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     const assetIds = pendingOwnershipAssetIds;
     if (!postId || !assetIds || assetIds.length === 0) return;
     const profileId = selectedBrandProfileId;
-    if (profileId === null) return;
+    if (profileId === null || !selectedProfileIds.includes(profileId)) return;
     // Ids already handed to a PATCH are not resent; the effect re-runs when the
     // ordered rows change so a freshly known id still lands in the same patch.
     // An Asset the creator detached never reaches the Post, even when its id was
@@ -911,7 +1155,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     if (fresh.length === 0) return;
     for (const assetId of fresh) persistedOwnershipRef.current.add(assetId);
     const attachmentIds = [...orderedAssetIds()];
-    for (const assetId of fresh) if (!attachmentIds.includes(assetId)) attachmentIds.push(assetId);
+    const claimed = new Set(attachmentIds);
+    for (const assetId of fresh) {
+      if (claimed.has(assetId)) continue;
+      attachmentIds.push(assetId);
+      claimed.add(assetId);
+    }
     void updatePost
       .mutateAsync({
         id: postId,
@@ -920,17 +1169,107 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       .catch(() => {
         // Ownership is retried on the next explicit save; never claim it is saved.
       });
-  }, [orderedAssetIds, pendingOwnershipAssetIds, postId, selectedBrandProfileId, updatePost]);
+  }, [
+    orderedAssetIds,
+    pendingOwnershipAssetIds,
+    postId,
+    selectedBrandProfileId,
+    selectedProfileIds,
+    updatePost,
+  ]);
 
-  const selectedChannels = useMemo(
-    () =>
-      integrations.filter(
-        (channel: ChannelIntegration) =>
-          channel.brandProfileId === selectedBrandProfileId &&
-          selectedChannelIds.includes(channel.id),
-      ),
-    [integrations, selectedBrandProfileId, selectedChannelIds],
+  const selectedChannels = useMemo(() => {
+    const selectedIds = new Set(selectedChannelIds);
+    const profileIds = new Set(selectedProfileIds);
+    return integrations.filter(
+      (channel: ChannelIntegration) =>
+        channel.brandProfileId !== null &&
+        profileIds.has(channel.brandProfileId) &&
+        selectedIds.has(channel.id),
+    );
+  }, [integrations, selectedProfileIds, selectedChannelIds]);
+
+  /**
+   * Label for one target Channel inside the composer. Customization is per social
+   * provider, so a Channel is named by its platform — and the account handle is
+   * appended only when the same provider appears more than once in the selection,
+   * where the platform alone would name two different targets identically.
+   */
+  const targetLabels = useMemo(() => {
+    const perProvider = new Map<string, number>();
+    for (const channel of selectedChannels) {
+      const provider = channel.providerIdentifier.toLowerCase();
+      perProvider.set(provider, (perProvider.get(provider) ?? 0) + 1);
+    }
+    const labels = new Map<string, string>();
+    for (const channel of selectedChannels) {
+      const provider = channel.providerIdentifier.toLowerCase();
+      const platformName = platformDisplayName(channel.providerIdentifier);
+      labels.set(
+        channel.id,
+        (perProvider.get(provider) ?? 0) > 1 ? `${platformName} · ${channel.name}` : platformName,
+      );
+    }
+    return labels;
+  }, [selectedChannels]);
+
+  /**
+   * Provider-first label of one target Channel.
+   *
+   * @param channel - Target Channel being labelled.
+   * @returns The platform's display name, with the account handle when it has to disambiguate.
+   */
+  const targetLabelFor = useCallback(
+    (channel: ChannelIntegration): string =>
+      targetLabels.get(channel.id) ?? platformDisplayName(channel.providerIdentifier),
+    [targetLabels],
   );
+
+  /**
+   * Published capabilities indexed once per result. First row per platform wins;
+   * rendering and submission share the same limits without rebuilding the index.
+   */
+  const capabilityByPlatform = useMemo(() => {
+    const byPlatform = new Map<string, PlatformCapability>();
+    for (const capability of capabilitiesQuery.data ?? []) {
+      const platform = capability.platform.toLowerCase();
+      if (!byPlatform.has(platform)) byPlatform.set(platform, capability);
+    }
+    return byPlatform;
+  }, [capabilitiesQuery.data]);
+
+  /**
+   * Caption limit for one Channel, or null when its platform publishes none.
+   *
+   * @param channel - Target Channel whose platform limit is being read.
+   * @returns Maximum caption length in code points, else null.
+   */
+  const captionLimitFor = useCallback(
+    (channel: ChannelIntegration): number | null =>
+      capabilityByPlatform.get(channel.providerIdentifier.toLowerCase())?.max_caption_length ??
+      null,
+    [capabilityByPlatform],
+  );
+
+  /**
+   * Tightest caption limit across the selected Channels, or null when none of
+   * their platforms publishes one. The shared field's text reaches every
+   * selected Channel, so the strictest limit is the one that keeps the post
+   * publishable everywhere it targets.
+   */
+  const sharedCaptionLimit = useMemo(() => {
+    let limit: number | null = null;
+    for (const channel of selectedChannels) {
+      const channelLimit = captionLimitFor(channel);
+      if (channelLimit === null) continue;
+      limit = limit === null ? channelLimit : Math.min(limit, channelLimit);
+    }
+    return limit;
+  }, [captionLimitFor, selectedChannels]);
+
+  /** Whether the shared caption has reached its tightest platform limit. */
+  const isAtSharedCaptionLimit =
+    sharedCaptionLimit !== null && captionLength(sharedContent) >= sharedCaptionLimit;
 
   /**
    * Receives live TikTok publishing requirements from a Channel's settings panel
@@ -941,11 +1280,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    */
   const handleRequirementsChange = useCallback(
     (channelId: string, requirements: TikTokPublishingRequirements | null) => {
-      setTiktokRequirements((previous) =>
-        previous[channelId] === requirements
-          ? previous
-          : { ...previous, [channelId]: requirements },
-      );
+      if (tiktokRequirementsRef.current[channelId] === requirements) return;
+      tiktokRequirementsRef.current = {
+        ...tiktokRequirementsRef.current,
+        [channelId]: requirements,
+      };
     },
     [],
   );
@@ -1100,6 +1439,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           const next = { ...previous };
           for (const [channelId, position] of replaced) {
             const current = next[channelId];
+            // One membership test per channel against that channel's own list:
+            // not a repeated scan, so a Set here would only add construction.
             if (!current || current.includes(newAssetId)) continue;
             const ordered = [...current];
             ordered.splice(Math.min(position, ordered.length), 0, newAssetId);
@@ -1443,14 +1784,25 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const validateSubmission = useCallback(
     (type: "draft" | "schedule" | "now"): string[] => {
       const errors: string[] = [];
-      const capabilities = capabilitiesQuery.data;
       const starting = attachments.filter((attachment) => attachment.assetId === null);
 
-      if (selectedBrandProfileId === null) {
+      if (selectedProfileIds.length === 0 || selectedBrandProfileId === null) {
         errors.push(t("Select a Brand Profile before publishing."));
       }
       if (type !== "draft" && selectedChannels.length === 0) {
         errors.push(t("Please select at least one destination channel."));
+      }
+      if (type !== "draft") {
+        const targetedProfiles = new Set(selectedChannels.map((channel) => channel.brandProfileId));
+        for (const profileId of selectedProfileIds) {
+          if (!targetedProfiles.has(profileId)) {
+            errors.push(
+              t("{name}: select at least one destination channel.", {
+                name: profileNames.get(profileId) ?? t("Unknown profile"),
+              }),
+            );
+          }
+        }
       }
       if (!sharedContent.trim() && attachments.length === 0) {
         errors.push(t("Post must contain text content or at least one media item."));
@@ -1476,14 +1828,18 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         const platform = channel.providerIdentifier.toLowerCase();
         const settings = channelOverrides[channel.id]?.settings ?? {};
         const content = resolvedContentFor(channel.id);
-        const capability = capabilities?.find((item) => item.platform === platform);
+        const capability = capabilityByPlatform.get(platform);
         const channelAttachments = attachmentsForChannel(channel.id);
 
         if (!content.trim() && channelAttachments.length === 0) {
           errors.push(t("{name}: post text is empty for this channel.", { name }));
         }
         const maxCaption = capability?.max_caption_length;
-        if (maxCaption !== null && maxCaption !== undefined && content.length > maxCaption) {
+        if (
+          maxCaption !== null &&
+          maxCaption !== undefined &&
+          captionLength(content) > maxCaption
+        ) {
           errors.push(
             t("{name}: text exceeds the {limit}-character limit for this platform.", {
               name,
@@ -1514,13 +1870,17 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             }),
           );
         }
+        // Per-channel acceptance sets: each attachment below re-tests membership
+        // against these lists, so build them once for the channel.
+        const acceptedAssetTypes = new Set(capability?.asset_types ?? []);
+        const combinedAssetTypes = new Set(capability?.multi_asset_types ?? []);
         if (channelAttachments.length > 1 && capability) {
           const combined = capability.multi_asset_types ?? [];
           if (combined.length === 0) {
             errors.push(t("{name}: cannot publish more than one attachment per post.", { name }));
           } else {
             const hasUnsupported = channelAttachments.some(
-              (attachment) => attachment.assetType && !combined.includes(attachment.assetType),
+              (attachment) => attachment.assetType && !combinedAssetTypes.has(attachment.assetType),
             );
             if (hasUnsupported) {
               errors.push(
@@ -1537,8 +1897,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           if (
             assetType &&
             capability &&
-            capability.asset_types.length > 0 &&
-            !capability.asset_types.includes(assetType)
+            acceptedAssetTypes.size > 0 &&
+            !acceptedAssetTypes.has(assetType)
           ) {
             errors.push(
               t("{name}: this channel does not accept {type} media.", { name, type: assetType }),
@@ -1570,7 +1930,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               channelName: name,
               settings,
               capability,
-              requirements: tiktokRequirements[channel.id] ?? null,
+              requirements: tiktokRequirementsRef.current[channel.id] ?? null,
               t,
             }),
           );
@@ -1581,18 +1941,33 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     [
       attachments,
       attachmentsForChannel,
-      capabilitiesQuery.data,
+      capabilityByPlatform,
       capabilitiesQuery.isPending,
       channelOverrides,
       resolvedContentFor,
       scheduleDate,
       selectedBrandProfileId,
+      selectedProfileIds,
+      profileNames,
       selectedChannels,
       sharedContent,
       t,
-      tiktokRequirements,
     ],
   );
+
+  /**
+   * Validation messages keyed for rendering. A message may repeat verbatim (the
+   * same rule can fail for two Channels), so identity is the message plus its
+   * occurrence count - stable across re-renders and unique within the list.
+   */
+  const validationErrorRows = useMemo(() => {
+    const occurrences = new Map<string, number>();
+    return validationErrors.map((message) => {
+      const occurrence = (occurrences.get(message) ?? 0) + 1;
+      occurrences.set(message, occurrence);
+      return { key: `${message}#${occurrence}`, message };
+    });
+  }, [validationErrors]);
 
   /**
    * Persists the current composer state as one authoritative Post, creating it on
@@ -1640,12 +2015,96 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       // null selection cannot reach the scoped mutations.
       if (selectedBrandProfileId === null) return;
       const brandProfileId = selectedBrandProfileId;
-      // A first save moves the composition from the unsaved `new` namespace to
-      // the saved Post's, so both copies have to be captured before the id lands.
+      // Async completion must affect only the composition that submitted it.
       const recoveryNamespaceAtSubmit = recoveryNamespaceRef.current;
+      const composerIdentityAtSubmit = composerIdentityRef.current;
 
       setIsSubmitting(true);
       try {
+        if (
+          selectedProfileIds.length !== 1 ||
+          selectedProfileIds[0] !== brandProfileId ||
+          profileCopiesRef.current.size > 0
+        ) {
+          const targetsByProfile = new Map<string, PostTargetDraft[]>();
+          const channelsById = new Map(selectedChannels.map((channel) => [channel.id, channel]));
+          for (const target of buildTargets()) {
+            const profileId = channelsById.get(target.platform_account_id)?.brandProfileId;
+            if (!profileId) continue;
+            const targets = targetsByProfile.get(profileId);
+            if (targets) targets.push(target);
+            else targetsByProfile.set(profileId, [target]);
+          }
+          const controller = new AbortController();
+          batchAbortRef.current = controller;
+          setProfileProgress([]);
+          const succeeded = await persistProfileCopies({
+            profileIds: selectedProfileIds,
+            sourceProfileId: brandProfileId,
+            sourcePostId: postId,
+            sharedContent,
+            targetsByProfile,
+            attachments: attachments.flatMap((attachment) =>
+              attachment.assetId
+                ? [
+                    {
+                      assetId: attachment.assetId,
+                      name: attachment.name,
+                      mimeType: attachment.mimeType,
+                      file: filesRef.current.get(attachment.key),
+                    },
+                  ]
+                : [],
+            ),
+            mode: type,
+            scheduledAt: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
+            workspaceId: scope.workspaceId,
+            copies: profileCopiesRef.current,
+            signal: controller.signal,
+            create: createPost.mutateAsync,
+            update: updatePost.mutateAsync,
+            schedule: schedulePost.mutateAsync,
+            onProgress: (progress) => {
+              if (controller.signal.aborted) return;
+              setProfileProgress((previous) => [
+                ...previous.filter((entry) => entry.profileId !== progress.profileId),
+                progress,
+              ]);
+            },
+          });
+          if (controller.signal.aborted || composerIdentityRef.current !== composerIdentityAtSubmit)
+            return;
+          const anchor = profileCopiesRef.current.get(brandProfileId);
+          await refreshWorkspace();
+          if (!succeeded) {
+            markDirty();
+            setErrorMessage(
+              t(
+                "Some profiles could not be completed. Completed profiles are kept; retry to finish the remaining work.",
+              ),
+            );
+            return;
+          }
+          clearRecoveryAfterSave(recoveryNamespaceAtSubmit);
+          dirtyRef.current = false;
+          setIsDirty(false);
+          setSavedAt(
+            anchor?.updatedAt ??
+              profileCopiesRef.current.get(selectedProfileIds[0])?.updatedAt ??
+              null,
+          );
+          toast(type === "draft" ? t("Drafts saved") : t("Posts queued"), {
+            variant: "success",
+            description: t("Saved one independent Post per selected Brand Profile."),
+          });
+          if (type !== "draft") {
+            setProfileProgress([]);
+            setCreatedPostId(null);
+            resetComposer();
+            onPostSuccess?.();
+          }
+          return;
+        }
         const saved = await persistPost(brandProfileId);
         setCreatedPostId(saved.id);
         dirtyRef.current = false;
@@ -1691,6 +2150,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         await refreshWorkspace();
         onPostSuccess?.();
       } catch (error) {
+        if (composerIdentityRef.current !== composerIdentityAtSubmit) return;
         // A rejected mutation that carried structured per-field violations names
         // each one in the fix-list; anything else falls back to the masked
         // user-facing message so internals never surface.
@@ -1717,7 +2177,15 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       scheduleDate,
       schedulePost,
       selectedBrandProfileId,
-      selectedChannels.length,
+      selectedProfileIds,
+      selectedChannels,
+      attachments,
+      sharedContent,
+      postId,
+      scope.workspaceId,
+      createPost.mutateAsync,
+      updatePost.mutateAsync,
+      markDirty,
       t,
       validateSubmission,
     ],
@@ -1738,6 +2206,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     (isPostLoading ||
       (postId !== null && hydratedPostId !== postId) ||
       (functionalConsent && recoveryReadNamespace !== recoveryNamespace));
+  /** Icon of the selected publishing mode, shown on the pinned action. */
+  const PublishModeIcon = PUBLISH_MODE_ICONS[publishMode];
   const submitDisabled =
     isSubmitting ||
     isInitializing ||
@@ -1748,190 +2218,202 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
   return (
     <fieldset
-      disabled={isInitializing}
-      aria-busy={isInitializing}
-      className="flex min-w-0 flex-col gap-6"
+      disabled={isInitializing || isSubmitting}
+      aria-busy={isInitializing || isSubmitting}
+      className="@container flex min-h-0 min-w-0 grow flex-col gap-5 @4xl:overflow-hidden"
     >
-      <div className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-            {t("Publishing Composer")}
-          </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {t(
-              "Compose once, preview channel-specific variations, and schedule or publish across your accounts.",
-            )}
-          </p>
-        </div>
-        <DestinationSelector onNavigate={onNavigate} />
-      </div>
-
-      {selectedBrandProfileId === null && (
-        <Alert variant="info" className="items-center">
-          <AlertCircle className="size-5 shrink-0" />
-          <div className="flex-1">
-            {t("Select a Brand Profile in the sidebar to compose, schedule, or publish.")}
-          </div>
-        </Alert>
-      )}
-      {profileMismatch && (
-        <Alert variant="destructive" className="items-center">
-          <AlertCircle className="size-5 shrink-0" />
-          <div className="flex-1">
-            {t("This post belongs to {name}. Switch to that Brand Profile to edit it.", {
-              name:
-                brandProfiles.find((profile) => profile.id === postQuery.data?.brand_profile_id)
-                  ?.name ?? t("another Brand Profile"),
-            })}
-          </div>
-        </Alert>
-      )}
-      {postLoadError && (
-        <Alert variant="destructive" className="items-center">
-          <AlertCircle className="size-5 shrink-0" />
-          <div className="flex-1">
-            <span className="font-semibold">{t("Could not load post")}:</span>{" "}
-            {userFacingErrorMessage(postLoadError, language)}
-          </div>
-        </Alert>
-      )}
-
-      {errorMessage && (
-        <Alert variant="destructive" className="items-center">
-          <AlertCircle className="size-5 shrink-0" />
-          <div className="flex-1">
-            <span className="font-semibold">{t("Submission Error")}:</span> {errorMessage}
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setErrorMessage(null)}
-            aria-label={t("Dismiss")}
-            className="text-destructive hover:bg-destructive/20 size-7 p-0"
-          >
-            <X className="size-4" />
-          </Button>
-        </Alert>
-      )}
-
-      {validationErrors.length > 0 && (
-        <Alert variant="destructive" className="flex-col items-start">
-          <div className="flex items-center gap-2 font-semibold">
+      <div className="flex flex-col gap-3 empty:hidden">
+        {selectedBrandProfileId === null && (
+          <Alert variant="info" className="items-center">
             <AlertCircle className="size-4 shrink-0" />
-            {t("Please fix the following before submitting:")}
-          </div>
-          <ul className="list-disc pl-6 flex flex-col gap-0.5">
-            {validationErrors.map((message, index) => (
-              <li key={index}>{message}</li>
+            <div className="flex-1">
+              {t("Choose a Brand Profile to compose, schedule, or publish.")}
+            </div>
+          </Alert>
+        )}
+        {profileMismatch && (
+          <Alert variant="destructive" className="items-center">
+            <AlertCircle className="size-4 shrink-0" />
+            <div className="flex-1">
+              {t("This post belongs to {name}. Switch to that Brand Profile to edit it.", {
+                name:
+                  profileNames.get(postQuery.data?.brand_profile_id ?? "") ??
+                  t("another Brand Profile"),
+              })}
+            </div>
+          </Alert>
+        )}
+        {postLoadError && (
+          <Alert variant="destructive" className="items-center">
+            <AlertCircle className="size-4 shrink-0" />
+            <div className="flex-1">
+              <span className="font-semibold">{t("Could not load post")}:</span>{" "}
+              {userFacingErrorMessage(postLoadError, language)}
+            </div>
+          </Alert>
+        )}
+
+        {errorMessage && (
+          <Alert variant="destructive" className="items-center">
+            <AlertCircle className="size-4 shrink-0" />
+            <div className="flex-1">
+              <span className="font-semibold">{t("Submission Error")}:</span> {errorMessage}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setErrorMessage(null)}
+              aria-label={t("Dismiss")}
+              className="text-red hover:bg-red/20 size-7 p-0"
+            >
+              <X className="size-4" />
+            </Button>
+          </Alert>
+        )}
+
+        {validationErrors.length > 0 && (
+          <Alert variant="destructive" className="flex-col items-start">
+            <div className="flex items-center gap-2 font-semibold">
+              <AlertCircle className="size-4 shrink-0" />
+              {t("Please fix the following before submitting:")}
+            </div>
+            <ul className="list-disc pl-6 flex flex-col gap-0.5">
+              {validationErrorRows.map((row) => (
+                <li key={row.key}>{row.message}</li>
+              ))}
+            </ul>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setValidationErrors([])}
+              aria-label={t("Dismiss")}
+              className="text-red hover:bg-red/20 size-7 p-0 self-end"
+            >
+              <X className="size-4" />
+            </Button>
+          </Alert>
+        )}
+        {profileProgress.length > 0 && (
+          <ul
+            className="space-y-1 text-xs text-ink-2"
+            aria-label={t("Brand Profile progress")}
+            aria-live="polite"
+          >
+            {profileProgress.map((progress) => (
+              <li key={progress.profileId}>
+                {profileNames.get(progress.profileId) ?? t("Unknown profile")}
+                {": "}
+                {progress.phase === "failed"
+                  ? userFacingErrorMessage(progress.error, language)
+                  : progress.phase === "scheduled"
+                    ? publishMode === "schedule"
+                      ? t("Scheduled")
+                      : t("Queued")
+                    : progress.phase === "saved"
+                      ? t("Draft saved")
+                      : progress.phase === "media"
+                        ? t("Preparing profile media…")
+                        : t("Saving…")}
+              </li>
             ))}
           </ul>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setValidationErrors([])}
-            aria-label={t("Dismiss")}
-            className="text-destructive hover:bg-destructive/20 size-7 p-0 self-end"
-          >
-            <X className="size-4" />
-          </Button>
-        </Alert>
-      )}
+        )}
+      </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <Card className="border border-border shadow-sm">
-          <CardHeader className="p-4 pb-2 border-b border-border">
-            <div className="flex items-center justify-between overflow-x-auto pb-1">
-              <TabsList className="bg-muted">
-                <TabsTrigger value="shared" className="text-xs font-semibold">
-                  <Layers className="size-3.5 mr-1.5" />
-                  {t("Shared Content")}
-                </TabsTrigger>
-                {selectedChannels.map((channel: ChannelIntegration) => (
-                  <TabsTrigger
-                    key={channel.id}
-                    value={channel.id}
-                    className="text-xs font-medium flex items-center gap-1.5"
-                  >
-                    <span>{channel.name}</span>
-                    {channelOverrides[channel.id]?.hasOverride && (
-                      <span className="size-1.5 rounded-full bg-foreground" />
-                    )}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </div>
-          </CardHeader>
-
-          <CardContent className="p-4 flex flex-col gap-4">
-            <TabsContent value="shared" className="mt-0">
-              <div className="flex flex-col gap-4">
-                <div className="relative">
-                  <Textarea
-                    placeholder={t(
-                      "What do you want to publish? Share across all selected destinations...",
-                    )}
-                    aria-label={t("Shared Content")}
-                    value={sharedContent}
-                    onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
-                      setSharedContent(event.target.value);
-                      markDirty();
-                    }}
-                    className="min-h-[160px] text-base resize-y font-normal bg-background"
-                  />
-                  <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
-                    <span>
-                      {t("Targeting {count} channel(s)", { count: selectedChannels.length })}
-                    </span>
-                    <span className="font-mono">
-                      {t("{count} characters", { count: sharedContent.length })}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-foreground">
-                      {t("Attached Media ({count})", { count: attachments.length })}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          replaceTargetRef.current = null;
-                          fileInputRef.current?.click();
-                        }}
-                        disabled={selectedBrandProfileId === null || !scope.isSignedIn}
-                        className="h-8 text-xs gap-1.5"
-                      >
-                        <ImageIcon className="size-3.5" />
-                        {t("Add Media")}
-                      </Button>
-                      <Input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        accept="image/*,video/*"
-                        className="hidden"
-                        aria-label={t("Add Media")}
-                        onChange={handleFilesSelected}
+      {/* The editor takes the remaining width beside a compact destinations and
+          publishing column. The split follows the panel's own width; narrower
+          panels stack in reading order. Each wide column scrolls independently. */}
+      <div className="flex min-w-0 grow flex-col gap-6 @4xl:min-h-0 @4xl:flex-1 @4xl:flex-row @4xl:items-stretch">
+        <div
+          aria-label={t("Post content")}
+          tabIndex={0}
+          className="hide-scrollbar flex min-w-0 flex-1 flex-col gap-6 @4xl:-my-1 @4xl:-ml-1 @4xl:min-h-0 @4xl:overflow-y-auto @4xl:overscroll-contain @4xl:py-1 @4xl:pr-2 @4xl:pl-1"
+        >
+          <ComposerSection icon={Layers} title={t("Shared Content")}>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Textarea
+                  placeholder={t("What do you want to publish?")}
+                  aria-label={t("Shared Content")}
+                  value={sharedContent}
+                  onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
+                    setSharedContent(clampCaption(event.target.value, sharedCaptionLimit));
+                    markDirty();
+                  }}
+                  autoGrow
+                  className="min-h-36 max-h-72 resize-none text-base font-normal bg-field"
+                />
+                {/* The destination count only means something once the Post
+                        has an owning Brand Profile: in the aggregate view the
+                        banner above already says what is missing, and the
+                        Destinations block shows the accounts as unavailable. */}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-(length:--font-size-micro) text-ink-3">
+                  <span>
+                    {selectedBrandProfileId !== null && (
+                      <Trans
+                        message="Targeting {count} channel(s)"
+                        values={{ count: <RollingCount value={selectedChannels.length} /> }}
                       />
-                    </div>
-                  </div>
-
-                  <div
-                    onDragOver={(event: React.DragEvent<HTMLDivElement>) => {
-                      event.preventDefault();
-                      setDragActive(true);
-                    }}
-                    onDragLeave={() => setDragActive(false)}
-                    onDrop={handleDrop}
-                    className={`rounded-lg border border-dashed p-3 transition-colors ${
-                      isDragActive ? "border-foreground bg-muted/50" : "border-border"
-                    }`}
+                    )}
+                  </span>
+                  <span
+                    className={cn("font-mono", isAtSharedCaptionLimit && "text-red")}
+                    title={
+                      sharedCaptionLimit === null ? t("Character limit unavailable") : undefined
+                    }
                   >
-                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                    {t("{count}/{limit} characters", {
+                      count: captionLength(sharedContent),
+                      limit: sharedCaptionLimit ?? "—",
+                    })}
+                  </span>
+                </div>
+              </div>
+
+              <ComposerSection
+                icon={ImageIcon}
+                title={t("Attached Media ({count})", { count: attachments.length })}
+                action={
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        replaceTargetRef.current = null;
+                        fileInputRef.current?.click();
+                      }}
+                      disabled={selectedBrandProfileId === null || !scope.isSignedIn}
+                      className="h-7 gap-1.5 px-2 text-(length:--font-size-control)"
+                    >
+                      <ImageIcon className="size-3.5" />
+                      {t("Add Media")}
+                    </Button>
+                    <Input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/*,video/*"
+                      className="hidden"
+                      aria-label={t("Add Media")}
+                      onChange={handleFilesSelected}
+                    />
+                  </div>
+                }
+              >
+                <div
+                  onDragOver={(event: React.DragEvent<HTMLDivElement>) => {
+                    event.preventDefault();
+                    setDragActive(true);
+                  }}
+                  onDragLeave={() => setDragActive(false)}
+                  onDrop={handleDrop}
+                  className={`rounded-control border border-dashed p-3 transition-colors ${
+                    isDragActive ? "border-foreground bg-inset" : "border-line"
+                  }`}
+                >
+                  {attachments.length > 0 && (
+                    <div className="grid grid-cols-2 gap-3 @sm:grid-cols-3 @xl:grid-cols-4">
                       {attachments.map((attachment, index) => {
                         const phase = attachmentPhase(attachment, t);
                         const isActive =
@@ -1941,7 +2423,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         return (
                           <div
                             key={attachment.key}
-                            className="relative group aspect-square rounded-lg border border-border overflow-hidden bg-muted"
+                            className="relative group aspect-square rounded-control border border-line overflow-hidden bg-hover"
                           >
                             {attachment.assetId !== null && postId === null && (
                               <AttachmentStatusPoller
@@ -1961,7 +2443,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                               alt={attachment.name || t("media")}
                               className="size-full object-cover"
                               empty={
-                                <div className="size-full flex items-center justify-center text-muted-foreground">
+                                <div className="size-full flex items-center justify-center text-ink-3">
                                   {!phase.ready && !phase.failed ? (
                                     <Loader2 className="size-5 animate-spin" />
                                   ) : (
@@ -1971,7 +2453,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                               }
                             />
                             <div
-                              className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-background/85 px-1 py-0.5 text-[9px] text-foreground"
+                              className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-surface/85 px-1 py-0.5 text-(length:--font-size-micro) text-ink"
                               role="status"
                             >
                               <span className="truncate">
@@ -1980,10 +2462,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                               <span
                                 className={
                                   phase.failed
-                                    ? "text-destructive"
+                                    ? "text-red"
                                     : phase.ready
                                       ? "text-green"
-                                      : "text-muted-foreground"
+                                      : "text-ink-3"
                                 }
                               >
                                 {phase.label}
@@ -1991,7 +2473,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                             </div>
                             {isActive && attachment.percent < 100 && (
                               <div
-                                className="absolute inset-x-0 top-0 h-1 bg-background/60"
+                                className="absolute inset-x-0 top-0 h-1 bg-surface/60"
                                 role="progressbar"
                                 aria-valuemin={0}
                                 aria-valuemax={100}
@@ -2001,7 +2483,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                 })}
                               >
                                 <div
-                                  className="h-1 bg-accent transition-all w-[var(--attachment-progress)]"
+                                  data-attachment-progress
+                                  className="h-1 bg-accent w-[var(--attachment-progress)]"
                                   style={
                                     {
                                       "--attachment-progress": `${attachment.percent}%`,
@@ -2011,11 +2494,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                               </div>
                             )}
                             {phase.message && (
-                              <p className="absolute inset-x-0 top-1 px-1 text-[9px] leading-tight text-destructive">
+                              <p className="absolute inset-x-0 top-1 px-1 text-(length:--font-size-micro) leading-tight text-red">
                                 {phase.message}
                               </p>
                             )}
-                            <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100">
+                            <div className="absolute top-1 right-1 flex max-w-full flex-wrap justify-end gap-0.5 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100">
                               <Button
                                 type="button"
                                 variant="default"
@@ -2025,7 +2508,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                 })}
                                 disabled={index === 0}
                                 onClick={() => handleMoveAttachment(index, -1)}
-                                className="size-5 rounded-full bg-background/80 text-foreground shadow hover:bg-accent"
+                                className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
                               >
                                 <ChevronUp className="size-3" />
                               </Button>
@@ -2038,7 +2521,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                 })}
                                 disabled={index === attachments.length - 1}
                                 onClick={() => handleMoveAttachment(index, 1)}
-                                className="size-5 rounded-full bg-background/80 text-foreground shadow hover:bg-accent"
+                                className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
                               >
                                 <ChevronDown className="size-3" />
                               </Button>
@@ -2046,13 +2529,15 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                 type="button"
                                 variant="default"
                                 size="icon"
-                                aria-label={t("Replace attachment {index}", { index: index + 1 })}
+                                aria-label={t("Replace attachment {index}", {
+                                  index: index + 1,
+                                })}
                                 disabled={selectedBrandProfileId === null}
                                 onClick={() => {
                                   replaceTargetRef.current = attachment.key;
                                   fileInputRef.current?.click();
                                 }}
-                                className="size-5 rounded-full bg-background/80 text-foreground shadow hover:bg-accent"
+                                className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
                               >
                                 <Replace className="size-3" />
                               </Button>
@@ -2065,7 +2550,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                     name: attachment.name,
                                   })}
                                   onClick={() => handleRetryUpload(attachment.key)}
-                                  className="size-5 rounded-full bg-background/80 text-foreground shadow hover:bg-accent"
+                                  className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
                                 >
                                   <Upload className="size-3" />
                                 </Button>
@@ -2080,7 +2565,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                       name: attachment.name,
                                     })}
                                     onClick={() => attachment.task?.resume()}
-                                    className="size-5 rounded-full bg-background/80 text-foreground shadow hover:bg-accent"
+                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
                                   >
                                     <Play className="size-3" />
                                   </Button>
@@ -2093,7 +2578,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                       name: attachment.name,
                                     })}
                                     onClick={() => attachment.task?.pause()}
-                                    className="size-5 rounded-full bg-background/80 text-foreground shadow hover:bg-accent"
+                                    className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-accent-tint"
                                   >
                                     <Pause className="size-3" />
                                   </Button>
@@ -2111,7 +2596,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                     name: attachment.name,
                                   })}
                                   onClick={() => handleRemoveAttachment(attachment.key)}
-                                  className="size-5 rounded-full bg-background/80 text-foreground shadow hover:bg-destructive hover:text-destructive-foreground"
+                                  className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
                                 >
                                   <X className="size-3" />
                                 </Button>
@@ -2120,9 +2605,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                   type="button"
                                   variant="default"
                                   size="icon"
-                                  aria-label={t("Remove attachment {index}", { index: index + 1 })}
+                                  aria-label={t("Remove attachment {index}", {
+                                    index: index + 1,
+                                  })}
                                   onClick={() => handleRemoveAttachment(attachment.key)}
-                                  className="size-5 rounded-full bg-background/80 text-foreground shadow hover:bg-destructive hover:text-destructive-foreground"
+                                  className="size-5 rounded-full bg-surface/80 text-ink shadow hover:bg-red hover:text-ink-inverse"
                                 >
                                   <X className="size-3" />
                                 </Button>
@@ -2131,243 +2618,313 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                           </div>
                         );
                       })}
+                      {/* Once a Post has media, the picker stays inside the
+                              grid as a dashed tile so adding one more is the
+                              same gesture as the first; the dropzone wrapper
+                              remains the drag target for the whole area. */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          replaceTargetRef.current = null;
+                          fileInputRef.current?.click();
+                        }}
+                        disabled={selectedBrandProfileId === null || !scope.isSignedIn}
+                        className="aspect-square h-auto w-full flex-col gap-1.5 rounded-control border-dashed font-normal text-ink-3 hover:text-ink"
+                      >
+                        <Plus className="size-4" />
+                        <span className="text-(length:--font-size-micro)">{t("Add Media")}</span>
+                      </Button>
                     </div>
-                    {attachments.length === 0 && (
-                      <p className="py-6 text-center text-xs text-muted-foreground">
+                  )}
+                  {attachments.length === 0 && (
+                    <div className="flex flex-col items-center gap-2 py-5 text-center">
+                      <ImageIcon className="size-4 text-ink-3" aria-hidden="true" />
+                      <p className="text-(length:--font-size-micro) text-ink-3">
                         {t(
                           "Drag images or videos here, or use Add Media. Attachments keep their order.",
                         )}
                       </p>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            </TabsContent>
+              </ComposerSection>
+            </div>
+          </ComposerSection>
 
-            {selectedChannels.map((channel: ChannelIntegration) => {
-              const override = channelOverrides[channel.id] ?? {
-                content: sharedContent,
-                hasOverride: false,
-                settings: {},
-              };
-              const distribution = postQuery.data?.distributions.find(
-                (item) => item.platform_account_id === channel.id,
-              );
-              const channelAttachments = attachmentsForChannel(channel.id);
-              const inheritsAttachments = !attachmentOverrides[channel.id];
+          {selectedChannels.map((channel: ChannelIntegration) => {
+            const override = channelOverrides[channel.id] ?? {
+              content: sharedContent,
+              hasOverride: false,
+              settings: {},
+            };
+            const distribution = postQuery.data?.distributions.find(
+              (item) => item.platform_account_id === channel.id,
+            );
+            const channelAttachments = attachmentsForChannel(channel.id);
+            const inheritsAttachments = !attachmentOverrides[channel.id];
+            const includesAttachments = inheritsAttachments || channelAttachments.length > 0;
+            const channelCaptionLimit = captionLimitFor(channel);
+            const channelContent = resolvedContentFor(channel.id);
 
-              return (
-                <TabsContent key={channel.id} value={channel.id} className="mt-0">
-                  <div className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between border-b border-border pb-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-foreground">
-                          {channel.name}
-                        </span>
-                        <Badge variant="outline" className="font-mono text-xs uppercase">
-                          {channel.providerIdentifier}
-                        </Badge>
-                        {distribution && (
-                          <Badge variant="outline" className="text-[10px] uppercase">
-                            {tStatus(distribution.status)}
-                          </Badge>
-                        )}
-                      </div>
-                      <Button
-                        type="button"
-                        variant={override.hasOverride ? "secondary" : "outline"}
-                        size="sm"
-                        onClick={() =>
+            return (
+              <section
+                key={channel.id}
+                aria-label={channel.name}
+                className="shrink-0 border-t border-line pt-6"
+              >
+                <div className="flex flex-col gap-6">
+                  <ComposerSection
+                    icon={channel.providerIdentifier}
+                    title={targetLabelFor(channel)}
+                  >
+                    {distribution && (
+                      <p className="text-(length:--font-size-micro) text-ink-3">
+                        {tStatus(distribution.status)}
+                      </p>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      <label
+                        htmlFor={`channel-override-text-${channel.id}`}
+                        className="text-xs font-medium text-ink-3"
+                      >
+                        {t("Custom Text for {name}", { name: channel.name })}
+                      </label>
+                      <Textarea
+                        id={`channel-override-text-${channel.id}`}
+                        value={channelContent}
+                        onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
                           handleChannelOverrideChange(channel.id, {
-                            hasOverride: !override.hasOverride,
-                            content: override.hasOverride ? sharedContent : override.content,
+                            hasOverride: true,
+                            content: clampCaption(event.target.value, channelCaptionLimit),
                           })
                         }
-                        className="text-xs"
+                        autoGrow
+                        className="min-h-36 max-h-72 resize-none text-sm"
+                      />
+                      <span
+                        className={cn(
+                          "text-(length:--font-size-micro) text-ink-3 self-end font-mono",
+                          channelCaptionLimit !== null &&
+                            captionLength(channelContent) >= channelCaptionLimit &&
+                            "text-red",
+                        )}
+                        title={
+                          channelCaptionLimit === null
+                            ? t("Character limit unavailable")
+                            : undefined
+                        }
                       >
-                        {override.hasOverride
-                          ? t("Remove Custom Override")
-                          : t("Customize for This Channel")}
-                      </Button>
+                        {t("{count}/{limit} characters", {
+                          count: captionLength(channelContent),
+                          limit: channelCaptionLimit ?? "—",
+                        })}
+                      </span>
                     </div>
-
                     {override.hasOverride && (
-                      <div className="flex flex-col gap-2">
-                        <label
-                          htmlFor={`channel-override-text-${channel.id}`}
-                          className="text-xs font-medium text-muted-foreground"
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="self-start text-xs"
+                        onClick={() =>
+                          handleChannelOverrideChange(channel.id, {
+                            hasOverride: false,
+                            content: sharedContent,
+                          })
+                        }
+                      >
+                        {t("Remove Custom Override")}
+                      </Button>
+                    )}
+                  </ComposerSection>
+
+                  <ComposerSection
+                    icon={ImageIcon}
+                    title={t("Attachments for {name}", { name: channel.name })}
+                  >
+                    <label
+                      htmlFor={`channel-media-${channel.id}`}
+                      className="flex min-h-12 cursor-pointer items-center justify-between gap-3"
+                    >
+                      <span className="flex min-w-0 flex-col gap-1">
+                        <span
+                          id={`channel-media-label-${channel.id}`}
+                          className="text-xs font-medium text-ink"
                         >
-                          {t("Custom Text for {name}", { name: channel.name })}
-                        </label>
-                        <Textarea
-                          id={`channel-override-text-${channel.id}`}
-                          value={override.content}
-                          onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
-                            handleChannelOverrideChange(channel.id, { content: event.target.value })
-                          }
-                          className="min-h-[120px] text-sm resize-y"
-                        />
-                        <span className="text-[10px] text-muted-foreground self-end font-mono">
-                          {t("{count} characters", { count: override.content.length })}
+                          {t("Use post attachments")}
                         </span>
+                        <span
+                          id={`channel-media-state-${channel.id}`}
+                          className="text-(length:--font-size-micro) text-ink-3"
+                        >
+                          {inheritsAttachments
+                            ? t("All post attachments")
+                            : includesAttachments
+                              ? t("Selected attachments")
+                              : t("Text only")}
+                        </span>
+                      </span>
+                      <Switch
+                        id={`channel-media-${channel.id}`}
+                        aria-labelledby={`channel-media-label-${channel.id}`}
+                        aria-describedby={`channel-media-state-${channel.id}`}
+                        checked={includesAttachments}
+                        onCheckedChange={(checked) =>
+                          handleSetChannelAttachments(channel.id, checked ? null : [])
+                        }
+                      />
+                    </label>
+                    {attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {attachments.map((attachment, index) => {
+                          const assetId = attachment.assetId;
+                          if (!assetId) return null;
+                          const selected = channelAttachments.some(
+                            (item) => item.assetId === assetId,
+                          );
+                          return (
+                            <Button
+                              key={attachment.key}
+                              type="button"
+                              variant={selected ? "secondary" : "outline"}
+                              size="sm"
+                              aria-pressed={selected}
+                              className="text-xs h-8 gap-1.5 max-w-[12rem]"
+                              onClick={() => handleToggleChannelAttachment(channel.id, assetId)}
+                            >
+                              {selected ? (
+                                <Check className="size-3.5 shrink-0" />
+                              ) : (
+                                <ImageIcon className="size-3.5 shrink-0" />
+                              )}
+                              <span className="truncate">
+                                {index + 1}. {attachment.name}
+                              </span>
+                            </Button>
+                          );
+                        })}
                       </div>
                     )}
+                  </ComposerSection>
 
-                    <div className="flex flex-col gap-2">
-                      <span className="text-xs font-medium text-foreground">
-                        {t("Attachments for {name}", { name: channel.name })}
-                      </span>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button
-                          type="button"
-                          variant={inheritsAttachments ? "secondary" : "outline"}
-                          size="sm"
-                          className="text-xs"
-                          aria-pressed={inheritsAttachments}
-                          onClick={() => handleSetChannelAttachments(channel.id, null)}
-                        >
-                          {t("Use all post attachments")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={
-                            !inheritsAttachments && channelAttachments.length === 0
-                              ? "secondary"
-                              : "outline"
-                          }
-                          size="sm"
-                          className="text-xs"
-                          aria-pressed={!inheritsAttachments && channelAttachments.length === 0}
-                          onClick={() => handleSetChannelAttachments(channel.id, [])}
-                        >
-                          {t("Text only")}
-                        </Button>
-                      </div>
-                      {attachments.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {attachments.map((attachment, index) => {
-                            const assetId = attachment.assetId;
-                            if (!assetId) return null;
-                            const selected = channelAttachments.some(
-                              (item) => item.assetId === assetId,
-                            );
-                            return (
-                              <Button
-                                key={attachment.key}
-                                type="button"
-                                variant={selected ? "secondary" : "outline"}
-                                size="sm"
-                                aria-pressed={selected}
-                                className="text-xs h-8 gap-1.5 max-w-[12rem]"
-                                onClick={() => handleToggleChannelAttachment(channel.id, assetId)}
-                              >
-                                {selected ? (
-                                  <Check className="size-3.5 shrink-0" />
-                                ) : (
-                                  <ImageIcon className="size-3.5 shrink-0" />
-                                )}
-                                <span className="truncate">
-                                  {index + 1}. {attachment.name}
-                                </span>
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
+                  <PlatformSettings
+                    provider={channel.providerIdentifier}
+                    channelName={channel.name}
+                    channelId={channel.id}
+                    settings={override.settings}
+                    onChange={(newSettings) =>
+                      handleChannelOverrideChange(channel.id, { settings: newSettings })
+                    }
+                    onRequirementsChange={handleRequirementsChange}
+                  />
+                </div>
+              </section>
+            );
+          })}
+        </div>
 
-                    <PlatformSettings
-                      provider={channel.providerIdentifier}
-                      channelName={channel.name}
-                      channelId={channel.id}
-                      settings={override.settings}
-                      onChange={(newSettings) =>
-                        handleChannelOverrideChange(channel.id, { settings: newSettings })
-                      }
-                      onRequirementsChange={handleRequirementsChange}
-                    />
-                  </div>
-                </TabsContent>
-              );
-            })}
+        {/* Targeting and timing stay together in a bounded rail rather than
+            stretching to half the composer. Mobile retains the same DOM order. */}
+        <div className="flex min-w-0 flex-col gap-6 @4xl:-my-1 @4xl:min-h-0 @4xl:w-85 @4xl:shrink-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:py-1 @4xl:pr-1 @4xl:pl-6">
+          <DestinationSelector
+            onNavigate={onNavigate}
+            selectedProfileIds={selectedProfileIds}
+            onProfilesChange={(ids) => {
+              setSelectedProfileIds(ids);
+              markDirty();
+            }}
+          />
 
-            <Separator className="my-4" />
+          <ComposerSection icon={Send} title={t("Publishing")}>
+            <SegmentedControl
+              options={PUBLISH_MODES}
+              value={publishMode}
+              onChange={setPublishMode}
+              label={t("Publishing")}
+              fill
+              className="w-full"
+              renderOption={(mode) => {
+                const Icon = PUBLISH_MODE_ICONS[mode];
+                return (
+                  <>
+                    <Icon className="size-3.5" />
+                    <span>{publishModeOption(mode, t)}</span>
+                  </>
+                );
+              }}
+            />
 
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
-              <div className="flex flex-col gap-1.5 w-full sm:w-auto">
-                <Input
-                  type="datetime-local"
-                  value={scheduleDate}
-                  aria-label={t("Schedule date and time")}
-                  onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-                    setScheduleDate(event.target.value);
-                    markDirty();
-                  }}
-                  className="w-full sm:w-[220px] text-xs h-9"
-                />
-                <span className="text-[11px] text-muted-foreground" role="status">
-                  {savedAt && !isDirty
-                    ? t("Saved to your workspace at {time}", {
-                        time: new Date(savedAt).toLocaleTimeString(language),
-                      })
-                    : isDirty
-                      ? t("Unsaved changes are kept in this browser until you save.")
-                      : t("Draft changes are saved to your workspace when you save.")}
-                </span>
-              </div>
+            {publishMode === "schedule" && (
+              <ScheduleDateTime
+                value={scheduleDate}
+                onChange={(value) => {
+                  setScheduleDate(value);
+                  markDirty();
+                }}
+              />
+            )}
 
-              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleSubmit("draft")}
-                  disabled={submitDisabled}
-                  className="gap-1.5"
-                  title={t(
-                    "Saves this post's text, attachments, and channel settings without publishing",
-                  )}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Save className="size-3.5" />
-                  )}
-                  {postId ? t("Save") : t("Save Draft")}
-                </Button>
+            {/* What the selected mode will do, in the mode's own words: the
+                action bar names the commit, this line names its effect. */}
+            <p className="text-(length:--font-size-micro) text-ink-3">
+              {publishMode === "draft"
+                ? t("Saves this post's text, attachments, and channel settings without publishing")
+                : publishMode === "schedule"
+                  ? t("Queues this post to {count} channel(s) at the selected time.", {
+                      count: selectedChannels.length,
+                    })
+                  : t("Queues this post to {count} channel(s) right away.", {
+                      count: selectedChannels.length,
+                    })}
+            </p>
+          </ComposerSection>
+        </div>
+      </div>
 
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void handleSubmit("schedule")}
-                  disabled={submitDisabled}
-                  className="gap-1.5"
-                >
-                  <Calendar className="size-3.5" />
-                  {t("Schedule")}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="default"
-                  size="sm"
-                  onClick={() => void handleSubmit("now")}
-                  disabled={submitDisabled}
-                  className="gap-1.5"
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Send className="size-3.5" />
-                  )}
-                  {t("Publish Now")}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </Tabs>
+      {/* The action bar carries the draft's real save state and the one primary
+          action; the publishing selector in the rail decides what it submits, so
+          the bar never repeats a control the body owns. */}
+      <div className="sticky bottom-0 -mx-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line bg-surface px-4 pb-(--safe-control-bottom) pt-2.5 sm:-mx-6 sm:px-6">
+        <p
+          className="min-w-0 basis-full text-(length:--font-size-micro) text-ink-3 @sm:basis-0 @sm:flex-1"
+          role="status"
+        >
+          {savedAt && !isDirty
+            ? t("Saved to your workspace at {time}", {
+                time: new Date(savedAt).toLocaleTimeString(language),
+              })
+            : isDirty
+              ? t("Unsaved changes are kept in this browser until you save.")
+              : t("Draft changes are saved to your workspace when you save.")}
+        </p>
+        <Button
+          type="button"
+          variant="default"
+          size="sm"
+          onClick={() => void handleSubmit(publishMode)}
+          disabled={submitDisabled || (publishMode === "schedule" && !scheduleDate)}
+          className="h-8 w-full shrink-0 gap-1.5 @sm:w-auto"
+          title={
+            publishMode === "draft"
+              ? t("Saves this post's text, attachments, and channel settings without publishing")
+              : undefined
+          }
+        >
+          {isSubmitting ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <PublishModeIcon className="size-3.5" />
+          )}
+          {selectedProfileIds.length > 1
+            ? publishMode === "draft"
+              ? t("Save Drafts")
+              : publishMode === "schedule"
+                ? t("Schedule Posts")
+                : t("Publish Posts")
+            : publishModeAction(publishMode, postId, t)}
+        </Button>
+      </div>
     </fieldset>
   );
 }

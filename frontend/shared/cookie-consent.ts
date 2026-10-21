@@ -11,13 +11,12 @@ export const consentCookieName = "meltiply-consent";
 export const consentLifetimeSeconds = 180 * 24 * 60 * 60;
 export const functionalStorageKeys = [
   "meltiply.theme",
-  "meltiply.low-motion",
   "meltiply.language",
   "meltiply.recent-navigation",
   "meltiply.devbox",
 ] as const;
 export const functionalStoragePrefixes = [
-  "meltiply.composer.v1.",
+  "meltiply.composer.",
   "meltiply.upload.v1.",
   "meltiply.upload.create.v1.",
 ] as const;

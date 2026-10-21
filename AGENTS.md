@@ -2,7 +2,8 @@
 
 Read [STATE.md](STATE.md) before refactors, schema changes, or data resets. It owns
 compatibility and migration rules. Use [CONTEXT.md](CONTEXT.md) for domain terms and
-[PRODUCT.md](PRODUCT.md) for product intent; inspect code for the current layout.
+[PRODUCT.md](PRODUCT.md) for product intent and [DESIGN.md](DESIGN.md) for the
+current visual system; inspect code for the current layout.
 
 ## Completion gate
 
@@ -54,12 +55,18 @@ only when the user requests it or an applicable skill explicitly requires it.
 
 ## Conditional guidance
 
-- **Frontend:** read [UI conventions](PRODUCT.md#modular-consistent-surfaces) and
-  [shared UI ownership](docs/frontend-ui.md) before editing components. Inspect
-  `frontend/shared/package.json` exports and an existing caller; extend canonical
-  shared controls instead of copying primitives or adding local re-exports. Verify
-  feedback, motion, focus, and reduced-motion behavior. Dialogs use
-  `CenterDialog`/`CenterAlertDialog` or `SideDialog`.
+- **Frontend:** read [product UI intent](PRODUCT.md#modular-consistent-surfaces),
+  [shared ownership](docs/frontend-ui.md), [layout](docs/frontend-layout.md), and
+  the [capability inventory](docs/frontend-capabilities.md) for the affected flow.
+  Treat the current Gr8r-adapted components as visual truth. Inspect
+  `frontend/shared/package.json` exports and a real caller; extend the canonical
+  TypeScript/React/Tailwind control instead of copying components or page CSS.
+  Keep feature data, authorization, selection, async outcomes, and labels in
+  their owning feature. Preserve keyboard focus, mobile access, and the existing
+  animation implementation; there is one path, without motion-mode state or
+  mode-specific guards. Use `CenterDialog`, `CenterAlertDialog`, or `SideDialog`
+  for their documented purposes. Migrate callers and public guides together,
+  then exercise the changed UI in both palettes and at desktop/phone widths.
 - **Effect programs:** use the `effectv4` skill for services, layers, retries, and
   error mapping. Use `codebase-design` when shaping module interfaces.
 - **PRs:** use the [pr skill](.agents/skills/pr/SKILL.md) to author or revise a PR.

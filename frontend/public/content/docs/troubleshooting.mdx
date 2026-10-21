@@ -11,9 +11,10 @@ Most issues have a safe, self-serve fix. Work through the symptom you're seeing 
 
 ### The action buttons are disabled in the composer
 
-- **Select a Brand Profile** in the toolbar or composer. The "All Brand Profiles" view can't publish — the composer shows a banner asking you to choose one.
-- **Select at least one destination channel** in the Destinations bar. If the bar is empty, connect a channel on the [Channels](/docs/channels) screen first.
-- If you're editing a post and see "This post belongs to…", the post was created under a different Brand Profile — switch the Brand Profile dropdown selection to the profile named in the banner.
+- Select Brand Profiles in the composer. Several selected profiles receive separate Posts; All Brand Profiles in the collection is still aggregate review.
+- Add text or media. **Save Drafts** needs no channels; Schedule and Publish Now need at least one eligible selected channel for each profile.
+- If the Post belongs to another profile, use the profile named by the composer before changing its publishing targets.
+- For a partial multi-profile failure, read each profile's progress. Completed copies are retained. Resolve the reported connection, media, or quota problem, then retry the unchanged composition to finish remaining work without resending completed profiles.
 
 ### A channel can't be selected in Destinations
 
@@ -31,7 +32,7 @@ The banner lists every problem to fix before submitting. Common ones:
 
 - **Empty post** — add text or at least one media item.
 - **Media limit or type error** — the destination channel limits how many attachments can be published or restricts combining media types. Adjust the channel's attachment selection or deselect that channel.
-- **Text too long** — the channel's platform caption limit is shown in the message; shorten that channel's text (use **Customize for This Channel** to shorten just one).
+- **Text too long** — the channel's platform caption limit is shown in the message; edit its caption directly in the per-channel section to shorten just that destination.
 - **YouTube** — add a Video Title between 2 and 100 characters and keep tags within the limits.
 - **TikTok** — pick a Privacy Level; if a toggle (Duet, Stitch, Comments) is blocked, that account doesn't allow it.
 - **Media type** — the attached file isn't accepted by that channel (for example, a video where the platform expects an image); swap the media or deselect that channel.
@@ -40,7 +41,7 @@ If submission itself fails, everything you wrote is kept — fix the cause and s
 
 ### Media constraints block scheduling or publishing
 
-Each platform enforces media limits (such as single-video restrictions or maximum attachment counts). Switch to the channel's tab in the composer to review its attachment selection and adjust which files are included.
+Each platform enforces media limits (such as single-video restrictions or maximum attachment counts). Review the relevant channel section and its attachment controls in the composer to adjust which files are included.
 
 ### My post is stuck on Queued, Processing, or Awaiting provider
 
@@ -56,9 +57,9 @@ These are normal in-progress states — posts update automatically while deliver
 
 The outcome couldn't be confirmed with the platform — the post may or may not have been published. **Check the post on the platform itself before doing anything else**, otherwise you could publish a duplicate. If it didn't go live, cancel the unconfirmed delivery and submit the post again (for example by editing it and re-scheduling).
 
-### I can't edit or delete a post
+### I can't edit a Post or remove a published platform copy
 
-Only drafts and posts with pending or unconfirmed channels can be edited, rescheduled, or cancelled. Published posts can't be edited or deleted from Meltiply — remove them on the platform. Cancelling never pulls down already-published channels; it only stops the pending ones, and for an in-flight delivery it is a request rather than a guaranteed stop.
+Editing requires a draft or eligible pending/unconfirmed Channel delivery. Open Details and review the available header actions. Deleting the stored Post is a separate confirmed action: it stops pending delivery but leaves published copies on their platforms. Remove those copies on the platform itself. Cancelling an in-flight delivery is a request, not a guarantee that it did not publish.
 
 ### My draft disappeared
 
@@ -68,7 +69,7 @@ Drafts live under the **Drafts** status filter in [Posts](/docs/publishing). If 
 
 ### Connecting a channel fails
 
-Connecting redirects you to the platform to approve access, then returns you to Meltiply. Facebook opens a Page chooser: select a Page and **Connect Page** before expecting it on [Channels](/docs/channels). No eligible Pages means the required publishing permissions or Page access are missing. A connection-limit error requires disconnecting an account or upgrading the verified plan; retry the chosen Page while the selection remains valid. Expired selections require starting **Connect** again.
+Connecting redirects you to the platform, then returns to Meltiply. Facebook opens a Page chooser: select a Page and **Connect Page** before expecting it in Channels. No eligible Pages means required permissions or Page access are missing. For connection limits, review [Resource limits](/docs/resource-limits) and free capacity where appropriate; there is no in-app plan upgrade flow. Retry while the selection is valid, or start Connect again after expiry.
 
 If you cancelled the provider's permission prompt or authorization failed, run **Connect** or **Re-authenticate** again. A platform that can't be connected right now reports that its connection isn't available yet; try again later.
 
@@ -80,7 +81,7 @@ For information on comment processing, see [Inbox](/docs/inbox).
 
 ## Performance analytics
 
-The application does not currently feature an in-app analytics dashboard. The backend metrics sync endpoints remain active, while live impressions, engagement, and post reach can be monitored directly on the native platform dashboards.
+Posts **Table** includes stored engagement counters; use **Columns** to show or hide them. A `-` means the Post is not published, has no collected measurement, or that metric is untracked—not a measured zero. Saves and Clicks are currently untracked. Values follow backend synchronization rather than updating live. There is no dedicated analytics dashboard; use native platform reports for unsupported metrics.
 
 For details on how analytics processing operates, see [Analytics](/docs/analytics).
 

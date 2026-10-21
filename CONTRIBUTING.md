@@ -90,6 +90,15 @@ Provider-controlled publication/composer journeys require the separate acceptanc
 backend and `MELTIPLY_E2E_ACCEPTANCE=1`; details live in the app guide. Use
 `make frontend-lighthouse` for the production-build performance budgets.
 
+## Agent skills
+
+Agent skills live in `.agents/skills` and are shared through the `.claude` and
+`.kiro` symlinks. Pack-managed skills come from
+[`Essential-kit/skills`](https://github.com/Essential-kit/skills); update them with
+`bun run skills:sync` and verify them with `bun run skills:check`. Read
+[agent skills](docs/agents/skills.md) before editing the managed set or
+`skills-lock.json`.
+
 ## UI and public-guide changes
 
 Use the current Gr8r-adapted implementation as visual truth. Read

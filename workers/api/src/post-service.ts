@@ -1350,6 +1350,10 @@ function insertPendingDistributionsEffect(
  * stays protected, and published rows remain as immutable history: local
  * deletion never unpublishes a live Platform copy.
  *
+ * Cancellation and command cleanup commit as one statement: the data-modifying
+ * CTEs remove the extra round trip a Post with pending work would otherwise
+ * pay inside the deletion transaction.
+ *
  * @param client - Active tenant transaction client.
  * @param postId - Post whose pending publications are cancelled.
  * @returns Effect resolving once cancellations and outbox cleanup commit.
@@ -1358,25 +1362,26 @@ function cancelPendingDistributionsEffect(
   client: EffectTransactionClient,
   postId: string,
 ): Effect.Effect<void, DatabaseError> {
-  return Effect.gen(function* () {
-    const cancelled = yield* client.query<{ id: string }>(
-      `UPDATE distributions
-          SET status = 'cancelled', updated_at = now()
-        WHERE post_id = $1
-          AND status IN ('scheduled', 'queued')
-        RETURNING id`,
+  return client
+    .query<{ cancelled_count: number }>(
+      `WITH cancelled AS (
+         UPDATE distributions
+            SET status = 'cancelled', updated_at = now()
+          WHERE post_id = $1
+            AND status IN ('scheduled', 'queued')
+          RETURNING id
+       ), dropped AS (
+         DELETE FROM outbox_events
+          WHERE aggregate_id IN (SELECT id FROM cancelled)
+            AND topic = 'distribution.publish.requested'
+            AND state IN ('pending', 'failed')
+          RETURNING 1
+       )
+       SELECT (SELECT COUNT(*)::integer FROM cancelled) AS cancelled_count,
+              (SELECT COUNT(*)::integer FROM dropped) AS dropped_count`,
       [postId],
-    );
-    const ids = cancelled.rows.map((row) => row.id);
-    if (ids.length === 0) return;
-    yield* client.query(
-      `DELETE FROM outbox_events
-        WHERE aggregate_id = ANY($1::uuid[])
-          AND topic = 'distribution.publish.requested'
-          AND state IN ('pending', 'failed')`,
-      [ids],
-    );
-  });
+    )
+    .pipe(Effect.asVoid);
 }
 
 /**
@@ -1443,9 +1448,19 @@ export function createPostApiService(
               [organizationId, input.brandProfileId, input.title ?? "", input.defaultText ?? ""],
             );
             const post = inserted.rows[0]!;
-            yield* replaceAttachmentsEffect(client, post, attachmentIds);
-            yield* replaceTargetsEffect(client, post, targets);
-            const value = yield* assembleSinglePostEffect(client, post);
+            // A new Post owns no attachment or target rows yet, so an empty
+            // selection has nothing to replace and no collection to re-read.
+            if (attachmentIds.length > 0)
+              yield* replaceAttachmentsEffect(client, post, attachmentIds);
+            if (targets.length > 0) yield* replaceTargetsEffect(client, post, targets);
+            const value = yield* assembleSinglePostEffect(client, post, {
+              ...(attachmentIds.length === 0
+                ? { attachments: new Map<string, Schemas["PostAttachment"][]>([[post.id, []]]) }
+                : {}),
+              ...(targets.length === 0
+                ? { targets: new Map<string, Schemas["PostTarget"][]>([[post.id, []]]) }
+                : {}),
+            });
             yield* completeIdempotencyEffect(
               client,
               organizationId,
@@ -1894,7 +1909,10 @@ export function createPostApiService(
                 value: replay.response_body as Post,
               };
             }
-            yield* lockOrganizationEffect(client, organizationId);
+            // Deletion only releases retention and cancels pending work; it
+            // never charges quota. Locking the Workspace here would serialize
+            // every deletion in one tenant behind a single lock row without
+            // protecting anything deletion writes.
             const post = yield* lockPostEffect(client, postId);
             // Deleting is scoped like every other Post mutation: the request must
             // name the Brand Profile that owns the Post, so an aggregate-view
@@ -1914,7 +1932,13 @@ export function createPostApiService(
                 RETURNING ${postColumns}`,
               [postId],
             );
-            const value = yield* assembleSinglePostEffect(client, deleted.rows[0]!);
+            // Both collection statements above ran in this transaction, so
+            // their authoritative result is empty. Re-reading them in the
+            // response projection would repeat work the delete already did.
+            const value = yield* assembleSinglePostEffect(client, deleted.rows[0]!, {
+              attachments: new Map<string, Schemas["PostAttachment"][]>([[postId, []]]),
+              targets: new Map<string, Schemas["PostTarget"][]>([[postId, []]]),
+            });
             yield* completeIdempotencyEffect(
               client,
               organizationId,

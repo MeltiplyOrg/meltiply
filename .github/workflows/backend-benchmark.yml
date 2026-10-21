@@ -16,18 +16,15 @@ on:
       repetitions:
         description: Alternating run blocks per revision
         required: true
-        default: "2"
+        default: "3"
         type: choice
         options: ["1", "2", "3"]
       samples:
         description: Measured samples per read/mutation workflow
         required: true
-        default: "20"
+        default: "30"
         type: choice
         options: ["10", "20", "30"]
-
-  push:
-    branches: [logic-optimize-39]
 
 permissions:
   contents: read
@@ -49,7 +46,6 @@ env:
 
 jobs:
   benchmark:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[benchmark]')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     services:

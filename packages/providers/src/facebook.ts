@@ -46,6 +46,7 @@ const publishingScopes = [
   "pages_read_engagement",
   "pages_manage_posts",
 ] as const;
+const businessDiscoveryScope = "business_management";
 
 /** Facebook's caption ceiling remains known even before live publishing is configured. */
 export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
@@ -299,6 +300,8 @@ function statusPublished(status: ReelStatus): boolean {
 function oauthMalformed(
   field:
     | "authorization_token"
+    | "business_user_identity"
+    | "business_user_list"
     | "long_lived_token"
     | "token_type"
     | "token_expiry"
@@ -560,9 +563,9 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
   return {
     extractRateLimitBudget: (headers) => extractRateLimitBudget("facebook", headers),
     /**
-     * Builds the Facebook OAuth dialog URL for Page Reels using only the documented
-     * Page permissions; unsupported legacy video scopes would block authorization.
-     * Preserves caller state and rejects callbacks that differ from configuration.
+     * Builds the state-bound Facebook dialog URL for Page publishing and discovery.
+     * business_management enables business-user Page assignments in addition to
+     * directly managed Pages. Rejects callbacks that differ from configuration.
      */
     authorizationUrl(input) {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -570,7 +573,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
       url.searchParams.set("client_id", clientId);
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
-      url.searchParams.set("scope", publishingScopes.join(","));
+      url.searchParams.set("scope", [...publishingScopes, businessDiscoveryScope].join(","));
       url.searchParams.set("state", required("state", input.state, 1_024));
       return url.toString();
     },
@@ -578,10 +581,11 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
     capability,
 
     /**
-     * Exchanges the code for a user token and discovers every publishable Page as a choice.
-     * Bounds both Page count and requests to 1,000, including empty continuation pages.
-     * Candidates retain true identity, Page credentials, and inspected zero-expiry semantics;
-     * neither a single eligible Page nor multiple Pages are automatically connected.
+     * Exchanges the code and discovers publishable direct and business-assigned Pages.
+     * With business_management consent, enumerates business users and their assigned_pages.
+     * Every edge is paginated with independent cursor tracking; Page ids are deduplicated.
+     * Bounds total Page records and discovery requests to 1,000, failing rather than
+     * returning a truncated list. Credentials remain explicit selection candidates.
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthExchangeResult> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -634,154 +638,182 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
 
       const eligible: OAuthConnection[] = [];
       const identifiers = new Set<string>();
-      const seenCursors = new Set<string>();
+      const businessUsers = new Set<string>();
+      const discoveryPaths = ["me/accounts"];
+      if (grantedScopes.includes(businessDiscoveryScope)) {
+        discoveryPaths.push("me/business_users");
+      }
       let discoveredCount = 0;
       let requestCount = 0;
-      let nextCursor: string | undefined = undefined;
 
-      while (true) {
-        if (requestCount >= 1_000) throw oauthMalformed("page_pagination");
-        requestCount += 1;
-        const pagesUrl = new URL(`/${apiVersion}/me/accounts`, graphOrigin);
-        pagesUrl.searchParams.set("fields", "id,name,access_token,tasks,picture,link");
-        pagesUrl.searchParams.set("limit", "100");
-        if (nextCursor !== undefined) {
-          pagesUrl.searchParams.set("after", nextCursor);
-        }
-
-        const pagesResponse = await http.request<unknown>(context, {
-          headers: bearer(longToken.accessToken),
-          method: "GET",
-          url: pagesUrl.toString(),
-        });
-        const pagesBody = record(pagesResponse.body);
-        if (!Array.isArray(pagesBody?.data) || pagesBody.data.length > 100) {
-          throw oauthMalformed("page_list");
-        }
-
-        discoveredCount += pagesBody.data.length;
-        if (discoveredCount > 1_000) {
-          throw oauthMalformed("page_list");
-        }
-
-        for (const value of pagesBody.data) {
-          const page = record(value);
-          const id = providerIdentifier(page?.id);
-          const displayName = boundedText(page?.name, 500);
-          const accessToken = boundedString(page?.access_token, 16_000);
-          const tasks = page?.tasks;
-          if (!id || !displayName) {
-            throw oauthMalformed("page_identity");
+      // Business-user records append assigned-page edges to this bounded work list.
+      // Each edge owns its cursors: Meta may reuse a cursor across different edges.
+      for (let sourceIndex = 0; sourceIndex < discoveryPaths.length; sourceIndex += 1) {
+        const discoveryPath = discoveryPaths[sourceIndex]!;
+        const isBusinessUserList = discoveryPath === "me/business_users";
+        const seenCursors = new Set<string>();
+        let nextCursor: string | undefined;
+        while (true) {
+          if (requestCount >= 1_000) throw oauthMalformed("page_pagination");
+          requestCount += 1;
+          const pagesUrl = new URL(`/${apiVersion}/${discoveryPath}`, graphOrigin);
+          pagesUrl.searchParams.set(
+            "fields",
+            isBusinessUserList ? "id" : "id,name,access_token,tasks,picture,link",
+          );
+          pagesUrl.searchParams.set("limit", "100");
+          if (nextCursor !== undefined) {
+            pagesUrl.searchParams.set("after", nextCursor);
           }
-          if (!accessToken) throw oauthMalformed("page_access_token");
-          if (
-            !Array.isArray(tasks) ||
-            tasks.length > 32 ||
-            tasks.some((task) => typeof task !== "string" || !/^[A-Z][A-Z0-9_]{0,127}$/.test(task))
-          ) {
-            throw oauthMalformed("page_tasks");
+
+          const pagesResponse = await http.request<unknown>(context, {
+            headers: bearer(longToken.accessToken),
+            method: "GET",
+            url: pagesUrl.toString(),
+          });
+          const pagesBody = record(pagesResponse.body);
+          if (!Array.isArray(pagesBody?.data) || pagesBody.data.length > 100) {
+            throw oauthMalformed("page_list");
           }
-          if (identifiers.has(id)) {
-            continue;
+
+          if (!isBusinessUserList) {
+            discoveredCount += pagesBody.data.length;
+            if (discoveredCount > 1_000) {
+              throw oauthMalformed("page_list");
+            }
           }
-          identifiers.add(id);
 
-          const picture = record(page?.picture);
-          const pictureData = record(picture?.data);
-          const rawAvatar =
-            pictureData?.url ?? (typeof page?.picture === "string" ? page.picture : undefined);
-          const avatarUrl = secureUrl(rawAvatar);
-          const username = facebookVanityHandle(page?.link);
+          for (const value of pagesBody.data) {
+            if (isBusinessUserList) {
+              const id = providerIdentifier(record(value)?.id);
+              if (!id) throw oauthMalformed("business_user_identity");
+              if (!businessUsers.has(id)) {
+                businessUsers.add(id);
+                if (businessUsers.size > 1_000) throw oauthMalformed("business_user_list");
+                discoveryPaths.push(`${id}/assigned_pages`);
+              }
+              continue;
+            }
+            const page = record(value);
+            const id = providerIdentifier(page?.id);
+            const displayName = boundedText(page?.name, 500);
+            const accessToken = boundedString(page?.access_token, 16_000);
+            const tasks = page?.tasks;
+            if (!id || !displayName) {
+              throw oauthMalformed("page_identity");
+            }
+            if (!accessToken) throw oauthMalformed("page_access_token");
+            if (
+              !Array.isArray(tasks) ||
+              tasks.length > 32 ||
+              tasks.some(
+                (task) => typeof task !== "string" || !/^[A-Z][A-Z0-9_]{0,127}$/.test(task),
+              )
+            ) {
+              throw oauthMalformed("page_tasks");
+            }
+            if (identifiers.has(id)) {
+              continue;
+            }
 
-          if (tasks.includes("CREATE_CONTENT") || tasks.includes("PROFILE_PLUS_CREATE_CONTENT")) {
-            eligible.push({
-              accessToken,
-              account: {
-                ...(avatarUrl ? { avatarUrl } : {}),
-                displayName,
-                id,
-                ...(username ? { username } : {}),
-              },
-              ...(longToken.expiresAt === undefined ? {} : { expiresAt: longToken.expiresAt }),
-              refreshToken: encodeRefreshSecret({
-                pageId: id,
-                userAccessToken: longToken.accessToken,
-              }),
-              scopes: [...grantedScopes],
-            });
+            const picture = record(page?.picture);
+            const pictureData = record(picture?.data);
+            const rawAvatar =
+              pictureData?.url ?? (typeof page?.picture === "string" ? page.picture : undefined);
+            const avatarUrl = secureUrl(rawAvatar);
+            const username = facebookVanityHandle(page?.link);
+
+            if (tasks.includes("CREATE_CONTENT") || tasks.includes("PROFILE_PLUS_CREATE_CONTENT")) {
+              identifiers.add(id);
+              eligible.push({
+                accessToken,
+                account: {
+                  ...(avatarUrl ? { avatarUrl } : {}),
+                  displayName,
+                  id,
+                  ...(username ? { username } : {}),
+                },
+                ...(longToken.expiresAt === undefined ? {} : { expiresAt: longToken.expiresAt }),
+                refreshToken: encodeRefreshSecret({
+                  pageId: id,
+                  userAccessToken: longToken.accessToken,
+                }),
+                scopes: [...grantedScopes],
+              });
+            }
           }
-        }
 
-        if (pagesBody.paging === undefined) {
-          break;
-        }
-        const paging = record(pagesBody.paging);
-        if (!paging) {
-          throw oauthMalformed("page_pagination");
-        }
-
-        let rawCursorFromPaging: string | undefined;
-        if (paging.cursors !== undefined) {
-          const cursors = record(paging.cursors);
-          if (!cursors) {
+          if (pagesBody.paging === undefined) {
+            break;
+          }
+          const paging = record(pagesBody.paging);
+          if (!paging) {
             throw oauthMalformed("page_pagination");
           }
-          if (cursors.after !== undefined) {
-            const validated = boundedCursor(cursors.after);
-            if (!validated) {
+
+          let rawCursorFromPaging: string | undefined;
+          if (paging.cursors !== undefined) {
+            const cursors = record(paging.cursors);
+            if (!cursors) {
               throw oauthMalformed("page_pagination");
             }
-            rawCursorFromPaging = validated;
+            if (cursors.after !== undefined) {
+              const validated = boundedCursor(cursors.after);
+              if (!validated) {
+                throw oauthMalformed("page_pagination");
+              }
+              rawCursorFromPaging = validated;
+            }
           }
-        }
 
-        if (paging.next === undefined) {
-          break;
-        }
+          if (paging.next === undefined) {
+            break;
+          }
 
-        if (typeof paging.next !== "string") {
-          throw oauthMalformed("page_pagination");
-        }
-
-        let nextUrl: URL;
-        try {
-          nextUrl = new URL(paging.next);
-        } catch {
-          throw oauthMalformed("page_pagination");
-        }
-
-        if (nextUrl.origin !== new URL(graphOrigin).origin) {
-          throw oauthMalformed("page_pagination");
-        }
-
-        const rawAfterParam = nextUrl.searchParams.get("after");
-        let validatedAfterParam: string | undefined;
-        if (rawAfterParam !== null) {
-          validatedAfterParam = boundedCursor(rawAfterParam);
-          if (!validatedAfterParam) {
+          if (typeof paging.next !== "string") {
             throw oauthMalformed("page_pagination");
           }
-        }
 
-        if (
-          rawCursorFromPaging !== undefined &&
-          validatedAfterParam !== undefined &&
-          rawCursorFromPaging !== validatedAfterParam
-        ) {
-          throw oauthMalformed("page_pagination");
-        }
+          let nextUrl: URL;
+          try {
+            nextUrl = new URL(paging.next);
+          } catch {
+            throw oauthMalformed("page_pagination");
+          }
 
-        const resolvedCursor = rawCursorFromPaging ?? validatedAfterParam;
-        if (!resolvedCursor) {
-          throw oauthMalformed("page_pagination");
-        }
+          if (nextUrl.origin !== new URL(graphOrigin).origin) {
+            throw oauthMalformed("page_pagination");
+          }
 
-        if (seenCursors.has(resolvedCursor)) {
-          throw oauthMalformed("page_pagination");
-        }
+          const rawAfterParam = nextUrl.searchParams.get("after");
+          let validatedAfterParam: string | undefined;
+          if (rawAfterParam !== null) {
+            validatedAfterParam = boundedCursor(rawAfterParam);
+            if (!validatedAfterParam) {
+              throw oauthMalformed("page_pagination");
+            }
+          }
 
-        seenCursors.add(resolvedCursor);
-        nextCursor = resolvedCursor;
+          if (
+            rawCursorFromPaging !== undefined &&
+            validatedAfterParam !== undefined &&
+            rawCursorFromPaging !== validatedAfterParam
+          ) {
+            throw oauthMalformed("page_pagination");
+          }
+
+          const resolvedCursor = rawCursorFromPaging ?? validatedAfterParam;
+          if (!resolvedCursor) {
+            throw oauthMalformed("page_pagination");
+          }
+
+          if (seenCursors.has(resolvedCursor)) {
+            throw oauthMalformed("page_pagination");
+          }
+
+          seenCursors.add(resolvedCursor);
+          nextCursor = resolvedCursor;
+        }
       }
 
       return { accounts: eligible };

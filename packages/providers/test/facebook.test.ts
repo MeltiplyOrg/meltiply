@@ -143,7 +143,7 @@ describe("createFacebookAdapter", () => {
       client_id: "facebook-client",
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "pages_show_list,pages_read_engagement,pages_manage_posts",
+      scope: "pages_show_list,pages_read_engagement,pages_manage_posts,business_management",
       state: "oauth-state",
     });
     expect(() =>
@@ -552,6 +552,81 @@ describe("createFacebookAdapter", () => {
       refreshToken: '{"pageId":"page-2","userAccessToken":"long"}',
     });
     expect(result.accounts[1]!.account.username).toBeUndefined();
+  });
+
+  it("includes business-assigned Pages across pagination and deduplicates shared Pages", async () => {
+    const page = (id: string) => ({
+      id,
+      name: `Page ${id}`,
+      access_token: `page-token-${id}`,
+      tasks: ["CREATE_CONTENT"],
+    });
+    const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
+      const url = new URL(input.toString());
+      if (url.pathname.endsWith("/oauth/access_token")) {
+        const form = new URLSearchParams(String(init.body));
+        return json({
+          access_token: form.get("grant_type") === "fb_exchange_token" ? "long" : "short",
+          expires_in: 3_600,
+          token_type: "bearer",
+        });
+      }
+      if (url.pathname.endsWith("/me/permissions")) {
+        return json({
+          data: [
+            { permission: "pages_show_list", status: "granted" },
+            { permission: "pages_read_engagement", status: "granted" },
+            { permission: "pages_manage_posts", status: "granted" },
+            { permission: "business_management", status: "granted" },
+          ],
+        });
+      }
+      if (url.pathname.endsWith("/me/accounts")) return json({ data: [page("direct")] });
+      if (url.pathname.endsWith("/me/business_users")) {
+        return url.searchParams.has("after")
+          ? json({ data: [{ id: "business-user-2" }] })
+          : json({
+              data: [{ id: "business-user-1" }],
+              paging: {
+                cursors: { after: "next" },
+                next: "https://graph.facebook.com/v25.0/me/business_users?after=next",
+              },
+            });
+      }
+      if (url.pathname.endsWith("/business-user-1/assigned_pages")) {
+        return url.searchParams.has("after")
+          ? json({ data: [page("business-2")] })
+          : json({
+              data: [page("direct"), page("business-1")],
+              paging: {
+                cursors: { after: "next" },
+                next: "https://graph.facebook.com/v25.0/business-user-1/assigned_pages?after=next",
+              },
+            });
+      }
+      if (url.pathname.endsWith("/business-user-2/assigned_pages")) {
+        return json({ data: [page("business-2"), page("business-3")] });
+      }
+      throw new Error(`Unexpected discovery endpoint: ${url.pathname}`);
+    });
+    const result = await adapter(fetcher).exchangeAuthorizationCode!(context, {
+      code: "code",
+      codeVerifier: "unused",
+      redirectUri,
+    });
+    if (!("accounts" in result)) throw new Error("Expected account selection");
+    expect(result.accounts.map((connection) => connection.account.id)).toEqual([
+      "direct",
+      "business-1",
+      "business-2",
+      "business-3",
+    ]);
+    expect(result.accounts.map((connection) => connection.accessToken)).toEqual([
+      "page-token-direct",
+      "page-token-business-1",
+      "page-token-business-2",
+      "page-token-business-3",
+    ]);
   });
 
   it("traverses Graph API pagination safely using validated cursors and Graph origin", async () => {

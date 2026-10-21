@@ -714,7 +714,6 @@ const spanishTranslations: Record<string, string> = {
     "Crea un perfil de marca antes de asignar este canal.",
   "Every Brand Profile already has a {platform} Channel. Disconnect one or create another Brand Profile.":
     "Todos los perfiles de marca ya tienen un canal de {platform}. Desconecta uno o crea otro perfil de marca.",
-  "Already has a {platform} Channel": "Ya tiene un canal de {platform}",
   "Reconnect this Channel": "Reconectar este canal",
   "Choose a provider to authorize. After authorization, choose which Brand Profile owns the connected Channel.":
     "Elige un proveedor para autorizar. Después de la autorización, elige qué perfil de marca será dueño del canal conectado.",

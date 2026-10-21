@@ -1,8 +1,9 @@
 import { useCallback, useState } from "react";
-import { AlertCircle, ArrowLeft, Check, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, Link2, Loader2 } from "lucide-react";
 import { Link } from "react-router";
 import { Alert } from "@meltiply/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@meltiply/ui/avatar";
+import { BrandMark } from "@meltiply/ui/brand-mark";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Skeleton } from "@meltiply/ui/skeleton";
@@ -32,10 +33,10 @@ export interface ChannelAssignmentProps {
 /**
  * Resolves the authorized accounts and offers the Brand Profile choice.
  *
- * The account list is native-radio driven so keyboard selection matches mouse
- * behavior. A Profile that already owns a Channel of the same Provider is
- * disabled rather than omitted, making the one-Channel-per-Provider rule
- * visible. Confirmation supplies both ids; dismissal discards the ticket.
+ * Account and Profile choices use native radios. Only connectable Profiles
+ * appear in the bounded scrolling list, preserving workspace order. Reconnecting
+ * the same account remains eligible. Confirmation supplies both ids; dismissal
+ * discards the ticket.
  */
 function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAssignmentProps) {
   const { t } = useI18n();
@@ -147,7 +148,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
       className="grid w-full min-w-0 max-w-4xl overflow-hidden rounded-window border border-line bg-surface lg:grid-cols-[0.8fr_1fr]"
     >
       <aside className="flex flex-col justify-between gap-6 border-b border-line bg-canvas p-6 lg:gap-10 lg:border-r lg:border-b-0 lg:p-8">
-        <div className="flex items-center justify-between gap-4">
+        <div>
           <Link
             to="/channels"
             className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-2 transition-colors hover:text-ink"
@@ -155,19 +156,30 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
             <ArrowLeft className="size-3.5" aria-hidden="true" />
             {t("Channels")}
           </Link>
-          {platform ? (
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-control border border-line bg-surface shadow-hairline">
-              <PlatformIcon provider={platform} className="size-6" />
-            </span>
-          ) : (
-            <Skeleton className="size-10 rounded-control" />
-          )}
         </div>
 
         <div className="max-w-sm space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-ink-3">
-            {t("Connect a Channel")}
-          </p>
+          <div className="mb-8 flex w-full items-center justify-center gap-5 py-2 sm:gap-6">
+            <span
+              role="img"
+              aria-label="Meltiply"
+              className="flex size-20 shrink-0 items-center justify-center text-ink sm:size-24"
+            >
+              <BrandMark className="size-12 sm:size-14" />
+            </span>
+            <Link2 className="size-6 shrink-0 text-ink-3" aria-hidden="true" />
+            {platform ? (
+              <span
+                role="img"
+                aria-label={platformName ?? platform}
+                className="flex size-20 shrink-0 items-center justify-center sm:size-24"
+              >
+                <PlatformIcon provider={platform} className="size-12 sm:size-14" />
+              </span>
+            ) : (
+              <Skeleton className="size-20 rounded-window sm:size-24" />
+            )}
+          </div>
           <h1
             id="channel-assignment-title"
             className="text-2xl font-semibold leading-8 tracking-tight text-ink text-balance"
@@ -261,10 +273,8 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
                     <label
                       key={account.id}
                       className={cn(
-                        "group flex cursor-pointer items-center justify-between gap-3 rounded-control border p-3 text-left transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
-                        isSelected
-                          ? "border-ink bg-surface shadow-card ring-1 ring-ink/10"
-                          : "border-line bg-page hover:bg-hover",
+                        "group flex cursor-pointer items-center justify-between gap-3 rounded-control border border-line p-3 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2",
+                        isSelected ? "bg-surface" : "bg-page hover:bg-hover",
                       )}
                     >
                       <Input
@@ -320,6 +330,17 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
               </p>
             </div>
 
+            {!workspaceLoading && brandProfiles.length > 0 && eligibleProfiles.length === 0 ? (
+              <Alert variant="destructive">
+                <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
+                <p className="text-xs">
+                  {t(
+                    "Every Brand Profile already has a {platform} Channel. Disconnect one or create another Brand Profile.",
+                    { platform: platformName ?? t("Channel") },
+                  )}
+                </p>
+              </Alert>
+            ) : null}
             {workspaceLoading ? (
               <div className="space-y-2" role="status" aria-live="polite" aria-busy="true">
                 <span className="sr-only">{t("Loading Brand Profiles…")}</span>
@@ -333,39 +354,26 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
                   {t("Create a Brand Profile before assigning this Channel.")}
                 </p>
               </Alert>
-            ) : eligibleProfiles.length === 0 ? (
-              <Alert variant="destructive">
-                <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
-                <p className="text-xs">
-                  {t(
-                    "Every Brand Profile already has a {platform} Channel. Disconnect one or create another Brand Profile.",
-                    { platform: platformName ?? t("Channel") },
-                  )}
-                </p>
-              </Alert>
-            ) : (
-              <fieldset disabled={isSubmitting} className="space-y-2">
+            ) : eligibleProfiles.length === 0 ? null : (
+              <fieldset
+                disabled={isSubmitting}
+                data-lenis-prevent
+                className="-m-1 max-h-64 min-w-0 space-y-1 overflow-y-auto overscroll-contain p-1 [scrollbar-gutter:stable]"
+              >
                 <legend className="sr-only">{t("Brand Profile")}</legend>
-                {brandProfiles.map((profile) => {
+                {eligibleProfiles.map((profile) => {
                   const existingChannel = channelByProfile[profile.id];
                   const canReconnect =
                     existingChannel !== undefined &&
                     effectiveAccountId !== null &&
                     existingChannel.platformUserId === effectiveAccountId;
-                  const isAvailable = existingChannel === undefined || canReconnect;
                   const isSelected = selectedProfile === profile.id;
                   return (
                     <label
                       key={profile.id}
-                      aria-disabled={!isAvailable}
                       className={cn(
-                        "group flex items-center justify-between gap-3 rounded-control border p-3 text-left transition-colors",
-                        !isAvailable
-                          ? "cursor-not-allowed border-line bg-page/50 opacity-60"
-                          : "cursor-pointer focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
-                        isSelected
-                          ? "border-ink bg-surface shadow-card ring-1 ring-ink/10"
-                          : isAvailable && "border-line bg-page hover:bg-hover",
+                        "group flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-control p-3 text-left transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
+                        isSelected ? "bg-hover" : "hover:bg-hover",
                       )}
                     >
                       <Input
@@ -373,7 +381,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
                         name={`channel-profile-${selectionId}`}
                         value={profile.id}
                         checked={isSelected}
-                        disabled={!isAvailable || isSubmitting}
+                        disabled={isSubmitting}
                         onChange={() => setSelectedProfileId(profile.id)}
                         className="sr-only"
                       />
@@ -389,12 +397,6 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
                           <p className="truncate text-sm font-semibold text-ink">{profile.name}</p>
                           {canReconnect ? (
                             <p className="text-xs text-ink-3">{t("Reconnect this Channel")}</p>
-                          ) : existingChannel ? (
-                            <p className="text-xs text-ink-3">
-                              {t("Already has a {platform} Channel", {
-                                platform: platformName ?? t("Channel"),
-                              })}
-                            </p>
                           ) : null}
                         </div>
                       </div>

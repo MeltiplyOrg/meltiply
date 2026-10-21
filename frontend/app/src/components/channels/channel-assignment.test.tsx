@@ -133,7 +133,7 @@ describe("Channel assignment", () => {
     workspace.integrations = [alphaFacebookChannel];
     renderAssignment();
 
-    expect(screen.getByText("Already has a Facebook Channel")).toBeVisible();
+    expect(screen.queryByRole("radio", { name: /Alpha Brand/ })).not.toBeInTheDocument();
     const connect = screen.getByRole("button", { name: "Connect Channel" });
     expect(connect).toBeDisabled();
 

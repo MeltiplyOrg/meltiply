@@ -368,9 +368,6 @@ describe("ProviderRegistry", () => {
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/api/v1/platforms/facebook/callback",
     );
-    expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "pages_show_list,pages_read_engagement,pages_manage_posts",
-    );
   });
 
   it("keeps YouTube absent until Shorts publishing acceptance is explicit", () => {

@@ -25,6 +25,20 @@ import {
   type StorageServiceShape,
 } from "@meltiply/storage";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import type * as Domain from "@meltiply/domain";
+
+// Exercise finite-policy boundaries even though community deployments are
+// unrestricted. Individual scenarios also load the real community policy.
+vi.mock("@meltiply/domain", async (importOriginal) => ({
+  ...(await importOriginal<typeof Domain>()),
+  COMMUNITY_LIMITS: {
+    max_distributions: 30,
+    max_platforms: 2,
+    max_storage_bytes: 1024 * 1024 * 1024,
+    max_uploads: 10,
+  },
+}));
+
 import { resolveActor, type ResolvedActor } from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
 import { createAssetApiService } from "../src/asset-service";
@@ -2613,7 +2627,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const posts = postServiceWith(["youtube", "instagram", "facebook"]);
     const period = currentUsagePeriod;
     const usageBefore = await currentUsageCount();
-    // Exhaust the shared community allowance to prove quota refusal is atomic.
+    // Exhaust a finite test allowance to prove quota refusal remains atomic.
     const distributionAllowance = COMMUNITY_LIMITS.max_distributions ?? 0;
     const draft = await createAlphaPost(
       posts,
@@ -2771,6 +2785,37 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         distributions: String(distributionAllowance),
         idempotency_count: 0,
       });
+
+      const boundedPolicy = { ...COMMUNITY_LIMITS };
+      try {
+        const community = await vi.importActual<typeof Domain>("@meltiply/domain");
+        Object.assign(COMMUNITY_LIMITS, community.COMMUNITY_LIMITS);
+        const accepted = await scheduleAlphaPost(
+          posts,
+          postId,
+          [{ platformAccountId: alphaThirdAccountId }],
+          null,
+          quotaKey,
+        );
+        expect(accepted.value.distributions).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ platform_account_id: alphaThirdAccountId }),
+          ]),
+        );
+        expect(await currentUsageCount()).toBe(distributionAllowance + 1);
+        await expect(
+          scheduleAlphaPost(
+            posts,
+            postId,
+            [{ platformAccountId: alphaThirdAccountId }],
+            null,
+            quotaKey,
+          ),
+        ).resolves.toEqual({ ...accepted, replayed: true });
+        expect(await currentUsageCount()).toBe(distributionAllowance + 1);
+      } finally {
+        Object.assign(COMMUNITY_LIMITS, boundedPolicy);
+      }
     } finally {
       await purgeIntegrationPosts(
         [postId],
@@ -6601,6 +6646,24 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           expect(result.rows[0]?.count).toBe(String(allowance));
         }),
       );
+
+      const boundedPolicy = { ...COMMUNITY_LIMITS };
+      try {
+        const community = await vi.importActual<typeof Domain>("@meltiply/domain");
+        Object.assign(COMMUNITY_LIMITS, community.COMMUNITY_LIMITS);
+        await Promise.all(candidates.map(({ id, platform }) => connection(id, platform)));
+        await systemTransaction(env, (client) =>
+          Effect.gen(function* () {
+            const result = yield* client.query<{ count: string }>(
+              "SELECT COUNT(*)::text AS count FROM platform_accounts WHERE org_id = $1",
+              [beta.organizationId],
+            );
+            expect(result.rows[0]?.count).toBe(String(allowance + 1));
+          }),
+        );
+      } finally {
+        Object.assign(COMMUNITY_LIMITS, boundedPolicy);
+      }
     } finally {
       await systemTransaction(env, (client) =>
         client.query(

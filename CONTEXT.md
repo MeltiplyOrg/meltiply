@@ -69,7 +69,7 @@ _Avoid_: engagement, interaction, mention
 The surface where a creator reads Comments and sends Replies.
 _Avoid_: engagement view, messages, feed
 
-## Workspace and entitlement
+## Workspace and resource usage
 
 **Workspace**:
 The tenant that contains Brand Profiles and Usage records, and the unit that all
@@ -87,11 +87,11 @@ description and owns its Posts, Assets, Platform accounts, Distributions,
 analytics, and Inbox activity. A Workspace can contain multiple Brand Profiles.
 
 **Usage record**:
-A durable measurement of Workspace consumption used to enforce resource limits.
+A durable measurement of Workspace consumption used for usage reporting and, when a deployment defines quotas, resource enforcement.
 _Avoid_: metric, quota row, counter
 
 **Workspace quota**:
-A limit on the uploads, publication distributions, connected Channels, or storage a Workspace may consume, measured over the applicable usage period or current occupancy. It is separate from a User's authorization to act in that Workspace.
+An optional limit on the uploads, publication distributions, connected Channels, or storage a Workspace may consume over a usage period or current occupancy. Community deployments impose no such quotas; they are separate from a User's authorization.
 _Avoid_: paid plan, subscription tier, entitlement, permission
 
 **Operator**:

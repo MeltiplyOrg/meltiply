@@ -46,7 +46,9 @@ implementation detail.
 - Retained creator workflows: Post composition with composer-owned attachments,
   Platform account connection, Brand Profile organization, and scheduled and
   monitored publication. Backend analytics and comment APIs do not imply
-  available creator-facing app surfaces. Community resource quotas do not imply subscriptions.
+  available creator-facing app surfaces. Community deployments have unrestricted
+  resource allowances; their administrators own capacity, consumption, and costs.
+  Quota enforcement is retained for bounded hosted policies.
 - Provider-specific logic stays inside `packages/providers` behind the shared
   provider interface; generic pipelines never branch on provider identity.
 - All SQL is parameterized; schema migrations live in

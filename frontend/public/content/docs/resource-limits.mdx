@@ -1,36 +1,42 @@
 ---
-title: Resource limits
-description: Community workspace quotas for uploads, publishing, connected accounts, and storage.
+title: Resource usage
+description: Unlimited community resource allowances and responsibility for infrastructure usage and costs.
 section: Workspace
 order: 9
 ---
 
-Meltiply enforces one community resource policy. There are no subscription tiers,
-payment-provider integrations, checkout sessions, or customer billing portals.
+Meltiply's community version does not impose quotas on monthly uploads,
+per-channel publication distributions, connected accounts, or workspace storage.
+You administer the infrastructure and are responsible for its capacity, usage,
+and costs. There are no subscription tiers, checkout sessions, or billing portals
+in the community application.
 
-## Workspace quotas
+## Community allowances
 
-| Resource                              | Limit              |
-| ------------------------------------- | ------------------ |
-| Accepted upload sessions              | 10 per usage month |
-| Per-channel publication distributions | 30 per usage month |
-| Connected platform accounts           | 2 concurrently     |
-| Resident media and reserved storage   | 1 GiB              |
+| Resource                          | Community allowance |
+| --------------------------------- | ------------------- |
+| Monthly uploads                   | Unlimited           |
+| Monthly publication distributions | Unlimited           |
+| Connected Channels per Workspace  | Unlimited           |
+| Workspace storage                 | Unlimited           |
 
-Storage includes originals, variants, temporary copies, and in-flight processing
-reservations, not just completed uploads. Cleanup releases bytes only after they
-can be safely removed. Reconnecting an existing account does not consume another
-connection slot.
+Unlimited allowances do not provide unlimited infrastructure. Monitor database,
+object-storage, processing, queue, and provider usage and provision capacity for
+your workload. Infrastructure failures and external service quotas still apply.
 
-## Reaching a limit
+## Accounting and safeguards
 
-The API checks quotas transactionally when accepting uploads, scheduling Posts,
-connecting accounts, and reserving processing storage. Concurrent requests cannot
-bypass those checks. Disconnect an unused account or remove unneeded media where
-appropriate; monthly counters and storage occupancy are separate limits.
+Usage counters and storage inventories remain active. Storage accounting includes
+originals, variants, temporary copies, and live upload or processing reservations.
+Cleanup releases bytes only when the corresponding objects can be safely removed.
+These records track resource consumption; they do not cap community usage.
 
-The app has no usage dashboard or approaching-quota banners. A failed operation
-shows an actionable quota error rather than an upgrade or payment prompt.
+Per-file media validation, provider restrictions, authentication safeguards, and
+bounded processing remain in place. A Brand Profile still has one Channel per
+provider; create more Brand Profiles to organize additional connections.
+
+Quota enforcement remains available for a future hosted version with a bounded
+resource policy. Those allowances are not applied to community deployments.
 
 ## Related
 

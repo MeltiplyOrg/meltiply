@@ -1,6 +1,6 @@
 # Frontend capability inventory
 
-This document records the current creator-facing interface. Backend endpoints and reference-design examples do not imply a shipped screen. Use [UI ownership](frontend-ui.md) and [layout](frontend-layout.md) for implementation; [`COMMUNITY_LIMITS`](../packages/domain/src/index.ts) owns resource policy.
+This document records the current creator-facing interface. Backend endpoints and reference-design examples do not imply a shipped screen. Use [UI ownership](frontend-ui.md) and [layout](frontend-layout.md) for implementation; [`COMMUNITY_LIMITS`](../packages/domain/src/index.ts) leaves community resource allowances unrestricted while retaining quota machinery for hosted policies.
 
 ## App surfaces
 
@@ -27,7 +27,7 @@ This document records the current creator-facing interface. Backend endpoints an
 
 ## Public surfaces
 
-The landing page explains supported publishing workflows using clearly labeled local sample content; that sample cannot publish or persist authenticated workspace Posts. Public guides cover setup, ownership, Channels, composition/media, publishing, Settings, recovery, quotas, and legal/storage policy.
+The landing page explains supported publishing workflows using clearly labeled local sample content; that sample cannot publish or persist authenticated workspace Posts. Public guides cover setup, ownership, Channels, composition/media, publishing, Settings, recovery, resource responsibility, and legal/storage policy.
 
 Public article search uses its build-time documentation index and a canonical shared trigger/dialog. It is separate from app jump search. Landing, docs, and app share palette/fonts, while keeping their own product-explanation, reading, and operating layouts.
 

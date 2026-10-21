@@ -400,6 +400,15 @@ function scenarios() {
       },
     },
     {
+      name: "assets.upload-session.detail",
+      run: async () => {
+        const result = await httpRequest(`/api/v1/asset-upload-sessions/${ids.uploadSession}`, {
+          headers: authorization,
+        });
+        return { bytes: result.bytes, latencyMs: result.durationMs, operations: 1 };
+      },
+    },
+    {
       name: "posts.create.draft",
       beforeSample: async () => {
         await cleanupMutatedRows(admin);
@@ -514,16 +523,24 @@ async function measureScenario(scenario) {
   capture.queries = [];
   const measuredQueries = [];
   const sampleResults = [];
-  const cpuBefore = process.cpuUsage();
+  const cpuAfter = { system: 0, user: 0 };
+  let setupMs = 0;
   const rssBefore = process.memoryUsage().rss;
   for (let index = 0; index < samplesToRun; index += 1) {
+    const setupStarted = performance.now();
     await scenario.beforeSample?.();
+    setupMs += performance.now() - setupStarted;
     capture.queries.length = 0;
+    // Fixture creation and cleanup are excluded from CPU and latency: start the
+    // resource clock only around the operation being measured.
+    const cpuBefore = process.cpuUsage();
     const result = await scenario.run();
+    const cpuDelta = process.cpuUsage(cpuBefore);
+    cpuAfter.system += cpuDelta.system;
+    cpuAfter.user += cpuDelta.user;
     measuredQueries.push(...capture.queries);
     sampleResults.push(result);
   }
-  const cpuAfter = process.cpuUsage(cpuBefore);
   const rssAfter = process.memoryUsage().rss;
   const resourceUsage = process.resourceUsage();
 
@@ -575,6 +592,7 @@ async function measureScenario(scenario) {
     },
     samples: samplesToRun,
     samples_ms: sampleResults.map((sample) => rounded(sample.latencyMs)),
+    setup_ms_total: rounded(setupMs),
     throughput_rps: rounded(
       totalOperations /
         (sampleResults.reduce((total, sample) => total + sample.latencyMs, 0) / 1_000),

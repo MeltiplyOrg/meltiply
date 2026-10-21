@@ -17,6 +17,7 @@ a before/after report.
 | `analytics.summary.year`             | `GET /api/v1/analytics?start=…&end=…` (366-day maximum)  |
 | `inbox.list.page100`                 | `GET /api/v1/inbox?limit=100&offset=0`                   |
 | `assets.detail`                      | `GET /api/v1/assets/:id`                                 |
+| `assets.upload-session.detail`       | `GET /api/v1/asset-upload-sessions/:id`                  |
 | `posts.create.draft`                 | `POST /api/v1/posts` (text-only draft)                   |
 | `posts.schedule.fanout20`            | `POST /api/v1/posts/:id/schedule` with 20 saved Channels |
 | `assets.upload-session.create`       | `POST /api/v1/asset-upload-sessions` (single PUT)        |
@@ -46,7 +47,8 @@ Every scenario records:
 - HTTP response bytes;
 - application SQL statement count per operation, statement-time percentiles,
   total statement time, and the most repeated statements;
-- process CPU and RSS/heap around the scenario.
+- process CPU and RSS/heap around the measured operation only; fixture setup
+  time is reported separately as `setup_ms_total`.
 
 Unavailable metrics are stated in the comparison report: deployed Worker CPU
 time, Queue delivery, provider HTTP time, and Durable Object work are outside

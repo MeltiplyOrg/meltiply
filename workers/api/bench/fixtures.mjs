@@ -15,6 +15,8 @@ export const ids = {
   schedulePost: (index) => `c2000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
   snapshot: (index) => `e1000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
   threadAccount: (index) => `b6000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+  uploadAsset: "a2000000-0000-4000-8000-000000000001",
+  uploadSession: "f0000000-0000-4000-8000-000000000001",
   usage: "b9000000-0000-4000-8000-000000000001",
   user: "b1000000-0000-4000-8000-000000000001",
   youtubeAccount: (index) => `b5000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
@@ -95,6 +97,22 @@ export async function seed(client) {
        ARRAY['upload'], '{"fixture": true}'::jsonb
      FROM generate_series(1, 20) AS item`,
     [ids.org, ids.brandProfile],
+  );
+  await client.query(
+    `INSERT INTO assets
+       (id, org_id, brand_profile_id, uploaded_by, asset_type, title, status,
+        file_size, mime_type, original_filename, created_at)
+     VALUES ($1, $2, $3, $4, 'image', 'Benchmark upload session asset',
+             'pending_upload', 1024, 'image/png', 'benchmark-upload.png', now())`,
+    [ids.uploadAsset, ids.org, ids.brandProfile, ids.user],
+  );
+  await client.query(
+    `INSERT INTO asset_upload_sessions
+       (id, org_id, asset_id, uploaded_by, strategy, status, content_type,
+        file_size, object_key, expires_at)
+     VALUES ($1, $2, $3, $4, 'single', 'created', 'image/png', 1024,
+             'benchmark/upload-session-object', now() + INTERVAL '1 day')`,
+    [ids.uploadSession, ids.org, ids.uploadAsset, ids.user],
   );
   await client.query(
     `INSERT INTO usage_records (id, org_id, period, uploads, distributions, api_calls, storage_bytes)

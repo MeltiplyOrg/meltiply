@@ -70,6 +70,7 @@ function aggregate(runs) {
         statements: 0,
         statementTimeMs: 0,
         cpuMs: 0,
+        setupMs: 0,
       };
       if (workflow.error) {
         bucket.errors.push(workflow.error);
@@ -84,6 +85,7 @@ function aggregate(runs) {
       bucket.statements += metrics.db.statements_total;
       bucket.statementTimeMs += metrics.db.time_ms_total;
       bucket.cpuMs += metrics.cpu_ms.user_total + metrics.cpu_ms.system_total;
+      bucket.setupMs += metrics.setup_ms_total ?? 0;
       workflows.set(workflow.name, bucket);
     }
   }
@@ -109,6 +111,7 @@ function comparisonRow(name) {
     p95: percentile(bucket.samples, 0.95),
     p99: percentile(bucket.samples, 0.99),
     reqP95: percentile(bucket.requestSamples, 0.95),
+    setupMs: bucket.setupMs,
     statementsPerOp: bucket.statements / bucket.operations,
     throughput:
       bucket.operations / (bucket.samples.reduce((total, value) => total + value, 0) / 1_000),
@@ -182,12 +185,12 @@ markdown.push(
 markdown.push("|---|---:|---:|---:|---:|---:|---:|---:|---:|");
 for (const row of rows) {
   if (row.unavailable) {
-    markdown.push(`| ${row.name} | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |`);
+    markdown.push(`| ${row.name} | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |`);
     continue;
   }
   const { baseline: b, candidate: c } = row;
   markdown.push(
-    `| ${row.name} | ${fixed(b.statementsPerOp)} | ${fixed(c.statementsPerOp)} | ${fixed(b.dbMsPerOp)} | ${fixed(c.dbMsPerOp)} | ${fixed(b.bytes)} | ${fixed(c.bytes)} | ${fixed(b.cpuPerOp)} | ${fixed(c.cpuPerOp)} |`,
+    `| ${row.name} | ${fixed(b.statementsPerOp)} | ${fixed(c.statementsPerOp)} | ${fixed(b.dbMsPerOp)} | ${fixed(c.dbMsPerOp)} | ${fixed(b.bytes)} | ${fixed(c.bytes)} | ${fixed(b.cpuPerOp)} | ${fixed(c.cpuPerOp)} | ${fixed(b.setupMs, 0)} | ${fixed(c.setupMs, 0)} |`,
   );
 }
 markdown.push("");

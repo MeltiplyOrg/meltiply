@@ -26,15 +26,6 @@ function assertDatabaseName(value) {
   }
 }
 
-/** Builds a connection URL for one role by swapping credentials on the admin URL. */
-function roleUrl(user, password) {
-  const url = new URL(adminUrl);
-  url.username = user;
-  url.password = password;
-  url.pathname = `/${databaseName}`;
-  return url.toString();
-}
-
 /** Connects once, retrying while the service container is still starting. */
 async function connectWhenReady(connectionString) {
   const deadline = Date.now() + 60_000;
@@ -138,11 +129,13 @@ try {
   await schema.end().catch(() => {});
 }
 
+// Report only non-secret connection metadata: the administrator URL may carry
+// a credential that must never reach captured logs.
 process.stdout.write(
   `${JSON.stringify({
-    admin_url: target.toString(),
-    authenticated_url: roleUrl("meltiply_rls", "meltiply-authenticated-local"),
     database: databaseName,
-    system_url: roleUrl("meltiply_system", "meltiply-system-local"),
+    host: target.hostname,
+    port: target.port,
+    schema_ready: true,
   })}\n`,
 );

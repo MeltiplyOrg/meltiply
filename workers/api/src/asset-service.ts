@@ -1094,10 +1094,11 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
    * Plans a fresh single-PUT grant for an active session inside the session's
    * own transaction.
    *
-   * The session row is re-read under `FOR UPDATE`, which is what serializes
+   * The session row is read under `FOR UPDATE`, which is what serializes
    * minting against abort and completion: whichever transaction commits first
    * decides, so a grant is either recorded before an abort retains its hold or
-   * never minted because the locked read already sees the terminal status. The
+   * never minted because the locked read already sees the terminal status.
+   * Callers that already hold the row lock pass it in; others read it here. The
    * planned deadline is persisted on the staging row's `write_hold_until`
    * before this transaction ends, so every URL the caller exposes afterwards
    * has its writer window durably inventoried — the sweep can never reclaim
@@ -1106,15 +1107,20 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
    * @param client - Active PostgreSQL EffectTransactionClient owning the session row lock.
    * @param sessionId - Upload session to plan a grant for.
    * @param current - Reference timestamp; the planned deadline is `signedExpiry(current, expires_at)`.
+   * @param lockedRow - Session row the caller already read `FOR UPDATE` in this transaction, if any.
    * @returns The locked row plus the deadline to sign with; `grantDeadline` is null when the session mints no single-PUT grant.
    */
   function planSingleUploadGrantEffect(
     client: EffectTransactionClient,
     sessionId: string,
     current: Date,
+    lockedRow?: UploadSessionRow,
   ): Effect.Effect<{ grantDeadline: Date | null; row: UploadSessionRow }, AssetServiceError> {
     return Effect.gen(function* () {
-      const row = yield* getSessionRowEffect(client, sessionId, true);
+      // A caller that just read the session FOR UPDATE already holds the row
+      // lock, so re-reading it inside the same transaction only costs a round
+      // trip. Callers without a locked row still read it here.
+      const row = lockedRow ?? (yield* getSessionRowEffect(client, sessionId, true));
       if (
         row.strategy !== "single" ||
         !["created", "uploading"].includes(row.status) ||
@@ -1503,7 +1509,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
               // committed state rather than a snapshot taken before a
               // concurrent abort could land; the planned deadline is
               // persisted on the staging row inside this transaction.
-              const plan = yield* planSingleUploadGrantEffect(client, row.id, current);
+              const plan = yield* planSingleUploadGrantEffect(client, row.id, current, row);
               const parts = yield* client.query<UploadPartRow>(
                 `SELECT part_number, etag, size
                    FROM asset_upload_parts

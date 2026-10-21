@@ -51,9 +51,6 @@ const businessDiscoveryScope = "business_management";
 /** Facebook's caption ceiling remains known even before live publishing is configured. */
 export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
 
-/** Facebook's caption ceiling remains known even before live publishing is configured. */
-export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
-
 const capability: PlatformCapability = {
   accepted_mime_types: ["video/mp4", "video/quicktime"],
   analytics: false,

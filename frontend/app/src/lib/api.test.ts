@@ -170,7 +170,7 @@ describe("generated API client adapters", () => {
     }
   });
 
-  it("sends the session JWT as a bearer credential without cookies", async () => {
+  it("keeps bearer credentials on API calls and excludes them from signed object reads", async () => {
     const storageUrl = "https://objects.example/original.png";
     const originalBytes = new Uint8Array([0, 127, 255]);
     const fetchMock = vi
@@ -208,16 +208,17 @@ describe("generated API client adapters", () => {
     const blob = await Effect.runPromise(isolatedApi.getAssetBlob("ws-123", "asset-1"));
     expect(new Uint8Array(await blob.arrayBuffer())).toEqual(originalBytes);
 
-    // The auth lifecycle request keeps the session cookie; API requests carry
-    // only the bearer JWT and must not send cookies.
+    // Auth and same-origin API calls may traverse Cloudflare Access. Signed
+    // object-store downloads must never inherit API headers or session cookies.
     expect(credentialsAt(fetchMock, 0)).toBe("include");
     expect(headerAt(fetchMock, 1, "Authorization")).toBe("Bearer session-jwt-1");
     expect(credentialsAt(fetchMock, 1)).toBe("same-origin");
     expect(headerAt(fetchMock, 2, "Authorization")).toBe("Bearer session-jwt-1");
     expect(headerAt(fetchMock, 2, "X-Workspace-ID")).toBe("ws-123");
-    expect(credentialsAt(fetchMock, 2)).toBe("omit");
+    expect(credentialsAt(fetchMock, 2)).toBe("same-origin");
     expect(headerAt(fetchMock, 3, "Authorization")).toBe("Bearer session-jwt-1");
     expect(headerAt(fetchMock, 3, "X-Workspace-ID")).toBe("ws-123");
+    expect(credentialsAt(fetchMock, 3)).toBe("same-origin");
     expect(headerAt(fetchMock, 4, "Authorization")).toBeNull();
     expect(headerAt(fetchMock, 4, "X-Workspace-ID")).toBeNull();
     expect(credentialsAt(fetchMock, 4)).toBe("omit");

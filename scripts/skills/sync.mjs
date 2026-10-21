@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,7 +8,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const skillsRoot = join(repositoryRoot, ".agents", "skills");
-const lockPath = join(repositoryRoot, "skills-lock.json");
 
 const pack = "Essential-kit/skills";
 const packRef = "936efac7e8e2ba2bb4413edf0fa530c2cff1eed8";
@@ -97,27 +95,6 @@ async function applyContextNames(directory) {
 }
 
 /**
- * Computes the same deterministic folder hash the `skills` CLI writes to
- * `skills-lock.json`: sorted relative paths followed by file contents.
- *
- * @param {string} directory - Skill directory to hash
- * @returns {Promise<string>} SHA-256 hex digest
- */
-async function folderHash(directory) {
-  const files = [];
-  for await (const file of walkFiles(directory)) {
-    files.push(file);
-  }
-  files.sort((left, right) => relative(directory, left).localeCompare(relative(directory, right)));
-  const hash = createHash("sha256");
-  for (const file of files) {
-    hash.update(relative(directory, file).split(sep).join("/"));
-    hash.update(await readFile(file));
-  }
-  return hash.digest("hex");
-}
-
-/**
  * Installs the pinned pack into a staging directory with the `skills` CLI.
  * The CLI is invoked outside the repository so a failed install cannot leave
  * partial skill directories behind.
@@ -149,11 +126,10 @@ function installPack(directory) {
 }
 
 /**
- * Installs the pack into a temporary directory, applies this repository's
- * context naming, and rewrites the staged lock hashes so they describe the
- * patched files rather than the pristine pack.
+ * Installs the pack into a temporary directory and applies this repository's
+ * context naming.
  *
- * @returns {Promise<{staging: string, skills: string, lock: object}>} Staged install
+ * @returns {Promise<{staging: string, skills: string}>} Staged install
  */
 async function stagePack() {
   const staging = await mkdtemp(join(tmpdir(), "meltiply-skills-"));
@@ -161,32 +137,11 @@ async function stagePack() {
     installPack(staging);
     const skills = join(staging, ".agents", "skills");
     await applyContextNames(skills);
-    const lock = JSON.parse(await readFile(join(staging, "skills-lock.json"), "utf8"));
-    for (const skill of managedSkills) {
-      lock.skills[skill].computedHash = await folderHash(join(skills, skill));
-    }
-    return { staging, skills, lock };
+    return { staging, skills };
   } catch (error) {
     await rm(staging, { recursive: true, force: true });
     throw error;
   }
-}
-
-/**
- * Merges the staged pack entries into the committed lock, preserving entries
- * owned by other sources.
- *
- * @param {object} stagedLock - Lock written by the staged install
- * @returns {Promise<void>} Resolves after `skills-lock.json` is written
- */
-async function writeLock(stagedLock) {
-  const current = existsSync(lockPath)
-    ? JSON.parse(await readFile(lockPath, "utf8"))
-    : { version: 1, skills: {} };
-  for (const skill of managedSkills) {
-    current.skills[skill] = stagedLock.skills[skill];
-  }
-  await writeFile(lockPath, `${JSON.stringify(current, null, 2)}\n`);
 }
 
 /**
@@ -254,11 +209,11 @@ async function compareDirectories(expected, actual) {
 }
 
 /**
- * Verifies the committed skills and lock match a fresh install of the pinned
- * pack. Never writes to the repository.
+ * Verifies the committed skills match a fresh install of the pinned pack.
+ * Never writes to the repository.
  *
  * @returns {Promise<void>} Resolves when everything matches
- * @throws {Error} When skills or lock entries drift from the pinned pack
+ * @throws {Error} When skill files drift from the pinned pack
  */
 async function check() {
   const staged = await stagePack();
@@ -268,24 +223,6 @@ async function check() {
       failures.push(
         ...(await compareDirectories(join(staged.skills, skill), join(skillsRoot, skill))),
       );
-    }
-    const current = existsSync(lockPath)
-      ? JSON.parse(await readFile(lockPath, "utf8"))
-      : { skills: {} };
-    for (const skill of managedSkills) {
-      const expected = staged.lock.skills[skill];
-      const actual = current.skills?.[skill];
-      if (!actual) {
-        failures.push(`skills-lock.json: missing ${skill}`);
-        continue;
-      }
-      for (const field of ["source", "ref", "sourceType", "skillPath", "computedHash"]) {
-        if (actual[field] !== expected[field]) {
-          failures.push(
-            `skills-lock.json: ${skill}.${field} is ${actual[field]}; expected ${expected[field]}`,
-          );
-        }
-      }
     }
     if (failures.length > 0) {
       throw new Error(
@@ -302,7 +239,7 @@ async function check() {
 
 /**
  * Installs the pinned pack, reapplies this repository's context naming, and
- * writes both the managed skill directories and `skills-lock.json`.
+ * writes the managed skill directories.
  *
  * @returns {Promise<void>} Resolves after the repository is updated
  */
@@ -310,7 +247,6 @@ async function sync() {
   const staged = await stagePack();
   try {
     await installStaged(staged.skills);
-    await writeLock(staged.lock);
     process.stdout.write(
       `Synced ${managedSkills.length} skills from ${pack}@${packRef.slice(0, 7)}.\n`,
     );

@@ -96,8 +96,7 @@ Agent skills live in `.agents/skills` and are shared through the `.claude` and
 `.kiro` symlinks. Pack-managed skills come from
 [`Essential-kit/skills`](https://github.com/Essential-kit/skills); update them with
 `bun run skills:sync` and verify them with `bun run skills:check`. Read
-[agent skills](docs/agents/skills.md) before editing the managed set or
-`skills-lock.json`.
+[agent skills](docs/agents/skills.md) before editing the managed set.
 
 ## UI and public-guide changes
 

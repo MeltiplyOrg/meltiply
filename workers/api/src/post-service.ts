@@ -462,6 +462,35 @@ function lockPostEffect(
 }
 
 /**
+ * Locks every Asset currently attached to a Post in ascending Asset id order.
+ *
+ * The detach trigger locks each Asset as the attachment row is removed, so a
+ * deletion transaction must acquire those locks first and in the same global
+ * order a composition write uses. Otherwise two concurrent deletions of Posts
+ * that share media could each hold one Asset and wait for the other.
+ *
+ * @param client - Active tenant transaction client.
+ * @param postId - Post whose attached Assets are about to be detached.
+ * @returns Effect resolving once every attached Asset row is locked.
+ */
+function lockPostAttachmentAssetsEffect(
+  client: EffectTransactionClient,
+  postId: string,
+): Effect.Effect<void, DatabaseError> {
+  return client
+    .query(
+      `SELECT asset.id
+         FROM assets AS asset
+         JOIN post_attachments AS attachment ON attachment.asset_id = asset.id
+        WHERE attachment.post_id = $1
+        ORDER BY asset.id
+        FOR UPDATE OF asset`,
+      [postId],
+    )
+    .pipe(Effect.asVoid);
+}
+
+/**
  * Rejects a mutation that targets a different Brand Profile than the Post's.
  *
  * Composer mutations are scoped to one Brand Profile so content cannot move
@@ -483,18 +512,24 @@ function requireMatchingBrandProfile(post: PostRow, brandProfileId: string): voi
 }
 
 /**
- * Locks and validates every Asset a save intends to attach, in request order.
+ * Locks every Asset a composition write will touch and validates the ones being
+ * attached.
  *
  * An attachment is what retains stored media, so attaching proves the Asset
  * belongs to the same Brand Profile, is not already claimed for deletion, and —
  * for an upload still in flight — belongs to a session that has not expired.
- * Locking in request order keeps two concurrent saves of the same Post from
- * deadlocking, and the `post_attachments_guard_attachable` trigger
- * independently rejects a deletion claim that wins the race.
+ *
+ * All assets, including ones being detached, are locked in ascending Asset id
+ * order. The attachment triggers lock each Asset while detaching or inserting,
+ * so a transaction that reaches a trigger holding a lock this one acquires
+ * first would otherwise deadlock. One global order across create, update, and
+ * delete removes those cycles without serializing unrelated Posts.
  *
  * @param client - Active tenant transaction client.
  * @param brandProfileId - Brand Profile that will own the attachments.
- * @param attachmentIds - Ordered, de-duplicated Asset identifiers.
+ * @param attachmentIds - Ordered, de-duplicated Asset identifiers being attached.
+ * @param alsoLockIds - Additional Assets the same transaction will detach; they
+ *   are locked but not revalidated because their ownership was proven when attached.
  * @returns Effect resolving to the locked asset rows in the requested order.
  * @throws {CoreApiError} 422 `validation_error` when the selection repeats an Asset.
  * @throws {CoreApiError} 404 `asset_not_found` when an Asset is missing or owned by another workspace.
@@ -505,14 +540,16 @@ function lockAttachmentAssetsEffect(
   client: EffectTransactionClient,
   brandProfileId: string,
   attachmentIds: readonly string[],
+  alsoLockIds: readonly string[] = [],
 ): Effect.Effect<AssetRow[], CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    if (attachmentIds.length === 0) return [];
     if (new Set(attachmentIds).size !== attachmentIds.length) {
       return yield* Effect.fail(
         new CoreApiError(422, "validation_error", "attachment_ids must not repeat an asset."),
       );
     }
+    const lockIds = [...new Set([...alsoLockIds, ...attachmentIds])].sort();
+    if (lockIds.length === 0) return [];
     const locked = yield* client.query<AssetRow>(
       `SELECT ${assetColumns},
               EXISTS (
@@ -525,11 +562,11 @@ function lockAttachmentAssetsEffect(
          FROM assets AS asset
         WHERE asset.id = ANY($1::uuid[])
           AND asset.org_id = public.auth_active_org_id()
-        ORDER BY array_position($1::uuid[], asset.id)
+        ORDER BY asset.id
         FOR UPDATE`,
-      [attachmentIds],
+      [lockIds],
     );
-    if (locked.rows.length !== attachmentIds.length) {
+    if (locked.rows.length !== lockIds.length) {
       return yield* Effect.fail(
         new CoreApiError(404, "asset_not_found", "One of the attachments was not found."),
       );
@@ -585,21 +622,28 @@ function lockAttachmentAssetsEffect(
  * @param client - Active tenant transaction client.
  * @param post - Locked Post row owning the Brand Profile.
  * @param assetIds - Complete ordered attachment selection.
+ * @param previousIds - Current ordered attachment ids when the caller already
+ *   read them; omitted means the current set is not known yet.
  * @returns Effect resolving once the attachment set matches `assetIds`.
  */
 function replaceAttachmentsEffect(
   client: EffectTransactionClient,
   post: PostRow,
   assetIds: readonly string[],
+  previousIds?: readonly string[],
 ): Effect.Effect<void, DatabaseError> {
   return Effect.gen(function* () {
-    const previous = yield* client.query<{ asset_id: string }>(
-      `SELECT asset_id FROM post_attachments WHERE post_id = $1 ORDER BY position`,
-      [post.id],
-    );
+    const previous =
+      previousIds ??
+      (yield* client
+        .query<{ asset_id: string }>(
+          `SELECT asset_id FROM post_attachments WHERE post_id = $1 ORDER BY position`,
+          [post.id],
+        )
+        .pipe(Effect.map((result) => result.rows.map((row) => row.asset_id))));
     if (
-      previous.rows.length === assetIds.length &&
-      previous.rows.every((row, index) => row.asset_id === assetIds[index])
+      previous.length === assetIds.length &&
+      previous.every((id, index) => id === assetIds[index])
     ) {
       return;
     }
@@ -1451,7 +1495,7 @@ export function createPostApiService(
             // A new Post owns no attachment or target rows yet, so an empty
             // selection has nothing to replace and no collection to re-read.
             if (attachmentIds.length > 0)
-              yield* replaceAttachmentsEffect(client, post, attachmentIds);
+              yield* replaceAttachmentsEffect(client, post, attachmentIds, []);
             if (targets.length > 0) yield* replaceTargetsEffect(client, post, targets);
             const value = yield* assembleSinglePostEffect(client, post, {
               ...(attachmentIds.length === 0
@@ -1571,8 +1615,9 @@ export function createPostApiService(
               catch: validationError,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
-            const attachmentIds =
-              input.attachmentIds ?? (yield* loadPostAttachmentIdsEffect(client, postId));
+            const currentAttachmentIds = yield* loadPostAttachmentIdsEffect(client, postId);
+            const attachmentIds = input.attachmentIds ?? currentAttachmentIds;
+            const attachmentChange = input.attachmentIds !== undefined;
             const targets = input.targets;
             yield* Effect.try({
               try: () => {
@@ -1584,7 +1629,17 @@ export function createPostApiService(
               },
               catch: validationError,
             });
-            yield* lockAttachmentAssetsEffect(client, post.brand_profile_id, attachmentIds);
+            if (attachmentChange) {
+              // Lock the union of the current and requested sets in ascending
+              // Asset order so the detach and insert triggers cannot form a
+              // lock cycle with a concurrent composition write.
+              yield* lockAttachmentAssetsEffect(
+                client,
+                post.brand_profile_id,
+                attachmentIds,
+                currentAttachmentIds,
+              );
+            }
             if (targets) {
               yield* validateTargetScopesEffect(
                 client,
@@ -1594,7 +1649,9 @@ export function createPostApiService(
               );
               yield* replaceTargetsEffect(client, post, targets);
             }
-            yield* replaceAttachmentsEffect(client, post, attachmentIds);
+            if (attachmentChange) {
+              yield* replaceAttachmentsEffect(client, post, attachmentIds, currentAttachmentIds);
+            }
             const updated = yield* updatePostRowEffect(client, postId, {
               ...(input.title !== undefined ? { title: input.title } : {}),
               ...(input.defaultText !== undefined ? { defaultText: input.defaultText } : {}),
@@ -1948,6 +2005,7 @@ export function createPostApiService(
               }
             }
             yield* cancelPendingDistributionsEffect(client, postId);
+            yield* lockPostAttachmentAssetsEffect(client, postId);
             yield* client.query("DELETE FROM post_attachments WHERE post_id = $1", [postId]);
             yield* client.query("DELETE FROM post_targets WHERE post_id = $1", [postId]);
             const deleted = yield* client.query<PostRow>(

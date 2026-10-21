@@ -43,6 +43,7 @@
         "server.mjs",
         "s3-check.ts",
         "storage-pipeline-check.ts",
+        "oauth-connection-check.ts",
         "admin.mjs"
       ],
       "project": ["*.ts", "*.mjs"]

@@ -1,6 +1,6 @@
 # Provider Channel connection contracts
 
-Research date: 2026-10-22. Scope: the five implemented Providers' authorization,
+Research date: 2026-10-21. Scope: the five implemented Providers' authorization,
 account discovery, explicit Brand Profile assignment, and reconnection. This is
 not evidence of live third-party authorization or publishing acceptance.
 

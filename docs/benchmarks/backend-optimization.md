@@ -7,7 +7,8 @@ concurrency, configuration, runner class, and PostgreSQL version.
 - Baseline revision: `master` at `d370259ef0c3` (the merge base of the
   integration branch).
 - Optimized revision: `logic-optimize-39` at `bfc005f` (the measured head; the
-  report and raw-result commits that follow are documentation-only).
+  report, raw-result, and report-label commits that follow do not change
+  application code).
 - Benchmark workflow: [`.github/workflows/backend-benchmark.yml`](../../.github/workflows/backend-benchmark.yml).
 - Run: [run 39650424133](https://github.com/MeltiplyOrg/meltiply/actions/runs/39650424133).
 - Raw results: [`results/2026-10-21-backend/`](results/2026-10-21-backend/).

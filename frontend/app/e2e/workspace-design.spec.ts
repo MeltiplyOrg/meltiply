@@ -894,7 +894,8 @@ test("keeps navigation focus and reconnect assignment correct in both palettes",
       await page.goto(
         `/channels/connect?oauth=select_account&provider=threads&selection_id=${ticket}`,
       );
-      await page.getByRole("radio", { name: /Existing Threads/ }).check();
+      await page.getByText("Existing Threads", { exact: true }).click();
+      await expect(page.getByRole("radio", { name: /Existing Threads/ })).toBeChecked();
       await expect(page.getByRole("radio", { name: /Empty destination/ })).toHaveCount(0);
       await page.getByText(workspace.profileName, { exact: true }).click();
       await expect(
@@ -905,8 +906,9 @@ test("keeps navigation focus and reconnect assignment correct in both palettes",
         animations: "disabled",
         fullPage: true,
       });
-      await page.getByRole("radio", { name: /New Threads/ }).check();
-      await expect(page.getByRole("radio", { name: /Empty destination/ })).toBeVisible();
+      await page.getByText("New Threads", { exact: true }).click();
+      await expect(page.getByRole("radio", { name: /New Threads/ })).toBeChecked();
+      await expect(page.getByText("Empty destination", { exact: true })).toBeVisible();
       await expect(
         page.getByRole("button", { name: "Connect Channel", exact: true }),
       ).toBeDisabled();

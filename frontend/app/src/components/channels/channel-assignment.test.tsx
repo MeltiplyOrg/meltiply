@@ -157,13 +157,14 @@ describe("Channel assignment", () => {
 
   it("allows the existing owner to refresh a reconnected Channel", () => {
     queryState.selection = singleSelection;
-    workspace.brandProfiles = [alphaProfile];
+    workspace.brandProfiles = [alphaProfile, betaProfile];
     workspace.integrations = [
       { ...alphaFacebookChannel, platformUserId: singleSelection.accounts[0]!.id },
     ];
     renderAssignment();
 
     expect(screen.getByText("Reconnect this Channel")).toBeVisible();
+    expect(screen.queryByRole("radio", { name: /Beta Brand/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Alpha Brand"));
     expect(screen.getByRole("button", { name: "Connect Channel" })).toBeEnabled();
   });

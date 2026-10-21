@@ -234,6 +234,7 @@ describe("OAuthStateCoordinator", () => {
       selectionId,
       "page-unknown",
       {
+        brandProfileId: "profile-alpha",
         organizationId: "org-crash-invariant",
         userId: "user-crash-invariant",
       },
@@ -246,6 +247,7 @@ describe("OAuthStateCoordinator", () => {
       selectionId,
       "page-alpha",
       {
+        brandProfileId: "profile-alpha",
         organizationId: "org-crash-invariant",
         userId: "user-crash-invariant",
       },
@@ -260,6 +262,7 @@ describe("OAuthStateCoordinator", () => {
       selectionId,
       "page-alpha",
       {
+        brandProfileId: "profile-alpha",
         organizationId: "org-crash-invariant",
         userId: "user-crash-invariant",
       },
@@ -290,6 +293,7 @@ describe("OAuthStateCoordinator", () => {
       selectionId,
       "page-beta",
       {
+        brandProfileId: "profile-alpha",
         organizationId: "org-crash-invariant",
         userId: "user-crash-invariant",
       },
@@ -305,6 +309,7 @@ describe("OAuthStateCoordinator", () => {
       selectionId,
       "page-alpha",
       {
+        brandProfileId: "profile-alpha",
         organizationId: "org-crash-invariant",
         userId: "user-crash-invariant",
       },
@@ -327,6 +332,7 @@ describe("OAuthStateCoordinator", () => {
       selectionId,
       "page-alpha",
       {
+        brandProfileId: "profile-alpha",
         organizationId: "org-crash-invariant",
         userId: "user-crash-invariant",
       },
@@ -340,11 +346,23 @@ describe("OAuthStateCoordinator", () => {
       "page-alpha",
       {
         organizationId: "org-crash-invariant",
+        brandProfileId: "profile-alpha",
         userId: "user-crash-invariant",
       },
       "different-key",
     );
     expect(replayMismatch.status).toBe("conflict");
+    const changedProfile = await coordinator.claimSelection(
+      selectionId,
+      "page-alpha",
+      {
+        brandProfileId: "profile-beta",
+        organizationId: "org-crash-invariant",
+        userId: "user-crash-invariant",
+      },
+      "idem-key-retry",
+    );
+    expect(changedProfile.status).toBe("conflict");
   });
 
   it("rejects cancellation when claim lease has expired but save is unreleased (stale lease fence)", async () => {
@@ -373,7 +391,11 @@ describe("OAuthStateCoordinator", () => {
     const claim = await coordinator.claimSelection(
       selectionId,
       "page-fenced",
-      { organizationId: "org-stale-fence", userId: "user-stale-fence" },
+      {
+        brandProfileId: "profile-alpha",
+        organizationId: "org-stale-fence",
+        userId: "user-stale-fence",
+      },
       "idem-stale",
     );
     expect(claim.status).toBe("claimed");
@@ -408,11 +430,27 @@ describe("OAuthStateCoordinator", () => {
       expect(cancelStale.message).toContain("in progress");
     }
 
+    // An expired lease is not proof the first save failed: it cannot change the destination.
+    const changedProfile = await coordinator.claimSelection(
+      selectionId,
+      "page-fenced",
+      {
+        brandProfileId: "profile-beta",
+        organizationId: "org-stale-fence",
+        userId: "user-stale-fence",
+      },
+      "idem-other-profile",
+    );
+    expect(changedProfile).toMatchObject({ status: "conflict", code: "pinned_profile_mismatch" });
     // Same pinned Page CAN be retried after lease expiry
     const retryClaim = await coordinator.claimSelection(
       selectionId,
       "page-fenced",
-      { organizationId: "org-stale-fence", userId: "user-stale-fence" },
+      {
+        brandProfileId: "profile-alpha",
+        organizationId: "org-stale-fence",
+        userId: "user-stale-fence",
+      },
       "idem-stale-retry",
     );
     expect(retryClaim.status).toBe("claimed");
@@ -453,7 +491,11 @@ describe("OAuthStateCoordinator", () => {
     const claim = await coordinator.claimSelection(
       selectionId,
       "page-edge-7",
-      { organizationId: "org-near-expiry", userId: "user-near-expiry" },
+      {
+        brandProfileId: "profile-alpha",
+        organizationId: "org-near-expiry",
+        userId: "user-near-expiry",
+      },
       "idem-edge",
     );
     expect(claim.status).toBe("claimed");
@@ -493,7 +535,11 @@ describe("OAuthStateCoordinator", () => {
     const reclaim = await coordinator.claimSelection(
       selectionId,
       "page-edge-7",
-      { organizationId: "org-near-expiry", userId: "user-near-expiry" },
+      {
+        brandProfileId: "profile-alpha",
+        organizationId: "org-near-expiry",
+        userId: "user-near-expiry",
+      },
       "idem-edge-retry",
     );
     expect(reclaim.status).toBe("not_found");
@@ -524,7 +570,11 @@ describe("OAuthStateCoordinator", () => {
     const replay = await coordinator.claimSelection(
       selectionId,
       "page-edge-7",
-      { organizationId: "org-near-expiry", userId: "user-near-expiry" },
+      {
+        brandProfileId: "profile-alpha",
+        organizationId: "org-near-expiry",
+        userId: "user-near-expiry",
+      },
       "idem-edge",
     );
     expect(replay.status).toBe("replayed");
@@ -542,7 +592,11 @@ describe("OAuthStateCoordinator", () => {
         const expiredReplay = await instance.claimSelection(
           selectionId,
           "page-edge-7",
-          { organizationId: "org-near-expiry", userId: "user-near-expiry" },
+          {
+            brandProfileId: "profile-alpha",
+            organizationId: "org-near-expiry",
+            userId: "user-near-expiry",
+          },
           "idem-edge",
         );
         expect(expiredReplay.status).toBe("not_found");
@@ -554,7 +608,11 @@ describe("OAuthStateCoordinator", () => {
     const late = await coordinator.claimSelection(
       selectionId,
       "page-edge-7",
-      { organizationId: "org-near-expiry", userId: "user-near-expiry" },
+      {
+        brandProfileId: "profile-alpha",
+        organizationId: "org-near-expiry",
+        userId: "user-near-expiry",
+      },
       "idem-edge",
     );
     expect(late.status).toBe("not_found");
@@ -657,7 +715,11 @@ describe("OAuthStateCoordinator", () => {
     const claim = await coordinator.claimSelection(
       selectionId,
       "page-85",
-      { organizationId: "org-large-scale", userId: "user-large-scale" },
+      {
+        brandProfileId: "profile-alpha",
+        organizationId: "org-large-scale",
+        userId: "user-large-scale",
+      },
       "idem-large",
     );
     expect(claim.status).toBe("claimed");

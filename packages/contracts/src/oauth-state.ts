@@ -43,12 +43,14 @@ export interface OAuthSelectionInit {
 export interface OAuthSelectionRecord {
   readonly account_ids: ReadonlyArray<string>;
   claim?: {
+    readonly brand_profile_id: string;
     readonly claimed_at: number;
     readonly expires_at: number;
     readonly idempotency_key: string;
     readonly token: string;
   };
   completed_account_id?: string;
+  completed_brand_profile_id?: string;
   completed_idempotency_key?: string;
   cancelled_idempotency_key?: string;
   /**
@@ -86,7 +88,11 @@ export type ClaimSelectionResult =
       readonly status: "not_found";
     }
   | {
-      readonly code: "already_completed" | "pinned_account_mismatch" | "claim_active";
+      readonly code:
+        | "already_completed"
+        | "pinned_account_mismatch"
+        | "pinned_profile_mismatch"
+        | "claim_active";
       readonly message: string;
       readonly status: "conflict";
     }
@@ -122,7 +128,7 @@ export interface OAuthStateCoordinatorStub {
   claimSelection(
     selectionId: string,
     accountId: string,
-    actor: { organizationId: string; userId: string },
+    actor: { brandProfileId: string; organizationId: string; userId: string },
     idempotencyKey: string,
     leaseMs?: number,
   ): Promise<ClaimSelectionResult>;

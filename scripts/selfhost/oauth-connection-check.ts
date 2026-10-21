@@ -277,6 +277,13 @@ try {
   assert.equal(profileResponse.status, 201);
   const profileId = z.object({ id: z.uuid() }).parse(await profileResponse.json()).id;
   profiles.push(profileId);
+  const otherProfileResponse = await request("/api/v1/brand-profiles", "POST", {
+    name: `OAuth replay ${nonce}`,
+    color: "#b91c1c",
+  });
+  assert.equal(otherProfileResponse.status, 201);
+  const otherProfileId = z.object({ id: z.uuid() }).parse(await otherProfileResponse.json()).id;
+  profiles.push(otherProfileId);
   const persistedIds: string[] = [];
   const accountListSchema = z.object({
     accounts: z.array(
@@ -332,6 +339,13 @@ try {
     );
     assert.equal(replay.status, 204);
     assert.equal(replay.headers.get("Idempotency-Replayed"), "true");
+    const changedProfileReplay = await request(
+      `/api/v1/oauth-selections/${selectionId}/confirm`,
+      "POST",
+      { ...body, brand_profile_id: otherProfileId },
+      key,
+    );
+    assert.equal(changedProfileReplay.status, 409);
     tokenGeneration++;
     const reconnectId = await authorize(platform);
     const reconnect = await request(

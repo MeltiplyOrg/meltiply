@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { FocusScope } from "@radix-ui/react-focus-scope";
 import { X } from "lucide-react";
 import { SidebarNav, type WorkspaceView } from "@/components/primitives/sidebar-nav";
 import { Button } from "@meltiply/ui/button";
@@ -18,8 +19,9 @@ interface MobileNavigationSidebarProps {
  * left-edge layer: a plain panel translated off the left edge with a fading
  * scrim, not a shared drawer primitive. Escape, the scrim, a destination, or a
  * viewport that grows past the rail breakpoint dismisses it; opening moves focus
- * into the panel and closing returns it to the opener. The shell marks the rest
- * of the workspace inert while the layer is open, so focus stays in the panel.
+ * into the panel and closing returns it to the opener. Radix FocusScope wraps
+ * keyboard traversal and suspends containment while a nested menu owns focus;
+ * the shell separately makes the background workspace inert.
  */
 export function MobileNavigationSidebar({
   open,
@@ -73,36 +75,44 @@ export function MobileNavigationSidebar({
           open ? "opacity-100" : "opacity-0",
         )}
       />
-      <div
-        ref={panelRef}
-        id="mobile-navigation"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("Workspace navigation")}
-        tabIndex={-1}
-        inert={!open}
-        className={cn(
-          "mobile-navigation-panel absolute inset-y-0 left-0 flex w-80 max-w-full flex-col overflow-hidden border-r border-line bg-canvas pt-(--safe-area-top) pb-(--safe-area-bottom) shadow-overlay outline-none",
-          open ? "translate-x-0" : "-translate-x-full",
-        )}
+      <FocusScope
+        asChild
+        trapped={open}
+        loop={open}
+        onMountAutoFocus={(event) => event.preventDefault()}
+        onUnmountAutoFocus={(event) => event.preventDefault()}
       >
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="mobile-navigation-close absolute right-2 z-10 size-8"
-          aria-label={t("Close navigation menu")}
-          onClick={() => onOpenChange(false)}
+        <div
+          ref={panelRef}
+          id="mobile-navigation"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("Workspace navigation")}
+          tabIndex={-1}
+          inert={!open}
+          className={cn(
+            "mobile-navigation-panel absolute inset-y-0 left-0 flex w-80 max-w-full flex-col overflow-hidden border-r border-line bg-canvas pt-(--safe-area-top) pb-(--safe-area-bottom) shadow-overlay outline-none",
+            open ? "translate-x-0" : "-translate-x-full",
+          )}
         >
-          <X className="size-4" aria-hidden="true" />
-        </Button>
-        <SidebarNav
-          currentView={currentView}
-          onNavigate={onNavigate}
-          collapsible={false}
-          className="min-h-0 w-full border-r-0"
-        />
-      </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="mobile-navigation-close absolute right-2 z-10 size-8"
+            aria-label={t("Close navigation menu")}
+            onClick={() => onOpenChange(false)}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+          <SidebarNav
+            currentView={currentView}
+            onNavigate={onNavigate}
+            collapsible={false}
+            className="min-h-0 w-full border-r-0"
+          />
+        </div>
+      </FocusScope>
     </div>
   );
 }

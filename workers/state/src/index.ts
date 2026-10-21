@@ -477,14 +477,14 @@ export class OAuthStateCoordinator
 
   /**
    * Claims an owner-bound candidate before the original deadline; the default 30s lease excludes concurrent saves.
-   * The chosen account stays pinned across retries, and only its credential is read.
-   * Completed same-key requests replay only before the evidence deadline, independent of alarm delivery.
+   * The chosen account stays pinned across retries; an unreleased claim also fences its Brand Profile.
+   * Completed replay requires the same account, Brand Profile, and key before the evidence deadline.
    * Returns a credential claim, replay, conflict, or not-found; custom lease durations are milliseconds.
    */
   async claimSelection(
     selectionId: string,
     accountId: string,
-    actor: { organizationId: string; userId: string },
+    actor: { brandProfileId: string; organizationId: string; userId: string },
     idempotencyKey: string,
     leaseMs: number = 30_000,
   ): Promise<ClaimSelectionResult> {
@@ -512,6 +512,7 @@ export class OAuthStateCoordinator
       if (record.status === "completed") {
         if (
           record.completed_account_id === accountId &&
+          record.completed_brand_profile_id === actor.brandProfileId &&
           record.completed_idempotency_key === idempotencyKey
         ) {
           return { status: "replayed" } as const;
@@ -533,6 +534,14 @@ export class OAuthStateCoordinator
           code: "pinned_account_mismatch",
           message:
             "This selection was already confirmed for a different account. Restart authorization to choose another account.",
+          status: "conflict",
+        } as const;
+      }
+      if (record.claim && record.claim.brand_profile_id !== actor.brandProfileId) {
+        return {
+          code: "pinned_profile_mismatch",
+          message:
+            "This confirmation may still be saving to another Brand Profile. Retry the original assignment.",
           status: "conflict",
         } as const;
       }
@@ -566,6 +575,7 @@ export class OAuthStateCoordinator
       const updated: OAuthSelectionRecord = {
         ...record,
         claim: {
+          brand_profile_id: actor.brandProfileId,
           claimed_at: now,
           expires_at: now + leaseMs,
           idempotency_key: idempotencyKey,
@@ -607,6 +617,12 @@ export class OAuthStateCoordinator
       );
       if (!record) return false;
       if (record.claim?.token !== claimToken) return false;
+      if (
+        record.pinned_account_id !== accountId ||
+        record.claim.idempotency_key !== idempotencyKey
+      ) {
+        return false;
+      }
       const now = Date.now();
       const evidenceExpiry =
         record.evidence_expires_at ?? record.expires_at + SELECTION_EVIDENCE_RETENTION_MS;
@@ -617,6 +633,7 @@ export class OAuthStateCoordinator
         account_ids: [],
         claim: undefined,
         completed_account_id: accountId,
+        completed_brand_profile_id: record.claim.brand_profile_id,
         completed_idempotency_key: idempotencyKey,
         status: "completed",
       };

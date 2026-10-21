@@ -819,3 +819,97 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     }
   }
 });
+
+/**
+ * Uses real owner/profile/Channel state and controlled selection metadata to check
+ * reconnect eligibility and modal keyboard containment, including the portalled menu.
+ * Both palettes and desktop/phone assignment layouts use the production app surface.
+ */
+test("keeps navigation focus and reconnect assignment correct in both palettes", async ({
+  page,
+  request,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const workspace = await openIsolatedOwnerWorkspace(page);
+  const accountId = controlledProviderAccountId("threads");
+  await provisionControlledChannels(request, workspace.profileName, [
+    {
+      platform: "threads",
+      displayName: "Existing Threads",
+      providerUserId: accountId,
+    },
+  ]);
+  await page.goto("/channels");
+  await page.getByRole("button", { name: "Create Brand Profile", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Create Brand Profile", exact: true });
+  await editor.getByLabel("Profile name", { exact: true }).fill("Empty destination");
+  await editor.getByRole("button", { name: "Create profile", exact: true }).click();
+  await expect(editor).toBeHidden();
+  const ticket = "review-assignment-1234567890";
+  await page.route(`**/api/v1/oauth-selections/${ticket}`, (route) =>
+    route.fulfill({
+      json: {
+        id: ticket,
+        platform: "threads",
+        expires_at: new Date(Date.now() + 600_000).toISOString(),
+        accounts: [
+          { id: accountId, display_name: "Existing Threads", avatar_url: null, username: null },
+          {
+            id: "new-threads-account",
+            display_name: "New Threads",
+            avatar_url: null,
+            username: null,
+          },
+        ],
+      },
+    }),
+  );
+  for (const palette of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: palette });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/channels");
+    const opener = page.getByRole("button", { name: "Open navigation menu", exact: true });
+    await opener.click();
+    const navigation = page.getByRole("dialog", { name: "Workspace navigation", exact: true });
+    const close = navigation.getByRole("button", { name: "Close navigation menu", exact: true });
+    const account = navigation.getByRole("button", { name: "Account menu", exact: true });
+    await close.focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(account).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(close).toBeFocused();
+    await account.click();
+    await expect(page.getByRole("menu", { name: "Account menu", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(account).toBeFocused();
+    await expect(navigation).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath(`navigation-focus-${palette}.png`),
+      animations: "disabled",
+    });
+    await page.keyboard.press("Escape");
+    await expect(opener).toBeFocused();
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(
+        `/channels/connect?oauth=select_account&provider=threads&selection_id=${ticket}`,
+      );
+      await page.getByRole("radio", { name: /Existing Threads/ }).check();
+      await expect(page.getByRole("radio", { name: /Empty destination/ })).toHaveCount(0);
+      await page.getByText(workspace.profileName, { exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "Connect Channel", exact: true }),
+      ).toBeEnabled();
+      await page.screenshot({
+        path: testInfo.outputPath(`reconnect-assignment-${palette}-${width}.png`),
+        animations: "disabled",
+        fullPage: true,
+      });
+      await page.getByRole("radio", { name: /New Threads/ }).check();
+      await expect(page.getByRole("radio", { name: /Empty destination/ })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Connect Channel", exact: true }),
+      ).toBeDisabled();
+    }
+  }
+});

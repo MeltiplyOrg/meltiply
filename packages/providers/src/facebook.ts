@@ -583,9 +583,9 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
     /**
      * Exchanges the code and discovers publishable direct and business-assigned Pages.
      * With business_management consent, enumerates business users and their assigned_pages.
-     * Every edge is paginated with independent cursor tracking; Page ids are deduplicated.
-     * Bounds total Page records and discovery requests to 1,000, failing rather than
-     * returning a truncated list. Credentials remain explicit selection candidates.
+     * Every edge is paginated with independent cursor tracking. Up to four business-user
+     * edges run concurrently; results keep discovery order and Page ids are deduplicated.
+     * Bounds Page records and requests to 1,000; failures drain in-flight work before rejecting.
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthExchangeResult> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -636,24 +636,25 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
         return { accounts: [] };
       }
 
-      const eligible: OAuthConnection[] = [];
-      const identifiers = new Set<string>();
       const businessUsers = new Set<string>();
-      const discoveryPaths = ["me/accounts"];
-      if (grantedScopes.includes(businessDiscoveryScope)) {
-        discoveryPaths.push("me/business_users");
-      }
+      const businessPaths: string[] = [];
       let discoveredCount = 0;
       let requestCount = 0;
+      let failed = false;
 
-      // Business-user records append assigned-page edges to this bounded work list.
-      // Each edge owns its cursors: Meta may reuse a cursor across different edges.
-      for (let sourceIndex = 0; sourceIndex < discoveryPaths.length; sourceIndex += 1) {
-        const discoveryPath = discoveryPaths[sourceIndex]!;
+      /**
+       * Traverses one edge sequentially, validating cursors before each next request.
+       * Shared counters bound all workers; business-user discovery queues independent edges.
+       * Returns candidates in edge order without cross-edge deduplication, so response timing
+       * cannot change the retained Page token or the user's account ordering.
+       */
+      const discover = async (discoveryPath: string): Promise<OAuthConnection[]> => {
+        const candidates: OAuthConnection[] = [];
+        const pageIds = new Set<string>();
         const isBusinessUserList = discoveryPath === "me/business_users";
         const seenCursors = new Set<string>();
         let nextCursor: string | undefined;
-        while (true) {
+        while (!failed) {
           if (requestCount >= 1_000) throw oauthMalformed("page_pagination");
           requestCount += 1;
           const pagesUrl = new URL(`/${apiVersion}/${discoveryPath}`, graphOrigin);
@@ -690,7 +691,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
               if (!businessUsers.has(id)) {
                 businessUsers.add(id);
                 if (businessUsers.size > 1_000) throw oauthMalformed("business_user_list");
-                discoveryPaths.push(`${id}/assigned_pages`);
+                businessPaths.push(`${id}/assigned_pages`);
               }
               continue;
             }
@@ -712,9 +713,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
             ) {
               throw oauthMalformed("page_tasks");
             }
-            if (identifiers.has(id)) {
-              continue;
-            }
+            if (pageIds.has(id)) continue;
 
             const picture = record(page?.picture);
             const pictureData = record(picture?.data);
@@ -724,8 +723,8 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
             const username = facebookVanityHandle(page?.link);
 
             if (tasks.includes("CREATE_CONTENT") || tasks.includes("PROFILE_PLUS_CREATE_CONTENT")) {
-              identifiers.add(id);
-              eligible.push({
+              pageIds.add(id);
+              candidates.push({
                 accessToken,
                 account: {
                   ...(avatarUrl ? { avatarUrl } : {}),
@@ -814,8 +813,41 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
           seenCursors.add(resolvedCursor);
           nextCursor = resolvedCursor;
         }
-      }
+        return candidates;
+      };
 
+      const eligible = await discover("me/accounts");
+      if (grantedScopes.includes(businessDiscoveryScope)) {
+        await discover("me/business_users");
+      }
+      const businessResults: OAuthConnection[][] = new Array(businessPaths.length);
+      let nextEdge = 0;
+      // Each worker takes one independent edge at a time. A failed edge stops new
+      // work; all workers settle before the callback can return or reject.
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: Math.min(4, businessPaths.length) }, async () => {
+          while (!failed && nextEdge < businessPaths.length) {
+            const index = nextEdge++;
+            try {
+              businessResults[index] = await discover(businessPaths[index]!);
+            } catch (cause) {
+              failed = true;
+              throw cause;
+            }
+          }
+        }),
+      );
+      for (const outcome of outcomes) {
+        if (outcome.status === "rejected") throw outcome.reason;
+      }
+      const identifiers = new Set(eligible.map((connection) => connection.account.id));
+      for (const candidates of businessResults) {
+        for (const candidate of candidates) {
+          if (identifiers.has(candidate.account.id)) continue;
+          identifiers.add(candidate.account.id);
+          eligible.push(candidate);
+        }
+      }
       return { accounts: eligible };
     },
 

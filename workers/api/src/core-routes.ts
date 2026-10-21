@@ -1729,6 +1729,7 @@ export function registerCoreRoutes(
             selectionId,
             accountId,
             {
+              brandProfileId,
               organizationId: actor.workspace.id,
               userId: actor.userId,
             },

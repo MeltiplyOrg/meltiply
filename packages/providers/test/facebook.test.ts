@@ -629,6 +629,85 @@ describe("createFacebookAdapter", () => {
     ]);
   });
 
+  /** Independent business edges overlap, stay bounded, and retain discovery order despite response order. */
+  it("discovers independent business Page edges concurrently without unbounded fan-out", async () => {
+    let release!: () => void;
+    let started!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const overlapping = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let active = 0;
+    let peak = 0;
+    const users = Array.from({ length: 8 }, (_, index) => ({ id: `business-${index}` }));
+    const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
+      const url = new URL(input.toString());
+      if (url.pathname.endsWith("/oauth/access_token")) {
+        return json({
+          access_token: new URLSearchParams(String(init.body)).has("fb_exchange_token")
+            ? "long"
+            : "short",
+          expires_in: 3_600,
+          token_type: "bearer",
+        });
+      }
+      if (url.pathname.endsWith("/me/permissions")) {
+        return json({
+          data: [
+            { permission: "pages_show_list", status: "granted" },
+            { permission: "pages_read_engagement", status: "granted" },
+            { permission: "pages_manage_posts", status: "granted" },
+            { permission: "business_management", status: "granted" },
+          ],
+        });
+      }
+      if (url.pathname.endsWith("/me/accounts")) return json({ data: [] });
+      if (url.pathname.endsWith("/me/business_users")) return json({ data: users });
+      const id = url.pathname.split("/")[2];
+      if (!users.some((user) => user.id === id) || !url.pathname.endsWith("/assigned_pages")) {
+        throw new Error(`Unexpected discovery endpoint: ${url.pathname}`);
+      }
+      active++;
+      peak = Math.max(peak, active);
+      if (active >= 2) started();
+      try {
+        await held;
+        return json({
+          data: [
+            {
+              id: `page-${id}`,
+              name: `Page ${id}`,
+              access_token: `token-${id}`,
+              tasks: ["CREATE_CONTENT"],
+            },
+          ],
+        });
+      } finally {
+        active--;
+      }
+    });
+    const exchange = adapter(fetcher).exchangeAuthorizationCode!(context, {
+      code: "code",
+      codeVerifier: "unused",
+      redirectUri,
+    });
+    try {
+      await Promise.race([overlapping, exchange]);
+      expect(peak).toBeGreaterThan(1);
+      expect(peak).toBeLessThanOrEqual(4);
+    } finally {
+      release();
+    }
+    const result = await exchange;
+    if (!("accounts" in result)) throw new Error("Expected account selection");
+    expect(result.accounts.map((connection) => connection.account.id)).toEqual(
+      users.map((user) => `page-${user.id}`),
+    );
+    expect(peak).toBeLessThanOrEqual(4);
+  });
+
   it("traverses Graph API pagination safely using validated cursors and Graph origin", async () => {
     const paginated = sequence(
       () => json({ access_token: "short" }),

@@ -34,9 +34,10 @@ export interface ChannelAssignmentProps {
  * Resolves the authorized accounts and offers the Brand Profile choice.
  *
  * Account and Profile choices use native radios. Only connectable Profiles
- * appear in the bounded scrolling list, preserving workspace order. Reconnecting
- * the same account remains eligible. Confirmation supplies both ids; dismissal
- * discards the ticket.
+ * appear in the bounded scrolling list, preserving workspace order. An already
+ * connected account can only refresh its current owner; other accounts require
+ * an empty Platform slot.
+ * Confirmation supplies both ids; dismissal discards the ticket.
  */
 function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAssignmentProps) {
   const { t } = useI18n();
@@ -63,19 +64,20 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
     (selection?.accounts.length === 1 ? (selection.accounts[0]?.id ?? null) : null);
 
   const channelByProfile: Record<string, (typeof integrations)[number]> = {};
+  let existingOwnerId: string | undefined;
   if (platform) {
     for (const integration of integrations) {
       if (integration.providerIdentifier.toLowerCase() === platform.toLowerCase()) {
         channelByProfile[integration.brandProfileId] = integration;
+        if (integration.platformUserId === effectiveAccountId) {
+          existingOwnerId = integration.brandProfileId;
+        }
       }
     }
   }
   const isProfileAvailable = (profileId: string) => {
-    const existingChannel = channelByProfile[profileId];
-    return (
-      !existingChannel ||
-      (effectiveAccountId !== null && existingChannel.platformUserId === effectiveAccountId)
-    );
+    if (existingOwnerId) return profileId === existingOwnerId;
+    return !channelByProfile[profileId];
   };
   const eligibleProfiles = brandProfiles.filter((profile) => isProfileAvailable(profile.id));
   const selectedProfile =

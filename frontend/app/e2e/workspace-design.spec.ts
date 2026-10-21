@@ -74,7 +74,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       }),
     )
     .toBe(true);
-  const railGlide = page.locator("[data-glide-highlight]");
+  const railGlide = page.locator("aside:visible [data-glide-highlight]");
   const postsRow = page.locator("aside").getByRole("button", { name: "Posts", exact: true });
   const channelsRow = page.locator("aside").getByRole("button", { name: "Channels", exact: true });
   await page.mouse.move(1200, 500);

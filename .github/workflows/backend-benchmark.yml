@@ -129,7 +129,7 @@ jobs:
           candidate_args=""
           for file in benchmark-results/baseline-*.json; do baseline_args="$baseline_args --baseline $file"; done
           for file in benchmark-results/candidate-*.json; do candidate_args="$candidate_args --candidate $file"; done
-          (cd candidate && bun workers/api/bench/compare.mjs $baseline_args $candidate_args --out ../benchmark-results/comparison.md --json ../benchmark-results/comparison.json)
+          bun candidate/workers/api/bench/compare.mjs $baseline_args $candidate_args --out benchmark-results/comparison.md --json benchmark-results/comparison.json
       - name: Upload raw results and report
         if: always()
         uses: actions/upload-artifact@v7.0.2

@@ -51,8 +51,8 @@ Candidate: logic-optimize-39@bfc005fd624a
 
 ## Database and resource use
 
-| Workflow | Statements/op B | Statements/op C | DB ms/op B | DB ms/op C | Response bytes B | Response bytes C | CPU ms/op B | CPU ms/op C |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Workflow | Statements/op B | Statements/op C | DB ms/op B | DB ms/op C | Response bytes B | Response bytes C | CPU ms/op B | CPU ms/op C | Fixture setup ms total B | Fixture setup ms total C |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | analytics.summary.year | 1.00 | 1.00 | 6.70 | 2.85 | 681.00 | 681.00 | 5.61 | 5.67 | 0 | 0 |
 | assets.detail | 1.00 | 1.00 | 1.47 | 1.49 | 494.00 | 494.00 | 3.94 | 4.07 | 0 | 0 |
 | assets.upload-session.create | 12.00 | 12.00 | 20.71 | 20.73 | 1050.00 | 1050.00 | 7.07 | 7.23 | 300 | 304 |

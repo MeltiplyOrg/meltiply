@@ -28,7 +28,7 @@ avoidable work:
 3. Post deletion no longer serializes on a Workspace lock that protected no
    quota write, reuses the empty attachment/target collections it just deleted,
    and commits cancellation plus outbox cleanup in one statement. Per-Post
-   application statements fell from 15 to 11.
+   application statements fell from 15 to 12.
 4. The Posts UI deletes a batch with four bounded concurrent requests and one
    cache invalidation after the batch, instead of one request at a time with a
    Posts/Distributions/Calendar refetch after every success. On batch deletion
@@ -175,39 +175,39 @@ evidence behind changing the invalidation strategy, not just the concurrency.
 
 ### Database and resource use
 
-| Workflow                                         | Statements/op B | Statements/op C | DB ms/op B | DB ms/op C | Response bytes B | Response bytes C | CPU ms/op B | CPU ms/op C |
-| ------------------------------------------------ | --------------: | --------------: | ---------: | ---------: | ---------------: | ---------------: | ----------: | ----------: |
-| analytics.summary.year                           |            1.00 |            1.00 |       6.70 |       2.85 |           681.00 |           681.00 |        5.61 |        5.67 | 0    | 0    |
-| assets.detail                                    |            1.00 |            1.00 |       1.47 |       1.49 |           494.00 |           494.00 |        3.94 |        4.07 | 0    | 0    |
-| assets.upload-session.create                     |           12.00 |           12.00 |      20.71 |      20.73 |          1050.00 |          1050.00 |        7.07 |        7.23 | 300  | 304  |
-| assets.upload-session.detail                     |            5.00 |            4.00 |       5.88 |       4.47 |           820.00 |           820.00 |        6.04 |        5.57 | 0    | 0    |
-| calendar.range                                   |            1.00 |            1.00 |       3.62 |       3.71 |        117504.00 |        117504.00 |        7.99 |        8.23 | 0    | 0    |
-| distributions.list.page100                       |            1.00 |            1.00 |       2.97 |       3.12 |         73158.00 |         73158.00 |        6.25 |        6.86 | 0    | 0    |
-| inbox.list.page100                               |            1.00 |            1.00 |       2.56 |       2.50 |         54338.00 |         54338.00 |        5.44 |        5.42 | 0    | 0    |
-| posts.create.draft                               |           11.00 |            7.00 |      10.30 |       7.53 |           394.00 |           394.00 |        6.82 |        6.36 | 255  | 257  |
-| posts.delete.bounded4-per-item-refetch.batch1    |           22.00 |           19.00 |      54.71 |      53.72 |        795879.00 |        795879.00 |       40.88 |       40.82 | 132  | 141  |
-| posts.delete.bounded4-per-item-refetch.batch10   |           22.00 |           19.00 |     101.80 |      79.64 |       4803314.00 |       3211296.00 |       49.42 |       49.96 | 1013 | 989  |
-| posts.delete.bounded4-per-item-refetch.batch25   |           22.00 |           19.00 |      89.81 |      77.65 |       9596491.00 |       8264080.00 |       49.08 |       48.07 | 2467 | 2435 |
-| posts.delete.bounded4-per-item-refetch.batch5    |           22.00 |           19.00 |     123.20 |      75.29 |       2400285.00 |       1601070.00 |       43.42 |       44.53 | 527  | 523  |
-| posts.delete.bounded4-per-item-refetch.batch50   |           22.00 |           19.00 |      82.64 |      75.20 |      15324062.00 |      14023501.00 |       44.01 |       44.70 | 4815 | 4842 |
-| posts.delete.bounded4-single-refetch.batch1      |           22.00 |           19.00 |      51.81 |      51.33 |        795873.00 |        795873.00 |       37.89 |       39.28 | 138  | 128  |
-| posts.delete.bounded4-single-refetch.batch10     |           15.70 |           12.70 |      82.82 |      43.63 |        818511.00 |        818511.00 |       12.73 |       12.01 | 975  | 963  |
-| posts.delete.bounded4-single-refetch.batch25     |           15.28 |           12.28 |      88.10 |      39.94 |        856281.00 |        856281.00 |       10.60 |       10.36 | 2466 | 2460 |
-| posts.delete.bounded4-single-refetch.batch5      |           16.40 |           13.40 |      75.20 |      45.83 |        805921.00 |        805921.00 |       14.57 |       14.80 | 521  | 523  |
-| posts.delete.bounded4-single-refetch.batch50     |           15.14 |           12.14 |      88.62 |      39.45 |        919381.00 |        919381.00 |        9.20 |        8.74 | 4769 | 4744 |
-| posts.delete.sequential-per-item-refetch.batch1  |           22.00 |           19.00 |      62.20 |      61.13 |        795882.00 |        795882.00 |       48.83 |       49.89 | 156  | 172  |
-| posts.delete.sequential-per-item-refetch.batch10 |           22.00 |           19.00 |      53.26 |      54.14 |       8020393.00 |       8020393.00 |       42.01 |       42.66 | 1013 | 1005 |
-| posts.delete.sequential-per-item-refetch.batch25 |           22.00 |           19.00 |      54.42 |      56.09 |      18346697.00 |      18346697.00 |       45.24 |       44.99 | 2498 | 2426 |
-| posts.delete.sequential-per-item-refetch.batch5  |           22.00 |           19.00 |      53.23 |      53.03 |       3996425.00 |       3996425.00 |       41.54 |       43.57 | 516  | 510  |
-| posts.delete.sequential-per-item-refetch.batch50 |           22.00 |           19.00 |      53.10 |      51.51 |      29293367.00 |      29293367.00 |       40.71 |       40.51 | 4834 | 4834 |
-| posts.delete.sequential-single-refetch.batch1    |           22.00 |           19.00 |      54.91 |      53.48 |        795879.00 |        795879.00 |       42.69 |       44.45 | 138  | 152  |
-| posts.delete.sequential-single-refetch.batch10   |           15.70 |           12.70 |      26.46 |      26.51 |        818571.00 |        818571.00 |       11.98 |       11.47 | 985  | 969  |
-| posts.delete.sequential-single-refetch.batch25   |           15.28 |           12.28 |      24.56 |      23.99 |        856431.00 |        856431.00 |       10.12 |        8.26 | 2440 | 2451 |
-| posts.delete.sequential-single-refetch.batch5    |           16.40 |           13.40 |      29.10 |      28.62 |        805951.00 |        805951.00 |       14.35 |       13.43 | 524  | 533  |
-| posts.delete.sequential-single-refetch.batch50   |           15.14 |           12.14 |      24.14 |      22.61 |        919681.00 |        919681.00 |        8.56 |        8.22 | 4798 | 4790 |
-| posts.detail.published                           |            5.00 |            5.00 |       5.37 |       5.53 |          1798.00 |          1798.00 |        7.26 |        7.03 | 0    | 0    |
-| posts.list.page100                               |            5.00 |            5.00 |      11.70 |      11.07 |        278590.00 |        278590.00 |       17.84 |       17.62 | 0    | 0    |
-| posts.schedule.fanout20                          |           15.00 |           15.00 |      38.58 |      38.89 |         16967.00 |         16967.00 |       10.52 |       10.18 | 212  | 211  |
+| Workflow                                         | Statements/op B | Statements/op C | DB ms/op B | DB ms/op C | Response bytes B | Response bytes C | CPU ms/op B | CPU ms/op C | Fixture setup ms total B | Fixture setup ms total C |
+| ------------------------------------------------ | --------------: | --------------: | ---------: | ---------: | ---------------: | ---------------: | ----------: | ----------: | -----------------------: | -----------------------: |
+| analytics.summary.year                           |            1.00 |            1.00 |       6.70 |       2.85 |           681.00 |           681.00 |        5.61 |        5.67 |                        0 |                        0 |
+| assets.detail                                    |            1.00 |            1.00 |       1.47 |       1.49 |           494.00 |           494.00 |        3.94 |        4.07 |                        0 |                        0 |
+| assets.upload-session.create                     |           12.00 |           12.00 |      20.71 |      20.73 |          1050.00 |          1050.00 |        7.07 |        7.23 |                      300 |                      304 |
+| assets.upload-session.detail                     |            5.00 |            4.00 |       5.88 |       4.47 |           820.00 |           820.00 |        6.04 |        5.57 |                        0 |                        0 |
+| calendar.range                                   |            1.00 |            1.00 |       3.62 |       3.71 |        117504.00 |        117504.00 |        7.99 |        8.23 |                        0 |                        0 |
+| distributions.list.page100                       |            1.00 |            1.00 |       2.97 |       3.12 |         73158.00 |         73158.00 |        6.25 |        6.86 |                        0 |                        0 |
+| inbox.list.page100                               |            1.00 |            1.00 |       2.56 |       2.50 |         54338.00 |         54338.00 |        5.44 |        5.42 |                        0 |                        0 |
+| posts.create.draft                               |           11.00 |            7.00 |      10.30 |       7.53 |           394.00 |           394.00 |        6.82 |        6.36 |                      255 |                      257 |
+| posts.delete.bounded4-per-item-refetch.batch1    |           22.00 |           19.00 |      54.71 |      53.72 |        795879.00 |        795879.00 |       40.88 |       40.82 |                      132 |                      141 |
+| posts.delete.bounded4-per-item-refetch.batch10   |           22.00 |           19.00 |     101.80 |      79.64 |       4803314.00 |       3211296.00 |       49.42 |       49.96 |                     1013 |                      989 |
+| posts.delete.bounded4-per-item-refetch.batch25   |           22.00 |           19.00 |      89.81 |      77.65 |       9596491.00 |       8264080.00 |       49.08 |       48.07 |                     2467 |                     2435 |
+| posts.delete.bounded4-per-item-refetch.batch5    |           22.00 |           19.00 |     123.20 |      75.29 |       2400285.00 |       1601070.00 |       43.42 |       44.53 |                      527 |                      523 |
+| posts.delete.bounded4-per-item-refetch.batch50   |           22.00 |           19.00 |      82.64 |      75.20 |      15324062.00 |      14023501.00 |       44.01 |       44.70 |                     4815 |                     4842 |
+| posts.delete.bounded4-single-refetch.batch1      |           22.00 |           19.00 |      51.81 |      51.33 |        795873.00 |        795873.00 |       37.89 |       39.28 |                      138 |                      128 |
+| posts.delete.bounded4-single-refetch.batch10     |           15.70 |           12.70 |      82.82 |      43.63 |        818511.00 |        818511.00 |       12.73 |       12.01 |                      975 |                      963 |
+| posts.delete.bounded4-single-refetch.batch25     |           15.28 |           12.28 |      88.10 |      39.94 |        856281.00 |        856281.00 |       10.60 |       10.36 |                     2466 |                     2460 |
+| posts.delete.bounded4-single-refetch.batch5      |           16.40 |           13.40 |      75.20 |      45.83 |        805921.00 |        805921.00 |       14.57 |       14.80 |                      521 |                      523 |
+| posts.delete.bounded4-single-refetch.batch50     |           15.14 |           12.14 |      88.62 |      39.45 |        919381.00 |        919381.00 |        9.20 |        8.74 |                     4769 |                     4744 |
+| posts.delete.sequential-per-item-refetch.batch1  |           22.00 |           19.00 |      62.20 |      61.13 |        795882.00 |        795882.00 |       48.83 |       49.89 |                      156 |                      172 |
+| posts.delete.sequential-per-item-refetch.batch10 |           22.00 |           19.00 |      53.26 |      54.14 |       8020393.00 |       8020393.00 |       42.01 |       42.66 |                     1013 |                     1005 |
+| posts.delete.sequential-per-item-refetch.batch25 |           22.00 |           19.00 |      54.42 |      56.09 |      18346697.00 |      18346697.00 |       45.24 |       44.99 |                     2498 |                     2426 |
+| posts.delete.sequential-per-item-refetch.batch5  |           22.00 |           19.00 |      53.23 |      53.03 |       3996425.00 |       3996425.00 |       41.54 |       43.57 |                      516 |                      510 |
+| posts.delete.sequential-per-item-refetch.batch50 |           22.00 |           19.00 |      53.10 |      51.51 |      29293367.00 |      29293367.00 |       40.71 |       40.51 |                     4834 |                     4834 |
+| posts.delete.sequential-single-refetch.batch1    |           22.00 |           19.00 |      54.91 |      53.48 |        795879.00 |        795879.00 |       42.69 |       44.45 |                      138 |                      152 |
+| posts.delete.sequential-single-refetch.batch10   |           15.70 |           12.70 |      26.46 |      26.51 |        818571.00 |        818571.00 |       11.98 |       11.47 |                      985 |                      969 |
+| posts.delete.sequential-single-refetch.batch25   |           15.28 |           12.28 |      24.56 |      23.99 |        856431.00 |        856431.00 |       10.12 |        8.26 |                     2440 |                     2451 |
+| posts.delete.sequential-single-refetch.batch5    |           16.40 |           13.40 |      29.10 |      28.62 |        805951.00 |        805951.00 |       14.35 |       13.43 |                      524 |                      533 |
+| posts.delete.sequential-single-refetch.batch50   |           15.14 |           12.14 |      24.14 |      22.61 |        919681.00 |        919681.00 |        8.56 |        8.22 |                     4798 |                     4790 |
+| posts.detail.published                           |            5.00 |            5.00 |       5.37 |       5.53 |          1798.00 |          1798.00 |        7.26 |        7.03 |                        0 |                        0 |
+| posts.list.page100                               |            5.00 |            5.00 |      11.70 |      11.07 |        278590.00 |        278590.00 |       17.84 |       17.62 |                        0 |                        0 |
+| posts.schedule.fanout20                          |           15.00 |           15.00 |      38.58 |      38.89 |         16967.00 |         16967.00 |       10.52 |       10.18 |                      212 |                      211 |
 
 ## Change analysis
 

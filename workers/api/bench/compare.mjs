@@ -180,9 +180,9 @@ for (const row of rows) {
 markdown.push("");
 markdown.push("## Database and resource use", "");
 markdown.push(
-  "| Workflow | Statements/op B | Statements/op C | DB ms/op B | DB ms/op C | Response bytes B | Response bytes C | CPU ms/op B | CPU ms/op C |",
+  "| Workflow | Statements/op B | Statements/op C | DB ms/op B | DB ms/op C | Response bytes B | Response bytes C | CPU ms/op B | CPU ms/op C | Fixture setup ms total B | Fixture setup ms total C |",
 );
-markdown.push("|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+markdown.push("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
 for (const row of rows) {
   if (row.unavailable) {
     markdown.push(`| ${row.name} | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |`);

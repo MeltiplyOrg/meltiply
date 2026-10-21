@@ -438,13 +438,13 @@ export function useDeletePost(scope: SessionScope) {
 }
 
 /** One failed deletion in a bulk batch, kept so the caller can retry it. */
-export interface BulkDeleteFailure {
+interface BulkDeleteFailure {
   id: string;
   message: string;
 }
 
 /** Result of one confirmed bulk deletion: successful identities and retryable failures. */
-export interface BulkDeleteOutcome {
+interface BulkDeleteOutcome {
   deletedIds: string[];
   failed: BulkDeleteFailure[];
 }

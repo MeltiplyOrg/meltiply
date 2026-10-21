@@ -17,7 +17,7 @@ export const AUDIT_PAGE_SIZE = 100;
  * the filter matches the stored value exactly; an unknown future action remains
  * visible in the log and reachable through search until this list is extended.
  */
-export const AUDIT_ACTIONS = [
+const AUDIT_ACTIONS = [
   "account.deleted",
   "account.reactivated",
   "account.suspended",
@@ -38,7 +38,7 @@ export const AUDIT_ACTIONS = [
 ] as const;
 
 /** Target kinds stored on an Audit entry. */
-export const AUDIT_TARGET_TYPES = [
+const AUDIT_TARGET_TYPES = [
   "brand_profile",
   "channel",
   "invitation",

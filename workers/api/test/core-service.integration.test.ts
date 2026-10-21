@@ -1,5 +1,6 @@
 import {
   type DatabaseError,
+  MailSubmissionError,
   StorageUnavailableError,
   type PlatformCapability,
   COMMUNITY_LIMITS,
@@ -6660,9 +6661,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       method: "GET",
     });
     expect(members.status).toBe(200);
-    const memberBody = (await members.json()) as {
+    const memberBody = await members.json<{
       members: { email: string; is_installation_owner: boolean; role: string }[];
-    };
+    }>();
     expect(memberBody.members).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -6694,7 +6695,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     });
     expect(invited.status).toBe(201);
     expect(sent).toHaveLength(1);
-    const invitation = (await invited.json()) as { id: string; role: string; status: string };
+    const invitation = await invited.json<{ id: string; role: string; status: string }>();
     expect(invitation).toMatchObject({ role: "editor", status: "pending" });
 
     const pending = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
@@ -6758,7 +6759,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       method: "GET",
     });
     expect(audit.status).toBe(200);
-    const auditBody = (await audit.json()) as { entries: { action: string }[] };
+    const auditBody = await audit.json<{ entries: { action: string }[] }>();
     expect(auditBody.entries.map((entry) => entry.action)).toEqual(
       expect.arrayContaining([
         "invitation.created",
@@ -6804,7 +6805,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           method: "POST",
         });
         expect(response.status).toBe(201);
-        const body = (await response.json()) as { email: string; id: string };
+        const body = await response.json<{ email: string; id: string }>();
         created.push({ email: body.email, id: body.id });
       }
 
@@ -6832,7 +6833,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         method: "POST",
       });
       expect(replacement.status).toBe(201);
-      const replacementBody = (await replacement.json()) as { id: string };
+      const replacementBody = await replacement.json<{ id: string }>();
       created.push({ email: emailFor(6), id: replacementBody.id });
 
       const renew = await request(
@@ -6849,6 +6850,63 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         client.query("DELETE FROM workspace_invitations WHERE email LIKE $1", [
           `seat-limit-${run}-%`,
         ]),
+      );
+    }
+  });
+
+  it("reports a resend mail failure and revokes the undeliverable invitation", async () => {
+    const sharedWorkspaceId = "20000000-0000-4000-8000-000000000005";
+    const run = lifecycleRunToken();
+    const email = `resend-failure-${run}@meltiply.local`;
+    const ownerIdentity = jwtIdentity({
+      email: "alpha@meltiply.local",
+      id: alpha.subject,
+      name: "Alpha Creator",
+    });
+    let failSubmission = false;
+    const { request } = lifecycleInvitationHarness({
+      identities: { owner: ownerIdentity },
+      send: () =>
+        failSubmission
+          ? Effect.fail(
+              new MailSubmissionError({
+                classification: "rejected",
+                message: "The mail service rejected the submission.",
+              }),
+            )
+          : Effect.succeed({ submissionId: "test-submission-id" }),
+    });
+
+    const created = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
+      body: JSON.stringify({ email, role: "viewer" }),
+      headers: { "Idempotency-Key": `resend-failure-create-${run}` },
+      method: "POST",
+    });
+    expect(created.status).toBe(201);
+    const invitationId = (await created.json<{ id: string }>()).id;
+
+    try {
+      failSubmission = true;
+      const resend = await request(
+        `/api/v1/workspaces/${sharedWorkspaceId}/invitations/${invitationId}/resend`,
+        {
+          headers: { "Idempotency-Key": `resend-failure-retry-${run}` },
+          method: "POST",
+        },
+      );
+      expect(resend.status).toBe(502);
+      expect(errorCodeFrom(await resend.json())).toBe("email_delivery_failed");
+
+      const revoked = await systemTransaction(env, (client) =>
+        client.query<{ revoked_at: Date | string | null }>(
+          "SELECT revoked_at FROM workspace_invitations WHERE id = $1",
+          [invitationId],
+        ),
+      );
+      expect(revoked.rows[0]?.revoked_at).not.toBeNull();
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query("DELETE FROM workspace_invitations WHERE id = $1", [invitationId]),
       );
     }
   });
@@ -6938,7 +6996,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       "invitee",
     );
     expect(accepted.status).toBe(200);
-    const acceptedBody = (await accepted.json()) as { member: { user_id: string } };
+    const acceptedBody = await accepted.json<{ member: { user_id: string } }>();
     const memberId = acceptedBody.member.user_id;
 
     const suspended = await request(`/api/v1/installation/members/${memberId}/suspend`, {

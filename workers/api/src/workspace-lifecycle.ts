@@ -496,6 +496,72 @@ function invitationLink(env: ApiWorkerEnv, token: string): string {
 }
 
 /**
+ * Submits one invitation email and owns the shared delivery-failure policy.
+ *
+ * Creation and resend both rotate or mint a single-use token before sending.
+ * A definitively rejected or unavailable submission therefore leaves an
+ * undeliverable invitation holding a Seat, so those rows are revoked while an
+ * `ambiguous` outcome stays pending (the provider may already have accepted it).
+ * The caller's request fails with the typed mail error so the API never reports
+ * an undelivered invitation as successful.
+ *
+ * @param env - Worker environment bindings used for the revocation transaction.
+ * @param invitation - Invitation whose id and recipient identify the message.
+ * @param link - Absolute acceptance link carrying the raw token.
+ * @param workspaceName - Workspace display name for the message copy.
+ * @returns Effect resolving after the mail service accepts the submission.
+ * @throws {CoreApiError} 503 `email_unavailable` or 502 `email_delivery_failed`.
+ */
+function submitInvitationEffect(
+  env: ApiWorkerEnv,
+  invitation: Pick<WorkspaceInvitationBody, "email" | "id">,
+  link: string,
+  workspaceName: string,
+): Effect.Effect<void, CoreApiError, MailService> {
+  return Effect.gen(function* () {
+    const mail = yield* MailService;
+    yield* mail.send(renderInvitationMessage({ link, to: invitation.email, workspaceName })).pipe(
+      Effect.catchTag("MailSubmissionError", (failure) =>
+        Effect.gen(function* () {
+          yield* Effect.logWarning("invitation_email_submission_failed").pipe(
+            Effect.annotateLogs({
+              invitation_id: invitation.id,
+              mail_classification: failure.classification,
+              mail_error: failure.message,
+            }),
+          );
+          if (failure.classification !== "ambiguous") {
+            yield* withSystemTransactionEffect(env, (client) =>
+              client.query(
+                `UPDATE workspace_invitations
+                   SET revoked_at = now(), updated_at = now()
+                   WHERE id = $1 AND accepted_at IS NULL`,
+                [invitation.id],
+              ),
+            ).pipe(Effect.ignore);
+          }
+          return yield* Effect.fail(
+            failure.classification === "unavailable"
+              ? new CoreApiError(
+                  503,
+                  "email_unavailable",
+                  "Invitation email delivery is not configured.",
+                )
+              : new CoreApiError(
+                  502,
+                  "email_delivery_failed",
+                  failure.classification === "ambiguous"
+                    ? "The invitation email delivery outcome could not be confirmed."
+                    : "The invitation email could not be delivered.",
+                ),
+          );
+        }),
+      ),
+    );
+  });
+}
+
+/**
  * Registers the native Workspace lifecycle routes on the API router.
  *
  * @param app - Hono application instance.
@@ -775,54 +841,12 @@ export function registerWorkspaceLifecycleRoutes(
         );
         if (!result.replayed) {
           const link = yield* fromPromise(() => invitationLink(c.env, result.token ?? ""));
-          const invitation = result.body as WorkspaceInvitationBody;
-          const mail = yield* MailService;
-          yield* mail
-            .send(
-              renderInvitationMessage({
-                link,
-                to: email,
-                workspaceName: result.workspaceName ?? "your team",
-              }),
-            )
-            .pipe(
-              Effect.catchTag("MailSubmissionError", (failure) =>
-                Effect.gen(function* () {
-                  yield* Effect.logWarning("invitation_email_submission_failed").pipe(
-                    Effect.annotateLogs({
-                      invitation_id: invitation.id,
-                      mail_classification: failure.classification,
-                      mail_error: failure.message,
-                    }),
-                  );
-                  if (failure.classification !== "ambiguous") {
-                    yield* withSystemTransactionEffect(c.env, (client) =>
-                      client.query(
-                        `UPDATE workspace_invitations
-                         SET revoked_at = now(), updated_at = now()
-                         WHERE id = $1 AND accepted_at IS NULL`,
-                        [invitation.id],
-                      ),
-                    ).pipe(Effect.ignore);
-                  }
-                  return yield* Effect.fail(
-                    failure.classification === "unavailable"
-                      ? new CoreApiError(
-                          503,
-                          "email_unavailable",
-                          "Invitation email delivery is not configured.",
-                        )
-                      : new CoreApiError(
-                          502,
-                          "email_delivery_failed",
-                          failure.classification === "ambiguous"
-                            ? "The invitation email delivery outcome could not be confirmed."
-                            : "The invitation email could not be delivered.",
-                        ),
-                  );
-                }),
-              ),
-            );
+          yield* submitInvitationEffect(
+            c.env,
+            result.body as WorkspaceInvitationBody,
+            link,
+            result.workspaceName ?? "your team",
+          );
         }
         return jsonResponse(result.body, result.status, requestId(c), {
           ...idempotencyHeaders(result.replayed),
@@ -923,15 +947,12 @@ export function registerWorkspaceLifecycleRoutes(
             }),
         );
         if (!result.replayed) {
-          const invitation = result.body as WorkspaceInvitationBody;
           const link = yield* fromPromise(() => invitationLink(c.env, result.token ?? ""));
-          const mail = yield* MailService;
-          yield* mail.send(
-            renderInvitationMessage({
-              link,
-              to: invitation.email,
-              workspaceName: result.workspaceName ?? "your team",
-            }),
+          yield* submitInvitationEffect(
+            c.env,
+            result.body as WorkspaceInvitationBody,
+            link,
+            result.workspaceName ?? "your team",
           );
         }
         return jsonResponse(result.body, result.status, requestId(c), {

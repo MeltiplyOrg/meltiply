@@ -80,22 +80,27 @@ _Avoid_: organization, org, team, tenant, account
 The single account that bootstrapped the installation and holds
 installation-level authority: transferring ownership and suspending,
 reactivating, or deleting accounts. Ownership is separate from Workspace
-roles; the Owner always holds the Admin role in the shared Workspace.
+roles; the Owner always holds the Admin role in the shared Workspace. Content
+access follows ordinary Workspace membership; an Installation Owner is not an
+Operator.
 _Avoid_: superadmin, root, owner account, personal workspace owner
 
 **Workspace member**:
-An account with an active membership in the shared Workspace.
+An account with one active membership and exactly one role in the shared
+Workspace.
 _Avoid_: user, seat, teammate
 
 **Workspace Admin**:
 The Workspace role that manages Brand Profiles, Channels, members, invitations,
-settings, and Audit. Admins cannot assign or modify another Admin.
+settings, and Audit, in addition to acting on its content. Admins cannot assign
+or modify another Admin.
 _Avoid_: owner, superadmin
 
 **Editor**:
 The Workspace role that creates and edits Posts, uploads Assets, schedules and
 publishes, retries or cancels Distributions, and replies to Comments. Editors
-read Channels and Brand Profiles but cannot configure them.
+read Channels and Brand Profiles but cannot configure them or manage members,
+settings, or Audit.
 _Avoid_: member, creator, writer
 
 **Viewer**:
@@ -105,7 +110,8 @@ _Avoid_: guest, read-only member
 
 **Invitation**:
 A single-use, seven-day, hashed-token offer to join the shared Workspace at a
-specific email address and role. Pending invitations reserve Seats.
+specific email address and role. Only the invited address may accept it, and
+pending invitations reserve Seats.
 _Avoid_: invite, request, onboarding link
 
 **Seat**:
@@ -128,52 +134,6 @@ _Avoid_: log line, activity, event
 > documentation. Below the persistence seam the established internal names are
 > `org_id` / `org_role`; native Workspace membership supplies their values.
 > This seam is intentionally internal rather than an external identity-provider contract.
-
-**Installation Owner**:
-The person who owns a Meltiply installation and administers its user accounts,
-invitations, and Workspace creation. Content access follows ordinary Workspace
-membership; an Installation Owner is not an Operator.
-_Avoid_: superadmin, admin, owner
-
-**Workspace member**:
-A person with an active membership in a Workspace. Every member holds exactly one
-Workspace role.
-_Avoid_: user, seat, collaborator
-
-**Workspace Admin**:
-A Workspace member who manages the Workspace's members, settings, Brand Profiles,
-and Channels, in addition to acting on its content.
-_Avoid_: owner, manager, operator
-
-**Editor**:
-A Workspace member who creates, edits, schedules, and publishes content and
-replies to Inbox activity, but does not manage members, settings, Brand Profiles,
-or Channels.
-_Avoid_: creator, publisher, contributor
-
-**Viewer**:
-A Workspace member with read-only access to the Workspace's content and Channels.
-_Avoid_: guest, observer, read-only user
-
-**Invitation**:
-An email-bound offer to become a Workspace member with a specific role. Only the
-invited address may accept it.
-_Avoid_: invite link, request, signup
-
-**Seat**:
-One of the installation's ten active Workspace member places. A pending
-Invitation reserves a Seat; a suspended member releases one.
-_Avoid_: license, slot
-
-**Suspended member**:
-A Workspace member whose sign-in is blocked and whose Seat is released while
-their data and history remain.
-_Avoid_: deleted user, inactive account
-
-**Audit entry**:
-A durable record of an administrative action, including its actor, target, and
-what changed.
-_Avoid_: log line, event
 
 **Brand Profile**:
 A named, color-labelled identity within one Workspace that can carry an optional short

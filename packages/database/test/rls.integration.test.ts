@@ -311,6 +311,81 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
     expect(Number(viewerRead.rows[0]?.count)).toBeGreaterThanOrEqual(0);
   });
 
+  it("requires admin deletion for a Post with published distributions", async () => {
+    const sharedOrgId = "20000000-0000-4000-8000-000000000005";
+    const gammaSubject = "auth_user_local_gamma";
+    const publishedPostId = crypto.randomUUID();
+    const draftPostId = crypto.randomUUID();
+    const brandProfileId = "c0000000-0000-4000-8000-000000000001";
+
+    const asEditor = <A, E>(operation: (client: EffectTransactionClient) => Effect.Effect<A, E>) =>
+      withAuthenticatedTransactionEffect(
+        pool,
+        { org_id: sharedOrgId, sub: gammaSubject },
+        operation,
+      );
+
+    await Effect.runPromise(
+      asEditor((client) =>
+        client.query(
+          `INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status)
+           VALUES ($1, $2, $3, 'RLS published post', 'Published history', 'active'),
+                  ($4, $2, $3, 'RLS draft post', 'Draft history', 'active')`,
+          [publishedPostId, sharedOrgId, brandProfileId, draftPostId],
+        ),
+      ),
+    );
+    await Effect.runPromise(
+      asEditor((client) =>
+        client.query(
+          `INSERT INTO distributions (
+             org_id, brand_profile_id, post_id, platform, status, published_at
+           )
+           VALUES ($1, $2, $3, 'youtube', 'published', now())`,
+          [sharedOrgId, brandProfileId, publishedPostId],
+        ),
+      ),
+    );
+
+    try {
+      // RLS hides the published Post from DELETE, so the statement affects no
+      // rows instead of raising; the row and its distribution must survive.
+      const editorDelete = await Effect.runPromise(
+        asEditor((client) =>
+          client.query<{ id: string }>("DELETE FROM posts WHERE id = $1 RETURNING id", [
+            publishedPostId,
+          ]),
+        ),
+      );
+      expect(editorDelete.rows).toEqual([]);
+
+      const survivor = await Effect.runPromise(
+        asEditor((client) =>
+          client.query<{ id: string }>("SELECT id FROM posts WHERE id = $1", [publishedPostId]),
+        ),
+      );
+      expect(survivor.rows).toEqual([{ id: publishedPostId }]);
+
+      // Drafts without published history remain deletable by Editors.
+      const draftDelete = await Effect.runPromise(
+        asEditor((client) =>
+          client.query<{ id: string }>("DELETE FROM posts WHERE id = $1 RETURNING id", [
+            draftPostId,
+          ]),
+        ),
+      );
+      expect(draftDelete.rows).toEqual([{ id: draftPostId }]);
+    } finally {
+      await Effect.runPromise(
+        withAuthenticatedTransactionEffect(
+          pool,
+          { org_id: sharedOrgId, sub: alphaSubject },
+          (client) => client.query("DELETE FROM posts WHERE id = $1", [publishedPostId]),
+        ),
+      );
+    }
+  });
+
   it("destroys connections after use when destroy-after-use is enabled", async () => {
     // Pool.query uses connect(callback) internally; it must finish and release
     // capacity before Promise-based transaction checkouts use the same pool.

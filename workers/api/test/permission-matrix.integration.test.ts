@@ -602,6 +602,31 @@ describe("role permission matrix", () => {
     expect(errorCode(await selfTransfer.json())).toBe("owner_transfer_invalid");
   });
 
+  it("rejects malformed suspension reasons as validation errors", async () => {
+    for (const [reason, label] of [
+      [123, "non-string"],
+      ["x".repeat(501), "too-long"],
+    ] as const) {
+      const response = await request(
+        `/api/v1/installation/members/${editorId}/suspend`,
+        {
+          body: JSON.stringify({ reason }),
+          headers: { "Idempotency-Key": `invalid-suspend-${label}-${crypto.randomUUID()}` },
+          method: "POST",
+        },
+        "owner",
+      );
+      expect(response.status, label).toBe(400);
+      expect(errorCode(await response.json()), label).toBe("validation_error");
+    }
+
+    const member = await systemPoolFor(env).query<{ suspended_at: Date | string | null }>(
+      "SELECT suspended_at FROM users WHERE id = $1",
+      [editorId],
+    );
+    expect(member.rows[0]?.suspended_at).toBeNull();
+  });
+
   it("validates Audit pagination and repairs an Audit entry on idempotent replay", async () => {
     for (const query of ["limit=1.5", "offset=Infinity", "limit=0"]) {
       const response = await request(
@@ -678,22 +703,22 @@ describe("role permission matrix", () => {
 
     try {
       const scoped = await request(
-        auditPath({ action: "brand_profile.created", limit: "100", q: created[0]!.id }),
+        auditPath({ action: "brand_profile.created", limit: "100", q: created[0].id }),
         { method: "GET" },
         "owner",
       );
       expect(scoped.status).toBe(200);
-      const scopedBody = (await scoped.json()) as {
+      const scopedBody = await scoped.json<{
         entries: { action: string; target_id: string; target_type: string }[];
         has_more: boolean;
         limit: number;
         offset: number;
-      };
+      }>();
       expect(scopedBody).toMatchObject({ has_more: false, limit: 100, offset: 0 });
       expect(scopedBody.entries).toHaveLength(1);
       expect(scopedBody.entries[0]).toMatchObject({
         action: "brand_profile.created",
-        target_id: created[0]!.id,
+        target_id: created[0].id,
         target_type: "brand_profile",
       });
 
@@ -703,10 +728,10 @@ describe("role permission matrix", () => {
         "owner",
       );
       expect(firstPage.status).toBe(200);
-      const firstPageBody = (await firstPage.json()) as {
+      const firstPageBody = await firstPage.json<{
         entries: { id: string }[];
         has_more: boolean;
-      };
+      }>();
       expect(firstPageBody.entries).toHaveLength(2);
       expect(firstPageBody.has_more).toBe(true);
 
@@ -716,13 +741,13 @@ describe("role permission matrix", () => {
         "owner",
       );
       expect(secondPage.status).toBe(200);
-      const secondPageBody = (await secondPage.json()) as { entries: { id: string }[] };
+      const secondPageBody = await secondPage.json<{ entries: { id: string }[] }>();
       expect(secondPageBody.entries.length).toBeGreaterThan(0);
       const firstPageIds = new Set(firstPageBody.entries.map((entry) => entry.id));
       expect(secondPageBody.entries.some((entry) => firstPageIds.has(entry.id))).toBe(false);
 
       const otherTarget = await request(
-        auditPath({ q: created[0]!.id, target_type: "channel" }),
+        auditPath({ q: created[0].id, target_type: "channel" }),
         { method: "GET" },
         "owner",
       );

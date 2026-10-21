@@ -394,7 +394,17 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const body = yield* fromPromise(() => jsonBody(c, true));
         yield* fromPromise(() => onlyKeys(body, ["reason"]));
-        const reason = optionalStringField(body, "reason") ?? null;
+        const reason = yield* fromPromise(() => {
+          const value = optionalStringField(body, "reason");
+          if (value !== undefined && value !== null && [...value].length > 500) {
+            throw new CoreApiError(
+              400,
+              "validation_error",
+              "reason must be at most 500 characters.",
+            );
+          }
+          return value ?? null;
+        });
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(
           JSON.stringify({ memberId, reason }),
@@ -646,7 +656,19 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
               const owner = yield* client.query<{ id: string }>(
                 `SELECT id FROM users WHERE installation_owner FOR UPDATE`,
               );
-              const currentOwnerId = owner.rows[0]?.id ?? actor.userId;
+              const currentOwnerId = owner.rows[0]?.id;
+              // Ownership may have moved while reauthentication was in flight.
+              // Only the account that still owns the installation may transfer
+              // it, so a stale request cannot overwrite a completed transfer.
+              if (currentOwnerId !== actor.userId) {
+                return yield* Effect.fail(
+                  new CoreApiError(
+                    403,
+                    "installation_owner_required",
+                    "The installation owner role is required.",
+                  ),
+                );
+              }
               yield* client.query(
                 `UPDATE users SET installation_owner = FALSE, updated_at = now()
                  WHERE id = $1`,

@@ -22,6 +22,12 @@ function passwordFrom(value: unknown): string | undefined {
   return undefined;
 }
 
+const reauthGate = vi.hoisted(() => ({
+  hold: false,
+  release: undefined as (() => void) | undefined,
+  started: undefined as (() => void) | undefined,
+}));
+
 vi.mock("../src/better-auth", async (importOriginal) => {
   const actual = await importOriginal<typeof BetterAuthModule>();
   return {
@@ -29,6 +35,13 @@ vi.mock("../src/better-auth", async (importOriginal) => {
     betterAuthFor: async () => ({
       handler: async (request: Request) => {
         const password = passwordFrom(await request.json());
+        if (reauthGate.hold) {
+          const gate = new Promise<void>((resolve) => {
+            reauthGate.release = resolve;
+          });
+          reauthGate.started?.();
+          await gate;
+        }
         return password === "MeltiplyLocal1!"
           ? Response.json({ token: `reauth-${crypto.randomUUID()}` })
           : new Response(JSON.stringify({ message: "invalid credentials" }), {
@@ -260,6 +273,88 @@ describe("installation ownership transfer", () => {
         await systemPoolFor(env).query(
           "DELETE FROM workspace_audit_entries WHERE request_id = ANY($1::text[])",
           [requestIds],
+        );
+      }
+    }
+  });
+
+  it("rejects a transfer whose owner authority changed during reauthentication", async () => {
+    const gammaId = "10000000-0000-4000-8000-000000000003";
+    const keyPrefix = "stale-ownership-transfer-test-";
+    let firstRequestId: string | null = null;
+
+    await systemPoolFor(env).query(
+      `UPDATE org_members SET role = 'admin', updated_at = now()
+       WHERE org_id = $1 AND user_id = $2`,
+      [sharedWorkspaceId, gammaId],
+    );
+    reauthGate.hold = true;
+    try {
+      const staleStarted = new Promise<void>((resolve) => {
+        reauthGate.started = resolve;
+      });
+      const stale = request(
+        "/api/v1/installation/ownership-transfer",
+        {
+          body: JSON.stringify({ password: "MeltiplyLocal1!", target_user_id: gammaId }),
+          headers: { "Idempotency-Key": `${keyPrefix}stale` },
+          method: "POST",
+        },
+        "owner",
+      );
+      await staleStarted;
+      // Only the stale request is held; later sign-ins (the first transfer)
+      // must proceed normally.
+      reauthGate.hold = false;
+
+      // The first transfer completes while the stale request is waiting in
+      // reauthentication. Releasing it must not let the former Owner transfer
+      // ownership a second time.
+      const first = await request(
+        "/api/v1/installation/ownership-transfer",
+        {
+          body: JSON.stringify({ password: "MeltiplyLocal1!", target_user_id: adminId }),
+          headers: { "Idempotency-Key": `${keyPrefix}first` },
+          method: "POST",
+        },
+        "owner",
+      );
+      expect(first.status).toBe(200);
+      firstRequestId = first.headers.get("X-Request-ID");
+
+      reauthGate.release?.();
+      const staleResponse = await stale;
+      expect(staleResponse.status).toBe(403);
+      await expect(staleResponse.json()).resolves.toMatchObject({
+        error: { code: "installation_owner_required" },
+      });
+    } finally {
+      reauthGate.hold = false;
+      reauthGate.release = undefined;
+      reauthGate.started = undefined;
+      await systemPoolFor(env).query(
+        "UPDATE users SET installation_owner = FALSE WHERE installation_owner AND id <> $1",
+        [ownerId],
+      );
+      await systemPoolFor(env).query(
+        "UPDATE users SET installation_owner = TRUE, updated_at = now() WHERE id = $1",
+        [ownerId],
+      );
+      await systemPoolFor(env).query(
+        `UPDATE org_members SET role = 'editor', updated_at = now()
+         WHERE org_id = $1 AND user_id = $2`,
+        [sharedWorkspaceId, gammaId],
+      );
+      await systemPoolFor(env).query(
+        `DELETE FROM idempotency_keys
+         WHERE org_id = $1 AND operation = 'installation.ownership.transfer'
+           AND idempotency_key LIKE $2`,
+        [sharedWorkspaceId, `${keyPrefix}%`],
+      );
+      if (firstRequestId) {
+        await systemPoolFor(env).query(
+          "DELETE FROM workspace_audit_entries WHERE request_id = $1",
+          [firstRequestId],
         );
       }
     }

@@ -32,6 +32,8 @@
     "docs:links": "node scripts/ci/docs-links.mjs",
     "test:docs-links": "node --test scripts/ci/docs-links.test.mjs",
     "docs:check": "bun run test:docs-links && bun run docs:links",
+    "skills:sync": "node scripts/skills/sync.mjs",
+    "skills:check": "node scripts/skills/sync.mjs --check",
     "i18n:check": "node scripts/i18n/check.mjs",
     "i18n:generate": "node scripts/i18n/generate.mjs",
     "i18n:lock": "node scripts/i18n/lock.mjs",

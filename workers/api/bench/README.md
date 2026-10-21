@@ -96,7 +96,8 @@ Workspace, so repeated runs are independent.
 The GitHub workflow `.github/workflows/backend-benchmark.yml` checks out two
 revisions, installs each with the locked dependency graph, copies this harness
 into the baseline checkout, and gives each revision its own migrated database.
-Runs alternate baseline/candidate order by repetition. Raw JSON and the
+Runs alternate baseline/candidate order by repetition; the workflow uses three
+repetitions, 30 read/mutation samples, and five samples per deletion batch. Raw JSON and the
 Markdown report are uploaded as artifacts.
 
 The harness may only use APIs present in both revisions. It is intentionally

@@ -349,7 +349,13 @@ await runtime.ready;
 const frontend = await runtime.getWorker("frontend");
 const api = await runtime.getWorker("api");
 const automation = await runtime.getWorker("automation");
-const control = await startControl(runtime, jobs, queuePolicies, config.SELFHOST_OPERATOR_SECRET);
+const control = await startControl(
+  runtime,
+  jobs,
+  queuePolicies,
+  config.SELFHOST_OPERATOR_SECRET,
+  databaseUrl("meltiply_system", config.SELFHOST_DB_SYSTEM_PASSWORD),
+);
 let stopping = false;
 
 /** Dispatches all queues serially, preserving per-provider concurrency limits and avoiding unbounded work. */

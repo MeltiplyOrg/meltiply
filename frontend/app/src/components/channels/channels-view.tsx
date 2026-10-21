@@ -519,7 +519,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
    * @param brandProfileId - Brand Profile UUID that will own the connection.
    */
   const handleConnect = async (platformId: string, brandProfileId: string | null) => {
-    if (!isContractPlatform(platformId) || brandProfileId === null) return;
+    if (!isAdmin || !isContractPlatform(platformId) || brandProfileId === null) return;
     setConnectingPlatform(platformId);
     setConnectError(null);
     try {
@@ -547,7 +547,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
    */
   const handleConfirmDisconnect = async () => {
     const target = disconnectTarget;
-    if (!target) return;
+    if (!isAdmin || !target) return;
     try {
       await disconnectMutation.mutateAsync(target.id);
       toast(t("Channel disconnected"), {
@@ -570,6 +570,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
    * filter selections are included and ids disconnected elsewhere are skipped.
    */
   const openBulkDisconnect = () => {
+    if (!isAdmin) return;
     const targets = accounts.filter((account) => selectedIds.has(account.id));
     if (targets.length === 0) return;
     setBulkTargets(targets);
@@ -586,7 +587,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
    */
   const handleConfirmBulkDisconnect = async () => {
     const targets = bulkTargets;
-    if (!targets || bulkRunning) return;
+    if (!isAdmin || !targets || bulkRunning) return;
     setBulkRunning(true);
     let succeeded = 0;
     let failed = 0;
@@ -672,14 +673,18 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
       className="mx-auto max-w-300"
       actions={
         <>
-          <Button
-            onClick={() => setAddAccountOpen(true)}
-            disabled={brandProfiles.length === 0}
-            aria-describedby={brandProfiles.length === 0 ? "add-account-disabled-note" : undefined}
-          >
-            <Plus className="size-4" />
-            {t("Add account")}
-          </Button>
+          {isAdmin && (
+            <Button
+              onClick={() => setAddAccountOpen(true)}
+              disabled={brandProfiles.length === 0}
+              aria-describedby={
+                brandProfiles.length === 0 ? "add-account-disabled-note" : undefined
+              }
+            >
+              <Plus className="size-4" />
+              {t("Add account")}
+            </Button>
+          )}
           {isAdmin && (
             <Button variant="outline" onClick={() => openProfileEditor()}>
               <UserPlus className="size-4" />
@@ -878,11 +883,13 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 allVisibleSelected={allVisibleSelected}
                 onToggleVisibleSelection={handleToggleVisibleSelection}
                 onToggleSelection={handleToggleSelection}
-                selectionDisabled={bulkRunning}
-                onReconnect={(account) =>
-                  void handleConnect(account.platform, account.brand_profile_id)
+                selectionDisabled={bulkRunning || !isAdmin}
+                onReconnect={
+                  isAdmin
+                    ? (account) => void handleConnect(account.platform, account.brand_profile_id)
+                    : undefined
                 }
-                onDisconnect={setDisconnectTarget}
+                onDisconnect={isAdmin ? setDisconnectTarget : undefined}
               />
             )}
           </div>
@@ -933,7 +940,10 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
       />
 
       {/* Connect social account dialog */}
-      <CenterDialog open={addAccountOpen} onOpenChange={setAddAccountOpen}>
+      <CenterDialog
+        open={isAdmin && addAccountOpen}
+        onOpenChange={(open) => setAddAccountOpen(isAdmin && open)}
+      >
         <CenterDialogContent className="max-w-xl">
           <CenterDialogHeader>
             <CenterDialogTitle>{t("Connect social account")}</CenterDialogTitle>
@@ -1169,15 +1179,17 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         </CenterAlertDialogContent>
       </CenterAlertDialog>
 
-      <BulkSelectionBar
-        count={selectedIds.size}
-        actionLabel={t("Disconnect")}
-        actionIcon={Unplug}
-        busyLabel={t("Disconnecting…")}
-        busy={bulkRunning}
-        onClear={() => setSelection((prev) => ({ ...prev, ids: new Set<string>() }))}
-        onAction={openBulkDisconnect}
-      />
+      {isAdmin && (
+        <BulkSelectionBar
+          count={selectedIds.size}
+          actionLabel={t("Disconnect")}
+          actionIcon={Unplug}
+          busyLabel={t("Disconnecting…")}
+          busy={bulkRunning}
+          onClear={() => setSelection((prev) => ({ ...prev, ids: new Set<string>() }))}
+          onAction={openBulkDisconnect}
+        />
+      )}
     </WorkspaceSurface>
   );
 }

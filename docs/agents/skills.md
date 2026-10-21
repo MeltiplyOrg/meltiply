@@ -7,8 +7,7 @@ vendored from their upstream projects; a subset is synchronized from the
 ## Pack-managed skills
 
 These skills are installed from `Essential-kit/skills` at the ref pinned in
-[`scripts/skills/sync.mjs`](../../scripts/skills/sync.mjs) and recorded in
-[`skills-lock.json`](../../skills-lock.json):
+[`scripts/skills/sync.mjs`](../../scripts/skills/sync.mjs):
 
 - `code-review`
 - `codebase-design`
@@ -30,7 +29,7 @@ Run these from the repository root:
 
 ```bash
 bun run skills:sync   # install or update the pinned pack
-bun run skills:check  # verify committed skills and lock without writing
+bun run skills:check  # verify committed skills against the pinned pack
 ```
 
 The sync installs for the OpenCode agent into `.agents/skills/`, so the existing
@@ -55,7 +54,7 @@ and are not changed by the sync. See
 1. Change `packRef` in [`scripts/skills/sync.mjs`](../../scripts/skills/sync.mjs)
    to the new commit in `Essential-kit/skills`.
 2. Run `bun run skills:sync`.
-3. Review the skill and lock diff; upstream may add, rename, or remove skills.
+3. Review the skill diff; upstream may add, rename, or remove skills.
 4. Run `bun run skills:check`.
 
 When the pack adds a skill, add it to `managedSkills` and to the list above. If

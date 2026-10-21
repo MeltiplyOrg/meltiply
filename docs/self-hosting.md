@@ -142,23 +142,26 @@ copy. For full copy coverage, run the same command with `S3_CHECK_ENDPOINT`,
 against a **disposable empty bucket**: the check creates the bucket and writes
 and deletes fixture objects. Never use production credentials or a real bucket.
 
-## Authentication and owner recovery
+## Authentication, invitations, and owner recovery
 
-Each installation accepts one owner, without changing Workspace or Brand Profile
-ownership. The database enforces the singleton even if two setup requests race.
-Migration `010_single_owner_auth.sql` adopts a sole existing account; it refuses
-to choose between multiple existing accounts. Back up and explicitly reconcile
-authentication identities and their domain ownership before retrying that migration;
-do not delete accounts blindly or reset production data to bypass the guard.
-For local development databases seeded before this migration, use `make reset`
-to recreate the disposable fixtures; never use it against production data.
+The first bootstrapped account becomes the Installation Owner and creates the
+single shared Workspace. The Owner and Workspace Admins invite people by email;
+public registration then stays closed, including direct API requests. Invitations
+are bound to the invited address, expire after seven days, and require email
+verification before membership activates. Each installation supports at most ten
+people, counting active members and pending invitations; suspension or revocation
+frees a Seat.
+
+The Owner controls installation-level actions: suspending, reactivating, and
+hard-deleting accounts, and transferring ownership after reauthentication.
+Workspace Admins manage Editors and Viewers, Brand Profiles, Channels, the
+Workspace name, and the audit trail. Editors create and publish content; Viewers
+read Posts, Channels, analytics, and Inbox.
 
 `AUTH_SETUP_SECRET` must be a private, randomly generated value of at least 32
 characters. Existing environment files must add it; the generator does not
 overwrite them. It is an API-only bootstrap credential, never a browser build
-variable. Setup status reveals only whether registration has closed. After setup,
-the owner's password and optional second factor authenticate sign-in, not the
-bootstrap secret.
+variable. Setup status reveals only whether the installation has an Owner.
 
 Better Auth stores salted scrypt password hashes, not plaintext passwords.
 Passwords are 8–128 characters; use a password manager and a unique passphrase.
@@ -282,7 +285,20 @@ docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T runtime 
 # Replay a bounded batch after correcting the underlying failure:
 docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T runtime \
   node scripts/selfhost/admin.mjs replay QUEUE_NAME-selfhost-dlq 100
+
+# Break-glass: promote an existing account to Installation Owner. Use this only
+# when the Owner session and recovery path are lost; the target must already have
+# an account. It also restores that account to Workspace Admin, clears any
+# suspension so the new Owner can authenticate, and records the ownership,
+# membership, and reactivation changes in the Workspace Audit trail.
+docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T runtime \
+  node scripts/selfhost/admin.mjs promote-owner owner@example.com
 ```
+
+Managed deployments use the same action through the operator runbook: an
+on-call operator with privileged access promotes the existing account, records
+the incident, and asks the new Owner to rotate credentials. Ownership transfer
+inside the product remains the normal path.
 
 Send the token as `Cf-Access-Jwt-Assertion` to canonical `/operator/v1/*` routes
 on the configured app hostname. Tokens expire after 15 minutes. Invalid tokens

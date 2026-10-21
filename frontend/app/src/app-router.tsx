@@ -7,6 +7,7 @@ import { WorkspaceLoadingSkeleton } from "@/components/layout/workspace-loading-
 const ChannelsPage = lazy(() => import("@/app/(dashboard)/channels/page"));
 const PostsPage = lazy(() => import("@/app/(dashboard)/posts/page"));
 const SettingsPage = lazy(() => import("@/components/layout/workspace-settings"));
+const InvitationAcceptRoute = lazy(() => import("@/app/invitation-accept-route"));
 const SignInRoute = lazy(() => import("@/app/sign-in-route"));
 
 /**
@@ -30,6 +31,7 @@ export function AppRouter(): React.ReactElement {
       <Routes>
         <Route path="/" element={<Navigate to="/posts" replace />} />
         <Route path="/sign-in/*" element={<SignInRoute />} />
+        <Route path="/invitations/accept" element={<InvitationAcceptRoute />} />
         <Route element={<AuthenticatedShell />}>
           <Route path="/posts" element={<PostsPage />} />
           <Route path="/channels" element={<ChannelsPage />} />

@@ -354,6 +354,8 @@ export interface PostDetailSurfaceProps {
    * reschedule, and channel cancels stay gated.
    */
   canMutate: boolean;
+  /** Whether this Post may be deleted by the current role. */
+  canDelete: boolean;
   onClose: () => void;
   /** Opens the composer for a Post that still has an editable surface. */
   onEdit: (postId: string) => void;
@@ -380,6 +382,7 @@ export interface PostDetailSurfaceProps {
 export function usePostDetailSurface({
   post: livePost,
   canMutate,
+  canDelete,
   onClose,
   onEdit,
   onRequestDelete,
@@ -451,27 +454,29 @@ export function usePostDetailSurface({
           {/* Delete is the only remaining action, so it is its own control: a menu
               holding one item would only add a step to a destructive intent. The
               confirmation still owns the consequence. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 text-ink-3 hover:text-red"
-                aria-label={isDraft ? t("Delete draft") : t("Delete post")}
-                onClick={() =>
-                  onRequestDelete({
-                    kind: "delete-post",
-                    postId: post.id,
-                    brandProfileId: post.brandProfileId,
-                    distributionIds: [],
-                  })
-                }
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{isDraft ? t("Delete draft") : t("Delete post")}</TooltipContent>
-          </Tooltip>
+          {canDelete && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 text-ink-3 hover:text-red"
+                  aria-label={isDraft ? t("Delete draft") : t("Delete post")}
+                  onClick={() =>
+                    onRequestDelete({
+                      kind: "delete-post",
+                      postId: post.id,
+                      brandProfileId: post.brandProfileId,
+                      distributionIds: [],
+                    })
+                  }
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{isDraft ? t("Delete draft") : t("Delete post")}</TooltipContent>
+            </Tooltip>
+          )}
         </>
       ),
       onClose,
@@ -571,7 +576,7 @@ export function usePostDetailSurface({
         </>
       ),
     };
-  }, [post, livePost, canMutate, onClose, onEdit, onRequestDelete, t]);
+  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, t]);
 
   return surface;
 }

@@ -44,6 +44,7 @@ import { usePostDetailSurface } from "./post-detail-surface";
 import { PostsToolbar } from "./posts-toolbar";
 import {
   filterAndSortPosts,
+  isPublishedDistributionStatus,
   prunePostSelection,
   resolveChannelMedia,
   resolveChannelText,
@@ -277,6 +278,8 @@ export function PostsView({
     setSelectedBrandProfileId,
     selectedPlatforms,
     setSelectedPlatforms,
+    canWriteContent,
+    isAdmin,
   } = useWorkspace();
   const scope = useSessionScope();
   const { t } = useI18n();
@@ -453,6 +456,25 @@ export function PostsView({
     return loadedPosts.map((post) => toPostRow(post, integrationById));
   }, [isCalendarMode, calendarQuery.data, loadedPosts, postById, integrationById]);
 
+  /** True when a row reached or is attempting a Provider and deletion is Admin-only. */
+  const hasPublishedDistribution = useCallback(
+    (row: PostRow) =>
+      row.channels.some((channel) =>
+        isPublishedDistributionStatus(channel.distribution?.status ?? channel.status),
+      ),
+    [],
+  );
+
+  /**
+   * Shared by single delete, detail delete, and bulk selection. Viewers never
+   * delete; Editors may delete drafts and scheduled Posts; Admins may also
+   * delete Posts with published work.
+   */
+  const canDeletePost = useCallback(
+    (row: PostRow) => canWriteContent && (isAdmin || !hasPublishedDistribution(row)),
+    [canWriteContent, hasPublishedDistribution, isAdmin],
+  );
+
   /**
    * Distinct Brand Profile ids carried by the rendered Post rows, forwarded to
    * the toolbar's profile checklist as `unresolvedProfileIds`. The checklist
@@ -548,14 +570,15 @@ export function PostsView({
   const handleDeletePostAction = useCallback(
     (postId: string) => {
       const row = posts.find((r) => r.id === postId);
+      if (!row || !canDeletePost(row)) return;
       setPendingAction({
         kind: "delete-post",
         postId,
-        brandProfileId: row?.brandProfileId ?? "",
+        brandProfileId: row.brandProfileId,
         distributionIds: [],
       });
     },
-    [posts],
+    [posts, canDeletePost],
   );
 
   /**
@@ -624,7 +647,7 @@ export function PostsView({
           next.delete(postId);
         } else {
           const row = posts.find((r) => r.id === postId);
-          if (!row) return prev;
+          if (!row || !canDeletePost(row)) return prev;
           next.set(postId, {
             id: postId,
             brandProfileId: row.brandProfileId,
@@ -634,7 +657,7 @@ export function PostsView({
         return next;
       });
     },
-    [posts, postById],
+    [posts, postById, canDeletePost],
   );
 
   /**
@@ -652,7 +675,7 @@ export function PostsView({
         for (const postId of postIds) {
           if (selected) {
             const row = rowsById.get(postId);
-            if (!row) continue;
+            if (!row || !canDeletePost(row)) continue;
             next.set(postId, {
               id: postId,
               brandProfileId: row.brandProfileId,
@@ -665,7 +688,7 @@ export function PostsView({
         return next;
       });
     },
-    [posts, postById],
+    [posts, postById, canDeletePost],
   );
 
   /** Clears the whole selection — the bulk bar's Deselect action. */
@@ -680,9 +703,13 @@ export function PostsView({
    * shrink the confirmed set.
    */
   const openBulkDelete = useCallback(() => {
-    if (selectedPosts.size === 0) return;
-    setBulkDeleteTargets([...selectedPosts.values()]);
-  }, [selectedPosts]);
+    const targets = [...selectedPosts.values()].filter((entry) => {
+      const row = posts.find((candidate) => candidate.id === entry.id);
+      return row !== undefined && canDeletePost(row);
+    });
+    if (targets.length === 0) return;
+    setBulkDeleteTargets(targets);
+  }, [selectedPosts, posts, canDeletePost]);
 
   /**
    * Executes the confirmed bulk delete over the snapshot latched when the
@@ -846,7 +873,8 @@ export function PostsView({
   // below are called through closures so the descriptors stay declaration-ordered.
   const detailSurface = usePostDetailSurface({
     post: detailPost,
-    canMutate: selectedBrandProfileId !== null,
+    canMutate: canWriteContent && selectedBrandProfileId !== null,
+    canDelete: detailPost !== null && canDeletePost(detailPost),
     onClose: () => handleCloseDetail(),
     onEdit: handleEditPost,
     onRequestDelete: handleModalRequestDelete,
@@ -972,7 +1000,7 @@ export function PostsView({
         onWeekNavigate={handleWeekNavigate}
         onScheduleDate={handleScheduleCalendarDate}
         onViewDetails={handleViewDetails}
-        canSchedule={selectedBrandProfileId !== null}
+        canSchedule={canWriteContent && selectedBrandProfileId !== null}
         selectionActive={selectedIds.size > 0}
       />
     ) : viewMode === "grid" ? (
@@ -981,7 +1009,9 @@ export function PostsView({
         isLoading={isLoading}
         gridColumnClass={gridColumnClass}
         brandProfiles={brandProfiles}
-        canMutate={selectedBrandProfileId !== null}
+        canMutate={canWriteContent && selectedBrandProfileId !== null}
+        canCreate={canWriteContent}
+        canDelete={canDeletePost}
         onEdit={handleEditPost}
         onDelete={handleDeletePostAction}
         onCreatePost={handleCreatePost}
@@ -990,6 +1020,7 @@ export function PostsView({
         onToggleSelection={handleTogglePostSelection}
         onSetSelection={handleSetPostSelection}
         selectionDisabled={bulkDeleteBusy}
+        canSelect={canDeletePost}
       />
     ) : (
       <PostTableView
@@ -999,6 +1030,7 @@ export function PostsView({
         brandProfiles={brandProfiles}
         groupBy={groupBy}
         hiddenColumns={hiddenColumns}
+        canCreate={canWriteContent}
         onCreatePost={handleCreatePost}
         onSortChange={setSortKey}
         onViewDetails={handleViewDetails}
@@ -1006,6 +1038,7 @@ export function PostsView({
         onToggleSelection={handleTogglePostSelection}
         onSetSelection={handleSetPostSelection}
         selectionDisabled={bulkDeleteBusy}
+        canSelect={canDeletePost}
       />
     );
 
@@ -1023,10 +1056,12 @@ export function PostsView({
         )
       }
       actions={
-        <Button variant="default" onClick={handleCreatePost}>
-          <Plus className="size-4" />
-          {t("Create post")}
-        </Button>
+        canWriteContent ? (
+          <Button variant="default" onClick={handleCreatePost}>
+            <Plus className="size-4" />
+            {t("Create post")}
+          </Button>
+        ) : undefined
       }
     >
       {queryError && (
@@ -1076,7 +1111,7 @@ export function PostsView({
       <CalendarDateDetailDialog
         selectedDate={selectedCalendarDate}
         posts={calendarDatePosts}
-        canMutate={selectedBrandProfileId !== null}
+        canMutate={canWriteContent && selectedBrandProfileId !== null}
         onClose={handleCloseCalendarDialog}
         onEdit={handleEditPost}
         onDelete={handleDeletePostAction}
@@ -1086,6 +1121,7 @@ export function PostsView({
         onToggleSelection={handleTogglePostSelection}
         onSetSelection={handleSetPostSelection}
         selectionDisabled={bulkDeleteBusy}
+        canSelect={canDeletePost}
       />
 
       {/* The open panel covers the page's create action, so the drawer carries it
@@ -1096,7 +1132,7 @@ export function PostsView({
         detail={detailSurface}
         composer={composerSurface}
         headerAction={
-          composerOpen && !detailPost ? undefined : (
+          canWriteContent && !(composerOpen && !detailPost) ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -1111,7 +1147,7 @@ export function PostsView({
               </TooltipTrigger>
               <TooltipContent>{t("New Post")}</TooltipContent>
             </Tooltip>
-          )
+          ) : undefined
         }
       />
 
@@ -1145,15 +1181,17 @@ export function PostsView({
         </CenterAlertDialogContent>
       </CenterAlertDialog>
 
-      <BulkSelectionBar
-        count={selectedIds.size}
-        actionLabel={t("Delete")}
-        actionIcon={Trash2}
-        busyLabel={t("Deleting…")}
-        onClear={handleClearPostSelection}
-        onAction={openBulkDelete}
-        busy={bulkDeleteBusy}
-      />
+      {canWriteContent && selectedIds.size > 0 && (
+        <BulkSelectionBar
+          count={selectedIds.size}
+          actionLabel={t("Delete")}
+          actionIcon={Trash2}
+          busyLabel={t("Deleting…")}
+          onClear={handleClearPostSelection}
+          onAction={openBulkDelete}
+          busy={bulkDeleteBusy}
+        />
+      )}
 
       <CenterAlertDialog
         open={bulkDeleteTargets !== null}

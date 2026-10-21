@@ -364,12 +364,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -380,28 +379,6 @@ export interface paths {
         get: operations["getCurrentUser"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/workspaces": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create a team workspace
-         * @description Creates a team workspace owned by the authenticated user, who becomes
-         *     its admin member. Personal workspaces are provisioned automatically at
-         *     sign-up and cannot be created through this operation.
-         */
-        post: operations["createWorkspace"];
         delete?: never;
         options?: never;
         head?: never;
@@ -431,7 +408,7 @@ export interface paths {
         /**
          * Rename or re-slug a workspace
          * @description Updates workspace display fields. Requires the admin role in the
-         *     addressed workspace; personal workspaces cannot be renamed.
+         *     addressed shared Workspace.
          */
         patch: operations["updateWorkspace"];
         trace?: never;
@@ -450,14 +427,18 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List pending invitations
+         * @description Returns pending, unexpired invitations in reverse creation order.
+         *     Requires the Workspace Admin role.
+         */
+        get: operations["listWorkspaceInvitations"];
         put?: never;
         /**
          * Invite a member to a team workspace
          * @description Creates a pending invitation and delivers the acceptance link through
-         *     the configured transactional email provider. Requires the admin role;
-         *     personal workspaces cannot issue invitations, and at most one pending
-         *     invitation may exist per workspace and email.
+         *     the configured transactional email provider. Requires the admin role,
+         *     and at most one pending invitation may exist per workspace and email.
          */
         post: operations["createWorkspaceInvitation"];
         delete?: never;
@@ -495,6 +476,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspaceId}/invitations/{invitationId}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Workspace UUID addressed by this lifecycle operation. The server
+                 *     resolves the caller's membership and role for this workspace; the
+                 *     X-Workspace-ID header is not used on workspace lifecycle routes.
+                 */
+                workspaceId: components["parameters"]["WorkspaceIdPath"];
+                invitationId: components["parameters"]["InvitationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend a pending invitation
+         * @description Rotates the invitation token, extends the expiry by seven days, and
+         *     delivers a fresh acceptance link. The previous link stops working.
+         *     Requires the Workspace Admin role.
+         */
+        post: operations["resendWorkspaceInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspace-invitations/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Single-use invitation token from the invitation email link. */
+                token: components["parameters"]["InvitationToken"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Inspect an invitation token
+         * @description Returns the invited email, role, Workspace name, and lifecycle status
+         *     so the acceptance page can render before the visitor signs in. Token
+         *     possession is the credential; no account is required.
+         */
+        get: operations["getWorkspaceInvitation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspace-invitations/{token}/accept": {
         parameters: {
             query?: never;
@@ -515,6 +551,34 @@ export interface paths {
          *     membership.
          */
         post: operations["acceptWorkspaceInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspaceId}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Workspace UUID addressed by this lifecycle operation. The server
+                 *     resolves the caller's membership and role for this workspace; the
+                 *     X-Workspace-ID header is not used on workspace lifecycle routes.
+                 */
+                workspaceId: components["parameters"]["WorkspaceIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List workspace members
+         * @description Returns every member with role, status, and join date. Requires the
+         *     Workspace Admin role.
+         */
+        get: operations["listWorkspaceMembers"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -557,17 +621,161 @@ export interface paths {
         patch: operations["updateWorkspaceMember"];
         trace?: never;
     };
+    "/installation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read installation settings and Seat usage
+         * @description Returns the Seat limit, active members, pending invitations, and the
+         *     shared Workspace. Requires the Workspace Admin role or Installation
+         *     Ownership.
+         */
+        get: operations["getInstallation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/members/{memberId}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID of the member's user within the addressed workspace. */
+                memberId: components["parameters"]["MemberId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend a member
+         * @description Immediately revokes every session and releases the member's Seat while
+         *     preserving their membership and content attribution. Installation
+         *     Owner only.
+         */
+        post: operations["suspendInstallationMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/members/{memberId}/reactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID of the member's user within the addressed workspace. */
+                memberId: components["parameters"]["MemberId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reactivate a suspended member
+         * @description Restores sign-in when a Seat is free. Installation Owner only.
+         */
+        post: operations["reactivateInstallationMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/members/{memberId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID of the member's user within the addressed workspace. */
+                memberId: components["parameters"]["MemberId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Permanently delete a member account
+         * @description Removes the auth account, sessions, and membership while leaving
+         *     Workspace content intact. The confirmation email must match. The
+         *     Installation Owner cannot delete their own account. Owner only.
+         */
+        delete: operations["deleteInstallationMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/installation/ownership-transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer installation ownership
+         * @description Reauthenticates the current Owner with their password and transfers
+         *     ownership to an active Workspace Admin. The previous Owner remains a
+         *     Workspace Admin. Owner only.
+         */
+        post: operations["transferInstallationOwnership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspaceId}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Workspace UUID addressed by this lifecycle operation. The server
+                 *     resolves the caller's membership and role for this workspace; the
+                 *     X-Workspace-ID header is not used on workspace lifecycle routes.
+                 */
+                workspaceId: components["parameters"]["WorkspaceIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the workspace audit trail
+         * @description Returns administrative Audit entries in reverse chronological order.
+         *     Requires the Workspace Admin role or Installation Ownership.
+         */
+        get: operations["listWorkspaceAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/brand-profiles": {
         parameters: {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -601,12 +809,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -632,12 +839,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -679,12 +885,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -715,12 +920,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -742,12 +946,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -769,12 +972,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -831,12 +1033,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -872,12 +1073,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -906,12 +1106,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -941,12 +1140,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -970,12 +1168,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1006,12 +1203,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1058,12 +1254,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1101,12 +1296,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1128,12 +1322,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1158,12 +1351,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1187,12 +1379,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1216,12 +1407,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1245,12 +1435,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1274,12 +1463,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1303,12 +1491,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1335,12 +1522,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1366,12 +1552,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1395,12 +1580,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1422,12 +1606,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1449,12 +1632,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1478,12 +1660,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1505,12 +1686,11 @@ export interface paths {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -1704,23 +1884,24 @@ export interface components {
             /** Format: uri */
             avatar_url: string | null;
             active_organization: components["schemas"]["OrganizationSummary"];
+            /**
+             * @description True for the installation's single Owner. Ownership is
+             *     installation-level authority and is separate from the Workspace
+             *     role; content access still follows the Workspace membership.
+             */
+            is_installation_owner: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
         /** @enum {string} */
-        WorkspaceRole: "admin" | "member";
+        WorkspaceRole: "admin" | "editor" | "viewer";
         Workspace: {
             /** Format: uuid */
             id: string;
             name: string;
             slug: string;
-            /**
-             * @description True for the auto-provisioned personal workspace; personal
-             *     workspaces cannot be renamed, invite members, or change roles.
-             */
-            is_personal: boolean;
             /** @description Caller's membership role in this workspace. */
             role: components["schemas"]["WorkspaceRole"];
             /** Format: date-time */
@@ -1740,10 +1921,21 @@ export interface components {
             /** Format: uri */
             avatar_url: string | null;
             role: components["schemas"]["WorkspaceRole"];
+            /** @enum {string} */
+            status: "active" | "suspended";
             /** Format: date-time */
+            suspended_at: string | null;
+            is_installation_owner: boolean;
+            /**
+             * Format: date-time
+             * @description Membership join date.
+             */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        WorkspaceMemberListResponse: {
+            members: components["schemas"]["WorkspaceMember"][];
         };
         /** @enum {string} */
         WorkspaceInvitationStatus: "pending" | "accepted" | "revoked" | "expired";
@@ -1763,11 +1955,6 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        CreateWorkspaceRequest: {
-            name: string;
-            /** @description URL-safe slug; derived from name when omitted. */
-            slug?: string;
-        };
         UpdateWorkspaceRequest: {
             name?: string;
             slug?: string;
@@ -1775,7 +1962,10 @@ export interface components {
         CreateWorkspaceInvitationRequest: {
             /** Format: email */
             email: string;
-            /** @default member */
+            /**
+             * @description Editor or Viewer for Workspace Admins; only the Installation Owner
+             *     may invite an Admin.
+             */
             role: components["schemas"]["WorkspaceRole"];
         };
         UpdateWorkspaceMemberRequest: {
@@ -1784,6 +1974,107 @@ export interface components {
         AcceptWorkspaceInvitationResponse: {
             workspace: components["schemas"]["Workspace"];
             member: components["schemas"]["WorkspaceMember"];
+        };
+        WorkspaceInvitationListResponse: {
+            invitations: components["schemas"]["WorkspaceInvitation"][];
+        };
+        InvitationPreview: {
+            /** Format: email */
+            email: string;
+            role: components["schemas"]["WorkspaceRole"];
+            status: components["schemas"]["WorkspaceInvitationStatus"];
+            /** Format: date-time */
+            expires_at: string;
+            workspace_name: string;
+        };
+        InstallationSummary: {
+            /** Format: uuid */
+            installation_owner_user_id: string;
+            seat_limit: number;
+            seats_used: number;
+            members_active: number;
+            invitations_pending: number;
+            workspace: components["schemas"]["Workspace"];
+        };
+        AccountLifecycle: {
+            /** Format: uuid */
+            user_id: string;
+            /** @enum {string} */
+            status: "active" | "suspended";
+            /** Format: date-time */
+            suspended_at: string | null;
+            suspension_reason: string | null;
+        };
+        SuspendMemberRequest: {
+            reason?: string;
+        };
+        HardDeleteMemberRequest: {
+            /**
+             * Format: email
+             * @description Must match the member's email address.
+             */
+            confirm_email: string;
+        };
+        OwnershipTransferRequest: {
+            /** Format: uuid */
+            target_user_id: string;
+            /** @description Current Owner's password, required to reauthenticate. */
+            password: string;
+        };
+        OwnershipTransferResponse: {
+            /** Format: uuid */
+            installation_owner_user_id: string;
+        };
+        AuditEntry: {
+            /** Format: uuid */
+            id: string;
+            actor: {
+                /** Format: email */
+                email: string;
+                display_name: string | null;
+            };
+            action: string;
+            target_type: string;
+            target_id: string;
+            before: components["schemas"]["AuditState"] | null;
+            after: components["schemas"]["AuditState"] | null;
+            request_id: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        AuditState: {
+            account_id?: string;
+            brand_profile_id?: string;
+            color?: components["schemas"]["BrandProfileColor"];
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            deleted_at?: string | null;
+            description?: string | null;
+            /** Format: email */
+            email?: string;
+            id?: string;
+            name?: string;
+            /** Format: uuid */
+            org_id?: string;
+            /** Format: uuid */
+            owner_user_id?: string;
+            platform?: string;
+            /** Format: date-time */
+            purge_at?: string | null;
+            reason?: string | null;
+            role?: components["schemas"]["WorkspaceRole"];
+            slug?: string;
+            /** @enum {string} */
+            status?: "active" | "suspended";
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        AuditListResponse: {
+            entries: components["schemas"]["AuditEntry"][];
+            has_more: boolean;
+            limit: number;
+            offset: number;
         };
         /**
          * @description Fixed accessible palette for Brand Profile color labels. Labels are
@@ -2689,16 +2980,25 @@ export interface components {
     parameters: {
         IdempotencyKey: string;
         /**
-         * @description Optional workspace selection for the authenticated caller. When
-         *     present, the server resolves the caller's org_members membership and
-         *     role for this workspace before it becomes the actor and RLS claims;
-         *     when absent, the caller's personal workspace is used. A UUID that is
-         *     not a workspace the caller belongs to fails with 403
-         *     `inaccessible_workspace`.
+         * @description Optional shared-Workspace selection for the authenticated caller. The
+         *     server validates the caller's org_members membership before it becomes
+         *     the actor and RLS claim. An installation has exactly one shared
+         *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+         *     When absent, the shared Workspace is selected automatically.
          */
         XWorkspaceId: string;
         Limit: number;
+        AuditLimit: number;
         Offset: number;
+        /**
+         * @description Case-insensitive substring matched against the action, the actor's email
+         *     or display name, and the target id.
+         */
+        AuditSearch: string;
+        /** @description Exact action identifier, for example `member.role_changed`. */
+        AuditAction: string;
+        /** @description Exact target type, for example `member` or `invitation`. */
+        AuditTargetType: string;
         Start: string;
         End: string;
         RequiredStart: string;
@@ -3265,12 +3565,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -3293,37 +3592,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
             503: components["responses"]["ServiceUnavailable"];
-        };
-    };
-    createWorkspace: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateWorkspaceRequest"];
-            };
-        };
-        responses: {
-            /** @description Created workspace with the caller's admin membership. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Workspace"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["Unprocessable"];
-            429: components["responses"]["RateLimited"];
         };
     };
     updateWorkspace: {
@@ -3364,6 +3632,36 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    listWorkspaceInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Workspace UUID addressed by this lifecycle operation. The server
+                 *     resolves the caller's membership and role for this workspace; the
+                 *     X-Workspace-ID header is not used on workspace lifecycle routes.
+                 */
+                workspaceId: components["parameters"]["WorkspaceIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending invitations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceInvitationListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createWorkspaceInvitation: {
@@ -3439,6 +3737,75 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    resendWorkspaceInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /**
+                 * @description Workspace UUID addressed by this lifecycle operation. The server
+                 *     resolves the caller's membership and role for this workspace; the
+                 *     X-Workspace-ID header is not used on workspace lifecycle routes.
+                 */
+                workspaceId: components["parameters"]["WorkspaceIdPath"];
+                invitationId: components["parameters"]["InvitationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reissued pending invitation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceInvitation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Invitation has been revoked. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getWorkspaceInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Single-use invitation token from the invitation email link. */
+                token: components["parameters"]["InvitationToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitation preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationPreview"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     acceptWorkspaceInvitation: {
         parameters: {
             query?: never;
@@ -3466,6 +3833,36 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    listWorkspaceMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Workspace UUID addressed by this lifecycle operation. The server
+                 *     resolves the caller's membership and role for this workspace; the
+                 *     X-Workspace-ID header is not used on workspace lifecycle routes.
+                 */
+                workspaceId: components["parameters"]["WorkspaceIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Workspace members. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     removeWorkspaceMember: {
@@ -3544,17 +3941,209 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    getInstallation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installation summary. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallationSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    suspendInstallationMember: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description UUID of the member's user within the addressed workspace. */
+                memberId: components["parameters"]["MemberId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SuspendMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Suspended account state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLifecycle"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    reactivateInstallationMember: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description UUID of the member's user within the addressed workspace. */
+                memberId: components["parameters"]["MemberId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active account state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLifecycle"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteInstallationMember: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description UUID of the member's user within the addressed workspace. */
+                memberId: components["parameters"]["MemberId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HardDeleteMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Account deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    transferInstallationOwnership: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnershipTransferRequest"];
+            };
+        };
+        responses: {
+            /** @description New Installation Owner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnershipTransferResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listWorkspaceAudit: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["AuditLimit"];
+                offset?: components["parameters"]["Offset"];
+                /**
+                 * @description Case-insensitive substring matched against the action, the actor's email
+                 *     or display name, and the target id.
+                 */
+                q?: components["parameters"]["AuditSearch"];
+                /** @description Exact action identifier, for example `member.role_changed`. */
+                action?: components["parameters"]["AuditAction"];
+                /** @description Exact target type, for example `member` or `invitation`. */
+                target_type?: components["parameters"]["AuditTargetType"];
+            };
+            header?: never;
+            path: {
+                /**
+                 * @description Workspace UUID addressed by this lifecycle operation. The server
+                 *     resolves the caller's membership and role for this workspace; the
+                 *     X-Workspace-ID header is not used on workspace lifecycle routes.
+                 */
+                workspaceId: components["parameters"]["WorkspaceIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audit entries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listBrandProfiles: {
         parameters: {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -3580,12 +4169,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -3621,12 +4209,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -3653,12 +4240,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -3688,12 +4274,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -3727,12 +4312,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -3772,12 +4356,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -3811,12 +4394,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -3849,12 +4431,11 @@ export interface operations {
             };
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -3887,12 +4468,11 @@ export interface operations {
             };
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -3964,12 +4544,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4000,12 +4579,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4034,12 +4612,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4076,12 +4653,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4110,12 +4686,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4159,12 +4734,11 @@ export interface operations {
             };
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4191,12 +4765,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4232,12 +4805,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4275,12 +4847,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4319,12 +4890,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4364,12 +4934,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4409,12 +4978,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4452,12 +5020,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4486,12 +5053,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4520,12 +5086,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4562,12 +5127,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4607,12 +5171,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4641,12 +5204,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4676,12 +5238,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4725,12 +5286,11 @@ export interface operations {
             };
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4757,12 +5317,11 @@ export interface operations {
             query?: never;
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4799,12 +5358,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4842,12 +5400,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4884,12 +5441,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
@@ -4930,12 +5486,11 @@ export interface operations {
             };
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -4972,12 +5527,11 @@ export interface operations {
             };
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -5008,12 +5562,11 @@ export interface operations {
             };
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -5056,12 +5609,11 @@ export interface operations {
             };
             header?: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
             };
@@ -5088,12 +5640,11 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Optional workspace selection for the authenticated caller. When
-                 *     present, the server resolves the caller's org_members membership and
-                 *     role for this workspace before it becomes the actor and RLS claims;
-                 *     when absent, the caller's personal workspace is used. A UUID that is
-                 *     not a workspace the caller belongs to fails with 403
-                 *     `inaccessible_workspace`.
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
                  */
                 "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];

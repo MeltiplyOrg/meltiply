@@ -1,5 +1,10 @@
 [files]
-extend-exclude = [".claude", "**/worker-configuration.d.ts", "frontend/app/src/lib/i18n.tsx", "frontend/app/src/locales"]
+extend-exclude = [
+  ".claude",
+  "**/worker-configuration.d.ts",
+  "frontend/app/src/lib/i18n.tsx",
+  "frontend/app/src/locales",
+]
 
 [default]
 # Fumadocs owns the `nd-*` DOM ID prefix; preserve exact quoted selectors and lookups.

@@ -68,7 +68,7 @@ The API secret bundle requires `AUTH_SETUP_SECRET` (random, at least 32 characte
 alongside `BETTER_AUTH_SECRET`, encryption keys, and the existing mail configuration.
 First-run owner setup at `/sign-in` requires that secret; registration closes
 once the sole owner exists. Deployed email verification is not optional.
-See [authentication and owner recovery](../../docs/self-hosting.md#authentication-and-owner-recovery)
+See [authentication, invitations, and owner recovery](../../docs/self-hosting.md#authentication-invitations-and-owner-recovery)
 for migration, password, and authenticator policies. Managed Workers trust
 Cloudflare's `CF-Connecting-IP` for shared rate limits, not caller-supplied
 `X-Forwarded-For`; the self-hosted ingress instead uses its socket peer.

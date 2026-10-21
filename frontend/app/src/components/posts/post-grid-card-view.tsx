@@ -22,8 +22,10 @@ export interface PostGridCardViewProps extends PostSelectionProps {
   gridColumnClass: string;
   brandProfiles: BrandProfile[];
   canMutate: boolean;
+  canDelete: (post: PostRow) => boolean;
   onEdit: (postId: string) => void;
   onDelete: (postId: string) => void;
+  canCreate: boolean;
   onCreatePost: () => void;
   onViewDetails: (postId: string) => void;
 }
@@ -41,14 +43,17 @@ export const PostGridCardView = React.memo(function PostGridCardView({
   gridColumnClass,
   brandProfiles,
   canMutate,
+  canDelete,
   onEdit,
   onDelete,
+  canCreate,
   onCreatePost,
   onViewDetails,
   selectedIds,
   onToggleSelection,
   onSetSelection,
   selectionDisabled,
+  canSelect,
 }: PostGridCardViewProps) {
   const { t } = useI18n();
   const scrollRef = useSmoothScrollContainer();
@@ -56,9 +61,10 @@ export const PostGridCardView = React.memo(function PostGridCardView({
     () => new Map(brandProfiles.map((profile) => [profile.id, profile.name])),
     [brandProfiles],
   );
-  const visibleIds = posts.map((post) => post.id);
-  const selectedCount = visibleIds.reduce((count, id) => count + Number(selectedIds.has(id)), 0);
-  const allSelected = visibleIds.length > 0 && selectedCount === visibleIds.length;
+  const selectablePosts = canSelect ? posts.filter(canSelect) : posts;
+  const selectableIds = selectablePosts.map((post) => post.id);
+  const selectedCount = selectableIds.reduce((count, id) => count + Number(selectedIds.has(id)), 0);
+  const allSelected = selectableIds.length > 0 && selectedCount === selectableIds.length;
   if (isLoading)
     return (
       <div className={GRID_VIEWPORT_CLASS}>
@@ -91,10 +97,12 @@ export const PostGridCardView = React.memo(function PostGridCardView({
         <EmptyDescription>
           {t("Try adjusting your search query, status, or date range filters.")}
         </EmptyDescription>
-        <Button variant="outline" onClick={onCreatePost} className="mt-3">
-          <Plus className="size-3.5" />
-          {t("Create post")}
-        </Button>
+        {canCreate && (
+          <Button variant="outline" onClick={onCreatePost} className="mt-3">
+            <Plus className="size-3.5" />
+            {t("Create post")}
+          </Button>
+        )}
       </Empty>
     );
   return (
@@ -104,8 +112,8 @@ export const PostGridCardView = React.memo(function PostGridCardView({
           type="checkbox"
           aria-label={t("Select all visible posts")}
           checked={allSelected}
-          disabled={selectionDisabled}
-          onChange={() => onSetSelection(visibleIds, !allSelected)}
+          disabled={selectionDisabled || selectableIds.length === 0}
+          onChange={() => onSetSelection(selectableIds, !allSelected)}
         />
         {t("Select all posts")}
       </label>
@@ -117,9 +125,10 @@ export const PostGridCardView = React.memo(function PostGridCardView({
             postId={post.id}
             profileName={profiles.get(post.brandProfileId) ?? t("Unknown profile")}
             selected={selectedIds.has(post.id)}
-            selectionDisabled={selectionDisabled}
+            selectionDisabled={selectionDisabled || !(canSelect?.(post) ?? true)}
             onToggleSelection={onToggleSelection}
             canMutate={canMutate}
+            canDelete={canDelete(post)}
             onViewDetails={onViewDetails}
             onEdit={onEdit}
             onDelete={onDelete}

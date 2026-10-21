@@ -290,12 +290,19 @@ async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
   await disclosure.click();
   const addStatus = page.getByRole("button", { name: "Add Post status filter", exact: true });
   if (await addStatus.isVisible()) await addStatus.click();
-  const combobox = page.getByRole("combobox", { name: /post status/i });
-  await expect(combobox).toBeVisible({ timeout: 30_000 });
-  await combobox.click();
-  await page.getByRole("option", { name: status }).click();
-  await expect(combobox).toHaveText(status);
+  const trigger = page
+    .getByRole("button", { name: "Remove Post status filter", exact: true })
+    .locator("..")
+    .locator('button[aria-haspopup="menu"]');
+  await trigger.click();
+  const menu = page.getByRole("menu", { name: "Post status", exact: true });
+  await menu.getByRole("menuitemcheckbox", { name: "All statuses", exact: true }).click();
+  const option = menu.getByRole("menuitemcheckbox", { name: status });
+  if (!(await option.isChecked())) await option.click();
+  await expect(option).toBeChecked();
+  await page.keyboard.press("Escape");
   await disclosure.click();
+  await expect(page.getByRole("group", { name: "Filters", exact: true })).toBeHidden();
 }
 
 /** Restores all status buckets using the same user-visible filtering flow. */

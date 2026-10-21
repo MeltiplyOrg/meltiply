@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 import { expect } from "@playwright/test";
+import { Schema } from "effect";
 
 /**
  * One durable publication the controlled external Provider holds for a Channel.
@@ -46,20 +47,22 @@ export interface ControlledChannelSpec {
   providerUserId: string;
 }
 
-/** The Channels a {@link provisionControlledChannels} call created. */
-interface ProvisionedControlledChannel {
-  displayName: string;
-  id: string;
-  platform: string;
-  providerUserId: string;
-}
+/** Validates the acceptance entry's wire names before ownership drives fault injection. */
+const provisionedChannelsSchema = Schema.Struct({
+  brand_profile_id: Schema.String,
+  channels: Schema.Array(
+    Schema.Struct({
+      display_name: Schema.String,
+      id: Schema.String,
+      platform: Schema.String,
+      platform_user_id: Schema.String,
+    }),
+  ),
+  organization_id: Schema.String,
+});
 
-/** Identity of the Brand Profile a provisioned Channel was attached to. */
-export interface ProvisionedChannelsResult {
-  brandProfileId: string;
-  channels: ProvisionedControlledChannel[];
-  organizationId: string;
-}
+/** Identity and real account records returned by controlled Channel provisioning. */
+export type ProvisionedChannelsResult = typeof provisionedChannelsSchema.Type;
 
 /** Stored attachment bytes as the controlled Provider returned them. */
 export interface ControlledMediaBytes {
@@ -131,21 +134,25 @@ export async function activeBrandProfileName(page: Page): Promise<string> {
   }
   const addProfile = page.getByRole("button", { name: "Add Brand Profile filter", exact: true });
   if (await addProfile.isVisible()) await addProfile.click();
-  const combobox = page
-    .getByRole("group", { name: "Filters", exact: true })
-    .getByRole("combobox")
-    .first();
-  await expect(combobox).toBeVisible({ timeout: 30_000 });
-  await combobox.click();
-  const options = page.getByRole("option");
+  const trigger = page
+    .getByRole("button", { name: "Remove Brand Profile filter", exact: true })
+    .locator("..")
+    .locator('button[aria-haspopup="menu"]');
+  await expect(trigger).toBeVisible({ timeout: 30_000 });
+  await trigger.click();
+  const menu = page.getByRole("menu", { name: "Brand Profile", exact: true });
+  const options = menu.getByRole("menuitemcheckbox");
   await expect(options.first()).toBeVisible({ timeout: 30_000 });
   const names = (await options.allInnerTexts()).map((value) => value.trim());
   const name = names.find((value) => value.length > 0 && !/^all brand profiles$/i.test(value));
   if (!name) {
     throw new Error(`workspace has no selectable Brand Profile; options were ${names.join(", ")}`);
   }
-  await page.getByRole("option", { name, exact: true }).click();
+  await menu.getByRole("menuitemcheckbox", { name: "All Brand Profiles", exact: true }).click();
+  await menu.getByRole("menuitemcheckbox", { name, exact: true }).click();
+  await page.keyboard.press("Escape");
   await disclosure.click();
+  await expect(page.getByRole("group", { name: "Filters", exact: true })).toBeHidden();
   return name;
 }
 
@@ -184,7 +191,7 @@ export async function closeComposer(page: Page): Promise<void> {
  * @param profileName - Display name of the already-created Brand Profile.
  * @param channels - Channels to attach to that profile.
  * @returns The resolved profile identity plus the created Channels.
- * @throws {Error} When the fixture rejects the request.
+ * @throws {Error} When the fixture rejects the request or returns an invalid result.
  */
 export async function provisionControlledChannels(
   request: APIRequestContext,
@@ -205,7 +212,7 @@ export async function provisionControlledChannels(
     response.status(),
     `provisioning ${channels.length} controlled channel(s) for "${profileName}"`,
   ).toBe(201);
-  return (await response.json()) as ProvisionedChannelsResult;
+  return Schema.decodeUnknownSync(provisionedChannelsSchema)(await response.json());
 }
 
 /**

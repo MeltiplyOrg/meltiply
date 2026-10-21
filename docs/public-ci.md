@@ -56,11 +56,18 @@ secrets. A passing automatic `ci-gate` does not imply that a manual lane ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
 `frontend-full` provisions local signing/storage configuration before browser
-journeys. User-facing journeys and screenshots use production assets without
-DevBox chrome. `frontend-ui` runs both frontend checks, dead-code detection,
+journeys. It runs production-entry browser scenarios, then the cross-profile
+media/recovery/publishing journey against the controlled-Provider acceptance
+entries; provisioning helpers never run against production endpoints.
+Controlled fixture responses are schema-decoded using their wire ownership fields
+before those identities drive media copying or injected failures.
+User-facing journeys and screenshots use production assets without DevBox chrome.
+`frontend-ui` runs both frontend checks, dead-code detection,
 documentation links, React review, development CSS/font HTTP smoke, and the
 controlled-backend workspace/public browser journey. Artifacts include desktop,
 phone, and reported-user-width captures plus failure traces.
+The React Doctor invocation is pinned in the workflow and receives no GitHub token.
+Its changed-scope comparison fetches the public base branch without credentials.
 The topology lane owns a separate backend process for load checks after smoke exits.
 
 The existing self-hosted image smoke includes Chromium owner journeys: first-run
@@ -118,6 +125,10 @@ from the default branch; cache size and retention remain subject to GitHub limit
 Gitleaks 8.30.1 and typos 1.35.5 using versioned release archives and pinned
 SHA-256 archive checksums. These verify downloads; they are not GitHub Action
 commit references. Linux x64 and arm64 are supported.
+
+Spelling checks still cover generated third-party notice bundles. A scoped
+dictionary preserves an upstream author's surname; do not rewrite copyright
+attribution to satisfy an English spelling suggestion.
 
 The scanner retains its live synthetic detection canary. Its configuration
 excludes three proven false-positive values only when their exact source path

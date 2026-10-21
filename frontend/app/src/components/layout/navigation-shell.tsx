@@ -97,6 +97,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
             </Button>
           </div>
         </header>
+
         <main
           id="workspace-content"
           tabIndex={-1}

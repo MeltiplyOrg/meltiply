@@ -26,6 +26,7 @@ import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { BrandProfileDirectory } from "@/components/workspace/brand-profile-directory";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
+
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { Alert } from "@meltiply/ui/alert";
 import { toast } from "@meltiply/ui/toast";
@@ -186,10 +187,8 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   } = useWorkspace();
   const scope = useSessionScope();
   const { t, tStatus, language } = useI18n();
-  const accountsScrollRef = useRef<HTMLDivElement | null>(null);
-  const profilesScrollRef = useRef<HTMLDivElement | null>(null);
-  useSmoothScrollContainer(accountsScrollRef);
-  useSmoothScrollContainer(profilesScrollRef);
+  const accountsScrollRef = useSmoothScrollContainer();
+  const profilesScrollRef = useSmoothScrollContainer();
 
   const pathname = usePathname();
   const navigate = useNavigate();

@@ -8,6 +8,7 @@ import {
   SelectSeparator,
   SelectTrigger,
 } from "@meltiply/ui/select";
+import { FilterChecklist } from "@meltiply/ui/dropdown-menu";
 
 /**
  * Props for {@link BrandProfileSelect}, the canonical Brand Profile picker
@@ -115,21 +116,7 @@ export function BrandProfileSelect({
 }: BrandProfileSelectProps) {
   const { t } = useI18n();
 
-  /** Canonical option list: resolved profiles first, then any unique unresolved ids. */
-  const options = useMemo(() => {
-    const list: BrandProfileOption[] = brandProfiles.map((profile) => ({
-      id: profile.id,
-      name: profile.name,
-    }));
-    const known = new Set(list.map((option) => option.id));
-    for (const id of unresolvedProfileIds ?? []) {
-      if (!known.has(id)) {
-        known.add(id);
-        list.push({ id, name: t("Unknown profile") });
-      }
-    }
-    return list;
-  }, [brandProfiles, unresolvedProfileIds, t]);
+  const options = useBrandProfileOptions(brandProfiles, unresolvedProfileIds);
 
   return (
     <Select value={value} onValueChange={onValueChange}>
@@ -152,5 +139,62 @@ export function BrandProfileSelect({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+/** Builds resolved profiles followed by unique unknown references for either selection mode. */
+function useBrandProfileOptions(
+  brandProfiles: readonly BrandProfile[],
+  unresolvedProfileIds?: readonly string[],
+) {
+  const { t } = useI18n();
+  return useMemo(() => {
+    const list: BrandProfileOption[] = brandProfiles.map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+    }));
+    const known = new Set(list.map((option) => option.id));
+    for (const id of unresolvedProfileIds ?? []) {
+      if (!known.has(id)) {
+        known.add(id);
+        list.push({ id, name: t("Unknown profile") });
+      }
+    }
+    return list;
+  }, [brandProfiles, unresolvedProfileIds, t]);
+}
+
+/**
+ * Multi-profile checklist sharing the canonical resolved/unknown option roster.
+ * Collection filters include aggregate clearing (empty means all). Composition
+ * omits it: empty means no profiles, and each selected profile owns its own Post.
+ */
+export function BrandProfileFilterSelect({
+  value,
+  onValueChange,
+  brandProfiles,
+  unresolvedProfileIds,
+  trigger,
+  includeAggregate = true,
+}: {
+  value: readonly string[];
+  onValueChange: (value: string[]) => void;
+  brandProfiles: readonly BrandProfile[];
+  unresolvedProfileIds?: readonly string[];
+  trigger: ReactElement;
+  includeAggregate?: boolean;
+}) {
+  const { t } = useI18n();
+  const options = useBrandProfileOptions(brandProfiles, unresolvedProfileIds);
+  return (
+    <FilterChecklist
+      value={value}
+      onValueChange={onValueChange}
+      trigger={trigger}
+      label={t("Brand Profile")}
+      aggregateLabel={includeAggregate ? t("All Brand Profiles") : undefined}
+      className="w-max max-w-80"
+      options={options.map((option) => ({ value: option.id, label: option.name }))}
+    />
   );
 }

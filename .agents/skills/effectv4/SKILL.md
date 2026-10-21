@@ -17,7 +17,7 @@ Build every Effect change as a composable program that ends at one approved boun
 ## Branch map
 
 - Touching `workers/api`, `workers/automation`, `workers/state`, or `packages/database|secrets|storage|auth|providers|observability|domain` → [backend](backend.md).
-- Touching `frontend/app/src/lib/effect`, `lib/queries.ts`, `lib/api.ts`, `lib/upload.ts`, or a query/mutation hook → [frontend](frontend.md).
+- Touching `frontend/app/src/lib/effect`, `lib/queries.ts`, `lib/api.ts`, `lib/upload.ts`, `lib/mutation-idempotency.ts`, or a query/mutation hook → [frontend](frontend.md).
 - Adding or changing a domain failure → define it in `packages/domain/src/effect/errors.ts` first, then follow the branch file.
 
 ## Completion bar

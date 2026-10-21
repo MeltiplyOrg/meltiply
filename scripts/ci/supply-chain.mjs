@@ -59,20 +59,25 @@ function packageLicense(pkg, manifestPath, corrections) {
  * An optional synchronous onPackage visitor receives each resolved third-party
  * manifest and its normalized license for artifact notice generation. It runs
  * only for reachable packages; development-only dependencies remain excluded.
+ *
+ * `workspaceRoot` defaults to `root`. Pass the repository root when `root` is a
+ * single workspace so private workspace packages are skipped as local code
+ * instead of being rejected for missing third-party license metadata.
  */
 export function javascriptCatalog(
   root = repositoryRoot,
-  { includeDevelopment = false, licenseMetadata = [], onPackage } = {},
+  { includeDevelopment = false, licenseMetadata = [], onPackage, workspaceRoot = root } = {},
 ) {
-  const rootManifest = join(root, "package.json");
-  const metadata = JSON.parse(readFileSync(rootManifest, "utf8"));
-  const workspaces = new Set([realpathSync(rootManifest)]);
-  for (const pattern of metadata.workspaces ?? []) {
+  const rootManifest = realpathSync(join(root, "package.json"));
+  const workspaceManifest = join(workspaceRoot, "package.json");
+  const workspaceMetadata = JSON.parse(readFileSync(workspaceManifest, "utf8"));
+  const workspaces = new Set([realpathSync(workspaceManifest), rootManifest]);
+  for (const pattern of workspaceMetadata.workspaces ?? []) {
     for (const path of globSync(`${pattern}/package.json`, {
-      cwd: root,
+      cwd: workspaceRoot,
       exclude: ["**/node_modules/**"],
     })) {
-      workspaces.add(realpathSync(join(root, path)));
+      workspaces.add(realpathSync(join(workspaceRoot, path)));
     }
   }
   const allProductionDependencies = new Set();
@@ -142,7 +147,9 @@ export function javascriptCatalog(
     }
   }
 
-  for (const path of workspaces) visit(path);
+  const visitRoots =
+    resolve(root) === resolve(workspaceRoot) ? workspaces : new Set([rootManifest]);
+  for (const path of visitRoots) visit(path);
   return catalog;
 }
 

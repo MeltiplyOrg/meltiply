@@ -35,10 +35,10 @@ export interface SideDialogProps {
  * non-modal companion, as in the reference: the workspace keeps painting and
  * taking input, so clicking another record re-inspects it in place instead of
  * being swallowed by a scrim. Radix still owns Escape dismissal, the portal, and
- * opener restoration; the inspection container receives initial focus so a
- * toolbar tooltip cannot consume the first Escape. Keyboard focus is
- * deliberately not trapped: this is a companion panel over live content, so Tab
- * reaches the workspace. Native body scrolling stays untouched. Motion is the
+ * opener restoration without scrolling the workspace; the inspection container
+ * receives initial focus so a toolbar tooltip cannot consume the first Escape.
+ * Keyboard focus is deliberately not trapped: this companion panel lets Tab
+ * reach the workspace. Native body scrolling stays untouched. Motion is the
  * reference drawer's: the panel steps 48px in on `--ease-drawer` and slides back
  * out on dismissal (`side-dialog-enter`/`side-dialog-exit`), its body blocks rise
  * behind the panel with a 0/55/105/150ms stagger (`side-dialog-rise-in`).
@@ -78,13 +78,13 @@ export function SideDialog({
             const active = document.activeElement;
             previousActiveElement.current = active instanceof HTMLElement ? active : null;
             event.preventDefault();
-            contentRef.current?.focus();
+            contentRef.current?.focus({ preventScroll: true });
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             const active = previousActiveElement.current;
             previousActiveElement.current = null;
-            if (active?.isConnected) active.focus();
+            if (active?.isConnected) active.focus({ preventScroll: true });
           }}
           className={cn(
             "fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 flex-col overflow-hidden border-l border-line bg-surface pt-(--safe-area-top) shadow-overlay outline-none sm:max-w-155",

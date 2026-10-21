@@ -36,6 +36,11 @@ Self-hosted font assets have explicit exports in `frontend/shared/package.json`.
 The Vite reload hook watches that manifest as well as the root environment file,
 so export-map changes invalidate cached package resolution in development.
 
+The interactive cookie notice loads behind its own Suspense boundary, keeping
+toast animation dependencies off the authentication/workspace first-paint path.
+The inline consent bootstrap remains authoritative before it loads: optional
+purposes stay denied without a saved decision, including when loading fails.
+
 ## Local development
 
 From the repository root:
@@ -65,8 +70,8 @@ through workspace membership, or selects the personal workspace when absent.
 `/sign-in` owns first-run setup, owner sign-in, email verification recovery,
 password reset, and optional authenticator challenges. Setup requires the
 API-only `AUTH_SETUP_SECRET` and closes permanently when the single owner exists.
-There is no separate public registration route. Account security in desktop and
-mobile navigation provides password changes and complete authenticator enrollment,
+There is no separate public registration route. **Settings → Security** on desktop
+and mobile provides password changes and complete authenticator enrollment,
 backup-code replacement, and disabling with password reauthentication.
 
 The [cookie policy](https://meltiply.com/docs/cookies) governs optional

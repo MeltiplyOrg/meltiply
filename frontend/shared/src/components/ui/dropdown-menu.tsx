@@ -329,3 +329,67 @@ export const DropdownMenuSeparator = React.forwardRef<
   />
 ));
 DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
+
+/**
+ * Controlled checklist. An aggregate label adds a clearing row for collection
+ * filters, where empty means all. Omitting it leaves explicit choices only.
+ * Toggling values keeps the menu open; Radix owns keyboard navigation,
+ * dismissal, and trigger restoration. Callers own selection semantics.
+ */
+export function FilterChecklist<Value extends string>({
+  value,
+  onValueChange,
+  options,
+  aggregateLabel,
+  trigger,
+  label,
+  className,
+}: {
+  value: readonly Value[];
+  onValueChange: (value: Value[]) => void;
+  options: readonly { value: Value; label: React.ReactNode }[];
+  aggregateLabel?: string;
+  trigger: React.ReactElement;
+  label?: string;
+  className?: string;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className={className}
+        {...(label ? { "aria-label": label, "aria-labelledby": undefined } : {})}
+      >
+        {aggregateLabel && (
+          <>
+            <DropdownMenuCheckboxItem
+              checked={value.length === 0}
+              onCheckedChange={() => onValueChange([])}
+              onSelect={(event) => event.preventDefault()}
+            >
+              {aggregateLabel}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        {options.map((option) => (
+          <DropdownMenuCheckboxItem
+            key={option.value}
+            checked={value.includes(option.value)}
+            onCheckedChange={() =>
+              onValueChange(
+                value.includes(option.value)
+                  ? value.filter((selected) => selected !== option.value)
+                  : [...value, option.value],
+              )
+            }
+            onSelect={(event) => event.preventDefault()}
+          >
+            {option.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

@@ -12,12 +12,12 @@ Open **Channels** to manage the accounts used for publishing. The page has two t
 Every connection belongs to one Brand Profile. If none exists, workspace admins can select **Create Brand Profile** in the header; members must ask an admin. **Add account** becomes available once a profile exists.
 
 1. Select **Add account**.
-2. Choose the owning Brand Profile.
-3. Find the platform in the Social Channels list, using its search field if needed.
-4. Select **Connect**, sign in on the platform, and approve the requested access.
-5. Return to Channels and review the result. The account appears only after the connection is saved.
+2. Find the platform in the Social Channels list, using its search field if needed.
+3. Select **Connect**, sign in on the platform, and approve the requested access.
+4. On the connection page, choose an authorized account and the Brand Profile that should own it. Only profiles that can accept that account appear.
+5. Select **Connect Channel**. The account appears in Channels only after confirmation succeeds.
 
-Each Brand Profile connects at most one Channel per Provider. A platform the selected profile already owns shows its connected account in place of the **Connect** action. To publish through a different account of that platform, disconnect the current Channel first, then connect the replacement from this dialog; a direct link to `/channels?tab=add` opens the dialog.
+Each Brand Profile connects at most one Channel per provider. To replace that Channel with a different account, disconnect the current one first or choose another eligible Brand Profile. Reconnecting the same account remains available. A direct link to `/channels?tab=add` opens the platform connection dialog.
 
 On phones, each platform's saved accounts and connection action appear below its identity instead of competing for the same row. Scroll the connection dialog to reach every platform; it stays within the available screen height, including landscape orientation.
 
@@ -25,11 +25,20 @@ Connection availability comes from the server and the platform's requirements. A
 
 ### Facebook Page selection
 
-Facebook authorization opens **Select Facebook Page**. Choose one eligible Page and select **Connect Page**. Even a single eligible Page requires explicit confirmation; closing, cancelling, or pressing Escape does not add an account.
+Facebook authorization returns all eligible Pages from direct management and,
+with `business_management` consent, Business Manager assignments. Each discovery
+list is paginated and duplicate Page IDs appear only once. Existing grants must
+reconnect to add Business Manager discovery permission.
 
-The selection expires after ten minutes. If it expires, start Connect again. For a connection-limit error, review [Resource limits](/docs/resource-limits), free capacity where appropriate, and retry while the selection is still valid. Meltiply does not provide a billing or upgrade flow.
+Choose the Page and its owning Brand Profile on the connection page, then select
+**Connect Channel**. Even a single eligible Page requires confirmation; cancelling
+does not add a Channel. The selection expires after ten minutes. If it expires,
+start Connect again.
 
-Eligible Pages require the necessary content-creation access and publishing permissions. Token revocation or a change in platform permissions can invalidate a previously working connection.
+Eligible Pages require content-creation access and publishing permissions.
+Token revocation or changed platform permissions can invalidate a working
+connection. Community deployments do not impose a Channel-count quota; see
+[Resource usage](/docs/resource-limits) for infrastructure responsibility.
 
 ### Supported providers
 
@@ -95,7 +104,7 @@ Disconnecting removes the connection and stops scheduled/queued publishing for t
 
 The **Brand Profiles** tab shows actual profiles and their connected-account counts. These counts describe the workspace's connections, not just the current account filters. **View channels** applies the profile and returns to Accounts.
 
-Admins can create a profile from the header or edit one from its card or the Brand Profile filter's edit control. Creating a profile selects it and opens account connection. Deletion is in the profile editor and requires confirmation; read its consequences before proceeding.
+Admins can create a profile from the header or edit one from its card in the **Brand Profiles** tab. Creating a profile selects it and opens account connection. Deletion is in the profile editor and requires confirmation; read its consequences before proceeding.
 
 See [Workspaces & Brand Profiles](/docs/workspaces) for ownership, permissions, and deletion behavior.
 

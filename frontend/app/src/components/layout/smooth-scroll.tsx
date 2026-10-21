@@ -1,5 +1,5 @@
 import Lenis from "lenis";
-import { useEffect, type RefObject } from "react";
+import { useEffect, useState, type RefCallback } from "react";
 
 const nestedScrollSelector = "[data-lenis-prevent]";
 
@@ -43,19 +43,24 @@ export function createSmoothScroll(): () => void {
  * native scrolling, and destroying the instance restores native scrolling for
  * every other teardown path.
  *
- * @param ref - Ref to the scrollable element that owns the viewport.
+ * Returns a stable callback ref so setup follows the mounted element, including
+ * conditional mounts and replacements. Replacing the first child rebuilds Lenis
+ * with the current content; detaching the viewport destroys its controller.
+ *
+ * @returns Ref for the scrollable element that owns the viewport.
  */
-export function useSmoothScrollContainer(ref: RefObject<HTMLElement | null>): void {
+export function useSmoothScrollContainer(): RefCallback<HTMLElement> {
+  const [element, setElement] = useState<HTMLElement | null>(null);
   useEffect(() => {
-    const element = ref.current;
     if (!element) return;
     // Lenis needs a real layout engine: it reads reduced-motion preferences and
     // observes element boxes. A DOM without them (server rendering, a jsdom test
     // surface) has nothing to smooth, so the viewport keeps native scrolling.
     if (typeof window.matchMedia !== "function" || typeof ResizeObserver === "undefined") return;
-    const lenis = new Lenis({
+    let content = element.firstElementChild ?? element;
+    let lenis = new Lenis({
       wrapper: element,
-      content: element.firstElementChild ?? element,
+      content,
       autoRaf: true,
     });
     // An element wrapper's scroll limit is measured from the wrapper, and the
@@ -65,7 +70,16 @@ export function useSmoothScrollContainer(ref: RefObject<HTMLElement | null>): vo
     let frame = 0;
     const observer = new MutationObserver(() => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => lenis.resize());
+      frame = requestAnimationFrame(() => {
+        const nextContent = element.firstElementChild ?? element;
+        if (nextContent !== content) {
+          lenis.destroy();
+          content = nextContent;
+          lenis = new Lenis({ wrapper: element, content, autoRaf: true });
+        } else {
+          lenis.resize();
+        }
+      });
     });
     observer.observe(element, { childList: true, subtree: true });
     // Lenis animates through fractional offsets, and a `position: sticky` header
@@ -84,7 +98,8 @@ export function useSmoothScrollContainer(ref: RefObject<HTMLElement | null>): vo
       cancelAnimationFrame(frame);
       lenis.destroy();
     };
-  }, [ref]);
+  }, [element]);
+  return setElement;
 }
 
 /**

@@ -51,7 +51,7 @@ function SiteFooter() {
         <a href="/docs/privacy">Privacy</a>
         <a href="/docs/cookies">Cookies</a>
         <a href="/third-party-notices.txt" data-astro-reload>
-          Third-party notices
+          Licenses
         </a>
       </nav>
     </footer>

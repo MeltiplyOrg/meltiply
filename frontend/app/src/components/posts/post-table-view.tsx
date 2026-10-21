@@ -1,4 +1,4 @@
-import React, { Fragment, useMemo, useRef, useState } from "react";
+import React, { Fragment, useMemo, useState } from "react";
 import { ArrowUpDown, ChevronDown, Paperclip, Plus } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { RollingCount } from "@meltiply/ui/rolling-count";
@@ -150,7 +150,9 @@ const PostTableRow = React.memo(function PostTableRow({
       data-selected={selected || undefined}
       onClick={(event) => {
         if (event.target instanceof Element && event.target.closest("button, input, a")) return;
-        event.currentTarget.querySelector<HTMLButtonElement>("[data-post-details]")?.focus();
+        event.currentTarget
+          .querySelector<HTMLButtonElement>("[data-post-details]")
+          ?.focus({ preventScroll: true });
         onViewDetails(post.id);
       }}
     >
@@ -326,8 +328,7 @@ export const PostTableView = React.memo(function PostTableView({
 }: PostTableViewProps) {
   const { t, tStatus } = useI18n();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  useSmoothScrollContainer(scrollRef);
+  const scrollRef = useSmoothScrollContainer();
   const groups = useMemo(
     () => groupPostRows(posts, groupBy, brandProfiles),
     [posts, groupBy, brandProfiles],
@@ -438,7 +439,7 @@ export const PostTableView = React.memo(function PostTableView({
                     ? tStatus(group.status)
                     : group.id === "all"
                       ? t("All posts")
-                      : group.label;
+                      : (profileNames.get(group.id) ?? t("Unknown profile"));
                   return (
                     <Fragment key={group.id}>
                       {groupBy !== "none" && (

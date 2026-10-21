@@ -140,13 +140,10 @@ jobs:
           bun run local:k6:ci
       - name: Review changed UI and required frontend gates
         if: inputs.lane == 'frontend-ui'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           cd frontend/app
-          gh auth setup-git
           git fetch origin ${{ github.event.repository.default_branch }}:refs/remotes/origin/${{ github.event.repository.default_branch }}
-          npx --yes react-doctor@latest --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+          npx --yes react-doctor@0.9.14 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
           cd ../..
           bun run lint:dead
           bun run --filter frontend-app check
@@ -180,13 +177,13 @@ jobs:
           assert(response, "Development server did not become reachable");
           const css = await response.text();
           assert.equal(response.status, 200, css);
-          const fonts = [...css.matchAll(/url\(["']?([^"')]*geist[^"')]*\.ttf[^"')]*)["']?\)/g)];
+          const fonts = [...css.matchAll(/url\(["']?([^"')]*geist[^"')]*\.woff2[^"')]*)["']?\)/g)];
           assert.equal(fonts.length, 4, "Stylesheet must resolve all four self-hosted Geist faces");
           for (const [, path] of fonts) {
             const font = await fetch(new URL(path, origin));
             assert.equal(font.status, 200, `Font request failed: ${path}`);
             const bytes = new Uint8Array(await font.arrayBuffer());
-            assert.deepEqual([...bytes.slice(0, 4)], [0, 1, 0, 0], `Invalid TrueType response: ${path}`);
+            assert.deepEqual([...bytes.slice(0, 4)], [0x77, 0x4f, 0x46, 0x32], `Invalid WOFF2 response: ${path}`);
             console.log(`Loaded development font: ${path}`);
           }
           NODE
@@ -207,7 +204,9 @@ jobs:
         working-directory: frontend/app
         env:
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
-        run: bun run test:e2e --trace on
+        run: |
+          bun run test:e2e --trace on
+          MELTIPLY_E2E_ACCEPTANCE=1 bun run test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies and retries only unfinished publishing" --trace on
       - name: Exercise redesigned workspace and public pages
         if: inputs.lane == 'frontend-ui'
         env:

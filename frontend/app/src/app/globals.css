@@ -182,7 +182,6 @@
 .mobile-navigation-close {
   top: calc(var(--safe-area-top) + 0.5rem);
 }
-
 /* Keep bottom-right feedback above the portal-based selection action on mobile. */
 @media (width < 768px) {
   body:has([data-selection-dock]) [data-sileo-viewport][data-position="bottom-right"] {

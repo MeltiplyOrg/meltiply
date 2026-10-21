@@ -372,7 +372,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
                     <label
                       key={profile.id}
                       className={cn(
-                        "group flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-control p-3 text-left transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
+                        "group flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-control p-3 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2",
                         isSelected ? "bg-hover" : "hover:bg-hover",
                       )}
                     >

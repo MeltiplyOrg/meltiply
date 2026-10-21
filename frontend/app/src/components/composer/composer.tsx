@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Schema } from "effect";
+import { persistProfileCopies, type ProfileCopy, type ProfileCopyProgress } from "./profile-copies";
 import {
   hasCookieConsent,
   readFunctionalStorage,
@@ -203,24 +205,45 @@ type ReplacedSelections = ReadonlyArray<readonly [string, number]>;
  * Workspace/Brand Profile/Post so it can never surface under another identity,
  * and a successful save deletes it.
  */
-interface ComposerRecoveryRecord {
-  attachmentOverrides: Record<string, string[]>;
-  attachments: Array<{
-    assetId: string;
-    assetType: Asset["asset_type"] | null;
-    mimeType: string | null;
-    name: string;
-  }>;
-  channelOverrides: Record<string, ChannelOverride>;
-  removedAssetIds: string[];
-  scheduleDate: string;
-  sharedContent: string;
-  updatedAt: string;
-  version: 1;
-}
+const composerRecoverySchema = Schema.Struct({
+  attachmentOverrides: Schema.Record(Schema.String, Schema.Array(Schema.String)),
+  attachments: Schema.Array(
+    Schema.Struct({
+      assetId: Schema.String,
+      assetType: Schema.NullOr(Schema.Literals(["image", "video"])),
+      mimeType: Schema.NullOr(Schema.String),
+      name: Schema.String,
+    }),
+  ),
+  channelOverrides: Schema.Record(
+    Schema.String,
+    Schema.Struct({
+      content: Schema.String,
+      hasOverride: Schema.Boolean,
+      settings: Schema.Record(Schema.String, Schema.Unknown),
+    }),
+  ),
+  removedAssetIds: Schema.Array(Schema.String),
+  scheduleDate: Schema.String,
+  sharedContent: Schema.String,
+  updatedAt: Schema.String,
+  profileIds: Schema.Array(Schema.String),
+  selectedChannelIds: Schema.Array(Schema.String),
+  profileCopies: Schema.Record(
+    Schema.String,
+    Schema.Struct({
+      postId: Schema.optional(Schema.String),
+      updatedAt: Schema.optional(Schema.String),
+      scheduledIntent: Schema.optional(Schema.String),
+      assets: Schema.Record(Schema.String, Schema.String),
+    }),
+  ),
+  version: Schema.Literal(2),
+});
+type ComposerRecoveryRecord = typeof composerRecoverySchema.Type;
 
 /** localStorage namespace for supplemental composer recovery. */
-const recoveryKeyPrefix = "meltiply.composer.v1.";
+const recoveryKeyPrefix = "meltiply.composer.v2.";
 
 /** Upload statuses whose lifecycle is finished: the file's bytes no longer need it. */
 const terminalUploadStatuses: ReadonlySet<AssetUploadStatus> = new Set([
@@ -531,12 +554,12 @@ function ComposerSection({
 /**
  * Multi-Channel Post composer: shared text, composer-owned media uploads with
  * ordered attachments, per-Channel captions/options/attachment selections, and
- * authoritative save/schedule/publish against one stable Post identity.
+ * authoritative save/schedule/publish with one stable Post per selected profile.
  *
- * Saving writes the same Post every time — `useCreatePost` only for the first
- * save of a new composition, `useUpdatePost` afterwards — so text, ordered
- * `attachment_ids`, and saved targets form one persisted record. No server Post
- * is created merely by opening the composer.
+ * One profile keeps the existing single-Post path. Multi-profile composition
+ * uses `persistProfileCopies`: independent draft identities, profile-owned media,
+ * and per-profile delivery progress survive partial failures. Repeated saves
+ * update the same copies; opening the composer never creates a Post.
  *
  * Uploads run through `createAssetUpload` directly (file picker or drag and
  * drop), so per-file progress, processing state, pause/resume, cancel, and retry
@@ -592,6 +615,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   } = useWorkspace();
   const scope = useSessionScope();
   const { t, tStatus, language } = useI18n();
+  // Share workspace-owned labels across validation, ownership guidance, and batch
+  // progress without re-scanning every profile for each destination/progress row.
+  const profileNames = useMemo(
+    () => new Map(brandProfiles.map((profile) => [profile.id, profile.name])),
+    [brandProfiles],
+  );
 
   // The deep link is the Post identity; a composition that has not been saved yet
   // has none, so the id only appears once the first save returns it.
@@ -622,6 +651,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [hydratedPostId, setHydratedPostId] = useState<string | null>(null);
+  const [selectedProfileIds, setSelectedProfileIds] = useState<string[]>(() =>
+    selectedBrandProfileId ? [selectedBrandProfileId] : [],
+  );
+  const [profileProgress, setProfileProgress] = useState<ProfileCopyProgress[]>([]);
+  const profileCopiesRef = useRef(new Map<string, ProfileCopy>());
+  const batchAbortRef = useRef<AbortController | null>(null);
   // Recovery is neither read nor written until functional consent is active.
   const [functionalConsent, setFunctionalConsent] = useState(() => hasCookieConsent("functional"));
   const [recoveryReadNamespace, setRecoveryReadNamespace] = useState<string | null>(null);
@@ -649,12 +684,17 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const persistedOwnershipRef = useRef(new Set<string>());
   const removedAssetIdsRef = useRef<Set<string>>(new Set());
 
-  // Identity of the composition the creator is working on. Switching it (another
-  // Brand Profile or another deep-linked Post) abandons the current rows; a first
-  // save only fills in `postId`, which moves the recovery namespace but not this
-  // identity, so saving a draft never discards the work in front of the creator.
+  // Session identity stays stable when the first single-Post save learns its id,
+  // but subsequent edits must recover under that Post's durable identity. A new
+  // batch keeps its copy ids in one new-composition record instead.
   const composerIdentity = `${scope.workspaceId ?? "personal"}::${selectedBrandProfileId ?? "all"}::${initialPostId ?? "new"}`;
   const recoveryNamespace = `${scope.workspaceId ?? "personal"}::${selectedBrandProfileId ?? "all"}::${postId ?? "new"}`;
+  const [previousComposerIdentity, setPreviousComposerIdentity] = useState(composerIdentity);
+  if (previousComposerIdentity !== composerIdentity) {
+    setPreviousComposerIdentity(composerIdentity);
+    setSelectedProfileIds(selectedBrandProfileId ? [selectedBrandProfileId] : []);
+    setProfileProgress([]);
+  }
   // Async upload callbacks need the *current* identity without re-subscribing,
   // so the refs are synced after commit rather than during render.
   useEffect(() => {
@@ -675,18 +715,27 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const postQuery = usePost(scope, postId ?? "", postId !== null);
   const capabilitiesQuery = usePlatformCapabilities(scope);
 
-  // After sign-in settles, new compositions start under the first available
-  // profile; reopening from aggregate scope adopts the Post's actual owner.
-  // A concrete choice is never replaced, including after a query refresh.
+  // Adopt a default owner once per mounted composer session, after an existing
+  // Post has loaded. Later aggregate selections belong to the collection filter
+  // and must not be replaced by this initialization.
+  const hasAdoptedOwnerRef = useRef(false);
   useEffect(() => {
-    if (!scope.isSignedIn || selectedBrandProfileId !== null) return;
+    if (!scope.isSignedIn || hasAdoptedOwnerRef.current) return;
+    if (initialPostId !== undefined && !postQuery.data) return;
+    if (selectedBrandProfileId !== null) {
+      hasAdoptedOwnerRef.current = true;
+      return;
+    }
     const profileId =
       initialPostId !== undefined ? postQuery.data?.brand_profile_id : brandProfiles[0]?.id;
-    if (profileId) setSelectedBrandProfileId(profileId);
+    if (profileId) {
+      hasAdoptedOwnerRef.current = true;
+      setSelectedBrandProfileId(profileId);
+    }
   }, [
     brandProfiles,
     initialPostId,
-    postQuery.data?.brand_profile_id,
+    postQuery.data,
     scope.isSignedIn,
     selectedBrandProfileId,
     setSelectedBrandProfileId,
@@ -727,6 +776,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     const tasks = tasksRef.current;
     const files = filesRef.current;
     return () => {
+      batchAbortRef.current?.abort();
       for (const url of urls) URL.revokeObjectURL(url);
       urls.clear();
       for (const task of tasks.values()) void task.cancel();
@@ -750,6 +800,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * @returns Nothing; performs the state resets.
    */
   const resetComposer = useCallback(() => {
+    batchAbortRef.current?.abort();
+    profileCopiesRef.current.clear();
     setSharedContent("");
     setAttachments([]);
     setChannelOverrides({});
@@ -801,23 +853,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     try {
       const raw = readFunctionalStorage(recoveryKeyPrefix + recoveryNamespaceRef.current);
       if (!raw) return null;
-      const parsed: unknown = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") return null;
-      const record = parsed as Partial<ComposerRecoveryRecord>;
-      // Every field is applied unconditionally on restore, so a record missing
-      // any of them is treated as unrecoverable rather than half-applied.
-      return record.version === 1 &&
-        typeof record.updatedAt === "string" &&
-        typeof record.sharedContent === "string" &&
-        typeof record.scheduleDate === "string" &&
-        Array.isArray(record.attachments) &&
-        Array.isArray(record.removedAssetIds) &&
-        typeof record.channelOverrides === "object" &&
-        record.channelOverrides !== null &&
-        typeof record.attachmentOverrides === "object" &&
-        record.attachmentOverrides !== null
-        ? (record as ComposerRecoveryRecord)
-        : null;
+      return Schema.decodeUnknownSync(composerRecoverySchema)(JSON.parse(raw));
     } catch {
       return null;
     }
@@ -837,17 +873,15 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   }, []);
 
   /**
-   * Deletes every supplemental record a successful save supersedes: both the
-   * namespace active when the save began and the one the saved Post id moves to.
-   * Either copy could restore work the server now owns, including into the empty
-   * composer after a publish. Removal remains permitted after consent withdrawal.
+   * Deletes the supplemental record superseded by a successful save. A single
+   * Post's later edits use its durable id; new batches retain all copy ids together.
+   * Removal remains permitted after consent withdrawal and never clears another
+   * composition that became active while the request was in flight.
    *
    * @param namespaceAtSubmit - Recovery namespace active when the save started.
    */
   const clearRecoveryAfterSave = useCallback((namespaceAtSubmit: string) => {
-    for (const namespace of new Set([namespaceAtSubmit, recoveryNamespaceRef.current])) {
-      writeFunctionalStorage(recoveryKeyPrefix + namespace, null);
-    }
+    writeFunctionalStorage(recoveryKeyPrefix + namespaceAtSubmit, null);
   }, []);
 
   // Persist unsaved work only after functional consent and after the active
@@ -877,8 +911,16 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       removedAssetIds: [...removedAssetIdsRef.current],
       scheduleDate,
       sharedContent,
+      profileIds: selectedProfileIds,
+      selectedChannelIds,
+      profileCopies: Object.fromEntries(
+        [...profileCopiesRef.current].map(([id, copy]) => [
+          id,
+          { ...copy, assets: Object.fromEntries(copy.assets) },
+        ]),
+      ),
       updatedAt: new Date().toISOString(),
-      version: 1,
+      version: 2,
     });
   }, [
     attachmentOverrides,
@@ -890,6 +932,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     recoveryReadNamespace,
     scheduleDate,
     sharedContent,
+    selectedProfileIds,
+    selectedChannelIds,
+    profileProgress,
     writeRecovery,
   ]);
 
@@ -968,7 +1013,19 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         setAttachments((previous) => restoredAttachmentRows(previous, record, removedAssetIds));
         setSharedContent(record.sharedContent);
         setChannelOverrides(record.channelOverrides);
-        setAttachmentOverrides(record.attachmentOverrides);
+        setAttachmentOverrides(
+          Object.fromEntries(
+            Object.entries(record.attachmentOverrides).map(([id, assets]) => [id, [...assets]]),
+          ),
+        );
+        setSelectedProfileIds([...record.profileIds]);
+        setSelectedChannelIds([...record.selectedChannelIds]);
+        profileCopiesRef.current = new Map(
+          Object.entries(record.profileCopies).map(([id, copy]) => [
+            id,
+            { ...copy, assets: new Map(Object.entries(copy.assets)) },
+          ]),
+        );
         if (record.scheduleDate) setScheduleDate(record.scheduleDate);
         // Restored work is unsaved: it is reported as such and can be saved
         // over the server Post the creator was editing.
@@ -986,6 +1043,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     readRecovery,
     recoveryNamespace,
     recoveryReadNamespace,
+    setSelectedChannelIds,
   ]);
 
   // Merge server-owned attachment state into composer rows. Locally removed
@@ -1085,7 +1143,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     const assetIds = pendingOwnershipAssetIds;
     if (!postId || !assetIds || assetIds.length === 0) return;
     const profileId = selectedBrandProfileId;
-    if (profileId === null) return;
+    if (profileId === null || !selectedProfileIds.includes(profileId)) return;
     // Ids already handed to a PATCH are not resent; the effect re-runs when the
     // ordered rows change so a freshly known id still lands in the same patch.
     // An Asset the creator detached never reaches the Post, even when its id was
@@ -1111,15 +1169,25 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       .catch(() => {
         // Ownership is retried on the next explicit save; never claim it is saved.
       });
-  }, [orderedAssetIds, pendingOwnershipAssetIds, postId, selectedBrandProfileId, updatePost]);
+  }, [
+    orderedAssetIds,
+    pendingOwnershipAssetIds,
+    postId,
+    selectedBrandProfileId,
+    selectedProfileIds,
+    updatePost,
+  ]);
 
   const selectedChannels = useMemo(() => {
     const selectedIds = new Set(selectedChannelIds);
+    const profileIds = new Set(selectedProfileIds);
     return integrations.filter(
       (channel: ChannelIntegration) =>
-        channel.brandProfileId === selectedBrandProfileId && selectedIds.has(channel.id),
+        channel.brandProfileId !== null &&
+        profileIds.has(channel.brandProfileId) &&
+        selectedIds.has(channel.id),
     );
-  }, [integrations, selectedBrandProfileId, selectedChannelIds]);
+  }, [integrations, selectedProfileIds, selectedChannelIds]);
 
   /**
    * Label for one target Channel inside the composer. Customization is per social
@@ -1718,11 +1786,23 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       const errors: string[] = [];
       const starting = attachments.filter((attachment) => attachment.assetId === null);
 
-      if (selectedBrandProfileId === null) {
+      if (selectedProfileIds.length === 0 || selectedBrandProfileId === null) {
         errors.push(t("Select a Brand Profile before publishing."));
       }
       if (type !== "draft" && selectedChannels.length === 0) {
         errors.push(t("Please select at least one destination channel."));
+      }
+      if (type !== "draft") {
+        const targetedProfiles = new Set(selectedChannels.map((channel) => channel.brandProfileId));
+        for (const profileId of selectedProfileIds) {
+          if (!targetedProfiles.has(profileId)) {
+            errors.push(
+              t("{name}: select at least one destination channel.", {
+                name: profileNames.get(profileId) ?? t("Unknown profile"),
+              }),
+            );
+          }
+        }
       }
       if (!sharedContent.trim() && attachments.length === 0) {
         errors.push(t("Post must contain text content or at least one media item."));
@@ -1867,6 +1947,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       resolvedContentFor,
       scheduleDate,
       selectedBrandProfileId,
+      selectedProfileIds,
+      profileNames,
       selectedChannels,
       sharedContent,
       t,
@@ -1933,12 +2015,96 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       // null selection cannot reach the scoped mutations.
       if (selectedBrandProfileId === null) return;
       const brandProfileId = selectedBrandProfileId;
-      // A first save moves the composition from the unsaved `new` namespace to
-      // the saved Post's, so both copies have to be captured before the id lands.
+      // Async completion must affect only the composition that submitted it.
       const recoveryNamespaceAtSubmit = recoveryNamespaceRef.current;
+      const composerIdentityAtSubmit = composerIdentityRef.current;
 
       setIsSubmitting(true);
       try {
+        if (
+          selectedProfileIds.length !== 1 ||
+          selectedProfileIds[0] !== brandProfileId ||
+          profileCopiesRef.current.size > 0
+        ) {
+          const targetsByProfile = new Map<string, PostTargetDraft[]>();
+          const channelsById = new Map(selectedChannels.map((channel) => [channel.id, channel]));
+          for (const target of buildTargets()) {
+            const profileId = channelsById.get(target.platform_account_id)?.brandProfileId;
+            if (!profileId) continue;
+            const targets = targetsByProfile.get(profileId);
+            if (targets) targets.push(target);
+            else targetsByProfile.set(profileId, [target]);
+          }
+          const controller = new AbortController();
+          batchAbortRef.current = controller;
+          setProfileProgress([]);
+          const succeeded = await persistProfileCopies({
+            profileIds: selectedProfileIds,
+            sourceProfileId: brandProfileId,
+            sourcePostId: postId,
+            sharedContent,
+            targetsByProfile,
+            attachments: attachments.flatMap((attachment) =>
+              attachment.assetId
+                ? [
+                    {
+                      assetId: attachment.assetId,
+                      name: attachment.name,
+                      mimeType: attachment.mimeType,
+                      file: filesRef.current.get(attachment.key),
+                    },
+                  ]
+                : [],
+            ),
+            mode: type,
+            scheduledAt: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
+            workspaceId: scope.workspaceId,
+            copies: profileCopiesRef.current,
+            signal: controller.signal,
+            create: createPost.mutateAsync,
+            update: updatePost.mutateAsync,
+            schedule: schedulePost.mutateAsync,
+            onProgress: (progress) => {
+              if (controller.signal.aborted) return;
+              setProfileProgress((previous) => [
+                ...previous.filter((entry) => entry.profileId !== progress.profileId),
+                progress,
+              ]);
+            },
+          });
+          if (controller.signal.aborted || composerIdentityRef.current !== composerIdentityAtSubmit)
+            return;
+          const anchor = profileCopiesRef.current.get(brandProfileId);
+          await refreshWorkspace();
+          if (!succeeded) {
+            markDirty();
+            setErrorMessage(
+              t(
+                "Some profiles could not be completed. Completed profiles are kept; retry to finish the remaining work.",
+              ),
+            );
+            return;
+          }
+          clearRecoveryAfterSave(recoveryNamespaceAtSubmit);
+          dirtyRef.current = false;
+          setIsDirty(false);
+          setSavedAt(
+            anchor?.updatedAt ??
+              profileCopiesRef.current.get(selectedProfileIds[0])?.updatedAt ??
+              null,
+          );
+          toast(type === "draft" ? t("Drafts saved") : t("Posts queued"), {
+            variant: "success",
+            description: t("Saved one independent Post per selected Brand Profile."),
+          });
+          if (type !== "draft") {
+            setProfileProgress([]);
+            setCreatedPostId(null);
+            resetComposer();
+            onPostSuccess?.();
+          }
+          return;
+        }
         const saved = await persistPost(brandProfileId);
         setCreatedPostId(saved.id);
         dirtyRef.current = false;
@@ -1984,6 +2150,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         await refreshWorkspace();
         onPostSuccess?.();
       } catch (error) {
+        if (composerIdentityRef.current !== composerIdentityAtSubmit) return;
         // A rejected mutation that carried structured per-field violations names
         // each one in the fix-list; anything else falls back to the masked
         // user-facing message so internals never surface.
@@ -2010,7 +2177,15 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       scheduleDate,
       schedulePost,
       selectedBrandProfileId,
-      selectedChannels.length,
+      selectedProfileIds,
+      selectedChannels,
+      attachments,
+      sharedContent,
+      postId,
+      scope.workspaceId,
+      createPost.mutateAsync,
+      updatePost.mutateAsync,
+      markDirty,
       t,
       validateSubmission,
     ],
@@ -2043,8 +2218,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
 
   return (
     <fieldset
-      disabled={isInitializing}
-      aria-busy={isInitializing}
+      disabled={isInitializing || isSubmitting}
+      aria-busy={isInitializing || isSubmitting}
       className="@container flex min-h-0 min-w-0 grow flex-col gap-5 @4xl:overflow-hidden"
     >
       <div className="flex flex-col gap-3 empty:hidden">
@@ -2062,8 +2237,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             <div className="flex-1">
               {t("This post belongs to {name}. Switch to that Brand Profile to edit it.", {
                 name:
-                  brandProfiles.find((profile) => profile.id === postQuery.data?.brand_profile_id)
-                    ?.name ?? t("another Brand Profile"),
+                  profileNames.get(postQuery.data?.brand_profile_id ?? "") ??
+                  t("another Brand Profile"),
               })}
             </div>
           </Alert>
@@ -2117,6 +2292,31 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               <X className="size-4" />
             </Button>
           </Alert>
+        )}
+        {profileProgress.length > 0 && (
+          <ul
+            className="space-y-1 text-xs text-ink-2"
+            aria-label={t("Brand Profile progress")}
+            aria-live="polite"
+          >
+            {profileProgress.map((progress) => (
+              <li key={progress.profileId}>
+                {profileNames.get(progress.profileId) ?? t("Unknown profile")}
+                {": "}
+                {progress.phase === "failed"
+                  ? userFacingErrorMessage(progress.error, language)
+                  : progress.phase === "scheduled"
+                    ? publishMode === "schedule"
+                      ? t("Scheduled")
+                      : t("Queued")
+                    : progress.phase === "saved"
+                      ? t("Draft saved")
+                      : progress.phase === "media"
+                        ? t("Preparing profile media…")
+                        : t("Saving…")}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 
@@ -2627,7 +2827,14 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         {/* Targeting and timing stay together in a bounded rail rather than
             stretching to half the composer. Mobile retains the same DOM order. */}
         <div className="flex min-w-0 flex-col gap-6 @4xl:-my-1 @4xl:min-h-0 @4xl:w-85 @4xl:shrink-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:py-1 @4xl:pr-1 @4xl:pl-6">
-          <DestinationSelector onNavigate={onNavigate} />
+          <DestinationSelector
+            onNavigate={onNavigate}
+            selectedProfileIds={selectedProfileIds}
+            onProfilesChange={(ids) => {
+              setSelectedProfileIds(ids);
+              markDirty();
+            }}
+          />
 
           <ComposerSection icon={Send} title={t("Publishing")}>
             <SegmentedControl
@@ -2709,7 +2916,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           ) : (
             <PublishModeIcon className="size-3.5" />
           )}
-          {publishModeAction(publishMode, postId, t)}
+          {selectedProfileIds.length > 1
+            ? publishMode === "draft"
+              ? t("Save Drafts")
+              : publishMode === "schedule"
+                ? t("Schedule Posts")
+                : t("Publish Posts")
+            : publishModeAction(publishMode, postId, t)}
         </Button>
       </div>
     </fieldset>

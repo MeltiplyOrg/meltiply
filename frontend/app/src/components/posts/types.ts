@@ -132,13 +132,13 @@ export type PostSortKey = "date-desc" | "date-asc";
 /**
  * Filter and sorting criteria passed to the post processor.
  *
- * `platformFilter` contains zero or more provider identifiers. An empty array means all platforms;
- * multiple identifiers are OR-matched so a post from any selected platform remains visible.
+ * Empty selection arrays mean all values. Values within each field are
+ * OR-matched; separate fields are AND-matched.
  */
 export interface FilterCriteria {
-  statusFilter: PostStatusFilter;
-  platformFilter: string[];
-  profileFilter: string;
+  statusFilter: readonly Exclude<PostStatusFilter, "all">[];
+  platformFilter: readonly string[];
+  profileFilter: readonly string[];
   searchQuery: string;
   dateFilter: string;
   sortKey: PostSortKey;

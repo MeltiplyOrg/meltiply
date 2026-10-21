@@ -104,7 +104,7 @@ export interface ThreadsAdapterOptions {
  */
 function postText(input: PublishInput): string {
   const caption = input.caption.trim();
-  if ([...caption].length > 500 || input.hashtags.length > 1) {
+  if ([...caption].length > THREADS_MAX_CAPTION_LENGTH || input.hashtags.length > 1) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "threads_content_invalid",

@@ -38,11 +38,12 @@ function neverSettlingUploadTask(): AssetUploadTask {
 
 /** Sidebar probe driving the same Brand Profile switch the workspace shell performs. */
 function ProfileSwitchProbe({ profileId }: { profileId: string }) {
-  const { setBrandProfileId } = useMeltiplyAuth();
+  const { brandProfileId, setBrandProfileId } = useMeltiplyAuth();
   return (
     <>
       <button onClick={() => setBrandProfileId(profileId)}>switch-profile</button>
       <button onClick={() => setBrandProfileId(null)}>switch-all</button>
+      <output aria-label="Collection profile">{brandProfileId ?? "all"}</output>
     </>
   );
 }
@@ -191,14 +192,22 @@ const composerProfiles: BrandProfile[] = ["profile-a", "profile-b"].map((id, ind
 describe("Composer default ownership", () => {
   it("selects the first profile for a new Post without replacing a later choice", async () => {
     renderComposer({ brandProfiles: composerProfiles });
-    await screen.findByRole("combobox", { name: "Alpha Brand" });
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Alpha Brand" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Alpha Brand" })).toBeChecked();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
 
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
-    await screen.findByRole("combobox", { name: "Beta Brand" });
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Beta Brand" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Beta Brand" })).toBeChecked();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Alpha Brand" })).not.toBeChecked();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     await waitFor(() => expect(composerTextarea()).toBeEnabled());
     fireEvent.change(composerTextarea(), { target: { value: "Draft for Beta" } });
-    expect(screen.getByRole("combobox", { name: "Beta Brand" })).toBeInTheDocument();
     expect(composerTextarea()).toHaveValue("Draft for Beta");
+    fireEvent.click(screen.getByRole("button", { name: "switch-all" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Collection profile")).toHaveTextContent("all"),
+    );
   });
 
   it("uses a reopened Post's owner rather than assigning the first profile", async () => {
@@ -207,9 +216,10 @@ describe("Composer default ownership", () => {
       initialPostId: hydratedPost.id,
       post: { ...hydratedPost, brand_profile_id: "profile-b" },
     });
-    await screen.findByRole("combobox", { name: "Beta Brand" });
     await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
-    expect(screen.queryByRole("combobox", { name: "Alpha Brand" })).not.toBeInTheDocument();
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Beta Brand" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Beta Brand" })).toBeChecked();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Alpha Brand" })).not.toBeChecked();
   });
 });
 
@@ -252,9 +262,9 @@ describe("Composer recovery consent", () => {
     await waitFor(() => expect(textarea).toBeEnabled());
 
     window.localStorage.setItem(
-      "meltiply.composer.v1.personal::all::new",
+      "meltiply.composer.v2.personal::all::new",
       JSON.stringify({
-        version: 1,
+        version: 2,
         updatedAt: "2026-10-01T12:00:00.000Z",
         sharedContent: "Recovered paragraph",
         scheduleDate: "",
@@ -262,6 +272,9 @@ describe("Composer recovery consent", () => {
         removedAssetIds: [],
         channelOverrides: {},
         attachmentOverrides: {},
+        profileIds: [],
+        selectedChannelIds: [],
+        profileCopies: {},
       }),
     );
     act(() => {

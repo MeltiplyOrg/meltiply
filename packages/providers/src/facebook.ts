@@ -51,6 +51,9 @@ const businessDiscoveryScope = "business_management";
 /** Facebook's caption ceiling remains known even before live publishing is configured. */
 export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
 
+/** Facebook's caption ceiling remains known even before live publishing is configured. */
+export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
+
 const capability: PlatformCapability = {
   accepted_mime_types: ["video/mp4", "video/quicktime"],
   analytics: false,
@@ -217,7 +220,7 @@ function reelInput(input: PublishInput): {
     input.media.length !== 1 ||
     !media ||
     media.mode !== "remote_ingest" ||
-    [...description].length > 2_200 ||
+    [...description].length > FACEBOOK_MAX_CAPTION_LENGTH ||
     input.hashtags.length > 30
   ) {
     throw new ProviderAdapterError(

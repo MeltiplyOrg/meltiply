@@ -45,8 +45,9 @@ gutter. Only connectable profiles appear, preserving workspace order; reconnecti
 the same provider account remains eligible. If none can accept the selected
 Channel, an explanatory empty state replaces the choices. Page actions remain
 outside the list's scroll boundary.
-Account selection keeps the neutral row border and uses the trailing checkmark;
-its focus ring appears for keyboard navigation, not pointer clicks.
+Account selection keeps the neutral row border and uses the trailing checkmark.
+Account and Brand Profile rows show a focus ring only for keyboard navigation,
+not pointer clicks; Profile selection uses its fill and trailing checkmark.
 
 ## Settings
 
@@ -73,6 +74,7 @@ Centered forms and confirmations have 16px viewport gutters and a maximum height
 
 Keep control identity, unsaved content, selection, and keyboard focus stable as labels or state change. Hidden columns retain underlying data; filters operate only on loaded, authorized records. Scope changes clear selection according to the owning feature's contract.
 
+Drawer focus entry and opener restoration use `preventScroll`; neither may move the underlying collection. A non-modal inspection can remain open while the list scrolls, so dismissal preserves the current viewport rather than rewinding to where inspection began.
 Inspecting a background Post hides rather than unmounts the live composer; returning preserves its local inputs and upload tasks. Only explicit composition dismissal or a deliberate identity/scope change releases it. URL-backed composer intent opens and closes on same-route navigation as well as reload.
 
 At the composer's wide split, independently scrolling columns reserve a 4px focus gutter so textarea, input, select, and button rings remain visible at every edge. The editor compensates its gutter with margins to retain the shared content alignment; phone layouts keep the drawer's existing outer padding. Do not remove the clipping boundary or shrink a shared focus ring to work around a column's missing space.
@@ -81,6 +83,6 @@ There is one implemented animation path, with no application motion mode or mode
 
 Native `prefers-reduced-motion` remains independent: CSS overrides shorten declarative motion, and the shared WAAPI owner skips spatial effects. Interrupted toolbar exits cancel their own animation and stale completion callbacks before the next intent settles.
 
-Smooth scrolling has one owner, `frontend/app/src/components/layout/smooth-scroll.tsx`. The document controller (`SmoothScroll`) smooths the window and deliberately stays out of every region marked `data-lenis-prevent`, so it can never swallow a nested wheel gesture. Each list viewport that owns its scrolling — the Posts table, Grid, Calendar, and both Channels directories — mounts `useSmoothScrollContainer` for its own controller, re-measures when its children change, and snaps its scroll position to whole pixels so a `position: sticky` header cannot flicker along its top edge while the container animates through fractional offsets.
+Smooth scrolling has one owner, `frontend/app/src/components/layout/smooth-scroll.tsx`. The document controller (`SmoothScroll`) smooths the window and deliberately stays out of every region marked `data-lenis-prevent`, so it can never swallow a nested wheel gesture. Each list viewport that owns its scrolling — the Posts table, Grid, Calendar, and both Channels directories — attaches the callback ref returned by `useSmoothScrollContainer`. Its controller follows the mounted element, destroys itself on detachment or replacement, and rebuilds against the current first child when content is replaced. It re-measures when descendants change and snaps its scroll position to whole pixels so a `position: sticky` header cannot flicker along its top edge while the container animates through fractional offsets.
 
 Verify the actual desktop, phone, and reported user viewport. Cover both palettes, long content, loading, empty/error states, keyboard traversal, nested scrolling, and available actions. Every bounded scroller needs shrinkable flex/grid ancestors; only the intended table or calendar canvas may overflow horizontally.

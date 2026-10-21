@@ -690,6 +690,26 @@ export function getAssetDownloadUrl(
 }
 
 /**
+ * Reads original Asset bytes through its authorized, short-lived download URL.
+ * Workspace/id select the source Asset; object storage receives no API bearer
+ * header or cookies. Non-2xx downloads fail with ApiError, while transport/body
+ * failures follow the canonical adapter defect boundary. Cancellation covers
+ * both URL acquisition and the binary transfer.
+ */
+export function getAssetBlob(
+  workspaceId: string | null,
+  id: string,
+  options?: ApiRequestOptions,
+): Effect.Effect<Blob, ApiError> {
+  return Effect.flatMap(getAssetDownloadUrl(workspaceId, id, options), ({ url }) =>
+    unwrap<Blob>(async (signal) => {
+      const response = await globalThis.fetch(url, { credentials: "omit", signal });
+      return response.ok ? { response, data: await response.blob() } : { response };
+    }, options?.signal),
+  );
+}
+
+/**
  * Initiates an upload session for a media file, determining single or multipart upload strategy.
  *
  * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.

@@ -277,8 +277,31 @@ export function PostsView({
   const searchParams = useSearchParams();
 
   const [viewMode, setViewMode] = useState<PostViewMode>(initialViewMode);
-  const [statusFilter, setStatusFilter] = useState<PostStatusFilter>(initialStatusFilter);
-  const profileFilter = selectedBrandProfileId ?? "all";
+  const [statusFilter, setStatusFilter] = useState<Exclude<PostStatusFilter, "all">[]>(() =>
+    initialStatusFilter === "all" ? [] : [initialStatusFilter],
+  );
+  const [profileFilter, setProfileFilter] = useState<string[]>(() =>
+    selectedBrandProfileId ? [selectedBrandProfileId] : [],
+  );
+  const [previousProfileId, setPreviousProfileId] = useState(selectedBrandProfileId);
+  if (previousProfileId !== selectedBrandProfileId) {
+    setPreviousProfileId(selectedBrandProfileId);
+    setProfileFilter(selectedBrandProfileId ? [selectedBrandProfileId] : []);
+  }
+  /**
+   * One selected profile remains the mutation/composer owner. Zero or several
+   * profiles query the aggregate scope and filter locally without inventing a
+   * multi-owner Post; external scope changes replace this collection selection.
+   */
+  const handleProfileFilterChange = useCallback(
+    (profiles: string[]) => {
+      const owner = profiles.length === 1 ? profiles[0] : null;
+      setProfileFilter(profiles);
+      setPreviousProfileId(owner);
+      setSelectedBrandProfileId(owner);
+    },
+    [setSelectedBrandProfileId],
+  );
   const [dateFilter, setDateFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortKey, setSortKey] = useState<PostSortKey>("date-desc");
@@ -333,7 +356,9 @@ export function PostsView({
       prevInputs.initialComposerOpen !== initialComposerOpen;
     setPrevInputs({ initialViewMode, initialStatusFilter, initialPostId, initialComposerOpen });
     if (initialViewMode) setViewMode(initialViewMode);
-    if (initialStatusFilter) setStatusFilter(initialStatusFilter);
+    if (initialStatusFilter) {
+      setStatusFilter(initialStatusFilter === "all" ? [] : [initialStatusFilter]);
+    }
     if (compositionChanged) {
       setEditingPostId(initialPostId);
       setSchedulingDate(undefined);
@@ -371,7 +396,7 @@ export function PostsView({
     };
   }, [calendarMonth]);
 
-  const isDraftFilter = statusFilter === "draft";
+  const isDraftFilter = statusFilter.length === 1 && statusFilter[0] === "draft";
   const isCalendarMode = viewMode === "calendar";
 
   /**
@@ -423,7 +448,7 @@ export function PostsView({
 
   /**
    * Distinct Brand Profile ids carried by the rendered Post rows, forwarded to
-   * the toolbar's `BrandProfileSelect` as `unresolvedProfileIds`. The select
+   * the toolbar's profile checklist as `unresolvedProfileIds`. The checklist
    * keeps only ids missing from `brandProfiles` and renders them as name-only
    * "Unknown profile" rows, so posts whose owning profile was deleted or left
    * scope keep their profile selectable instead of silently dropping out of the
@@ -1029,7 +1054,7 @@ export function PostsView({
         platformFilter={selectedPlatforms}
         onPlatformChange={setSelectedPlatforms}
         profileFilter={profileFilter}
-        onProfileChange={(id) => setSelectedBrandProfileId(id === "all" ? null : id)}
+        onProfileChange={handleProfileFilterChange}
         dateFilter={dateFilter}
         onDateChange={setDateFilter}
         sortKey={sortKey}

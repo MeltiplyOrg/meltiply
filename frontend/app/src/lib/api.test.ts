@@ -171,6 +171,8 @@ describe("generated API client adapters", () => {
   });
 
   it("sends the session JWT as a bearer credential without cookies", async () => {
+    const storageUrl = "https://objects.example/original.png";
+    const originalBytes = new Uint8Array([0, 127, 255]);
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -185,14 +187,13 @@ describe("generated API client adapters", () => {
           },
         ),
       )
-      .mockImplementation(() =>
-        Promise.resolve(
-          new Response(JSON.stringify({}), {
-            headers: { "content-type": "application/json" },
-            status: 200,
-          }),
-        ),
-      );
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith("/download-url"))
+          return Promise.resolve(Response.json({ url: storageUrl }));
+        if (url === storageUrl) return Promise.resolve(new Response(originalBytes));
+        return Promise.resolve(Response.json({}));
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     // Fresh module instances so the module-local bearer token holder starts
@@ -204,6 +205,8 @@ describe("generated API client adapters", () => {
     await authClient.getSession();
     await Effect.runPromise(isolatedApi.getCurrentUser(null));
     await Effect.runPromise(isolatedApi.listPosts("ws-123"));
+    const blob = await Effect.runPromise(isolatedApi.getAssetBlob("ws-123", "asset-1"));
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(originalBytes);
 
     // The auth lifecycle request keeps the session cookie; API requests carry
     // only the bearer JWT and must not send cookies.
@@ -212,6 +215,11 @@ describe("generated API client adapters", () => {
     expect(credentialsAt(fetchMock, 1)).toBe("same-origin");
     expect(headerAt(fetchMock, 2, "Authorization")).toBe("Bearer session-jwt-1");
     expect(headerAt(fetchMock, 2, "X-Workspace-ID")).toBe("ws-123");
-    expect(credentialsAt(fetchMock, 2)).toBe("same-origin");
+    expect(credentialsAt(fetchMock, 2)).toBe("omit");
+    expect(headerAt(fetchMock, 3, "Authorization")).toBe("Bearer session-jwt-1");
+    expect(headerAt(fetchMock, 3, "X-Workspace-ID")).toBe("ws-123");
+    expect(headerAt(fetchMock, 4, "Authorization")).toBeNull();
+    expect(headerAt(fetchMock, 4, "X-Workspace-ID")).toBeNull();
+    expect(credentialsAt(fetchMock, 4)).toBe("omit");
   });
 });

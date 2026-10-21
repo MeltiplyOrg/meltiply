@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import { LayoutGrid, Plus } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Card } from "@meltiply/ui/card";
@@ -51,8 +51,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
   selectionDisabled,
 }: PostGridCardViewProps) {
   const { t } = useI18n();
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  useSmoothScrollContainer(scrollRef);
+  const scrollRef = useSmoothScrollContainer();
   const profiles = useMemo(
     () => new Map(brandProfiles.map((profile) => [profile.id, profile.name])),
     [brandProfiles],

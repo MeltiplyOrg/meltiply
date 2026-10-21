@@ -962,7 +962,6 @@ WHERE platform = 'linkedin'
     'e3000000-0000-4000-8000-000000000002',
     'e4000000-0000-4000-8000-000000000002'
   );
-
 INSERT INTO platform_accounts (
   id, org_id, brand_profile_id, platform, platform_user_id, display_name,
   access_token, scopes, metadata, connection_status, last_synced_at, revoked_at
@@ -1011,6 +1010,7 @@ VALUES
     NULL
   ),
   (
+
     'e3000000-0000-4000-8000-000000000005',
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000002',

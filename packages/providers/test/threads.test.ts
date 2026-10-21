@@ -86,7 +86,7 @@ describe("createThreadsAdapter", () => {
       state: "oauth-state",
     });
     const url = new URL(value);
-    expect(url.origin).toBe("https://threads.net");
+    expect(url.origin).toBe("https://threads.com");
     expect(url.pathname).toBe("/oauth/authorize");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       client_id: "threads-client",
@@ -508,7 +508,7 @@ describe("createThreadsAdapter", () => {
 
     // Rejects child item container when media_type discriminator is omitted
     const omittedUrl = new URL(
-      "https://graph.threads.net/me/threads?is_carousel_item=true&image_url=https://assets.example/one.jpg",
+      "https://graph.threads.com/me/threads?is_carousel_item=true&image_url=https://assets.example/one.jpg",
     );
     const omittedResponse = await strictResponder(omittedUrl, {
       method: "POST",
@@ -517,7 +517,7 @@ describe("createThreadsAdapter", () => {
 
     // Rejects child item container when media_type discriminator is wrong/mismatched
     const wrongUrl = new URL(
-      "https://graph.threads.net/me/threads?is_carousel_item=true&media_type=VIDEO&image_url=https://assets.example/one.jpg",
+      "https://graph.threads.com/me/threads?is_carousel_item=true&media_type=VIDEO&image_url=https://assets.example/one.jpg",
     );
     const wrongResponse = await strictResponder(wrongUrl, { method: "POST" });
     expect(wrongResponse.status).toBe(400);

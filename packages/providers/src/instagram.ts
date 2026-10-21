@@ -287,6 +287,21 @@ function insightValue(metric: Record<string, unknown>): number | undefined {
 }
 
 /**
+ * Reads the single account in an Instagram Login response. Meta documents both
+ * a Graph node object and a `data` envelope; multiple or empty entries cannot
+ * identify the one professional account authorized by this token.
+ */
+function loginRecord(value: unknown): Record<string, unknown> {
+  const body = record(value);
+  if (!body) throw malformed();
+  if (body.data === undefined) return body;
+  if (!Array.isArray(body.data) || body.data.length !== 1) throw malformed();
+  const account = record(body.data[0]);
+  if (!account) throw malformed();
+  return account;
+}
+
+/**
  * Instantiates a ProviderAdapter for Instagram Professional (Business/Creator) accounts.
  * Supports image and Reel publishing via container ingestion, analytics, comments, and replies.
  * Optionally strips engagement methods if options.engagementEnabled is false.
@@ -460,6 +475,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
       const url = new URL("/oauth/authorize", authorizationOrigin);
       url.searchParams.set("client_id", clientId);
+      url.searchParams.set("force_reauth", "true");
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", configuredScopes.join(","));
@@ -476,10 +492,11 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
 
     /**
      * Exchanges the authorization code for a short-lived token, upgrades it via
-     * ig_exchange_token to a long-lived token, then binds the connection to the
-     * professional (BUSINESS or MEDIA_CREATOR) Instagram profile whose id matches the
-     * exchange response. Throws TypeError on redirect URI mismatch; returns the
-     * OAuthConnection with the long-lived token as its own refresh token.
+     * ig_exchange_token to a long-lived token, then reads the authorized Business or
+     * Creator profile. The token's app-scoped ID must match `id`; the connection
+     * retains `user_id`, Instagram's professional account ID used for publishing
+     * and webhooks. Rejects malformed profiles or incomplete explicit permission
+     * grants; retains the long-lived token as its own refresh token.
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -496,10 +513,20 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         method: "POST",
         url: `${exchangeOrigin}/oauth/access_token`,
       });
-      const shortBody = record(shortResponse.body);
+      const shortBody = loginRecord(shortResponse.body);
       const shortToken = boundedString(shortBody?.access_token, 16_384);
       const exchangedAccountId = providerIdentifier(String(shortBody?.user_id ?? ""));
       if (!shortToken || !exchangedAccountId) throw malformed();
+      if (shortBody.permissions !== undefined) {
+        const permissions = boundedString(shortBody.permissions, 4_096)
+          ?.split(",")
+          .map((scope) => scope.trim());
+        if (!permissions || configuredScopes.some((scope) => !permissions.includes(scope))) {
+          throw new ProviderAdapterError(
+            classifyProviderFailure({ code: "instagram_permissions_missing", status: 403 }),
+          );
+        }
+      }
 
       const longUrl = new URL("/access_token", apiOrigin);
       longUrl.searchParams.set("grant_type", "ig_exchange_token");
@@ -515,14 +542,18 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       const expiresAt = addSeconds(now(), longBody.expires_in, tokenLifetimeMaximumSeconds);
 
       const profileUrl = new URL(`/${apiVersion}/me`, apiOrigin);
-      profileUrl.searchParams.set("fields", "id,username,name,profile_picture_url,account_type");
+      profileUrl.searchParams.set(
+        "fields",
+        "id,user_id,username,name,profile_picture_url,account_type",
+      );
       const profileResponse = await http.request<unknown>(context, {
         headers: bearer(accessToken),
         method: "GET",
         url: profileUrl.toString(),
       });
-      const profile = record(profileResponse.body);
-      const profileAccountId = providerIdentifier(profile?.id);
+      const profile = loginRecord(profileResponse.body);
+      const profileScopedId = providerIdentifier(profile.id);
+      const profileAccountId = providerIdentifier(profile.user_id);
       const username = boundedString(profile?.username, 255);
       const name = boundedText(profile?.name, 500);
       const displayName = name ?? (username ? boundedString(username, 500) : undefined);
@@ -531,10 +562,11 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
           ? undefined
           : secureUrl(profile.profile_picture_url);
       if (
-        profileAccountId !== exchangedAccountId ||
+        profileScopedId !== exchangedAccountId ||
+        !profileAccountId ||
         !username ||
         !displayName ||
-        !["BUSINESS", "MEDIA_CREATOR"].includes(String(profile?.account_type)) ||
+        !["BUSINESS", "MEDIA_CREATOR"].includes(String(profile?.account_type).toUpperCase()) ||
         (profile?.profile_picture_url !== undefined && !avatarUrl)
       ) {
         throw malformed();

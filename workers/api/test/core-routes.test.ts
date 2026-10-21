@@ -1562,7 +1562,7 @@ describe("core API routes", () => {
     );
     expect(response.status).toBe(307);
     const location = new URL(response.headers.get("Location")!);
-    expect(location.origin).toBe("https://threads.net");
+    expect(location.origin).toBe("https://threads.com");
     expect(location.searchParams.get("client_id")).toBe("threads-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
       "http://localhost:8787/api/v1/platforms/threads/callback",

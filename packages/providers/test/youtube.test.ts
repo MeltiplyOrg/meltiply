@@ -254,7 +254,14 @@ describe("createYouTubeAdapter", () => {
     });
   });
 
-  it("fails closed when the authorized YouTube channel is not unique", async () => {
+  it.each([
+    { reason: "no channel", body: { items: [] } },
+    { reason: "several channels", body: { items: [{ id: "channel-1" }, { id: "channel-2" }] } },
+    {
+      reason: "another page of channels",
+      body: { items: [{ id: "channel-1" }], nextPageToken: "next-page" },
+    },
+  ])("refuses to bind a YouTube grant with $reason to an arbitrary channel", async ({ body }) => {
     const providerCalls = sequence(
       () =>
         json({
@@ -263,7 +270,7 @@ describe("createYouTubeAdapter", () => {
           refresh_token: "refresh-secret",
           token_type: "Bearer",
         }),
-      () => json({ items: [] }),
+      () => json(body),
     );
     await expect(
       adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {

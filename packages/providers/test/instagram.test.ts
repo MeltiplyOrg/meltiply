@@ -81,6 +81,7 @@ describe("createInstagramAdapter", () => {
     expect(url.pathname).toBe("/oauth/authorize");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       client_id: "instagram-client",
+      force_reauth: "true",
       redirect_uri: redirectUri,
       response_type: "code",
       scope:
@@ -163,6 +164,57 @@ describe("createInstagramAdapter", () => {
         "instagram_business_manage_insights",
       ],
     });
+  });
+
+  it.each([
+    { account_type: "Media_Creator", id: "12345", user_id: "17841400000098765", valid: true },
+    { account_type: "BUSINESS", id: "12345", user_id: "17841400000098765", valid: true },
+    { account_type: "PERSONAL", id: "12345", user_id: "17841400000098765", valid: false },
+    { account_type: "Business", id: "wrong-user", user_id: "17841400000098765", valid: false },
+    { account_type: "Business", id: "12345", user_id: undefined, valid: false },
+  ])(
+    "validates Instagram identity and account type $account_type/$id/$user_id",
+    async ({ valid, ...profile }) => {
+      const providerCalls = sequence(
+        () => json({ access_token: "short-secret", user_id: "12345" }),
+        () => json({ access_token: "long-secret", token_type: "bearer", expires_in: 5_184_000 }),
+        () => json({ ...profile, username: "creator" }),
+      );
+      const connection = adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+        code: "authorization-code",
+        codeVerifier: "unused",
+        redirectUri,
+      });
+      if (valid) {
+        await expect(connection).resolves.toMatchObject({
+          account: { id: "17841400000098765", displayName: "creator" },
+        });
+      } else {
+        await expect(connection).rejects.toBeInstanceOf(ProviderAdapterError);
+      }
+    },
+  );
+
+  it("refuses a partial Instagram publishing grant before upgrading its token", async () => {
+    const providerCalls = sequence(() =>
+      json({
+        data: [
+          {
+            access_token: "short-secret",
+            user_id: "12345",
+            permissions: "instagram_business_basic",
+          },
+        ],
+      }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+        code: "authorization-code",
+        codeVerifier: "unused",
+        redirectUri,
+      }),
+    ).rejects.toMatchObject({ failure: { code: "instagram_permissions_missing" } });
+    expect(providerCalls.calls.map(({ url }) => url.pathname)).toEqual(["/oauth/access_token"]);
   });
 
   it("creates, polls, and publishes a remote-ingest media container", async () => {

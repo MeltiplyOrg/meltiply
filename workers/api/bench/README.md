@@ -6,6 +6,9 @@ a dedicated PostgreSQL database, times each workflow through the same service
 or route the product uses, and emits JSON that the comparison script turns into
 a before/after report.
 
+Current results and analysis:
+[backend performance comparison](../../../docs/benchmarks/backend-optimization.md).
+
 ## What it measures
 
 | Workflow                             | Path                                                     |

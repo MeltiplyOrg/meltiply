@@ -1,0 +1,971 @@
+{
+  "baseline_revision": [
+    "master@d370259ef0c3"
+  ],
+  "candidate_revision": [
+    "logic-optimize-39@bfc005fd624a"
+  ],
+  "rows": [
+    {
+      "baseline": {
+        "bytes": 681,
+        "cpuPerOp": 5.614111111111111,
+        "dbMsPerOp": 6.695777777777778,
+        "p50": 14.88,
+        "p95": 17.87,
+        "p99": 21.14,
+        "reqP95": 17.87,
+        "setupMs": 0.06,
+        "statementsPerOp": 1,
+        "throughput": 65.1980208778551
+      },
+      "candidate": {
+        "bytes": 681,
+        "cpuPerOp": 5.666222222222222,
+        "dbMsPerOp": 2.852,
+        "p50": 10.92,
+        "p95": 13.16,
+        "p99": 16.45,
+        "reqP95": 13.16,
+        "setupMs": 0.12000000000000001,
+        "statementsPerOp": 1,
+        "throughput": 89.05776880603217
+      },
+      "name": "analytics.summary.year",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 494,
+        "cpuPerOp": 3.9444444444444446,
+        "dbMsPerOp": 1.4720000000000002,
+        "p50": 8.92,
+        "p95": 11.49,
+        "p99": 16.57,
+        "reqP95": 11.49,
+        "setupMs": 0.08,
+        "statementsPerOp": 1,
+        "throughput": 107.63618967888533
+      },
+      "candidate": {
+        "bytes": 494,
+        "cpuPerOp": 4.0744444444444445,
+        "dbMsPerOp": 1.4918888888888886,
+        "p50": 9.19,
+        "p95": 11.11,
+        "p99": 12.01,
+        "reqP95": 11.11,
+        "setupMs": 0.12000000000000001,
+        "statementsPerOp": 1,
+        "throughput": 106.75396768913247
+      },
+      "name": "assets.detail",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 1050,
+        "cpuPerOp": 7.072777777777778,
+        "dbMsPerOp": 20.71311111111111,
+        "p50": 29.3,
+        "p95": 33.53,
+        "p99": 36.58,
+        "reqP95": 33.53,
+        "setupMs": 300.09000000000003,
+        "statementsPerOp": 12,
+        "throughput": 33.58823068396834
+      },
+      "candidate": {
+        "bytes": 1050,
+        "cpuPerOp": 7.234222222222223,
+        "dbMsPerOp": 20.725,
+        "p50": 29.39,
+        "p95": 31.66,
+        "p99": 37.99,
+        "reqP95": 31.66,
+        "setupMs": 303.63,
+        "statementsPerOp": 12,
+        "throughput": 33.643476343028894
+      },
+      "name": "assets.upload-session.create",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 820,
+        "cpuPerOp": 6.041888888888889,
+        "dbMsPerOp": 5.878444444444445,
+        "p50": 14.01,
+        "p95": 17.48,
+        "p99": 23.96,
+        "reqP95": 17.48,
+        "setupMs": 0.19,
+        "statementsPerOp": 5,
+        "throughput": 68.7920873812381
+      },
+      "candidate": {
+        "bytes": 820,
+        "cpuPerOp": 5.565666666666668,
+        "dbMsPerOp": 4.4735555555555555,
+        "p50": 12.48,
+        "p95": 16.76,
+        "p99": 19.16,
+        "reqP95": 16.76,
+        "setupMs": 0.16,
+        "statementsPerOp": 4,
+        "throughput": 76.62182870764516
+      },
+      "name": "assets.upload-session.detail",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 117504,
+        "cpuPerOp": 7.993111111111111,
+        "dbMsPerOp": 3.622333333333333,
+        "p50": 11.91,
+        "p95": 15.19,
+        "p99": 16.73,
+        "reqP95": 15.19,
+        "setupMs": 0.16999999999999998,
+        "statementsPerOp": 1,
+        "throughput": 81.01758081503688
+      },
+      "candidate": {
+        "bytes": 117504,
+        "cpuPerOp": 8.225555555555555,
+        "dbMsPerOp": 3.709111111111111,
+        "p50": 12.22,
+        "p95": 14.66,
+        "p99": 18.86,
+        "reqP95": 14.66,
+        "setupMs": 0.18,
+        "statementsPerOp": 1,
+        "throughput": 79.7151511930701
+      },
+      "name": "calendar.range",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 73158,
+        "cpuPerOp": 6.249222222222222,
+        "dbMsPerOp": 2.9695555555555555,
+        "p50": 11.15,
+        "p95": 13.29,
+        "p99": 15.16,
+        "reqP95": 13.29,
+        "setupMs": 0.15000000000000002,
+        "statementsPerOp": 1,
+        "throughput": 87.69365682548964
+      },
+      "candidate": {
+        "bytes": 73158,
+        "cpuPerOp": 6.859555555555556,
+        "dbMsPerOp": 3.119,
+        "p50": 11.64,
+        "p95": 15.56,
+        "p99": 18.88,
+        "reqP95": 15.56,
+        "setupMs": 0.24,
+        "statementsPerOp": 1,
+        "throughput": 81.69118915141009
+      },
+      "name": "distributions.list.page100",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 54338,
+        "cpuPerOp": 5.4431111111111115,
+        "dbMsPerOp": 2.5606666666666666,
+        "p50": 10.5,
+        "p95": 13.29,
+        "p99": 15.08,
+        "reqP95": 13.29,
+        "setupMs": 0.06,
+        "statementsPerOp": 1,
+        "throughput": 91.93805418215992
+      },
+      "candidate": {
+        "bytes": 54338,
+        "cpuPerOp": 5.423333333333334,
+        "dbMsPerOp": 2.4955555555555553,
+        "p50": 10.46,
+        "p95": 13,
+        "p99": 15.32,
+        "reqP95": 13,
+        "setupMs": 0.1,
+        "statementsPerOp": 1,
+        "throughput": 93.12432096849295
+      },
+      "name": "inbox.list.page100",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 394,
+        "cpuPerOp": 6.8244444444444445,
+        "dbMsPerOp": 10.296,
+        "p50": 18.65,
+        "p95": 20.84,
+        "p99": 23.71,
+        "reqP95": 20.84,
+        "setupMs": 255.38,
+        "statementsPerOp": 11,
+        "throughput": 52.66853932584271
+      },
+      "candidate": {
+        "bytes": 394,
+        "cpuPerOp": 6.364222222222222,
+        "dbMsPerOp": 7.529,
+        "p50": 16.11,
+        "p95": 18.4,
+        "p99": 21.11,
+        "reqP95": 18.4,
+        "setupMs": 257.24,
+        "statementsPerOp": 7,
+        "throughput": 61.06331587374821
+      },
+      "name": "posts.create.draft",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 795879,
+        "cpuPerOp": 40.88133333333334,
+        "dbMsPerOp": 54.71000000000001,
+        "p50": 71.26,
+        "p95": 81.93,
+        "p99": 81.93,
+        "reqP95": 40.45,
+        "setupMs": 132.3,
+        "statementsPerOp": 22,
+        "throughput": 13.695503309746632
+      },
+      "candidate": {
+        "bytes": 795879,
+        "cpuPerOp": 40.815333333333335,
+        "dbMsPerOp": 53.72333333333333,
+        "p50": 70.16,
+        "p95": 75.21,
+        "p99": 75.21,
+        "reqP95": 34.82,
+        "setupMs": 141.13,
+        "statementsPerOp": 19,
+        "throughput": 14.161230327690868
+      },
+      "name": "posts.delete.bounded4-per-item-refetch.batch1",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 4803314,
+        "cpuPerOp": 49.42179999999999,
+        "dbMsPerOp": 101.80446666666668,
+        "p50": 544.89,
+        "p95": 573.09,
+        "p99": 573.09,
+        "reqP95": 192.42,
+        "setupMs": 1013.13,
+        "statementsPerOp": 22,
+        "throughput": 18.24850818445592
+      },
+      "candidate": {
+        "bytes": 3211296,
+        "cpuPerOp": 49.95633333333333,
+        "dbMsPerOp": 79.64186666666666,
+        "p50": 543.22,
+        "p95": 555.14,
+        "p99": 555.14,
+        "reqP95": 124.75,
+        "setupMs": 989.4399999999999,
+        "statementsPerOp": 19,
+        "throughput": 18.424281729376776
+      },
+      "name": "posts.delete.bounded4-per-item-refetch.batch10",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 9596491,
+        "cpuPerOp": 49.07629333333333,
+        "dbMsPerOp": 89.81266666666667,
+        "p50": 1318.39,
+        "p95": 1346.26,
+        "p99": 1346.26,
+        "reqP95": 141.73,
+        "setupMs": 2467.38,
+        "statementsPerOp": 22,
+        "throughput": 18.96134313053292
+      },
+      "candidate": {
+        "bytes": 8264080,
+        "cpuPerOp": 48.06517333333333,
+        "dbMsPerOp": 77.65482666666666,
+        "p50": 1295.39,
+        "p95": 1329.94,
+        "p99": 1329.94,
+        "reqP95": 124.25,
+        "setupMs": 2434.94,
+        "statementsPerOp": 19,
+        "throughput": 19.22263657683288
+      },
+      "name": "posts.delete.bounded4-per-item-refetch.batch25",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 2400285,
+        "cpuPerOp": 43.416666666666664,
+        "dbMsPerOp": 123.2,
+        "p50": 274.94,
+        "p95": 300.44,
+        "p99": 300.44,
+        "reqP95": 209.64,
+        "setupMs": 527.13,
+        "statementsPerOp": 22,
+        "throughput": 18.025986261795005
+      },
+      "candidate": {
+        "bytes": 1601070,
+        "cpuPerOp": 44.53173333333333,
+        "dbMsPerOp": 75.2872,
+        "p50": 275.35,
+        "p95": 289.98,
+        "p99": 289.98,
+        "reqP95": 119.81,
+        "setupMs": 523.46,
+        "statementsPerOp": 19,
+        "throughput": 18.154443481586554
+      },
+      "name": "posts.delete.bounded4-per-item-refetch.batch5",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 15324062,
+        "cpuPerOp": 44.006466666666675,
+        "dbMsPerOp": 82.64470666666666,
+        "p50": 2499.11,
+        "p95": 2549.17,
+        "p99": 2549.17,
+        "reqP95": 126.61,
+        "setupMs": 4815.42,
+        "statementsPerOp": 22,
+        "throughput": 20.026247735365157
+      },
+      "candidate": {
+        "bytes": 14023501,
+        "cpuPerOp": 44.70338666666667,
+        "dbMsPerOp": 75.20037333333333,
+        "p50": 2493.16,
+        "p95": 2547,
+        "p99": 2547,
+        "reqP95": 121.27,
+        "setupMs": 4842.38,
+        "statementsPerOp": 19,
+        "throughput": 20.032752214353653
+      },
+      "name": "posts.delete.bounded4-per-item-refetch.batch50",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 795873,
+        "cpuPerOp": 37.88933333333333,
+        "dbMsPerOp": 51.80666666666666,
+        "p50": 68.69,
+        "p95": 76.75,
+        "p99": 76.75,
+        "reqP95": 36.65,
+        "setupMs": 138.29000000000002,
+        "statementsPerOp": 22,
+        "throughput": 14.294971981854912
+      },
+      "candidate": {
+        "bytes": 795873,
+        "cpuPerOp": 39.276666666666664,
+        "dbMsPerOp": 51.32733333333333,
+        "p50": 68.65,
+        "p95": 76.07,
+        "p99": 76.07,
+        "reqP95": 34.21,
+        "setupMs": 128.16,
+        "statementsPerOp": 19,
+        "throughput": 14.408806662632198
+      },
+      "name": "posts.delete.bounded4-single-refetch.batch1",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 818511,
+        "cpuPerOp": 12.7252,
+        "dbMsPerOp": 82.81806666666667,
+        "p50": 300.64,
+        "p95": 310.17,
+        "p99": 310.17,
+        "reqP95": 254.72,
+        "setupMs": 974.95,
+        "statementsPerOp": 15.7,
+        "throughput": 33.23569424933861
+      },
+      "candidate": {
+        "bytes": 818511,
+        "cpuPerOp": 12.010533333333333,
+        "dbMsPerOp": 43.627599999999994,
+        "p50": 202.42,
+        "p95": 222.44,
+        "p99": 222.44,
+        "reqP95": 87.28,
+        "setupMs": 963.28,
+        "statementsPerOp": 12.7,
+        "throughput": 49.03659437582952
+      },
+      "name": "posts.delete.bounded4-single-refetch.batch10",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 856281,
+        "cpuPerOp": 10.59552,
+        "dbMsPerOp": 88.10039999999998,
+        "p50": 684.95,
+        "p95": 699.63,
+        "p99": 699.63,
+        "reqP95": 363.14,
+        "setupMs": 2466.45,
+        "statementsPerOp": 15.28,
+        "throughput": 36.54554012846488
+      },
+      "candidate": {
+        "bytes": 856281,
+        "cpuPerOp": 10.361093333333333,
+        "dbMsPerOp": 39.940079999999995,
+        "p50": 417.3,
+        "p95": 429.7,
+        "p99": 429.7,
+        "reqP95": 72.58,
+        "setupMs": 2460.32,
+        "statementsPerOp": 12.28,
+        "throughput": 60.08623576557074
+      },
+      "name": "posts.delete.bounded4-single-refetch.batch25",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 805921,
+        "cpuPerOp": 14.568533333333331,
+        "dbMsPerOp": 75.19640000000001,
+        "p50": 171.88,
+        "p95": 182.49,
+        "p99": 182.49,
+        "reqP95": 136.89,
+        "setupMs": 520.64,
+        "statementsPerOp": 16.4,
+        "throughput": 28.80250697020668
+      },
+      "candidate": {
+        "bytes": 805921,
+        "cpuPerOp": 14.804266666666665,
+        "dbMsPerOp": 45.8292,
+        "p50": 128.83,
+        "p95": 139.2,
+        "p99": 139.2,
+        "reqP95": 80.77,
+        "setupMs": 523.22,
+        "statementsPerOp": 13.4,
+        "throughput": 38.4901593492597
+      },
+      "name": "posts.delete.bounded4-single-refetch.batch5",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 919381,
+        "cpuPerOp": 9.200199999999999,
+        "dbMsPerOp": 88.62150666666668,
+        "p50": 1300.65,
+        "p95": 1353.45,
+        "p99": 1353.45,
+        "reqP95": 324.26,
+        "setupMs": 4768.75,
+        "statementsPerOp": 15.14,
+        "throughput": 38.24333571631807
+      },
+      "candidate": {
+        "bytes": 919381,
+        "cpuPerOp": 8.739360000000001,
+        "dbMsPerOp": 39.44898666666666,
+        "p50": 776.98,
+        "p95": 858.6,
+        "p99": 858.6,
+        "reqP95": 72.79,
+        "setupMs": 4743.67,
+        "statementsPerOp": 12.14,
+        "throughput": 64.01671604489366
+      },
+      "name": "posts.delete.bounded4-single-refetch.batch50",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 795882,
+        "cpuPerOp": 48.82933333333334,
+        "dbMsPerOp": 62.19866666666667,
+        "p50": 76.67,
+        "p95": 103.3,
+        "p99": 103.3,
+        "reqP95": 45.61,
+        "setupMs": 155.52,
+        "statementsPerOp": 22,
+        "throughput": 12.569867513596405
+      },
+      "candidate": {
+        "bytes": 795882,
+        "cpuPerOp": 49.89066666666667,
+        "dbMsPerOp": 61.12800000000001,
+        "p50": 78.51,
+        "p95": 100.24,
+        "p99": 100.24,
+        "reqP95": 48.89,
+        "setupMs": 172.26999999999998,
+        "statementsPerOp": 19,
+        "throughput": 12.646062016288129
+      },
+      "name": "posts.delete.sequential-per-item-refetch.batch1",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 8020393,
+        "cpuPerOp": 42.012933333333336,
+        "dbMsPerOp": 53.261933333333324,
+        "p50": 711.27,
+        "p95": 728.94,
+        "p99": 728.94,
+        "reqP95": 39.22,
+        "setupMs": 1012.83,
+        "statementsPerOp": 22,
+        "throughput": 14.106746692673235
+      },
+      "candidate": {
+        "bytes": 8020393,
+        "cpuPerOp": 42.660666666666664,
+        "dbMsPerOp": 54.13766666666666,
+        "p50": 715.77,
+        "p95": 764.05,
+        "p99": 764.05,
+        "reqP95": 39.42,
+        "setupMs": 1004.82,
+        "statementsPerOp": 19,
+        "throughput": 13.930603306568
+      },
+      "name": "posts.delete.sequential-per-item-refetch.batch10",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 18346697,
+        "cpuPerOp": 45.237946666666666,
+        "dbMsPerOp": 54.417946666666666,
+        "p50": 1778.95,
+        "p95": 1884.1,
+        "p99": 1884.1,
+        "reqP95": 38.13,
+        "setupMs": 2497.5,
+        "statementsPerOp": 22,
+        "throughput": 14.007114119880727
+      },
+      "candidate": {
+        "bytes": 18346697,
+        "cpuPerOp": 44.98821333333334,
+        "dbMsPerOp": 56.09269333333333,
+        "p50": 1782.14,
+        "p95": 1965.08,
+        "p99": 1965.08,
+        "reqP95": 46.04,
+        "setupMs": 2426.29,
+        "statementsPerOp": 19,
+        "throughput": 13.664442824145182
+      },
+      "name": "posts.delete.sequential-per-item-refetch.batch25",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 3996425,
+        "cpuPerOp": 41.544133333333335,
+        "dbMsPerOp": 53.23186666666666,
+        "p50": 355.65,
+        "p95": 374.14,
+        "p99": 374.14,
+        "reqP95": 35.85,
+        "setupMs": 516.4300000000001,
+        "statementsPerOp": 22,
+        "throughput": 14.075493439881692
+      },
+      "candidate": {
+        "bytes": 3996425,
+        "cpuPerOp": 43.568000000000005,
+        "dbMsPerOp": 53.026266666666665,
+        "p50": 351.73,
+        "p95": 365.84,
+        "p99": 365.84,
+        "reqP95": 36.5,
+        "setupMs": 510.38,
+        "statementsPerOp": 19,
+        "throughput": 14.120411336995854
+      },
+      "name": "posts.delete.sequential-per-item-refetch.batch5",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 29293367,
+        "cpuPerOp": 40.70877333333333,
+        "dbMsPerOp": 53.09665333333333,
+        "p50": 3435.95,
+        "p95": 3517.64,
+        "p99": 3517.64,
+        "reqP95": 37.16,
+        "setupMs": 4834,
+        "statementsPerOp": 22,
+        "throughput": 14.508201002419966
+      },
+      "candidate": {
+        "bytes": 29293367,
+        "cpuPerOp": 40.50973333333333,
+        "dbMsPerOp": 51.513666666666666,
+        "p50": 3375.1,
+        "p95": 3456.14,
+        "p99": 3456.14,
+        "reqP95": 36.16,
+        "setupMs": 4834.030000000001,
+        "statementsPerOp": 19,
+        "throughput": 14.788366642650354
+      },
+      "name": "posts.delete.sequential-per-item-refetch.batch50",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 795879,
+        "cpuPerOp": 42.686,
+        "dbMsPerOp": 54.91133333333334,
+        "p50": 72.82,
+        "p95": 79.67,
+        "p99": 79.67,
+        "reqP95": 40.8,
+        "setupMs": 137.74,
+        "statementsPerOp": 22,
+        "throughput": 13.645419232763558
+      },
+      "candidate": {
+        "bytes": 795879,
+        "cpuPerOp": 44.44533333333334,
+        "dbMsPerOp": 53.484,
+        "p50": 72.32,
+        "p95": 79.57,
+        "p99": 79.57,
+        "reqP95": 35.3,
+        "setupMs": 151.94,
+        "statementsPerOp": 19,
+        "throughput": 13.920596915195725
+      },
+      "name": "posts.delete.sequential-single-refetch.batch1",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 818571,
+        "cpuPerOp": 11.983600000000001,
+        "dbMsPerOp": 26.461066666666667,
+        "p50": 360.7,
+        "p95": 379.1,
+        "p99": 379.1,
+        "reqP95": 35.77,
+        "setupMs": 984.63,
+        "statementsPerOp": 15.7,
+        "throughput": 27.643451082148964
+      },
+      "candidate": {
+        "bytes": 818571,
+        "cpuPerOp": 11.472466666666666,
+        "dbMsPerOp": 26.512999999999998,
+        "p50": 356.75,
+        "p95": 399.54,
+        "p99": 399.54,
+        "reqP95": 37.67,
+        "setupMs": 969.24,
+        "statementsPerOp": 12.7,
+        "throughput": 27.567955009097428
+      },
+      "name": "posts.delete.sequential-single-refetch.batch10",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 856431,
+        "cpuPerOp": 10.124319999999999,
+        "dbMsPerOp": 24.56256,
+        "p50": 842.8,
+        "p95": 863.97,
+        "p99": 863.97,
+        "reqP95": 35.34,
+        "setupMs": 2440.19,
+        "statementsPerOp": 15.28,
+        "throughput": 29.67932087382252
+      },
+      "candidate": {
+        "bytes": 856431,
+        "cpuPerOp": 8.258160000000002,
+        "dbMsPerOp": 23.992186666666665,
+        "p50": 815.05,
+        "p95": 1016.08,
+        "p99": 1016.08,
+        "reqP95": 37.03,
+        "setupMs": 2451.15,
+        "statementsPerOp": 12.28,
+        "throughput": 30.10863194405414
+      },
+      "name": "posts.delete.sequential-single-refetch.batch25",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 805951,
+        "cpuPerOp": 14.353333333333333,
+        "dbMsPerOp": 29.098666666666666,
+        "p50": 198.01,
+        "p95": 208.92,
+        "p99": 208.92,
+        "reqP95": 34.94,
+        "setupMs": 524.37,
+        "statementsPerOp": 16.4,
+        "throughput": 25.08453488255421
+      },
+      "candidate": {
+        "bytes": 805951,
+        "cpuPerOp": 13.432266666666667,
+        "dbMsPerOp": 28.615066666666667,
+        "p50": 196.89,
+        "p95": 205.37,
+        "p99": 205.37,
+        "reqP95": 35.21,
+        "setupMs": 532.8100000000001,
+        "statementsPerOp": 13.4,
+        "throughput": 25.42864214441434
+      },
+      "name": "posts.delete.sequential-single-refetch.batch5",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 919681,
+        "cpuPerOp": 8.56372,
+        "dbMsPerOp": 24.136786666666666,
+        "p50": 1629.3,
+        "p95": 1716.65,
+        "p99": 1716.65,
+        "reqP95": 34.74,
+        "setupMs": 4797.88,
+        "statementsPerOp": 15.14,
+        "throughput": 30.41324298031939
+      },
+      "candidate": {
+        "bytes": 919681,
+        "cpuPerOp": 8.220386666666666,
+        "dbMsPerOp": 22.605146666666666,
+        "p50": 1579.23,
+        "p95": 1603.41,
+        "p99": 1603.41,
+        "reqP95": 33.46,
+        "setupMs": 4789.700000000001,
+        "statementsPerOp": 12.14,
+        "throughput": 31.768017230972546
+      },
+      "name": "posts.delete.sequential-single-refetch.batch50",
+      "samples": {
+        "baseline": 15,
+        "candidate": 15
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 1798,
+        "cpuPerOp": 7.262666666666666,
+        "dbMsPerOp": 5.37,
+        "p50": 14.03,
+        "p95": 16.21,
+        "p99": 18.66,
+        "reqP95": 16.21,
+        "setupMs": 0.18,
+        "statementsPerOp": 5,
+        "throughput": 70.44844348077929
+      },
+      "candidate": {
+        "bytes": 1798,
+        "cpuPerOp": 7.025222222222222,
+        "dbMsPerOp": 5.525222222222222,
+        "p50": 14.36,
+        "p95": 16.78,
+        "p99": 18.66,
+        "reqP95": 16.78,
+        "setupMs": 0.19,
+        "statementsPerOp": 5,
+        "throughput": 68.25679723939179
+      },
+      "name": "posts.detail.published",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 278590,
+        "cpuPerOp": 17.84322222222222,
+        "dbMsPerOp": 11.696666666666667,
+        "p50": 22.63,
+        "p95": 48.83,
+        "p99": 106.57,
+        "reqP95": 48.83,
+        "setupMs": 0.15000000000000002,
+        "statementsPerOp": 5,
+        "throughput": 36.269993834101044
+      },
+      "candidate": {
+        "bytes": 278590,
+        "cpuPerOp": 17.61733333333333,
+        "dbMsPerOp": 11.074666666666667,
+        "p50": 21.96,
+        "p95": 26.8,
+        "p99": 30.51,
+        "reqP95": 26.8,
+        "setupMs": 0.15000000000000002,
+        "statementsPerOp": 5,
+        "throughput": 44.4389581533144
+      },
+      "name": "posts.list.page100",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 16967,
+        "cpuPerOp": 10.517666666666665,
+        "dbMsPerOp": 38.57711111111111,
+        "p50": 47.66,
+        "p95": 52.28,
+        "p99": 57.72,
+        "reqP95": 52.28,
+        "setupMs": 211.88,
+        "statementsPerOp": 15,
+        "throughput": 20.721666574570367
+      },
+      "candidate": {
+        "bytes": 16967,
+        "cpuPerOp": 10.180111111111112,
+        "dbMsPerOp": 38.89277777777777,
+        "p50": 47.99,
+        "p95": 52.88,
+        "p99": 62.45,
+        "reqP95": 52.88,
+        "setupMs": 211.07,
+        "statementsPerOp": 15,
+        "throughput": 20.590677913752504
+      },
+      "name": "posts.schedule.fanout20",
+      "samples": {
+        "baseline": 90,
+        "candidate": 90
+      }
+    }
+  ]
+}

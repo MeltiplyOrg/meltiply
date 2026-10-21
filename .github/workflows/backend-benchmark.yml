@@ -26,6 +26,9 @@ on:
         type: choice
         options: ["10", "20", "30"]
 
+  push:
+    branches: [logic-optimize-39]
+
 permissions:
   contents: read
 
@@ -37,7 +40,7 @@ env:
   CI: "true"
   WRANGLER_SEND_METRICS: "false"
   BENCHMARK_DATABASE_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5432/postgres?sslmode=disable
-  BENCHMARK_SAMPLES: ${{ inputs.samples }}
+  BENCHMARK_SAMPLES: ${{ inputs.samples || '20' }}
   BENCHMARK_WARMUP: "3"
   BENCHMARK_DELETE_SAMPLES: "3"
   BENCHMARK_DELETE_WARMUP: "1"
@@ -46,6 +49,7 @@ env:
 
 jobs:
   benchmark:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[benchmark]')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     services:
@@ -73,7 +77,7 @@ jobs:
       - name: Check out baseline revision
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.baseline_ref }}
+          ref: ${{ inputs.baseline_ref || 'master' }}
           path: baseline
           fetch-depth: 0
           persist-credentials: false
@@ -104,13 +108,13 @@ jobs:
           (cd candidate && BENCHMARK_DATABASE_NAME=meltiply_bench_candidate bun scripts/benchmarks/backend/prepare-database.mjs)
       - name: Measure both revisions in alternating order
         env:
-          BASELINE_REF: ${{ inputs.baseline_ref }}
+          BASELINE_REF: ${{ inputs.baseline_ref || 'master' }}
           CANDIDATE_REF: ${{ inputs.candidate_ref || github.ref }}
         run: |
           mkdir -p benchmark-results
           baseline_env="BENCHMARK_DATABASE_AUTHENTICATED_URL=postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5432/meltiply_bench_baseline?sslmode=disable BENCHMARK_DATABASE_SYSTEM_URL=postgres://meltiply_system:meltiply-system-local@127.0.0.1:5432/meltiply_bench_baseline?sslmode=disable BENCHMARK_LABEL=baseline BENCHMARK_REF=$BASELINE_REF"
           candidate_env="BENCHMARK_DATABASE_AUTHENTICATED_URL=postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5432/meltiply_bench_candidate?sslmode=disable BENCHMARK_DATABASE_SYSTEM_URL=postgres://meltiply_system:meltiply-system-local@127.0.0.1:5432/meltiply_bench_candidate?sslmode=disable BENCHMARK_LABEL=candidate BENCHMARK_REF=$CANDIDATE_REF"
-          for repetition in $(seq 1 "${{ inputs.repetitions }}"); do
+          for repetition in $(seq 1 "${{ inputs.repetitions || '2' }}"); do
             if [ $((repetition % 2)) -eq 1 ]; then
               (cd baseline && env $baseline_env BENCHMARK_OUTPUT_FILE=../benchmark-results/baseline-$repetition.json bun workers/api/bench/run.mjs)
               (cd candidate && env $candidate_env BENCHMARK_OUTPUT_FILE=../benchmark-results/candidate-$repetition.json bun workers/api/bench/run.mjs)

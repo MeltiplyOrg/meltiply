@@ -667,6 +667,84 @@ describe("role permission matrix", () => {
     }
   });
 
+  it("filters the Audit trail by action, target, and search text", async () => {
+    const created = await Promise.all([
+      createTemporaryProfile("owner"),
+      createTemporaryProfile("owner"),
+      createTemporaryProfile("owner"),
+    ]);
+    const auditPath = (query: Record<string, string>) =>
+      `/api/v1/workspaces/${sharedWorkspaceId}/audit?${new URLSearchParams(query).toString()}`;
+
+    try {
+      const scoped = await request(
+        auditPath({ action: "brand_profile.created", limit: "100", q: created[0]!.id }),
+        { method: "GET" },
+        "owner",
+      );
+      expect(scoped.status).toBe(200);
+      const scopedBody = (await scoped.json()) as {
+        entries: { action: string; target_id: string; target_type: string }[];
+        has_more: boolean;
+        limit: number;
+        offset: number;
+      };
+      expect(scopedBody).toMatchObject({ has_more: false, limit: 100, offset: 0 });
+      expect(scopedBody.entries).toHaveLength(1);
+      expect(scopedBody.entries[0]).toMatchObject({
+        action: "brand_profile.created",
+        target_id: created[0]!.id,
+        target_type: "brand_profile",
+      });
+
+      const firstPage = await request(
+        auditPath({ action: "brand_profile.created", limit: "2" }),
+        { method: "GET" },
+        "owner",
+      );
+      expect(firstPage.status).toBe(200);
+      const firstPageBody = (await firstPage.json()) as {
+        entries: { id: string }[];
+        has_more: boolean;
+      };
+      expect(firstPageBody.entries).toHaveLength(2);
+      expect(firstPageBody.has_more).toBe(true);
+
+      const secondPage = await request(
+        auditPath({ action: "brand_profile.created", limit: "2", offset: "2" }),
+        { method: "GET" },
+        "owner",
+      );
+      expect(secondPage.status).toBe(200);
+      const secondPageBody = (await secondPage.json()) as { entries: { id: string }[] };
+      expect(secondPageBody.entries.length).toBeGreaterThan(0);
+      const firstPageIds = new Set(firstPageBody.entries.map((entry) => entry.id));
+      expect(secondPageBody.entries.some((entry) => firstPageIds.has(entry.id))).toBe(false);
+
+      const otherTarget = await request(
+        auditPath({ q: created[0]!.id, target_type: "channel" }),
+        { method: "GET" },
+        "owner",
+      );
+      expect(otherTarget.status).toBe(200);
+      await expect(otherTarget.json()).resolves.toMatchObject({ entries: [] });
+
+      const oversized = await request(
+        auditPath({ q: "a".repeat(101) }),
+        { method: "GET" },
+        "owner",
+      );
+      expect(oversized.status).toBe(400);
+      expect(errorCode(await oversized.json())).toBe("invalid_request");
+    } finally {
+      for (const profile of created) {
+        await systemPoolFor(env).query("DELETE FROM workspace_audit_entries WHERE target_id = $1", [
+          profile.id,
+        ]);
+      }
+    }
+  });
+
   it("previews invitations and rejects used, expired, revoked, and mismatched tokens", async () => {
     const invitationId = crypto.randomUUID();
     const token = `permission-preview-${crypto.randomUUID().replaceAll("-", "")}`;

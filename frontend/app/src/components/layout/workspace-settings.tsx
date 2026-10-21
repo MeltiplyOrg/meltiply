@@ -133,8 +133,20 @@ export default function WorkspaceSettings() {
           );
         })}
       </nav>
-      <div className="min-h-0 min-w-0 overflow-y-auto px-4 pb-20 pt-6 sm:px-10 sm:pt-8">
-        <div className={cn("w-full", section === "administration" ? "max-w-5xl" : "max-w-2xl")}>
+      <div
+        className={cn(
+          "min-h-0 min-w-0 px-4 pb-20 pt-6 sm:px-10 sm:pt-8",
+          section === "administration" ? "overflow-hidden" : "overflow-y-auto",
+        )}
+      >
+        <div
+          className={cn(
+            "w-full",
+            section === "administration"
+              ? "mx-auto flex h-full min-h-0 max-w-300 flex-col"
+              : "max-w-2xl",
+          )}
+        >
           <h1 className="text-(length:--text-title) font-semibold leading-tight tracking-page-title">
             {current.label}
           </h1>

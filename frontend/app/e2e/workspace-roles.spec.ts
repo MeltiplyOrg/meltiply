@@ -37,6 +37,9 @@ test("limits installation lifecycle controls to the Installation Owner", async (
   await expect(admin.page.getByText("epsilon@meltiply.local")).toBeVisible();
   await expect(admin.page.getByText("Suspended", { exact: true })).toBeVisible();
   await expect(admin.page.getByRole("button", { name: "Invite" })).toBeVisible();
+  await expect(
+    admin.page.getByRole("switch", { name: "Toggle active state for Gamma Editor" }),
+  ).toBeDisabled();
   await expect(admin.page.getByRole("button", { name: "Suspend" })).toHaveCount(0);
   await expect(admin.page.getByRole("button", { name: "Reactivate" })).toHaveCount(0);
   await expect(admin.page.getByRole("button", { name: "Delete" })).toHaveCount(0);
@@ -52,8 +55,12 @@ test("limits installation lifecycle controls to the Installation Owner", async (
 
   const owner = await openSeededAccount(browser, "alpha@meltiply.local");
   await openAdministration(owner.page);
-  await expect(owner.page.getByRole("button", { name: "Reactivate" })).toBeVisible();
-  await expect(owner.page.getByRole("button", { name: "Delete" }).first()).toBeVisible();
+  await expect(
+    owner.page.getByRole("switch", { name: "Toggle active state for Epsilon Suspended" }),
+  ).not.toBeChecked();
+  await owner.page.getByRole("button", { name: "Actions for Gamma Editor" }).click();
+  await expect(owner.page.getByRole("menuitem", { name: "Delete account" })).toBeVisible();
+  await owner.page.keyboard.press("Escape");
   await owner.page.getByRole("tab", { name: "Workspace" }).click();
   await expect(owner.page.getByRole("button", { name: "Transfer ownership" })).toBeVisible();
   await owner.context.close();

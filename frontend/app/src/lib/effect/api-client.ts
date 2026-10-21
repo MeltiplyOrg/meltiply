@@ -5,6 +5,7 @@ import type {
   AccountLifecycle,
   Asset,
   AuditListResponse,
+  AuditQueryParams,
   BrandProfile,
   BrandProfileListResponse,
   CalendarQueryParams,
@@ -345,7 +346,7 @@ export interface ApiClientServiceShape {
   ) => ApiClientEffect<{ installation_owner_user_id: string }>;
   readonly listWorkspaceAudit: (
     workspaceId: string,
-    params: { limit?: number; offset?: number },
+    params: AuditQueryParams,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<AuditListResponse>;
   readonly getInvitationPreview: (

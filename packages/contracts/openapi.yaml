@@ -1148,6 +1148,9 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/AuditSearch"
+        - $ref: "#/components/parameters/AuditAction"
+        - $ref: "#/components/parameters/AuditTargetType"
       responses:
         "200":
           description: Audit entries.
@@ -2439,6 +2442,32 @@ components:
         type: integer
         minimum: 0
         default: 0
+    AuditSearch:
+      name: q
+      in: query
+      required: false
+      description: |
+        Case-insensitive substring matched against the action, the actor's email
+        or display name, and the target id.
+      schema:
+        type: string
+        maxLength: 100
+    AuditAction:
+      name: action
+      in: query
+      required: false
+      description: Exact action identifier, for example `member.role_changed`.
+      schema:
+        type: string
+        maxLength: 100
+    AuditTargetType:
+      name: target_type
+      in: query
+      required: false
+      description: Exact target type, for example `member` or `invitation`.
+      schema:
+        type: string
+        maxLength: 64
     Start:
       name: start
       in: query
@@ -3393,12 +3422,18 @@ components:
     AuditListResponse:
       type: object
       additionalProperties: false
-      required: [entries]
+      required: [entries, has_more, limit, offset]
       properties:
         entries:
           type: array
           items:
             $ref: "#/components/schemas/AuditEntry"
+        has_more:
+          type: boolean
+        limit:
+          type: integer
+        offset:
+          type: integer
     BrandProfileColor:
       type: string
       description: |

@@ -23,6 +23,7 @@ import {
   onlyKeys,
   optionalStringField,
   stringField,
+  textParam,
   uuidParam,
 } from "./validation";
 import { idempotentMutation } from "./workspace-lifecycle";
@@ -322,6 +323,13 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
         const offset = yield* fromPromise(() =>
           integerParam(c.req.query("offset"), "offset", 0, 0, 1_000_000),
         );
+        const action = yield* fromPromise(() => textParam(c.req.query("action"), "action", 100));
+        const targetType = yield* fromPromise(() =>
+          textParam(c.req.query("target_type"), "target_type", 64),
+        );
+        const search = yield* fromPromise(() => textParam(c.req.query("q"), "q", 100));
+        // Filter predicates reuse one parameter each; a NULL means "no filter".
+        // `q` uses strpos instead of LIKE so user text cannot act as wildcards.
         const entries = yield* withSystemTransactionEffect(c.env, (client) =>
           client
             .query<AuditRow>(
@@ -329,33 +337,50 @@ export function registerInstallationRoutes(app: Hono<ApiWorkerEnvironment>): voi
                       target_id, before_state, after_state, request_id, created_at
                FROM workspace_audit_entries
                WHERE org_id = $1
+                 AND ($4::text IS NULL OR action = $4)
+                 AND ($5::text IS NULL OR target_type = $5)
+                 AND ($6::text IS NULL
+                      OR strpos(lower(action), lower($6)) > 0
+                      OR strpos(lower(actor_email), lower($6)) > 0
+                      OR strpos(lower(coalesce(actor_display_name, '')), lower($6)) > 0
+                      OR strpos(lower(target_id), lower($6)) > 0)
                ORDER BY created_at DESC, id DESC
                LIMIT $2 OFFSET $3`,
-              [workspaceId, limit, offset],
+              [workspaceId, limit + 1, offset, action ?? null, targetType ?? null, search ?? null],
             )
             .pipe(
-              Effect.map((result) =>
-                result.rows.map((row) => ({
-                  action: row.action,
-                  actor: {
-                    display_name: row.actor_display_name,
-                    email: row.actor_email,
-                  },
-                  after: row.after_state,
-                  before: row.before_state,
-                  created_at:
-                    row.created_at instanceof Date
-                      ? row.created_at.toISOString()
-                      : new Date(row.created_at).toISOString(),
-                  id: row.id,
-                  request_id: row.request_id,
-                  target_id: row.target_id,
-                  target_type: row.target_type,
-                })),
-              ),
+              Effect.map((result) => ({
+                hasMore: result.rows.length > limit,
+                rows: result.rows.slice(0, limit),
+              })),
             ),
         );
-        return jsonResponse({ entries }, 200, requestId(c));
+        return jsonResponse(
+          {
+            entries: entries.rows.map((row) => ({
+              action: row.action,
+              actor: {
+                display_name: row.actor_display_name,
+                email: row.actor_email,
+              },
+              after: row.after_state,
+              before: row.before_state,
+              created_at:
+                row.created_at instanceof Date
+                  ? row.created_at.toISOString()
+                  : new Date(row.created_at).toISOString(),
+              id: row.id,
+              request_id: row.request_id,
+              target_id: row.target_id,
+              target_type: row.target_type,
+            })),
+            has_more: entries.hasMore,
+            limit,
+            offset,
+          },
+          200,
+          requestId(c),
+        );
       }),
     ),
   );

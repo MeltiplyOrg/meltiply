@@ -19,6 +19,7 @@ import {
 import { useMutationKeyTracker } from "./mutation-idempotency";
 import { pollingInterval } from "./query-defaults";
 import type {
+  AuditQueryParams,
   CalendarQueryParams,
   CreateBrandProfileInput,
   CreatePostInput,
@@ -83,7 +84,7 @@ export const queryKeys = {
   installation: () => ["installation"] as const,
   workspaceMembers: () => ["workspace-members"] as const,
   workspaceInvitations: () => ["workspace-invitations"] as const,
-  workspaceAudit: (params?: { limit?: number; offset?: number }) =>
+  workspaceAudit: (params?: AuditQueryParams) =>
     params === undefined
       ? (["workspace-audit"] as const)
       : (["workspace-audit", normalizeParams(params)] as const),
@@ -776,7 +777,7 @@ export function useWorkspaceInvitations(scope: SessionScope, workspaceId: string
 export function useWorkspaceAudit(
   scope: SessionScope,
   workspaceId: string,
-  params: { limit?: number; offset?: number },
+  params: AuditQueryParams,
   enabled = true,
 ) {
   return useQuery({

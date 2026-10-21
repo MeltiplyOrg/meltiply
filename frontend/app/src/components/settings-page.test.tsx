@@ -134,6 +134,9 @@ vi.mock("@/lib/queries", () => ({
           target_type: "member",
         },
       ],
+      has_more: false,
+      limit: 100,
+      offset: 0,
     },
     error: null,
     isPending: false,
@@ -175,19 +178,42 @@ describe("settings administration surface", () => {
     renderSettings();
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Workspace members" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Pending invitations" })).toBeInTheDocument();
     expect(screen.getByText("gamma@meltiply.local")).toBeInTheDocument();
     expect(screen.getByText("epsilon@meltiply.local")).toBeInTheDocument();
-    expect(screen.getByText("Installation Owner")).toBeInTheDocument();
+    expect(screen.getByLabelText("Installation Owner")).toBeInTheDocument();
     expect(screen.getByText("Suspended")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reactivate" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "Toggle active state for Epsilon Suspended" }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("switch", { name: "Toggle active state for Gamma Editor" }),
+    ).toBeChecked();
+    expect(screen.getByRole("button", { name: "Actions for Gamma Editor" })).toBeInTheDocument();
     expect(screen.getByText("pending.invitee@meltiply.local")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Invite" }).length).toBeGreaterThan(0);
+
+    const workspaceTab = screen.getByRole("tab", { name: "Workspace" });
+    fireEvent.mouseDown(workspaceTab);
+    fireEvent.click(workspaceTab);
+    expect(screen.getByText("Seat usage")).toBeInTheDocument();
+    expect(screen.getByText("4 / 10")).toBeInTheDocument();
 
     const auditTab = screen.getByRole("tab", { name: "Audit" });
     fireEvent.mouseDown(auditTab);
     fireEvent.click(auditTab);
+    expect(screen.getByRole("table", { name: "Audit log" })).toBeInTheDocument();
     expect(screen.getByText("member.role_changed")).toBeInTheDocument();
     expect(screen.getByText(/alpha@meltiply.local/)).toBeInTheDocument();
+  });
+
+  it("opens the row menu for remove and owner-only delete", () => {
+    renderSettings();
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Actions for Gamma Editor" }));
+    expect(screen.getByRole("menuitem", { name: "Remove" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete account" })).toBeInTheDocument();
   });
 
   it("hides installation lifecycle actions from a non-owner admin", () => {
@@ -199,11 +225,13 @@ describe("settings administration surface", () => {
 
       expect(screen.getByRole("button", { name: "Invite" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Audit" })).toBeInTheDocument();
-      expect(screen.getAllByRole("button", { name: "Remove" }).length).toBeGreaterThan(0);
+      expect(
+        screen.getAllByRole("switch").every((control) => (control as HTMLButtonElement).disabled),
+      ).toBe(true);
+      expect(screen.getByRole("button", { name: "Actions for Gamma Editor" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Actions for Beta Admin" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Actions for Alpha Creator" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Transfer ownership" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Suspend" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Reactivate" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
     } finally {
       Object.assign(workspace, original);
     }

@@ -2073,6 +2073,9 @@ export interface components {
         };
         AuditListResponse: {
             entries: components["schemas"]["AuditEntry"][];
+            has_more: boolean;
+            limit: number;
+            offset: number;
         };
         /**
          * @description Fixed accessible palette for Brand Profile color labels. Labels are
@@ -2987,6 +2990,15 @@ export interface components {
         XWorkspaceId: string;
         Limit: number;
         Offset: number;
+        /**
+         * @description Case-insensitive substring matched against the action, the actor's email
+         *     or display name, and the target id.
+         */
+        AuditSearch: string;
+        /** @description Exact action identifier, for example `member.role_changed`. */
+        AuditAction: string;
+        /** @description Exact target type, for example `member` or `invitation`. */
+        AuditTargetType: string;
         Start: string;
         End: string;
         RequiredStart: string;
@@ -4076,6 +4088,15 @@ export interface operations {
             query?: {
                 limit?: components["parameters"]["Limit"];
                 offset?: components["parameters"]["Offset"];
+                /**
+                 * @description Case-insensitive substring matched against the action, the actor's email
+                 *     or display name, and the target id.
+                 */
+                q?: components["parameters"]["AuditSearch"];
+                /** @description Exact action identifier, for example `member.role_changed`. */
+                action?: components["parameters"]["AuditAction"];
+                /** @description Exact target type, for example `member` or `invitation`. */
+                target_type?: components["parameters"]["AuditTargetType"];
             };
             header?: never;
             path: {

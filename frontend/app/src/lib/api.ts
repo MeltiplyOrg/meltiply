@@ -6,6 +6,7 @@ import type {
   AccountLifecycle,
   Asset,
   AuditListResponse,
+  AuditQueryParams,
   BrandProfile,
   BrandProfileListResponse,
   CalendarQueryParams,
@@ -1554,7 +1555,7 @@ export function transferInstallationOwnership(
  */
 export function listWorkspaceAudit(
   workspaceId: string,
-  params: { limit?: number; offset?: number },
+  params: AuditQueryParams,
   options?: ApiRequestOptions,
 ) {
   return unwrap<AuditListResponse>(

@@ -802,6 +802,9 @@ operations:
       status: 200
       body:
         entries: [*audit_entry]
+        has_more: false
+        limit: 50
+        offset: 0
     errors:
       - status: 401
         body: *authentication_error

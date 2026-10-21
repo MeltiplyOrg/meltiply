@@ -140,6 +140,8 @@ export type InvitationPreview = components["schemas"]["InvitationPreview"];
 export type InstallationSummary = components["schemas"]["InstallationSummary"];
 export type AccountLifecycle = components["schemas"]["AccountLifecycle"];
 export type AuditListResponse = components["schemas"]["AuditListResponse"];
+export type AuditEntry = AuditListResponse["entries"][number];
+export type AuditQueryParams = NonNullable<operations["listWorkspaceAudit"]["parameters"]["query"]>;
 
 export type Platform = components["schemas"]["Platform"];
 export type PlatformCapability = components["schemas"]["PlatformCapability"];

@@ -694,7 +694,7 @@ paths:
       summary: Rename or re-slug a workspace
       description: |
         Updates workspace display fields. Requires the admin role in the
-        addressed workspace; personal workspaces cannot be renamed.
+        addressed shared Workspace.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -753,9 +753,8 @@ paths:
       summary: Invite a member to a team workspace
       description: |
         Creates a pending invitation and delivers the acceptance link through
-        the configured transactional email provider. Requires the admin role;
-        personal workspaces cannot issue invitations, and at most one pending
-        invitation may exist per workspace and email.
+        the configured transactional email provider. Requires the admin role,
+        and at most one pending invitation may exist per workspace and email.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -840,6 +839,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "410":
+          description: Invitation has been revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "429":
           $ref: "#/components/responses/RateLimited"
   /workspace-invitations/{token}:
@@ -1146,7 +1151,7 @@ paths:
         Returns administrative Audit entries in reverse chronological order.
         Requires the Workspace Admin role or Installation Ownership.
       parameters:
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/AuditLimit"
         - $ref: "#/components/parameters/Offset"
         - $ref: "#/components/parameters/AuditSearch"
         - $ref: "#/components/parameters/AuditAction"
@@ -2435,6 +2440,14 @@ components:
         minimum: 1
         maximum: 100
         default: 20
+    AuditLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
     Offset:
       name: offset
       in: query

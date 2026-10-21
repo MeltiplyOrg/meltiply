@@ -156,6 +156,7 @@ async function ownerIdFrom(response: Response): Promise<string> {
 }
 
 afterAll(async () => {
+  await systemPoolFor(env).query("DELETE FROM auth_rate_limits WHERE action = 'sign-in'");
   await systemPoolFor(env).query(
     "UPDATE users SET installation_owner = FALSE WHERE installation_owner AND id <> $1",
     [ownerId],

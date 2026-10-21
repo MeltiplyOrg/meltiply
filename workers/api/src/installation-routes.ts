@@ -6,7 +6,7 @@ import type { Context, Hono } from "hono";
 
 import type { ResolvedActor } from "./actor-resolution";
 import { auditActorFrom, recordWorkspaceAuditEffect } from "./audit";
-import { betterAuthFor } from "./better-auth";
+import { betterAuthFor, checkAuthRateLimit } from "./better-auth";
 import { CoreApiError } from "./core-types";
 import { withSystemTransactionEffect } from "./database";
 import { fromPromise } from "./effect/route";
@@ -207,7 +207,8 @@ function sessionTokenFrom(value: unknown): string | undefined {
  * @param actor - Resolved caller whose email is reauthenticated.
  * @param password - Submitted current password.
  * @returns Effect resolving void for a valid password.
- * @throws {CoreApiError} 401 `reauthentication_failed` for invalid credentials.
+ * @throws {CoreApiError} 401 `reauthentication_failed` for invalid credentials;
+ *   429 `rate_limited` when the sign-in attempt budget is exhausted.
  */
 function reauthenticateEffect(
   env: ApiWorkerEnv,
@@ -217,15 +218,20 @@ function reauthenticateEffect(
   return Effect.gen(function* () {
     const auth = yield* Effect.promise(() => betterAuthFor(env));
     const base = env.BETTER_AUTH_URL?.trim() || env.PUBLIC_API_URL?.trim() || "http://localhost";
-    const response = yield* Effect.promise(() =>
-      auth.handler(
-        new Request(`${base}/api/auth/sign-in/email`, {
-          body: JSON.stringify({ email: actor.email, password }),
-          headers: { "Content-Type": "application/json" },
-          method: "POST",
-        }),
-      ),
-    );
+    const request = new Request(`${base}/api/auth/sign-in/email`, {
+      body: JSON.stringify({ email: actor.email, password }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    if (env.DB_SYSTEM?.connectionString) {
+      const limit = yield* Effect.promise(() => checkAuthRateLimit(env, "sign-in", request));
+      if (limit.status === "limited") {
+        return yield* Effect.fail(
+          new CoreApiError(429, "rate_limited", "Too many authentication attempts. Retry later."),
+        );
+      }
+    }
+    const response = yield* Effect.promise(() => auth.handler(request));
     if (!response.ok) {
       return yield* Effect.fail(
         new CoreApiError(401, "reauthentication_failed", "Reauthentication failed."),

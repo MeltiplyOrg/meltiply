@@ -23,7 +23,10 @@ import {
   type StorageServiceShape,
 } from "@meltiply/storage";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
-import { resolveActor, type ResolvedActor } from "../src/actor-resolution";
+import {
+  resolveActor as resolveActorWithRequestId,
+  type ResolvedActor,
+} from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
 import { createAssetApiService } from "../src/asset-service";
 import { createCoreApiService } from "../src/core-service";
@@ -149,6 +152,15 @@ function actorRequest(headers: Record<string, string> = {}): Request {
   return new Request("https://api.meltiply.local/api/v1/platforms", {
     headers,
   });
+}
+
+/** Resolves an actor with the middleware request id the app supplies. */
+function resolveActor(
+  env: ApiWorkerEnv,
+  identity: JwtIdentity,
+  request: Request,
+): Promise<ResolvedActor> {
+  return resolveActorWithRequestId(env, identity, request, "core-service-test-request");
 }
 
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
@@ -6854,7 +6866,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  it("reports a resend mail failure and revokes the undeliverable invitation", async () => {
+  it("allows a resend retry after a definitive mail failure", async () => {
     const sharedWorkspaceId = "20000000-0000-4000-8000-000000000005";
     const run = lifecycleRunToken();
     const email = `resend-failure-${run}@meltiply.local`;
@@ -6864,7 +6876,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       name: "Alpha Creator",
     });
     let failSubmission = false;
-    const { request } = lifecycleInvitationHarness({
+    const { request, sent } = lifecycleInvitationHarness({
       identities: { owner: ownerIdentity },
       send: () =>
         failSubmission
@@ -6886,24 +6898,39 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const invitationId = (await created.json<{ id: string }>()).id;
 
     try {
+      const resendKey = `resend-failure-retry-${run}`;
       failSubmission = true;
       const resend = await request(
         `/api/v1/workspaces/${sharedWorkspaceId}/invitations/${invitationId}/resend`,
         {
-          headers: { "Idempotency-Key": `resend-failure-retry-${run}` },
+          headers: { "Idempotency-Key": resendKey },
           method: "POST",
         },
       );
       expect(resend.status).toBe(502);
       expect(errorCodeFrom(await resend.json())).toBe("email_delivery_failed");
+      expect(sent).toHaveLength(2);
 
-      const revoked = await systemTransaction(env, (client) =>
+      // The failed resend keeps the invitation pending and drops its committed
+      // idempotency record, so reusing the key can rotate and resend.
+      const pending = await systemTransaction(env, (client) =>
         client.query<{ revoked_at: Date | string | null }>(
           "SELECT revoked_at FROM workspace_invitations WHERE id = $1",
           [invitationId],
         ),
       );
-      expect(revoked.rows[0]?.revoked_at).not.toBeNull();
+      expect(pending.rows[0]?.revoked_at).toBeNull();
+
+      failSubmission = false;
+      const retry = await request(
+        `/api/v1/workspaces/${sharedWorkspaceId}/invitations/${invitationId}/resend`,
+        {
+          headers: { "Idempotency-Key": resendKey },
+          method: "POST",
+        },
+      );
+      expect(retry.status).toBe(200);
+      expect(sent).toHaveLength(3);
     } finally {
       await systemTransaction(env, (client) =>
         client.query("DELETE FROM workspace_invitations WHERE id = $1", [invitationId]),

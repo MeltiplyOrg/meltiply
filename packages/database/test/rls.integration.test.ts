@@ -348,6 +348,26 @@ describe("PostgreSQL authenticated-role tenant isolation", () => {
     );
 
     try {
+      // Ordinary Editor edits to a protected Post remain allowed.
+      const editorEdit = await Effect.runPromise(
+        asEditor((client) =>
+          client.query<{ id: string }>(
+            "UPDATE posts SET title = 'RLS edited' WHERE id = $1 RETURNING id",
+            [publishedPostId],
+          ),
+        ),
+      );
+      expect(editorEdit.rows).toEqual([{ id: publishedPostId }]);
+
+      // A soft delete is an UPDATE, so the column-specific trigger must reject
+      // it even though the Post row is otherwise editable.
+      const editorSoftDelete = await Effect.runPromiseExit(
+        asEditor((client) =>
+          client.query("UPDATE posts SET deleted_at = now() WHERE id = $1", [publishedPostId]),
+        ),
+      );
+      expect(editorSoftDelete._tag).toBe("Failure");
+
       // RLS hides the published Post from DELETE, so the statement affects no
       // rows instead of raising; the row and its distribution must survive.
       const editorDelete = await Effect.runPromise(

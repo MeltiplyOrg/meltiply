@@ -499,24 +499,33 @@ function invitationLink(env: ApiWorkerEnv, token: string): string {
  * Submits one invitation email and owns the shared delivery-failure policy.
  *
  * Creation and resend both rotate or mint a single-use token before sending.
- * A definitively rejected or unavailable submission therefore leaves an
- * undeliverable invitation holding a Seat, so those rows are revoked while an
- * `ambiguous` outcome stays pending (the provider may already have accepted it).
- * The caller's request fails with the typed mail error so the API never reports
- * an undelivered invitation as successful.
+ * A `rejected` or `unavailable` submission is definitive, so the committed
+ * idempotency record is removed: a client retry with the same key must execute
+ * again rather than replay a response whose message was never delivered. A
+ * created invitation is also revoked so its undelivered token cannot hold a
+ * Seat; a resent invitation stays pending so the retry can rotate and resend.
+ * An `ambiguous` outcome keeps both records because the provider may have
+ * accepted the message. The caller's request fails with the typed mail error so
+ * the API never reports an undelivered invitation as successful.
  *
- * @param env - Worker environment bindings used for the revocation transaction.
- * @param invitation - Invitation whose id and recipient identify the message.
+ * @param env - Worker environment bindings used for the repair transaction.
+ * @param invitation - Invitation whose id, Workspace, and recipient identify the message.
  * @param link - Absolute acceptance link carrying the raw token.
  * @param workspaceName - Workspace display name for the message copy.
+ * @param operation - Idempotent operation whose record may be invalidated.
+ * @param idempotencyKey - Client key committed by the invitation mutation.
+ * @param revokeOnDefinitiveFailure - Whether a definitive failure releases the Seat.
  * @returns Effect resolving after the mail service accepts the submission.
  * @throws {CoreApiError} 503 `email_unavailable` or 502 `email_delivery_failed`.
  */
 function submitInvitationEffect(
   env: ApiWorkerEnv,
-  invitation: Pick<WorkspaceInvitationBody, "email" | "id">,
+  invitation: Pick<WorkspaceInvitationBody, "email" | "id" | "org_id">,
   link: string,
   workspaceName: string,
+  operation: string,
+  idempotencyKey: string,
+  revokeOnDefinitiveFailure: boolean,
 ): Effect.Effect<void, CoreApiError, MailService> {
   return Effect.gen(function* () {
     const mail = yield* MailService;
@@ -532,12 +541,21 @@ function submitInvitationEffect(
           );
           if (failure.classification !== "ambiguous") {
             yield* withSystemTransactionEffect(env, (client) =>
-              client.query(
-                `UPDATE workspace_invitations
-                   SET revoked_at = now(), updated_at = now()
-                   WHERE id = $1 AND accepted_at IS NULL`,
-                [invitation.id],
-              ),
+              Effect.gen(function* () {
+                yield* client.query(
+                  `DELETE FROM idempotency_keys
+                   WHERE org_id = $1 AND operation = $2 AND idempotency_key = $3`,
+                  [invitation.org_id, operation, idempotencyKey],
+                );
+                if (revokeOnDefinitiveFailure) {
+                  yield* client.query(
+                    `UPDATE workspace_invitations
+                     SET revoked_at = now(), updated_at = now()
+                     WHERE id = $1 AND accepted_at IS NULL`,
+                    [invitation.id],
+                  );
+                }
+              }),
             ).pipe(Effect.ignore);
           }
           return yield* Effect.fail(
@@ -846,6 +864,9 @@ export function registerWorkspaceLifecycleRoutes(
             result.body as WorkspaceInvitationBody,
             link,
             result.workspaceName ?? "your team",
+            "workspace.invitation.create",
+            key,
+            true,
           );
         }
         return jsonResponse(result.body, result.status, requestId(c), {
@@ -953,6 +974,9 @@ export function registerWorkspaceLifecycleRoutes(
             result.body as WorkspaceInvitationBody,
             link,
             result.workspaceName ?? "your team",
+            "workspace.invitation.resend",
+            key,
+            false,
           );
         }
         return jsonResponse(result.body, result.status, requestId(c), {

@@ -1906,12 +1906,16 @@ export function createPostApiService(
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
             // Published history is administratively owned: Editors may delete
             // drafts and scheduled Posts (their pending work is cancelled), but
-            // removing a Post that already reached a Platform is an Admin action.
+            // removing a Post that reached or is attempting a Platform is an
+            // Admin action.
             if (session.organizationRole !== "admin") {
               const published = yield* client.query<{ exists: boolean }>(
                 `SELECT EXISTS (
                    SELECT 1 FROM distributions
-                   WHERE post_id = $1 AND status IN ('published', 'awaiting_provider')
+                   WHERE post_id = $1
+                     AND status IN (
+                       'processing', 'awaiting_provider', 'published', 'needs_reconciliation'
+                     )
                  ) AS exists`,
                 [postId],
               );

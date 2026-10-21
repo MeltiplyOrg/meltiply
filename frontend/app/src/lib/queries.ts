@@ -979,9 +979,13 @@ export function useRenameWorkspace(scope: SessionScope) {
  * @returns Mutation accepting the invitation token.
  */
 export function useAcceptWorkspaceInvitation(scope: SessionScope) {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (token: string) =>
       runApiQuery(scope, (api) => api.acceptWorkspaceInvitation(token)),
+    onSuccess: async () => {
+      await invalidateQueryKeys(queryClient, mutationInvalidations.workspaceSettings());
+    },
   });
 }
 

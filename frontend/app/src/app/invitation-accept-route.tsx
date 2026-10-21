@@ -67,6 +67,7 @@ function InvitationAcceptance(): React.ReactElement {
     acceptStarted.current = true;
     acceptInvitation(token, {
       onError: (cause) => {
+        acceptStarted.current = false;
         const message =
           cause instanceof Error ? cause.message : t("The invitation could not be accepted.");
         if (message.toLowerCase().includes("verify")) {

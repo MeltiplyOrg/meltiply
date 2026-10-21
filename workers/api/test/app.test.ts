@@ -1068,7 +1068,12 @@ describe("API Worker foundation", () => {
 
     expect(response.status).toBe(200);
     expect(verifyJwtToken).toHaveBeenCalledWith(expect.anything(), "test-only.jwt");
-    expect(resolveActor).toHaveBeenCalledWith(expect.anything(), jwtIdentity, expect.any(Request));
+    expect(resolveActor).toHaveBeenCalledWith(
+      expect.anything(),
+      jwtIdentity,
+      expect.any(Request),
+      response.headers.get("X-Request-ID"),
+    );
     expect(loadCurrentUser).toHaveBeenCalledWith(expect.anything(), actor.claims);
     expect(fakeBetterAuth.api.getSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({

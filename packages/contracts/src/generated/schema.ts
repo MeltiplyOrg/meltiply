@@ -408,7 +408,7 @@ export interface paths {
         /**
          * Rename or re-slug a workspace
          * @description Updates workspace display fields. Requires the admin role in the
-         *     addressed workspace; personal workspaces cannot be renamed.
+         *     addressed shared Workspace.
          */
         patch: operations["updateWorkspace"];
         trace?: never;
@@ -437,9 +437,8 @@ export interface paths {
         /**
          * Invite a member to a team workspace
          * @description Creates a pending invitation and delivers the acceptance link through
-         *     the configured transactional email provider. Requires the admin role;
-         *     personal workspaces cannot issue invitations, and at most one pending
-         *     invitation may exist per workspace and email.
+         *     the configured transactional email provider. Requires the admin role,
+         *     and at most one pending invitation may exist per workspace and email.
          */
         post: operations["createWorkspaceInvitation"];
         delete?: never;
@@ -2989,6 +2988,7 @@ export interface components {
          */
         XWorkspaceId: string;
         Limit: number;
+        AuditLimit: number;
         Offset: number;
         /**
          * @description Case-insensitive substring matched against the action, the actor's email
@@ -3769,6 +3769,15 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            /** @description Invitation has been revoked. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -4086,7 +4095,7 @@ export interface operations {
     listWorkspaceAudit: {
         parameters: {
             query?: {
-                limit?: components["parameters"]["Limit"];
+                limit?: components["parameters"]["AuditLimit"];
                 offset?: components["parameters"]["Offset"];
                 /**
                  * @description Case-insensitive substring matched against the action, the actor's email

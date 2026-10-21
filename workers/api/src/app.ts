@@ -65,6 +65,7 @@ export interface ApiDependencies extends CoreRouteDependencies, OperatorRouteDep
     env: ApiWorkerEnv,
     identity: JwtIdentity,
     request: Request,
+    requestId: string,
   ) => Promise<ResolvedActor>;
   verifyJwtToken?: (env: ApiWorkerEnv, token: string) => Promise<JwtIdentity>;
   verifyAccessToken?: (env: ApiWorkerEnv, token: string) => Promise<AccessClaims>;
@@ -268,8 +269,8 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     });
   const resolveRequestActor =
     dependencies.resolveActor ??
-    (async (env: ApiWorkerEnv, identity: JwtIdentity, request: Request) =>
-      resolveActor(env, identity, request));
+    (async (env: ApiWorkerEnv, identity: JwtIdentity, request: Request, requestId: string) =>
+      resolveActor(env, identity, request, requestId));
   const authRateLimiter =
     dependencies.authRateLimiter ??
     ((env: ApiWorkerEnv, action: string, request: Request) =>
@@ -517,7 +518,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
       );
     }
     try {
-      c.set("actor", await resolveRequestActor(c.env, identity, c.req.raw));
+      c.set("actor", await resolveRequestActor(c.env, identity, c.req.raw, c.get("requestId")));
     } catch (cause) {
       if (cause instanceof CoreApiError) {
         return errorResponse(c.get("requestId"), cause.status, cause.code, cause.message);

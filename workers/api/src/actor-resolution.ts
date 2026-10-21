@@ -211,7 +211,8 @@ function ensureInstallation(
        JOIN users u ON u.id = $1
        WHERE o.is_shared AND u.installation_owner
        ON CONFLICT (org_id, user_id) DO UPDATE
-         SET role = 'admin', updated_at = now()`,
+         SET role = 'admin', updated_at = now()
+       WHERE org_members.role IS DISTINCT FROM 'admin'`,
       [user.id],
     );
     yield* client.query(
@@ -340,6 +341,7 @@ function resolveWorkspace(
  * @param env - Worker environment bindings.
  * @param identity - Verified JWT identity (subject, email, optional name).
  * @param request - Incoming HTTP request (optional x-workspace-id header).
+ * @param requestId - Middleware-generated, length-validated request identifier.
  * @returns The ResolvedActor for the request.
  * @throws {CoreApiError} 401 invalid identity, 400 malformed workspace id,
  *   403 suspended account or missing workspace membership, 409 email conflict.
@@ -348,6 +350,7 @@ export async function resolveActor(
   env: ApiWorkerEnv,
   identity: JwtIdentity,
   request: Request,
+  requestId: string,
 ): Promise<ResolvedActor> {
   const verified = verifiedIdentity(identity);
 
@@ -362,7 +365,6 @@ export async function resolveActor(
 
   // Exception: dynamic import avoids loading pg in workerd unit test isolates
   const { withSystemTransactionEffect } = await import("./database");
-  const requestId = request.headers.get("x-request-id")?.trim() || "request-unavailable";
   return Effect.runPromise(
     withSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {

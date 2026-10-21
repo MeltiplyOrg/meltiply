@@ -75,11 +75,11 @@ export async function startControl(runtime, jobs, queuePolicies, secret, systemD
           const organizationId = shared.rows[0]?.id;
           if (!organizationId) throw new Error("No shared workspace exists");
           const previousOwner = await client.query(
-            "SELECT id FROM users WHERE installation_owner AND id <> $1 LIMIT 1",
+            "SELECT id FROM users WHERE installation_owner AND id <> $1 LIMIT 1 FOR UPDATE",
             [account.id],
           );
           const previousMembership = await client.query(
-            "SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2 LIMIT 1",
+            "SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2 LIMIT 1 FOR UPDATE",
             [organizationId, account.id],
           );
           const requestId = `selfhost-break-glass-${randomUUID()}`;

@@ -8,7 +8,10 @@ const { withSystemTransactionEffect } = vi.hoisted(() => ({
 }));
 vi.mock("../src/database", () => ({ withSystemTransactionEffect }));
 
-import { resolveActor } from "../src/actor-resolution";
+import {
+  resolveActor as resolveActorWithRequestId,
+  type ResolvedActor,
+} from "../src/actor-resolution";
 import { CoreApiError } from "../src/core-types";
 import type { ApiWorkerEnv } from "../src/env";
 
@@ -31,6 +34,15 @@ const identity: JwtIdentity = {
 
 function request(headers: Record<string, string> = {}): Request {
   return new Request("https://api.example.test/api/v1/assets", { headers });
+}
+
+/** Resolves an actor with the middleware request id the app supplies. */
+function resolveActor(
+  env: ApiWorkerEnv,
+  identity: JwtIdentity,
+  request: Request,
+): Promise<ResolvedActor> {
+  return resolveActorWithRequestId(env, identity, request, "actor-resolution-test-request");
 }
 
 /**
@@ -288,6 +300,10 @@ describe("resolveActor", () => {
       String(sql).includes("UPDATE workspace_invitations"),
     );
     expect(accepted).toBeDefined();
+    const audit = client.query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO workspace_audit_entries"),
+    );
+    expect(audit?.[1]?.[9]).toBe("actor-resolution-test-request");
   });
 
   it("reads the user row back when the profile upsert changes nothing", async () => {

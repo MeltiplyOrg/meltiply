@@ -203,6 +203,13 @@ export async function seed(client) {
      CROSS JOIN generate_series(1, $4::integer) AS account_item`,
     [ids.org, ids.brandProfile, dataset.schedulePosts, dataset.scheduleChannels],
   );
+  // Freshly inserted fixtures have no column statistics until autovacuum
+  // reaches them. Refresh them deterministically before measurement so the
+  // planner sees the same row counts in every repetition.
+  await client.query(
+    `ANALYZE assets, posts, post_attachments, post_targets, distributions,
+             analytics_snapshots, comments, platform_accounts`,
+  );
 }
 
 /** Restores the monthly usage headroom mutation scenarios consume. */

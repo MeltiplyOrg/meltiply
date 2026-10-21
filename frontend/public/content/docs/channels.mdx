@@ -44,6 +44,18 @@ connection. Community deployments do not impose a Channel-count quota; see
 
 The connection flow currently includes TikTok, YouTube, Instagram, Facebook Pages, and Threads. Supported publishing formats and account requirements are shown by the real platform capabilities and composer validation; a listed provider does not imply every feature of its native app.
 
+| Platform  | What one authorization makes available                                                                                                                                         |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Facebook  | Eligible managed Pages, including consented Business Manager assignments. Choose the Page in Meltiply.                                                                         |
+| Instagram | The Business or Creator account used for Instagram Login. Sign in again to connect a different account; Facebook Page access does not grant access to every Instagram account. |
+| Threads   | The Threads profile that authorized the app. Connect another profile through another authorization.                                                                            |
+| TikTok    | The TikTok account that authorized the app, with basic-profile and publishing access.                                                                                          |
+| YouTube   | The personal or Brand Account channel authorized through Google. Authorize each channel separately; Meltiply refuses a grant that cannot identify one upload destination.      |
+
+All platforms still require explicit **Connect Channel** confirmation and an eligible Brand Profile. Cancelling a pending assignment does not disconnect an existing Channel. Reconnecting the same account updates its credentials without adding another Channel.
+
+An installation must configure its own provider credentials, exact callback URL, and required permissions. Meta access approval, Google consent-screen/test-user access, and TikTok approval remain provider-side requirements. In particular, TikTok restricts unaudited Direct Post clients and does not accept an internal-only uploader as an audit use case; see its [Content Sharing Guidelines](https://developers.tiktok.com/doc/content-sharing-guidelines). Community resource freedom does not override these platform policies.
+
 ## Use the Accounts directory
 
 Each account row shows:

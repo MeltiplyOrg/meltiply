@@ -123,3 +123,14 @@ Platforms through authorization state, metadata, explicit assignment,
 idempotent replay, reconnect and cancellation. This cannot prove app review,
 live consent, real account permissions, or successful publication to a real
 social account. Those remain explicit live-provider acceptance checks.
+
+### Observed results
+
+The [failing-before hosted run](https://github.com/MeltiplyOrg/meltiply/actions/runs/39642629160)
+reproduced three regressions against the previous implementation: Instagram
+exchange, Threads exchange, and Threads refresh.
+
+The [passing full-gate run](https://github.com/MeltiplyOrg/meltiply/actions/runs/39645278404)
+at `ce7a9a2d6313eee1b8a16e5bc9215fc92bdf843c` passed all five connection smoke
+flows, the self-hosted script type-check, and `bun run cloudflare:check`.
+No live third-party OAuth credentials or consent sessions were used.

@@ -1,4 +1,4 @@
-// Run against the disposable full-gate database after cloudflare:check. Real API,
+// Run against the disposable seeded full-gate database with the state Worker built. Real API,
 // SQLite Durable Object state, encryption and PostgreSQL persistence; only actor
 // authentication and external provider HTTP responses are controlled here.
 import assert from "node:assert/strict";

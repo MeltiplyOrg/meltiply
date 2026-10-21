@@ -55,6 +55,16 @@ against R2 and MinIO. They run on GitHub-hosted machines without deployment
 secrets. A passing automatic `ci-gate` does not imply that a manual lane ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
+`cloudflare-full` first runs the [provider connection smoke](../scripts/selfhost/oauth-connection-check.ts)
+against its disposable seeded database and the built SQLite OAuth state Worker.
+All five implemented Providers exercise real authorization-state consumption,
+encrypted selection, explicit assignment, idempotent replay, reconnection, and
+cancellation through API handlers and PostgreSQL persistence. Only actor
+authentication and external provider HTTP responses are controlled. The full
+application gate runs afterward. This does not certify live provider consent,
+app review, account permissions, or real social publication; see the
+[provider contract research](research/provider-channel-connections.md).
+
 `frontend-full` provisions local signing/storage configuration before browser
 journeys. It runs production-entry browser scenarios, then the cross-profile
 media/recovery/publishing journey against the controlled-Provider acceptance

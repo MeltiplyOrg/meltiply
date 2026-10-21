@@ -6,7 +6,7 @@ import {
   type QueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 
 import {
   ApiClientService,
@@ -418,6 +418,74 @@ export function useDeletePost(scope: SessionScope) {
     scope,
     (api, variables: { id: string; brandProfileId: string }, idempotencyKey) =>
       api.deletePost(variables.id, variables.brandProfileId, { idempotencyKey }),
+    mutationInvalidations.deletePost,
+  );
+}
+
+/** One failed deletion in a bulk batch, kept so the caller can retry it. */
+export interface BulkDeleteFailure {
+  id: string;
+  message: string;
+}
+
+/** Result of one confirmed bulk deletion: successful identities and retryable failures. */
+export interface BulkDeleteOutcome {
+  deletedIds: string[];
+  failed: BulkDeleteFailure[];
+}
+
+/**
+ * Upper bound on concurrent per-Post deletion requests. Four keeps the batch
+ * responsive without turning a large selection into one unbounded burst; the
+ * backend row lock already serializes any two requests for the same Post.
+ */
+const BULK_DELETE_CONCURRENCY = 4;
+
+/**
+ * TanStack mutation hook deleting a batch of Posts with bounded concurrency and
+ * one cache invalidation after the batch settles.
+ *
+ * The per-Post endpoint is unchanged, so each request keeps its own
+ * idempotency key derived from the batch key and target position; a retried
+ * batch reuses those keys. Failures are returned as data instead of rejecting
+ * the mutation so one unavailable Post cannot discard the successes or the
+ * caller's retry list.
+ *
+ * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
+ * @returns Mutation hook accepting `{ targets }` and resolving `BulkDeleteOutcome`.
+ */
+export function useDeletePostsBatch(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (
+      api,
+      variables: { targets: readonly { id: string; brandProfileId: string }[] },
+      idempotencyKey,
+    ) =>
+      Effect.forEach(
+        variables.targets,
+        (target, index) =>
+          Effect.result(
+            api.deletePost(target.id, target.brandProfileId, {
+              idempotencyKey: `${idempotencyKey}:${index}`,
+            }),
+          ),
+        { concurrency: BULK_DELETE_CONCURRENCY },
+      ).pipe(
+        Effect.map((results) => {
+          const deletedIds: string[] = [];
+          const failed: BulkDeleteFailure[] = [];
+          results.forEach((result, index) => {
+            const target = variables.targets[index]!;
+            if (Result.isSuccess(result)) {
+              deletedIds.push(target.id);
+            } else {
+              failed.push({ id: target.id, message: result.failure.message });
+            }
+          });
+          return { deletedIds, failed };
+        }),
+      ),
     mutationInvalidations.deletePost,
   );
 }

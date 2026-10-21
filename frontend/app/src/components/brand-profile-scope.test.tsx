@@ -50,6 +50,7 @@ const queryMutations = vi.hoisted(() => ({
   update: { error: null, mutate: vi.fn() },
   cancelDistribution: { isPending: false, mutateAsync: vi.fn() },
   deletePost: { isPending: false, mutateAsync: vi.fn() },
+  deletePostsBatch: { isPending: false, mutateAsync: vi.fn() },
   retryDistribution: { isPending: false, mutateAsync: vi.fn() },
   updateScheduledDistribution: { isPending: false, mutateAsync: vi.fn() },
 }));
@@ -134,6 +135,7 @@ vi.mock("@/lib/queries", () => ({
   useCalendar: () => queryResults.calendar,
   useCancelDistribution: () => queryMutations.cancelDistribution,
   useDeletePost: () => queryMutations.deletePost,
+  useDeletePostsBatch: () => queryMutations.deletePostsBatch,
   usePost: () => ({ data: undefined as Post | undefined, error: null, isLoading: false }),
   usePosts: () => queryResults.posts,
   useRetryDistribution: () => queryMutations.retryDistribution,
@@ -996,9 +998,10 @@ describe("Posts surfaces", () => {
     };
     workspace.brandProfiles = [alphaProfile, betaProfile];
     queryResults.posts.data = { posts: [first, second], has_more: false, limit: 100, offset: 0 };
-    queryMutations.deletePost.mutateAsync
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("Delete failed"));
+    queryMutations.deletePostsBatch.mutateAsync.mockResolvedValueOnce({
+      deletedIds: [first.id],
+      failed: [{ id: second.id, message: "Delete failed" }],
+    });
     render(
       <MemoryRouter>
         <PostsView />
@@ -1014,7 +1017,7 @@ describe("Posts surfaces", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all visible posts" }));
     const pill = await screen.findByRole("region", { name: "Selection actions" });
     fireEvent.click(within(pill).getByRole("button", { name: "Delete" }));
-    expect(queryMutations.deletePost.mutateAsync).not.toHaveBeenCalled();
+    expect(queryMutations.deletePostsBatch.mutateAsync).not.toHaveBeenCalled();
     await act(async () => {
       fireEvent.click(
         within(screen.getByRole("alertdialog")).getByRole("button", {
@@ -1023,10 +1026,13 @@ describe("Posts surfaces", () => {
       );
     });
 
-    expect(queryMutations.deletePost.mutateAsync.mock.calls.map(([input]) => input)).toEqual([
-      { id: first.id, brandProfileId: first.brand_profile_id },
-      { id: second.id, brandProfileId: second.brand_profile_id },
-    ]);
+    expect(queryMutations.deletePostsBatch.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(queryMutations.deletePostsBatch.mutateAsync.mock.calls[0]?.[0]).toEqual({
+      targets: [
+        { id: first.id, brandProfileId: first.brand_profile_id },
+        { id: second.id, brandProfileId: second.brand_profile_id },
+      ],
+    });
     await settleSelection("1 selected");
     const rows = screen.getAllByRole("checkbox", { name: "Select post" });
     expect(rows.filter((row) => (row as HTMLInputElement).checked)).toHaveLength(1);

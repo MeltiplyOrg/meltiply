@@ -2,7 +2,7 @@
 // SQLite Durable Object state, encryption and PostgreSQL persistence; only actor
 // authentication and external provider HTTP responses are controlled here.
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { z } from "zod";
 import { PLATFORM_IDS, type Platform } from "../../packages/domain/src/index";
@@ -191,7 +191,7 @@ const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   FRONTEND_URL: "http://localhost:3000",
   PUBLIC_API_URL: origin,
-  TOKEN_ENCRYPTION_KEY: "oauth-smoke-private-ephemeral-key-32",
+  TOKEN_ENCRYPTION_KEY: randomBytes(32).toString("base64url"),
   FACEBOOK_CLIENT_ID: "facebook-client",
   FACEBOOK_CLIENT_SECRET: "facebook-smoke-secret",
   FACEBOOK_LIVE_ACCEPTED: "true",
@@ -343,13 +343,20 @@ try {
     const listed = await request("/api/v1/platforms");
     const accounts = accountListSchema.parse(await listed.json()).accounts;
     persistedIds.push(expectedIds[platform]);
+    const connected = accounts.filter(
+      (account) => account.brand_profile_id === profileId && account.platform === platform,
+    );
     assert.deepEqual(
-      accounts
-        .filter(
-          (account) => account.brand_profile_id === profileId && account.platform === platform,
-        )
-        .map((account) => ({ id: account.platform_user_id, status: account.connection_status })),
-      [{ id: expectedIds[platform], status: "connected" }],
+      connected.map((account) => account.platform_user_id),
+      [expectedIds[platform]],
+    );
+    // TikTok and YouTube's fresh grants are already within the API's seven-day
+    // expiry-warning window; both statuses remain usable for publishing.
+    assert.ok(
+      connected.every(
+        (account) =>
+          account.connection_status === "connected" || account.connection_status === "expiring",
+      ),
     );
     const pending = await authorize(platform);
     assert.equal((await request(`/api/v1/oauth-selections/${pending}`, "DELETE")).status, 204);

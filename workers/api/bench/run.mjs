@@ -512,6 +512,7 @@ async function measureScenario(scenario) {
   }
 
   capture.queries = [];
+  const measuredQueries = [];
   const sampleResults = [];
   const cpuBefore = process.cpuUsage();
   const rssBefore = process.memoryUsage().rss;
@@ -519,6 +520,7 @@ async function measureScenario(scenario) {
     await scenario.beforeSample?.();
     capture.queries.length = 0;
     const result = await scenario.run();
+    measuredQueries.push(...capture.queries);
     sampleResults.push(result);
   }
   const cpuAfter = process.cpuUsage(cpuBefore);
@@ -529,7 +531,7 @@ async function measureScenario(scenario) {
     (total, sample) => total + (sample.operations ?? 1),
     0,
   );
-  const applicationQueries = capture.queries.filter((query) => query.kind === "application");
+  const applicationQueries = measuredQueries.filter((query) => query.kind === "application");
   const statementCounts = new Map();
   for (const query of applicationQueries) {
     statementCounts.set(query.statement, (statementCounts.get(query.statement) ?? 0) + 1);
@@ -547,7 +549,7 @@ async function measureScenario(scenario) {
     },
     db: {
       application_statements_per_operation: rounded(applicationQueries.length / totalOperations),
-      context_statements: capture.queries.length - applicationQueries.length,
+      context_statements: measuredQueries.length - applicationQueries.length,
       statement_ms: summarize(applicationQueries.map((query) => query.durationMs)),
       statements_total: applicationQueries.length,
       time_ms_total: rounded(

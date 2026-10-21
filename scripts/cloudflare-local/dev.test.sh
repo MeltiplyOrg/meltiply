@@ -200,7 +200,11 @@ set -euo pipefail
 for argument in "$@"; do
   case "$argument" in
     https://fixture-*.trycloudflare.com/* | https://dev-tunnel.meltiply.com/*)
-      printf '200'
+      if [[ "${FIXTURE_ACCESS_REDIRECT:-0}" == "1" ]]; then
+        printf '302 https://fixture.cloudflareaccess.com/cdn-cgi/access/login'
+      else
+        printf '200 '
+      fi
       exit 0
       ;;
   esac
@@ -458,6 +462,39 @@ public_line="$(grep -n "dev-tunnel-public.meltiply.com" "$config" | cut -d: -f1)
 app_line="$(grep -n "'dev-tunnel.meltiply.com'" "$config" | cut -d: -f1)"
 [[ "$public_line" -lt "$app_line" ]] ||
   fail "the public ingress rule must precede the app rule"
+
+# --- run 2b: Access-protected hostname still proves the tunnel is live -------
+# The unauthenticated health probe cannot return 200 when Cloudflare Access
+# guards the hostname; its login redirect is the expected success signal.
+reset_run_state
+: >"$COMMAND_LOG"
+export FIXTURE_TUNNEL_EXISTS=0
+log_file="$fixture/dev-named-access.log"
+set +e
+(
+  cd "$fixture"
+  PATH="$LAUNCHER_PATH" \
+    BUN="$fixture/bin/bun" \
+    WRANGLER_DEV_PORT=9911 \
+    FRONTEND_DEV_PORT=9912 \
+    PUBLIC_SITE_DEV_PORT=9913 \
+    MELTIPLY_DEV_TUNNEL_MODE=named \
+    TUNNEL_TRANSPORT_PROTOCOL=http2 \
+    MELTIPLY_TUNNEL_BRANCH=dev-tunnel \
+    MELTIPLY_DEV_FIXTURE="$fixture" \
+    FIXTURE_ACCESS_REDIRECT=1 \
+    "$fixture/scripts/cloudflare-local/dev.sh" >"$log_file" 2>&1
+)
+status=$?
+set -e
+[[ "$status" == "17" ]] || fail "expected backend exit 17 in Access run, got $status"
+expect_contains "$log_file" \
+  "Tunnel live: https://dev-tunnel.meltiply.com is reachable behind Cloudflare Access (HTTP 302)" \
+  access-health-probe
+if grep -q "did not answer /api/v1/health" "$log_file"; then
+  fail "an Access login redirect was reported as a failed health probe"
+fi
+unset FIXTURE_ACCESS_REDIRECT
 
 # --- run 3: opt out (no tunnel published) ------------------------------------
 reset_run_state

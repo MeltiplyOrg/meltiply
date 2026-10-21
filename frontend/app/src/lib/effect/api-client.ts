@@ -206,7 +206,6 @@ export interface ApiClientServiceShape {
   ) => ApiClientEffect<PlatformCapabilitiesResponse>;
   readonly startPlatformOAuth: (
     platform: Platform,
-    brandProfileId: string,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<OAuthStartResponse>;
   readonly getOAuthSelection: (
@@ -388,10 +387,8 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => retryDistribution(workspaceId, id, options)),
     schedulePost: (id, input, options) =>
       inWorkspace((workspaceId) => schedulePost(workspaceId, id, input, options)),
-    startPlatformOAuth: (platform, brandProfileId, options) =>
-      inWorkspace((workspaceId) =>
-        startPlatformOAuth(workspaceId, platform, brandProfileId, options),
-      ),
+    startPlatformOAuth: (platform, options) =>
+      inWorkspace((workspaceId) => startPlatformOAuth(workspaceId, platform, options)),
     getOAuthSelection: (selectionId, options) =>
       inWorkspace((workspaceId) => getOAuthSelection(workspaceId, selectionId, options)),
     confirmOAuthSelection: (selectionId, input, options) =>

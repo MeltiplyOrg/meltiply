@@ -173,7 +173,6 @@ const spanishTranslations: Record<string, string> = {
   "Copied “{value}” to your clipboard.": "Se copió «{value}» al portapapeles.",
   "Could not copy": "No se pudo copiar",
   "Select the value and copy it manually.": "Selecciona el valor y cópialo manualmente.",
-  "The selected Page is ready to publish to.": "La página seleccionada está lista para publicar.",
   "The post and its pending channels were removed.":
     "Se eliminaron la publicación y sus canales pendientes.",
   "Cancelled {count} pending channel(s).": "Se cancelaron {count} canal(es) pendiente(s).",
@@ -500,8 +499,6 @@ const spanishTranslations: Record<string, string> = {
   "Connect social account": "Conectar cuenta social",
   "Connect your social accounts to start publishing and scheduling across platforms.":
     "Conecta tus cuentas sociales para empezar a publicar y programar en todas las plataformas.",
-  "Connect your social accounts to start publishing and scheduling across platforms. Each Brand Profile connects one Channel per Provider.":
-    "Conecta tus cuentas sociales para empezar a publicar y programar en todas las plataformas. Cada perfil de marca conecta un canal por proveedor.",
   "Could not cancel this post": "No se pudo cancelar esta publicación",
   "Could not delete this post": "No se pudo eliminar esta publicación",
   "Could not load post": "No se pudo cargar la publicación",
@@ -689,26 +686,44 @@ const spanishTranslations: Record<string, string> = {
   "Unknown profile": "Perfil desconocido",
   "another Brand Profile": "otro perfil de marca",
   "e.g. Acme Corp": "p. ej. Acme Corp",
-  "Select Facebook Page": "Seleccionar página de Facebook",
-  "Choose the Facebook Page you want to connect to your Brand Profile.":
-    "Elige la página de Facebook que quieres conectar a tu perfil de marca.",
-  "Connecting to:": "Conectando a:",
-  "Loading eligible Facebook Pages…": "Cargando páginas de Facebook aptas…",
-  "Unable to load Facebook Pages": "No se pudieron cargar las páginas de Facebook",
-  "The selection ticket has expired or could not be found.":
-    "El ticket de selección ha caducado o no se pudo encontrar.",
-  "No eligible Facebook Pages found": "No se encontraron páginas de Facebook aptas",
-  "You need admin or publishing access on at least one Facebook Page to connect it. Create or request access to a Page in Facebook, then try connecting again.":
-    "Necesitas acceso de administrador o permisos de publicación en al menos una página de Facebook para conectarla. Crea o solicita acceso a una página en Facebook y vuelve a intentarlo.",
-  "Eligible Facebook Pages": "Páginas de Facebook aptas",
-  "Unnamed Page": "Página sin nombre",
-  "The selected Page could not be connected.": "No se pudo conectar la página seleccionada.",
-  "Connect Page": "Conectar página",
+  "Connect a Channel": "Conectar un canal",
+  "Connect {platform}": "Conectar {platform}",
+  "Connect Channel": "Conectar canal",
+  "Choose the Channel and the Brand Profile that should own it.":
+    "Elige el canal y el perfil de marca al que pertenecerá.",
+  "Each Brand Profile can hold one {platform} Channel. A Profile that already owns a different one is unavailable.":
+    "Cada perfil de marca puede tener un canal de {platform}. Un perfil que ya tiene otro distinto no está disponible.",
+  "Choose an account": "Elige una cuenta",
+  "Authorized account": "Cuenta autorizada",
+  "Select the account to connect.": "Selecciona la cuenta que quieres conectar.",
+  "The account authorized with {platform}.": "La cuenta autorizada con {platform}.",
+  "The provider authorized this account.": "El proveedor autorizó esta cuenta.",
+  "Loading authorized accounts…": "Cargando cuentas autorizadas…",
+  "Loading Brand Profiles…": "Cargando perfiles de marca…",
+  "Unable to load authorized accounts": "No se pudieron cargar las cuentas autorizadas",
+  "The assignment ticket has expired or could not be found.":
+    "El ticket de asignación ha caducado o no se pudo encontrar.",
+  "No eligible accounts found": "No se encontraron cuentas aptas",
+  "The provider authorized without a publishable account. Check its permissions and try connecting again.":
+    "El proveedor autorizó sin una cuenta publicable. Revisa sus permisos y vuelve a intentar la conexión.",
+  "Unnamed account": "Cuenta sin nombre",
+  "The selected Channel could not be connected.": "No se pudo conectar el canal seleccionado.",
+  "This Channel will publish and schedule for the selected profile.":
+    "Este canal publicará y programará para el perfil seleccionado.",
+  "Create a Brand Profile before assigning this Channel.":
+    "Crea un perfil de marca antes de asignar este canal.",
+  "Every Brand Profile already has a {platform} Channel. Disconnect one or create another Brand Profile.":
+    "Todos los perfiles de marca ya tienen un canal de {platform}. Desconecta uno o crea otro perfil de marca.",
+  "Already has a {platform} Channel": "Ya tiene un canal de {platform}",
+  "Reconnect this Channel": "Reconectar este canal",
+  "Choose a provider to authorize. After authorization, choose which Brand Profile owns the connected Channel.":
+    "Elige un proveedor para autorizar. Después de la autorización, elige qué perfil de marca será dueño del canal conectado.",
+  "No eligible Brand Profile": "Ningún perfil de marca disponible",
+  "The Channel is ready to publish and schedule.": "El canal está listo para publicar y programar.",
   "Connecting…": "Conectando…",
   Permissions: "Permisos",
   "No permissions granted": "Sin permisos otorgados",
   "ID: {id}": "ID: {id}",
-  "Facebook connected successfully.": "Facebook se conectó correctamente.",
 };
 
 const statusTranslations: Record<Language, Record<string, string>> = {

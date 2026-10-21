@@ -214,7 +214,7 @@ const cases: ConformanceCase[] = [
   {
     method: "GET",
     operationId: "startPlatformOAuth",
-    path: "/api/v1/platforms/threads/connect?brand_profile_id=00000000-0000-4000-8000-000000000111",
+    path: "/api/v1/platforms/threads/connect",
   },
   {
     method: "GET",
@@ -499,7 +499,6 @@ const conformanceTestKey = "0123456789abcdef0123456789abcdef";
 const oauthState = {
   create: async () => undefined,
   consume: async () => ({
-    brand_profile_id: "00000000-0000-4000-8000-000000000111",
     expires_at: Date.now() + 60_000,
     organization_id: "00000000-0000-4000-8000-000000000001",
     pkce_verifier: "pkce-verifier",
@@ -530,7 +529,6 @@ const oauthState = {
       }),
     );
     return {
-      brandProfileId: "00000000-0000-4000-8000-000000000111",
       claimToken: "test-claim-token",
       encryptedConnection: sealed,
       organizationId: "00000000-0000-4000-8000-000000000001",

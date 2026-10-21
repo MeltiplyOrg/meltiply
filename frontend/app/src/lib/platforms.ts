@@ -125,7 +125,8 @@ export function distributionTargetBlockReason(
 /**
  * Formats known OAuth outcomes, including non-Facebook destination-selection failures.
  * Interpolates the provider label in the chosen language; missing inputs and unknown/inherited
- * outcome keys return null. Facebook's pending Page chooser is handled by the dialog, not a banner.
+ * outcome keys return null. Pending account assignment is handled by the
+ * dedicated assignment route, not a banner.
  */
 export function oauthOutcomeMessage(
   outcome: string | null,

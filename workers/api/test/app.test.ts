@@ -9,7 +9,7 @@ import type { ResolvedActor } from "../src/actor-resolution";
 import { CoreApiError } from "../src/core-types";
 import worker from "../src/index";
 import type { ApiWorkerEnv, AutomationRelayStub, OAuthStateStub } from "../src/env";
-import { validateProductionBindings } from "../src/env";
+import { requiresEmailVerification, validateProductionBindings } from "../src/env";
 import { logRecords } from "./log-records";
 
 afterEach(() => {
@@ -342,6 +342,26 @@ describe("API Worker foundation", () => {
     ).toThrow("MAIL_FROM_ADDRESS/MAIL_FROM_NAME must configure a valid sender");
   });
 
+  it("allows missing mail when verification is explicitly disabled", () => {
+    const env = {
+      ...stagingEnv,
+      MAIL: undefined,
+      MAIL_FROM_ADDRESS: undefined,
+      MAIL_FROM_NAME: undefined,
+      REQUIRE_EMAIL_VERIFICATION: "false",
+    };
+    expect(requiresEmailVerification(env)).toBe(false);
+    expect(() => validateProductionBindings(env)).not.toThrow();
+  });
+
+  it("keeps verification enabled by default in deployed environments", () => {
+    expect(requiresEmailVerification(stagingEnv)).toBe(true);
+    expect(requiresEmailVerification({ ...stagingEnv, ENVIRONMENT: "local" })).toBe(false);
+    expect(requiresEmailVerification({ ...stagingEnv, REQUIRE_EMAIL_VERIFICATION: "true" })).toBe(
+      true,
+    );
+  });
+
   it("logs invalid staging configuration and returns only a generic response", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const response = await worker.fetch(
@@ -442,6 +462,28 @@ describe("API Worker foundation", () => {
       ]),
       status: "unavailable",
     });
+  });
+
+  it("reports ready without mail when verification is disabled", async () => {
+    const app = createApiApp();
+    const response = await app.request(
+      "/api/v1/ready",
+      {},
+      {
+        ...stagingEnv,
+        MAIL: undefined,
+        MAIL_FROM_ADDRESS: undefined,
+        MAIL_FROM_NAME: undefined,
+        REQUIRE_EMAIL_VERIFICATION: "false",
+      },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      components: Array<{ name: string }>;
+    };
+    expect(body.components.map(({ name }) => name)).not.toEqual(
+      expect.arrayContaining(["MAIL", "MAIL_FROM_ADDRESS"]),
+    );
   });
 
   it("reports mail ready without calling send on the binding", async () => {

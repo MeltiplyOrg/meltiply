@@ -1,6 +1,6 @@
 import type { BetterAuthInstance, JwtIdentity } from "@meltiply/auth";
 import { CoreApiError } from "./core-types";
-import type { ApiWorkerEnv } from "./env";
+import { requiresEmailVerification, type ApiWorkerEnv } from "./env";
 
 /** Reads only the installation's public initialized bit; never returns owner details. */
 async function installationInitialized(env: ApiWorkerEnv): Promise<boolean> {
@@ -127,11 +127,7 @@ export async function activeOwnerIdentity(
     `SELECT u.email, u.name FROM "session" s JOIN "user" u ON u.id = s."userId"
      WHERE s.id = $1 AND u.id = $2 AND s."expiresAt" > now()
        AND u."installationOwner" AND ($3::boolean OR u."emailVerified")`,
-    [
-      identity.sessionId,
-      identity.subject,
-      env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test",
-    ],
+    [identity.sessionId, identity.subject, !requiresEmailVerification(env)],
   );
   const owner = result.rows[0];
   if (!owner) throw new CoreApiError(401, "authentication_required", "Authentication is required.");

@@ -96,7 +96,7 @@ describe("Better Auth JWT lifecycle", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8787/api/auth/get-session");
     expect(credentialsAt(fetchMock, 0)).toBe("include");
     expect(headerAt(fetchMock, 1, "Authorization")).toBe(`Bearer ${firstJwt}`);
-    expect(credentialsAt(fetchMock, 1)).toBe("omit");
+    expect(credentialsAt(fetchMock, 1)).toBe("same-origin");
   });
 
   it("forwards the refreshed JWT after a later session refresh", async () => {
@@ -116,7 +116,7 @@ describe("Better Auth JWT lifecycle", () => {
 
     expect(headerAt(fetchMock, 1, "Authorization")).toBe(`Bearer ${firstJwt}`);
     expect(headerAt(fetchMock, 3, "Authorization")).toBe(`Bearer ${refreshedJwt}`);
-    expect(credentialsAt(fetchMock, 3)).toBe("omit");
+    expect(credentialsAt(fetchMock, 3)).toBe("same-origin");
   });
 
   it("clears the bearer credential when sign-out fails server-side", async () => {
@@ -139,7 +139,7 @@ describe("Better Auth JWT lifecycle", () => {
     await Effect.runPromise(api.getCurrentUser(null));
 
     expect(headerAt(fetchMock, 3, "Authorization")).toBeNull();
-    expect(credentialsAt(fetchMock, 3)).toBe("omit");
+    expect(credentialsAt(fetchMock, 3)).toBe("same-origin");
   });
 
   it("clears the bearer credential when the sign-out request rejects", async () => {
@@ -160,7 +160,7 @@ describe("Better Auth JWT lifecycle", () => {
     await Effect.runPromise(api.getCurrentUser(null));
 
     expect(headerAt(fetchMock, 3, "Authorization")).toBeNull();
-    expect(credentialsAt(fetchMock, 3)).toBe("omit");
+    expect(credentialsAt(fetchMock, 3)).toBe("same-origin");
   });
 
   it("never persists the bearer credential to Web Storage", async () => {

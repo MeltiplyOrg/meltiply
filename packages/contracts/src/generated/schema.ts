@@ -785,10 +785,11 @@ export interface paths {
         };
         /**
          * Start provider OAuth
-         * @description Begins the provider authorization handoff for the Brand Profile named
-         *     by brand_profile_id. The selection is pinned in durable OAuth state so
-         *     the callback attaches the connected Channel to the same Brand Profile
-         *     even if the caller's UI state changed meanwhile.
+         * @description Begins the provider authorization handoff. No Brand Profile is selected
+         *     yet: the callback discovers the authorized account(s), stages a
+         *     short-lived pending assignment session, and returns the browser to the
+         *     Channel assignment view. The chosen Brand Profile is supplied when the
+         *     assignment is confirmed, immediately before the Channel is persisted.
          */
         get: operations["startPlatformOAuth"];
         put?: never;
@@ -810,12 +811,13 @@ export interface paths {
         };
         /**
          * Complete provider OAuth with consume-once state
-         * @description Completes the provider OAuth exchange using consume-once state. For single-account
-         *     providers, the connection is persisted immediately and redirects to the frontend
-         *     result route. For multi-account providers such as Facebook Pages, the callback
-         *     discovers selectable Pages, stages a short-lived pending selection session, and
-         *     redirects (302) to the Page selection view (/channels?oauth=select_account&provider={platform}&selection_id={selection_id})
-         *     before any connection is persisted.
+         * @description Completes the provider OAuth exchange using consume-once state. The
+         *     authorized account or accounts are staged in a short-lived pending
+         *     assignment session; no Channel is persisted until the user selects an
+         *     account (when the provider returns more than one) and the Brand Profile
+         *     that should own it. Redirects (302) to the Channel assignment view
+         *     (/channels/connect?selection_id={selection_id}) with the provider
+         *     outcome query appended.
          */
         get: operations["completePlatformOAuth"];
         put?: never;
@@ -847,10 +849,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get pending OAuth account selection session
+         * Get pending OAuth account assignment session
          * @description Retrieves the public candidate accounts discovered during OAuth authorization
-         *     for explicit user selection. Only metadata is returned; external credentials
-         *     remain encrypted server-side in durable state.
+         *     for explicit account and Brand Profile selection. Only metadata is returned;
+         *     external credentials remain encrypted server-side in durable state.
          */
         get: operations["getOAuthSelection"];
         put?: never;
@@ -891,8 +893,10 @@ export interface paths {
         put?: never;
         /**
          * Confirm and connect chosen platform account
-         * @description Completes the pending OAuth selection session by connecting exactly one
-         *     chosen candidate account to the pinned Brand Profile.
+         * @description Completes the pending OAuth assignment session by persisting exactly one
+         *     chosen candidate account under the requested Brand Profile. The profile
+         *     must be active in the workspace and must not already own a Channel of
+         *     the same Platform.
          */
         post: operations["confirmOAuthSelection"];
         delete?: never;
@@ -1899,11 +1903,6 @@ export interface components {
             id: string;
             platform: components["schemas"]["Platform"];
             /**
-             * Format: uuid
-             * @description Brand Profile that will own the selected account.
-             */
-            brand_profile_id: string;
-            /**
              * Format: date-time
              * @description Expiration timestamp for this selection ticket.
              */
@@ -1914,6 +1913,11 @@ export interface components {
         OAuthSelectionConfirmRequest: {
             /** @description External provider account or Page identifier to connect. */
             account_id: string;
+            /**
+             * Format: uuid
+             * @description Active Brand Profile that will own the connected Channel.
+             */
+            brand_profile_id: string;
         };
         PlatformAccount: {
             /** Format: uuid */
@@ -3877,14 +3881,7 @@ export interface operations {
     };
     startPlatformOAuth: {
         parameters: {
-            query: {
-                /**
-                 * @description Active Brand Profile that will own the connected Channel. Connect
-                 *     fails when the profile is missing, soft-deleted, or outside the
-                 *     active workspace.
-                 */
-                brand_profile_id: string;
-            };
+            query?: never;
             header?: {
                 /**
                  * @description Optional workspace selection for the authenticated caller. When

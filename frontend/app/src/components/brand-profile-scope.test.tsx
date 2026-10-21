@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { contractSuccessBody } from "@/test/contract-fixtures";
 import type * as I18nModule from "@/lib/i18n";
+import type { ChannelIntegration } from "@/api/types";
 import type {
   Asset,
   BrandProfile,
@@ -23,7 +24,7 @@ function notifyWorkspace() {
 const workspace = vi.hoisted(() => ({
   brandProfiles: [] as BrandProfile[],
   channelStatuses: [],
-  integrations: [],
+  integrations: [] as ChannelIntegration[],
   isAdmin: true,
   selectedBrandProfile: null as BrandProfile | null,
   selectedBrandProfileId: null as string | null,
@@ -112,6 +113,7 @@ vi.mock("@/lib/i18n", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/navigation", () => ({
+  usePathname: () => "/channels",
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/lib/theme", () => ({
@@ -623,43 +625,65 @@ describe("Channels table contract", () => {
     const connectDialog = screen.getByRole("dialog", { name: "Connect social account" });
     expect(connectDialog).toBeVisible();
     expect(within(connectDialog).getByPlaceholderText("Search platforms…")).toBeVisible();
-    expect(within(connectDialog).getByRole("combobox", { name: "Brand Profile" })).toBeVisible();
+    expect(within(connectDialog).queryByRole("combobox")).not.toBeInTheDocument();
   });
 
   /**
-   * One Brand Profile connects at most one Channel per Provider: a Provider
-   * the active profile already owns renders its connected Channel without any
-   * Connect action, while the remaining Providers stay connectable.
+   * A Provider remains connectable while any Brand Profile does not own it.
+   * The existing Channel is summarized in the row, and assignment happens
+   * after OAuth rather than from the active profile filter.
    */
-  it("hides Connect for Providers the active Brand Profile already owns", () => {
+  it("offers Connect when another Brand Profile can still own the Provider", () => {
     workspace.brandProfiles = [alphaProfile, betaProfile];
     workspace.selectedBrandProfileId = alphaProfile.id;
     queryResults.platforms.data = [connectedAccount];
+    workspace.integrations = [
+      {
+        brandProfileId: alphaProfile.id,
+        disabled: false,
+        id: connectedAccount.id,
+        name: "Alpha TikTok",
+        platformUserId: connectedAccount.platform_user_id,
+        providerIdentifier: "tiktok",
+        refreshNeeded: false,
+        type: "tiktok",
+      },
+    ];
     renderChannels();
 
     fireEvent.click(screen.getByRole("button", { name: "Add account" }));
     const dialog = screen.getByRole("dialog", { name: "Connect social account" });
 
-    expect(within(dialog).getByText("Alpha TikTok")).toBeVisible();
-    expect(within(dialog).queryByRole("button", { name: "Add Another" })).not.toBeInTheDocument();
-    expect(within(dialog).getAllByRole("button", { name: "Connect" })).toHaveLength(4);
-    const ownedActions = within(dialog).getByText("Alpha TikTok").closest(".items-start");
-    expect(ownedActions).not.toBeNull();
-    expect(within(ownedActions as HTMLElement).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("1 connected accounts")).toBeVisible();
+    expect(within(dialog).getAllByRole("button", { name: "Connect" })).toHaveLength(5);
   });
 
-  /** The same Provider stays connectable for a Brand Profile that does not own it yet. */
-  it("offers Connect for a Provider the active Brand Profile does not own", () => {
-    workspace.brandProfiles = [alphaProfile, betaProfile];
-    workspace.selectedBrandProfileId = betaProfile.id;
+  /** A Provider is unavailable only when every Brand Profile already owns one. */
+  it("disables Connect when every Brand Profile owns the Provider", () => {
+    workspace.brandProfiles = [alphaProfile];
+    workspace.selectedBrandProfileId = alphaProfile.id;
     queryResults.platforms.data = [connectedAccount];
+    workspace.integrations = [
+      {
+        brandProfileId: alphaProfile.id,
+        disabled: false,
+        id: connectedAccount.id,
+        name: "Alpha TikTok",
+        platformUserId: connectedAccount.platform_user_id,
+        providerIdentifier: "tiktok",
+        refreshNeeded: false,
+        type: "tiktok",
+      },
+    ];
     renderChannels();
 
     fireEvent.click(screen.getByRole("button", { name: "Add account" }));
     const dialog = screen.getByRole("dialog", { name: "Connect social account" });
 
-    expect(within(dialog).queryByText("Alpha TikTok")).not.toBeInTheDocument();
-    expect(within(dialog).getAllByRole("button", { name: "Connect" })).toHaveLength(5);
+    expect(
+      within(dialog).getByRole("button", { name: "No eligible Brand Profile" }),
+    ).toBeDisabled();
+    expect(within(dialog).getAllByRole("button", { name: "Connect" })).toHaveLength(4);
   });
 
   /**

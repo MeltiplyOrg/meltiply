@@ -179,13 +179,13 @@ fixtures:
   oauth_selection: &oauth_selection
     id: select_session_alpha_1234567890
     platform: facebook
-    brand_profile_id: 00000000-0000-4000-8000-000000000111
     expires_at: 2026-01-01T00:10:00Z
     accounts:
       - *oauth_selection_account_primary
       - *oauth_selection_account_secondary
   oauth_selection_confirm_request: &oauth_selection_confirm_request
     account_id: page_1001
+    brand_profile_id: 00000000-0000-4000-8000-000000000111
   tiktok_requirements: &tiktok_requirements
     platform: tiktok
     creator:

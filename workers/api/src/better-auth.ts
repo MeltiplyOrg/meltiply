@@ -1,5 +1,5 @@
 import { createBetterAuth, type BetterAuthInstance } from "@meltiply/auth";
-import type { ApiWorkerEnv } from "./env";
+import { requiresEmailVerification, type ApiWorkerEnv } from "./env";
 import { sha256Hex } from "./crypto";
 import { allowedOriginsFor } from "./verifier-cache";
 import { createCloudflareMailSender, mailSenderConfiguration } from "./mail";
@@ -72,7 +72,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     env.BETTER_AUTH_URL?.trim() ||
     (env.PUBLIC_API_URL?.trim() ? env.PUBLIC_API_URL.trim() : undefined);
   const origins = env.ALLOWED_ORIGINS?.trim() || "";
-  const requireEmailVerification = !isLocalOrTest;
+  const requireEmailVerification = requiresEmailVerification(env);
   const senderAddress = mailSenderConfiguration(env);
   const mailUsable =
     senderAddress !== undefined && env.MAIL !== undefined && typeof env.MAIL.send === "function";

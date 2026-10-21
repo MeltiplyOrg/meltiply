@@ -45,6 +45,8 @@ export interface ApiWorkerEnv {
   MAIL?: SendEmail;
   MAIL_FROM_ADDRESS?: string;
   MAIL_FROM_NAME?: string;
+  /** `"false"` allows the owner to sign in before email verification; omitted keeps the deployed default. */
+  REQUIRE_EMAIL_VERIFICATION?: string;
   INSTAGRAM_CLIENT_ID?: string;
   INSTAGRAM_CLIENT_SECRET?: string;
   INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED?: string;
@@ -115,6 +117,21 @@ const stagingAutomationBindings: (keyof ApiWorkerEnv)[] = ["AUTOMATION"];
 
 const stagingAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET", "AUTH_SETUP_SECRET"];
 
+/**
+ * Reports whether a deployed session must prove email ownership.
+ *
+ * Local and test environments never enforce verification. Deployments enforce
+ * it unless the host explicitly sets `REQUIRE_EMAIL_VERIFICATION=false`, which
+ * self-hosting uses when no SMTP transport is configured.
+ *
+ * @param env - Worker environment bindings.
+ * @returns True when email verification gates sign-in and owner authorization.
+ */
+export function requiresEmailVerification(env: ApiWorkerEnv): boolean {
+  if (env.REQUIRE_EMAIL_VERIFICATION?.trim() === "false") return false;
+  return env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test";
+}
+
 // Check mail capability and normalized sender configuration, not mere presence.
 const stagingMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
 
@@ -152,12 +169,13 @@ function objectStorageStatuses(env: ApiWorkerEnv): BindingStatus[] {
  * @returns Array of `BindingStatus` entries with name and "ready" | "unavailable" status.
  */
 export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
+  const requiresMail = requiresEmailVerification(env);
   const bindings =
     env.ENVIRONMENT === "staging" || env.ENVIRONMENT === "preview"
       ? [
           ...requiredBindings,
           ...stagingAuthBindings,
-          ...stagingMailBindings,
+          ...(requiresMail ? stagingMailBindings : []),
           ...stagingAutomationBindings,
         ]
       : requiredBindings;
@@ -197,11 +215,13 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
  */
 export function validateProductionBindings(env: ApiWorkerEnv): void {
   if (env.ENVIRONMENT !== "staging") return;
-  if (typeof env.MAIL?.send !== "function") {
-    throw new Error("MAIL must be an Email Sending binding exposing a callable send method");
-  }
-  if (!mailSenderConfiguration(env)) {
-    throw new Error("MAIL_FROM_ADDRESS/MAIL_FROM_NAME must configure a valid sender");
+  if (requiresEmailVerification(env)) {
+    if (typeof env.MAIL?.send !== "function") {
+      throw new Error("MAIL must be an Email Sending binding exposing a callable send method");
+    }
+    if (!mailSenderConfiguration(env)) {
+      throw new Error("MAIL_FROM_ADDRESS/MAIL_FROM_NAME must configure a valid sender");
+    }
   }
   const missing = bindingStatuses(env)
     .filter((binding) => binding.status === "unavailable")

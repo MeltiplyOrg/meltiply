@@ -569,14 +569,12 @@ export function useDisconnectPlatform(scope: SessionScope) {
  * is owned by that Brand Profile.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @returns Mutation hook accepting `{ platform, brandProfileId }`.
+ * @returns Mutation hook accepting `{ platform }`.
  */
 export function useStartPlatformOAuth(scope: SessionScope) {
   return useMutation({
-    mutationFn: (variables: { platform: Platform; brandProfileId: string }) =>
-      runApiQuery(scope, (api) =>
-        api.startPlatformOAuth(variables.platform, variables.brandProfileId),
-      ),
+    mutationFn: (variables: { platform: Platform }) =>
+      runApiQuery(scope, (api) => api.startPlatformOAuth(variables.platform)),
   });
 }
 

@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useRef } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useNavigate } from "react-router";
 import { PLATFORM_IDS } from "@meltiply/domain";
 import { useWorkspace } from "@/context/workspace.context";
 import { useSessionScope } from "@/hooks/use-session-scope";
@@ -9,12 +9,11 @@ import {
   useDisconnectPlatform,
   useStartPlatformOAuth,
 } from "@/lib/queries";
-import { useSearchParams } from "@/lib/navigation";
+import { usePathname, useSearchParams } from "@/lib/navigation";
 import { CONNECTION_TONES, oauthOutcomeMessage, platformDisplayName } from "@/lib/platforms";
 import { Trans, useI18n } from "@/lib/i18n";
 import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import {
-  brandProfileColorClass,
   type BrandProfile,
   type ConnectionStatus,
   type Platform,
@@ -27,7 +26,6 @@ import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { BrandProfileDirectory } from "@/components/workspace/brand-profile-directory";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { Alert } from "@meltiply/ui/alert";
 import { toast } from "@meltiply/ui/toast";
@@ -53,13 +51,11 @@ import {
   BrandProfileSelect,
   brandProfileFilterLabel,
 } from "@/components/workspace/brand-profile-select";
-import { StatusPill } from "@meltiply/ui/status-pill";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { BrandProfileDialog } from "@/components/workspace/brand-profile-dialog";
 import { WorkspaceSurface } from "@/components/layout/workspace-surface";
 import { BulkSelectionBar } from "@/components/layout/bulk-selection-bar";
 import { ChannelTableView, type ChannelTableEntry } from "./channel-table-view";
-import { FacebookPageSelectionDialog } from "./facebook-page-selection-dialog";
 import {
   PlatformFilterSelect,
   platformFilterLabel,
@@ -172,8 +168,9 @@ function isContractPlatform(id: string): id is Platform {
  * Manages channel discovery, explicit OAuth account selection, profile
  * directories, and confirmed disconnects. Shared toolbar/dialog primitives
  * preserve filters across OAuth returns; table rows retain profile ownership.
- * `?tab=add|all` opens the connector. Facebook callback tickets open a chooser
- * without saving a Page. Profile edits never open the connector.
+ * `?tab=add|all` opens the connector. Post-OAuth account assignment runs on
+ * `/channels/connect`; the callback never persists a Channel before the user
+ * chooses its owning Brand Profile. Profile edits never open the connector.
  */
 export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   const {
@@ -194,51 +191,31 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
   useSmoothScrollContainer(accountsScrollRef);
   useSmoothScrollContainer(profilesScrollRef);
 
+  const pathname = usePathname();
   const navigate = useNavigate();
-  const location = useLocation();
   const searchParams = useSearchParams();
   const oauthOutcome = searchParams.get("oauth");
   const providerParam = searchParams.get("provider");
-  const selectionIdParam = searchParams.get("selection_id");
+  const oauthMessage = oauthOutcomeMessage(oauthOutcome, providerParam, language);
+  const oauthToastShown = useRef(false);
 
-  const isPageSelectionOpen =
-    oauthOutcome === "select_account" && providerParam === "facebook" && Boolean(selectionIdParam);
+  // OAuth returns through a full-page redirect, so success is announced as a
+  // toast and the one-shot outcome is removed from the URL. Keeping the query
+  // string would replay the toast on refresh and leave a stale inline banner.
+  useEffect(() => {
+    if (oauthOutcome !== "connected" || !oauthMessage || oauthToastShown.current) return;
+    oauthToastShown.current = true;
+    toast(oauthMessage, {
+      description: t("The Channel is ready to publish and schedule."),
+      variant: "success",
+    });
+    const next = new URLSearchParams(searchParams);
+    next.delete("oauth");
+    next.delete("provider");
+    const query = next.toString();
+    navigate(`${pathname}${query ? `?${query}` : ""}`, { replace: true });
+  }, [navigate, oauthMessage, oauthOutcome, pathname, searchParams, t]);
 
-  const oauthMessage =
-    oauthOutcome === "select_account"
-      ? null
-      : oauthOutcomeMessage(oauthOutcome, providerParam, language);
-
-  const removeOAuthSelectionParams = useCallback(() => {
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.delete("oauth");
-    nextParams.delete("provider");
-    nextParams.delete("selection_id");
-    const searchString = nextParams.toString();
-    const nextUrl = searchString ? `${location.pathname}?${searchString}` : location.pathname;
-    navigate(nextUrl, { replace: true });
-  }, [searchParams, location.pathname, navigate]);
-
-  /** Announces success with the saved Page's name only after the selection API confirms the chosen Page was stored. */
-  const handlePageSelectionSuccess = useCallback(
-    (pageName: string | null) => {
-      toast(t("Facebook connected successfully."), {
-        description: pageName ?? t("The selected Page is ready to publish to."),
-        variant: "success",
-      });
-    },
-    [t],
-  );
-
-  /** Clears the callback ticket after confirmed save or server-side cancellation. */
-  const handlePageSelectionOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open) {
-        removeOAuthSelectionParams();
-      }
-    },
-    [removeOAuthSelectionParams],
-  );
   const platformsQuery = usePlatforms(scope);
   const capabilitiesQuery = usePlatformCapabilities(scope);
   const disconnectMutation = useDisconnectPlatform(scope);
@@ -248,7 +225,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
 
   const [addAccountOpen, setAddAccountOpen] = useState(shouldOpenAdd);
   const [prevShouldOpenAdd, setPrevShouldOpenAdd] = useState(shouldOpenAdd);
-  const [selectedConnectProfileId, setSelectedConnectProfileId] = useState<string>("");
 
   if (shouldOpenAdd !== prevShouldOpenAdd) {
     setPrevShouldOpenAdd(shouldOpenAdd);
@@ -257,15 +233,6 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
     }
   }
 
-  const activeConnectProfileId = useMemo(() => {
-    if (selectedConnectProfileId && brandProfiles.some((p) => p.id === selectedConnectProfileId)) {
-      return selectedConnectProfileId;
-    }
-    if (selectedBrandProfileId && brandProfiles.some((p) => p.id === selectedBrandProfileId)) {
-      return selectedBrandProfileId;
-    }
-    return brandProfiles[0]?.id ?? "";
-  }, [brandProfiles, selectedBrandProfileId, selectedConnectProfileId]);
   const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<Error | null>(null);
   const [disconnectTarget, setDisconnectTarget] = useState<PlatformAccount | null>(null);
@@ -510,25 +477,19 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
    * Initiates the OAuth 2.0 authorization redirect flow for a selected social provider.
    *
    * Runs the real `useStartPlatformOAuth` mutation and redirects the browser to
-   * the contract `authorization_url`. Non-contract directory slugs are ignored
-   * (their connect action is disabled); failures surface through the inline
-   * `Alert` rather than redirecting. Every connection is owned by a Brand
-   * Profile: new connections use the active selection, while re-authentication
-   * reuses the account's existing `brand_profile_id` so the aggregate view can
-   * still refresh a broken channel.
+   * the contract `authorization_url`. No Brand Profile is sent: the callback
+   * stages the authorized account(s) and the assignment route selects the
+   * owning profile immediately before persistence. Non-contract directory
+   * slugs are ignored; failures surface through the inline `Alert`.
    *
    * @param platformId - Unique slug identifier of the target provider (e.g. 'tiktok').
-   * @param brandProfileId - Brand Profile UUID that will own the connection.
    */
-  const handleConnect = async (platformId: string, brandProfileId: string | null) => {
-    if (!isContractPlatform(platformId) || brandProfileId === null) return;
+  const handleConnect = async (platformId: string) => {
+    if (!isContractPlatform(platformId)) return;
     setConnectingPlatform(platformId);
     setConnectError(null);
     try {
-      const result = await oauthMutation.mutateAsync({
-        platform: platformId,
-        brandProfileId,
-      });
+      const result = await oauthMutation.mutateAsync({ platform: platformId });
       const authorizationUrl = new URL(result.authorization_url);
       if (authorizationUrl.protocol !== "https:") {
         throw new Error("The provider returned an unsafe authorization URL.");
@@ -691,12 +652,8 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         </>
       }
     >
-      {oauthMessage && (
-        <Alert
-          variant={oauthOutcome === "connected" ? "info" : "destructive"}
-          role={oauthOutcome === "connected" ? "status" : "alert"}
-          aria-live={oauthOutcome === "connected" ? "polite" : "assertive"}
-        >
+      {oauthMessage && oauthOutcome !== "connected" && (
+        <Alert variant="destructive" role="alert" aria-live="assertive">
           {oauthMessage}
         </Alert>
       )}
@@ -881,9 +838,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                 onToggleVisibleSelection={handleToggleVisibleSelection}
                 onToggleSelection={handleToggleSelection}
                 selectionDisabled={bulkRunning}
-                onReconnect={(account) =>
-                  void handleConnect(account.platform, account.brand_profile_id)
-                }
+                onReconnect={(account) => void handleConnect(account.platform)}
                 onDisconnect={setDisconnectTarget}
               />
             )}
@@ -916,22 +871,13 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         profile={editingProfile}
         onSuccess={(profile) => {
           // `editingProfile` is still latched here (the dialog fires onSuccess before
-          // onClose), so only a fresh creation selects the new profile and chains
-          // into the connect-account flow; saving an edit leaves the active
-          // workspace filter selection untouched.
+          // onClose), so only a fresh creation selects the new profile and opens
+          // the connector; saving an edit leaves the workspace filter untouched.
           if (editingProfile === null) {
             setSelectedBrandProfileId(profile.id);
-            setSelectedConnectProfileId(profile.id);
             setAddAccountOpen(true);
           }
         }}
-      />
-
-      <FacebookPageSelectionDialog
-        open={isPageSelectionOpen}
-        onOpenChange={handlePageSelectionOpenChange}
-        selectionId={selectionIdParam}
-        onSuccess={handlePageSelectionSuccess}
       />
 
       {/* Connect social account dialog */}
@@ -941,46 +887,14 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
             <CenterDialogTitle>{t("Connect social account")}</CenterDialogTitle>
             <CenterDialogDescription>
               {t(
-                "Connect your social accounts to start publishing and scheduling across platforms. Each Brand Profile connects one Channel per Provider.",
+                "Choose a provider to authorize. After authorization, choose which Brand Profile owns the connected Channel.",
               )}
             </CenterDialogDescription>
           </CenterDialogHeader>
 
           <div className="min-w-0 space-y-4 py-2">
-            {/* 1. Brand Profile selection */}
-            <div className="space-y-1.5">
-              <label htmlFor="connect-brand-profile" className="text-xs font-semibold text-ink">
-                {t("Brand Profile")}
-              </label>
-              <Select value={activeConnectProfileId} onValueChange={setSelectedConnectProfileId}>
-                <SelectTrigger
-                  id="connect-brand-profile"
-                  aria-label={t("Brand Profile")}
-                  className="h-10 w-full rounded-control border-line bg-surface text-[13px] shadow-inset-field"
-                >
-                  <SelectValue placeholder={t("Select a Brand Profile")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {brandProfiles.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "size-2.5 rounded-full border border-line shrink-0",
-                            brandProfileColorClass(p.color),
-                          )}
-                          aria-hidden="true"
-                        />
-                        <span className="font-medium text-ink">{p.name}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* 2. Social Channels to Connect */}
-            <div className="space-y-3 pt-2 border-t border-line/60">
+            {/* Social Channels to Connect */}
+            <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-semibold text-ink">{t("Social Channels")}</label>
               </div>
@@ -1008,12 +922,16 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                     const capability = isContractPlatform(platform.id)
                       ? capabilityByPlatform.get(platform.id)
                       : undefined;
-                    const platformAccounts = accounts.filter(
+                    const platformChannels = integrations.filter(
                       (account) =>
-                        account.platform.toLowerCase() === platform.id.toLowerCase() &&
-                        account.brand_profile_id === activeConnectProfileId,
+                        account.providerIdentifier.toLowerCase() === platform.id.toLowerCase(),
                     );
-                    const isAlreadyConnected = platformAccounts.length > 0;
+                    const eligibleProfileCount = brandProfiles.filter(
+                      (profile) =>
+                        !platformChannels.some((account) => account.brandProfileId === profile.id),
+                    ).length;
+                    const noEligibleProfile =
+                      brandProfiles.length === 0 || eligibleProfileCount === 0;
                     const connectUnavailable = capability?.connect_available === false;
                     const isConnecting = connectingPlatform === platform.id;
 
@@ -1040,54 +958,31 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
                         </div>
 
                         <div className="flex min-w-0 flex-col items-start gap-2 sm:max-w-[45%] sm:shrink-0 sm:items-end">
-                          {platformAccounts.map((account) => (
-                            <div
-                              key={account.id}
-                              className="flex max-w-full flex-wrap items-center gap-1.5 text-xs"
-                            >
-                              {account.connection_status === "connected" ? (
-                                <Check
-                                  className="size-3.5 shrink-0 text-green"
-                                  aria-hidden="true"
-                                />
-                              ) : (
-                                <StatusPill
-                                  tone={CONNECTION_TONES[account.connection_status]}
-                                  className="shrink-0"
-                                >
-                                  {tStatus(account.connection_status)}
-                                </StatusPill>
-                              )}
-                              <span
-                                className="truncate font-medium text-ink"
-                                title={account.display_name ?? account.platform_user_id}
-                              >
-                                {account.display_name ?? account.platform_user_id}
+                          {platformChannels.length > 0 && (
+                            <div className="flex max-w-full items-center gap-1.5 text-xs text-ink-2">
+                              <Check className="size-3.5 shrink-0 text-green" aria-hidden="true" />
+                              <span>
+                                {t("{count} connected accounts", {
+                                  count: platformChannels.length,
+                                })}
                               </span>
-                              {account.connection_status === "connected" && (
-                                <span className="sr-only">{tStatus("connected")}</span>
-                              )}
                             </div>
-                          ))}
-                          {!isAlreadyConnected && (
-                            <Button
-                              size="sm"
-                              variant="default"
-                              disabled={
-                                connectUnavailable || isConnecting || !activeConnectProfileId
-                              }
-                              onClick={() =>
-                                void handleConnect(platform.id, activeConnectProfileId)
-                              }
-                              className="rounded-control text-xs font-semibold h-8 px-3.5 bg-primary text-primary-foreground shadow-btn hover:bg-primary/90"
-                            >
-                              {connectUnavailable
-                                ? t("Unavailable")
+                          )}
+                          <Button
+                            size="sm"
+                            variant="default"
+                            disabled={connectUnavailable || isConnecting || noEligibleProfile}
+                            onClick={() => void handleConnect(platform.id)}
+                            className="rounded-control text-xs font-semibold h-8 px-3.5 bg-primary text-primary-foreground shadow-btn hover:bg-primary/90"
+                          >
+                            {connectUnavailable
+                              ? t("Unavailable")
+                              : noEligibleProfile
+                                ? t("No eligible Brand Profile")
                                 : isConnecting
                                   ? t("Redirecting…")
                                   : t("Connect")}
-                            </Button>
-                          )}
+                          </Button>
                         </div>
                       </div>
                     );

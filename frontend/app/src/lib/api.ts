@@ -60,15 +60,17 @@ let cachedClient: { baseUrl: string; value: MeltiplyClient } | undefined;
  * Fetch implementation bound to the generated OpenAPI client.
  * Merges caller-supplied headers (whether carried on a `Request` input or via
  * `init`), stamps `Authorization: Bearer <jwt>` from the in-memory holder when
- * one is held, and forces `credentials: "omit"` so the Better Auth session
- * cookie never reaches `/api/v1` — the bearer JWT is the only credential the
- * public API accepts. Callers cannot upgrade credential mode.
+ * one is held, and uses `credentials: "same-origin"` so Cloudflare Access on
+ * protected dev tunnels can see the visitor's session cookie. The Better Auth
+ * session cookie is never allowed to reach the API Worker: the frontend Worker
+ * strips it from `/api/v1/*` proxy requests before forwarding them. Callers
+ * cannot override the credential mode.
  */
 const runtimeFetch: typeof globalThis.fetch = (input, init) => {
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
   applyAuthJwt(headers);
-  return globalThis.fetch(input, { ...init, credentials: "omit", headers });
+  return globalThis.fetch(input, { ...init, credentials: "same-origin", headers });
 };
 
 export type ApiPath = string;
@@ -870,27 +872,25 @@ export function listPlatformCapabilities(workspaceId: string | null, options?: A
 /**
  * Initiates the OAuth authorization handshake for a social media provider.
  *
- * The `brandProfileId` is pinned into durable OAuth state at initiation so the
- * callback can verify the profile still belongs to the active workspace; the
- * new channel is owned by this Brand Profile.
+ * No Brand Profile is chosen here: the callback stages the authorized
+ * account(s), and the assignment view selects the owning profile immediately
+ * before persistence.
  *
  * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
  * @param platform Target social platform to connect.
- * @param brandProfileId Active Brand Profile UUID that will own the connected channel.
  * @param options Request options including optional abort signal.
  * @returns Effect resolving to the response containing the external provider OAuth authorization URL.
  */
 export function startPlatformOAuth(
   workspaceId: string | null,
   platform: Platform,
-  brandProfileId: string,
   options?: ApiRequestOptions,
 ) {
   return unwrap<OAuthStartResponse>(
     (signal) =>
       client().GET("/platforms/{platform}/connect", {
         headers: { ...workspaceHeaders(workspaceId), Accept: "application/json" },
-        params: { path: { platform }, query: { brand_profile_id: brandProfileId } },
+        params: { path: { platform } },
         signal,
       }),
     options?.signal,

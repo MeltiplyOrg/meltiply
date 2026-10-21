@@ -38,15 +38,18 @@ No Cloudflare account or remote Workers are needed by this deployment.
 ## First start from source
 
 Requirements: Docker Engine with a recent Docker Compose v2 supporting inline
-`configs.content`, Node 24 for the configuration generator, and a delivering SMTP
-server. Images support Linux amd64 and ARM64, with native CI builds and complete
-Compose smoke checks on both architectures; no emulation is required.
+`configs.content`, and Node 24 for the configuration generator. Images support
+Linux amd64 and ARM64, with native CI builds and complete Compose smoke checks on
+both architectures; no emulation is required. SMTP is optional; without it the
+installation disables email verification.
 
 From the repository root:
 
 ```bash
 node scripts/selfhost/configure.mjs
-# Edit .env.selfhost: set MAIL_FROM_ADDRESS and SELFHOST_SMTP_URL.
+# Edit .env.selfhost if you want email delivery and verification:
+#   MAIL_FROM_ADDRESS=no-reply@example.com
+#   SELFHOST_SMTP_URL=smtps://user:pass@mail.example.com:465
 docker compose --env-file .env.selfhost -f compose.selfhost.yml build
 docker compose --env-file .env.selfhost -f compose.selfhost.yml up -d --wait
 ```
@@ -57,16 +60,23 @@ Only 64-bit ARM is supported; 32-bit ARM is not a release target.
 
 The generator creates private random credentials in `.env.selfhost` with mode
 0600 and refuses to overwrite an existing file. Keep it outside version control
-and backups accessible only to administrators. Use an authenticated `smtps://`
-URL or a properly configured STARTTLS SMTP server; URL-encode credential
-characters. Startup verifies the SMTP connection. The `verification` profile
-contains a capture-only Mailpit service for CI, **not email delivery**.
+and backups accessible only to administrators.
+
+Mail is optional. When `MAIL_FROM_ADDRESS` and `SELFHOST_SMTP_URL` are both set,
+startup verifies the SMTP connection and email verification remains required. Use
+an authenticated `smtps://` URL or a properly configured STARTTLS SMTP server;
+URL-encode credential characters. When both are empty, verification is disabled
+and owner setup signs in immediately. Set `SELFHOST_REQUIRE_EMAIL_VERIFICATION=true`
+to require verification explicitly; doing so requires working SMTP settings.
+The `verification` profile contains a capture-only Mailpit service for CI,
+**not email delivery**.
 
 Open <http://localhost:8080/sign-in>. On an empty installation, enter the private
 `AUTH_SETUP_SECRET` from `.env.selfhost`, your name, email, and a unique password
-to create the installation's only owner. Follow the emailed verification link,
-then sign in. Once the owner exists, registration closes, including direct API
-requests. Development fixtures and passwords are not installed. PostgreSQL is
+to create the installation's only owner. With SMTP configured, follow the emailed
+verification link, then sign in; without SMTP, setup completes without a
+verification step. Once the owner exists, registration closes, including direct
+API requests. Development fixtures and passwords are not installed. PostgreSQL is
 not published to the host. Only loopback application ports are published by default.
 
 Signed storage URLs support a path prefix of at most 128 characters after
@@ -76,8 +86,8 @@ remain invalid.
 
 Set optional Provider/billing variables in `.env.selfhost` using the names in
 [`.env.example`](../.env.example). Self-hosting does not bypass Provider live-mode
-checks or account permissions. Do not change `ENVIRONMENT` to disable verification;
-the supervisor deliberately retains deployed security behavior.
+checks or account permissions. Do not change `ENVIRONMENT` to control verification;
+use `SELFHOST_REQUIRE_EMAIL_VERIFICATION` instead.
 
 ## Object storage
 

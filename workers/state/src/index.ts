@@ -18,8 +18,7 @@ import type {
 } from "@meltiply/contracts";
 
 /**
- * Tagged error for invalid OAuth state input: empty state, non-future
- * expiry, or missing/blank brand profile.
+ * Tagged error for invalid OAuth state input: empty state or non-future expiry.
  */
 export class InvalidOAuthStateError extends Data.TaggedError("InvalidOAuthStateError")<{
   readonly message: string;
@@ -39,13 +38,12 @@ export class OAuthStateStorageError extends Data.TaggedError("OAuthStateStorageE
  * Validates OAuth state creation input as an Effect program.
  *
  * Pure validation core shared by the Durable Object method and its tests:
- * rejects empty state strings, non-future expiries, and missing or blank
- * `brand_profile_id` values before any storage write, so invalid handoffs
- * fail before arming alarms. The brand profile is required because every
- * connected platform account must belong to one.
+ * rejects empty state strings and non-future expiries before any storage
+ * write, so invalid handoffs fail before arming alarms. Brand Profile
+ * assignment happens later, when the pending account is confirmed.
  *
  * @param state - Unique opaque state string from authorization initiation.
- * @param record - Context containing brand profile, org/user/provider/redirect/expiry.
+ * @param record - Context containing org/user/provider/redirect/expiry.
  * @returns Effect resolving to void on valid input, else InvalidOAuthStateError.
  */
 export function validateOAuthStateCreateEffect(
@@ -59,26 +57,17 @@ export function validateOAuthStateCreateEffect(
       }),
     );
   }
-  // typeof guard: RPC-deserialized records may carry non-string values that
-  // would throw on .trim(); treat them as missing.
-  if (typeof record.brand_profile_id !== "string" || record.brand_profile_id.trim().length === 0) {
-    return Effect.fail(
-      new InvalidOAuthStateError({
-        message: "A brand profile is required",
-      }),
-    );
-  }
   return Effect.void;
 }
 
 /**
- * Validates OAuth selection initialization input as an Effect program.
+ * Validates pending OAuth assignment initialization input as an Effect program.
  *
  * Ensures selection ID meets length constraints (16-256), expiry is in the future,
- * and tenant/brand profile context is present.
+ * and tenant context is present. The Brand Profile is chosen at confirmation.
  *
  * @param selectionId - Opaque selection ID string.
- * @param init - Pending selection context without candidates.
+ * @param init - Pending assignment context without candidates.
  * @returns Effect resolving to void on valid input, else InvalidOAuthStateError.
  */
 export function validateOAuthSelectionCreateEffect(
@@ -94,13 +83,6 @@ export function validateOAuthSelectionCreateEffect(
     return Effect.fail(
       new InvalidOAuthStateError({
         message: "Selection ID and a future expiry are required",
-      }),
-    );
-  }
-  if (typeof init.brand_profile_id !== "string" || init.brand_profile_id.trim().length === 0) {
-    return Effect.fail(
-      new InvalidOAuthStateError({
-        message: "A brand profile is required",
       }),
     );
   }
@@ -256,8 +238,8 @@ export class OAuthStateCoordinator
    * advances the DO alarm to match earliest expiry.
    *
    * @param state - Unique opaque state string generated during authorization initiation.
-   * @param record - Context containing brand_profile_id, org_id, user_id, provider, redirect path, expiry ms, and optional PKCE verifier.
-   * @throws {TypeError} When state is empty, record.expires_at is not in the future, or brand_profile_id is missing/blank.
+   * @param record - Context containing org_id, user_id, provider, redirect path, expiry ms, and optional PKCE verifier.
+   * @throws {TypeError} When state is empty or record.expires_at is not in the future.
    */
   async create(state: string, record: OAuthStateRecord): Promise<void> {
     const storage = this.ctx.storage;
@@ -317,7 +299,6 @@ export class OAuthStateCoordinator
       yield* validateOAuthSelectionCreateEffect(selectionId, init);
       const record: OAuthSelectionRecord = {
         account_ids: [],
-        brand_profile_id: init.brand_profile_id,
         expires_at: init.expires_at,
         id: selectionId,
         organization_id: init.organization_id,
@@ -486,7 +467,6 @@ export class OAuthStateCoordinator
       }
       return {
         accounts,
-        brand_profile_id: record.brand_profile_id,
         expires_at: new Date(record.expires_at).toISOString(),
         id: record.id,
         platform: record.platform as OAuthSelectionPublic["platform"],
@@ -597,7 +577,6 @@ export class OAuthStateCoordinator
         storage.put(key, updated),
       );
       return {
-        brandProfileId: record.brand_profile_id,
         claimToken,
         encryptedConnection: candidateEntry.encrypted_connection,
         organizationId: record.organization_id,

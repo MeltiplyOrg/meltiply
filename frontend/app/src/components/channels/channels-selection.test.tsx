@@ -54,6 +54,11 @@ const queryResults = vi.hoisted(() => ({
 
 const toastMock = vi.hoisted(() => vi.fn());
 
+const navigation = vi.hoisted(() => ({
+  pathname: "/channels",
+  searchParams: new URLSearchParams(),
+}));
+
 vi.mock("@/context/workspace.context", () => ({
   useWorkspace: () => {
     const [, setTick] = useState(0);
@@ -83,7 +88,8 @@ vi.mock("@/lib/i18n", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => navigation.pathname,
+  useSearchParams: () => navigation.searchParams,
 }));
 vi.mock("@/lib/theme", () => ({
   useTheme: () => ({
@@ -198,6 +204,7 @@ function resetScope() {
   queryMutations.disconnect.mutateAsync.mockReset();
   queryMutations.disconnect.isPending = false;
   queryResults.platforms.data = [];
+  navigation.searchParams = new URLSearchParams();
   toastMock.mockClear();
 }
 
@@ -244,6 +251,26 @@ afterEach(() => {
 });
 beforeEach(() => {
   resetScope();
+});
+
+describe("Channels OAuth outcome", () => {
+  /**
+   * OAuth success arrives through a redirect. It must surface as a one-shot
+   * toast, not a persistent banner, and must not replay on subsequent renders.
+   */
+  it("announces a connected Channel as a one-shot toast", async () => {
+    navigation.searchParams = new URLSearchParams("oauth=connected&provider=facebook");
+    renderChannels();
+
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith("Facebook connected successfully.", {
+        description: "The Channel is ready to publish and schedule.",
+        variant: "success",
+      }),
+    );
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Facebook connected successfully.")).not.toBeInTheDocument();
+  });
 });
 
 describe("Channels selection", () => {

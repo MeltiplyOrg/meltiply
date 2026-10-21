@@ -306,6 +306,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         latency_ms: elapsedMilliseconds(startedAt),
         method: c.req.method,
         outcome: c.res.status,
+        ...(observabilityRoute(c) === "/unmatched" ? { path: c.req.path } : {}),
         retry_class: c.res.status === 429 || c.res.status >= 500 ? "client_retry" : "none",
       },
     );

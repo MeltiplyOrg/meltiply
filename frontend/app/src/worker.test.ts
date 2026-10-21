@@ -158,6 +158,55 @@ describe("frontend Worker API proxy", () => {
     const forwarded = api.fetch.mock.calls[0]?.[0] as Request;
     expect(forwarded.url).toBe("https://frontend.test/api/v1/users/me");
     expect(forwarded.headers.get("Authorization")).toBe("Bearer test.jwt.token");
+    expect(forwarded.redirect).toBe("manual");
+  });
+
+  it("strips Better Auth session cookies from /api/v1 proxy requests", async () => {
+    const api = {
+      fetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
+    };
+    const request = new Request("https://frontend.test/api/v1/users/me", {
+      headers: {
+        Cookie:
+          "better-auth.session_token=secret; __Secure-better-auth.session_token=secure; cf_clearance=access; better-auth.session_token_extra=kept",
+      },
+    });
+
+    await worker.fetch(request, { ...environment, API: api });
+
+    const forwarded = api.fetch.mock.calls[0]?.[0] as Request;
+    expect(forwarded.headers.get("Cookie")).toBe(
+      "cf_clearance=access; better-auth.session_token_extra=kept",
+    );
+  });
+
+  it("drops the Cookie header when only Better Auth cookies are present on /api/v1", async () => {
+    const api = {
+      fetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
+    };
+    const request = new Request("https://frontend.test/api/v1/users/me", {
+      headers: { Cookie: "better-auth.session_token=secret" },
+    });
+
+    await worker.fetch(request, { ...environment, API: api });
+
+    const forwarded = api.fetch.mock.calls[0]?.[0] as Request;
+    expect(forwarded.headers.get("Cookie")).toBeNull();
+  });
+
+  it("forwards cookies unchanged for /api/auth requests", async () => {
+    const upstream = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", upstream);
+
+    await worker.fetch(
+      new Request("https://frontend.test/api/auth/get-session", {
+        headers: { Cookie: "better-auth.session_token=secret" },
+      }),
+      { ...environment, API_ORIGIN: "http://127.0.0.1:8787" },
+    );
+
+    const forwarded = upstream.mock.calls[0]?.[0] as Request;
+    expect(forwarded.headers.get("Cookie")).toBe("better-auth.session_token=secret");
   });
 
   it("rewrites /api/* onto API_ORIGIN when no service binding exists", async () => {

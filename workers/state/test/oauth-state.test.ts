@@ -7,14 +7,12 @@ import type {
   OAuthSelectionCandidate,
   OAuthSelectionInit,
   OAuthSelectionRecord,
-  OAuthStateRecord,
 } from "@meltiply/contracts";
 import type { OAuthStateCoordinator } from "../src/index";
 describe("OAuthStateCoordinator", () => {
   it("atomically consumes state once", async () => {
     const coordinator = env.OAUTH_STATE.getByName("org-alpha");
     const record = {
-      brand_profile_id: "brand-alpha",
       expires_at: Date.now() + 60_000,
       organization_id: "org-alpha",
       provider: "tiktok",
@@ -30,7 +28,6 @@ describe("OAuthStateCoordinator", () => {
   it("admits only one concurrent consume", async () => {
     const coordinator = env.OAUTH_STATE.getByName("org-concurrent");
     const record = {
-      brand_profile_id: "brand-concurrent",
       expires_at: Date.now() + 60_000,
       organization_id: "org-concurrent",
       provider: "threads",
@@ -46,10 +43,9 @@ describe("OAuthStateCoordinator", () => {
     expect(results.filter((value) => value === null)).toHaveLength(7);
   });
 
-  it("retains brand_profile_id through consume", async () => {
+  it("retains state through consume", async () => {
     const coordinator = env.OAUTH_STATE.getByName("org-brand");
     const record = {
-      brand_profile_id: "brand-retained",
       expires_at: Date.now() + 60_000,
       organization_id: "org-brand",
       provider: "tiktok",
@@ -59,7 +55,6 @@ describe("OAuthStateCoordinator", () => {
     await coordinator.create("state-brand", record);
 
     const consumed = await coordinator.consume("state-brand");
-    expect(consumed?.brand_profile_id).toBe("brand-retained");
     expect(consumed).toEqual(record);
   });
 
@@ -71,7 +66,6 @@ describe("OAuthStateCoordinator", () => {
     await expect(
       runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
         instance.create("state-expired", {
-          brand_profile_id: "brand-expired",
           expires_at: Date.now() - 1,
           organization_id: "org-expired",
           provider: "threads",
@@ -89,7 +83,6 @@ describe("OAuthStateCoordinator", () => {
     await expect(
       runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
         instance.create("", {
-          brand_profile_id: "brand-typeerror",
           expires_at: Date.now() + 60_000,
           organization_id: "org-typeerror",
           provider: "tiktok",
@@ -100,36 +93,10 @@ describe("OAuthStateCoordinator", () => {
     ).rejects.toThrow(TypeError);
   });
 
-  it("rejects a missing or blank brand_profile_id", async () => {
-    const coordinator = env.OAUTH_STATE.getByName("org-no-brand");
-    const base = {
-      expires_at: Date.now() + 60_000,
-      organization_id: "org-no-brand",
-      provider: "tiktok",
-      redirect_path: "/channels",
-      user_id: "user-no-brand",
-    };
-    // Missing field: cast past the type to prove the runtime guard rejects it.
-    await expect(
-      runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
-        instance.create("state-no-brand", base as OAuthStateRecord),
-      ),
-    ).rejects.toThrow("brand profile");
-    await expect(
-      runInDurableObject(coordinator, (instance: OAuthStateCoordinator) =>
-        instance.create("state-blank-brand", {
-          ...base,
-          brand_profile_id: "   ",
-        }),
-      ),
-    ).rejects.toThrow("brand profile");
-  });
-
   it("alarm deletes every expired record in one pass and reschedules", async () => {
     const coordinator = env.OAUTH_STATE.getByName("org-alarm");
     const liveExpiry = Date.now() + 60_000;
     const live = {
-      brand_profile_id: "brand-alarm",
       expires_at: liveExpiry,
       organization_id: "org-alarm",
       provider: "youtube",
@@ -165,7 +132,6 @@ describe("OAuthStateCoordinator", () => {
     const coordinator = env.OAUTH_STATE.getByName("org-select-pub");
     const selectionId = "org-select-pub.nonce1234567890abcdef";
     await coordinator.createSelection(selectionId, {
-      brand_profile_id: "00000000-0000-4000-8000-000000000001",
       expires_at: Date.now() + 600_000,
       id: selectionId,
       organization_id: "org-select-pub",
@@ -202,7 +168,6 @@ describe("OAuthStateCoordinator", () => {
     expect(publicDto).not.toBeNull();
     expect(publicDto?.id).toBe(selectionId);
     expect(publicDto?.platform).toBe("facebook");
-    expect(publicDto?.brand_profile_id).toBe("00000000-0000-4000-8000-000000000001");
     expect(publicDto?.accounts).toEqual([
       {
         avatar_url: "https://example.com/avatar1.jpg",
@@ -236,7 +201,6 @@ describe("OAuthStateCoordinator", () => {
     const coordinator = env.OAUTH_STATE.getByName("org-crash-invariant");
     const selectionId = "org-crash-invariant.nonce1234567890abcdef";
     await coordinator.createSelection(selectionId, {
-      brand_profile_id: "00000000-0000-4000-8000-000000000002",
       expires_at: Date.now() + 600_000,
       id: selectionId,
       organization_id: "org-crash-invariant",
@@ -387,7 +351,6 @@ describe("OAuthStateCoordinator", () => {
     const coordinator = env.OAUTH_STATE.getByName("org-stale-fence");
     const selectionId = "org-stale-fence.nonce1234567890abcdef";
     await coordinator.createSelection(selectionId, {
-      brand_profile_id: "00000000-0000-4000-8000-000000000005",
       expires_at: Date.now() + 600_000,
       id: selectionId,
       organization_id: "org-stale-fence",
@@ -464,7 +427,6 @@ describe("OAuthStateCoordinator", () => {
     const selectionId = "org-near-expiry.nonce1234567890abcdef";
     const expiry = Date.now() + 60_000;
     await coordinator.createSelection(selectionId, {
-      brand_profile_id: "00000000-0000-4000-8000-000000000006",
       expires_at: expiry,
       id: selectionId,
       organization_id: "org-near-expiry",
@@ -602,7 +564,6 @@ describe("OAuthStateCoordinator", () => {
     const coordinator = env.OAUTH_STATE.getByName("org-interrupted");
     const selectionId = "org-interrupted.nonce1234567890abcdef";
     await coordinator.createSelection(selectionId, {
-      brand_profile_id: "00000000-0000-4000-8000-000000000008",
       expires_at: Date.now() + 600_000,
       id: selectionId,
       organization_id: "org-interrupted",
@@ -658,7 +619,6 @@ describe("OAuthStateCoordinator", () => {
     const coordinator = env.OAUTH_STATE.getByName("org-large-scale");
     const selectionId = "org-large-scale.nonce1234567890abcdef";
     await coordinator.createSelection(selectionId, {
-      brand_profile_id: "00000000-0000-4000-8000-000000000007",
       expires_at: Date.now() + 600_000,
       id: selectionId,
       organization_id: "org-large-scale",
@@ -757,7 +717,6 @@ describe("OAuthStateCoordinator", () => {
     // Cancellation has the same batched-delete bound.
     const cancelId = "org-large-scale.cancelled1234567890";
     await coordinator.createSelection(cancelId, {
-      brand_profile_id: "00000000-0000-4000-8000-000000000007",
       expires_at: Date.now() + 600_000,
       id: cancelId,
       organization_id: "org-large-scale",
@@ -798,7 +757,6 @@ describe("OAuthStateCoordinator", () => {
     const coordinator = env.OAUTH_STATE.getByName("org-cancel");
     const selectionId = "org-cancel.nonce1234567890abcdef";
     await coordinator.createSelection(selectionId, {
-      brand_profile_id: "00000000-0000-4000-8000-000000000003",
       expires_at: Date.now() + 600_000,
       id: selectionId,
       organization_id: "org-cancel",
@@ -859,7 +817,6 @@ describe("OAuthStateCoordinator", () => {
       async (instance: OAuthStateCoordinator, ctx: DurableObjectState) => {
         const storage = ctx.storage;
         await storage.put("oauth:state-expired", {
-          brand_profile_id: "b1",
           expires_at: now - 100,
           organization_id: "org-combined-alarm",
           provider: "facebook",
@@ -868,7 +825,6 @@ describe("OAuthStateCoordinator", () => {
         });
         await storage.put("selection:sel-expired", {
           account_ids: [],
-          brand_profile_id: "b1",
           expires_at: now - 50,
           id: "sel-expired",
           organization_id: "org-combined-alarm",
@@ -879,7 +835,6 @@ describe("OAuthStateCoordinator", () => {
         });
         await storage.put("selection:sel-live", {
           account_ids: [],
-          brand_profile_id: "b1",
           expires_at: now + 50_000,
           id: "sel-live",
           organization_id: "org-combined-alarm",
@@ -903,7 +858,6 @@ describe("OAuthStateCoordinator", () => {
 describe("OAuthState Effect programs", () => {
   it("validates creation input without touching storage", async () => {
     const record = {
-      brand_profile_id: "brand-effect",
       expires_at: Date.now() + 60_000,
       organization_id: "org-effect",
       provider: "tiktok",
@@ -924,19 +878,10 @@ describe("OAuthState Effect programs", () => {
         }),
       ),
     ).rejects.toMatchObject({ _tag: "InvalidOAuthStateError" });
-    await expect(
-      Effect.runPromise(
-        validateOAuthStateCreateEffect("state-no-brand", {
-          ...record,
-          brand_profile_id: "  ",
-        }),
-      ),
-    ).rejects.toMatchObject({ _tag: "InvalidOAuthStateError" });
   });
 
   it("validates selection creation input without touching storage", async () => {
     const validInit: OAuthSelectionInit = {
-      brand_profile_id: "brand-1",
       expires_at: Date.now() + 60_000,
       id: "routing.nonce1234567890",
       organization_id: "org-1",

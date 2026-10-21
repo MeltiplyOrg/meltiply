@@ -8,7 +8,6 @@ export type Platform = components["schemas"]["Platform"];
  * Context persisted for an initial OAuth authorization handoff.
  */
 export interface OAuthStateRecord {
-  brand_profile_id: string;
   expires_at: number;
   organization_id: string;
   pkce_verifier?: string;
@@ -27,10 +26,9 @@ export interface OAuthSelectionCandidate {
 }
 
 /**
- * Initial metadata supplied when initiating a multi-account OAuth selection session.
+ * Initial metadata supplied when initiating a pending OAuth assignment session.
  */
 export interface OAuthSelectionInit {
-  readonly brand_profile_id: string;
   readonly expires_at: number;
   readonly id: string;
   readonly organization_id: string;
@@ -39,12 +37,11 @@ export interface OAuthSelectionInit {
 }
 
 /**
- * Master lifecycle record for a pending multi-account OAuth selection.
+ * Master lifecycle record for a pending OAuth account assignment.
  * Stores bounded metadata, account IDs, and lifecycle state only.
  */
 export interface OAuthSelectionRecord {
   readonly account_ids: ReadonlyArray<string>;
-  readonly brand_profile_id: string;
   claim?: {
     readonly claimed_at: number;
     readonly expires_at: number;
@@ -75,7 +72,6 @@ export interface OAuthSelectionRecord {
  */
 export type ClaimSelectionResult =
   | {
-      readonly brandProfileId: string;
       readonly claimToken: string;
       readonly encryptedConnection: string;
       readonly organizationId: string;

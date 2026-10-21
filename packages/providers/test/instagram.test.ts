@@ -102,7 +102,16 @@ describe("createInstagramAdapter", () => {
         expect(url.origin).toBe("https://api.instagram.com");
         expect(init.method).toBe("POST");
         expect(String(init.body)).toContain("client_secret=instagram-client-secret");
-        return json({ access_token: "short-secret", user_id: 12345 });
+        return json({
+          data: [
+            {
+              access_token: "short-secret",
+              user_id: "12345",
+              permissions:
+                "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_comments,instagram_business_manage_insights",
+            },
+          ],
+        });
       },
       (url) => {
         expect(url.searchParams.get("grant_type")).toBe("ig_exchange_token");
@@ -117,11 +126,16 @@ describe("createInstagramAdapter", () => {
         expect(url.pathname).toBe("/v25.0/me");
         expect(new Headers(init.headers).get("Authorization")).toBe("Bearer long-secret");
         return json({
-          account_type: "BUSINESS",
-          id: "12345",
-          name: "Creator Real Name",
-          profile_picture_url: "https://cdn.example/avatar.jpg",
-          username: "creator",
+          data: [
+            {
+              account_type: "Business",
+              id: "12345",
+              user_id: "17841400000098765",
+              name: "Creator Real Name",
+              profile_picture_url: "https://cdn.example/avatar.jpg",
+              username: "creator",
+            },
+          ],
         });
       },
     );
@@ -137,7 +151,7 @@ describe("createInstagramAdapter", () => {
       account: {
         avatarUrl: "https://cdn.example/avatar.jpg",
         displayName: "Creator Real Name",
-        id: "12345",
+        id: "17841400000098765",
         username: "creator",
       },
       expiresAt: "2026-09-17T00:00:00.000Z",

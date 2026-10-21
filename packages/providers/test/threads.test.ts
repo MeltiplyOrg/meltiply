@@ -107,13 +107,15 @@ describe("createThreadsAdapter", () => {
 
   it("exchanges a code for a long-lived token and bounded profile", async () => {
     const providerCalls = sequence(
-      (_url, init) => {
+      (url, init) => {
+        expect(url.origin).toBe("https://graph.threads.com");
         expect(init.method).toBe("POST");
         expect(String(init.body)).toContain("client_secret=threads-client-secret");
         return json({ access_token: "short-secret", user_id: 12345 });
       },
-      (_url, init) => {
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer short-secret");
+      (url) => {
+        expect(url.origin).toBe("https://graph.threads.com");
+        expect(url.searchParams.get("access_token")).toBe("short-secret");
         return json({
           access_token: "long-secret",
           expires_in: 5_184_000,
@@ -893,8 +895,9 @@ describe("createThreadsAdapter", () => {
   });
 
   it("refreshes a Threads long-lived access token", async () => {
-    const providerCalls = sequence((_url, init) => {
-      expect(new Headers(init.headers).get("Authorization")).toBe("Bearer current-long-token");
+    const providerCalls = sequence((url) => {
+      expect(url.origin).toBe("https://graph.threads.com");
+      expect(url.searchParams.get("access_token")).toBe("current-long-token");
       return json({
         access_token: "refreshed-long-token",
         expires_in: 5_184_000,

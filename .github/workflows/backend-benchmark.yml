@@ -40,7 +40,7 @@ env:
   CI: "true"
   WRANGLER_SEND_METRICS: "false"
   BENCHMARK_DATABASE_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5432/postgres?sslmode=disable
-  BENCHMARK_SAMPLES: ${{ inputs.samples || '20' }}
+  BENCHMARK_SAMPLES: ${{ inputs.samples || '30' }}
   BENCHMARK_WARMUP: "3"
   BENCHMARK_DELETE_SAMPLES: "5"
   BENCHMARK_DELETE_WARMUP: "1"
@@ -114,7 +114,7 @@ jobs:
           mkdir -p benchmark-results
           baseline_env="BENCHMARK_DATABASE_AUTHENTICATED_URL=postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5432/meltiply_bench_baseline?sslmode=disable BENCHMARK_DATABASE_SYSTEM_URL=postgres://meltiply_system:meltiply-system-local@127.0.0.1:5432/meltiply_bench_baseline?sslmode=disable BENCHMARK_LABEL=baseline BENCHMARK_REF=$BASELINE_REF"
           candidate_env="BENCHMARK_DATABASE_AUTHENTICATED_URL=postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5432/meltiply_bench_candidate?sslmode=disable BENCHMARK_DATABASE_SYSTEM_URL=postgres://meltiply_system:meltiply-system-local@127.0.0.1:5432/meltiply_bench_candidate?sslmode=disable BENCHMARK_LABEL=candidate BENCHMARK_REF=$CANDIDATE_REF"
-          for repetition in $(seq 1 "${{ inputs.repetitions || '2' }}"); do
+          for repetition in $(seq 1 "${{ inputs.repetitions || '3' }}"); do
             if [ $((repetition % 2)) -eq 1 ]; then
               (cd baseline && env $baseline_env BENCHMARK_OUTPUT_FILE=../benchmark-results/baseline-$repetition.json bun workers/api/bench/run.mjs)
               (cd candidate && env $candidate_env BENCHMARK_OUTPUT_FILE=../benchmark-results/candidate-$repetition.json bun workers/api/bench/run.mjs)

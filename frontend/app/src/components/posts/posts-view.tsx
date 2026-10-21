@@ -38,6 +38,7 @@ import { usePostDetailSurface } from "./post-detail-surface";
 import { PostsToolbar } from "./posts-toolbar";
 import {
   filterAndSortPosts,
+  isPublishedDistributionStatus,
   prunePostSelection,
   resolveChannelMedia,
   resolveChannelText,
@@ -448,13 +449,12 @@ export function PostsView({
     return loadedPosts.map((post) => toPostRow(post, integrationById));
   }, [isCalendarMode, calendarQuery.data, loadedPosts, postById, integrationById]);
 
-  /** True when a row already reached a Provider and deletion is Admin-only. */
+  /** True when a row reached or is attempting a Provider and deletion is Admin-only. */
   const hasPublishedDistribution = useCallback(
     (row: PostRow) =>
-      row.channels.some((channel) => {
-        const status = channel.distribution?.status ?? channel.status;
-        return status === "published" || status === "awaiting_provider";
-      }),
+      row.channels.some((channel) =>
+        isPublishedDistributionStatus(channel.distribution?.status ?? channel.status),
+      ),
     [],
   );
 

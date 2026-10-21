@@ -24,7 +24,8 @@ load_local_env() {
 
 # Derive the same host, bind address, and CORS origins as `make dev` when a
 # Worker launcher runs on its own. Explicit process or `.env` values take
-# precedence over the derived local/Tailnet values.
+# precedence. Signing keys default to loopback on the selected API port so
+# protected public tunnels do not require a browser Access session in the Worker.
 configure_local_wrangler_network() {
   local repo_root=$1
   local frontend_port=$2
@@ -41,6 +42,7 @@ configure_local_wrangler_network() {
   export WRANGLER_DEV_ALLOWED_ORIGINS="${WRANGLER_DEV_ALLOWED_ORIGINS:-${ALLOWED_ORIGINS:-$frontend_origin}}"
   export WRANGLER_DEV_FRONTEND_URL="${WRANGLER_DEV_FRONTEND_URL:-$frontend_origin}"
   export WRANGLER_DEV_PUBLIC_API_URL="${WRANGLER_DEV_PUBLIC_API_URL:-$api_origin}"
+  export WRANGLER_DEV_BETTER_AUTH_JWKS_URL="${WRANGLER_DEV_BETTER_AUTH_JWKS_URL:-${BETTER_AUTH_JWKS_URL:-http://127.0.0.1:${api_port}/api/auth/jwks}}"
 }
 append_local_wrangler_env_file() {
   local args_name=$1
@@ -51,6 +53,8 @@ append_local_wrangler_env_file() {
   wrangler_args_ref+=(--env-file "$env_file")
 }
 
+# Append public origin and trusted key-fetch overrides to the named Wrangler
+# argument array. Explicit local overrides win; no credential values are emitted.
 append_local_wrangler_overrides() {
   local args_name=$1
   local -n wrangler_args_ref="$args_name"
@@ -60,10 +64,12 @@ append_local_wrangler_overrides() {
   local allowed_origins="${WRANGLER_DEV_ALLOWED_ORIGINS:-http://localhost:3000}"
   local frontend_url="${WRANGLER_DEV_FRONTEND_URL:-http://localhost:3000}"
   local public_api_url="${WRANGLER_DEV_PUBLIC_API_URL:-http://localhost:8787}"
+  local jwks_url="${WRANGLER_DEV_BETTER_AUTH_JWKS_URL:-http://127.0.0.1:8787/api/auth/jwks}"
   wrangler_args_ref+=(
     --var "ALLOWED_ORIGINS:${allowed_origins}"
     --var "FRONTEND_URL:${frontend_url}"
     --var "PUBLIC_API_URL:${public_api_url}"
+    --var "BETTER_AUTH_JWKS_URL:${jwks_url}"
   )
 }
 

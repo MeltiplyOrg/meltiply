@@ -158,6 +158,14 @@ variable. Setup status reveals only whether registration has closed. After setup
 the owner's password and optional second factor authenticate sign-in, not the
 bootstrap secret.
 
+JWT issuer and audience use the public `BETTER_AUTH_URL` origin (falling back to
+`PUBLIC_API_URL`). By default the API retrieves signing keys from that origin's
+`/api/auth/jwks`. If browser-only ingress authentication protects the public host,
+set `BETTER_AUTH_JWKS_URL` to a trusted internal endpoint for the same installation;
+this changes only key retrieval, not issuer, audience, or live-session validation.
+The local development launchers automatically use loopback on their selected API
+port, so Cloudflare Access on a dev tunnel cannot block signing-key retrieval.
+
 Better Auth stores salted scrypt password hashes, not plaintext passwords.
 Passwords are 8–128 characters; use a password manager and a unique passphrase.
 No remote compromised-password screening or Turnstile service is configured:

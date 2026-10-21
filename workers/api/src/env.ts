@@ -30,6 +30,8 @@ export interface ApiWorkerEnv {
   /** Private deployment bootstrap secret, at least 32 random characters; required before first signup. */
   AUTH_SETUP_SECRET?: string;
   BETTER_AUTH_URL?: string;
+  /** Trusted signing-key endpoint override; issuer/audience still use the public auth URL. */
+  BETTER_AUTH_JWKS_URL?: string;
   /** Standalone workerd owns sockets per request; omitted keeps the environment's existing pool policy. */
   DATABASE_POOL_MODE?: "request";
   DB_AUTHENTICATED?: Hyperdrive;

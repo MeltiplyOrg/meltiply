@@ -41,10 +41,11 @@ The directory header row stays pinned to the top of the accounts viewport, and t
 The post-OAuth `/channels/connect` page pairs the shared Meltiply mark and provider
 mark directly on the canvas, without logo tiles, with a link glyph between them.
 Brand Profile assignment uses a bounded native-scrolling radio list with a focus
-gutter. Only connectable profiles appear, preserving workspace order; reconnecting
-the same provider account remains eligible. If none can accept the selected
-Channel, an explanatory empty state replaces the choices. Page actions remain
-outside the list's scroll boundary.
+gutter. Only connectable profiles appear, preserving workspace order. An already
+connected account can reconnect only to its current owning profile; empty slots
+on other profiles cannot accept it until it is disconnected. If none can accept
+the selected Channel, an explanatory empty state replaces the choices. Page actions
+remain outside the list's scroll boundary.
 Account selection keeps the neutral row border and uses the trailing checkmark.
 Account and Brand Profile rows show a focus ring only for keyboard navigation,
 not pointer clicks; Profile selection uses its fill and trailing checkmark.

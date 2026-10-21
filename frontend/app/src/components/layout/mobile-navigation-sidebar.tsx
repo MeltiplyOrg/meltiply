@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { FocusScope } from "@radix-ui/react-focus-scope";
+import { FocusScope } from "@meltiply/ui/center-dialog";
 import { X } from "lucide-react";
 import { SidebarNav, type WorkspaceView } from "@/components/primitives/sidebar-nav";
 import { Button } from "@meltiply/ui/button";

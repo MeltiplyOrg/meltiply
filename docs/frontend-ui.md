@@ -47,6 +47,11 @@ Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. I
 
 The phone navigation panel is `MobileNavigationSidebar`: the same `SidebarNav` as the desktop rail, positioned as a fixed left-edge layer over the workspace with a fading scrim, sliding in from the left. It renders `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
 
+The sidebar imports unstyled `FocusScope` from the shared `@meltiply/ui/center-dialog`
+owner. It loops Tab/Shift+Tab while open and shares Radix's focus stack with the
+portalled account menu, so nested menus can take focus without fighting the
+navigation trap. The shell's background `inert` state is separate from containment.
+
 `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`) owns the rail's hover background: every `data-sidebar-item` row is a target, and one pill springs to the hovered row instead of rows painting their own hover fill. The Settings section rail reuses the same component with its own container and a tighter snap radius. Rows keep `relative z-10` so labels and the selected surface read above it, keyboard focus rings are unchanged, and the public docs rail reuses the same component with its nested Radix viewport.
 
 `SlidingHighlight` (`@meltiply/ui/sliding-highlight`) owns every highlight that travels _between_ items: it measures the active item, writes that box as static geometry, and animates only transforms, so travel stays off the layout path. Menus drive it with `deferUntilInteraction` (`data-highlighted`, pointer and keyboard tracking, Radix pre-highlight suppressed); tab strips and segmented controls drive it from the selection itself (`data-state="active"`, `aria-pressed`). `axis="x"` adds translate plus `scaleX` from the left edge so a row of differently sized items — a segmented track, a `TabsList variant="segment"`, a `line` tab strip's accent underline — slides its fill or rule, settling back to `scaleX(1)` so the shape is crisp at rest; consumers style that indicator's vertical box (`inset-y-*` fill, `bottom-* h-*` underline) through `className`/`indicatorClassName`. One implementation covers the family: a control never paints its own selected fill next to the pill.

@@ -58,12 +58,16 @@ Live deployments follow the [operator-run release path](../infra/cloudflare/READ
 `cloudflare-full` first runs the [provider connection smoke](../scripts/selfhost/oauth-connection-check.ts)
 against its disposable seeded database and the built SQLite OAuth state Worker.
 All five implemented Providers exercise real authorization-state consumption,
-encrypted selection, explicit assignment, idempotent replay, reconnection, and
-cancellation through API handlers and PostgreSQL persistence. Only actor
-authentication and external provider HTTP responses are controlled. The full
-application gate runs afterward. This does not certify live provider consent,
-app review, account permissions, or real social publication; see the
-[provider contract research](research/provider-channel-connections.md).
+encrypted selection, explicit assignment, idempotent replay (including rejecting
+a changed Brand Profile), reconnection, and cancellation through API handlers and
+PostgreSQL persistence. Only actor authentication and external provider HTTP
+responses are controlled. The full application gate runs afterward, followed by a
+focused production-app browser journey covering mobile focus containment,
+portalled account-menu dismissal, and reconnect eligibility at desktop/phone widths
+in both palettes. Its owner, profiles, and Channels are real fixture state; pending
+selection metadata is controlled. Screenshots and traces are retained as artifacts.
+This does not certify live provider consent, app review, account permissions, or
+real social publication; see the [provider contract research](research/provider-channel-connections.md).
 
 `frontend-full` provisions local signing/storage configuration before browser
 journeys. It runs production-entry browser scenarios, then the cross-profile

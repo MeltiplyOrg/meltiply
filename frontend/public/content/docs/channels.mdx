@@ -19,6 +19,10 @@ Every connection belongs to one Brand Profile. If none exists, workspace admins 
 
 Each Brand Profile connects at most one Channel per provider. To replace that Channel with a different account, disconnect the current one first or choose another eligible Brand Profile. Reconnecting the same account remains available. A direct link to `/channels?tab=add` opens the platform connection dialog.
 
+An already-connected account can reconnect only to its current Brand Profile.
+An empty Platform slot on another profile does not transfer ownership; disconnect
+the account first if it should move.
+
 On phones, each platform's saved accounts and connection action appear below its identity instead of competing for the same row. Scroll the connection dialog to reach every platform; it stays within the available screen height, including landscape orientation.
 
 Connection availability comes from the server and the platform's requirements. An unavailable provider is not a working connection action. Existing accounts remain identifiable by their saved name or provider account ID.

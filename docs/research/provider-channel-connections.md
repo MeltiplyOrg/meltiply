@@ -14,6 +14,19 @@ browser. Confirmation binds the selected external account to an eligible Brand
 Profile through `saveOAuthConnectionEffect`. A profile owns at most one Channel
 per Platform, and an external account cannot be attached to two profiles.
 
+The assignment list restricts an already-connected account to its current owner,
+not every profile with an empty Platform slot. Durable confirmation claims fence
+the requested Brand Profile while a save may still be in flight. Completed replay
+requires the same account, Brand Profile, and idempotency key; a changed destination
+returns 409 rather than claiming an assignment that did not happen. A deterministic
+failed save releases its claim so another eligible profile can be chosen.
+
+Facebook business-user Page edges use at most four concurrent requests, with
+sequential pagination within each edge and shared 1,000-request/record bounds.
+Results are merged in discovery order, preserving deterministic Page deduplication
+regardless of response timing. Failed discovery stops new work and drains in-flight
+requests before rejecting; this is not a measured live-provider latency claim.
+
 ## Instagram
 
 Use Instagram Login, not Facebook's Page enumeration. Meta's

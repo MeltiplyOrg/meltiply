@@ -478,12 +478,14 @@ describe("API Worker foundation", () => {
       },
     );
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      components: Array<{ name: string }>;
-    };
-    expect(body.components.map(({ name }) => name)).not.toEqual(
-      expect.arrayContaining(["MAIL", "MAIL_FROM_ADDRESS"]),
-    );
+    const body: unknown = await response.json();
+    for (const name of ["MAIL", "MAIL_FROM_ADDRESS"]) {
+      expect(body).not.toEqual(
+        expect.objectContaining({
+          components: expect.arrayContaining([expect.objectContaining({ name })]),
+        }),
+      );
+    }
   });
 
   it("reports mail ready without calling send on the binding", async () => {

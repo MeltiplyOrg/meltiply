@@ -18,6 +18,7 @@ const intentionalIdenticalValues: Record<string, true> = {
   English: true,
   Español: true,
   Hashtags: true,
+  Meltiply: true,
   Plan: true,
   Stitch: true,
   General: true,

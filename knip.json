@@ -15,7 +15,7 @@
       "entry": ["src/app/globals.css"]
     },
     "workers/api": {
-      "entry": ["test-support/index.ts"],
+      "entry": ["test-support/index.ts", "bench/run.mjs", "bench/compare.mjs"],
       "vitest": {
         "config": ["vitest*.config.ts"]
       }

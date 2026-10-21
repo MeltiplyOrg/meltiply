@@ -1,0 +1,135 @@
+name: Backend benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Git ref measured as the baseline
+        required: true
+        default: master
+        type: string
+      candidate_ref:
+        description: Git ref measured as the candidate (defaults to the selected ref)
+        required: false
+        default: ""
+        type: string
+      repetitions:
+        description: Alternating run blocks per revision
+        required: true
+        default: "2"
+        type: choice
+        options: ["1", "2", "3"]
+      samples:
+        description: Measured samples per read/mutation workflow
+        required: true
+        default: "20"
+        type: choice
+        options: ["10", "20", "30"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  WRANGLER_SEND_METRICS: "false"
+  BENCHMARK_DATABASE_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5432/postgres?sslmode=disable
+  BENCHMARK_SAMPLES: ${{ inputs.samples }}
+  BENCHMARK_WARMUP: "3"
+  BENCHMARK_DELETE_SAMPLES: "3"
+  BENCHMARK_DELETE_WARMUP: "1"
+  BENCHMARK_DELETE_CONCURRENCY: "4"
+  BENCHMARK_DELETE_BATCH_SIZES: 1,5,10,25,50
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_PASSWORD: meltiply-admin-local
+          POSTGRES_USER: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - name: Check out candidate revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_ref || github.ref }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out baseline revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.baseline_ref }}
+          path: baseline
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.18.0"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Restore Bun downloads
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-bench-${{ runner.os }}-${{ runner.arch }}-1.4.2-${{ hashFiles('candidate/bun.lock', 'candidate/bunfig.toml', 'candidate/package.json') }}
+          restore-keys: |
+            bun-bench-${{ runner.os }}-${{ runner.arch }}-1.4.2-
+      - name: Install both revisions
+        run: |
+          (cd candidate && bun install --frozen-lockfile)
+          (cd baseline && bun install --frozen-lockfile)
+      - name: Inject benchmark infrastructure into the baseline checkout
+        run: |
+          cp -R candidate/workers/api/bench baseline/workers/api/bench
+          cp -R candidate/scripts/benchmarks baseline/scripts/benchmarks
+      - name: Prepare one database per revision
+        run: |
+          (cd baseline && BENCHMARK_DATABASE_NAME=meltiply_bench_baseline bun scripts/benchmarks/backend/prepare-database.mjs)
+          (cd candidate && BENCHMARK_DATABASE_NAME=meltiply_bench_candidate bun scripts/benchmarks/backend/prepare-database.mjs)
+      - name: Measure both revisions in alternating order
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref }}
+          CANDIDATE_REF: ${{ inputs.candidate_ref || github.ref }}
+        run: |
+          mkdir -p benchmark-results
+          baseline_env="BENCHMARK_DATABASE_AUTHENTICATED_URL=postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5432/meltiply_bench_baseline?sslmode=disable BENCHMARK_DATABASE_SYSTEM_URL=postgres://meltiply_system:meltiply-system-local@127.0.0.1:5432/meltiply_bench_baseline?sslmode=disable BENCHMARK_LABEL=baseline BENCHMARK_REF=$BASELINE_REF"
+          candidate_env="BENCHMARK_DATABASE_AUTHENTICATED_URL=postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5432/meltiply_bench_candidate?sslmode=disable BENCHMARK_DATABASE_SYSTEM_URL=postgres://meltiply_system:meltiply-system-local@127.0.0.1:5432/meltiply_bench_candidate?sslmode=disable BENCHMARK_LABEL=candidate BENCHMARK_REF=$CANDIDATE_REF"
+          for repetition in $(seq 1 "${{ inputs.repetitions }}"); do
+            if [ $((repetition % 2)) -eq 1 ]; then
+              (cd baseline && env $baseline_env BENCHMARK_OUTPUT_FILE=../benchmark-results/baseline-$repetition.json bun workers/api/bench/run.mjs)
+              (cd candidate && env $candidate_env BENCHMARK_OUTPUT_FILE=../benchmark-results/candidate-$repetition.json bun workers/api/bench/run.mjs)
+            else
+              (cd candidate && env $candidate_env BENCHMARK_OUTPUT_FILE=../benchmark-results/candidate-$repetition.json bun workers/api/bench/run.mjs)
+              (cd baseline && env $baseline_env BENCHMARK_OUTPUT_FILE=../benchmark-results/baseline-$repetition.json bun workers/api/bench/run.mjs)
+            fi
+          done
+      - name: Compare revisions
+        run: |
+          baseline_args=""
+          candidate_args=""
+          for file in benchmark-results/baseline-*.json; do baseline_args="$baseline_args --baseline $file"; done
+          for file in benchmark-results/candidate-*.json; do candidate_args="$candidate_args --candidate $file"; done
+          (cd candidate && bun workers/api/bench/compare.mjs $baseline_args $candidate_args --out ../benchmark-results/comparison.md --json ../benchmark-results/comparison.json)
+      - name: Upload raw results and report
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: backend-benchmark-${{ github.run_id }}
+          path: benchmark-results/
+          if-no-files-found: warn

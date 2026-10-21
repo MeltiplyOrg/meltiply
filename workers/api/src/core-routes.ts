@@ -23,6 +23,12 @@ import { errorDiagnostic, log } from "@meltiply/observability";
 import { createObjectStoreFromEnv, type ConfiguredObjectStore } from "@meltiply/storage";
 import type { Context, Hono } from "hono";
 import { CoreApiError, type CoreApiService } from "./core-types";
+import {
+  auditActorFrom,
+  recordWorkspaceAuditBestEffort,
+  recordWorkspaceAuditForUserBestEffort,
+  recordWorkspaceAuditOnceBestEffort,
+} from "./audit";
 import type { BrandProfileApiService } from "./brand-profile-service";
 import type { AssetApiService } from "./asset-types";
 import type { PostApiService, PostTargetInput } from "./post-types";
@@ -851,6 +857,24 @@ export function registerCoreRoutes(
           { color, description, name },
           key,
         );
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
+            action: "brand_profile.created",
+            actor: auditActorFrom({
+              display_name: actor.displayName,
+              email: actor.email,
+              id: actor.userId,
+            }),
+            after: result.value,
+            orgId: actor.workspace.id,
+            targetId: result.value.id,
+            targetType: "brand_profile",
+          },
+          "brand-profile.create",
+          key,
+        );
         return jsonResponse(result.value, 201, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
@@ -929,6 +953,24 @@ export function registerCoreRoutes(
           { color, description, name },
           key,
         );
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
+            action: "brand_profile.updated",
+            actor: auditActorFrom({
+              display_name: actor.displayName,
+              email: actor.email,
+              id: actor.userId,
+            }),
+            after: result.value,
+            orgId: actor.workspace.id,
+            targetId: profileId,
+            targetType: "brand_profile",
+          },
+          "brand-profile.update",
+          key,
+        );
         return jsonResponse(result.value, 200, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
@@ -951,6 +993,24 @@ export function registerCoreRoutes(
           profileId,
           key,
         );
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
+            action: "brand_profile.deleted",
+            actor: auditActorFrom({
+              display_name: actor.displayName,
+              email: actor.email,
+              id: actor.userId,
+            }),
+            after: result.value,
+            orgId: actor.workspace.id,
+            targetId: profileId,
+            targetType: "brand_profile",
+          },
+          "brand-profile.delete",
+          key,
+        );
         return jsonResponse(result.value, 200, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
@@ -971,6 +1031,24 @@ export function registerCoreRoutes(
           c.env,
           c.get("actor").claims,
           profileId,
+          key,
+        );
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
+            action: "brand_profile.restored",
+            actor: auditActorFrom({
+              display_name: actor.displayName,
+              email: actor.email,
+              id: actor.userId,
+            }),
+            after: result.value,
+            orgId: actor.workspace.id,
+            targetId: profileId,
+            targetType: "brand_profile",
+          },
+          "brand-profile.restore",
           key,
         );
         return jsonResponse(result.value, 200, requestId(c), {
@@ -1617,6 +1695,19 @@ export function registerCoreRoutes(
           ),
         );
         if (persisted instanceof Response) return persisted;
+        yield* recordWorkspaceAuditForUserBestEffort(c.env, {
+          action: "channel.connected",
+          after: {
+            account_id: exchanged.account.id,
+            brand_profile_id: record.brand_profile_id,
+            platform: selected,
+          },
+          orgId: record.organization_id,
+          requestId: requestId(c),
+          targetId: exchanged.account.id,
+          targetType: "channel",
+          userId: record.user_id,
+        });
         return yield* redirectTo("connected");
       }).pipe(Effect.provide(createProviderServiceLive(registry()))),
     ),
@@ -1660,6 +1751,24 @@ export function registerCoreRoutes(
           c.env,
           c.get("actor").claims,
           accountId,
+          disconnectKey,
+        );
+        const actor = c.get("actor");
+        yield* recordWorkspaceAuditOnceBestEffort(
+          c.env,
+          {
+            action: "channel.disconnected",
+            actor: auditActorFrom({
+              display_name: actor.displayName,
+              email: actor.email,
+              id: actor.userId,
+            }),
+            before: { account_id: accountId },
+            orgId: actor.workspace.id,
+            targetId: accountId,
+            targetType: "channel",
+          },
+          "channel.disconnect",
           disconnectKey,
         );
         return new Response(null, {
@@ -1862,6 +1971,23 @@ export function registerCoreRoutes(
             ),
           );
         }
+        yield* recordWorkspaceAuditBestEffort(c.env, {
+          action: "channel.connected",
+          actor: auditActorFrom({
+            display_name: actor.displayName,
+            email: actor.email,
+            id: actor.userId,
+          }),
+          after: {
+            account_id: accountId,
+            brand_profile_id: claim.brandProfileId,
+            platform: claim.platform,
+          },
+          orgId: actor.workspace.id,
+          requestId: requestId(c),
+          targetId: accountId,
+          targetType: "channel",
+        });
         return new Response(null, {
           headers: {
             ...idempotencyHeaders(false),

@@ -171,6 +171,12 @@ export interface PostSelectionProps {
   onSetSelection: (postIds: string[], selected: boolean) => void;
   /** Disables every selection control while a bulk operation runs. */
   selectionDisabled?: boolean;
+  /**
+   * Whether a row may enter the bulk-delete selection. Omitted allows every row;
+   * the Posts view passes its role/published-state delete predicate so a row the
+   * caller cannot delete cannot be selected.
+   */
+  canSelect?: (post: PostRow) => boolean;
 }
 
 /** Owning-profile snapshot for one selected Post; `isDraft` records the draft-filter pruning escape. */

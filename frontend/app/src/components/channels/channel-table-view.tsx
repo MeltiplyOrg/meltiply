@@ -33,8 +33,10 @@ export interface ChannelTableViewProps {
   onToggleVisibleSelection: () => void;
   onToggleSelection: (id: string) => void;
   selectionDisabled?: boolean;
-  onReconnect: (account: PlatformAccount) => void;
-  onDisconnect: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles. */
+  onReconnect?: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles. */
+  onDisconnect?: (account: PlatformAccount) => void;
 }
 
 /**

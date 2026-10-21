@@ -28,11 +28,13 @@ const alphaActor: ResolvedActor = {
     subject: "auth_user_alpha",
     userId: "10000000-0000-4000-8000-000000000001",
   },
+  displayName: "Alpha Admin",
+  email: "auth_user_alpha@example.test",
+  isInstallationOwner: false,
   role: "admin",
   userId: "10000000-0000-4000-8000-000000000001",
   workspace: {
     id: "20000000-0000-4000-8000-000000000001",
-    isPersonal: false,
     name: "Alpha",
     slug: "alpha",
   },
@@ -42,17 +44,19 @@ const personalActor: ResolvedActor = {
   authUserId: "auth_user_personal",
   claims: {
     organizationId: "20000000-0000-4000-8000-000000000011",
-    organizationRole: "member",
+    organizationRole: "viewer",
     subject: "auth_user_personal",
     userId: "10000000-0000-4000-8000-000000000011",
   },
-  role: "member",
+  displayName: "Personal Viewer",
+  email: "personal@example.com",
+  isInstallationOwner: false,
+  role: "viewer",
   userId: "10000000-0000-4000-8000-000000000011",
   workspace: {
     id: "20000000-0000-4000-8000-000000000011",
-    isPersonal: true,
-    name: "Personal workspace",
-    slug: "personal-workspace",
+    name: "Shared workspace",
+    slug: "shared-workspace",
   },
 };
 
@@ -69,6 +73,7 @@ function userProfileFor(actor: ResolvedActor) {
     display_name: actor.authUserId,
     email: `${actor.authUserId}@example.test`,
     id: actor.userId,
+    is_installation_owner: actor.isInstallationOwner,
     updated_at: "2026-01-01T00:00:00.000Z",
   };
 }
@@ -123,7 +128,7 @@ describe("authenticated API slices", () => {
     });
   });
 
-  it("returns a personal workspace for an actor without a team membership", async () => {
+  it("returns the shared workspace for a Viewer actor", async () => {
     const app = appForActor(personalActor);
     const response = await app.request(
       "/api/v1/users/me",
@@ -134,8 +139,8 @@ describe("authenticated API slices", () => {
     await expect(response.json()).resolves.toMatchObject({
       active_organization: {
         id: personalActor.workspace.id,
-        name: "Personal workspace",
-        role: "member",
+        name: "Shared workspace",
+        role: "viewer",
       },
       email: "auth_user_personal@example.test",
     });

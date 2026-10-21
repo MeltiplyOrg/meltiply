@@ -1904,6 +1904,31 @@ export function createPostApiService(
               catch: validationError,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
+            // Published history is administratively owned: Editors may delete
+            // drafts and scheduled Posts (their pending work is cancelled), but
+            // removing a Post that reached or is attempting a Platform is an
+            // Admin action.
+            if (session.organizationRole !== "admin") {
+              const published = yield* client.query<{ exists: boolean }>(
+                `SELECT EXISTS (
+                   SELECT 1 FROM distributions
+                   WHERE post_id = $1
+                     AND status IN (
+                       'processing', 'awaiting_provider', 'published', 'needs_reconciliation'
+                     )
+                 ) AS exists`,
+                [postId],
+              );
+              if (published.rows[0]?.exists === true) {
+                return yield* Effect.fail(
+                  new CoreApiError(
+                    403,
+                    "workspace_admin_required",
+                    "Only a workspace admin can delete a post that has published distributions.",
+                  ),
+                );
+              }
+            }
             yield* cancelPendingDistributionsEffect(client, postId);
             yield* client.query("DELETE FROM post_attachments WHERE post_id = $1", [postId]);
             yield* client.query("DELETE FROM post_targets WHERE post_id = $1", [postId]);

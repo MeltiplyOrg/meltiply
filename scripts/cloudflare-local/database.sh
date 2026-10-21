@@ -44,6 +44,16 @@ wait_for_stable_postgres() {
   exit 1
 }
 
+# Reports whether migrations have already created their ledger. An existing
+# volume can carry a valid database without the local init-complete marker when
+# an earlier cold-volume seed failed or the marker was removed.
+database_initialized() {
+  "${compose[@]}" exec -T postgres \
+    psql -U postgres -d meltiply -tAc \
+    "SELECT to_regclass('public.schema_migrations') IS NOT NULL" 2>/dev/null |
+    grep -q '^t$'
+}
+
 # Waits for the image entrypoint to finish writing PGDATA (the
 # .meltiply-init-complete marker), not just for a listening socket. On failure
 # it dumps the service log so the init error survives in CI output.
@@ -55,6 +65,15 @@ wait_for_initialization() {
     fi
     sleep 1
   done
+  # A volume created before the marker existed (or whose entrypoint seed failed)
+  # is still usable. Finish the idempotent migration and seed steps once, then
+  # record the marker so later starts are fast.
+  if database_initialized; then
+    "${compose[@]}" exec -T postgres /local/migrate.sh
+    "${compose[@]}" exec -T postgres /local/seed.sh
+    "${compose[@]}" exec -T postgres sh -c 'touch "$PGDATA/.meltiply-init-complete"'
+    return
+  fi
   echo "Cloudflare-target PostgreSQL initialization did not complete" >&2
   "${compose[@]}" logs postgres >&2
   exit 1

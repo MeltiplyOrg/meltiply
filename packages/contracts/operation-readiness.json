@@ -74,9 +74,45 @@
       "state": "specified",
       "evidenceAndGate": "Worker/RLS implementation and local tests exist; preview conformance remains."
     },
-    "createWorkspace": {
+    "listWorkspaceMembers": {
       "state": "specified",
-      "evidenceAndGate": "Contract specified in the Better Auth cutover; Worker route, membership transaction, and conformance evidence remain."
+      "evidenceAndGate": "Multi-user Workspace implementation; hosted database and browser acceptance required."
+    },
+    "listWorkspaceInvitations": {
+      "state": "specified",
+      "evidenceAndGate": "Multi-user Workspace implementation; hosted database and browser acceptance required."
+    },
+    "resendWorkspaceInvitation": {
+      "state": "specified",
+      "evidenceAndGate": "Token rotation and email delivery; hosted database and browser acceptance required."
+    },
+    "getWorkspaceInvitation": {
+      "state": "specified",
+      "evidenceAndGate": "Token-bound invitation preview; hosted database acceptance required."
+    },
+    "getInstallation": {
+      "state": "specified",
+      "evidenceAndGate": "Seat accounting implementation; hosted database acceptance required."
+    },
+    "suspendInstallationMember": {
+      "state": "specified",
+      "evidenceAndGate": "Session revocation and Seat release; hosted database acceptance required."
+    },
+    "reactivateInstallationMember": {
+      "state": "specified",
+      "evidenceAndGate": "Seat-checked reactivation; hosted database acceptance required."
+    },
+    "deleteInstallationMember": {
+      "state": "specified",
+      "evidenceAndGate": "Confirmed account deletion; hosted database acceptance required."
+    },
+    "transferInstallationOwnership": {
+      "state": "specified",
+      "evidenceAndGate": "Reauthenticated ownership transfer; hosted database and browser acceptance required."
+    },
+    "listWorkspaceAudit": {
+      "state": "specified",
+      "evidenceAndGate": "Workspace Audit read; hosted database acceptance required."
     },
     "updateWorkspace": {
       "state": "specified",

@@ -12,6 +12,7 @@ import { useI18n } from "@/lib/i18n";
 export interface PostActionsProps {
   postId: string;
   canMutate: boolean;
+  canDelete: boolean;
   onViewDetails: (postId: string) => void;
   onEdit: (postId: string) => void;
   onDelete: (postId: string) => void;
@@ -28,6 +29,7 @@ const QUICK_ACTION_CLASS =
 export function PostActions({
   postId,
   canMutate,
+  canDelete,
   onViewDetails,
   onEdit,
   onDelete,
@@ -50,16 +52,18 @@ export function PostActions({
           <Edit3 className="size-3.5" />
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="icon"
-        className={QUICK_ACTION_CLASS}
-        title={t("Delete post")}
-        aria-label={t("Delete post")}
-        onClick={() => onDelete(postId)}
-      >
-        <Trash2 className="size-3.5" />
-      </Button>
+      {canDelete && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={QUICK_ACTION_CLASS}
+          title={t("Delete post")}
+          aria-label={t("Delete post")}
+          onClick={() => onDelete(postId)}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -83,11 +87,18 @@ export function PostActions({
               {t("Edit post")}
             </DropdownMenuItem>
           )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem className="text-red focus:text-red" onClick={() => onDelete(postId)}>
-            <Trash2 className="size-3.5" />
-            {t("Delete post")}
-          </DropdownMenuItem>
+          {canDelete && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-red focus:text-red"
+                onClick={() => onDelete(postId)}
+              >
+                <Trash2 className="size-3.5" />
+                {t("Delete post")}
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

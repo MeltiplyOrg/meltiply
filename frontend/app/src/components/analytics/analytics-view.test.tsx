@@ -301,7 +301,7 @@ describe("analytics view", () => {
     renderView();
     expect(screen.getByRole("heading", { name: "Analytics" })).toBeInTheDocument();
     expect(screen.getByLabelText("Views: 300")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Platform comparison" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Engagement by platform" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Top posts" })).toBeInTheDocument();
     expect(screen.getByText(/Metrics are cumulative snapshots/)).toBeInTheDocument();
     expect(screen.getByText(/Last synced/)).toBeInTheDocument();
@@ -320,7 +320,9 @@ describe("analytics view", () => {
       isPending: false,
     };
     renderView();
-    expect(screen.queryByRole("heading", { name: "Platform comparison" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Engagement by platform" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Top posts" })).toBeInTheDocument();
   });
 

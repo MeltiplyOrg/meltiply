@@ -66,7 +66,7 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page.getByText(/Metrics are cumulative snapshots/)).toBeVisible();
 
   // The chart exposes the same values as a table and omits unsupported TikTok.
-  const chartTable = page.locator("div.sr-only table");
+  const chartTable = page.locator("div.sr-only table").filter({ hasText: "Total engagement" });
   await expect(chartTable).toContainText("Instagram");
   await expect(chartTable).toContainText("3,820");
   await expect(chartTable).toContainText("Threads");
@@ -109,10 +109,10 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(table.locator("tbody tr")).toHaveCount(1);
   // One platform is the whole cohort: the comparison card would be a single
   // bar against empty space, so the page omits it.
-  await expect(page.getByRole("heading", { name: "Platform comparison" })).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Engagement by platform" })).toBeHidden();
   await page.goBack();
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Platform comparison" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Engagement by platform" })).toBeVisible();
 
   // Refresh re-reads stored metrics; it never implies a provider sync.
   await page.getByRole("button", { name: "Refresh analytics" }).click();
@@ -150,7 +150,7 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   // Reduced-motion preference must not break the page or its chart.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Platform comparison" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Engagement by platform" })).toBeVisible();
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
 
   // Phones keep the stacked rows and never force page-level horizontal scroll.

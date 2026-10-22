@@ -1,19 +1,15 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import {
-  AccumulationChart,
   BestTimeHeatmap,
   ContentFormatBreakdown,
-  EngagementOverTimeChart,
   FollowerEvolutionChart,
-  FrequencyScatterChart,
-  MetricOverTimeChart,
+  PerformanceTrendChart,
   PlatformBreakdownTable,
   PostsOverTimeChart,
-  PostsPerPlatformChart,
 } from "./analytics-insights";
 import type { AnalyticsDashboard } from "@/types";
 
@@ -143,27 +139,18 @@ const fixture: AnalyticsDashboard = {
 };
 
 describe("analytics insights dashboard components", () => {
-  it("renders posts per platform with total header", () => {
-    render(<PostsPerPlatformChart dashboard={fixture} />);
-    expect(screen.getByRole("heading", { name: "Posts per platform" })).toBeInTheDocument();
-    expect(screen.getByText("3 published destinations")).toBeInTheDocument();
-  });
-
-  it("renders every metric over time on its own scale", () => {
-    render(<MetricOverTimeChart dashboard={fixture} />);
-    expect(screen.getByRole("heading", { name: "Metrics over time" })).toBeInTheDocument();
-    for (const metric of ["Views", "Likes", "Comments", "Shares"]) {
-      expect(screen.getByText(metric)).toBeInTheDocument();
-    }
+  it("renders one indexed trend chart for every metric", () => {
+    render(<PerformanceTrendChart dashboard={fixture} />);
+    expect(screen.getByRole("heading", { name: "Performance trend" })).toBeInTheDocument();
+    const table = within(screen.getByRole("table"));
+    expect(table.getByRole("columnheader", { name: "Views" })).toBeInTheDocument();
+    expect(table.getByRole("columnheader", { name: "Likes" })).toBeInTheDocument();
+    expect(table.getByRole("columnheader", { name: "Comments" })).toBeInTheDocument();
+    expect(table.getByRole("columnheader", { name: "Shares" })).toBeInTheDocument();
+    expect(table.getByRole("row", { name: /Oct 12/ })).toHaveTextContent("600");
+    expect(screen.queryByRole("group", { name: "Metrics" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Day" }));
     expect(screen.getByRole("button", { name: "Day" })).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("renders every engagement series without hiding any behind a toggle", () => {
-    render(<EngagementOverTimeChart dashboard={fixture} />);
-    expect(screen.getByRole("heading", { name: "Engagement over time" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Likes" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "Metrics" })).not.toBeInTheDocument();
   });
 
   it("renders the 7x24 best time heatmap and identifies the best slot", () => {
@@ -186,24 +173,18 @@ describe("analytics insights dashboard components", () => {
     expect(screen.getByText("Best")).toBeInTheDocument();
   });
 
-  it("renders platform breakdown table with honest null indicators", () => {
+  it("renders platform breakdown table and hides always-null columns", () => {
     render(<PlatformBreakdownTable dashboard={fixture} />);
     expect(screen.getByText("12.5%")).toBeInTheDocument();
-    expect(screen.getAllByText("Not tracked")).toHaveLength(2);
+    expect(screen.queryByRole("columnheader", { name: "Saves" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Clicks" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Not tracked by the connected providers: Saves, Clicks."),
+    ).toBeInTheDocument();
   });
 
-  it("renders scatter chart and accumulation", () => {
-    render(
-      <>
-        <PostsOverTimeChart dashboard={fixture} />
-        <FrequencyScatterChart dashboard={fixture} />
-        <AccumulationChart dashboard={fixture} />
-      </>,
-    );
+  it("renders the publishing cadence chart", () => {
+    render(<PostsOverTimeChart dashboard={fixture} />);
     expect(screen.getByRole("heading", { name: "Posts over time" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Posting frequency vs engagement" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Engagement accumulation" })).toBeInTheDocument();
   });
 });

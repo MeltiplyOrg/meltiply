@@ -32,18 +32,14 @@ import {
 import { AnalyticsToolbar, analyticsRangeLabel } from "./analytics-toolbar";
 import { MetricCards } from "./metric-cards";
 import {
-  AccumulationChart,
   BestTimeHeatmap,
   ContentFormatBreakdown,
-  EngagementOverTimeChart,
   FollowerEvolutionChart,
-  FrequencyScatterChart,
-  MetricOverTimeChart,
+  PerformanceTrendChart,
   PlatformBreakdownTable,
   PostsOverTimeChart,
-  PostsPerPlatformChart,
 } from "./analytics-insights";
-import { comparablePlatformRows, PlatformMetricChart } from "./platform-metric-chart";
+import { comparablePlatformRows, PlatformEngagementChart } from "./platform-engagement-chart";
 import { TopPostsTable } from "./top-posts-table";
 import type { Platform } from "@/types";
 
@@ -365,31 +361,27 @@ export function AnalyticsView(): React.ReactElement {
                 "Metrics are cumulative snapshots for posts published in this range, not activity during it.",
               )}
             </p>
-            {showComparison && (
-              <Card>
-                <CardHeader className="p-4 pb-0">
-                  <CardTitle className="text-sm">{t("Platform comparison")}</CardTitle>
-                </CardHeader>
-                <CardContent className="p-4">
-                  <PlatformMetricChart
-                    rows={summary.by_platform}
-                    rangeLabel={rangeLabel}
-                    unsupportedPlatforms={summary.unsupported_platforms}
-                  />
-                </CardContent>
-              </Card>
-            )}
             {dashboardQuery.data && (
               <>
+                <PerformanceTrendChart dashboard={dashboardQuery.data} />
                 <div className="grid gap-4 lg:grid-cols-2">
-                  <PostsPerPlatformChart dashboard={dashboardQuery.data} />
-                  <MetricOverTimeChart dashboard={dashboardQuery.data} />
+                  {showComparison && (
+                    <Card className="flex h-full flex-col">
+                      <CardHeader className="p-4 pb-0">
+                        <CardTitle className="text-sm">{t("Engagement by platform")}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="flex flex-1 flex-col p-4">
+                        <PlatformEngagementChart
+                          rows={summary.by_platform}
+                          rangeLabel={rangeLabel}
+                          unsupportedPlatforms={summary.unsupported_platforms}
+                        />
+                      </CardContent>
+                    </Card>
+                  )}
                   <PostsOverTimeChart dashboard={dashboardQuery.data} />
-                  <EngagementOverTimeChart dashboard={dashboardQuery.data} />
                   <FollowerEvolutionChart dashboard={dashboardQuery.data} />
                   <ContentFormatBreakdown dashboard={dashboardQuery.data} />
-                  <FrequencyScatterChart dashboard={dashboardQuery.data} />
-                  <AccumulationChart dashboard={dashboardQuery.data} />
                 </div>
                 <BestTimeHeatmap dashboard={dashboardQuery.data} />
                 <Card>

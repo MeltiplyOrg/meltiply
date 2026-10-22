@@ -672,5 +672,12 @@
   "Text": "Văn bản",
   "Video": "Đoạn video",
   "Metrics over time": "Chỉ số theo thời gian",
-  "Measured change between stored snapshots, one scale per metric.": "Mức thay đổi đo được giữa các bản chụp đã lưu, mỗi chỉ số một thang đo."
+  "Measured change between stored snapshots, one scale per metric.": "Mức thay đổi đo được giữa các bản chụp đã lưu, mỗi chỉ số một thang đo.",
+  "Performance trend": "Xu hướng hiệu suất",
+  "Cumulative measured change indexed to 100 at the first measured period. Hover for absolute values.": "Thay đổi tích lũy đo được, được chuẩn hóa về 100 tại kỳ đo đầu tiên. Di chuột để xem giá trị tuyệt đối.",
+  "Engagement by platform": "Tương tác theo nền tảng",
+  "Likes, comments, and shares by platform for {range}": "Lượt thích, bình luận và chia sẻ theo nền tảng cho {range}",
+  "Posts, per-post averages, and totals stay separate.": "Số bài, trung bình mỗi bài và tổng số được tách riêng.",
+  "Bars compare average engagement per post.": "Các thanh so sánh tương tác trung bình mỗi bài.",
+  "Not tracked by the connected providers: {metrics}.": "Nhà cung cấp đã kết nối không theo dõi: {metrics}."
 }

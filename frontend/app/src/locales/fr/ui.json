@@ -672,5 +672,12 @@
   "Text": "Texte",
   "Video": "Vidéo",
   "Metrics over time": "Indicateurs dans le temps",
-  "Measured change between stored snapshots, one scale per metric.": "Évolution mesurée entre les instantanés enregistrés, une échelle par indicateur."
+  "Measured change between stored snapshots, one scale per metric.": "Évolution mesurée entre les instantanés enregistrés, une échelle par indicateur.",
+  "Performance trend": "Évolution des performances",
+  "Cumulative measured change indexed to 100 at the first measured period. Hover for absolute values.": "Évolution cumulée mesurée, indexée à 100 sur la première période mesurée. Survolez pour les valeurs absolues.",
+  "Engagement by platform": "Interactions par plateforme",
+  "Likes, comments, and shares by platform for {range}": "J’aime, commentaires et partages par plateforme pour {range}",
+  "Posts, per-post averages, and totals stay separate.": "Publications, moyennes par publication et totaux restent distincts.",
+  "Bars compare average engagement per post.": "Les barres comparent l’engagement moyen par publication.",
+  "Not tracked by the connected providers: {metrics}.": "Non suivi par les fournisseurs connectés : {metrics}."
 }

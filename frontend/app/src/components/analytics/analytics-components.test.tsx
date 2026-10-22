@@ -5,7 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { AnalyticsToolbar } from "./analytics-toolbar";
 import { MetricCards } from "./metric-cards";
-import { PlatformMetricChart } from "./platform-metric-chart";
+import { PlatformEngagementChart } from "./platform-engagement-chart";
 import { TopPostsTable } from "./top-posts-table";
 import type { AnalyticsPostRow, AnalyticsSummary, PlatformMetrics } from "@/types";
 
@@ -185,10 +185,10 @@ describe("top Posts table", () => {
   });
 });
 
-describe("platform comparison chart", () => {
-  it("exposes the chart values as a table and names awaiting platforms", () => {
+describe("platform engagement chart", () => {
+  it("stacks engagement in one chart and exposes the values as a table", () => {
     render(
-      <PlatformMetricChart
+      <PlatformEngagementChart
         rows={[
           platformRow(),
           platformRow({ last_synced_at: "2026-10-21T12:00:00Z", platform: "threads", views: 80 }),
@@ -210,7 +210,7 @@ describe("platform comparison chart", () => {
       within(instagram)
         .getAllByRole("cell")
         .map((cell) => cell.textContent),
-    ).toEqual(["300", "5", "1", "1", "2"]);
+    ).toEqual(["5", "1", "1", "7", "2", "300"]);
     expect(table.queryByText("TikTok")).not.toBeInTheDocument();
     expect(screen.getByText("Awaiting first sync: Facebook")).toBeInTheDocument();
   });

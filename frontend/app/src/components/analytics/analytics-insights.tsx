@@ -3,17 +3,13 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
   ResponsiveContainer,
-  Scatter,
-  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
-  ZAxis,
 } from "recharts";
 import { Badge } from "@meltiply/ui/badge";
 import { Button } from "@meltiply/ui/button";
@@ -30,6 +26,7 @@ import type {
   AnalyticsBestTime,
   AnalyticsDashboard,
   AnalyticsDaySeries,
+  AnalyticsMetric,
   AnalyticsPlatformBreakdown,
   Platform,
 } from "@/types";
@@ -171,40 +168,6 @@ function platformRows(dashboard: AnalyticsDashboard) {
   return dashboard.platforms.filter((row) => PLATFORMS.includes(row.platform));
 }
 
-/** Posts published on each Platform, with the cohort total in the header. */
-export function PostsPerPlatformChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
-  const { t, language } = useI18n();
-  const rows = [...platformRows(dashboard)]
-    .sort((left, right) => right.posts - left.posts)
-    .map((row) => ({ ...row, label: platformDisplayName(row.platform) }));
-  const total = rows.reduce((sum, row) => sum + row.posts, 0);
-  if (rows.length === 0) return <EmptyInsight message={t("No published posts in this range.")} />;
-  return (
-    <InsightCard
-      title={t("Posts per platform")}
-      description={t("{count} published destinations", {
-        count: formatAnalyticsInteger(total, language),
-      })}
-    >
-      <div className="min-h-56 flex-1">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={rows} margin={{ bottom: 0, left: 0, right: 0, top: 18 }}>
-            <CartesianGrid vertical={false} stroke="var(--line)" />
-            <XAxis dataKey="label" tickLine={false} axisLine={false} />
-            <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={36} />
-            <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--hover)" }} />
-            <Bar dataKey="posts" name={t("Posts")} radius={[3, 3, 0, 0]} maxBarSize={42}>
-              {rows.map((row) => (
-                <Cell key={row.platform} fill={PLATFORM_COLORS[row.platform]} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </InsightCard>
-  );
-}
-
 /** Stacked publication counts per time bucket and Platform. */
 export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
@@ -302,141 +265,170 @@ function groupSeries(
     });
 }
 
-/** Totals for every stored metric per time bucket, each kept on its own scale. */
-function metricTotalsByBucket(
-  dashboard: AnalyticsDashboard,
-  grouping: Grouping,
-  language: Language,
-) {
-  const buckets = groupSeries(dashboard.series, grouping, language);
-  return buckets.map((bucket) => {
-    const row: Record<string, number | string> = { label: bucket.label };
-    for (const metric of ANALYTICS_METRICS) {
-      row[metric] = PLATFORMS.reduce(
-        (sum, platform) => sum + Number(bucket[`${platform}_${metric}`] ?? 0),
-        0,
-      );
-    }
-    return row;
-  });
+const TREND_COLORS: Record<AnalyticsMetric, string> = {
+  views: "var(--accent)",
+  likes: "var(--green)",
+  comments: "var(--orange)",
+  shares: "var(--teal)",
+};
+
+/** Dash patterns keep overlapping indexed lines distinguishable without more charts. */
+const TREND_DASHES: Record<AnalyticsMetric, string | undefined> = {
+  views: undefined,
+  likes: "6 4",
+  comments: "2 4",
+  shares: "10 4",
+};
+
+/** Index values stay whole numbers; the absolute value is in the tooltip. */
+function formatIndex(value: number, language: Language): string {
+  return new Intl.NumberFormat(language, { maximumFractionDigits: 0 }).format(value);
 }
 
 /**
- * Every stored metric over the same buckets, one small multiple per metric.
- * Separate scales keep views from flattening likes, comments, and shares, so
- * the whole dashboard stays readable without a metric mode switch.
+ * Cumulative measured change per metric, rebased to 100 at the first period
+ * where that metric was measured. Indexing is the documented alternative to a
+ * second y-axis: four metrics with different magnitudes share one honest scale,
+ * and the tooltip restores the absolute cumulative value.
  */
-export function MetricOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
-  const { t, language } = useI18n();
-  const [grouping, setGrouping] = useState<Grouping>("week");
-  const data = metricTotalsByBucket(dashboard, grouping, language);
-  if (data.length === 0)
-    return <EmptyInsight message={t("No measured changes in this range yet.")} />;
-  return (
-    <InsightCard
-      title={t("Metrics over time")}
-      description={t("Measured change between stored snapshots, one scale per metric.")}
-    >
-      <div className="mb-2 flex justify-end">
-        <GroupingControl grouping={grouping} onChange={setGrouping} />
-      </div>
-      <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-        {ANALYTICS_METRICS.map((metric) => (
-          <div key={metric}>
-            <div className="mb-1 flex items-baseline justify-between gap-2">
-              <span className="text-xs font-medium text-ink-2">
-                {analyticsMetricLabel(metric, t)}
-              </span>
-              <span className="font-mono text-xs tabular-nums text-ink-3">
-                {formatAnalyticsInteger(
-                  data.reduce((sum, row) => sum + Number(row[metric] ?? 0), 0),
-                  language,
-                )}
-              </span>
-            </div>
-            <div className="h-32">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data} margin={{ bottom: 0, left: 0, right: 0, top: 4 }}>
-                  <CartesianGrid vertical={false} stroke="var(--line)" />
-                  <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={16} />
-                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} />
-                  <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--hover)" }} />
-                  <Bar
-                    dataKey={metric}
-                    name={analyticsMetricLabel(metric, t)}
-                    fill="var(--accent)"
-                    radius={[3, 3, 0, 0]}
-                    maxBarSize={28}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        ))}
-      </div>
-    </InsightCard>
-  );
-}
-
-/** Likes, comments, and shares always share one comparable trend line each. */
-export function EngagementOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
-  const { t, language } = useI18n();
-  const [grouping, setGrouping] = useState<Grouping>("week");
+function trendSeries(dashboard: AnalyticsDashboard, grouping: Grouping, language: Language) {
   const buckets = groupSeries(dashboard.series, grouping, language);
-  const data = buckets.map((bucket) => {
+  const cumulative: Record<AnalyticsMetric, number> = {
+    views: 0,
+    likes: 0,
+    comments: 0,
+    shares: 0,
+  };
+  const totals = buckets.map((bucket) => {
     const row: Record<string, number | string> = { label: bucket.label };
-    for (const metric of ["likes", "comments", "shares"] as const) {
-      row[metric] = PLATFORMS.reduce(
+    for (const metric of ANALYTICS_METRICS) {
+      cumulative[metric] += PLATFORMS.reduce(
         (sum, platform) => sum + Number(bucket[`${platform}_${metric}`] ?? 0),
         0,
       );
+      row[metric] = cumulative[metric];
     }
     return row;
   });
-  if (data.length === 0)
+  const bases = {} as Record<AnalyticsMetric, number>;
+  for (const metric of ANALYTICS_METRICS) {
+    const first = totals.find((row) => Number(row[metric]) > 0);
+    bases[metric] = first ? Number(first[metric]) : 0;
+  }
+  const metrics = ANALYTICS_METRICS.filter((metric) => bases[metric] > 0);
+  const data = totals.map((row) => {
+    const indexed: Record<string, number | string | null> = { label: row.label };
+    for (const metric of ANALYTICS_METRICS) {
+      indexed[metric] = row[metric];
+      indexed[`${metric}_index`] =
+        bases[metric] > 0 ? (Number(row[metric]) / bases[metric]) * 100 : null;
+    }
+    return indexed;
+  });
+  return { data, metrics };
+}
+
+/** Tooltip for the indexed chart: index plus the absolute cumulative value. */
+function TrendTooltip({ active, label, payload }: TooltipProps) {
+  const { t, language } = useI18n();
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  return (
+    <div className="grid min-w-56 gap-1 rounded-control border border-line bg-surface px-2.5 py-1.5 text-xs shadow-raised">
+      <div className="font-medium text-ink">{label}</div>
+      {ANALYTICS_METRICS.map((metric) => {
+        const index = row[`${metric}_index`];
+        if (typeof index !== "number") return null;
+        return (
+          <div key={metric} className="flex items-baseline justify-between gap-4">
+            <span className="text-ink-2">{analyticsMetricLabel(metric, t)}</span>
+            <span className="font-mono tabular-nums text-ink">
+              {formatIndex(index, language)} ·{" "}
+              {formatAnalyticsInteger(Number(row[metric] ?? 0), language)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * One trend chart for every stored metric. Cumulative changes are indexed to
+ * 100 at the first measured period so views cannot flatten likes, comments, and
+ * shares; hovering restores absolute values. No nested panels, no metric mode.
+ */
+export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
+  const { t, language } = useI18n();
+  const [grouping, setGrouping] = useState<Grouping>("week");
+  const { data, metrics } = trendSeries(dashboard, grouping, language);
+  if (data.length === 0 || metrics.length === 0)
     return <EmptyInsight message={t("No measured changes in this range yet.")} />;
   return (
     <InsightCard
-      title={t("Engagement over time")}
-      description={t("Likes, comments, and shares measured between snapshots.")}
+      title={t("Performance trend")}
+      description={t(
+        "Cumulative measured change indexed to 100 at the first measured period. Hover for absolute values.",
+      )}
     >
       <div className="mb-2 flex justify-end">
         <GroupingControl grouping={grouping} onChange={setGrouping} />
       </div>
-      <div className="h-64">
+      <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ bottom: 0, left: 0, right: 8, top: 8 }}>
+          <LineChart data={data} margin={{ bottom: 0, left: 0, right: 12, top: 8 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" />
-            <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={16} />
-            <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} />
-            <Tooltip content={<ChartTooltip />} />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} />
+            <YAxis
+              tickLine={false}
+              axisLine={false}
+              width={48}
+              tickFormatter={(value: number) => formatIndex(value, language)}
+            />
+            <Tooltip content={<TrendTooltip />} />
             <Legend />
-            <Line
-              type="monotone"
-              dataKey="likes"
-              name={t("Likes")}
-              stroke="var(--accent)"
-              strokeWidth={2}
-              dot={false}
-            />
-            <Line
-              type="monotone"
-              dataKey="comments"
-              name={t("Comments")}
-              stroke="var(--green)"
-              strokeWidth={2}
-              dot={false}
-            />
-            <Line
-              type="monotone"
-              dataKey="shares"
-              name={t("Shares")}
-              stroke="var(--orange)"
-              strokeWidth={2}
-              dot={false}
-            />
+            {metrics.map((metric) => (
+              <Line
+                key={metric}
+                type="monotone"
+                dataKey={`${metric}_index`}
+                name={analyticsMetricLabel(metric, t)}
+                stroke={TREND_COLORS[metric]}
+                strokeWidth={2}
+                strokeDasharray={TREND_DASHES[metric]}
+                dot={false}
+                connectNulls
+              />
+            ))}
           </LineChart>
         </ResponsiveContainer>
+      </div>
+      {/* A block wrapper keeps the visually hidden table from leaking its caption. */}
+      <div className="sr-only">
+        <table>
+          <caption>{t("Performance trend")}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{t("Date")}</th>
+              {metrics.map((metric) => (
+                <th key={metric} scope="col">
+                  {analyticsMetricLabel(metric, t)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row) => (
+              <tr key={String(row.label)}>
+                <th scope="row">{row.label}</th>
+                {metrics.map((metric) => (
+                  <td key={metric}>{formatAnalyticsInteger(Number(row[metric] ?? 0), language)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </InsightCard>
   );
@@ -646,71 +638,69 @@ export function FollowerEvolutionChart({ dashboard }: { dashboard: AnalyticsDash
   );
 }
 
-const FORMAT_METRICS = ["avg_engagement", "avg_views", "engagement"] as const;
-
-type FormatMetric = (typeof FORMAT_METRICS)[number];
-
-/** Ranked content formats with total/average separation and a best badge. */
+/** Ranked content formats with every stored value visible and one comparison bar. */
 export function ContentFormatBreakdown({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
-  const [metric, setMetric] = useState<FormatMetric>("avg_engagement");
   const rows = dashboard.formats.filter((row) => row.posts > 0);
   if (rows.length === 0) return <EmptyInsight message={t("No published posts in this range.")} />;
-  const sorted = [...rows].sort((left, right) => right[metric] - left[metric]);
-  const max = Math.max(1, ...sorted.map((row) => row[metric]));
+  const sorted = [...rows].sort((left, right) => right.avg_engagement - left.avg_engagement);
+  const max = Math.max(1, ...sorted.map((row) => row.avg_engagement));
   return (
     <InsightCard
       title={t("Content format breakdown")}
-      description={t("Totals and per-post averages stay separate.")}
+      description={t("Posts, per-post averages, and totals stay separate.")}
     >
-      <div className="mb-3 flex items-center">
-        <SegmentedControl
-          options={FORMAT_METRICS}
-          value={metric}
-          onChange={setMetric}
-          label={t("Metric")}
-          renderOption={(value) =>
-            value === "avg_engagement"
-              ? t("Avg engagement")
-              : value === "avg_views"
-                ? t("Avg views")
-                : t("Total engagement")
-          }
-        />
-      </div>
-      <ul className="flex flex-col gap-3">
+      <ul className="flex flex-1 flex-col gap-4">
         {sorted.map((row) => (
-          <li key={row.format} className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-            <Badge variant="outline" className="justify-center text-[10px]">
-              {analyticsFormatLabel(row.format, t)}
-            </Badge>
-            <div className="min-w-0">
-              <div className="flex items-baseline justify-between gap-2 text-xs">
-                <span className="text-ink-2">
+          <li key={row.format} className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <Badge variant="outline" className="justify-center text-[10px]">
+                  {analyticsFormatLabel(row.format, t)}
+                </Badge>
+                <span className="truncate text-xs text-ink-2">
                   {t("{count} posts", { count: formatAnalyticsInteger(row.posts, language) })}
                 </span>
-                <span className="font-mono tabular-nums text-ink">
-                  {metric === "engagement"
-                    ? formatAnalyticsInteger(row.engagement, language)
-                    : formatAverage(row[metric], language)}
-                </span>
               </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-line">
-                <div
-                  className="h-full rounded-full bg-accent w-(--bar-width)"
-                  style={
-                    {
-                      "--bar-width": `${Math.max(2, (row[metric] / max) * 100)}%`,
-                    } as React.CSSProperties
-                  }
-                />
-              </div>
+              {row === sorted[0] && <Badge className="text-[10px]">{t("Best")}</Badge>}
             </div>
-            {row === sorted[0] && <Badge className="text-[10px]">{t("Best")}</Badge>}
+            <dl className="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <dt className="text-ink-3">{t("Avg engagement")}</dt>
+                <dd className="font-mono tabular-nums text-ink">
+                  {formatAverage(row.avg_engagement, language)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-ink-3">{t("Avg views")}</dt>
+                <dd className="font-mono tabular-nums text-ink">
+                  {formatAverage(row.avg_views, language)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-ink-3">{t("Total engagement")}</dt>
+                <dd className="font-mono tabular-nums text-ink">
+                  {formatAnalyticsInteger(row.engagement, language)}
+                </dd>
+              </div>
+            </dl>
+            <div className="h-1.5 overflow-hidden rounded-full bg-line">
+              <div
+                className="h-full rounded-full bg-accent w-(--bar-width)"
+                style={
+                  {
+                    "--bar-width": `${Math.max(2, (row.avg_engagement / max) * 100)}%`,
+                  } as React.CSSProperties
+                }
+              />
+            </div>
           </li>
         ))}
       </ul>
       <p className="mt-3 text-[11px] text-ink-3">
+        {t("Bars compare average engagement per post.")}
+      </p>
+      <p className="mt-1 text-[11px] text-ink-3">
         {t("Formats are derived from each published Distribution's frozen attachments.")}
       </p>
     </InsightCard>
@@ -755,6 +745,11 @@ export function PlatformBreakdownTable({ dashboard }: { dashboard: AnalyticsDash
     { key: "followers", label: t("Followers") },
     { key: "follower_gain", label: t("Follower gain") },
   ];
+  const showSaves = sorted.some((row) => row.saves !== null);
+  const showClicks = sorted.some((row) => row.clicks !== null);
+  const untracked = [!showSaves ? t("Saves") : null, !showClicks ? t("Clicks") : null].filter(
+    (value): value is string => value !== null,
+  );
   const sortBy = (key: PlatformSortKey) =>
     setSort((current) => ({
       direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
@@ -769,191 +764,92 @@ export function PlatformBreakdownTable({ dashboard }: { dashboard: AnalyticsDash
     return formatAnalyticsInteger(Number(raw), language);
   };
   return (
-    <div className="overflow-x-auto">
-      <Table className="min-w-[1080px]">
-        <colgroup>
-          <col className="w-[12%]" />
-          <col className="w-[6%]" />
-          <col className="w-[8%]" />
-          <col className="w-[6%]" />
-          <col className="w-[8%]" />
-          <col className="w-[6%]" />
-          <col className="w-[7%]" />
-          <col className="w-[9%]" />
-          <col className="w-[11%]" />
-          <col className="w-[8%]" />
-          <col className="w-[9%]" />
-          <col className="w-[5%]" />
-          <col className="w-[5%]" />
-        </colgroup>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="whitespace-nowrap">{t("Platform")}</TableHead>
-            {columns.map((column) => (
-              <TableHead key={column.key} className="whitespace-nowrap text-right">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto p-0 text-xs font-medium text-ink-3 hover:text-ink"
-                  aria-label={t("Sort by {metric}", { metric: column.label })}
-                  onClick={() => sortBy(column.key)}
-                >
-                  {column.label}
-                </Button>
-              </TableHead>
-            ))}
-            <TableHead className="whitespace-nowrap text-right">{t("Saves")}</TableHead>
-            <TableHead className="whitespace-nowrap text-right">{t("Clicks")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sorted.map((row) => (
-            <TableRow key={row.platform}>
-              <TableCell>
-                <span className="flex items-center gap-2">
-                  <PlatformIcon provider={row.platform} className="size-4" />
-                  {platformDisplayName(row.platform)}
-                </span>
-              </TableCell>
+    <div>
+      <div className="overflow-x-auto">
+        <Table className="min-w-[1080px]">
+          <colgroup>
+            <col className="w-[12%]" />
+            <col className="w-[6%]" />
+            <col className="w-[8%]" />
+            <col className="w-[6%]" />
+            <col className="w-[8%]" />
+            <col className="w-[6%]" />
+            <col className="w-[7%]" />
+            <col className="w-[9%]" />
+            <col className="w-[11%]" />
+            <col className="w-[8%]" />
+            <col className="w-[9%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+          </colgroup>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="whitespace-nowrap">{t("Platform")}</TableHead>
               {columns.map((column) => (
-                <TableCell
-                  key={column.key}
-                  className="whitespace-nowrap text-right font-mono tabular-nums"
-                >
-                  {value(row, column.key)}
-                </TableCell>
+                <TableHead key={column.key} className="whitespace-nowrap text-right">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto p-0 text-xs font-medium text-ink-3 hover:text-ink"
+                    aria-label={t("Sort by {metric}", { metric: column.label })}
+                    onClick={() => sortBy(column.key)}
+                  >
+                    {column.label}
+                  </Button>
+                </TableHead>
               ))}
-              <TableCell className="whitespace-nowrap text-right text-ink-3">
-                {row.saves === null
-                  ? t("Not tracked")
-                  : formatAnalyticsInteger(row.saves, language)}
-              </TableCell>
-              <TableCell className="whitespace-nowrap text-right text-ink-3">
-                {row.clicks === null
-                  ? t("Not tracked")
-                  : formatAnalyticsInteger(row.clicks, language)}
-              </TableCell>
+              {showSaves && (
+                <TableHead className="whitespace-nowrap text-right">{t("Saves")}</TableHead>
+              )}
+              {showClicks && (
+                <TableHead className="whitespace-nowrap text-right">{t("Clicks")}</TableHead>
+              )}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
-
-/** Weekly platform observations; no causal trend line is inferred. */
-export function FrequencyScatterChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
-  const { t, language } = useI18n();
-  const points = new Map<
-    Platform,
-    { engagementRate: number; posts: number; views: number; week: string }[]
-  >();
-  const weekly = groupSeries(dashboard.series, "week", language);
-  for (const bucket of weekly) {
-    for (const platform of PLATFORMS) {
-      const posts = Number(bucket[platform] ?? 0);
-      const views = Number(bucket[`${platform}_views`] ?? 0);
-      const engagement =
-        Number(bucket[`${platform}_likes`] ?? 0) +
-        Number(bucket[`${platform}_comments`] ?? 0) +
-        Number(bucket[`${platform}_shares`] ?? 0);
-      if (posts === 0 || views === 0) continue;
-      const list = points.get(platform) ?? [];
-      list.push({
-        engagementRate: (engagement / views) * 100,
-        posts,
-        views,
-        week: String(bucket.label),
-      });
-      points.set(platform, list);
-    }
-  }
-  if (points.size === 0)
-    return (
-      <EmptyInsight message={t("Not enough measured weeks to compare frequency and engagement.")} />
-    );
-  return (
-    <InsightCard
-      title={t("Posting frequency vs engagement")}
-      description={t("Weekly platform observations. Correlation is not causation.")}
-    >
-      <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
-          <ScatterChart margin={{ bottom: 8, left: 0, right: 8, top: 8 }}>
-            <CartesianGrid stroke="var(--line)" />
-            <XAxis
-              type="number"
-              dataKey="posts"
-              name={t("Posts")}
-              allowDecimals={false}
-              tickLine={false}
-              axisLine={false}
-            />
-            <YAxis
-              type="number"
-              dataKey="engagementRate"
-              name={t("Engagement rate")}
-              unit="%"
-              tickLine={false}
-              axisLine={false}
-              width={44}
-            />
-            <ZAxis range={[60, 60]} />
-            <Tooltip content={<ChartTooltip />} cursor={{ strokeDasharray: "3 3" }} />
-            <Legend />
-            {[...points.entries()].map(([platform, data]) => (
-              <Scatter
-                key={platform}
-                name={platformDisplayName(platform)}
-                data={data}
-                fill={PLATFORM_COLORS[platform]}
-              />
+          </TableHeader>
+          <TableBody>
+            {sorted.map((row) => (
+              <TableRow key={row.platform}>
+                <TableCell>
+                  <span className="flex items-center gap-2">
+                    <PlatformIcon provider={row.platform} className="size-4" />
+                    {platformDisplayName(row.platform)}
+                  </span>
+                </TableCell>
+                {columns.map((column) => (
+                  <TableCell
+                    key={column.key}
+                    className="whitespace-nowrap text-right font-mono tabular-nums"
+                  >
+                    {value(row, column.key)}
+                  </TableCell>
+                ))}
+                {showSaves && (
+                  <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
+                    {row.saves === null
+                      ? t("Not tracked")
+                      : formatAnalyticsInteger(row.saves, language)}
+                  </TableCell>
+                )}
+                {showClicks && (
+                  <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
+                    {row.clicks === null
+                      ? t("Not tracked")
+                      : formatAnalyticsInteger(row.clicks, language)}
+                  </TableCell>
+                )}
+              </TableRow>
             ))}
-          </ScatterChart>
-        </ResponsiveContainer>
+          </TableBody>
+        </Table>
       </div>
-    </InsightCard>
-  );
-}
-
-/** Average cumulative engagement at fixed elapsed-time milestones. */
-export function AccumulationChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
-  const { t } = useI18n();
-  const data = dashboard.accumulation.map((point) => ({
-    ...point,
-    label:
-      point.elapsed_hours < 24
-        ? `${point.elapsed_hours}h`
-        : point.elapsed_hours < 168
-          ? `${Math.round(point.elapsed_hours / 24)}d`
-          : `${Math.round(point.elapsed_hours / 168)}w`,
-  }));
-  if (data.length === 0)
-    return <EmptyInsight message={t("No measured engagement history in this range.")} />;
-  return (
-    <InsightCard
-      title={t("Engagement accumulation")}
-      description={t("Average engagement at elapsed time since publication.")}
-    >
-      <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ bottom: 0, left: 0, right: 8, top: 8 }}>
-            <CartesianGrid vertical={false} stroke="var(--line)" />
-            <XAxis dataKey="label" tickLine={false} axisLine={false} />
-            <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} />
-            <Tooltip content={<ChartTooltip />} />
-            <Line
-              type="monotone"
-              dataKey="avg_engagement"
-              name={t("Average engagement")}
-              stroke="var(--accent)"
-              strokeWidth={2}
-              dot={{ r: 3 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </InsightCard>
+      {untracked.length > 0 && (
+        <p className="px-4 pb-3 pt-2 text-[11px] text-ink-3">
+          {t("Not tracked by the connected providers: {metrics}.", {
+            metrics: untracked.join(", "),
+          })}
+        </p>
+      )}
+    </div>
   );
 }

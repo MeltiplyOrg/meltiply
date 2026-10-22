@@ -26,6 +26,17 @@ Contract change: approved in conversation on 2026-10-19
 > header re-ranking. Chart-local selectors use the shared sliding segmented
 > control. Tables declare explicit column widths so headers and state labels no
 > longer clip.
+> Implementation note (2026-10-22, density revision): the dashboard is reduced
+> from ten chart cards to five single-plot charts. Nested small multiples are
+> gone: the platform comparison is one stacked likes/comments/shares bar chart
+> (views and posts in its tooltip and hidden table), and the time series is one
+> indexed multi-series line chart (cumulative change rebased to 100 at the first
+> measured period, absolute values on hover). The posts-per-platform card, the
+> posting-frequency scatter, and the engagement-accumulation chart are no longer
+> rendered; the dashboard endpoint still returns their data. The content-format
+> card shows posts, per-post averages, and totals together without a metric
+> selector. Saves/clicks columns appear only when a provider reports them,
+> otherwise a footnote names them as untracked.
 
 ## 1. Summary
 

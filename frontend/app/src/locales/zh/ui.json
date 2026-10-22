@@ -672,5 +672,12 @@
   "Text": "纯文字",
   "Video": "视频",
   "Metrics over time": "指标随时间变化",
-  "Measured change between stored snapshots, one scale per metric.": "已保存快照之间的测量变化，每项指标使用独立刻度。"
+  "Measured change between stored snapshots, one scale per metric.": "已保存快照之间的测量变化，每项指标使用独立刻度。",
+  "Performance trend": "表现趋势",
+  "Cumulative measured change indexed to 100 at the first measured period. Hover for absolute values.": "累计测量变化，以首个测量周期为 100 进行索引。悬停查看绝对值。",
+  "Engagement by platform": "各平台互动",
+  "Likes, comments, and shares by platform for {range}": "各平台在{range}内的点赞、评论和分享",
+  "Posts, per-post averages, and totals stay separate.": "帖子数、单帖平均值和总计分别显示。",
+  "Bars compare average engagement per post.": "条形比较每帖的平均互动量。",
+  "Not tracked by the connected providers: {metrics}.": "已连接的提供商未跟踪：{metrics}。"
 }

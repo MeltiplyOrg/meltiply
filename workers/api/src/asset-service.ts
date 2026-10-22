@@ -1435,7 +1435,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                   client,
                   sessionId,
                   current,
-                  sessionResult.rows[0]!,
+                  sessionResult.rows[0],
                 );
                 return {
                   asset: mapAsset(assetResult.rows[0]!),

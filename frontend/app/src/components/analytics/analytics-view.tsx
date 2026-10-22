@@ -29,7 +29,7 @@ import {
   parseAnalyticsSearchParams,
   resolveAnalyticsEmptyState,
 } from "./analytics-helpers";
-import { AnalyticsToolbar, analyticsMetricLabel, analyticsRangeLabel } from "./analytics-toolbar";
+import { AnalyticsToolbar, analyticsRangeLabel } from "./analytics-toolbar";
 import { MetricCards } from "./metric-cards";
 import {
   AccumulationChart,
@@ -51,9 +51,7 @@ import type { Platform } from "@/types";
 function AnalyticsBody({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-lenis-prevent>
-      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-3 px-4 pb-8 pt-3 sm:px-6">
-        {children}
-      </div>
+      <div className="flex w-full flex-col gap-3 px-4 pb-8 pt-3 sm:px-6">{children}</div>
     </div>
   );
 }
@@ -263,7 +261,6 @@ export function AnalyticsView(): React.ReactElement {
         selectedFormat={format}
         selectedRange={range}
         selectedPlatform={platform}
-        selectedMetric={metric}
         refreshing={refreshing}
         onAccountChange={(nextAccountId) => {
           const account = (accountsQuery.data ?? []).find(
@@ -298,9 +295,6 @@ export function AnalyticsView(): React.ReactElement {
             range,
           });
         }}
-        onMetricChange={(nextMetric) =>
-          updateSearch({ accountId, format, metric: nextMetric, platform, range })
-        }
         onRefresh={refresh}
       />
       <AnalyticsBody>
@@ -374,17 +368,11 @@ export function AnalyticsView(): React.ReactElement {
             {showComparison && (
               <Card>
                 <CardHeader className="p-4 pb-0">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <CardTitle className="text-sm">{t("Platform comparison")}</CardTitle>
-                    <span className="text-xs font-normal text-ink-3">
-                      {analyticsMetricLabel(metric, t)}
-                    </span>
-                  </div>
+                  <CardTitle className="text-sm">{t("Platform comparison")}</CardTitle>
                 </CardHeader>
                 <CardContent className="p-4">
                   <PlatformMetricChart
                     rows={summary.by_platform}
-                    metric={metric}
                     rangeLabel={rangeLabel}
                     unsupportedPlatforms={summary.unsupported_platforms}
                   />
@@ -395,7 +383,7 @@ export function AnalyticsView(): React.ReactElement {
               <>
                 <div className="grid gap-4 lg:grid-cols-2">
                   <PostsPerPlatformChart dashboard={dashboardQuery.data} />
-                  <MetricOverTimeChart dashboard={dashboardQuery.data} metric={metric} />
+                  <MetricOverTimeChart dashboard={dashboardQuery.data} />
                   <PostsOverTimeChart dashboard={dashboardQuery.data} />
                   <EngagementOverTimeChart dashboard={dashboardQuery.data} />
                   <FollowerEvolutionChart dashboard={dashboardQuery.data} />

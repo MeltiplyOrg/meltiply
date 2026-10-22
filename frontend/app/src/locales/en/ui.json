@@ -670,5 +670,7 @@
   "Carousel": "Carousel",
   "Image": "Image",
   "Text": "Text",
-  "Video": "Video"
+  "Video": "Video",
+  "Metrics over time": "Metrics over time",
+  "Measured change between stored snapshots, one scale per metric.": "Measured change between stored snapshots, one scale per metric."
 }

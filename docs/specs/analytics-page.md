@@ -17,6 +17,15 @@ Contract change: approved in conversation on 2026-10-19
 > frequency-vs-engagement scatter, engagement accumulation, and shared filters
 > for account and content format. Saves, clicks, and missing follower histories
 > are labeled "Not tracked" / unavailable rather than fabricated as zero.
+> Implementation note (2026-10-22, feedback revision): the dashboard now fills
+> the available width instead of a centered 1200px column. The toolbar carries
+> filters only (range, platform, account, format) and no longer switches a global
+> metric mode: the platform comparison and time-series cards render one small
+> multiple per stored metric, the engagement trend always shows likes, comments,
+> and shares, and the top-Posts table keeps all metric columns visible with
+> header re-ranking. Chart-local selectors use the shared sliding segmented
+> control. Tables declare explicit column widths so headers and state labels no
+> longer clip.
 
 ## 1. Summary
 

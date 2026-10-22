@@ -670,5 +670,7 @@
   "Carousel": "轮播图",
   "Image": "单图",
   "Text": "纯文字",
-  "Video": "视频"
+  "Video": "视频",
+  "Metrics over time": "指标随时间变化",
+  "Measured change between stored snapshots, one scale per metric.": "已保存快照之间的测量变化，每项指标使用独立刻度。"
 }

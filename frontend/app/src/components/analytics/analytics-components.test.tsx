@@ -80,7 +80,6 @@ const toolbarProps = {
   accounts: [],
   onAccountChange: vi.fn(),
   onFormatChange: vi.fn(),
-  onMetricChange: vi.fn(),
   onPlatformChange: vi.fn(),
   onRangeChange: vi.fn(),
   onRefresh: vi.fn(),
@@ -88,20 +87,15 @@ const toolbarProps = {
   refreshing: false,
   selectedAccountId: undefined,
   selectedFormat: undefined,
-  selectedMetric: "views" as const,
   selectedPlatform: undefined,
   selectedRange: "30d" as const,
 };
 
 describe("analytics toolbar", () => {
-  it("switches the ranking metric and reloads stored metrics", () => {
-    const onMetricChange = vi.fn();
+  it("offers filters and a reload without a single-metric mode", () => {
     const onRefresh = vi.fn();
-    render(
-      <AnalyticsToolbar {...toolbarProps} onMetricChange={onMetricChange} onRefresh={onRefresh} />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Likes" }));
-    expect(onMetricChange).toHaveBeenCalledWith("likes");
+    render(<AnalyticsToolbar {...toolbarProps} onRefresh={onRefresh} />);
+    expect(screen.queryByRole("group", { name: "Metric" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh analytics" }));
     expect(onRefresh).toHaveBeenCalledOnce();
   });
@@ -201,7 +195,6 @@ describe("platform comparison chart", () => {
           platformRow({ last_synced_at: null, platform: "facebook", post_count: 4, views: 0 }),
           platformRow({ platform: "tiktok", post_count: 2, views: 999 }),
         ]}
-        metric="views"
         rangeLabel="Last 30 days"
         unsupportedPlatforms={["tiktok"]}
       />,
@@ -212,8 +205,12 @@ describe("platform comparison chart", () => {
     expect(hiddenTable.closest(".sr-only")).not.toBeNull();
     expect(hiddenTable).not.toHaveClass("sr-only");
     const table = within(hiddenTable);
-    expect(table.getByRole("rowheader", { name: "Instagram" })).toBeInTheDocument();
-    expect(table.getByText("300")).toBeInTheDocument();
+    const instagram = table.getByRole("row", { name: /Instagram/ });
+    expect(
+      within(instagram)
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent),
+    ).toEqual(["300", "5", "1", "1", "2"]);
     expect(table.queryByText("TikTok")).not.toBeInTheDocument();
     expect(screen.getByText("Awaiting first sync: Facebook")).toBeInTheDocument();
   });

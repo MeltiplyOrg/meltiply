@@ -149,20 +149,21 @@ describe("analytics insights dashboard components", () => {
     expect(screen.getByText("3 published destinations")).toBeInTheDocument();
   });
 
-  it("renders metric over time with grouping toggles", () => {
-    render(<MetricOverTimeChart dashboard={fixture} metric="views" />);
-    expect(screen.getByRole("heading", { name: "Views over time" })).toBeInTheDocument();
+  it("renders every metric over time on its own scale", () => {
+    render(<MetricOverTimeChart dashboard={fixture} />);
+    expect(screen.getByRole("heading", { name: "Metrics over time" })).toBeInTheDocument();
+    for (const metric of ["Views", "Likes", "Comments", "Shares"]) {
+      expect(screen.getByText(metric)).toBeInTheDocument();
+    }
     fireEvent.click(screen.getByRole("button", { name: "Day" }));
     expect(screen.getByRole("button", { name: "Day" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("renders multi-series engagement over time with metric filters", () => {
+  it("renders every engagement series without hiding any behind a toggle", () => {
     render(<EngagementOverTimeChart dashboard={fixture} />);
     expect(screen.getByRole("heading", { name: "Engagement over time" })).toBeInTheDocument();
-    const likesToggle = screen.getByRole("button", { name: "Likes" });
-    expect(likesToggle).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(likesToggle);
-    expect(likesToggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "Likes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Metrics" })).not.toBeInTheDocument();
   });
 
   it("renders the 7x24 best time heatmap and identifies the best slot", () => {

@@ -74,7 +74,7 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
 
   // Default ranking is views descending. Ten rows load; Load more reaches the
   // unsupported and not-yet-synced destinations that rank below them.
-  const table = page.locator("div.hidden.md\\:block table");
+  const table = page.locator("div.hidden.lg\\:block table");
   await expect(table.locator("tbody tr")).toHaveCount(10);
   await expect(table.locator("tbody tr").first()).toContainText("Analytics E2E older");
   await expect(table.getByText("Partial")).toBeVisible();
@@ -87,7 +87,7 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
 
   // Metric headers re-rank. Shares tie between the launch and older Posts, and
   // the tie-break prefers the newer publication.
-  await page.getByRole("button", { name: "Sort by Shares" }).click();
+  await table.getByRole("button", { name: "Sort by Shares" }).click();
   await expect(page).toHaveURL(/metric=shares/);
   await expect(table.locator("tbody tr").first()).toContainText("Analytics E2E launch");
 
@@ -119,7 +119,7 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page.getByText(/Last synced/)).toBeVisible();
 
   // Every ranking control is keyboard operable.
-  await page.getByRole("button", { name: "Sort by Views" }).focus();
+  await table.getByRole("button", { name: "Sort by Views" }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/metric=views/);
 

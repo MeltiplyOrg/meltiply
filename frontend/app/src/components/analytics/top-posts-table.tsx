@@ -105,14 +105,17 @@ function MetricHeader({
   const { t } = useI18n();
   const label = analyticsMetricLabel(metric, t);
   return (
-    <TableHead aria-sort={activeMetric === metric ? "descending" : "none"} className="text-right">
+    <TableHead
+      aria-sort={activeMetric === metric ? "descending" : "none"}
+      className="whitespace-nowrap text-right"
+    >
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => onMetricChange(metric)}
         aria-label={t("Sort by {metric}", { metric: label })}
-        className="h-6 gap-1 px-1 text-xs font-medium text-ink-3 hover:text-ink"
+        className="h-6 gap-1 whitespace-nowrap px-1 text-xs font-medium text-ink-3 hover:text-ink"
       >
         {label}
         {activeMetric === metric && <ArrowDown className="size-3" aria-hidden="true" />}
@@ -124,10 +127,10 @@ function MetricHeader({
 /**
  * Ranked Post table with a stacked phone layout.
  *
- * The desktop table and the phone list read the same rows and row state; only
+ * The desktop table and the stacked list read the same rows and row state; only
  * their geometry differs, so no view can show a different ranking or invented
- * value. Metric headers re-rank in place, and Load more raises the top-N window
- * without offset paging.
+ * value. All four stored metrics stay visible; their headers re-rank in place,
+ * and Load more raises the top-N window without offset paging.
  */
 export function TopPostsTable({
   posts,
@@ -148,13 +151,22 @@ export function TopPostsTable({
         </p>
       ) : (
         <>
-          <div className="hidden md:block">
-            <Table>
+          <div className="hidden overflow-x-auto lg:block">
+            <Table className="min-w-[900px]">
+              <colgroup>
+                <col className="w-[28%]" />
+                <col className="w-[17%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+              </colgroup>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[32%]">{t("Post")}</TableHead>
-                  <TableHead className="w-[22%]">{t("Platforms")}</TableHead>
-                  <TableHead className="w-[14%]">{t("Published")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("Post")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("Platforms")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("Published")}</TableHead>
                   {ANALYTICS_METRICS.map((key) => (
                     <MetricHeader
                       key={key}
@@ -176,13 +188,13 @@ export function TopPostsTable({
                       <TableCell>
                         <PlatformSummary row={row} />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-nowrap">
                         <time dateTime={row.published_at} title={exact}>
                           {formatAnalyticsRelativeTime(row.published_at, language)}
                         </time>
                       </TableCell>
                       {ANALYTICS_METRICS.map((key) => (
-                        <TableCell key={key} className="text-right">
+                        <TableCell key={key} className="whitespace-nowrap text-right">
                           <MetricValue row={row} metric={key} language={language} t={t} />
                         </TableCell>
                       ))}
@@ -192,7 +204,7 @@ export function TopPostsTable({
               </TableBody>
             </Table>
           </div>
-          <ul className="divide-y divide-line md:hidden">
+          <ul className="divide-y divide-line lg:hidden">
             {posts.map((row) => {
               const exact = formatAnalyticsTimestamp(row.published_at, language);
               return (

@@ -670,5 +670,7 @@
   "Carousel": "Bộ sưu tập",
   "Image": "Hình ảnh",
   "Text": "Văn bản",
-  "Video": "Đoạn video"
+  "Video": "Đoạn video",
+  "Metrics over time": "Chỉ số theo thời gian",
+  "Measured change between stored snapshots, one scale per metric.": "Mức thay đổi đo được giữa các bản chụp đã lưu, mỗi chỉ số một thang đo."
 }

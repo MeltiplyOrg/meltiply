@@ -1,6 +1,5 @@
 import { RotateCw } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
-import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { cn } from "@meltiply/ui/utils";
@@ -67,21 +66,21 @@ export interface AnalyticsToolbarProps {
   selectedFormat: AnalyticsFormat | undefined;
   selectedRange: AnalyticsRangePreset;
   selectedPlatform: Platform | undefined;
-  selectedMetric: AnalyticsMetric;
   /** True while stored metrics are refetching; prior data stays visible. */
   refreshing: boolean;
   onAccountChange: (accountId: string | undefined) => void;
   onFormatChange: (format: AnalyticsFormat | undefined) => void;
   onRangeChange: (range: AnalyticsRangePreset) => void;
   onPlatformChange: (platform: Platform | undefined) => void;
-  onMetricChange: (metric: AnalyticsMetric) => void;
   onRefresh: () => void;
 }
 
 /**
- * Analytics filter row: range preset, one platform, the ranking metric, and a
- * reload that only re-reads stored snapshots. Controls keep their geometry and
- * scroll horizontally on narrow screens rather than wrapping or disappearing.
+ * Analytics filter row: range preset, platform, connected account, and content
+ * format, plus a reload that only re-reads stored snapshots. Every metric stays
+ * visible in the charts, so the row never switches the dashboard into a
+ * single-metric mode. Controls keep their geometry and scroll horizontally on
+ * narrow screens rather than wrapping or disappearing.
  */
 export function AnalyticsToolbar({
   accounts,
@@ -90,13 +89,11 @@ export function AnalyticsToolbar({
   selectedFormat,
   selectedRange,
   selectedPlatform,
-  selectedMetric,
   refreshing,
   onAccountChange,
   onFormatChange,
   onRangeChange,
   onPlatformChange,
-  onMetricChange,
   onRefresh,
 }: AnalyticsToolbarProps): React.ReactElement {
   const { t } = useI18n();
@@ -181,14 +178,6 @@ export function AnalyticsToolbar({
           ))}
         </SelectContent>
       </Select>
-      <SegmentedControl
-        options={METRIC_OPTIONS}
-        value={selectedMetric}
-        onChange={(metric) => onMetricChange(metric)}
-        label={t("Metric")}
-        className="shrink-0"
-        renderOption={(metric) => analyticsMetricLabel(metric, t)}
-      />
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -214,5 +203,3 @@ export function AnalyticsToolbar({
     </TopToolbar>
   );
 }
-
-const METRIC_OPTIONS: readonly AnalyticsMetric[] = ["views", "likes", "comments", "shares"];

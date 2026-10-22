@@ -670,5 +670,7 @@
   "Carousel": "Carrossel",
   "Image": "Imagem",
   "Text": "Texto",
-  "Video": "Vídeo"
+  "Video": "Vídeo",
+  "Metrics over time": "Métricas ao longo do tempo",
+  "Measured change between stored snapshots, one scale per metric.": "Variação medida entre capturas armazenadas, uma escala por métrica."
 }

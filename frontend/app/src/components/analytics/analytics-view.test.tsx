@@ -324,12 +324,14 @@ describe("analytics view", () => {
     expect(screen.getByRole("heading", { name: "Top posts" })).toBeInTheDocument();
   });
 
-  it("reloads stored metrics and updates shareable URL state", () => {
+  it("reloads stored metrics and re-ranks from a Post metric header", () => {
     renderView();
     fireEvent.click(screen.getByRole("button", { name: "Refresh analytics" }));
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["analytics"] });
-    const toolbar = within(screen.getByRole("toolbar"));
-    fireEvent.click(toolbar.getByRole("button", { name: "Likes" }));
+    expect(within(screen.getByRole("toolbar")).queryByRole("group", { name: "Metric" })).toBeNull();
+    const topPosts = screen.getByRole("heading", { name: "Top posts" }).closest(".rounded-card");
+    if (!topPosts) throw new Error("Top posts card missing");
+    fireEvent.click(within(topPosts as HTMLElement).getByRole("button", { name: "Sort by Likes" }));
     expect(navigate).toHaveBeenCalledWith("/analytics?metric=likes&range=30d");
   });
 
@@ -342,11 +344,14 @@ describe("analytics view", () => {
     };
     renderView();
     expect(screen.getByText(/Published Last 7 days/)).toBeInTheDocument();
-    const toolbar = within(screen.getByRole("toolbar"));
-    expect(toolbar.getByRole("button", { name: "Comments" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByLabelText("Platform")).toHaveTextContent("Threads");
+    const topPosts = screen.getByRole("heading", { name: "Top posts" }).closest(".rounded-card");
+    if (!topPosts) throw new Error("Top posts card missing");
+    expect(
+      within(topPosts as HTMLElement)
+        .getByRole("button", { name: "Sort by Comments" })
+        .closest("th"),
+    ).toHaveAttribute("aria-sort", "descending");
   });
 
   it("names unsupported platforms in a partial-data banner", () => {

@@ -195,7 +195,7 @@ export function saveOAuthConnectionEffect(
         }
         if (!existingRow) {
           // One Brand Profile owns at most one Channel per Provider: the
-          // profile-scoped index from `012_one_channel_per_provider.sql` is the
+          // profile-scoped index from `016_one_channel_per_provider.sql` is the
           // final arbiter, and this read turns the expected conflict into the
           // same actionable 409 instead of a constraint error.
           const profileChannel = yield* client.query<{ id: string }>(

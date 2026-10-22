@@ -286,6 +286,31 @@ The migration service runs the existing migration ledger before starting the
 runtime. A runtime rollback does not reverse database migrations; restore a
 compatible backup if schema compatibility requires it.
 
+The Channel-return branch originally numbered its one-Channel-per-Provider
+migration `012_one_channel_per_provider.sql`. Integration with the shared-Workspace
+migrations moves it to `016_one_channel_per_provider.sql` without changing its SQL.
+For a database that already applied the former filename, verify its recorded
+checksum is `4f3093462c43460f9b629d984fc5cefd2fade838b5d6f01d1ce5a13969d60e41`
+and that `platform_accounts_brand_profile_platform_unique` exists, then rename
+only that ledger entry before upgrading:
+
+```sql
+UPDATE public.schema_migrations
+SET name = '016_one_channel_per_provider.sql'
+WHERE name = '012_one_channel_per_provider.sql'
+  AND checksum = '4f3093462c43460f9b629d984fc5cefd2fade838b5d6f01d1ce5a13969d60e41'
+  AND to_regclass('public.platform_accounts_brand_profile_platform_unique') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.schema_migrations
+    WHERE name = '016_one_channel_per_provider.sql'
+  );
+```
+
+Expect exactly one updated row when the old entry exists. If its checksum differs
+or the index is absent, stop and investigate rather than rerunning the migration
+or resetting data. Fresh databases and databases upgraded only from master do
+not need this ledger adjustment.
+
 ## Administration and recovery
 
 Administrator operations use a mode-0600 Unix socket inside the runtime container;

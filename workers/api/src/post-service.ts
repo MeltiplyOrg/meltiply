@@ -47,6 +47,11 @@ import type {
   SchedulePostInput,
   UpdatePostInput,
 } from "./post-types";
+import {
+  releaseQueueMembershipEffect,
+  requireNoQueueMembershipEffect,
+  reserveQueueSlotEffect,
+} from "./publishing-queue-store";
 
 type Schemas = components["schemas"];
 type Platform = Schemas["Platform"];
@@ -56,7 +61,11 @@ type PostStatus = Schemas["PostStatus"];
 
 const postColumns = `
   id, org_id, brand_profile_id, title, default_text, status, revision,
-  created_at, updated_at`;
+  created_at, updated_at,
+  (SELECT jsonb_build_object('queue_id', membership.queue_id,
+           'queue_name', membership.queue_name, 'assigned_at', membership.assigned_at)
+     FROM publishing_queue_memberships membership
+    WHERE membership.post_id = posts.id AND membership.released_at IS NULL) AS queue_membership`;
 
 /**
  * Columns selected for every attachment projection. `r2_key` no longer lives on
@@ -78,6 +87,7 @@ interface PostRow extends Record<string, unknown> {
   id: string;
   org_id: string;
   revision: number | string;
+  queue_membership: Schemas["QueueMembership"] | null;
   status: PostStatus;
   title: string;
   updated_at: Date | string;
@@ -388,6 +398,10 @@ function assemblePost(row: PostRow, collections: PostCollections): Post {
     distributions: collections.distributions.get(row.id) ?? [],
     id: row.id,
     org_id: row.org_id,
+    queue_membership: row.queue_membership === null ? null : {
+      ...row.queue_membership,
+      assigned_at: new Date(row.queue_membership.assigned_at).toISOString(),
+    },
     revision: Number(row.revision),
     status: row.status,
     targets: collections.targets.get(row.id) ?? [],
@@ -429,7 +443,7 @@ function assemblePostsEffect(
  * @param preloads - Collections already loaded in this transaction, keyed by Post id.
  * @returns Effect resolving to the assembled Post read model.
  */
-function assembleSinglePostEffect(
+export function assembleSinglePostEffect(
   client: EffectTransactionClient,
   row: PostRow,
   preloads: PostCollectionPreloads = {},
@@ -452,7 +466,7 @@ function assembleSinglePostEffect(
  * @returns Effect resolving to the locked Post row.
  * @throws {CoreApiError} 404 `post_not_found` when the Post is missing, owned by another workspace, or deleted.
  */
-function lockPostEffect(
+export function lockPostEffect(
   client: EffectTransactionClient,
   postId: string,
 ): Effect.Effect<PostRow, CoreApiError | DatabaseError> {
@@ -1554,6 +1568,11 @@ export function createPostApiService(
           if (filters.brandProfileId) {
             conditions.push(`posts.brand_profile_id = ${parameter(filters.brandProfileId)}`);
           }
+          if (filters.queueId) {
+            conditions.push(`EXISTS (SELECT 1 FROM publishing_queue_memberships membership
+              WHERE membership.post_id = posts.id AND membership.queue_id = ${parameter(filters.queueId)}
+                AND membership.released_at IS NULL)`);
+          }
           values.push(filters.limit + 1, filters.offset);
           const result = yield* client.query<PostRow>(
             `SELECT ${postColumns}
@@ -1732,6 +1751,8 @@ export function createPostApiService(
               catch: validationError,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
+            // The Post lock serializes explicit Queue removal with every scheduling mode.
+            if (!input.queueId) yield* requireNoQueueMembershipEffect(client, postId);
             const saved = input.targets ? undefined : yield* loadSavedTargetsEffect(client, postId);
             const targets = input.targets ?? saved!.inputs;
             // Scheduling the saved set returns exactly the rows already read, and
@@ -1875,10 +1896,15 @@ export function createPostApiService(
             if (created.length > 0) {
               yield* usageGuardEffect(client, organizationId, created.length);
             }
-            const scheduled =
-              input.scheduledAt !== null && input.scheduledAt.getTime() > now.getTime();
+            if (input.queueId && actionable.length === 0) {
+              return yield* Effect.fail(new CoreApiError(409, "invalid_state", "This Post has no editable publication targets."));
+            }
+            const deliveryAt = input.queueId
+              ? yield* reserveQueueSlotEffect(client, organizationId, post.brand_profile_id, postId, input.queueId, now)
+              : input.scheduledAt;
+            const scheduled = deliveryAt !== null && deliveryAt !== undefined && deliveryAt.getTime() > now.getTime();
             const status = scheduled ? ("scheduled" as const) : ("queued" as const);
-            const scheduledAt = input.scheduledAt?.toISOString() ?? null;
+            const scheduledAt = deliveryAt?.toISOString() ?? null;
             const rescheduledIds = yield* reschedulePendingDistributionsEffect(
               client,
               postId,
@@ -1897,7 +1923,7 @@ export function createPostApiService(
             );
             const command = {
               now,
-              scheduledAt: scheduled ? input.scheduledAt : null,
+              scheduledAt: scheduled ? deliveryAt : null,
             };
             yield* insertOutboxBatchEffect(client, organizationId, createdIds, command);
             if (rescheduledIds.length > 0) {
@@ -2032,6 +2058,7 @@ export function createPostApiService(
               }
             }
             yield* cancelPendingDistributionsEffect(client, postId);
+            yield* releaseQueueMembershipEffect(client, postId);
             yield* lockPostAttachmentAssetsEffect(client, postId);
             yield* client.query("DELETE FROM post_attachments WHERE post_id = $1", [postId]);
             yield* client.query("DELETE FROM post_targets WHERE post_id = $1", [postId]);

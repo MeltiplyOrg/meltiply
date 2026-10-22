@@ -16,6 +16,7 @@ type Schemas = components["schemas"];
  */
 interface PostFilters {
   brandProfileId?: string;
+  queueId?: string;
   limit: number;
   offset: number;
   status?: Schemas["PostStatus"];
@@ -61,15 +62,14 @@ interface UpdatePostInput {
 }
 
 /**
- * Scheduling intent for an existing Post. `scheduledAt` is always supplied;
- * `null` publishes immediately. Omitting `targets` schedules the Post's saved
- * targets, while supplying them replaces the saved target set.
+ * Scheduling intent for an existing Post. Exactly one of `scheduledAt`
+ * (null publishes immediately) and `queueId` must be supplied. Omitting
+ * `targets` uses saved targets; supplying them replaces the saved target set.
  */
-interface SchedulePostInput {
+type SchedulePostInput = {
   brandProfileId: string;
-  scheduledAt: Date | null;
   targets?: PostTargetInput[];
-}
+} & ({ scheduledAt: Date | null; queueId?: never } | { queueId: string; scheduledAt?: never });
 /**
  * Scoped delete intent for an existing Post.
  *

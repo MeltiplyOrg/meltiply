@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add Brand Profile-scoped recurring publishing Queues (`listQueues`,
+  `createQueue`, `getQueue`, `updateQueue`, `deleteQueue`), explicit pending
+  membership removal (`removePostFromQueue`), `Post.queue_membership` and the
+  `queue_id` Post filter. Scheduling accepts exactly one of `queue_id` or
+  `scheduled_at`; null still publishes immediately. Queue reservations are
+  immutable across configuration edits; gaps skip and overlaps choose the
+  post-transition instant. Existing delivery and reconciliation remain unchanged.
+
 - Add required nullable `Post.analytics`, with latest-snapshot totals across
   published Channels for likes, comments, shares, views, impressions, and reach.
   Missing snapshots produce null rather than invented zeros; saves and clicks

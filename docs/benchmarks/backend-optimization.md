@@ -6,9 +6,10 @@ concurrency, configuration, runner class, and PostgreSQL version.
 
 - Baseline revision: `master` at `d370259ef0c3` (the merge base of the
   integration branch).
-- Optimized revision: `logic-optimize-39` at `bfc005f` (the measured head; the
-  report, raw-result, and report-label commits that follow do not change
-  application code).
+- Original optimized revision: `logic-optimize-39` at `bfc005f`. The original
+  tables and raw results below describe that measured head, not later application
+  changes. The [follow-up query reductions](#follow-up-query-reductions) section
+  records the subsequent implementation and its separate hosted measurements.
 - Benchmark workflow: [`.github/workflows/backend-benchmark.yml`](../../.github/workflows/backend-benchmark.yml).
 - Run: [run 39650424133](https://github.com/MeltiplyOrg/meltiply/actions/runs/39650424133).
 - Raw results: [`results/2026-10-21-backend/`](results/2026-10-21-backend/).
@@ -35,13 +36,9 @@ avoidable work:
    Posts/Distributions/Calendar refetch after every success. On batch deletion
    this removes most of the client-visible round trips and response bytes.
 
-The measured tables retain a few tail regressions: `distributions.list.page100`
-rose 17.1% at p95 and 24.5% at p99, `calendar.range` rose 12.7% at p99, and
-`posts.delete.sequential-single-refetch.batch25` rose 17.6% at p95 and p99.
-Those code paths were unchanged by this branch (the first two issue no new
-work, and the sequential delete mode is not the optimized UI path), so the
-increases are most likely run-to-run noise; they are reported rather than
-hidden. No public API contract changed.
+The tables retain observed tail regressions rather than hiding them; see
+[regressions and trade-offs](#regressions-and-trade-offs). No public API contract
+changed.
 
 ## Workload
 
@@ -282,10 +279,14 @@ separate the backend-lock and invalidation costs.
 
 ## Regressions and trade-offs
 
-- Bounded concurrency is deliberately capped at four. Under a saturated local
-  PostgreSQL instance, concurrent requests can queue on connections and raise
-  p99 even while p50 and throughput improve; the results report both. Unbounded
-  fan-out is not used.
+- Bounded concurrency is deliberately capped at four; the original measured
+  bounded-concurrency modes all had lower p99 than their baseline counterparts.
+- `distributions.list.page100` rose 17.1% at p95 and 24.5% at p99,
+  `calendar.range` rose 12.7% at p99, and
+  `posts.delete.sequential-single-refetch.batch25` rose 17.6% at p95 and p99.
+  The list and Calendar implementations were unchanged; run-to-run noise is a
+  likely explanation there. The sequential delete path did change, so its
+  measured tail increase is retained without attributing it to concurrency.
 - The per-item-refetch modes remain slow by design: they exist to measure the
   cost the UI no longer pays, not to claim the browser still behaves that way.
 - The analytics win depends on data distribution and statistics freshness.
@@ -293,10 +294,9 @@ separate the backend-lock and invalidation costs.
   with refreshed statistics the optimized query is still faster and more stable,
   but the percentage is smaller. The retained raw results are from the
   refreshed-statistics run.
-- Asset upload-session creation (12 statements), schedule fan-out (15
-  statements), and the bounded list reads were left unchanged: the benchmark
-  showed no avoidable repeated work or lock contention worth a speculative
-  rewrite.
+- In the original measured revision, Asset upload-session creation used 12
+  statements, schedule fan-out used 15, and the bounded list reads were left
+  unchanged. Later reductions are measured separately below.
 - The benchmark excludes provider HTTP, Queue delivery, and Durable Object
   time; no optimization is claimed there.
 
@@ -344,3 +344,44 @@ Committed raw JSON from the run:
 
 The same files are attached to the workflow run as artifact
 `backend-benchmark-39650424133`.
+
+## Follow-up query reductions
+
+The subsequent implementation reuses the inserted upload-session row during
+grant planning, skips multipart-part reads for single-PUT sessions, and passes
+known-empty distributions into new-Post projection. Existing-session replay
+still acquires its row lock, writer deadlines are still persisted before signing,
+and existing Posts still load their distributions and analytics normally.
+
+Dropping scheduled targets now cancels the already-locked eligible Distribution
+ids and deletes only their pending/failed publish commands in one SQL statement.
+Leased commands and unrelated topics remain untouched. A first CTE-derived-id
+form selected the broad outbox state index and regressed latency; the final form
+keeps `aggregate_id = ANY($1)` so the partial aggregate index remains usable.
+The [hosted plan probe](https://github.com/MeltiplyOrg/meltiply/actions/runs/39715134667)
+records both plans; its temporary instrumentation was removed.
+
+[Run 39715661454](https://github.com/MeltiplyOrg/meltiply/actions/runs/39715661454)
+measured `master@d370259ef0c3` against `832bdf46bdcf` with three alternating
+repetitions, 30 measured samples after three warm-ups, and the existing deletion
+sample settings. All 32 workflows completed without scenario errors in every
+candidate repetition. Raw JSON and comparison files are available in artifact
+`backend-benchmark-39715661454`; these follow-up files are not part of the
+original committed result directory.
+
+This is a complete-branch comparison against `master`, not an isolated timing
+comparison against the previous optimized head. B/C denotes baseline/candidate;
+latencies are milliseconds.
+
+| Workflow                     | SQL/op B/C | p50 B/C       | p95 B/C         | p99 B/C         |
+| ---------------------------- | ---------- | ------------- | --------------- | --------------- |
+| assets.upload-session.create | 12 / 11    | 22.99 / 22.41 | 39.13 / 157.20  | 175.95 / 215.07 |
+| assets.upload-session.detail | 5 / 3      | 10.58 / 8.69  | 26.35 / 52.48   | 78.35 / 76.46   |
+| posts.create.draft           | 11 / 6     | 14.66 / 11.96 | 202.19 / 92.23  | 212.62 / 123.93 |
+| posts.schedule.drop19        | 19 / 18    | 55.16 / 58.05 | 147.53 / 279.70 | 236.68 / 326.24 |
+
+The query reductions were stable across all repetitions. They do not establish
+uniform latency improvements: target removal's p50 rose 5.2%, and its tail
+latencies and upload creation's tail latencies worsened. No latency win is
+claimed for those cases; the measured regressions remain explicit rather than
+being inferred away from the smaller SQL counts.

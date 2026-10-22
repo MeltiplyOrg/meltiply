@@ -68,6 +68,13 @@ bun run db:start
 BENCHMARK_DATABASE_NAME=meltiply_benchmark bun run benchmark:prepare
 ```
 
+Database preparation accepts only `localhost`, `127.0.0.1`, or `::1` by default,
+including PostgreSQL's effective query-string `host` override. An empty host
+cannot fall through to `PGHOST`. Set `BENCHMARK_ALLOW_REMOTE_DATABASE=1` only
+for an isolated, disposable remote benchmark server: preparation drops and
+recreates the benchmark database and changes fixture role credentials. Database
+names must still start with `meltiply_bench`.
+
 Run the harness:
 
 ```sh
@@ -79,15 +86,16 @@ bun run benchmark:backend
 
 Configuration:
 
-| Variable                       | Default        | Meaning                                      |
-| ------------------------------ | -------------- | -------------------------------------------- |
-| `BENCHMARK_SAMPLES`            | `20`           | Measured samples for read/mutation workflows |
-| `BENCHMARK_WARMUP`             | `3`            | Warm-up samples before measurement           |
-| `BENCHMARK_DELETE_SAMPLES`     | `3`            | Measured batches per delete mode             |
-| `BENCHMARK_DELETE_WARMUP`      | `1`            | Warm-up batches per delete mode              |
-| `BENCHMARK_DELETE_BATCH_SIZES` | `1,5,10,25,50` | Batch sizes                                  |
-| `BENCHMARK_DELETE_CONCURRENCY` | `4`            | Bounded deletion concurrency                 |
-| `BENCHMARK_ALLOW_ERRORS`       | unset          | Exit zero despite scenario errors            |
+| Variable                          | Default        | Meaning                                             |
+| --------------------------------- | -------------- | --------------------------------------------------- |
+| `BENCHMARK_SAMPLES`               | `20`           | Measured samples for read/mutation workflows        |
+| `BENCHMARK_WARMUP`                | `3`            | Warm-up samples before measurement                  |
+| `BENCHMARK_DELETE_SAMPLES`        | `3`            | Measured batches per delete mode                    |
+| `BENCHMARK_DELETE_WARMUP`         | `1`            | Warm-up batches per delete mode                     |
+| `BENCHMARK_DELETE_BATCH_SIZES`    | `1,5,10,25,50` | Batch sizes                                         |
+| `BENCHMARK_DELETE_CONCURRENCY`    | `4`            | Bounded deletion concurrency                        |
+| `BENCHMARK_ALLOW_ERRORS`          | unset          | Exit zero despite scenario errors                   |
+| `BENCHMARK_ALLOW_REMOTE_DATABASE` | `0`            | Set exactly `1` to permit a remote preparation host |
 
 The dataset is fixed in [`fixtures.mjs`](fixtures.mjs): one Workspace, one Brand
 Profile, 40 Channels, 300 Posts with attachments and published Distributions,
@@ -114,6 +122,13 @@ Markdown report are uploaded as artifacts.
 The harness may only use APIs present in both revisions. It is intentionally
 coupled to `workers/api/src` behavior, not to any optimization added on the
 candidate.
+
+Before pooling samples, the comparator requires every baseline and candidate
+run to match the first baseline's `config`, `dataset`, and sorted workflow names.
+Object-key and workflow ordering do not matter; configuration array values and
+their order do. The two sides may have different repetition counts. A mismatch
+identifies the side, run number, and metadata field, exits nonzero, and writes
+neither comparison output.
 
 ```sh
 bun run benchmark:compare -- \

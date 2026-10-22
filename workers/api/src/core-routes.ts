@@ -2189,9 +2189,17 @@ export function registerCoreRoutes(
       Effect.gen(function* () {
         const postId = yield* fromPromise(() => uuidParam(c.req.param("postId"), "post_id"));
         const body = yield* fromPromise(() => jsonBody(c));
-        yield* fromPromise(() => onlyKeys(body, ["brand_profile_id", "scheduled_at", "queue_id", "targets"]));
-        if (("scheduled_at" in body) === ("queue_id" in body)) {
-          return yield* Effect.fail(new CoreApiError(400, "invalid_request", "Supply exactly one of scheduled_at or queue_id."));
+        yield* fromPromise(() =>
+          onlyKeys(body, ["brand_profile_id", "scheduled_at", "queue_id", "targets"]),
+        );
+        if ("scheduled_at" in body === "queue_id" in body) {
+          return yield* Effect.fail(
+            new CoreApiError(
+              400,
+              "invalid_request",
+              "Supply exactly one of scheduled_at or queue_id.",
+            ),
+          );
         }
         const input: SchedulePostInput = yield* fromPromise(() => ({
           brandProfileId: uuidParam(stringField(body, "brand_profile_id"), "brand_profile_id"),

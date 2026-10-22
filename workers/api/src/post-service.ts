@@ -47,11 +47,7 @@ import type {
   SchedulePostInput,
   UpdatePostInput,
 } from "./post-types";
-import {
-  releaseQueueMembershipEffect,
-  requireNoQueueMembershipEffect,
-  reserveQueueSlotEffect,
-} from "./publishing-queue-store";
+import { releaseQueueMembershipEffect, reserveQueueSlotEffect } from "./publishing-queue-store";
 
 type Schemas = components["schemas"];
 type Platform = Schemas["Platform"];
@@ -398,10 +394,13 @@ function assemblePost(row: PostRow, collections: PostCollections): Post {
     distributions: collections.distributions.get(row.id) ?? [],
     id: row.id,
     org_id: row.org_id,
-    queue_membership: row.queue_membership === null ? null : {
-      ...row.queue_membership,
-      assigned_at: new Date(row.queue_membership.assigned_at).toISOString(),
-    },
+    queue_membership:
+      row.queue_membership === null
+        ? null
+        : {
+            ...row.queue_membership,
+            assigned_at: new Date(row.queue_membership.assigned_at).toISOString(),
+          },
     revision: Number(row.revision),
     status: row.status,
     targets: collections.targets.get(row.id) ?? [],
@@ -1751,8 +1750,17 @@ export function createPostApiService(
               catch: validationError,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
-            // The Post lock serializes explicit Queue removal with every scheduling mode.
-            if (!input.queueId) yield* requireNoQueueMembershipEffect(client, postId);
+            // The locked Post projection already carries membership, avoiding a
+            // second read on every independent manual Schedule/Publish Now.
+            if (!input.queueId && post.queue_membership !== null) {
+              return yield* Effect.fail(
+                new CoreApiError(
+                  409,
+                  "queue_membership_exists",
+                  "Remove this Post from its Queue before manually changing its Schedule.",
+                ),
+              );
+            }
             const saved = input.targets ? undefined : yield* loadSavedTargetsEffect(client, postId);
             const targets = input.targets ?? saved!.inputs;
             // Scheduling the saved set returns exactly the rows already read, and
@@ -1897,12 +1905,28 @@ export function createPostApiService(
               yield* usageGuardEffect(client, organizationId, created.length);
             }
             if (input.queueId && actionable.length === 0) {
-              return yield* Effect.fail(new CoreApiError(409, "invalid_state", "This Post has no editable publication targets."));
+              return yield* Effect.fail(
+                new CoreApiError(
+                  409,
+                  "invalid_state",
+                  "This Post has no editable publication targets.",
+                ),
+              );
             }
             const deliveryAt = input.queueId
-              ? yield* reserveQueueSlotEffect(client, organizationId, post.brand_profile_id, postId, input.queueId, now)
+              ? yield* reserveQueueSlotEffect(
+                  client,
+                  organizationId,
+                  post.brand_profile_id,
+                  postId,
+                  input.queueId,
+                  now,
+                )
               : input.scheduledAt;
-            const scheduled = deliveryAt !== null && deliveryAt !== undefined && deliveryAt.getTime() > now.getTime();
+            const scheduled =
+              deliveryAt !== null &&
+              deliveryAt !== undefined &&
+              deliveryAt.getTime() > now.getTime();
             const status = scheduled ? ("scheduled" as const) : ("queued" as const);
             const scheduledAt = deliveryAt?.toISOString() ?? null;
             const rescheduledIds = yield* reschedulePendingDistributionsEffect(
@@ -2058,7 +2082,7 @@ export function createPostApiService(
               }
             }
             yield* cancelPendingDistributionsEffect(client, postId);
-            yield* releaseQueueMembershipEffect(client, postId);
+            if (post.queue_membership !== null) yield* releaseQueueMembershipEffect(client, postId);
             yield* lockPostAttachmentAssetsEffect(client, postId);
             yield* client.query("DELETE FROM post_attachments WHERE post_id = $1", [postId]);
             yield* client.query("DELETE FROM post_targets WHERE post_id = $1", [postId]);

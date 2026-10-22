@@ -724,8 +724,12 @@ export function createDistributionMethods() {
             // before checking membership so per-Channel edits cannot split it.
             if (patch.scheduledAt !== undefined) {
               yield* lockOrganizationEffect(client, organizationId);
-              const owner = yield* client.query<{ post_id: string }>("SELECT post_id FROM distributions WHERE id = $1", [id]);
-              if (owner.rows[0]) yield* requireNoQueueMembershipEffect(client, owner.rows[0].post_id);
+              const owner = yield* client.query<{ post_id: string }>(
+                "SELECT post_id FROM distributions WHERE id = $1",
+                [id],
+              );
+              if (owner.rows[0])
+                yield* requireNoQueueMembershipEffect(client, owner.rows[0].post_id);
             }
             const result = yield* client.query<DistributionRow>(
               `UPDATE distributions SET

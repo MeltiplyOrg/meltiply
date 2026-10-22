@@ -56,9 +56,20 @@ export async function enforceWorkspaceCapabilities(
   }
 
   if (path.startsWith("/api/v1/queues")) {
-    const membershipRemoval = /^\/api\/v1\/queues\/[^/]+\/posts\/[^/]+$/.test(path) && method === "DELETE";
-    const allowed = can(actor.role, actor.isInstallationOwner, membershipRemoval ? "content:write" : "brand-profile:manage");
-    if (!allowed) return errorResponse(c.get("requestId"), 403, "forbidden_role", "Your Workspace role cannot perform this Queue action.");
+    const membershipRemoval =
+      /^\/api\/v1\/queues\/[^/]+\/posts\/[^/]+$/.test(path) && method === "DELETE";
+    const allowed = can(
+      actor.role,
+      actor.isInstallationOwner,
+      membershipRemoval ? "content:write" : "brand-profile:manage",
+    );
+    if (!allowed)
+      return errorResponse(
+        c.get("requestId"),
+        403,
+        "forbidden_role",
+        "Your Workspace role cannot perform this Queue action.",
+      );
     return next();
   }
   if (CONTENT_WRITE_PREFIXES.some((prefix) => path.startsWith(prefix))) {

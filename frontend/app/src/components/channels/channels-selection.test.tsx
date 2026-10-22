@@ -474,23 +474,4 @@ describe("Channels selection", () => {
       }),
     ).not.toBeChecked();
   });
-
-  /**
-   * The channel table is the only projection and keeps the full channel
-   * contract: copy controls, Brand Profile ownership, health affordance,
-   * settings dialog, and selection.
-   */
-  it("renders table rows with copy, health, profile, settings, and selection", () => {
-    queryResults.platforms.data = [{ ...connectedAccount, username: "alpha_tt" }];
-    renderChannels();
-
-    const row = screen.getByTestId(`channel-row-${connectedAccount.id}`);
-    expect(within(row).getByRole("checkbox", { name: "Select channel" })).toBeVisible();
-    expect(within(row).getByRole("button", { name: "Copy username" })).toBeVisible();
-    expect(within(row).getByRole("button", { name: "Copy channel ID" })).toBeVisible();
-    expect(within(row).getByText("Alpha Brand")).toBeVisible();
-    expect(within(row).getByRole("button", { name: "connected" })).toBeVisible();
-    expect(within(row).getByRole("button", { name: "Channel settings" })).toBeVisible();
-    expect(screen.getByRole("checkbox", { name: "Select all visible channels" })).toBeVisible();
-  });
 });

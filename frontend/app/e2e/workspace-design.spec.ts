@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { Schema } from "effect";
 import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 import {
   activeBrandProfileName,
@@ -912,6 +913,87 @@ test("keeps navigation focus and reconnect assignment correct in both palettes",
       await expect(
         page.getByRole("button", { name: "Connect Channel", exact: true }),
       ).toBeDisabled();
+    }
+  }
+});
+
+/**
+ * Keeps username presence from changing directory density and copies the actual
+ * identity text through the browser clipboard, without selecting its Channel.
+ * Only username metadata is controlled; auth, ownership, and Channels use real fixtures.
+ */
+test("keeps Channel identity rows compact and copies their text directly", async ({
+  page,
+  context,
+  request,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const workspace = await openIsolatedOwnerWorkspace(page);
+  const username = "studio.handle.with.a.long.identity";
+  const withUsernameId = controlledProviderAccountId("threads");
+  const withoutUsernameId = controlledProviderAccountId("instagram");
+  const provisioned = await provisionControlledChannels(request, workspace.profileName, [
+    { platform: "threads", displayName: "Studio Threads", providerUserId: withUsernameId },
+    { platform: "instagram", displayName: "Studio Instagram", providerUserId: withoutUsernameId },
+  ]);
+  const withUsername = provisioned.channels.find((channel) => channel.platform === "threads");
+  const withoutUsername = provisioned.channels.find((channel) => channel.platform === "instagram");
+  if (!withUsername || !withoutUsername) throw new Error("Expected both fixture Channels");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.route(/\/api\/v1\/platforms(?:\?.*)?$/, async (route) => {
+    const response = await route.fetch();
+    const payload = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(
+      await response.json(),
+    );
+    const accounts = Schema.decodeUnknownSync(
+      Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+    )(payload.accounts);
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        accounts: accounts.map((account) => ({
+          ...account,
+          username: account.id === withUsername.id ? username : null,
+        })),
+      },
+    });
+  });
+  for (const palette of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: palette });
+    for (const width of [1808, 390]) {
+      await page.setViewportSize({ width, height: 984 });
+      await page.goto("/channels");
+      const namedRow = page.getByTestId(`channel-row-${withUsername.id}`);
+      const unnamedRow = page.getByTestId(`channel-row-${withoutUsername.id}`);
+      await expect(namedRow).toBeVisible();
+      await expect(unnamedRow).toBeVisible();
+      const namedBox = await namedRow.boundingBox();
+      const unnamedBox = await unnamedRow.boundingBox();
+      if (!namedBox || !unnamedBox) throw new Error("Channel rows must be measurable");
+      expect(namedBox.height).toBeCloseTo(unnamedBox.height, 1);
+      const handle = namedRow.getByRole("button", { name: "Copy username", exact: true });
+      const identifier = namedRow.getByRole("button", { name: "Copy channel ID", exact: true });
+      await expect(handle).toHaveText(`@${username}`);
+      const handleBox = await handle.boundingBox();
+      const identifierBox = await identifier.boundingBox();
+      if (!handleBox || !identifierBox) throw new Error("Identity values must be measurable");
+      expect(handleBox.y).toBeCloseTo(identifierBox.y, 1);
+      await handle.click();
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(username);
+      await expect(page.getByText("Username copied", { exact: true })).toBeVisible();
+      await identifier.focus();
+      await page.keyboard.press("Enter");
+      await expect
+        .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+        .toBe(withUsernameId);
+      await expect(page.getByText("Channel ID copied", { exact: true })).toBeVisible();
+      await expect(namedRow.getByRole("checkbox", { name: "Select channel" })).not.toBeChecked();
+      await page.screenshot({
+        path: testInfo.outputPath(`channel-identities-${palette}-${width}.png`),
+        animations: "disabled",
+        fullPage: true,
+      });
     }
   }
 });

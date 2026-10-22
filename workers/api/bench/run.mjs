@@ -121,6 +121,7 @@ function statementKind(text) {
 /** Mutable per-scenario capture shared by every pooled connection. */
 const capture = { queries: [] };
 const instrumentedClients = new WeakSet();
+const explainedDropStatements = new Set();
 
 /** Wraps every pooled client's query method so statements and timings are recorded. */
 function instrumentPool(pool) {
@@ -134,8 +135,37 @@ function instrumentPool(pool) {
     client.query = async (textOrConfig, values) => {
       const text =
         typeof textOrConfig === "string" ? textOrConfig : String(textOrConfig?.text ?? "");
+      // Temporary diagnostic: inspect cleanup plans on the first drop19 warm-up.
+      const explainDrop =
+        text.includes("DELETE FROM outbox_events") &&
+        Array.isArray(values?.[0]) &&
+        values[0].length === 19 &&
+        !explainedDropStatements.has(text);
+      if (explainDrop) {
+        explainedDropStatements.add(text);
+        const variants = [text];
+        if (text.includes("SELECT id FROM cancelled")) {
+          variants.push(
+            text.replace(
+              "aggregate_id IN (SELECT id FROM cancelled)",
+              "aggregate_id = ANY($1::uuid[])",
+            ),
+          );
+        }
+        for (const statement of variants) {
+          const plan = await originalQuery(`EXPLAIN (FORMAT JSON) ${statement}`, values);
+          process.stdout.write(
+            `[DEBUG-drop19] ${JSON.stringify({ label, statement, plan: plan.rows })}\n`,
+          );
+        }
+      }
       const started = performance.now();
       const result = await originalQuery(textOrConfig, values);
+      if (explainDrop) {
+        process.stdout.write(
+          `[DEBUG-drop19] ${JSON.stringify({ label, durationMs: performance.now() - started })}\n`,
+        );
+      }
       capture.queries.push({
         durationMs: performance.now() - started,
         kind: statementKind(text),

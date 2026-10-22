@@ -23,7 +23,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 /** Default metric when the URL carries no supported value. */
 const DEFAULT_ANALYTICS_METRIC: AnalyticsMetric = "views";
 /** Default range when the URL carries no supported value. */
-const DEFAULT_ANALYTICS_RANGE: AnalyticsRangePreset = "30d";
+export const DEFAULT_ANALYTICS_RANGE: AnalyticsRangePreset = "30d";
 /** Rows raised by one Load more action, bounded by the page's maximum. */
 const ANALYTICS_LIMIT_STEP = 10;
 /** Initial top-Posts page size. */

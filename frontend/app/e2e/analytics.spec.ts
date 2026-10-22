@@ -91,7 +91,17 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page).toHaveURL(/metric=shares/);
   await expect(table.locator("tbody tr").first()).toContainText("Analytics E2E launch");
 
+  // The compact filter builder owns range, platform, account, and format.
+  const filterSummary = page.getByRole("toolbar").locator("summary");
+  const ensureFiltersOpen = async () => {
+    if (!(await page.getByRole("group", { name: "Filters" }).isVisible())) {
+      await filterSummary.click();
+    }
+  };
+
   // Range changes are shareable and back returns to the previous view.
+  await ensureFiltersOpen();
+  await page.getByRole("button", { name: "Add Range filter" }).click();
   await page.getByRole("combobox", { name: "Range" }).click();
   await page.getByRole("option", { name: "Last 7 days" }).click();
   await expect(page).toHaveURL(/range=7d/);
@@ -101,6 +111,8 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page).toHaveURL(/range=30d/);
 
   // One-platform filtering narrows KPIs, chart, and ranking.
+  await ensureFiltersOpen();
+  await page.getByRole("button", { name: "Add Platform filter" }).click();
   await page.getByRole("combobox", { name: "Platform" }).click();
   await page.getByRole("option", { name: "Threads" }).click();
   await expect(page).toHaveURL(/platform=threads/);
@@ -113,6 +125,11 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await page.goBack();
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Engagement by platform" })).toBeVisible();
+
+  // Close the filter builder before the remaining toolbar checks and screenshots.
+  if (await page.getByRole("group", { name: "Filters" }).isVisible()) {
+    await filterSummary.click();
+  }
 
   // Refresh re-reads stored metrics; it never implies a provider sync.
   await page.getByRole("button", { name: "Refresh analytics" }).click();

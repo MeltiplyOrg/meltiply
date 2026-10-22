@@ -1,12 +1,25 @@
 import { RotateCw } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
+import {
+  FilterSelect,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@meltiply/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { cn } from "@meltiply/ui/utils";
-import { TopToolbar } from "@/components/layout/top-toolbar";
-import { PlatformIcon } from "@/components/primitives/platform-icon";
+import {
+  TopToolbar,
+  TopToolbarButton,
+  TopToolbarFilterChip,
+  TopToolbarFilterChips,
+  TopToolbarFilters,
+  TopToolbarReset,
+} from "@/components/layout/top-toolbar";
 import { platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
+import { DEFAULT_ANALYTICS_RANGE } from "./analytics-helpers";
 import type {
   AnalyticsFormat,
   AnalyticsMetric,
@@ -38,7 +51,7 @@ const METRIC_LABELS: Record<AnalyticsMetric, string> = {
 
 /**
  * Localized label for a range preset. Exposed so the cohort caption and the
- * select share one wording instead of re-declaring the four labels.
+ * filter trigger share one wording instead of re-declaring the four labels.
  */
 export function analyticsRangeLabel(
   range: AnalyticsRangePreset,
@@ -76,11 +89,14 @@ export interface AnalyticsToolbarProps {
 }
 
 /**
- * Analytics filter row: range preset, platform, connected account, and content
- * format, plus a reload that only re-reads stored snapshots. Every metric stays
- * visible in the charts, so the row never switches the dashboard into a
- * single-metric mode. Controls keep their geometry and scroll horizontally on
- * narrow screens rather than wrapping or disappearing.
+ * Analytics filter row using the shared collection filter builder: one compact
+ * Filter disclosure holds the range, platform, account, and format fields, and
+ * active values become removable chips. This keeps the toolbar to two controls
+ * instead of four always-visible selects, matching the Posts surface.
+ *
+ * The range default is not "active": the cohort caption already states it, and
+ * the builder keeps it available under "Add filter". Only filters that narrow
+ * the default view raise the count badge or add a chip.
  */
 export function AnalyticsToolbar({
   accounts,
@@ -97,109 +113,190 @@ export function AnalyticsToolbar({
   onRefresh,
 }: AnalyticsToolbarProps): React.ReactElement {
   const { t } = useI18n();
-  const platformValue = selectedPlatform ?? "all";
   const accountOptions = selectedPlatform
     ? accounts.filter((account) => account.platform === selectedPlatform)
     : accounts;
+  const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+  const accountLabel = selectedAccount
+    ? (selectedAccount.display_name ?? selectedAccount.platform_user_id)
+    : t("Account");
+  const activeCount =
+    Number(selectedRange !== DEFAULT_ANALYTICS_RANGE) +
+    Number(selectedPlatform !== undefined) +
+    Number(selectedAccountId !== undefined) +
+    Number(selectedFormat !== undefined);
+  const reset = () => {
+    onRangeChange(DEFAULT_ANALYTICS_RANGE);
+    onPlatformChange(undefined);
+    onAccountChange(undefined);
+    onFormatChange(undefined);
+  };
   return (
-    <TopToolbar className="flex-nowrap overflow-x-auto">
-      <Select
-        value={selectedRange}
-        onValueChange={(value) => onRangeChange(value as AnalyticsRangePreset)}
-      >
-        <SelectTrigger className="w-36 shrink-0" aria-label={t("Range")}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {(Object.keys(RANGE_LABELS) as AnalyticsRangePreset[]).map((range) => (
-            <SelectItem key={range} value={range}>
-              {analyticsRangeLabel(range, t)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select
-        value={platformValue}
-        onValueChange={(value) =>
-          onPlatformChange(value === "all" ? undefined : (value as Platform))
-        }
-        disabled={platforms.length === 0}
-      >
-        <SelectTrigger className="w-40 shrink-0" aria-label={t("Platform")}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">{t("All platforms")}</SelectItem>
-          {platforms.map((platform) => (
-            <SelectItem key={platform} value={platform}>
-              <span className="flex items-center gap-2">
-                <PlatformIcon provider={platform} className="size-3.5" />
-                {platformDisplayName(platform)}
-              </span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select
-        value={selectedAccountId ?? "all"}
-        onValueChange={(value) => onAccountChange(value === "all" ? undefined : value)}
-        disabled={accountOptions.length === 0}
-      >
-        <SelectTrigger className="w-44 shrink-0" aria-label={t("Account")}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">{t("All accounts")}</SelectItem>
-          {accountOptions.map((account) => (
-            <SelectItem key={account.id} value={account.id}>
-              <span className="flex items-center gap-2">
-                <PlatformIcon provider={account.platform} className="size-3.5" />
-                <span className="truncate">{account.display_name ?? account.platform_user_id}</span>
-              </span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select
-        value={selectedFormat ?? "all"}
-        onValueChange={(value) =>
-          onFormatChange(value === "all" ? undefined : (value as AnalyticsFormat))
-        }
-      >
-        <SelectTrigger className="w-36 shrink-0" aria-label={t("Format")}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">{t("All formats")}</SelectItem>
-          {(Object.keys(FORMAT_LABELS) as AnalyticsFormat[]).map((format) => (
-            <SelectItem key={format} value={format}>
-              {analyticsFormatLabel(format, t)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              onClick={onRefresh}
-              disabled={refreshing}
-              aria-label={t("Refresh analytics")}
-              aria-busy={refreshing}
-            >
-              <RotateCw className={cn("size-3.5", refreshing && "animate-spin")} />
-              <span className="hidden sm:inline">{t("Refresh")}</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {t("Reloads stored metrics. Provider syncing runs on its own schedule.")}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    </TopToolbar>
+    <>
+      <TopToolbar>
+        <TopToolbarFilters
+          activeCount={activeCount}
+          onClearAll={reset}
+          fields={[
+            {
+              id: "range",
+              label: t("Range"),
+              active: selectedRange !== DEFAULT_ANALYTICS_RANGE,
+              onClear: () => onRangeChange(DEFAULT_ANALYTICS_RANGE),
+              control: (
+                <Select
+                  value={selectedRange}
+                  onValueChange={(value) => onRangeChange(value as AnalyticsRangePreset)}
+                >
+                  <SelectTrigger asChild aria-label={t("Range")}>
+                    <TopToolbarButton
+                      label={analyticsRangeLabel(selectedRange, t)}
+                      className="w-full"
+                    />
+                  </SelectTrigger>
+                  <SelectContent aria-label={t("Range")}>
+                    {(Object.keys(RANGE_LABELS) as AnalyticsRangePreset[]).map((range) => (
+                      <SelectItem key={range} value={range}>
+                        {analyticsRangeLabel(range, t)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ),
+            },
+            {
+              id: "platform",
+              label: t("Platform"),
+              active: selectedPlatform !== undefined,
+              onClear: () => onPlatformChange(undefined),
+              control: (
+                <FilterSelect
+                  value={selectedPlatform ?? "all"}
+                  onValueChange={(value) =>
+                    onPlatformChange(value === "all" ? undefined : (value as Platform))
+                  }
+                  aggregateOption={{ value: "all", label: t("All platforms") }}
+                  options={platforms.map((platform) => ({
+                    value: platform,
+                    label: platformDisplayName(platform),
+                  }))}
+                  ariaLabel={t("Platform")}
+                  trigger={
+                    <TopToolbarButton
+                      label={
+                        selectedPlatform
+                          ? platformDisplayName(selectedPlatform)
+                          : t("All platforms")
+                      }
+                      className="w-full"
+                    />
+                  }
+                />
+              ),
+            },
+            {
+              id: "account",
+              label: t("Account"),
+              active: selectedAccountId !== undefined,
+              onClear: () => onAccountChange(undefined),
+              control: (
+                <FilterSelect
+                  value={selectedAccountId ?? "all"}
+                  onValueChange={(value) => onAccountChange(value === "all" ? undefined : value)}
+                  aggregateOption={{ value: "all", label: t("All accounts") }}
+                  options={accountOptions.map((account) => ({
+                    value: account.id,
+                    label: account.display_name ?? account.platform_user_id,
+                  }))}
+                  ariaLabel={t("Account")}
+                  trigger={
+                    <TopToolbarButton
+                      label={selectedAccountId ? accountLabel : t("All accounts")}
+                      className="w-full"
+                    />
+                  }
+                />
+              ),
+            },
+            {
+              id: "format",
+              label: t("Format"),
+              active: selectedFormat !== undefined,
+              onClear: () => onFormatChange(undefined),
+              control: (
+                <FilterSelect
+                  value={selectedFormat ?? "all"}
+                  onValueChange={(value) =>
+                    onFormatChange(value === "all" ? undefined : (value as AnalyticsFormat))
+                  }
+                  aggregateOption={{ value: "all", label: t("All formats") }}
+                  options={(Object.keys(FORMAT_LABELS) as AnalyticsFormat[]).map((format) => ({
+                    value: format,
+                    label: analyticsFormatLabel(format, t),
+                  }))}
+                  ariaLabel={t("Format")}
+                  trigger={
+                    <TopToolbarButton
+                      label={
+                        selectedFormat ? analyticsFormatLabel(selectedFormat, t) : t("All formats")
+                      }
+                      className="w-full"
+                    />
+                  }
+                />
+              ),
+            },
+          ]}
+        />
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ml-auto shrink-0"
+                onClick={onRefresh}
+                disabled={refreshing}
+                aria-label={t("Refresh analytics")}
+                aria-busy={refreshing}
+              >
+                <RotateCw className={cn("size-3.5", refreshing && "animate-spin")} />
+                <span className="hidden sm:inline">{t("Refresh")}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {t("Reloads stored metrics. Provider syncing runs on its own schedule.")}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </TopToolbar>
+      {activeCount > 0 && (
+        <TopToolbarFilterChips>
+          {selectedRange !== DEFAULT_ANALYTICS_RANGE && (
+            <TopToolbarFilterChip
+              label={analyticsRangeLabel(selectedRange, t)}
+              onClear={() => onRangeChange(DEFAULT_ANALYTICS_RANGE)}
+            />
+          )}
+          {selectedPlatform && (
+            <TopToolbarFilterChip
+              label={platformDisplayName(selectedPlatform)}
+              onClear={() => onPlatformChange(undefined)}
+            />
+          )}
+          {selectedAccountId && (
+            <TopToolbarFilterChip label={accountLabel} onClear={() => onAccountChange(undefined)} />
+          )}
+          {selectedFormat && (
+            <TopToolbarFilterChip
+              label={analyticsFormatLabel(selectedFormat, t)}
+              onClear={() => onFormatChange(undefined)}
+            />
+          )}
+          <TopToolbarReset hasActiveFilters onReset={reset} className="ml-auto" />
+        </TopToolbarFilterChips>
+      )}
+    </>
   );
 }

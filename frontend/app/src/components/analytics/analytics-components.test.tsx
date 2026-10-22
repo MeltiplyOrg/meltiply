@@ -7,7 +7,7 @@ import { AnalyticsToolbar } from "./analytics-toolbar";
 import { MetricCards } from "./metric-cards";
 import { PlatformEngagementChart } from "./platform-engagement-chart";
 import { TopPostsTable } from "./top-posts-table";
-import type { AnalyticsPostRow, AnalyticsSummary, PlatformMetrics } from "@/types";
+import type { AnalyticsPostRow, AnalyticsSummary, PlatformAccount, PlatformMetrics } from "@/types";
 
 beforeAll(() => {
   class ResizeObserverMock {
@@ -98,6 +98,35 @@ describe("analytics toolbar", () => {
     expect(screen.queryByRole("group", { name: "Metric" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh analytics" }));
     expect(onRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("keeps active filters as removable chips beside the compact Filter control", () => {
+    const onPlatformChange = vi.fn();
+    const onRangeChange = vi.fn();
+    render(
+      <AnalyticsToolbar
+        {...toolbarProps}
+        accounts={[
+          {
+            display_name: "Alpha IG",
+            id: "account-1",
+            platform: "instagram",
+            platform_user_id: "ig-1",
+          } as PlatformAccount,
+        ]}
+        selectedAccountId="account-1"
+        selectedFormat="video"
+        selectedPlatform="instagram"
+        selectedRange="7d"
+        onPlatformChange={onPlatformChange}
+        onRangeChange={onRangeChange}
+      />,
+    );
+    expect(screen.getByText("Filter").closest("summary")).toHaveTextContent("4");
+    fireEvent.click(screen.getByRole("button", { name: "Clear Instagram filter" }));
+    expect(onPlatformChange).toHaveBeenCalledWith(undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Clear Last 7 days filter" }));
+    expect(onRangeChange).toHaveBeenCalledWith("30d");
   });
 
   it("marks the reload busy while stored metrics refetch", () => {

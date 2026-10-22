@@ -37,6 +37,12 @@ Contract change: approved in conversation on 2026-10-19
 > card shows posts, per-post averages, and totals together without a metric
 > selector. Saves/clicks columns appear only when a provider reports them,
 > otherwise a footnote names them as untracked.
+> Implementation note (2026-10-22, toolbar revision): the analytics toolbar now
+> uses the shared collection filter builder from Posts. One Filter disclosure
+> holds the range, platform, account, and format fields; active values become
+> removable chips with a Clear all action, and Refresh remains beside the
+> builder. The four always-visible selects are gone, and the row wraps instead
+> of scrolling horizontally.
 
 ## 1. Summary
 

@@ -26,7 +26,7 @@ function request(path: string, method = "GET", body?: unknown, key = randomUUID(
 }
 
 beforeAll(async () => {
-  const response = await request("/brand-profiles", "POST", { name: `Queue regression ${randomUUID()}`, color: "#2563eb" });
+  const response = await request("/brand-profiles", "POST", { name: `Queue regression ${randomUUID()}`, color: "#1d4ed8" });
   expect(response.status).toBe(201);
   const profile: Schemas["BrandProfile"] = await response.json();
   profileId = profile.id;

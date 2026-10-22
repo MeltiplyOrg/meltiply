@@ -1,11 +1,11 @@
 // Compares two sets of backend benchmark runs and writes the Markdown report.
 //
-// Samples from every repetition are pooled so alternating run order and
-// per-run warm-up cannot hide a regression in a single run. Missing scenarios,
-// failed scenarios, and error counts are reported explicitly rather than
-// dropped.
+// Samples from every repetition are pooled. Configuration, dataset, and workflow
+// names must match across every input before aggregation; failed scenarios are
+// reported explicitly rather than dropped.
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 /** Parses repeated `--flag value` pairs. */
 function parseArgs(argv) {
@@ -56,6 +56,40 @@ function signedPercent(value) {
   return value === null ? "n/a" : `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
+/**
+ * Rejects incomparable workloads before pooling samples or writing reports.
+ * Every repetition on both sides must match the first baseline's config,
+ * dataset, and sorted workflow names. Object key and workflow order do not
+ * matter; array values and all configuration fields do. Repetition counts,
+ * revision metadata, and measured results are deliberately not compared.
+ */
+function validateWorkloads(baselines, candidates) {
+  const reference = baselines[0];
+  const names = reference.workflows.map((workflow) => workflow.name).sort();
+  for (const [label, runs] of [
+    ["baseline", baselines],
+    ["candidate", candidates],
+  ]) {
+    for (let index = 0; index < runs.length; index += 1) {
+      const run = runs[index];
+      for (const field of ["config", "dataset"]) {
+        if (
+          !run[field] ||
+          typeof run[field] !== "object" ||
+          Array.isArray(run[field]) ||
+          !isDeepStrictEqual(run[field], reference[field])
+        ) {
+          throw new TypeError(`${label} run ${index + 1}: ${field} must match baseline run 1`);
+        }
+      }
+      const workflowNames = run.workflows.map((workflow) => workflow.name).sort();
+      if (!isDeepStrictEqual(workflowNames, names)) {
+        throw new TypeError(`${label} run ${index + 1}: workflow names must match baseline run 1`);
+      }
+    }
+  }
+}
+
 /** Aggregates the runs of one revision into pooled per-scenario metrics. */
 function aggregate(runs) {
   const workflows = new Map();
@@ -91,6 +125,8 @@ function aggregate(runs) {
   }
   return workflows;
 }
+
+validateWorkloads(baselineRuns, candidateRuns);
 
 const baseline = aggregate(baselineRuns);
 const candidate = aggregate(candidateRuns);

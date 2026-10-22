@@ -29,6 +29,28 @@ function assertDatabaseName(value) {
   }
 }
 
+/**
+ * Rejects non-loopback administrator hosts before any connection or database
+ * operation unless BENCHMARK_ALLOW_REMOTE_DATABASE is exactly "1".
+ * Matches pg's last query-string host override, falling back to the decoded
+ * URL hostname; an empty host cannot fall through to a remote PGHOST.
+ * Error messages never include the credential-bearing connection URL.
+ */
+function assertAdminHost(url) {
+  const host = (
+    url.searchParams.getAll("host").at(-1) || decodeURIComponent(url.hostname)
+  ).toLowerCase();
+  if (
+    !["localhost", "127.0.0.1", "::1", "[::1]"].includes(host) &&
+    process.env.BENCHMARK_ALLOW_REMOTE_DATABASE !== "1"
+  ) {
+    throw new TypeError(
+      "BENCHMARK_DATABASE_ADMIN_URL must target localhost, 127.0.0.1, or ::1; " +
+        "set BENCHMARK_ALLOW_REMOTE_DATABASE=1 to allow a remote benchmark server",
+    );
+  }
+}
+
 /** Connects once, retrying while the service container is still starting. */
 async function connectWhenReady(connectionString) {
   const deadline = Date.now() + 60_000;
@@ -75,6 +97,7 @@ async function applyMigrations(admin) {
 assertDatabaseName(databaseName);
 
 const target = new URL(adminUrl);
+assertAdminHost(target);
 target.pathname = `/${databaseName}`;
 
 const admin = await connectWhenReady(adminUrl);

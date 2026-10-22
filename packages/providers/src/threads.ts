@@ -617,6 +617,35 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       };
     },
 
+    /**
+     * Reads lifetime follower count from the Threads user insights edge.
+     * Threads returns the total under `total_value` (or a values array).
+     */
+    async getAccountAnalytics(context, credentials) {
+      const providerAccountId = requiredIdentifier(
+        credentials.accountId,
+        "threads_account_id_required",
+      );
+      const url = new URL(`/${encodeURIComponent(providerAccountId)}/threads_insights`, apiOrigin);
+      url.searchParams.set("metric", "followers_count");
+      url.searchParams.set("period", "lifetime");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const data = record(response.body)?.data;
+      if (!Array.isArray(data)) throw malformed();
+      const metric = data.map(record).find((item) => item?.name === "followers_count");
+      const values = metric?.values;
+      const total = record(metric?.total_value)?.value;
+      const followers = Array.isArray(values)
+        ? metricValue(record(values[0])?.value)
+        : metricValue(total);
+      if (followers === undefined) throw malformed();
+      return { followers, recordedAt: now().toISOString() };
+    },
+
     async listAnalytics(context, credentials, lookup, page) {
       validatePageInput("threads", page);
       if (page.cursor) {

@@ -810,6 +810,29 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
      * @throws {ProviderAdapterError} On a rejected permission, malformed
      *   Insights response, or missing requested counter.
      */
+    /** Reads the Page's lifetime follower counters from the Page node. */
+    async getAccountAnalytics(context, credentials) {
+      const url = new URL(
+        `/${apiVersion}/${encodeURIComponent(accountId(credentials))}`,
+        graphOrigin,
+      );
+      url.searchParams.set("fields", "followers_count,fan_count");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const body = record(response.body);
+      const followers = metricValue(body?.followers_count);
+      const following = metricValue(body?.fan_count);
+      if (followers === undefined) throw malformed();
+      return {
+        followers,
+        ...(following === undefined ? {} : { following }),
+        recordedAt: now().toISOString(),
+      };
+    },
+
     async listAnalytics(context, credentials, lookup, page) {
       validatePageInput("facebook", page);
       if (page.cursor) {

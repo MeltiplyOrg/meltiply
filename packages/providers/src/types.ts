@@ -208,15 +208,26 @@ export interface ProviderPage<T> {
 }
 
 export interface ProviderAnalyticsRecord {
+  /** Nullable counters are Provider metrics that may be unavailable, never zero by default. */
+  clicks?: number | null;
   comments: number;
   impressions: number;
   likes: number;
   providerPostId: string;
   reach: number;
   recordedAt: string;
+  saves?: number | null;
   shares: number;
   views: number;
   watchTimeSeconds: number;
+}
+
+/** Account-level counters captured on a slower cadence than per-Post snapshots. */
+export interface ProviderAccountAnalytics {
+  followers: number;
+  following?: number;
+  posts?: number;
+  recordedAt: string;
 }
 
 export interface ProviderCommentRecord {
@@ -297,6 +308,10 @@ export interface ProviderAdapter {
     context: ProviderRequestContext,
     credentials: ProviderCredentials,
   ): Promise<ProviderPublicationRequirements>;
+  getAccountAnalytics?(
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+  ): Promise<ProviderAccountAnalytics>;
   listAnalytics?(
     context: ProviderRequestContext,
     credentials: ProviderCredentials,

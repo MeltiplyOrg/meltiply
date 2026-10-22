@@ -1162,6 +1162,34 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
      * @throws {ProviderAdapterError} On a rejected scope/quota, malformed report,
      *   or a missing requested metric.
      */
+    /**
+     * Reads the authenticated channel's lifetime subscriber and video counters.
+     * Hidden subscriber counts are rejected so the chart never invents a value.
+     */
+    async getAccountAnalytics(context, credentials) {
+      const url = new URL("/youtube/v3/channels", apiOrigin);
+      url.searchParams.set("part", "statistics");
+      url.searchParams.set("mine", "true");
+      const response = await googleRequest<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const body = record(response.body);
+      const items = body?.items;
+      if (!Array.isArray(items) || items.length !== 1) throw malformed();
+      const statistics = record(record(items[0])?.statistics);
+      if (statistics?.hiddenSubscriberCount === true) throw malformed();
+      const followers = Number(statistics?.subscriberCount);
+      const posts = Number(statistics?.videoCount);
+      if (!Number.isSafeInteger(followers) || followers < 0) throw malformed();
+      return {
+        followers,
+        ...(Number.isSafeInteger(posts) && posts >= 0 ? { posts } : {}),
+        recordedAt: now().toISOString(),
+      };
+    },
+
     async listAnalytics(context, credentials, lookup, page) {
       validatePageInput("youtube", page);
       if (page.cursor) {

@@ -158,7 +158,7 @@ describe("createTikTokAdapter", () => {
       client_key: "tiktok-client-key",
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "user.info.basic,video.publish,video.list",
+      scope: "user.info.basic,user.info.stats,video.publish,video.list",
       state: "oauth-state",
     });
     expect(() =>
@@ -188,7 +188,7 @@ describe("createTikTokAdapter", () => {
           open_id: "open-id-1",
           refresh_expires_in: 31_536_000,
           refresh_token: "refresh-secret",
-          scope: "user.info.basic,video.publish,video.list",
+          scope: "user.info.basic,user.info.stats,video.publish,video.list",
           token_type: "Bearer",
         });
       },
@@ -220,7 +220,7 @@ describe("createTikTokAdapter", () => {
       },
       expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-secret",
-      scopes: ["user.info.basic", "video.publish", "video.list"],
+      scopes: ["user.info.basic", "user.info.stats", "video.publish", "video.list"],
     });
   });
 
@@ -232,7 +232,7 @@ describe("createTikTokAdapter", () => {
           expires_in: 86_400,
           open_id: "open-id-1",
           refresh_token: "refresh-secret",
-          scope: "user.info.basic,video.publish,video.list",
+          scope: "user.info.basic,user.info.stats,video.publish,video.list",
           token_type: "Bearer",
         }),
       () =>
@@ -627,7 +627,7 @@ describe("createTikTokAdapter", () => {
           expires_in: 86_400,
           open_id: "open-id-1",
           refresh_token: "refresh-rotated",
-          scope: "user.info.basic,video.publish,video.list",
+          scope: "user.info.basic,user.info.stats,video.publish,video.list",
           token_type: "Bearer",
         });
       },
@@ -646,7 +646,7 @@ describe("createTikTokAdapter", () => {
       accessToken: "access-rotated",
       expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-rotated",
-      scopes: ["user.info.basic", "video.publish", "video.list"],
+      scopes: ["user.info.basic", "user.info.stats", "video.publish", "video.list"],
     });
     await expect(provider.revoke!("access-rotated")).resolves.toBeUndefined();
   });

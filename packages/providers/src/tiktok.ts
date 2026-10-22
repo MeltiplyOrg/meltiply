@@ -37,7 +37,12 @@ const authorizationOrigin = "https://www.tiktok.com";
 const imageMaximumBytes = 20 * 1024 * 1024;
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 2 * 24 * 60 * 60;
-const configuredScopes = ["user.info.basic", "video.publish", "video.list"] as const;
+const configuredScopes = [
+  "user.info.basic",
+  "user.info.stats",
+  "video.publish",
+  "video.list",
+] as const;
 const privacyLevels = new Set<TikTokPrivacyLevel>([
   "PUBLIC_TO_EVERYONE",
   "MUTUAL_FOLLOW_FRIENDS",
@@ -596,6 +601,28 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
      * @throws {ProviderAdapterError} On a rejected scope, malformed payload, or
      *   missing counter, so a sync failure is recorded instead of a false zero.
      */
+    /** Reads the creator's lifetime follower, following, and video counters. */
+    async getAccountAnalytics(context, credentials) {
+      const url = new URL("/v2/user/info/", apiOrigin);
+      url.searchParams.set("fields", "open_id,follower_count,following_count,video_count");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const user = record(envelope(response.body).user);
+      const followers = metricValue(user?.follower_count);
+      const following = metricValue(user?.following_count);
+      const posts = metricValue(user?.video_count);
+      if (followers === undefined) throw malformed();
+      return {
+        followers,
+        ...(following === undefined ? {} : { following }),
+        ...(posts === undefined ? {} : { posts }),
+        recordedAt: now().toISOString(),
+      };
+    },
+
     async listAnalytics(context, credentials, lookup, page) {
       validatePageInput("tiktok", page);
       if (page.cursor) {

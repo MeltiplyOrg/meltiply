@@ -484,7 +484,7 @@ describe("ProviderRegistry", () => {
       "https://api.example.com/api/v1/platforms/tiktok/callback",
     );
     expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "user.info.basic,video.publish,video.list",
+      "user.info.basic,user.info.stats,video.publish,video.list",
     );
   });
 

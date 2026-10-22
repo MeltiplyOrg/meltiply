@@ -1,8 +1,9 @@
 # Provider Channel connection contracts
 
 Research date: 2026-10-21. Scope: the five implemented Providers' authorization,
-account discovery, explicit Brand Profile assignment, and reconnection. This is
-not evidence of live third-party authorization or publishing acceptance.
+account discovery, explicit Brand Profile assignment, and reconnection. Hosted
+contract checks and later operator-confirmed live connections are distinguished
+below; neither establishes live publishing acceptance.
 
 ## Shared application contract
 
@@ -53,6 +54,19 @@ and a `data`-wrapped profile response. The
 also describes flat Graph node responses. Both shapes must be decoded without
 confusing their identity fields. An empty or multiple-entry account envelope
 cannot establish the single account authorized by Instagram Login.
+
+The next live callback on 2026-10-22 passed every profile-field check but exposed
+an incorrect equality requirement between the token response's `user_id` and the
+profile's app-scoped `id`. Neither profile ID matched that token-response value.
+Do not infer the cause of the different values from this observation. The
+getting-started contract defines `/me` as the account represented by its access
+token: resolve identity from that authenticated profile and retain its professional
+`user_id`, without joining IDs across the two responses. Keep structural ID,
+professional account-type, permission, and avatar URL validation.
+
+After this correction, the operator confirmed that Facebook, Instagram, and
+Threads connections work in the live local environment. This confirms connection
+acceptance only, not publishing, analytics, comments, or production deployment.
 
 Confirmed source gaps in `packages/providers/src/instagram.ts`: only flat
 responses were decoded; the connection retained app-scoped `id` rather than
@@ -161,5 +175,11 @@ at `55ccd63` passed the corrected Instagram grant regression tests, all five
 connection lifecycles with real SQLite state and PostgreSQL persistence,
 `bun run cloudflare:check`, and the focused assignment/navigation browser journey.
 The connection smoke now uses Instagram's observed permission-array format.
-External provider HTTP responses remain controlled in that smoke; this is not
-a claim that a fresh live Instagram connection completed after the patch.
+External provider HTTP responses remain controlled in that smoke; the hosted
+result alone cannot certify live authorization. The operator's later live
+connection confirmation is recorded in the Instagram section above.
+
+The [profile-identity correction full gate](https://github.com/MeltiplyOrg/meltiply/actions/runs/39798038864)
+at `5be419a` passed the grant/profile identity regressions, the five-Platform
+connection smoke with distinct Instagram token and profile IDs,
+`bun run cloudflare:check`, and the assignment/navigation browser journey.

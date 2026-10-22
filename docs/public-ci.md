@@ -82,8 +82,9 @@ external inbox delivery or a managed Cloudflare rollout.
 manual two-revision measurement job, not part of `ci-gate`. It checks out
 `master` as the baseline and the dispatched commit as the candidate, gives each
 a dedicated PostgreSQL 18.6 database migrated from that revision, and runs the
-same in-process API workload against both in alternating order. Raw JSON, the comparison tables, and the exact
-commands are uploaded as artifacts. It measures Posts, Distributions, Calendar,
+same in-process API workload against both in alternating order. Raw JSON and the
+generated comparison files are uploaded as artifacts. It measures Posts,
+Distributions, Calendar,
 analytics, Inbox, Asset upload-session reads and creation, schedule fan-out, and
 bulk Post deletion at batch sizes 1/5/10/25/50 under sequential and bounded
 concurrency. The results and methodology behind the current optimizations are in

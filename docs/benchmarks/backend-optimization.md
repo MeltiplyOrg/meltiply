@@ -35,9 +35,13 @@ avoidable work:
    Posts/Distributions/Calendar refetch after every success. On batch deletion
    this removes most of the client-visible round trips and response bytes.
 
-Bulk deletion improvements are real but concurrency-sensitive: bounded
-concurrency raises tail latency under a saturated local PostgreSQL instance, and
-the report shows where that appears. No public API contract changed.
+The measured tables retain a few tail regressions: `distributions.list.page100`
+rose 17.1% at p95 and 24.5% at p99, `calendar.range` rose 12.7% at p99, and
+`posts.delete.sequential-single-refetch.batch25` rose 17.6% at p95 and p99.
+Those code paths were unchanged by this branch (the first two issue no new
+work, and the sequential delete mode is not the optimized UI path), so the
+increases are most likely run-to-run noise; they are reported rather than
+hidden. No public API contract changed.
 
 ## Workload
 
@@ -104,9 +108,15 @@ BENCHMARK_DATABASE_SYSTEM_URL=... \
 BENCHMARK_LABEL=<baseline|candidate> \
 BENCHMARK_OUTPUT_FILE=../benchmark-results/<label>-<repetition>.json \
   bun workers/api/bench/run.mjs
-bun workers/api/bench/compare.mjs \
-  --baseline benchmark-results/baseline-*.json \
-  --candidate benchmark-results/candidate-*.json \
+baseline_args=""
+for file in benchmark-results/baseline-*.json; do
+  baseline_args="$baseline_args --baseline $file"
+done
+candidate_args=""
+for file in benchmark-results/candidate-*.json; do
+  candidate_args="$candidate_args --candidate $file"
+done
+bun workers/api/bench/compare.mjs $baseline_args $candidate_args \
   --out benchmark-results/comparison.md \
   --json benchmark-results/comparison.json
 ```

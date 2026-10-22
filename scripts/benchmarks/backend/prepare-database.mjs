@@ -1,5 +1,5 @@
 // Recreates the dedicated benchmark database from the migrations checked out
-// in this revision, then prints the connection URLs the benchmark runner needs.
+// in this revision, then prints non-secret connection metadata.
 //
 // The benchmark deliberately owns a separate database from the integration
 // suite so baseline and candidate revisions can each apply their own schema to
@@ -19,10 +19,13 @@ const defaultAdminUrl =
 const adminUrl = process.env.BENCHMARK_DATABASE_ADMIN_URL ?? defaultAdminUrl;
 const databaseName = process.env.BENCHMARK_DATABASE_NAME ?? "meltiply_benchmark";
 
-/** Rejects a database name that could escape the quoted identifier. */
+/** Rejects a database name outside the dedicated benchmark prefix. */
 function assertDatabaseName(value) {
-  if (!/^[a-z][a-z0-9_]{0,62}$/.test(value)) {
-    throw new TypeError("BENCHMARK_DATABASE_NAME must be a lowercase PostgreSQL identifier");
+  if (!/^meltiply_bench[a-z0-9_]{0,49}$/.test(value)) {
+    throw new TypeError(
+      "BENCHMARK_DATABASE_NAME must start with 'meltiply_bench' and contain at most " +
+        "63 lowercase PostgreSQL identifier characters",
+    );
   }
 }
 

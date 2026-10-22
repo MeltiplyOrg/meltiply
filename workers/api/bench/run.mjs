@@ -10,7 +10,7 @@
 //   BENCHMARK_DATABASE_AUTHENTICATED_URL=... \
 //   BENCHMARK_DATABASE_SYSTEM_URL=... \
 //   BENCHMARK_LABEL=baseline BENCHMARK_OUTPUT_FILE=results/baseline.json \
-//   bun scripts/benchmarks/backend/run.ts
+//   bun workers/api/bench/run.mjs
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -48,6 +48,12 @@ const outputFile = resolve(
 const label = process.env.BENCHMARK_LABEL ?? "benchmark";
 const warmupSamples = integerEnv("BENCHMARK_WARMUP", 3, 0, 100);
 const measuredSamples = integerEnv("BENCHMARK_SAMPLES", 20, 1, 1_000);
+if (warmupSamples + measuredSamples > dataset.schedulePosts) {
+  throw new TypeError(
+    `BENCHMARK_WARMUP + BENCHMARK_SAMPLES (${warmupSamples + measuredSamples}) ` +
+      `exceeds the ${dataset.schedulePosts} schedule fixture Posts`,
+  );
+}
 const deleteWarmup = integerEnv("BENCHMARK_DELETE_WARMUP", 1, 0, 100);
 const deleteSamples = integerEnv("BENCHMARK_DELETE_SAMPLES", 3, 1, 100);
 const deleteConcurrency = integerEnv("BENCHMARK_DELETE_CONCURRENCY", 4, 1, 10);

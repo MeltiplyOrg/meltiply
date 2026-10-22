@@ -79,7 +79,6 @@ fixtures:
     id: 00000000-0000-4000-8000-000000000001
     name: Alpha
     slug: org-alpha
-    is_personal: false
     role: admin
     created_at: 2026-01-01T00:00:00Z
     updated_at: 2026-01-01T00:00:00Z
@@ -88,18 +87,57 @@ fixtures:
     email: beta-member@example.test
     display_name: Beta Member
     avatar_url: null
-    role: member
+    role: editor
+    status: active
+    suspended_at: null
+    is_installation_owner: false
     created_at: 2026-01-01T00:00:00Z
     updated_at: 2026-01-01T00:00:00Z
+  suspended_member: &suspended_member
+    <<: *workspace_member
+    status: suspended
+    suspended_at: 2026-01-03T00:00:00Z
   workspace_invitation: &workspace_invitation
     id: 00000000-0000-4000-8000-000000000601
     org_id: 00000000-0000-4000-8000-000000000001
     email: beta-member@example.test
-    role: member
+    role: editor
     status: pending
     expires_at: 2026-01-08T00:00:00Z
     created_at: 2026-01-01T00:00:00Z
     updated_at: 2026-01-01T00:00:00Z
+  account_lifecycle: &account_lifecycle
+    user_id: 00000000-0000-4000-8000-000000000012
+    status: suspended
+    suspended_at: 2026-01-03T00:00:00Z
+    suspension_reason: Offboarding
+  installation: &installation
+    installation_owner_user_id: 00000000-0000-4000-8000-000000000011
+    seat_limit: 10
+    seats_used: 4
+    members_active: 3
+    invitations_pending: 1
+    workspace: *workspace
+  audit_entry: &audit_entry
+    id: 00000000-0000-4000-8000-000000000701
+    actor:
+      email: alpha-admin@example.test
+      display_name: Alpha Admin
+    action: member.role_changed
+    target_type: member
+    target_id: 00000000-0000-4000-8000-000000000012
+    before:
+      role: viewer
+    after:
+      role: editor
+    request_id: request-example-audit
+    created_at: 2026-01-01T00:05:00Z
+  invitation_preview: &invitation_preview
+    email: beta-member@example.test
+    role: editor
+    status: pending
+    expires_at: 2026-01-08T00:00:00Z
+    workspace_name: Alpha
   brand_profile: &brand_profile
     id: 00000000-0000-4000-8000-000000000111
     org_id: 00000000-0000-4000-8000-000000000001
@@ -147,6 +185,7 @@ fixtures:
       name: Alpha
       slug: org-alpha
       role: admin
+    is_installation_owner: true
     created_at: 2026-01-01T00:00:00Z
     updated_at: 2026-01-01T00:00:00Z
   account: &account
@@ -533,21 +572,6 @@ operations:
     errors:
       - status: 401
         body: *authentication_error
-  createWorkspace:
-    headers: *bearer_authorization
-    request:
-      name: Alpha
-      slug: org-alpha
-    success:
-      status: 201
-      body: *workspace
-    errors:
-      - status: 401
-        body: *authentication_error
-      - status: 409
-        body: *invalid_state_error
-      - status: 422
-        body: *validation_error
   updateWorkspace:
     headers: *bearer_authorization
     request:
@@ -566,11 +590,43 @@ operations:
         body: *not_found_error
       - status: 422
         body: *validation_error
+  listWorkspaceMembers:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        members:
+          - <<: *workspace_member
+            role: admin
+            is_installation_owner: true
+          - *workspace_member
+          - <<: *suspended_member
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+  listWorkspaceInvitations:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        invitations:
+          - *workspace_invitation
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
   createWorkspaceInvitation:
     headers: *bearer_authorization
     request:
       email: beta-member@example.test
-      role: member
+      role: editor
     success:
       status: 201
       body: *workspace_invitation
@@ -583,6 +639,23 @@ operations:
         body: *invalid_state_error
       - status: 422
         body: *validation_error
+  resendWorkspaceInvitation:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        <<: *workspace_invitation
+        expires_at: 2026-01-15T00:00:00Z
+        updated_at: 2026-01-08T00:00:00Z
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
   revokeWorkspaceInvitation:
     headers: *bearer_authorization
     success:
@@ -596,6 +669,13 @@ operations:
         body: *not_found_error
       - status: 409
         body: *invalid_state_error
+  getWorkspaceInvitation:
+    success:
+      status: 200
+      body: *invitation_preview
+    errors:
+      - status: 404
+        body: *not_found_error
   acceptWorkspaceInvitation:
     headers: *bearer_authorization
     success:
@@ -613,12 +693,12 @@ operations:
   updateWorkspaceMember:
     headers: *bearer_authorization
     request:
-      role: admin
+      role: editor
     success:
       status: 200
       body:
         <<: *workspace_member
-        role: admin
+        role: editor
     errors:
       - status: 401
         body: *authentication_error
@@ -641,6 +721,97 @@ operations:
         body: *not_found_error
       - status: 409
         body: *invalid_state_error
+  getInstallation:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: *installation
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+  suspendInstallationMember:
+    headers: *bearer_authorization
+    request:
+      reason: Offboarding
+    success:
+      status: 200
+      body: *account_lifecycle
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  reactivateInstallationMember:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        <<: *account_lifecycle
+        status: active
+        suspended_at: null
+        suspension_reason: null
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  deleteInstallationMember:
+    headers: *bearer_authorization
+    request:
+      confirm_email: beta-member@example.test
+    success:
+      status: 204
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
+      - status: 409
+        body: *invalid_state_error
+  transferInstallationOwnership:
+    headers: *bearer_authorization
+    request:
+      target_user_id: 00000000-0000-4000-8000-000000000012
+      password: current password value
+    success:
+      status: 200
+      body:
+        installation_owner_user_id: 00000000-0000-4000-8000-000000000012
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 409
+        body: *invalid_state_error
+  listWorkspaceAudit:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        entries: [*audit_entry]
+        has_more: false
+        limit: 50
+        offset: 0
+    errors:
+      - status: 401
+        body: *authentication_error
+      - status: 403
+        body: *forbidden_error
+      - status: 404
+        body: *not_found_error
   listBrandProfiles:
     headers: *bearer_authorization
     success:

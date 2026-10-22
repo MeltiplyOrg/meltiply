@@ -30,21 +30,14 @@
     "--label=meltiply.devcontainer.project=meltiply-${devcontainerId}"
   ],
   // Create the host-side Wrangler config directory before the CLI bind-mounts it.
-  "initializeCommand": [
-    "bash",
-    "${localWorkspaceFolder}/.devcontainer/initialize.sh"
-  ],
+  "initializeCommand": ["bash", "${localWorkspaceFolder}/.devcontainer/initialize.sh"],
   // Prepare the Bun cache and derive GitHub-backed Git identity from mounted gh auth.
   "postCreateCommand": [
     "bash",
     "-lc",
     "sudo chown \"$(id -u):$(id -g)\" \"$BUN_INSTALL_CACHE_DIR\" && gh auth setup-git && gh api user --jq '\"git config --global user.name \" + (if (.name // \"\" | length) > 0 then .name else .login end | @sh), \"git config --global user.email \" + ((.id|tostring) + \"+\" + .login + \"@users.noreply.github.com\" | @sh)' | sh && sudo chown dev:dev /home/dev/.config && sudo mkdir -p \"${localEnv:HOME}/.local\" && if [ ! -e \"${localEnv:HOME}/.local/bin\" ]; then sudo ln -s /usr/local/bin \"${localEnv:HOME}/.local/bin\"; fi"
   ],
-  "postStartCommand": [
-    "bash",
-    "/opt/meltiply-devcontainer/container-network.sh",
-    "start"
-  ],
+  "postStartCommand": ["bash", "/opt/meltiply-devcontainer/container-network.sh", "start"],
   // OMP and Wrangler configs are shared read-write for state and OAuth refreshes.
   // GitHub login and WakaTime configuration are shared read-only.
   "mounts": [

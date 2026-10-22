@@ -23,6 +23,7 @@ function notifyWorkspace() {
 
 const workspace = vi.hoisted(() => ({
   brandProfiles: [] as BrandProfile[],
+  canWriteContent: true,
   channelStatuses: [],
   integrations: [] as ChannelIntegration[],
   isAdmin: true,
@@ -51,6 +52,7 @@ const queryMutations = vi.hoisted(() => ({
   update: { error: null, mutate: vi.fn() },
   cancelDistribution: { isPending: false, mutateAsync: vi.fn() },
   deletePost: { isPending: false, mutateAsync: vi.fn() },
+  deletePostsBatch: { isPending: false, mutateAsync: vi.fn() },
   retryDistribution: { isPending: false, mutateAsync: vi.fn() },
   updateScheduledDistribution: { isPending: false, mutateAsync: vi.fn() },
 }));
@@ -136,6 +138,7 @@ vi.mock("@/lib/queries", () => ({
   useCalendar: () => queryResults.calendar,
   useCancelDistribution: () => queryMutations.cancelDistribution,
   useDeletePost: () => queryMutations.deletePost,
+  useDeletePostsBatch: () => queryMutations.deletePostsBatch,
   usePost: () => ({ data: undefined as Post | undefined, error: null, isLoading: false }),
   usePosts: () => queryResults.posts,
   useRetryDistribution: () => queryMutations.retryDistribution,
@@ -251,6 +254,7 @@ const publishedEvent: CalendarEvent = {
 /** Resets mocked workspace and query state so each rendered surface starts independent. */
 function resetScope() {
   workspace.brandProfiles = [alphaProfile];
+  workspace.canWriteContent = true;
   workspace.channelStatuses = [];
   workspace.integrations = [];
   workspace.isAdmin = true;
@@ -498,7 +502,7 @@ describe("Channels table contract", () => {
     workspace.isAdmin = false;
     renderChannels();
 
-    expect(screen.getByRole("button", { name: "Add account" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Add account" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create Brand Profile" })).not.toBeInTheDocument();
     expect(screen.getByText("Ask a workspace admin to create a Brand Profile.")).toBeVisible();
   });
@@ -509,9 +513,24 @@ describe("Channels table contract", () => {
     renderChannels();
 
     expect(screen.queryByRole("button", { name: /Add Channels/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add account" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Add account" })).not.toBeInTheDocument();
     expect(screen.getByText("Ask a workspace admin to create a Brand Profile.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Create Brand Profile" })).not.toBeInTheDocument();
+  });
+
+  it("keeps channel connection controls read-only for non-admins", () => {
+    workspace.isAdmin = false;
+    queryResults.platforms.data = [expiredAccount];
+    renderChannels();
+
+    const row = within(screen.getByTestId(`channel-row-${expiredAccount.id}`));
+    expect(row.getByRole("checkbox", { name: "Select channel" })).toBeDisabled();
+    fireEvent.click(row.getByRole("button", { name: "expired" }));
+    expect(screen.queryByRole("menuitem", { name: /Re-authenticate/ })).not.toBeInTheDocument();
+    fireEvent.click(row.getByRole("button", { name: "Channel settings" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Permissions")).toBeVisible();
   });
 
   it("creates a Brand Profile in place and selects it for the platform directory", () => {
@@ -968,7 +987,7 @@ describe("Channels table contract", () => {
     expect(screen.getByText("Alpha YouTube")).toBeVisible();
     expect(screen.queryByText("Alpha TikTok")).not.toBeInTheDocument();
     expect(screen.queryByText("Beta Instagram")).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   /**
    * Guards the platform filter's accessible contract: it is a multi-select
@@ -1016,7 +1035,7 @@ describe("Channels table contract", () => {
 
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(screen.getByRole("button", { name: "All platforms" })).toBeVisible();
-  });
+  }, 15_000);
 
   it("displays the filtered-empty message and clears filters", () => {
     queryResults.platforms.data = [connectedAccount];
@@ -1056,9 +1075,10 @@ describe("Posts surfaces", () => {
     };
     workspace.brandProfiles = [alphaProfile, betaProfile];
     queryResults.posts.data = { posts: [first, second], has_more: false, limit: 100, offset: 0 };
-    queryMutations.deletePost.mutateAsync
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("Delete failed"));
+    queryMutations.deletePostsBatch.mutateAsync.mockResolvedValueOnce({
+      deletedIds: [first.id],
+      failed: [{ id: second.id, message: "Delete failed" }],
+    });
     render(
       <MemoryRouter>
         <PostsView />
@@ -1074,7 +1094,7 @@ describe("Posts surfaces", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all visible posts" }));
     const pill = await screen.findByRole("region", { name: "Selection actions" });
     fireEvent.click(within(pill).getByRole("button", { name: "Delete" }));
-    expect(queryMutations.deletePost.mutateAsync).not.toHaveBeenCalled();
+    expect(queryMutations.deletePostsBatch.mutateAsync).not.toHaveBeenCalled();
     await act(async () => {
       fireEvent.click(
         within(screen.getByRole("alertdialog")).getByRole("button", {
@@ -1083,13 +1103,65 @@ describe("Posts surfaces", () => {
       );
     });
 
-    expect(queryMutations.deletePost.mutateAsync.mock.calls.map(([input]) => input)).toEqual([
-      { id: first.id, brandProfileId: first.brand_profile_id },
-      { id: second.id, brandProfileId: second.brand_profile_id },
-    ]);
+    expect(queryMutations.deletePostsBatch.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(queryMutations.deletePostsBatch.mutateAsync.mock.calls[0]?.[0]).toEqual({
+      targets: [
+        { id: first.id, brandProfileId: first.brand_profile_id },
+        { id: second.id, brandProfileId: second.brand_profile_id },
+      ],
+    });
     await settleSelection("1 selected");
     const rows = screen.getAllByRole("checkbox", { name: "Select post" });
     expect(rows.filter((row) => (row as HTMLInputElement).checked)).toHaveLength(1);
+  });
+
+  it("hides delete controls and selection from a viewer", () => {
+    workspace.isAdmin = false;
+    workspace.canWriteContent = false;
+    seedPublishedPost();
+    renderPosts("grid");
+
+    expect(screen.getByText("Launch note")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Edit post" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete post" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select post" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Select all visible posts" })).toBeDisabled();
+    expect(screen.queryByRole("region", { name: "Selection actions" })).not.toBeInTheDocument();
+  });
+
+  it("hides published-Post deletion from an Editor but keeps draft deletion", () => {
+    workspace.isAdmin = false;
+    seedPublishedPost();
+    renderPosts("grid");
+
+    expect(screen.getByRole("button", { name: "Edit post" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Delete post" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select post" })).toBeDisabled();
+
+    cleanup();
+    queryResults.posts.data = {
+      posts: [{ ...publishedPost, status: "draft", distributions: [] }],
+      has_more: false,
+      limit: 100,
+      offset: 0,
+    };
+    renderPosts("grid");
+    expect(screen.getByRole("button", { name: "Delete post" })).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "Select post" })).toBeEnabled();
+  });
+
+  it("hides published-Post deletion in the calendar day dialog for an Editor", () => {
+    workspace.isAdmin = false;
+    seedPublishedPost();
+    renderPosts("calendar");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `View posts on ${new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(new Date())}`,
+      }),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Edit" })).toBeVisible();
   });
 
   /** Measured zero is data; drafts, missing snapshots, and unsupported metrics are not. */

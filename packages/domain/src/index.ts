@@ -5,6 +5,7 @@ export {
   maximumDelayedDeliverySeconds,
   overdueRecoveryGraceSeconds,
 } from "./due-work";
+export * from "./capabilities";
 export * from "./effect";
 
 export const rateLimitBudgetFreshSeconds = 2 * 60 * 60;

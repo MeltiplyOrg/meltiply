@@ -215,9 +215,12 @@ const app = createApiApp({
   resolveActor: async () => ({
     authUserId: subject,
     claims: { organizationId, organizationRole: "admin", subject, userId },
+    displayName: "Alpha Creator",
+    email: "alpha@meltiply.local",
+    isInstallationOwner: true,
     role: "admin",
     userId,
-    workspace: { id: organizationId, isPersonal: false, name: "Alpha", slug: "alpha" },
+    workspace: { id: organizationId, name: "Alpha", slug: "alpha" },
   }),
   verifyJwtToken: async () => ({ email: "alpha@meltiply.local", name: "Alpha Creator", subject }),
 });

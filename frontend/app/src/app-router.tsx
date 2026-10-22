@@ -10,6 +10,7 @@ const ChannelsPage = lazy(() => import("@/app/(dashboard)/channels/page"));
 const ChannelConnectPage = lazy(() => import("@/app/channel-connect-route"));
 const PostsPage = lazy(() => import("@/app/(dashboard)/posts/page"));
 const SettingsPage = lazy(() => import("@/components/layout/workspace-settings"));
+const InvitationAcceptRoute = lazy(() => import("@/app/invitation-accept-route"));
 const SignInRoute = lazy(() => import("@/app/sign-in-route"));
 
 /**
@@ -43,6 +44,7 @@ export function AppRouter(): React.ReactElement {
             </AuthBoundary>
           }
         />
+        <Route path="/invitations/accept" element={<InvitationAcceptRoute />} />
         <Route element={<AuthenticatedShell />}>
           <Route path="/posts" element={<PostsPage />} />
           <Route path="/channels" element={<ChannelsPage />} />

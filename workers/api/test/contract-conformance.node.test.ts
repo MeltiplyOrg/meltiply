@@ -9,11 +9,15 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import YAML from "yaml";
 
-const { registerWorkspaceLifecycleRoutes } = vi.hoisted(() => ({
+const { registerInstallationRoutes, registerWorkspaceLifecycleRoutes } = vi.hoisted(() => ({
+  registerInstallationRoutes: vi.fn(),
   registerWorkspaceLifecycleRoutes: vi.fn(),
 }));
 vi.mock("../src/workspace-lifecycle", () => ({
   registerWorkspaceLifecycleRoutes,
+}));
+vi.mock("../src/installation-routes", () => ({
+  registerInstallationRoutes,
 }));
 
 import { createApiApp } from "../src/app";
@@ -126,14 +130,19 @@ const cases: ConformanceCase[] = [
     path: "/api/auth/change-password",
   },
   {
-    method: "POST",
-    operationId: "createWorkspace",
-    path: "/api/v1/workspaces",
-  },
-  {
     method: "PATCH",
     operationId: "updateWorkspace",
     path: "/api/v1/workspaces/00000000-0000-4000-8000-000000000001",
+  },
+  {
+    method: "GET",
+    operationId: "listWorkspaceMembers",
+    path: "/api/v1/workspaces/00000000-0000-4000-8000-000000000001/members",
+  },
+  {
+    method: "GET",
+    operationId: "listWorkspaceInvitations",
+    path: "/api/v1/workspaces/00000000-0000-4000-8000-000000000001/invitations",
   },
   {
     method: "POST",
@@ -141,9 +150,19 @@ const cases: ConformanceCase[] = [
     path: "/api/v1/workspaces/00000000-0000-4000-8000-000000000001/invitations",
   },
   {
+    method: "POST",
+    operationId: "resendWorkspaceInvitation",
+    path: "/api/v1/workspaces/00000000-0000-4000-8000-000000000001/invitations/00000000-0000-4000-8000-000000000601/resend",
+  },
+  {
     method: "DELETE",
     operationId: "revokeWorkspaceInvitation",
     path: "/api/v1/workspaces/00000000-0000-4000-8000-000000000001/invitations/00000000-0000-4000-8000-000000000601",
+  },
+  {
+    method: "GET",
+    operationId: "getWorkspaceInvitation",
+    path: "/api/v1/workspace-invitations/invitation-token-alpha",
   },
   {
     method: "POST",
@@ -159,6 +178,36 @@ const cases: ConformanceCase[] = [
     method: "DELETE",
     operationId: "removeWorkspaceMember",
     path: "/api/v1/workspaces/00000000-0000-4000-8000-000000000001/members/00000000-0000-4000-8000-000000000012",
+  },
+  {
+    method: "GET",
+    operationId: "getInstallation",
+    path: "/api/v1/installation",
+  },
+  {
+    method: "POST",
+    operationId: "suspendInstallationMember",
+    path: "/api/v1/installation/members/00000000-0000-4000-8000-000000000012/suspend",
+  },
+  {
+    method: "POST",
+    operationId: "reactivateInstallationMember",
+    path: "/api/v1/installation/members/00000000-0000-4000-8000-000000000012/reactivate",
+  },
+  {
+    method: "DELETE",
+    operationId: "deleteInstallationMember",
+    path: "/api/v1/installation/members/00000000-0000-4000-8000-000000000012",
+  },
+  {
+    method: "POST",
+    operationId: "transferInstallationOwnership",
+    path: "/api/v1/installation/ownership-transfer",
+  },
+  {
+    method: "GET",
+    operationId: "listWorkspaceAudit",
+    path: "/api/v1/workspaces/00000000-0000-4000-8000-000000000001/audit",
   },
   {
     method: "GET",
@@ -571,10 +620,12 @@ const actorFixture = {
     userId: "00000000-0000-4000-8000-000000000012",
   },
   role: "admin" as const,
+  displayName: "Alpha Admin",
+  email: "alpha-admin@example.test",
+  isInstallationOwner: true,
   userId: "00000000-0000-4000-8000-000000000012",
   workspace: {
     id: "00000000-0000-4000-8000-000000000001",
-    isPersonal: false,
     name: "Alpha",
     slug: "org-alpha",
   },
@@ -705,15 +756,26 @@ function workspaceContractResponse(operationId: string): Response {
  * @param lifecycleApp - API app receiving the Workspace route registrations.
  */
 function registerWorkspaceContractRoutes(lifecycleApp: Hono<ApiWorkerEnvironment>): void {
-  lifecycleApp.post("/api/v1/workspaces", () => workspaceContractResponse("createWorkspace"));
+  lifecycleApp.get("/api/v1/workspaces/:workspaceId/members", () =>
+    workspaceContractResponse("listWorkspaceMembers"),
+  );
+  lifecycleApp.get("/api/v1/workspaces/:workspaceId/invitations", () =>
+    workspaceContractResponse("listWorkspaceInvitations"),
+  );
   lifecycleApp.patch("/api/v1/workspaces/:workspaceId", () =>
     workspaceContractResponse("updateWorkspace"),
   );
   lifecycleApp.post("/api/v1/workspaces/:workspaceId/invitations", () =>
     workspaceContractResponse("createWorkspaceInvitation"),
   );
+  lifecycleApp.post("/api/v1/workspaces/:workspaceId/invitations/:invitationId/resend", () =>
+    workspaceContractResponse("resendWorkspaceInvitation"),
+  );
   lifecycleApp.delete("/api/v1/workspaces/:workspaceId/invitations/:invitationId", () =>
     workspaceContractResponse("revokeWorkspaceInvitation"),
+  );
+  lifecycleApp.get("/api/v1/workspace-invitations/:token", () =>
+    workspaceContractResponse("getWorkspaceInvitation"),
   );
   lifecycleApp.post("/api/v1/workspace-invitations/:token/accept", () =>
     workspaceContractResponse("acceptWorkspaceInvitation"),
@@ -724,9 +786,34 @@ function registerWorkspaceContractRoutes(lifecycleApp: Hono<ApiWorkerEnvironment
   lifecycleApp.delete("/api/v1/workspaces/:workspaceId/members/:memberId", () =>
     workspaceContractResponse("removeWorkspaceMember"),
   );
+  lifecycleApp.get("/api/v1/workspaces/:workspaceId/audit", () =>
+    workspaceContractResponse("listWorkspaceAudit"),
+  );
+}
+
+/**
+ * Registers installation conformance doubles at the production paths.
+ *
+ * @param installationApp - API app receiving installation route registrations.
+ */
+function registerInstallationContractRoutes(installationApp: Hono<ApiWorkerEnvironment>): void {
+  installationApp.get("/api/v1/installation", () => workspaceContractResponse("getInstallation"));
+  installationApp.post("/api/v1/installation/members/:memberId/suspend", () =>
+    workspaceContractResponse("suspendInstallationMember"),
+  );
+  installationApp.post("/api/v1/installation/members/:memberId/reactivate", () =>
+    workspaceContractResponse("reactivateInstallationMember"),
+  );
+  installationApp.delete("/api/v1/installation/members/:memberId", () =>
+    workspaceContractResponse("deleteInstallationMember"),
+  );
+  installationApp.post("/api/v1/installation/ownership-transfer", () =>
+    workspaceContractResponse("transferInstallationOwnership"),
+  );
 }
 
 registerWorkspaceLifecycleRoutes.mockImplementation(registerWorkspaceContractRoutes);
+registerInstallationRoutes.mockImplementation(registerInstallationContractRoutes);
 
 const app = createApiApp({
   assetService,

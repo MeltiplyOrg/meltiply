@@ -71,8 +71,7 @@ only when the user requests it or an applicable skill explicitly requires it.
   error mapping. Use `codebase-design` when shaping module interfaces.
 - **Skills:** pack-managed skills come from `Essential-kit/skills`; run
   `bun run skills:sync` after changing the pinned ref. See
-  [agent skills](docs/agents/skills.md) before editing `.agents/skills/` or
-  `skills-lock.json`.
+  [agent skills](docs/agents/skills.md) before editing `.agents/skills/`.
 - **PRs:** use the [pr skill](.agents/skills/pr/SKILL.md) to author or revise a PR.
   Use native `gh` with a Markdown body; submit only when asked and checks pass.
 - **Commits:** Conventional Commits, imperative subject under 72 characters, no

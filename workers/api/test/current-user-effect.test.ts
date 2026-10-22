@@ -32,11 +32,13 @@ const actor: ResolvedActor = {
     subject: "auth_user_alpha",
     userId: "10000000-0000-4000-8000-000000000001",
   },
+  displayName: "Alpha Admin",
+  email: "alpha@example.test",
+  isInstallationOwner: false,
   role: "admin",
   userId: "10000000-0000-4000-8000-000000000001",
   workspace: {
     id: "20000000-0000-4000-8000-000000000001",
-    isPersonal: false,
     name: "Alpha",
     slug: "alpha",
   },
@@ -54,6 +56,7 @@ const mockProfile: UserProfile = {
   display_name: "Alpha User",
   email: "alpha@example.test",
   id: "10000000-0000-4000-8000-000000000001",
+  is_installation_owner: false,
   updated_at: "2026-09-12T12:00:00.000Z",
 };
 

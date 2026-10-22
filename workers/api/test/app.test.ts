@@ -66,11 +66,13 @@ const actor: ResolvedActor = {
     subject: "user_better_alpha",
     userId: "00000000-0000-4000-8000-000000000011",
   },
+  displayName: "Alpha Admin",
+  email: "alpha@example.com",
+  isInstallationOwner: false,
   role: "admin",
   userId: "00000000-0000-4000-8000-000000000011",
   workspace: {
     id: "00000000-0000-4000-8000-000000000001",
-    isPersonal: false,
     name: "Alpha",
     slug: "alpha",
   },
@@ -104,6 +106,7 @@ const userProfile: UserProfile = {
   display_name: "Alpha User",
   email: "alpha@example.com",
   id: actor.userId,
+  is_installation_owner: true,
   updated_at: "2026-01-01T00:00:00.000Z",
 };
 
@@ -1109,7 +1112,12 @@ describe("API Worker foundation", () => {
 
     expect(response.status).toBe(200);
     expect(verifyJwtToken).toHaveBeenCalledWith(expect.anything(), "test-only.jwt");
-    expect(resolveActor).toHaveBeenCalledWith(expect.anything(), jwtIdentity, expect.any(Request));
+    expect(resolveActor).toHaveBeenCalledWith(
+      expect.anything(),
+      jwtIdentity,
+      expect.any(Request),
+      response.headers.get("X-Request-ID"),
+    );
     expect(loadCurrentUser).toHaveBeenCalledWith(expect.anything(), actor.claims);
     expect(fakeBetterAuth.api.getSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({

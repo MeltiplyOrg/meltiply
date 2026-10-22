@@ -397,10 +397,21 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await filterSummary.click();
   const filterPanel = page.getByRole("group", { name: "Filters", exact: true });
   await filterPanel.getByRole("button", { name: "Add Platform filter", exact: true }).click();
-  await filterPanel.getByRole("button", { name: "All platforms", exact: true }).click();
+  const platformFilterTrigger = filterPanel.getByRole("button", {
+    name: "All platforms",
+    exact: true,
+  });
+  await platformFilterTrigger.click();
   const platformMenuSurface = page.locator(
     "[data-radix-popper-content-wrapper] [data-menu-surface]",
   );
+  const [platformTriggerBox, platformMenuBox] = await Promise.all([
+    platformFilterTrigger.boundingBox(),
+    platformMenuSurface.boundingBox(),
+  ]);
+  // The list must span the full-width filter control that opened it instead of
+  // collapsing to the shared surface floor.
+  expect(platformMenuBox?.width ?? 0).toBeGreaterThanOrEqual((platformTriggerBox?.width ?? 0) - 1);
   expect(
     await platformMenuSurface.evaluate((element) => getComputedStyle(element).animationName),
   ).toBe("menu-surface-in");
@@ -570,6 +581,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await statusControl.click();
   const openMenuSurface = page.getByRole("menu", { name: "Post status", exact: true });
   await expect(openMenuSurface).toBeVisible();
+  const [statusControlBox, statusMenuBox] = await Promise.all([
+    statusControl.boundingBox(),
+    openMenuSurface.boundingBox(),
+  ]);
+  expect(statusMenuBox?.width ?? 0).toBeGreaterThanOrEqual((statusControlBox?.width ?? 0) - 1);
   expect(await openMenuSurface.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   expect(
     await openMenuSurface.locator("[data-menu-item]").first().evaluate(menuItemChrome),

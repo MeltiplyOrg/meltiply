@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   filterAndSortPosts,
+  isPublishedDistributionStatus,
   prunePostSelection,
   resolveChannelMedia,
   resolveChannelText,
@@ -346,5 +347,26 @@ describe("prunePostSelection", () => {
       draftFilter: false,
     });
     expect(pruned).toBe(selection);
+  });
+});
+
+describe("isPublishedDistributionStatus", () => {
+  it("protects published, in-flight, and ambiguous Provider attempts", () => {
+    for (const status of ["published", "processing", "awaiting_provider", "needs_reconciliation"]) {
+      expect(isPublishedDistributionStatus(status), status).toBe(true);
+    }
+  });
+
+  it("leaves drafts and cancellable work editable by non-admins", () => {
+    for (const status of [
+      "draft",
+      "scheduled",
+      "queued",
+      "cancel_requested",
+      "cancelled",
+      "failed",
+    ]) {
+      expect(isPublishedDistributionStatus(status), status).toBe(false);
+    }
   });
 });

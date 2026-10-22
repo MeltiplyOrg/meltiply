@@ -69,7 +69,14 @@ vi.mock("@/context/workspace.context", () => ({
         listeners.delete(listener);
       };
     }, []);
-    return { ...workspace, logout: vi.fn() };
+    return {
+      ...workspace,
+      canManageConfiguration: true,
+      canManageSettings: true,
+      canWriteContent: true,
+      isInstallationOwner: false,
+      logout: vi.fn(),
+    };
   },
 }));
 vi.mock("@/hooks/use-session-scope", () => ({

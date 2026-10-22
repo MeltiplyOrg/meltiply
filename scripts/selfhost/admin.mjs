@@ -4,13 +4,14 @@ const [action = "status", argument, extra] = process.argv.slice(2);
 let command;
 if (action === "status") command = { action };
 else if (action === "token") command = { action, email: argument, subject: extra || argument };
+else if (action === "promote-owner") command = { action, email: argument };
 else if (action === "replay")
   command = { action, queue: argument, limit: extra ? Number(extra) : 100 };
 else if (["probe-write", "probe-read"].includes(action))
   command = { action, id: argument, organizationId: extra };
 else
   throw new TypeError(
-    "Usage: admin.mjs status | token EMAIL [SUBJECT] | replay DLQ [LIMIT] | probe-write UUID ORG_UUID | probe-read UUID ORG_UUID",
+    "Usage: admin.mjs status | token EMAIL [SUBJECT] | promote-owner EMAIL | replay DLQ [LIMIT] | probe-write UUID ORG_UUID | probe-read UUID ORG_UUID",
   );
 const body = JSON.stringify(command);
 const result = await new Promise((resolve, reject) => {

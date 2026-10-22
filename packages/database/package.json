@@ -7,8 +7,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vp test run --exclude test/rls.integration.test.ts",
-    "test:integration": "vp test run test/rls.integration.test.ts",
+    "test": "vp test run --exclude test/rls.integration.test.ts --exclude test/migration-012.integration.test.ts",
+    "test:integration": "vp test run test/rls.integration.test.ts test/migration-012.integration.test.ts",
     "type-check": "tsc --project tsconfig.json"
   },
   "dependencies": {

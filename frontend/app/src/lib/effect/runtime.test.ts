@@ -18,6 +18,7 @@ const mockProfile: UserProfile = {
   avatar_url: null,
   created_at: "2026-09-12T12:00:00.000Z",
   display_name: "Ada Lovelace",
+  is_installation_owner: false,
   email: "ada@example.com",
   id: "user_ada",
   updated_at: "2026-09-12T12:00:00.000Z",

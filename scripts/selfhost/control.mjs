@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { chmod, rm } from "node:fs/promises";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
+import pg from "pg";
 import { z } from "zod";
 
 const commandSchema = z.discriminatedUnion("action", [
@@ -8,6 +9,7 @@ const commandSchema = z.discriminatedUnion("action", [
   z
     .object({ action: z.literal("token"), email: z.email(), subject: z.string().min(1).max(200) })
     .strict(),
+  z.object({ action: z.literal("promote-owner"), email: z.email() }).strict(),
   z
     .object({
       action: z.literal("replay"),
@@ -25,7 +27,7 @@ const commandSchema = z.discriminatedUnion("action", [
  * identifiers; they cannot call a Provider. Read verifies restart recovery and
  * removes probe objects. The same socket supports queue recovery and token minting.
  */
-export async function startControl(runtime, jobs, queuePolicies, secret) {
+export async function startControl(runtime, jobs, queuePolicies, secret, systemDatabaseUrl) {
   const socket = "/tmp/meltiply-admin.sock";
   await rm(socket, { force: true });
   const server = createServer(async (request, response) => {
@@ -57,6 +59,102 @@ export async function startControl(runtime, jobs, queuePolicies, secret) {
           .update(`${header}.${payload}`)
           .digest("base64url");
         result = { token: `${header}.${payload}.${signature}`, expiresAt: now + 900 };
+      } else if (command.action === "promote-owner") {
+        const client = new pg.Client({ connectionString: systemDatabaseUrl });
+        await client.connect();
+        try {
+          await client.query("BEGIN");
+          const target = await client.query(
+            `SELECT id, email, display_name, suspended_at
+             FROM users WHERE lower(email) = lower($1) LIMIT 1`,
+            [command.email],
+          );
+          const account = target.rows[0];
+          if (!account) throw new Error("No account exists for that email");
+          const shared = await client.query("SELECT id FROM organizations WHERE is_shared LIMIT 1");
+          const organizationId = shared.rows[0]?.id;
+          if (!organizationId) throw new Error("No shared workspace exists");
+          const previousOwner = await client.query(
+            "SELECT id FROM users WHERE installation_owner AND id <> $1 LIMIT 1 FOR UPDATE",
+            [account.id],
+          );
+          const previousMembership = await client.query(
+            "SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2 LIMIT 1 FOR UPDATE",
+            [organizationId, account.id],
+          );
+          const requestId = `selfhost-break-glass-${randomUUID()}`;
+          const audit = (action, targetType, before, after) =>
+            client.query(
+              `INSERT INTO workspace_audit_entries (
+                 org_id, actor_user_id, actor_email, actor_display_name,
+                 action, target_type, target_id, before_state, after_state, request_id
+               )
+               VALUES ($1, NULL, 'selfhost-break-glass', 'Self-host break-glass',
+                       $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
+              [
+                organizationId,
+                action,
+                targetType,
+                account.id,
+                before === undefined ? null : JSON.stringify(before),
+                after === undefined ? null : JSON.stringify(after),
+                requestId,
+              ],
+            );
+
+          await client.query(
+            `UPDATE users SET installation_owner = FALSE
+             WHERE installation_owner AND id <> $1`,
+            [account.id],
+          );
+          await client.query(
+            `UPDATE users
+             SET installation_owner = TRUE,
+                 suspended_at = NULL,
+                 suspension_reason = NULL,
+                 updated_at = now()
+             WHERE id = $1`,
+            [account.id],
+          );
+          await client.query(
+            `INSERT INTO org_members (org_id, user_id, role)
+             VALUES ($1, $2, 'admin')
+             ON CONFLICT (org_id, user_id) DO UPDATE
+             SET role = 'admin', updated_at = now()`,
+            [organizationId, account.id],
+          );
+          if (account.suspended_at !== null) {
+            await audit(
+              "account.reactivated",
+              "member",
+              { suspended_at: account.suspended_at },
+              {
+                suspended_at: null,
+              },
+            );
+          }
+          if (previousMembership.rows[0]?.role !== "admin") {
+            await audit(
+              "member.role_changed",
+              "member",
+              { role: previousMembership.rows[0]?.role ?? null },
+              { role: "admin" },
+            );
+          }
+          await audit(
+            "installation.ownership_transferred",
+            "member",
+            { owner_user_id: previousOwner.rows[0]?.id ?? null },
+            { owner_user_id: account.id },
+          );
+          await client.query("COMMIT");
+          result = { promoted: account.id };
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally {
+          await client.end();
+        }
       } else if (command.action === "replay")
         result = { replayed: jobs.replay(command.queue, command.limit) };
       else {

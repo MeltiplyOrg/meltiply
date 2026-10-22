@@ -1,10 +1,11 @@
 import { Effect, type Layer } from "effect";
 import type { EffectTransactionClient } from "@meltiply/database";
-import type { DatabaseError } from "@meltiply/domain";
+import { can, isWorkspaceRole, type DatabaseError, type WorkspaceRole } from "@meltiply/domain";
 import { escapeMailHtml } from "@meltiply/domain/mail-content";
 import type { Context, Hono } from "hono";
 
 import type { ResolvedActor } from "./actor-resolution";
+import { auditActorFrom, recordWorkspaceAuditEffect } from "./audit";
 import { CoreApiError } from "./core-types";
 import { sha256Hex } from "./crypto";
 import { withSystemTransactionEffect } from "./database";
@@ -25,6 +26,7 @@ import {
   type MailMessage,
 } from "./mail";
 import { jsonResponse } from "./responses";
+import { requireSeatCapacityEffect } from "./seats";
 import {
   idempotencyKey,
   jsonBody,
@@ -37,35 +39,38 @@ import {
 /**
  * Workspace lifecycle REST surface implemented natively on the resolved actor.
  *
- * Every management operation is server-authoritative: the addressed workspace
- * comes from the path parameter, membership and role are re-checked inside the
- * transaction against `org_members`, and the untrusted `X-Workspace-ID` header
- * is never consulted on these routes. All work runs through
- * `withSystemTransactionEffect` because lifecycle operations span workspaces
- * (creating a new one, accepting an invitation into another one) and must not
- * be constrained by the caller's currently selected tenant RLS claims.
+ * There is exactly one shared Workspace per installation; administration is
+ * scoped to its path id and re-checked inside the transaction against
+ * `org_members`. The installation Owner is not a content superadmin: content
+ * authority comes from the Workspace role, while owner-only actions live in
+ * the installation routes. Every administrative mutation records an Audit
+ * entry in the same transaction.
  */
 
-type WorkspaceRole = "admin" | "member";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const INVITATION_TTL_DAYS = 7;
 
 interface WorkspaceBody {
   created_at: string;
   id: string;
-  is_personal: boolean;
   name: string;
   role: WorkspaceRole;
   slug: string;
   updated_at: string;
 }
 
+type MemberStatus = "active" | "suspended";
+
 interface WorkspaceMemberBody {
   avatar_url: string | null;
   created_at: string;
   display_name: string | null;
   email: string;
+  is_installation_owner: boolean;
   role: WorkspaceRole;
+  status: MemberStatus;
+  suspended_at: string | null;
   updated_at: string;
   user_id: string;
 }
@@ -87,7 +92,6 @@ interface OrganizationRow extends Record<string, unknown> {
   created_at: Date | string;
   id: string;
   name: string;
-  personal_user_id: string | null;
   slug: string;
   updated_at: Date | string;
 }
@@ -97,7 +101,9 @@ interface MemberRow extends Record<string, unknown> {
   created_at: Date | string;
   display_name: string | null;
   email: string;
+  installation_owner: boolean;
   role: string;
+  suspended_at: Date | string | null;
   updated_at: Date | string | null;
   user_id: string;
 }
@@ -120,14 +126,15 @@ interface IdempotentResponse {
   status: number;
   /** Workspace display name carried out of the transaction for invitation email copy. */
   workspaceName?: string;
+  /** Raw single-use token produced inside the transaction for email delivery. */
+  token?: string;
 }
 
 /**
  * Optional `MailService` override mirroring the `storageServiceLayer` seam in
  * `CoreRouteDependencies`: tests inject `createMailServiceTest` doubles while
  * production resolves the live sender from the current invocation's `env` (see
- * `resolveMailServiceLayer`). There is no delivery-skipping mode — a missing
- * binding or sender surfaces as the `unavailable` mail failure.
+ * `resolveMailServiceLayer`).
  */
 export interface WorkspaceLifecycleDependencies {
   mailServiceLayer?:
@@ -149,14 +156,13 @@ function isoTimestamp(value: Date | string): string {
  * Maps an organizations row plus the caller's membership role to the Workspace schema.
  *
  * @param row - organizations table row.
- * @param role - Caller's org_members role in this workspace.
+ * @param role - Caller's org_members role.
  * @returns OpenAPI Workspace response body.
  */
 function workspaceBody(row: OrganizationRow, role: WorkspaceRole): WorkspaceBody {
   return {
     created_at: isoTimestamp(row.created_at),
     id: row.id,
-    is_personal: row.personal_user_id !== null,
     name: row.name,
     role,
     slug: row.slug,
@@ -167,16 +173,24 @@ function workspaceBody(row: OrganizationRow, role: WorkspaceRole): WorkspaceBody
 /**
  * Maps a joined org_members/users row to the WorkspaceMember schema.
  *
+ * `status` reflects suspension, which is installation-level account state; a
+ * suspended member keeps their membership and content attribution but releases
+ * their Seat and cannot authenticate.
+ *
  * @param row - Joined membership row.
  * @returns OpenAPI WorkspaceMember response body.
  */
 function memberBody(row: MemberRow): WorkspaceMemberBody {
+  const suspended = row.suspended_at !== null;
   return {
     avatar_url: row.avatar_url,
     created_at: isoTimestamp(row.created_at),
     display_name: row.display_name,
     email: row.email,
-    role: row.role as WorkspaceRole,
+    is_installation_owner: row.installation_owner,
+    role: isWorkspaceRole(row.role) ? row.role : "viewer",
+    status: suspended ? "suspended" : "active",
+    suspended_at: suspended ? isoTimestamp(row.suspended_at as Date | string) : null,
     updated_at: isoTimestamp(row.updated_at ?? row.created_at),
     user_id: row.user_id,
   };
@@ -206,7 +220,7 @@ function invitationBody(row: InvitationRow): WorkspaceInvitationBody {
     expires_at: isoTimestamp(row.expires_at),
     id: row.id,
     org_id: row.org_id,
-    role: row.role as WorkspaceRole,
+    role: isWorkspaceRole(row.role) ? row.role : "viewer",
     status,
     updated_at: isoTimestamp(row.updated_at),
   };
@@ -231,51 +245,31 @@ function normalizedEmail(value: unknown): string {
 }
 
 /**
- * Validates an optional slug override or derives one from the workspace name.
+ * Reads a required Workspace role from a request body.
  *
- * Derived slugs append a random 8-character suffix so two workspaces named the
- * same do not collide on the unique slug index; explicit slugs must already
- * match the contract pattern.
- *
- * @param name - Workspace display name used for derivation.
- * @param supplied - Optional client-supplied slug.
- * @returns Contract-valid slug string.
- * @throws {CoreApiError} 400 `validation_error` when a supplied slug violates the pattern.
+ * @param value - Untrusted role field.
+ * @param field - Body field name used in the validation message.
+ * @returns Validated Workspace role.
+ * @throws {CoreApiError} 400 `validation_error` when the value is not a role.
  */
-function workspaceSlug(name: string, supplied: string | undefined): string {
-  if (supplied !== undefined) {
-    const slug = supplied.trim().toLowerCase();
-    if (!SLUG_PATTERN.test(slug) || slug.length > 100) {
-      throw new CoreApiError(
-        400,
-        "validation_error",
-        "slug must match ^[a-z0-9]+(?:-[a-z0-9]+)*$ and be at most 100 characters.",
-      );
-    }
-    return slug;
+function workspaceRoleField(value: unknown, field: string): WorkspaceRole {
+  if (!isWorkspaceRole(value)) {
+    throw new CoreApiError(400, "validation_error", `${field} must be admin, editor, or viewer.`);
   }
-  const base =
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 90) || "workspace";
-  const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
-  return `${base}-${suffix}`;
+  return value;
 }
 
 /**
- * Loads the caller's membership and the addressed workspace inside one transaction.
+ * Loads the caller's membership and the addressed Workspace inside one transaction.
  *
- * Membership in the addressed workspace is the authorization boundary for every
- * lifecycle route: a non-member gets 404 so workspace existence is not leaked.
+ * Membership is the authorization boundary for every lifecycle route: a
+ * non-member gets 404 so Workspace existence is not leaked.
  *
  * @param client - Active Effect transaction client.
  * @param workspaceId - Workspace UUID from the path.
  * @param actor - Resolved request actor.
- * @returns Effect resolving to the workspace row and the caller's role.
- * Fails with {CoreApiError} 404 `workspace_not_found` when the workspace is
- * missing or the actor is not a member.
+ * @returns Effect resolving to the Workspace row and the caller's role.
+ * @throws {CoreApiError} 404 `workspace_not_found` when the Workspace is missing or inaccessible.
  */
 function requireMembership(
   client: EffectTransactionClient,
@@ -287,31 +281,27 @@ function requireMembership(
 > {
   return client
     .query<OrganizationRow & { member_role: string }>(
-      `SELECT o.id, o.name, o.slug, o.personal_user_id,
-              o.created_at, o.updated_at, om.role AS member_role
+      `SELECT o.id, o.name, o.slug, o.created_at, o.updated_at, om.role AS member_role
        FROM organizations o
        JOIN org_members om ON om.org_id = o.id AND om.user_id = $2
-       WHERE o.id = $1`,
+       WHERE o.id = $1 AND o.is_shared`,
       [workspaceId, actor.userId],
     )
     .pipe(
       Effect.flatMap((result) => {
         const row = result.rows[0];
-        if (!row) {
+        if (!row || !isWorkspaceRole(row.member_role)) {
           return Effect.fail(
             new CoreApiError(404, "workspace_not_found", "The workspace was not found."),
           );
         }
-        return Effect.succeed({
-          role: row.member_role as WorkspaceRole,
-          workspace: row,
-        });
+        return Effect.succeed({ role: row.member_role, workspace: row });
       }),
     );
 }
 
 /**
- * Asserts the caller holds the admin role in the addressed workspace.
+ * Asserts the caller holds the Workspace Admin role in the addressed Workspace.
  *
  * @param role - Caller's membership role resolved by requireMembership.
  * @returns Effect that fails with 403 `workspace_admin_required` for non-admins.
@@ -325,25 +315,60 @@ function requireAdmin(role: WorkspaceRole): Effect.Effect<void, CoreApiError> {
 }
 
 /**
- * Guards against mutating a personal workspace through team lifecycle routes.
+ * Asserts the resolved caller may assign a role to another person.
  *
- * @param workspace - Addressed organizations row.
- * @returns Effect that fails with 409 `personal_workspace` for personal workspaces.
+ * Workspace Admins may invite and manage Editors and Viewers; only the
+ * Installation Owner may assign Admin. The capability map is the authority so
+ * the API and the frontend cannot disagree.
+ *
+ * @param actor - Resolved request actor.
+ * @param role - Role being assigned.
+ * @returns Effect that fails with 403 `forbidden_role_assignment`.
  */
-function requireTeamWorkspace(workspace: OrganizationRow): Effect.Effect<void, CoreApiError> {
-  return workspace.personal_user_id === null
+function requireAssignableRole(
+  actor: ResolvedActor,
+  role: WorkspaceRole,
+): Effect.Effect<void, CoreApiError> {
+  const capability =
+    role === "admin"
+      ? "member:assign-admin"
+      : role === "editor"
+        ? "member:assign-editor"
+        : "member:assign-viewer";
+  return can(actor.role, actor.isInstallationOwner, capability)
     ? Effect.void
     : Effect.fail(
-        new CoreApiError(
-          409,
-          "personal_workspace",
-          "Personal workspaces do not support this operation.",
-        ),
+        new CoreApiError(403, "forbidden_role_assignment", "You cannot assign that role."),
       );
 }
 
 /**
- * Runs an idempotent workspace mutation inside one system transaction.
+ * Asserts a Workspace Admin is not modifying another Admin.
+ *
+ * Installation Ownership is installation-level authority and is the only path
+ * that may change an Admin's role or membership.
+ *
+ * @param actor - Resolved request actor.
+ * @param targetRole - Target member's current role.
+ * @returns Effect that fails with 403 `forbidden_role_assignment`.
+ */
+function forbidAdminPeerMutation(
+  actor: ResolvedActor,
+  targetRole: WorkspaceRole,
+): Effect.Effect<void, CoreApiError> {
+  return targetRole === "admin" && !actor.isInstallationOwner
+    ? Effect.fail(
+        new CoreApiError(
+          403,
+          "forbidden_role_assignment",
+          "Workspace admins cannot modify another admin.",
+        ),
+      )
+    : Effect.void;
+}
+
+/**
+ * Runs an idempotent lifecycle mutation inside one system transaction.
  *
  * Reserves the (org_id, operation, key) slot, replays the stored response on a
  * matching request hash, and records the produced status/body before commit so
@@ -357,7 +382,7 @@ function requireTeamWorkspace(workspace: OrganizationRow): Effect.Effect<void, C
  * @param run - Transactional program producing the response status and body.
  * @returns Effect resolving to the fresh or replayed response.
  */
-function idempotentMutation(
+export function idempotentMutation(
   env: ApiWorkerEnv,
   organizationId: string,
   operation: string,
@@ -398,13 +423,11 @@ function idempotentMutation(
 }
 
 /**
- * Resolves the `MailService` Layer for the invitation create route.
+ * Resolves the `MailService` Layer for invitation delivery.
  *
  * Injected dependencies (layers or env-derived layer factories, e.g. test
  * doubles) win; otherwise the layer is derived from the current invocation's
- * `env` so Worker bindings are never captured by a module-global Layer. The
- * resulting program runs under `runRouteEffect` with the standard
- * `RequestContext` scope — no separate mail runtime is introduced.
+ * `env` so Worker bindings are never captured by a module-global Layer.
  *
  * @param env - Worker environment bindings of the current request.
  * @param dependencies - Route registration dependencies.
@@ -422,12 +445,10 @@ function resolveMailServiceLayer(
 }
 
 /**
- * Reduces a workspace name to subject-line-safe text. The invitation
- * subject interpolates the workspace name into a single header value, so
- * control/format characters (including CRLF, which would split headers)
- * are collapsed rather than delivered to the mail binding.
+ * Reduces a Workspace name to subject-line-safe text, collapsing control and
+ * format characters so CRLF cannot split the mail header.
  *
- * @param name - Raw workspace display name.
+ * @param name - Raw Workspace display name.
  * @returns Control-free name, or "your team" when nothing printable remains.
  */
 function invitationSubjectWorkspaceName(name: string): string {
@@ -436,15 +457,9 @@ function invitationSubjectWorkspaceName(name: string): string {
 }
 
 /**
- * Renders the neutral `MailMessage` for a workspace invitation.
+ * Renders the neutral `MailMessage` for a Workspace invitation.
  *
- * The acceptance link points at the frontend's invitation route carrying the
- * opaque token; only the token hash is persisted server-side. HTML and plain
- * text bodies carry the same content so the message reads in every client;
- * variable content is HTML-escaped (`escapeMailHtml`) while the plain-text
- * body and subject stay unescaped (HTML entities would display literally).
- *
- * @param message - Recipient, acceptance link, and workspace display name.
+ * @param message - Recipient, acceptance link, and Workspace display name.
  * @returns Provider-neutral message ready for `MailService.send`.
  */
 function renderInvitationMessage(message: {
@@ -481,14 +496,91 @@ function invitationLink(env: ApiWorkerEnv, token: string): string {
 }
 
 /**
- * Registers the native workspace lifecycle routes on the API router.
+ * Submits one invitation email and owns the shared delivery-failure policy.
  *
- * Implements the Workspaces tag of the OpenAPI contract: team workspace
- * creation, rename/re-slug, member role changes and removal, and the
- * invitation create/revoke/accept flow. All routes require the resolved actor
- * (the auth middleware rejects unauthenticated requests before dispatch) and
- * re-verify membership against the path-addressed workspace inside the
- * transaction.
+ * Creation and resend both rotate or mint a single-use token before sending.
+ * A `rejected` or `unavailable` submission is definitive, so the committed
+ * idempotency record is removed: a client retry with the same key must execute
+ * again rather than replay a response whose message was never delivered. A
+ * created invitation is also revoked so its undelivered token cannot hold a
+ * Seat; a resent invitation stays pending so the retry can rotate and resend.
+ * An `ambiguous` outcome keeps both records because the provider may have
+ * accepted the message. The caller's request fails with the typed mail error so
+ * the API never reports an undelivered invitation as successful.
+ *
+ * @param env - Worker environment bindings used for the repair transaction.
+ * @param invitation - Invitation whose id, Workspace, and recipient identify the message.
+ * @param link - Absolute acceptance link carrying the raw token.
+ * @param workspaceName - Workspace display name for the message copy.
+ * @param operation - Idempotent operation whose record may be invalidated.
+ * @param idempotencyKey - Client key committed by the invitation mutation.
+ * @param revokeOnDefinitiveFailure - Whether a definitive failure releases the Seat.
+ * @returns Effect resolving after the mail service accepts the submission.
+ * @throws {CoreApiError} 503 `email_unavailable` or 502 `email_delivery_failed`.
+ */
+function submitInvitationEffect(
+  env: ApiWorkerEnv,
+  invitation: Pick<WorkspaceInvitationBody, "email" | "id" | "org_id">,
+  link: string,
+  workspaceName: string,
+  operation: string,
+  idempotencyKey: string,
+  revokeOnDefinitiveFailure: boolean,
+): Effect.Effect<void, CoreApiError, MailService> {
+  return Effect.gen(function* () {
+    const mail = yield* MailService;
+    yield* mail.send(renderInvitationMessage({ link, to: invitation.email, workspaceName })).pipe(
+      Effect.catchTag("MailSubmissionError", (failure) =>
+        Effect.gen(function* () {
+          yield* Effect.logWarning("invitation_email_submission_failed").pipe(
+            Effect.annotateLogs({
+              invitation_id: invitation.id,
+              mail_classification: failure.classification,
+              mail_error: failure.message,
+            }),
+          );
+          if (failure.classification !== "ambiguous") {
+            yield* withSystemTransactionEffect(env, (client) =>
+              Effect.gen(function* () {
+                yield* client.query(
+                  `DELETE FROM idempotency_keys
+                   WHERE org_id = $1 AND operation = $2 AND idempotency_key = $3`,
+                  [invitation.org_id, operation, idempotencyKey],
+                );
+                if (revokeOnDefinitiveFailure) {
+                  yield* client.query(
+                    `UPDATE workspace_invitations
+                     SET revoked_at = now(), updated_at = now()
+                     WHERE id = $1 AND accepted_at IS NULL`,
+                    [invitation.id],
+                  );
+                }
+              }),
+            ).pipe(Effect.ignore);
+          }
+          return yield* Effect.fail(
+            failure.classification === "unavailable"
+              ? new CoreApiError(
+                  503,
+                  "email_unavailable",
+                  "Invitation email delivery is not configured.",
+                )
+              : new CoreApiError(
+                  502,
+                  "email_delivery_failed",
+                  failure.classification === "ambiguous"
+                    ? "The invitation email delivery outcome could not be confirmed."
+                    : "The invitation email could not be delivered.",
+                ),
+          );
+        }),
+      ),
+    );
+  });
+}
+
+/**
+ * Registers the native Workspace lifecycle routes on the API router.
  *
  * @param app - Hono application instance.
  * @param dependencies - Optional `MailService` Layer override for tests.
@@ -497,72 +589,62 @@ export function registerWorkspaceLifecycleRoutes(
   app: Hono<ApiWorkerEnvironment>,
   dependencies: WorkspaceLifecycleDependencies = {},
 ): void {
-  app.post("/api/v1/workspaces", (c) =>
+  app.get("/api/v1/workspaces/:workspaceId/members", (c) =>
     runRouteEffect(
       c,
       Effect.gen(function* () {
         const actor = c.get("actor");
-        const body = yield* fromPromise(() => jsonBody(c));
-        yield* fromPromise(() => onlyKeys(body, ["name", "slug"]));
-        const name = yield* fromPromise(() => stringField(body, "name"));
-        if (name.length > 200) {
-          return yield* Effect.fail(
-            new CoreApiError(400, "validation_error", "name must be at most 200 characters."),
-          );
-        }
-        const slug = yield* fromPromise(() =>
-          workspaceSlug(name, optionalStringField(body, "slug") ?? undefined),
+        const workspaceId = yield* fromPromise(() =>
+          uuidParam(c.req.param("workspaceId"), "workspace_id"),
         );
-        const key = yield* fromPromise(() => idempotencyKey(c));
-        const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ name, slug }));
-        // The new workspace has no id yet, so the caller's current workspace
-        // scopes the idempotency key; retries from the same session replay.
-        const result = yield* idempotentMutation(
-          c.env,
-          actor.workspace.id,
-          "workspace.create",
-          key,
-          requestHash,
-          (client) =>
-            Effect.gen(function* () {
-              const inserted = yield* client.query<OrganizationRow>(
-                `INSERT INTO organizations (name, slug)
-                 VALUES ($1, $2)
-                 ON CONFLICT (slug) DO NOTHING
-                 RETURNING id, name, slug, personal_user_id, created_at, updated_at`,
-                [name, slug],
-              );
-              const organization = inserted.rows[0];
-              if (!organization) {
-                return yield* Effect.fail(
-                  new CoreApiError(
-                    409,
-                    "workspace_slug_taken",
-                    "The workspace slug is already in use.",
-                  ),
-                );
-              }
-              yield* client.query(
-                `INSERT INTO org_members (org_id, user_id, role)
-                 VALUES ($1, $2, 'admin')`,
-                [organization.id, actor.userId],
-              );
-              yield* client.query(
-                `INSERT INTO usage_reconciliation_state (org_id)
-                 VALUES ($1)
-                 ON CONFLICT (org_id) DO NOTHING`,
-                [organization.id],
-              );
-              return {
-                body: workspaceBody(organization, "admin"),
-                replayed: false,
-                status: 201,
-              };
-            }),
+        const members = yield* withSystemTransactionEffect(c.env, (client) =>
+          Effect.gen(function* () {
+            const { role } = yield* requireMembership(client, workspaceId, actor);
+            yield* requireAdmin(role);
+            const result = yield* client.query<MemberRow>(
+              `SELECT om.user_id, om.role, om.created_at, om.updated_at,
+                      u.email, u.display_name, u.avatar_url, u.suspended_at,
+                      u.installation_owner
+               FROM org_members om
+               JOIN users u ON u.id = om.user_id
+               WHERE om.org_id = $1
+               ORDER BY om.created_at ASC, om.user_id ASC`,
+              [workspaceId],
+            );
+            return result.rows.map(memberBody);
+          }),
         );
-        return jsonResponse(result.body, result.status, requestId(c), {
-          ...idempotencyHeaders(result.replayed),
-        });
+        return jsonResponse({ members }, 200, c.get("requestId"));
+      }),
+    ),
+  );
+
+  app.get("/api/v1/workspaces/:workspaceId/invitations", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const actor = c.get("actor");
+        const workspaceId = yield* fromPromise(() =>
+          uuidParam(c.req.param("workspaceId"), "workspace_id"),
+        );
+        return yield* withSystemTransactionEffect(c.env, (client) =>
+          Effect.gen(function* () {
+            const { role } = yield* requireMembership(client, workspaceId, actor);
+            yield* requireAdmin(role);
+            const result = yield* client.query<InvitationRow>(
+              `SELECT id, org_id, email, role, expires_at, accepted_at,
+                      revoked_at, created_at, updated_at
+               FROM workspace_invitations
+               WHERE org_id = $1
+                 AND accepted_at IS NULL
+                 AND revoked_at IS NULL
+                 AND expires_at > now()
+               ORDER BY created_at DESC, id DESC`,
+              [workspaceId],
+            );
+            return { invitations: result.rows.map(invitationBody) };
+          }),
+        ).pipe(Effect.map((body) => jsonResponse(body, 200, c.get("requestId"))));
       }),
     ),
   );
@@ -626,14 +708,13 @@ export function registerWorkspaceLifecycleRoutes(
             Effect.gen(function* () {
               const { role, workspace } = yield* requireMembership(client, workspaceId, actor);
               yield* requireAdmin(role);
-              yield* requireTeamWorkspace(workspace);
               const updated = yield* client.query<OrganizationRow>(
                 `UPDATE organizations
                  SET name = COALESCE($2, name),
                      slug = COALESCE($3, slug),
                      updated_at = now()
                  WHERE id = $1
-                 RETURNING id, name, slug, personal_user_id, created_at, updated_at`,
+                 RETURNING id, name, slug, created_at, updated_at`,
                 [workspaceId, nextName ?? null, nextSlug ?? null],
               );
               const row = updated.rows[0];
@@ -642,6 +723,20 @@ export function registerWorkspaceLifecycleRoutes(
                   new CoreApiError(404, "workspace_not_found", "The workspace was not found."),
                 );
               }
+              yield* recordWorkspaceAuditEffect(client, {
+                action: "workspace.renamed",
+                actor: auditActorFrom({
+                  display_name: actor.displayName,
+                  email: actor.email,
+                  id: actor.userId,
+                }),
+                after: { name: row.name, slug: row.slug },
+                before: { name: workspace.name, slug: workspace.slug },
+                orgId: workspaceId,
+                requestId: requestId(c),
+                targetId: workspaceId,
+                targetType: "workspace",
+              });
               return {
                 body: workspaceBody(row, role),
                 replayed: false,
@@ -667,18 +762,13 @@ export function registerWorkspaceLifecycleRoutes(
         const body = yield* fromPromise(() => jsonBody(c));
         yield* fromPromise(() => onlyKeys(body, ["email", "role"]));
         const email = yield* fromPromise(() => normalizedEmail(body.email));
-        const role = yield* fromPromise(() => {
-          const value = body.role;
-          if (value === undefined) return "member";
-          if (value !== "admin" && value !== "member") {
-            throw new CoreApiError(400, "validation_error", "role must be admin or member.");
-          }
-          return value;
-        });
+        const role = yield* fromPromise(() => workspaceRoleField(body.role, "role"));
+        yield* requireAssignableRole(actor, role);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ email, role }));
-        const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
-        const tokenHash = yield* Effect.promise(() => sha256Hex(token));
+        const rawToken =
+          crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+        const tokenHash = yield* Effect.promise(() => sha256Hex(rawToken));
         const result = yield* idempotentMutation(
           c.env,
           workspaceId,
@@ -693,7 +783,10 @@ export function registerWorkspaceLifecycleRoutes(
                 actor,
               );
               yield* requireAdmin(callerRole);
-              yield* requireTeamWorkspace(workspace);
+              yield* requireAssignableRole(actor, role);
+              yield* client.query("SELECT id FROM organizations WHERE id = $1 FOR UPDATE", [
+                workspaceId,
+              ]);
               const existingMember = yield* client.query<{ user_id: string }>(
                 `SELECT om.user_id
                  FROM org_members om
@@ -711,8 +804,7 @@ export function registerWorkspaceLifecycleRoutes(
                 );
               }
               // Expired-but-unmarked rows still hold the (org_id, email) slot
-              // in the pending unique index; clear them before inserting so a
-              // re-invite of the same address succeeds.
+              // in the pending unique index; clear them before inserting.
               yield* client.query(
                 `UPDATE workspace_invitations
                  SET revoked_at = now(), updated_at = now()
@@ -721,16 +813,17 @@ export function registerWorkspaceLifecycleRoutes(
                    AND expires_at <= now()`,
                 [workspaceId, email],
               );
+              yield* requireSeatCapacityEffect(client, workspaceId, 1);
               const inserted = yield* client.query<InvitationRow>(
                 `INSERT INTO workspace_invitations
                    (org_id, email, role, invited_by, token_hash, expires_at)
-                 VALUES ($1, $2, $3, $4, $5, now() + INTERVAL '7 days')
+                 VALUES ($1, $2, $3, $4, $5, now() + make_interval(days => $6))
                  ON CONFLICT (org_id, email)
                    WHERE accepted_at IS NULL AND revoked_at IS NULL
                  DO NOTHING
                  RETURNING id, org_id, email, role, expires_at, accepted_at,
                            revoked_at, created_at, updated_at`,
-                [workspaceId, email, role, actor.userId, tokenHash],
+                [workspaceId, email, role, actor.userId, tokenHash, INVITATION_TTL_DAYS],
               );
               const invitation = inserted.rows[0];
               if (!invitation) {
@@ -742,78 +835,149 @@ export function registerWorkspaceLifecycleRoutes(
                   ),
                 );
               }
+              yield* recordWorkspaceAuditEffect(client, {
+                action: "invitation.created",
+                actor: auditActorFrom({
+                  display_name: actor.displayName,
+                  email: actor.email,
+                  id: actor.userId,
+                }),
+                after: { email, role },
+                orgId: workspaceId,
+                requestId: requestId(c),
+                targetId: invitation.id,
+                targetType: "invitation",
+              });
               return {
                 body: invitationBody(invitation),
                 replayed: false,
                 status: 201,
+                token: rawToken,
                 workspaceName: workspace.name,
               };
             }),
         );
         if (!result.replayed) {
-          // Delivery happens after commit so a provider failure cannot roll
-          // back the recorded invitation. Definitive failures (unavailable
-          // configuration, rejection, rate limits, quota, infrastructure) keep
-          // the existing revocation behavior so an undeliverable invitation
-          // does not linger. An ambiguous submission is never revoked and
-          // never resubmitted: the provider may already have accepted the
-          // message, so revoking would revoke on unproven evidence and a
-          // resend could duplicate an accepted send. The invitation stays
-          // pending — an admin can revoke it and re-invite deliberately — and
-          // the outcome stays identifiable through the sanitized warn log and
-          // the neutral `MailSubmissionError` classification. A Worker crash
-          // between vendor acceptance and response mapping is an unavoidable
-          // external-write window that this design accepts rather than adding
-          // an Outbox.
-          const link = yield* fromPromise(() => invitationLink(c.env, token));
-          const invitation = result.body as WorkspaceInvitationBody;
-          const mail = yield* MailService;
-          yield* mail
-            .send(
-              renderInvitationMessage({
-                link,
-                to: email,
-                workspaceName: result.workspaceName ?? "your team",
-              }),
-            )
-            .pipe(
-              Effect.catchTag("MailSubmissionError", (failure) =>
-                Effect.gen(function* () {
-                  yield* Effect.logWarning("invitation_email_submission_failed").pipe(
-                    Effect.annotateLogs({
-                      invitation_id: invitation.id,
-                      mail_classification: failure.classification,
-                      mail_error: failure.message,
-                    }),
-                  );
-                  if (failure.classification !== "ambiguous") {
-                    yield* withSystemTransactionEffect(c.env, (client) =>
-                      client.query(
-                        `UPDATE workspace_invitations
-                         SET revoked_at = now(), updated_at = now()
-                         WHERE id = $1 AND accepted_at IS NULL`,
-                        [invitation.id],
-                      ),
-                    ).pipe(Effect.ignore);
-                  }
-                  return yield* Effect.fail(
-                    failure.classification === "unavailable"
-                      ? new CoreApiError(
-                          503,
-                          "email_unavailable",
-                          "Invitation email delivery is not configured.",
-                        )
-                      : new CoreApiError(
-                          502,
-                          "email_delivery_failed",
-                          failure.classification === "ambiguous"
-                            ? "The invitation email delivery outcome could not be confirmed."
-                            : "The invitation email could not be delivered.",
-                        ),
-                  );
+          const link = yield* fromPromise(() => invitationLink(c.env, result.token ?? ""));
+          yield* submitInvitationEffect(
+            c.env,
+            result.body as WorkspaceInvitationBody,
+            link,
+            result.workspaceName ?? "your team",
+            "workspace.invitation.create",
+            key,
+            true,
+          );
+        }
+        return jsonResponse(result.body, result.status, requestId(c), {
+          ...idempotencyHeaders(result.replayed),
+        });
+      }).pipe(Effect.provide(resolveMailServiceLayer(c.env, dependencies))),
+    ),
+  );
+
+  app.post("/api/v1/workspaces/:workspaceId/invitations/:invitationId/resend", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const actor = c.get("actor");
+        const workspaceId = yield* fromPromise(() =>
+          uuidParam(c.req.param("workspaceId"), "workspace_id"),
+        );
+        const invitationId = yield* fromPromise(() =>
+          uuidParam(c.req.param("invitationId"), "invitation_id"),
+        );
+        const key = yield* fromPromise(() => idempotencyKey(c));
+        const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ invitationId }));
+        const rawToken =
+          crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+        const tokenHash = yield* Effect.promise(() => sha256Hex(rawToken));
+        const result = yield* idempotentMutation(
+          c.env,
+          workspaceId,
+          "workspace.invitation.resend",
+          key,
+          requestHash,
+          (client) =>
+            Effect.gen(function* () {
+              const { role, workspace } = yield* requireMembership(client, workspaceId, actor);
+              yield* requireAdmin(role);
+              const existing = yield* client.query<InvitationRow>(
+                `SELECT id, org_id, email, role, expires_at, accepted_at,
+                        revoked_at, created_at, updated_at
+                 FROM workspace_invitations
+                 WHERE id = $1 AND org_id = $2
+                 FOR UPDATE`,
+                [invitationId, workspaceId],
+              );
+              const invitation = existing.rows[0];
+              if (!invitation) {
+                return yield* Effect.fail(
+                  new CoreApiError(404, "invitation_not_found", "The invitation was not found."),
+                );
+              }
+              if (invitation.accepted_at !== null) {
+                return yield* Effect.fail(
+                  new CoreApiError(409, "invitation_used", "The invitation has already been used."),
+                );
+              }
+              if (invitation.revoked_at !== null) {
+                return yield* Effect.fail(
+                  new CoreApiError(410, "invitation_revoked", "The invitation has been revoked."),
+                );
+              }
+              // An expired invitation no longer reserves a Seat. Renewing it
+              // consumes capacity again, so serialize with the Workspace lock
+              // and re-check under the same rule used at creation.
+              if (new Date(invitation.expires_at).getTime() <= Date.now()) {
+                yield* client.query("SELECT id FROM organizations WHERE id = $1 FOR UPDATE", [
+                  workspaceId,
+                ]);
+                yield* requireSeatCapacityEffect(client, workspaceId, 1);
+              }
+              const updated = yield* client.query<InvitationRow>(
+                `UPDATE workspace_invitations
+                 SET token_hash = $3,
+                     expires_at = now() + make_interval(days => $4),
+                     updated_at = now()
+                 WHERE id = $1 AND org_id = $2
+                 RETURNING id, org_id, email, role, expires_at, accepted_at,
+                           revoked_at, created_at, updated_at`,
+                [invitationId, workspaceId, tokenHash, INVITATION_TTL_DAYS],
+              );
+              yield* recordWorkspaceAuditEffect(client, {
+                action: "invitation.resent",
+                actor: auditActorFrom({
+                  display_name: actor.displayName,
+                  email: actor.email,
+                  id: actor.userId,
                 }),
-              ),
-            );
+                after: { email: invitation.email, role: invitation.role },
+                orgId: workspaceId,
+                requestId: requestId(c),
+                targetId: invitationId,
+                targetType: "invitation",
+              });
+              return {
+                body: invitationBody(updated.rows[0]!),
+                replayed: false,
+                status: 200,
+                token: rawToken,
+                workspaceName: workspace.name,
+              };
+            }),
+        );
+        if (!result.replayed) {
+          const link = yield* fromPromise(() => invitationLink(c.env, result.token ?? ""));
+          yield* submitInvitationEffect(
+            c.env,
+            result.body as WorkspaceInvitationBody,
+            link,
+            result.workspaceName ?? "your team",
+            "workspace.invitation.resend",
+            key,
+            false,
+          );
         }
         return jsonResponse(result.body, result.status, requestId(c), {
           ...idempotencyHeaders(result.replayed),
@@ -845,25 +1009,44 @@ export function registerWorkspaceLifecycleRoutes(
             Effect.gen(function* () {
               const { role } = yield* requireMembership(client, workspaceId, actor);
               yield* requireAdmin(role);
-              const revoked = yield* client.query(
-                `UPDATE workspace_invitations
-                   SET revoked_at = now(), updated_at = now()
-                   WHERE id = $1 AND org_id = $2
-                     AND accepted_at IS NULL AND revoked_at IS NULL`,
+              const existing = yield* client.query<InvitationRow>(
+                `SELECT id, org_id, email, role, expires_at, accepted_at,
+                        revoked_at, created_at, updated_at
+                 FROM workspace_invitations
+                 WHERE id = $1 AND org_id = $2
+                 FOR UPDATE`,
                 [invitationId, workspaceId],
               );
-              if (revoked.rowCount !== 1) {
-                const existing = yield* client.query<{ id: string }>(
-                  `SELECT id FROM workspace_invitations
-                     WHERE id = $1 AND org_id = $2`,
-                  [invitationId, workspaceId],
+              const invitation = existing.rows[0];
+              if (!invitation) {
+                return yield* Effect.fail(
+                  new CoreApiError(404, "invitation_not_found", "The invitation was not found."),
                 );
-                if (!existing.rows[0]) {
-                  return yield* Effect.fail(
-                    new CoreApiError(404, "invitation_not_found", "The invitation was not found."),
-                  );
-                }
               }
+              if (invitation.accepted_at !== null) {
+                return yield* Effect.fail(
+                  new CoreApiError(409, "invitation_used", "The invitation has already been used."),
+                );
+              }
+              yield* client.query(
+                `UPDATE workspace_invitations
+                 SET revoked_at = COALESCE(revoked_at, now()), updated_at = now()
+                 WHERE id = $1 AND org_id = $2`,
+                [invitationId, workspaceId],
+              );
+              yield* recordWorkspaceAuditEffect(client, {
+                action: "invitation.revoked",
+                actor: auditActorFrom({
+                  display_name: actor.displayName,
+                  email: actor.email,
+                  id: actor.userId,
+                }),
+                after: { email: invitation.email, role: invitation.role },
+                orgId: workspaceId,
+                requestId: requestId(c),
+                targetId: invitationId,
+                targetType: "invitation",
+              });
               return { body: null, replayed: false, status: 204 };
             }),
         );
@@ -874,6 +1057,64 @@ export function registerWorkspaceLifecycleRoutes(
           },
           status: 204,
         });
+      }),
+    ),
+  );
+
+  app.get("/api/v1/workspace-invitations/:token", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const token = c.req.param("token") ?? "";
+        if (token.length < 16 || token.length > 255) {
+          return yield* Effect.fail(
+            new CoreApiError(400, "invalid_request", "A valid invitation token is required."),
+          );
+        }
+        const tokenHash = yield* Effect.promise(() => sha256Hex(token));
+        const preview = yield* withSystemTransactionEffect(c.env, (client) =>
+          client.query<{
+            accepted_at: Date | string | null;
+            email: string;
+            expires_at: Date | string;
+            revoked_at: Date | string | null;
+            role: string;
+            workspace_name: string;
+          }>(
+            `SELECT i.email, i.role, i.expires_at, i.accepted_at, i.revoked_at,
+                    o.name AS workspace_name
+             FROM workspace_invitations i
+             JOIN organizations o ON o.id = i.org_id
+             WHERE i.token_hash = $1
+             LIMIT 1`,
+            [tokenHash],
+          ),
+        );
+        const row = preview.rows[0];
+        if (!row) {
+          return yield* Effect.fail(
+            new CoreApiError(404, "invitation_not_found", "The invitation was not found."),
+          );
+        }
+        const status =
+          row.accepted_at !== null
+            ? "accepted"
+            : row.revoked_at !== null
+              ? "revoked"
+              : new Date(row.expires_at).getTime() <= Date.now()
+                ? "expired"
+                : "pending";
+        return jsonResponse(
+          {
+            email: row.email,
+            expires_at: isoTimestamp(row.expires_at),
+            role: isWorkspaceRole(row.role) ? row.role : "viewer",
+            status,
+            workspace_name: row.workspace_name,
+          },
+          200,
+          requestId(c),
+        );
       }),
     ),
   );
@@ -908,6 +1149,51 @@ export function registerWorkspaceLifecycleRoutes(
                 new CoreApiError(404, "invitation_not_found", "The invitation was not found."),
               );
             }
+            if (row.accepted_at !== null) {
+              // Actor resolution activates a verified invitation automatically.
+              // Replaying the link for the same account returns that membership;
+              // any other caller still sees the used-invitation error.
+              const existing = yield* client.query<{
+                avatar_url: string | null;
+                created_at: Date | string;
+                display_name: string | null;
+                email: string;
+                installation_owner: boolean;
+                role: string;
+                suspended_at: Date | string | null;
+                updated_at: Date | string;
+                user_id: string;
+              }>(
+                `SELECT om.user_id, om.role, om.created_at, om.updated_at,
+                        u.email, u.display_name, u.avatar_url, u.suspended_at,
+                        u.installation_owner
+                 FROM org_members om
+                 JOIN users u ON u.id = om.user_id
+                 WHERE om.org_id = $1 AND om.user_id = $2`,
+                [row.org_id, actor.userId],
+              );
+              const member = existing.rows[0];
+              if (member && member.email.toLowerCase() === row.email.toLowerCase()) {
+                const organization = yield* client.query<OrganizationRow>(
+                  `SELECT id, name, slug, created_at, updated_at
+                   FROM organizations WHERE id = $1`,
+                  [row.org_id],
+                );
+                const workspace = organization.rows[0];
+                if (workspace) {
+                  return {
+                    member: memberBody(member),
+                    workspace: workspaceBody(
+                      workspace,
+                      isWorkspaceRole(member.role) ? member.role : "viewer",
+                    ),
+                  };
+                }
+              }
+              return yield* Effect.fail(
+                new CoreApiError(409, "invitation_used", "The invitation has already been used."),
+              );
+            }
             if (row.revoked_at !== null) {
               return yield* Effect.fail(
                 new CoreApiError(410, "invitation_revoked", "The invitation has been revoked."),
@@ -918,12 +1204,20 @@ export function registerWorkspaceLifecycleRoutes(
                 new CoreApiError(410, "invitation_expired", "The invitation has expired."),
               );
             }
-            const user = yield* client.query<{ email: string }>(
-              "SELECT email FROM users WHERE id = $1",
+            const user = yield* client.query<{
+              display_name: string | null;
+              email: string;
+              id: string;
+              suspended_at: Date | string | null;
+            }>(
+              `SELECT u.id, u.email, u.display_name, u.suspended_at
+               FROM users u
+               WHERE u.id = $1`,
               [actor.userId],
             );
-            const actorEmail = user.rows[0]?.email.toLowerCase();
-            if (!actorEmail || actorEmail !== row.email) {
+            const account = user.rows[0];
+            const actorEmail = account?.email.toLowerCase();
+            if (!account || !actorEmail || actorEmail !== row.email.toLowerCase()) {
               return yield* Effect.fail(
                 new CoreApiError(
                   403,
@@ -932,13 +1226,40 @@ export function registerWorkspaceLifecycleRoutes(
                 ),
               );
             }
+            if (account.suspended_at !== null) {
+              return yield* Effect.fail(
+                new CoreApiError(403, "account_suspended", "This account is suspended."),
+              );
+            }
+            const verified = yield* client.query<{ email_verified: boolean }>(
+              `SELECT u."emailVerified" AS email_verified
+               FROM "user" u WHERE u.id = $1`,
+              [actor.authUserId],
+            );
+            const localOrTest = c.env.ENVIRONMENT === "local" || c.env.ENVIRONMENT === "test";
+            if (!verified.rows[0]?.email_verified && !localOrTest) {
+              return yield* Effect.fail(
+                new CoreApiError(
+                  403,
+                  "email_verification_required",
+                  "Verify your email before joining the workspace.",
+                ),
+              );
+            }
+            yield* client.query("SELECT id FROM organizations WHERE id = $1 FOR UPDATE", [
+              row.org_id,
+            ]);
+            yield* requireSeatCapacityEffect(client, row.org_id);
             const membership = yield* client.query<MemberRow>(
               `INSERT INTO org_members (org_id, user_id, role)
                VALUES ($1, $2, $3)
                ON CONFLICT (org_id, user_id) DO UPDATE
                  SET role = org_members.role
-               RETURNING user_id, role, created_at, updated_at`,
-              [row.org_id, actor.userId, row.role],
+               RETURNING user_id, role, created_at, updated_at,
+                         $4::text AS email, $5::text AS display_name,
+                         NULL::text AS avatar_url, $6::timestamptz AS suspended_at,
+                         FALSE AS installation_owner`,
+              [row.org_id, actor.userId, row.role, account.email, account.display_name, null],
             );
             const member = membership.rows[0];
             if (!member) {
@@ -952,21 +1273,22 @@ export function registerWorkspaceLifecycleRoutes(
                WHERE id = $1 AND accepted_at IS NULL`,
               [row.id],
             );
-            const joined = yield* client.query<MemberRow>(
-              `SELECT om.user_id, om.role, om.created_at, om.updated_at,
-                      u.email, u.display_name, u.avatar_url
-               FROM org_members om
-               JOIN users u ON u.id = om.user_id
-               WHERE om.org_id = $1 AND om.user_id = $2`,
-              [row.org_id, actor.userId],
-            );
+            yield* recordWorkspaceAuditEffect(client, {
+              action: "invitation.accepted",
+              actor: auditActorFrom(account),
+              after: { email: account.email, role: member.role },
+              orgId: row.org_id,
+              requestId: requestId(c),
+              targetId: row.id,
+              targetType: "invitation",
+            });
             const organization = yield* client.query<OrganizationRow>(
-              `SELECT id, name, slug, personal_user_id, created_at, updated_at
+              `SELECT id, name, slug, created_at, updated_at
                FROM organizations WHERE id = $1`,
               [row.org_id],
             );
             const workspace = organization.rows[0];
-            if (!workspace || !joined.rows[0]) {
+            if (!workspace) {
               return yield* Effect.fail(
                 new CoreApiError(
                   500,
@@ -976,8 +1298,11 @@ export function registerWorkspaceLifecycleRoutes(
               );
             }
             return {
-              member: memberBody(joined.rows[0]),
-              workspace: workspaceBody(workspace, joined.rows[0].role as WorkspaceRole),
+              member: memberBody(member),
+              workspace: workspaceBody(
+                workspace,
+                isWorkspaceRole(member.role) ? member.role : "viewer",
+              ),
             };
           }),
         );
@@ -997,13 +1322,8 @@ export function registerWorkspaceLifecycleRoutes(
         const memberId = yield* fromPromise(() => uuidParam(c.req.param("memberId"), "member_id"));
         const body = yield* fromPromise(() => jsonBody(c));
         yield* fromPromise(() => onlyKeys(body, ["role"]));
-        const role = yield* fromPromise(() => {
-          const value = body.role;
-          if (value !== "admin" && value !== "member") {
-            throw new CoreApiError(400, "validation_error", "role must be admin or member.");
-          }
-          return value;
-        });
+        const role = yield* fromPromise(() => workspaceRoleField(body.role, "role"));
+        yield* requireAssignableRole(actor, role);
         const key = yield* fromPromise(() => idempotencyKey(c));
         const requestHash = yield* hashIdempotencyRequestEffect(JSON.stringify({ memberId, role }));
         const result = yield* idempotentMutation(
@@ -1014,16 +1334,13 @@ export function registerWorkspaceLifecycleRoutes(
           requestHash,
           (client) =>
             Effect.gen(function* () {
-              const { role: callerRole, workspace } = yield* requireMembership(
-                client,
-                workspaceId,
-                actor,
-              );
+              const { role: callerRole } = yield* requireMembership(client, workspaceId, actor);
               yield* requireAdmin(callerRole);
-              yield* requireTeamWorkspace(workspace);
+              yield* requireAssignableRole(actor, role);
               const target = yield* client.query<MemberRow>(
                 `SELECT om.user_id, om.role, om.created_at, om.updated_at,
-                        u.email, u.display_name, u.avatar_url
+                        u.email, u.display_name, u.avatar_url, u.suspended_at,
+                        u.installation_owner
                  FROM org_members om
                  JOIN users u ON u.id = om.user_id
                  WHERE om.org_id = $1 AND om.user_id = $2
@@ -1040,7 +1357,27 @@ export function registerWorkspaceLifecycleRoutes(
                   ),
                 );
               }
-              if (member.role === "admin" && role === "member") {
+              const currentRole = isWorkspaceRole(member.role) ? member.role : "viewer";
+              yield* forbidAdminPeerMutation(actor, currentRole);
+              if (member.installation_owner && !actor.isInstallationOwner) {
+                return yield* Effect.fail(
+                  new CoreApiError(
+                    403,
+                    "forbidden_role_assignment",
+                    "The installation owner's role cannot be changed.",
+                  ),
+                );
+              }
+              if (member.installation_owner && role !== "admin") {
+                return yield* Effect.fail(
+                  new CoreApiError(
+                    409,
+                    "owner_role_required",
+                    "Transfer installation ownership before changing the owner's workspace role.",
+                  ),
+                );
+              }
+              if (currentRole === "admin" && role !== "admin") {
                 const admins = yield* client.query<{ count: string }>(
                   `SELECT count(*)::text AS count
                    FROM org_members
@@ -1063,9 +1400,24 @@ export function registerWorkspaceLifecycleRoutes(
                  FROM users u
                  WHERE om.org_id = $1 AND om.user_id = $2 AND u.id = om.user_id
                  RETURNING om.user_id, om.role, om.created_at, om.updated_at,
-                           u.email, u.display_name, u.avatar_url`,
+                           u.email, u.display_name, u.avatar_url, u.suspended_at,
+                           u.installation_owner`,
                 [workspaceId, memberId, role],
               );
+              yield* recordWorkspaceAuditEffect(client, {
+                action: "member.role_changed",
+                actor: auditActorFrom({
+                  display_name: actor.displayName,
+                  email: actor.email,
+                  id: actor.userId,
+                }),
+                after: { role },
+                before: { role: currentRole },
+                orgId: workspaceId,
+                requestId: requestId(c),
+                targetId: memberId,
+                targetType: "member",
+              });
               return {
                 body: memberBody(updated.rows[0]!),
                 replayed: false,
@@ -1099,20 +1451,15 @@ export function registerWorkspaceLifecycleRoutes(
           requestHash,
           (client) =>
             Effect.gen(function* () {
-              const { role: callerRole, workspace } = yield* requireMembership(
-                client,
-                workspaceId,
-                actor,
-              );
-              const selfRemoval = memberId === actor.userId;
-              if (!selfRemoval) {
-                yield* requireAdmin(callerRole);
-              }
-              yield* requireTeamWorkspace(workspace);
-              const target = yield* client.query<{ role: string }>(
-                `SELECT role FROM org_members
-                 WHERE org_id = $1 AND user_id = $2
-                 FOR UPDATE`,
+              const { role: callerRole } = yield* requireMembership(client, workspaceId, actor);
+              const target = yield* client.query<MemberRow>(
+                `SELECT om.user_id, om.role, om.created_at, om.updated_at,
+                        u.email, u.display_name, u.avatar_url, u.suspended_at,
+                        u.installation_owner
+                 FROM org_members om
+                 JOIN users u ON u.id = om.user_id
+                 WHERE om.org_id = $1 AND om.user_id = $2
+                 FOR UPDATE OF om`,
                 [workspaceId, memberId],
               );
               const member = target.rows[0];
@@ -1122,6 +1469,23 @@ export function registerWorkspaceLifecycleRoutes(
                     404,
                     "member_not_found",
                     "The member was not found in this workspace.",
+                  ),
+                );
+              }
+              const selfRemoval = memberId === actor.userId;
+              if (!selfRemoval) {
+                yield* requireAdmin(callerRole);
+                yield* forbidAdminPeerMutation(
+                  actor,
+                  isWorkspaceRole(member.role) ? member.role : "viewer",
+                );
+              }
+              if (member.installation_owner) {
+                return yield* Effect.fail(
+                  new CoreApiError(
+                    409,
+                    "owner_self_removal",
+                    "Transfer installation ownership before removing the owner.",
                   ),
                 );
               }
@@ -1147,6 +1511,19 @@ export function registerWorkspaceLifecycleRoutes(
                  WHERE org_id = $1 AND user_id = $2`,
                 [workspaceId, memberId],
               );
+              yield* recordWorkspaceAuditEffect(client, {
+                action: "member.removed",
+                actor: auditActorFrom({
+                  display_name: actor.displayName,
+                  email: actor.email,
+                  id: actor.userId,
+                }),
+                before: { role: member.role },
+                orgId: workspaceId,
+                requestId: requestId(c),
+                targetId: memberId,
+                targetType: "member",
+              });
               return { body: null, replayed: false, status: 204 };
             }),
         );

@@ -116,6 +116,12 @@ returns one `data.user`, whose `open_id` must match the token subject.
 `video.publish` authorizes Direct Post. Existing adapter behavior follows these
 contracts; no Facebook-style account-list endpoint should be invented.
 
+The [web authorization contract](https://developers.tiktok.com/doc/login-kit-web)
+documents `disable_auto_auth=1` to always show the authorization page instead of
+silently reusing a valid session's authorization. Connection now supplies this
+parameter, so connecting another Channel does not silently skip that step.
+The web flow intentionally does not send the mobile/desktop-only PKCE verifier.
+
 The [Content Sharing Guidelines](https://developers.tiktok.com/doc/content-sharing-guidelines)
 require a verified domain/URL prefix for PULL_FROM_URL media. Unaudited clients
 have private-viewership/user restrictions. The guidelines explicitly exclude
@@ -141,11 +147,33 @@ channel requires another Google/YouTube authorization, choosing the appropriate
 personal or Brand Account. [Google's channel ownership guide](https://support.google.com/youtube/answer/4642409)
 explains how one Google account can manage separate Brand Accounts.
 
-The existing adapter requests offline access, consent, PKCE S256, upload and
-read-only scopes, requires a refresh token at initial connection, and preserves
+The adapter requests offline access, account selection and consent, PKCE S256,
+upload and read-only scopes, requires a refresh token at initial connection, and preserves
 it when a refresh response omits a replacement. Deployment still needs its own
 Google consent-screen access, registered exact redirect URI and permitted test
 users or production verification. App configuration is not proven by fixtures.
+
+[Google's web-server OAuth contract](https://developers.google.com/identity/protocols/oauth2/web-server#incrementalAuth)
+allows incremental authorization to combine grants made by other clients of the
+same API project, including `openid` and `profile`. The old URL-only scope decoder
+rejected these otherwise valid grants. Decode bounded
+[OAuth scope tokens](https://www.rfc-editor.org/rfc/rfc6749#section-3.3), not just
+HTTPS URLs, while still requiring both configured YouTube scopes. The same
+decoder handles refresh responses. `prompt=consent select_account` preserves
+offline consent and explicitly offers account choice.
+
+Before live connection, configure each app's credentials and register these exact
+callback paths under the deployment's public **API** origin:
+
+| Platform | Required configuration                                                                                                                                     | Callback path                        |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| TikTok   | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_MEDIA_URL_PREFIX`; Login Kit and `user.info.basic,video.publish` access                               | `/api/v1/platforms/tiktok/callback`  |
+| YouTube  | `YOUTUBE_SHORTS_CLIENT_ID`, `YOUTUBE_SHORTS_CLIENT_SECRET`; Google Web application client, enabled YouTube Data API v3, and permitted consent-screen users | `/api/v1/platforms/youtube/callback` |
+
+TikTok's media prefix must cover the API's `/api/v1/provider-media/` path on a
+verified domain. `TIKTOK_LIVE_ACCEPTED` and `YOUTUBE_LIVE_ACCEPTED` remain explicit
+deployment activation controls; tests do not enable them in an operator's `.env`.
+Never treat fixture credentials or a passing hosted gate as provider app approval.
 
 ## Verification boundary
 
@@ -183,3 +211,16 @@ The [profile-identity correction full gate](https://github.com/MeltiplyOrg/melti
 at `5be419a` passed the grant/profile identity regressions, the five-Platform
 connection smoke with distinct Instagram token and profile IDs,
 `bun run cloudflare:check`, and the assignment/navigation browser journey.
+
+The [YouTube/TikTok connection gate](https://github.com/MeltiplyOrg/meltiply/actions/runs/39804649567)
+at `12a95e8` passed provider regressions, `bun run cloudflare:check`, the
+assignment/navigation browser journey, and the expanded real-state connection
+smoke. It exercises both providers' forged-state and denied-consent callbacks
+without any token exchange. Successful flows exercise assignment, reconnect,
+cancellation, and automation refresh against encrypted PostgreSQL credentials.
+TikTok's replacement
+refresh token is persisted; Google's existing refresh token survives an omitted
+replacement; replaying the old refresh event does not exchange another token.
+Google's token responses in this smoke include non-URL incremental grants.
+External OAuth/profile responses remain controlled; live TikTok/YouTube consent
+and provider app configuration have not been accepted.

@@ -92,5 +92,5 @@ export async function openIsolatedOwnerWorkspace(page: Page): Promise<IsolatedWo
   await expect(editor).not.toBeVisible({ timeout: 30_000 });
   await page.goto("/posts");
   await waitForWorkspace(page);
-  return { credentials, profileName: await activeBrandProfileName(page) };
+  return { credentials, profileName: await activeBrandProfileName(page, profileName) };
 }

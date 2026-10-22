@@ -1982,6 +1982,15 @@ paths:
           in: query
           schema:
             $ref: "#/components/schemas/Platform"
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsFormat"
         - $ref: "#/components/parameters/BrandProfileId"
       responses:
         "200":
@@ -2015,6 +2024,15 @@ paths:
           in: query
           schema:
             $ref: "#/components/schemas/Platform"
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsFormat"
         - $ref: "#/components/parameters/BrandProfileId"
         - name: metric
           in: query
@@ -2041,6 +2059,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnalyticsPostsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /analytics/dashboard:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Analytics]
+      operationId: getAnalyticsDashboard
+      summary: Read the analytics dashboard series and breakdowns
+      description: |
+        Returns stored-snapshot aggregates for the published cohort. Daily
+        series carry measured counter changes between consecutive snapshots,
+        not lifetime totals. Follower series come from account snapshots.
+        Metrics a Provider does not expose are returned as null or listed in
+        `unavailable_metrics`; they are never fabricated as zero.
+      parameters:
+        - $ref: "#/components/parameters/RequiredStart"
+        - $ref: "#/components/parameters/RequiredEnd"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/Platform"
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsFormat"
+        - $ref: "#/components/parameters/BrandProfileId"
+      responses:
+        "200":
+          description: Dashboard series and breakdowns.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsDashboard"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -4544,6 +4603,270 @@ components:
             Latest snapshot time for this Platform's published Distributions in
             scope, or null when no snapshot has been stored yet. Null
             distinguishes an unsynced Platform from a measured zero.
+    AnalyticsFormat:
+      type: string
+      enum: [text, image, video, carousel]
+    AnalyticsDaySeries:
+      type: object
+      additionalProperties: false
+      required:
+        [date, platform, posts, views, likes, comments, shares, impressions, reach, last_synced_at]
+      properties:
+        date:
+          type: string
+          format: date
+        platform:
+          $ref: "#/components/schemas/Platform"
+        posts:
+          type: integer
+          minimum: 0
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        impressions:
+          type: integer
+          minimum: 0
+        reach:
+          type: integer
+          minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+    AnalyticsBestTime:
+      type: object
+      additionalProperties: false
+      required:
+        [day_of_week, hour, posts, avg_views, avg_likes, avg_comments, avg_shares, avg_engagement]
+      properties:
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        posts:
+          type: integer
+          minimum: 0
+        avg_views:
+          type: number
+          minimum: 0
+        avg_likes:
+          type: number
+          minimum: 0
+        avg_comments:
+          type: number
+          minimum: 0
+        avg_shares:
+          type: number
+          minimum: 0
+        avg_engagement:
+          type: number
+          minimum: 0
+    AnalyticsFormatBreakdown:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          format,
+          posts,
+          views,
+          likes,
+          comments,
+          shares,
+          engagement,
+          avg_views,
+          avg_engagement,
+          last_synced_at,
+        ]
+      properties:
+        format:
+          $ref: "#/components/schemas/AnalyticsFormat"
+        posts:
+          type: integer
+          minimum: 0
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        engagement:
+          type: integer
+          minimum: 0
+        avg_views:
+          type: number
+          minimum: 0
+        avg_engagement:
+          type: number
+          minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+    AnalyticsPlatformBreakdown:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          platform,
+          posts,
+          views,
+          likes,
+          comments,
+          shares,
+          impressions,
+          reach,
+          engagement_rate,
+          followers,
+          follower_gain,
+          saves,
+          clicks,
+          last_synced_at,
+        ]
+      properties:
+        platform:
+          $ref: "#/components/schemas/Platform"
+        posts:
+          type: integer
+          minimum: 0
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        impressions:
+          type: integer
+          minimum: 0
+        reach:
+          type: integer
+          minimum: 0
+        engagement_rate:
+          type: [number, "null"]
+          minimum: 0
+        followers:
+          type: [integer, "null"]
+          minimum: 0
+        follower_gain:
+          type: [integer, "null"]
+        saves:
+          type: [integer, "null"]
+          minimum: 0
+        clicks:
+          type: [integer, "null"]
+          minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+    AnalyticsFollowerPoint:
+      type: object
+      additionalProperties: false
+      required: [captured_at, followers]
+      properties:
+        captured_at:
+          type: string
+          format: date-time
+        followers:
+          type: integer
+          minimum: 0
+    AnalyticsFollowerSeries:
+      type: object
+      additionalProperties: false
+      required: [platform, account_id, account_name, points]
+      properties:
+        platform:
+          $ref: "#/components/schemas/Platform"
+        account_id:
+          type: string
+          format: uuid
+        account_name:
+          type: [string, "null"]
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsFollowerPoint"
+    AnalyticsAccumulationPoint:
+      type: object
+      additionalProperties: false
+      required: [elapsed_hours, avg_engagement, observations]
+      properties:
+        elapsed_hours:
+          type: integer
+          minimum: 0
+        avg_engagement:
+          type: number
+          minimum: 0
+        observations:
+          type: integer
+          minimum: 0
+    AnalyticsDashboard:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          range,
+          series,
+          best_times,
+          formats,
+          platforms,
+          followers,
+          accumulation,
+          unavailable_metrics,
+        ]
+      properties:
+        range:
+          $ref: "#/components/schemas/AnalyticsRange"
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsDaySeries"
+        best_times:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsBestTime"
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsFormatBreakdown"
+        platforms:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsPlatformBreakdown"
+        followers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsFollowerSeries"
+        accumulation:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsAccumulationPoint"
+        unavailable_metrics:
+          type: array
+          items:
+            type: string
+            enum: [saves, clicks, followers, account]
     AnalyticsMetric:
       type: string
       enum: [views, likes, comments, shares]

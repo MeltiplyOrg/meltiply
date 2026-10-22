@@ -74,6 +74,7 @@ Current version: contract/client/Worker `1.0.0-target.0`.
 | `listCalendarEvents`                | `specified`   | Worker RFC3339/range/RLS tests and frontend consumer tests pass; preview conformance remains.                                                              |
 | `getAnalyticsSummary`               | `specified`   | Worker published_at cohort, latest-snapshot aggregation, and published-platform coverage tests pass; preview measurement remains.                          |
 | `getAnalyticsPosts`                 | `specified`   | Worker cohort ranking, pagination, and tenant/RLS tests pass; preview measurement remains.                                                                 |
+| `getAnalyticsDashboard`             | `specified`   | Worker series/heatmap/format/platform/follower aggregation tests pass; preview measurement remains.                                                        |
 | `getDistributionAnalytics`          | `specified`   | Worker bounds/order/RLS tests pass; preview measurement remains.                                                                                           |
 | `listInboxComments`                 | `specified`   | Worker filter/pagination/RLS/reconciliation tests pass; preview remains.                                                                                   |
 | `replyToComment`                    | `specified`   | Worker commits idempotent acceptance; bounded reply Workflow, provider ledger, and ambiguity lookup pass locally; live proof remains.                      |

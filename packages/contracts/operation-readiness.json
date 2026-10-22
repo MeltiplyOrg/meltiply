@@ -265,6 +265,10 @@
     "cancelOAuthSelection": {
       "state": "specified",
       "evidenceAndGate": "Worker idempotent selection cancellation and ticket discard pass local tests; preview remains."
+    },
+    "getAnalyticsDashboard": {
+      "state": "specified",
+      "evidenceAndGate": "Worker series/heatmap/format/platform/follower aggregation tests pass; preview measurement remains."
     }
   }
 }

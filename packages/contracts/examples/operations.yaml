@@ -1164,6 +1164,75 @@ operations:
     errors:
       - status: 400
         body: *invalid_request_error
+  getAnalyticsDashboard:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        range:
+          start: 2026-01-01T00:00:00Z
+          end: 2026-01-31T23:59:59Z
+        series:
+          - date: 2026-01-01
+            platform: tiktok
+            posts: 1
+            views: 100
+            likes: 10
+            comments: 1
+            shares: 2
+            impressions: 120
+            reach: 90
+            last_synced_at: 2026-01-01T01:00:00Z
+        best_times:
+          - day_of_week: 1
+            hour: 14
+            posts: 1
+            avg_views: 100
+            avg_likes: 10
+            avg_comments: 1
+            avg_shares: 2
+            avg_engagement: 13
+        formats:
+          - format: video
+            posts: 1
+            views: 100
+            likes: 10
+            comments: 1
+            shares: 2
+            engagement: 13
+            avg_views: 100
+            avg_engagement: 13
+            last_synced_at: 2026-01-01T01:00:00Z
+        platforms:
+          - platform: tiktok
+            posts: 1
+            views: 100
+            likes: 10
+            comments: 1
+            shares: 2
+            impressions: 120
+            reach: 90
+            engagement_rate: 0.13
+            followers: 5000
+            follower_gain: 120
+            saves: null
+            clicks: null
+            last_synced_at: 2026-01-01T01:00:00Z
+        followers:
+          - platform: tiktok
+            account_id: 00000000-0000-4000-8000-000000000201
+            account_name: Creator
+            points:
+              - captured_at: 2026-01-01T01:00:00Z
+                followers: 5000
+        accumulation:
+          - elapsed_hours: 1
+            avg_engagement: 13
+            observations: 1
+        unavailable_metrics: [saves, clicks]
+    errors:
+      - status: 400
+        body: *invalid_request_error
   getDistributionAnalytics:
     headers: *bearer_authorization
     success:

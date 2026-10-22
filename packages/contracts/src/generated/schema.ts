@@ -1479,6 +1479,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/dashboard": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional workspace selection for the authenticated caller. When
+                 *     present, the server resolves the caller's org_members membership and
+                 *     role for this workspace before it becomes the actor and RLS claims;
+                 *     when absent, the caller's personal workspace is used. A UUID that is
+                 *     not a workspace the caller belongs to fails with 403
+                 *     `inaccessible_workspace`.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the analytics dashboard series and breakdowns
+         * @description Returns stored-snapshot aggregates for the published cohort. Daily
+         *     series carry measured counter changes between consecutive snapshots,
+         *     not lifetime totals. Follower series come from account snapshots.
+         *     Metrics a Provider does not expose are returned as null or listed in
+         *     `unavailable_metrics`; they are never fabricated as zero.
+         */
+        get: operations["getAnalyticsDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics/{distribution_id}": {
         parameters: {
             query?: never;
@@ -2520,6 +2554,89 @@ export interface components {
              *     distinguishes an unsynced Platform from a measured zero.
              */
             last_synced_at: string | null;
+        };
+        /** @enum {string} */
+        AnalyticsFormat: "text" | "image" | "video" | "carousel";
+        AnalyticsDaySeries: {
+            /** Format: date */
+            date: string;
+            platform: components["schemas"]["Platform"];
+            posts: number;
+            views: number;
+            likes: number;
+            comments: number;
+            shares: number;
+            impressions: number;
+            reach: number;
+            /** Format: date-time */
+            last_synced_at: string | null;
+        };
+        AnalyticsBestTime: {
+            day_of_week: number;
+            hour: number;
+            posts: number;
+            avg_views: number;
+            avg_likes: number;
+            avg_comments: number;
+            avg_shares: number;
+            avg_engagement: number;
+        };
+        AnalyticsFormatBreakdown: {
+            format: components["schemas"]["AnalyticsFormat"];
+            posts: number;
+            views: number;
+            likes: number;
+            comments: number;
+            shares: number;
+            engagement: number;
+            avg_views: number;
+            avg_engagement: number;
+            /** Format: date-time */
+            last_synced_at: string | null;
+        };
+        AnalyticsPlatformBreakdown: {
+            platform: components["schemas"]["Platform"];
+            posts: number;
+            views: number;
+            likes: number;
+            comments: number;
+            shares: number;
+            impressions: number;
+            reach: number;
+            engagement_rate: number | null;
+            followers: number | null;
+            follower_gain: number | null;
+            saves: number | null;
+            clicks: number | null;
+            /** Format: date-time */
+            last_synced_at: string | null;
+        };
+        AnalyticsFollowerPoint: {
+            /** Format: date-time */
+            captured_at: string;
+            followers: number;
+        };
+        AnalyticsFollowerSeries: {
+            platform: components["schemas"]["Platform"];
+            /** Format: uuid */
+            account_id: string;
+            account_name: string | null;
+            points: components["schemas"]["AnalyticsFollowerPoint"][];
+        };
+        AnalyticsAccumulationPoint: {
+            elapsed_hours: number;
+            avg_engagement: number;
+            observations: number;
+        };
+        AnalyticsDashboard: {
+            range: components["schemas"]["AnalyticsRange"];
+            series: components["schemas"]["AnalyticsDaySeries"][];
+            best_times: components["schemas"]["AnalyticsBestTime"][];
+            formats: components["schemas"]["AnalyticsFormatBreakdown"][];
+            platforms: components["schemas"]["AnalyticsPlatformBreakdown"][];
+            followers: components["schemas"]["AnalyticsFollowerSeries"][];
+            accumulation: components["schemas"]["AnalyticsAccumulationPoint"][];
+            unavailable_metrics: ("saves" | "clicks" | "followers" | "account")[];
         };
         /**
          * @description Stored metric that ranks the Post analytics rows.
@@ -5046,6 +5163,8 @@ export interface operations {
                 start: components["parameters"]["RequiredStart"];
                 end: components["parameters"]["RequiredEnd"];
                 platform?: components["schemas"]["Platform"];
+                account_id?: string;
+                format?: components["schemas"]["AnalyticsFormat"];
                 /**
                  * @description Restricts the result to one Brand Profile. When omitted, the operation
                  *     returns the workspace-wide aggregate across all active Brand Profiles
@@ -5088,6 +5207,8 @@ export interface operations {
                 start: components["parameters"]["RequiredStart"];
                 end: components["parameters"]["RequiredEnd"];
                 platform?: components["schemas"]["Platform"];
+                account_id?: string;
+                format?: components["schemas"]["AnalyticsFormat"];
                 /**
                  * @description Restricts the result to one Brand Profile. When omitted, the operation
                  *     returns the workspace-wide aggregate across all active Brand Profiles
@@ -5121,6 +5242,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnalyticsPostsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getAnalyticsDashboard: {
+        parameters: {
+            query: {
+                start: components["parameters"]["RequiredStart"];
+                end: components["parameters"]["RequiredEnd"];
+                platform?: components["schemas"]["Platform"];
+                account_id?: string;
+                format?: components["schemas"]["AnalyticsFormat"];
+                /**
+                 * @description Restricts the result to one Brand Profile. When omitted, the operation
+                 *     returns the workspace-wide aggregate across all active Brand Profiles
+                 *     (the read-only All Brand Profiles view).
+                 */
+                brand_profile_id?: components["parameters"]["BrandProfileId"];
+            };
+            header?: {
+                /**
+                 * @description Optional workspace selection for the authenticated caller. When
+                 *     present, the server resolves the caller's org_members membership and
+                 *     role for this workspace before it becomes the actor and RLS claims;
+                 *     when absent, the caller's personal workspace is used. A UUID that is
+                 *     not a workspace the caller belongs to fails with 403
+                 *     `inaccessible_workspace`.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dashboard series and breakdowns. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsDashboard"];
                 };
             };
             400: components["responses"]["BadRequest"];

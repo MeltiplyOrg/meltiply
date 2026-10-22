@@ -5,6 +5,7 @@ import {
   normalizeProviderFailure,
   ProviderAdapterError,
   ProviderService,
+  type ProviderAccountAnalytics,
   type ProviderAdapter,
   type ProviderAnalyticsRecord,
   type ProviderCommentRecord,
@@ -16,6 +17,26 @@ import {
   type ProviderRegistry,
 } from "@meltiply/providers";
 import { normalizeIdentifier } from "./validation";
+
+export interface ProviderAccountReadTarget {
+  connectionStatus: string;
+  platform: Platform;
+  providerAccountId: string;
+  storedAccessToken: string;
+  tokenExpiresAt: Date | null;
+}
+
+export type ProviderAccountExecution =
+  | {
+      outcome: "failure";
+      failure: ProviderFailure;
+      retryPolicy?: ProviderRetryPolicy;
+    }
+  | {
+      outcome: "success";
+      account: ProviderAccountAnalytics;
+      retryPolicy?: ProviderRetryPolicy;
+    };
 
 export interface ProviderReadTarget {
   connectionStatus: string;
@@ -231,6 +252,26 @@ function normalizeAnalytics(
  * @param providerPostId - Expected platform post identifier to enforce matching attribution.
  * @returns Cleaned and validated comment page, or undefined if invalid or contains duplicates.
  */
+/**
+ * Validates and normalizes account-level counters returned by a Provider.
+ * Counters must be non-negative safe integers; optional counters are dropped
+ * when malformed rather than turning an unavailable value into zero.
+ */
+function normalizeAccountAnalytics(value: unknown): ProviderAccountAnalytics | undefined {
+  const body = value as Partial<ProviderAccountAnalytics> | null | undefined;
+  const followers = metric(body?.followers);
+  const recordedAt = timestamp(body?.recordedAt);
+  if (followers === undefined || !recordedAt) return undefined;
+  const following = body?.following === undefined ? undefined : metric(body.following);
+  const posts = body?.posts === undefined ? undefined : metric(body.posts);
+  return {
+    followers,
+    ...(following === undefined ? {} : { following }),
+    ...(posts === undefined ? {} : { posts }),
+    recordedAt,
+  };
+}
+
 function normalizeComments(
   page: ProviderPage<ProviderCommentRecord>,
   providerPostId: string,
@@ -422,6 +463,69 @@ export function executeProviderAnalyticsEffect(
           (page) => normalizeAnalytics(page, target.providerPostId),
         ),
       ),
+  );
+}
+
+/**
+ * Reads account-level follower counters for the scheduled account sweep.
+ * Uses the same decrypted access token and failure classification as Post reads.
+ */
+export function executeProviderAccountAnalyticsEffect(
+  registry: ProviderRegistry,
+  context: ProviderRequestContext,
+  target: ProviderAccountReadTarget,
+  dependencies: ProviderSyncDependencies,
+  now = new Date(),
+): Effect.Effect<ProviderAccountExecution, never, ProviderService> {
+  const adapter = registry.get(target.platform);
+  if (!adapter?.getAccountAnalytics) {
+    return Effect.succeed(failure("provider_account_analytics_unavailable", 422));
+  }
+  return Effect.catch(
+    Effect.gen(function* () {
+      const accessToken = yield* Effect.tryPromise({
+        catch: () =>
+          caughtFailure(
+            undefined,
+            "provider_account_analytics_preparation_failed",
+            adapter.retryPolicy,
+          ),
+        try: () =>
+          credentials(
+            {
+              connectionStatus: target.connectionStatus,
+              cursor: null,
+              providerPostId: target.providerAccountId,
+              platform: target.platform,
+              storedAccessToken: target.storedAccessToken,
+              tokenExpiresAt: target.tokenExpiresAt,
+            },
+            dependencies,
+            now,
+          ),
+      });
+      if (!accessToken) {
+        return failure("provider_reconnect_required", 401, adapter.retryPolicy);
+      }
+      const account = yield* Effect.mapError(
+        Effect.flatMap(ProviderService, (service) =>
+          service.getAccountAnalytics(target.platform, context, {
+            accessToken,
+            accountId: target.providerAccountId,
+          }),
+        ),
+        (cause) => caughtFailure(cause, "provider_account_analytics_failed", adapter.retryPolicy),
+      );
+      const normalized = normalizeAccountAnalytics(account);
+      return normalized
+        ? { account: normalized, outcome: "success", retryPolicy: adapter.retryPolicy }
+        : caughtFailure(
+            undefined,
+            "provider_account_analytics_invalid_response",
+            adapter.retryPolicy,
+          );
+    }),
+    (failureExecution: ProviderAccountExecution) => Effect.succeed(failureExecution),
   );
 }
 

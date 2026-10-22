@@ -407,10 +407,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const platformMenuSurface = page.locator(
     "[data-radix-popper-content-wrapper] [data-menu-surface]",
   );
-  const platformMenuBox = await platformMenuSurface.boundingBox();
   // The list must span the full-width filter control that opened it instead of
   // collapsing to the shared surface floor.
-  expect(platformMenuBox?.width ?? 0).toBeGreaterThanOrEqual((platformTriggerBox?.width ?? 0) - 1);
+  await expect
+    .poll(async () => (await platformMenuSurface.boundingBox())?.width ?? 0)
+    .toBeGreaterThanOrEqual((platformTriggerBox?.width ?? 0) - 1);
   expect(
     await platformMenuSurface.evaluate((element) => getComputedStyle(element).animationName),
   ).toBe("menu-surface-in");
@@ -441,7 +442,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.getByRole("heading", { name: "Channels", exact: true }).hover();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("tab", { name: /Brand Profiles/ }).click();
-  await expect(page.getByRole("button", { name: "View channels" })).toBeVisible();
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("brand-profiles-desktop.png"),

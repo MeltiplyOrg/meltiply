@@ -466,6 +466,51 @@ function scenarios() {
         return { bytes: result.bytes, latencyMs: result.durationMs, operations: 1 };
       },
     },
+    // Restore the same 20-Channel schedule outside measurement before dropping
+    // 19 targets. Reuse the last seeded Post only after the fan-out scenario.
+    {
+      name: "posts.schedule.drop19",
+      beforeSample: async () => {
+        await cleanupMutatedRows(admin);
+        idempotencyCounter += 1;
+        await httpRequest(`/api/v1/posts/${ids.schedulePost(dataset.schedulePosts)}/schedule`, {
+          body: JSON.stringify({
+            brand_profile_id: ids.brandProfile,
+            scheduled_at: null,
+            targets: Array.from({ length: dataset.scheduleChannels }, (_, index) => ({
+              platform_account_id: ids.threadAccount(index + 1),
+            })),
+          }),
+          headers: mutationHeaders(`benchmark-restore-schedule-${idempotencyCounter}`),
+          method: "POST",
+        });
+      },
+      run: async () => {
+        idempotencyCounter += 1;
+        const result = await httpRequest(
+          `/api/v1/posts/${ids.schedulePost(dataset.schedulePosts)}/schedule`,
+          {
+            body: JSON.stringify({
+              brand_profile_id: ids.brandProfile,
+              scheduled_at: null,
+              targets: [{ platform_account_id: ids.threadAccount(1) }],
+            }),
+            headers: mutationHeaders(`benchmark-drop-schedule-${idempotencyCounter}`),
+            method: "POST",
+          },
+        );
+        let cancelled = 0;
+        let queued = 0;
+        for (const row of result.body.distributions) {
+          if (row.status === "cancelled") cancelled += 1;
+          if (row.status === "queued") queued += 1;
+        }
+        if (cancelled !== dataset.scheduleChannels - 1 || queued !== 1) {
+          throw new Error("expected 19 cancelled Distributions and one queued target");
+        }
+        return { bytes: result.bytes, latencyMs: result.durationMs, operations: 1 };
+      },
+    },
     {
       name: "assets.upload-session.create",
       beforeSample: async () => {

@@ -237,6 +237,7 @@ function mapTarget(row: TargetRow): Schemas["PostTarget"] {
  */
 interface PostCollectionPreloads {
   attachments?: Map<string, Schemas["PostAttachment"][]>;
+  distributions?: Map<string, Schemas["Distribution"][]>;
   targets?: Map<string, Schemas["PostTarget"][]>;
 }
 
@@ -248,7 +249,8 @@ interface PostCollectionPreloads {
  * latest-snapshot lookup per published Distribution inside a single statement,
  * then sums per Post; older snapshots and unpublished Channels never contribute.
  * No snapshot means no analytics object, not zero. Draft-only batches skip that
- * statement. Caller-supplied attachment/target preloads are not read again.
+ * statement. Caller-supplied collection preloads are not read again, including
+ * the known-empty distributions of a newly inserted Post.
  *
  * @param client - Active tenant transaction client.
  * @param postIds - Post identifiers already read and authorized by the caller.
@@ -264,7 +266,7 @@ function loadPostCollectionsEffect(
     const collections: PostCollections = {
       analytics: new Map(),
       attachments: preloads.attachments ?? new Map(),
-      distributions: new Map(),
+      distributions: preloads.distributions ?? new Map(),
       targets: preloads.targets ?? new Map(),
     };
     if (postIds.length === 0) return collections;
@@ -305,20 +307,29 @@ function loadPostCollectionsEffect(
         collections.targets.set(postId, bucket);
       }
     }
-    const distributionRows = yield* client.query<Parameters<typeof mapDistribution>[0]>(
-      `SELECT ${distributionColumns},
-              ${publicationSnapshotColumn}
-         FROM distributions
-        WHERE post_id = ANY($1::uuid[])
-        ORDER BY post_id, event_at DESC, id DESC`,
-      [postIds],
-    );
-    for (const row of distributionRows.rows) {
-      const bucket = collections.distributions.get(row.post_id) ?? [];
-      bucket.push(mapDistribution(row));
-      collections.distributions.set(row.post_id, bucket);
+    if (!preloads.distributions) {
+      const distributionRows = yield* client.query<Parameters<typeof mapDistribution>[0]>(
+        `SELECT ${distributionColumns},
+                ${publicationSnapshotColumn}
+           FROM distributions
+          WHERE post_id = ANY($1::uuid[])
+          ORDER BY post_id, event_at DESC, id DESC`,
+        [postIds],
+      );
+      for (const row of distributionRows.rows) {
+        const bucket = collections.distributions.get(row.post_id) ?? [];
+        bucket.push(mapDistribution(row));
+        collections.distributions.set(row.post_id, bucket);
+      }
     }
-    if (distributionRows.rows.some((row) => row.status === "published")) {
+    let hasPublishedDistribution = false;
+    for (const distributions of collections.distributions.values()) {
+      if (distributions.some((row) => row.status === "published")) {
+        hasPublishedDistribution = true;
+        break;
+      }
+    }
+    if (hasPublishedDistribution) {
       const analyticsRows = yield* client.query<PostAnalyticsRow>(
         `SELECT d.post_id,
                 SUM(snapshot.likes) AS likes,
@@ -1448,6 +1459,11 @@ export function createPostApiService(
     configuredCapabilities.map((capability) => [capability.platform, structuredClone(capability)]),
   );
   return {
+    /**
+     * Creates an idempotent draft under the active Brand Profile, retaining
+     * Workspace and Asset locks. A new Post has no distributions or analytics;
+     * its response reuses those known-empty collections without reading them.
+     */
     createPost(
       env: ApiWorkerEnv,
       session: SessionClaims,
@@ -1498,6 +1514,7 @@ export function createPostApiService(
               yield* replaceAttachmentsEffect(client, post, attachmentIds, []);
             if (targets.length > 0) yield* replaceTargetsEffect(client, post, targets);
             const value = yield* assembleSinglePostEffect(client, post, {
+              distributions: new Map<string, Schemas["Distribution"][]>([[post.id, []]]),
               ...(attachmentIds.length === 0
                 ? { attachments: new Map<string, Schemas["PostAttachment"][]>([[post.id, []]]) }
                 : {}),
@@ -1671,6 +1688,12 @@ export function createPostApiService(
       });
     },
 
+    /**
+     * Schedules the explicit or saved Channel targets idempotently with quota
+     * enforcement. Existing provider-owned outcomes remain unchanged; dropping
+     * editable targets cancels their rows and removes only pending/failed
+     * publish commands in one statement, preserving consumer-owned leases.
+     */
     schedulePost(
       env: ApiWorkerEnv,
       session: SessionClaims,
@@ -1898,14 +1921,17 @@ export function createPostApiService(
             );
             if (dropped.length > 0) {
               const droppedIds = dropped.map((row) => row.id);
+              // As in Post deletion, derive command cleanup from the cancelled
+              // rows in one statement; leased commands remain consumer-owned.
               yield* client.query(
-                `UPDATE distributions SET status = 'cancelled', updated_at = now()
-                  WHERE id = ANY($1::uuid[])`,
-                [droppedIds],
-              );
-              yield* client.query(
-                `DELETE FROM outbox_events
-                  WHERE aggregate_id = ANY($1::uuid[])
+                `WITH cancelled AS (
+                   UPDATE distributions
+                      SET status = 'cancelled', updated_at = now()
+                    WHERE id = ANY($1::uuid[])
+                    RETURNING id
+                 )
+                 DELETE FROM outbox_events
+                  WHERE aggregate_id IN (SELECT id FROM cancelled)
                     AND topic = 'distribution.publish.requested'
                     AND state IN ('pending', 'failed')`,
                 [droppedIds],

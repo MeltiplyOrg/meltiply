@@ -753,11 +753,10 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 1,
-        // 11 statements: org id check, idempotency reservation, workspace lock,
-        // Brand Profile guard, Post insert, attachment-set diff read,
-        // post_targets delete, the three grouped projection reads (attachments,
-        // targets, distributions), and complete idempotency.
-        maxStatements: 11,
+        // A text-only draft needs only the tenant check, idempotency reserve,
+        // Workspace lock, Brand Profile guard, Post insert, and idempotency
+        // completion; all response collections are known empty.
+        maxStatements: 6,
         minRows: 1,
         name: "post draft create",
         run: async () => {
@@ -845,12 +844,9 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 1,
-        // 12 statements: workspace lock, lazy quota reservation release,
-        // organization usage, idempotency reservation, Brand Profile guard,
-        // asset row insert, staging object insert, session insert, quota
-        // reservation insert, complete idempotency, session lock for the
-        // single-PUT grant, and the write-hold record on the staging row.
-        maxStatements: 12,
+        // Reuse the inserted session for grant planning: creation retains the
+        // quota checks and persisted staging write hold without a session read.
+        maxStatements: 11,
         minRows: 1,
         name: "upload session create",
         prepare: prepareMutationSample,

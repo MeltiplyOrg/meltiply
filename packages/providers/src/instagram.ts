@@ -493,10 +493,10 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
     /**
      * Exchanges the authorization code for a short-lived token, upgrades it via
      * ig_exchange_token to a long-lived token, then reads the authorized Business or
-     * Creator profile. The token's app-scoped ID must match `id`; the connection
-     * retains `user_id`, Instagram's professional account ID used for publishing
-     * and webhooks. Accepts permissions as Meta's live array or documented
-     * comma-separated string, rejecting malformed lists or incomplete grants;
+     * Creator profile. The long-lived token authenticates `/me`; its `user_id`
+     * is the professional account ID retained for publishing and webhooks.
+     * Token-response and profile IDs need not match. Accepts permissions as a
+     * live array or comma-separated string, rejecting malformed or incomplete grants;
      * retains the long-lived token as its own refresh token.
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
@@ -574,7 +574,7 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
           ? undefined
           : secureUrl(profile.profile_picture_url);
       if (
-        profileScopedId !== exchangedAccountId ||
+        !profileScopedId ||
         !profileAccountId ||
         !username ||
         !displayName ||

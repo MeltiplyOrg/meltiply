@@ -139,7 +139,7 @@ describe("createInstagramAdapter", () => {
             data: [
               {
                 account_type: "Business",
-                id: "12345",
+                id: "98765",
                 user_id: "17841400000098765",
                 name: "Creator Real Name",
                 profile_picture_url: "https://cdn.example/avatar.jpg",
@@ -179,8 +179,9 @@ describe("createInstagramAdapter", () => {
   it.each([
     { account_type: "Media_Creator", id: "12345", user_id: "17841400000098765", valid: true },
     { account_type: "BUSINESS", id: "12345", user_id: "17841400000098765", valid: true },
+    { account_type: "MEDIA_CREATOR", id: "98765", user_id: "17841400000098765", valid: true },
     { account_type: "PERSONAL", id: "12345", user_id: "17841400000098765", valid: false },
-    { account_type: "Business", id: "wrong-user", user_id: "17841400000098765", valid: false },
+    { account_type: "Business", id: "", user_id: "17841400000098765", valid: false },
     { account_type: "Business", id: "12345", user_id: undefined, valid: false },
   ])(
     "validates Instagram identity and account type $account_type/$id/$user_id",

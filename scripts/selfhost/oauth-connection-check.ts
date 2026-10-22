@@ -65,7 +65,7 @@ const providerFetch: typeof fetch = async (input, init = {}) => {
       return Response.json({
         data: [
           {
-            id: `scoped-${nonce}`,
+            id: `profile-scoped-${nonce}`,
             user_id: expectedIds.instagram,
             username: "ig_creator",
             account_type: "Media_Creator",

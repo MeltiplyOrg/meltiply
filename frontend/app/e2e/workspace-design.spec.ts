@@ -577,14 +577,13 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     .locator('button[aria-haspopup="menu"]');
   expect(await postsFilterPanel.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   await expect(postsFilterPanel).toHaveAttribute("data-state", "open");
+  const statusControlBox = await statusControl.boundingBox();
   await statusControl.click();
   const openMenuSurface = page.getByRole("menu", { name: "Post status", exact: true });
   await expect(openMenuSurface).toBeVisible();
-  const [statusControlBox, statusMenuBox] = await Promise.all([
-    statusControl.boundingBox(),
-    openMenuSurface.boundingBox(),
-  ]);
-  expect(statusMenuBox?.width ?? 0).toBeGreaterThanOrEqual((statusControlBox?.width ?? 0) - 1);
+  await expect
+    .poll(async () => (await openMenuSurface.boundingBox())?.width ?? 0)
+    .toBeGreaterThanOrEqual((statusControlBox?.width ?? 0) - 1);
   expect(await openMenuSurface.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   expect(
     await openMenuSurface.locator("[data-menu-item]").first().evaluate(menuItemChrome),

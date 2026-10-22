@@ -1921,17 +1921,18 @@ export function createPostApiService(
             );
             if (dropped.length > 0) {
               const droppedIds = dropped.map((row) => row.id);
-              // As in Post deletion, derive command cleanup from the cancelled
-              // rows in one statement; leased commands remain consumer-owned.
+              // Both writes use the same already-locked eligible ids. Keep the
+              // direct aggregate predicate so RLS uses the partial aggregate
+              // index instead of scanning pending work through a CTE subquery.
+              // The data-modifying CTE runs even without a RETURNING consumer.
               yield* client.query(
                 `WITH cancelled AS (
                    UPDATE distributions
                       SET status = 'cancelled', updated_at = now()
                     WHERE id = ANY($1::uuid[])
-                    RETURNING id
                  )
                  DELETE FROM outbox_events
-                  WHERE aggregate_id IN (SELECT id FROM cancelled)
+                  WHERE aggregate_id = ANY($1::uuid[])
                     AND topic = 'distribution.publish.requested'
                     AND state IN ('pending', 'failed')`,
                 [droppedIds],

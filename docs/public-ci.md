@@ -84,10 +84,10 @@ manual two-revision measurement job, not part of `ci-gate`. It checks out
 a dedicated PostgreSQL 18.6 database migrated from that revision, and runs the
 same in-process API workload against both in alternating order. Raw JSON and the
 generated comparison files are uploaded as artifacts. It measures Posts,
-Distributions, Calendar,
-analytics, Inbox, Asset upload-session reads and creation, schedule fan-out, and
-bulk Post deletion at batch sizes 1/5/10/25/50 under sequential and bounded
-concurrency. The results and methodology behind the current optimizations are in
+Distributions, Calendar, analytics, Inbox, Asset upload-session reads and creation,
+schedule fan-out and target removal, and bulk Post deletion at batch sizes
+1/5/10/25/50 under sequential and bounded concurrency. The results and methodology
+behind the current optimizations are in
 the [backend comparison report](benchmarks/backend-optimization.md).
 
 ## Self-hosted release images

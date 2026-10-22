@@ -23,6 +23,7 @@ Current results and analysis:
 | `assets.upload-session.detail`       | `GET /api/v1/asset-upload-sessions/:id`                  |
 | `posts.create.draft`                 | `POST /api/v1/posts` (text-only draft)                   |
 | `posts.schedule.fanout20`            | `POST /api/v1/posts/:id/schedule` with 20 saved Channels |
+| `posts.schedule.drop19`              | Reschedule 20 Channels down to one, cancelling 19        |
 | `assets.upload-session.create`       | `POST /api/v1/asset-upload-sessions` (single PUT)        |
 | `posts.delete.*.batch{1,5,10,25,50}` | `DELETE /api/v1/posts/:id` under four execution modes    |
 
@@ -93,6 +94,12 @@ Profile, 40 Channels, 300 Posts with attachments and published Distributions,
 300 analytics snapshots, 100 comments, and 42 drafts with 20 saved targets.
 Deletion fixtures are created per sample. Every run deletes and recreates its
 Workspace, so repeated runs are independent.
+
+The `posts.schedule.drop19` scenario runs after fan-out and reuses the last
+seeded schedule Post. Before every sample it restores all 20 targets through the
+API outside measurement, then times retaining one queued Distribution and
+cancelling the other 19. Its SQL count includes the complete scheduling request,
+not just cancellation and command cleanup.
 
 ## Revisions and comparison
 

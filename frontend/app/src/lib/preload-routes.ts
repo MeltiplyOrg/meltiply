@@ -4,6 +4,7 @@ import type { WorkspaceView } from "@/components/primitives/sidebar-nav";
 const dashboardRouteImports: Record<WorkspaceView, () => Promise<unknown>> = {
   posts: () => import("@/app/(dashboard)/posts/page"),
   channels: () => import("@/app/(dashboard)/channels/page"),
+  queues: () => import("@/app/(dashboard)/queues/page"),
   settings: () => import("@/components/layout/workspace-settings"),
 };
 

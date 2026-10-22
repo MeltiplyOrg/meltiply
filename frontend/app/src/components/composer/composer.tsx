@@ -18,6 +18,7 @@ import { Button } from "@meltiply/ui/button";
 import { Textarea } from "@meltiply/ui/textarea";
 import { Switch } from "@meltiply/ui/switch";
 import { Input } from "@meltiply/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { Alert } from "@meltiply/ui/alert";
 
@@ -61,6 +62,7 @@ import {
   usePost,
   useSchedulePost,
   useUpdatePost,
+  useQueues,
 } from "@/lib/queries";
 import { createAssetUpload, type AssetUploadStatus, type AssetUploadTask } from "@/lib/upload";
 import { RollingCount } from "@meltiply/ui/rolling-count";
@@ -82,7 +84,7 @@ interface ChannelOverride {
 }
 
 /** Publishing intents the composer submits; the pinned bar acts on the chosen one. */
-const PUBLISH_MODES = ["draft", "schedule", "now"] as const;
+const PUBLISH_MODES = ["draft", "queue", "schedule", "now"] as const;
 type PublishMode = (typeof PUBLISH_MODES)[number];
 
 /**
@@ -97,6 +99,8 @@ function publishModeOption(mode: PublishMode, t: (message: string) => string): s
   switch (mode) {
     case "draft":
       return t("Draft");
+    case "queue":
+      return t("Queue");
     case "schedule":
       return t("Schedule");
     case "now":
@@ -120,11 +124,12 @@ function publishModeAction(
 ): string {
   if (mode === "draft") return postId === null ? t("Save Draft") : t("Save");
   if (mode === "schedule") return t("Schedule Post");
+  if (mode === "queue") return t("Add to Queue");
   return t("Publish Now");
 }
 
 /** Icon per publishing mode, matching the action the pinned bar performs. */
-const PUBLISH_MODE_ICONS = { draft: Save, schedule: Calendar, now: Send } as const;
+const PUBLISH_MODE_ICONS = { draft: Save, queue: Layers, schedule: Calendar, now: Send } as const;
 
 /**
  * Number of characters a platform counts a caption by: code points, matching
@@ -638,6 +643,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [publishMode, setPublishMode] = useState<PublishMode>(
     initialDate !== undefined ? "schedule" : "draft",
   );
+  const [selectedQueueId, setSelectedQueueId] = useState("");
   const [scheduleDate, setScheduleDate] = useState<string>(() => {
     const seeded = initialDate ? formatInitialScheduleDate(initialDate) : "";
     if (seeded) return seeded;
@@ -743,6 +749,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const createPost = useCreatePost(scope);
   const updatePost = useUpdatePost(scope);
   const schedulePost = useSchedulePost(scope);
+  const queueQuery = useQueues(
+    scope,
+    selectedProfileIds.length === 1 ? selectedProfileIds[0]! : null,
+    publishMode === "queue",
+  );
+  const publishingQueues = queueQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const selectedQueue = publishingQueues.find((queue) => queue.id === selectedQueueId);
 
   // A saved target that has never been scheduled names no platform of its own,
   // so the Channel list is where its provider settings are resolved from. The
@@ -806,6 +819,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setAttachments([]);
     setChannelOverrides({});
     setAttachmentOverrides({});
+    setSelectedQueueId("");
     // Back to the eligible defaults rather than an empty set: abandoning a
     // composition (or finishing one) must not leave the next one with no
     // destinations, which is what the previous explicit [] produced after a
@@ -973,6 +987,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setAttachmentOverrides(attachmentOverridesFromPost(post));
       setSelectedChannelIds([...channelIds]);
       if (scheduledAt) setScheduleDate(formatInitialScheduleDate(scheduledAt));
+      if (post.queue_membership) {
+        setSelectedQueueId(post.queue_membership.queue_id);
+        setPublishMode("queue");
+      }
       setSavedAt(post.updated_at);
       setIsDirty(false);
       dirtyRef.current = false;
@@ -1782,7 +1800,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * @returns Localized violation messages; empty when submission may proceed.
    */
   const validateSubmission = useCallback(
-    (type: "draft" | "schedule" | "now"): string[] => {
+    (type: PublishMode): string[] => {
       const errors: string[] = [];
       const starting = attachments.filter((attachment) => attachment.assetId === null);
 
@@ -1816,6 +1834,15 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       }
       if (type === "schedule" && Number.isNaN(new Date(scheduleDate).getTime())) {
         errors.push(t("Please provide a valid schedule date and time."));
+      }
+      if (
+        type === "queue" &&
+        (!selectedQueue ||
+          selectedProfileIds.length !== 1 ||
+          selectedProfileIds[0] !== selectedBrandProfileId ||
+          profileCopiesRef.current.size > 0)
+      ) {
+        errors.push(t("Choose a Queue in this Post's single Brand Profile before submitting."));
       }
       if (type === "draft") return errors;
 
@@ -1946,6 +1973,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       channelOverrides,
       resolvedContentFor,
       scheduleDate,
+      selectedQueue,
       selectedBrandProfileId,
       selectedProfileIds,
       profileNames,
@@ -2006,7 +2034,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * @param type - Submission mode: `'draft'`, `'schedule'`, or `'now'`.
    */
   const handleSubmit = useCallback(
-    async (type: "draft" | "schedule" | "now") => {
+    async (type: PublishMode) => {
       setErrorMessage(null);
       const errors = validateSubmission(type);
       setValidationErrors(errors);
@@ -2022,9 +2050,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setIsSubmitting(true);
       try {
         if (
-          selectedProfileIds.length !== 1 ||
-          selectedProfileIds[0] !== brandProfileId ||
-          profileCopiesRef.current.size > 0
+          type !== "queue" &&
+          (selectedProfileIds.length !== 1 ||
+            selectedProfileIds[0] !== brandProfileId ||
+            profileCopiesRef.current.size > 0)
         ) {
           const targetsByProfile = new Map<string, PostTargetDraft[]>();
           const channelsById = new Map(selectedChannels.map((channel) => [channel.id, channel]));
@@ -2129,24 +2158,35 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           id: saved.id,
           input: {
             brand_profile_id: brandProfileId,
-            scheduled_at: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
+            ...(type === "queue"
+              ? { queue_id: selectedQueueId }
+              : {
+                  scheduled_at: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
+                }),
             targets: buildTargets(),
           },
         });
         clearRecoveryAfterSave(recoveryNamespaceAtSubmit);
         setCreatedPostId(null);
         resetComposer();
-        toast(type === "now" ? t("Post published") : t("Post scheduled"), {
-          variant: "success",
-          description:
-            type === "now"
-              ? t("Distribution to {count} channel(s) has been queued.", {
-                  count: selectedChannels.length,
-                })
-              : t("Distribution to {count} channel(s) is scheduled.", {
-                  count: selectedChannels.length,
-                }),
-        });
+        toast(
+          type === "queue"
+            ? t("Post added to Queue")
+            : type === "now"
+              ? t("Publication queued")
+              : t("Post scheduled"),
+          {
+            variant: "success",
+            description:
+              type === "now"
+                ? t("Distribution to {count} channel(s) has been queued.", {
+                    count: selectedChannels.length,
+                  })
+                : t("Distribution to {count} channel(s) is scheduled.", {
+                    count: selectedChannels.length,
+                  }),
+          },
+        );
         await refreshWorkspace();
         onPostSuccess?.();
       } catch (error) {
@@ -2176,6 +2216,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       resetComposer,
       scheduleDate,
       schedulePost,
+      selectedQueueId,
       selectedBrandProfileId,
       selectedProfileIds,
       selectedChannels,
@@ -2864,19 +2905,77 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                 }}
               />
             )}
+            {publishMode === "queue" && (
+              <div className="space-y-2">
+                <Select
+                  value={selectedQueue?.id ?? ""}
+                  onValueChange={(value) => {
+                    setSelectedQueueId(value);
+                    markDirty();
+                  }}
+                >
+                  <SelectTrigger
+                    aria-label={t("Publishing Queue")}
+                    disabled={queueQuery.isPending || selectedProfileIds.length !== 1}
+                  >
+                    <SelectValue placeholder={t("Choose a Queue")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {publishingQueues.map((queue) => (
+                      <SelectItem key={queue.id} value={queue.id}>
+                        {queue.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedQueue && <p className="text-xs text-ink-3">{selectedQueue.timezone}</p>}
+                {queueQuery.error && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {userFacingErrorMessage(queueQuery.error, language)}
+                  </p>
+                )}
+                {queueQuery.hasNextPage && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      void queueQuery.fetchNextPage();
+                    }}
+                    disabled={queueQuery.isFetchingNextPage}
+                  >
+                    {t("Load more Queues")}
+                  </Button>
+                )}
+                <Button variant="link" onClick={() => onNavigate?.("queues")}>
+                  {t("Manage Queues")}
+                </Button>
+                {postQuery.data?.queue_membership && (
+                  <p className="text-xs text-ink-2">
+                    {t("Assigned: {time}", {
+                      time: new Date(postQuery.data.queue_membership.assigned_at).toLocaleString(
+                        language,
+                      ),
+                    })}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* What the selected mode will do, in the mode's own words: the
                 action bar names the commit, this line names its effect. */}
             <p className="text-(length:--font-size-micro) text-ink-3">
               {publishMode === "draft"
                 ? t("Saves this post's text, attachments, and channel settings without publishing")
-                : publishMode === "schedule"
-                  ? t("Queues this post to {count} channel(s) at the selected time.", {
-                      count: selectedChannels.length,
-                    })
-                  : t("Queues this post to {count} channel(s) right away.", {
-                      count: selectedChannels.length,
-                    })}
+                : publishMode === "queue"
+                  ? t(
+                      "Assigns the next free future slot without changing your content or Channel settings.",
+                    )
+                  : publishMode === "schedule"
+                    ? t("Queues this post to {count} channel(s) at the selected time.", {
+                        count: selectedChannels.length,
+                      })
+                    : t("Queues this post to {count} channel(s) right away.", {
+                        count: selectedChannels.length,
+                      })}
             </p>
           </ComposerSection>
         </div>

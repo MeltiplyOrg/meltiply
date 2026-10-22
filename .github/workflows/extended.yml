@@ -14,6 +14,7 @@ on:
           - cloudflare-extended
           - cloudflare-full
           - object-storage
+          - publishing-queues
 
 permissions:
   contents: read
@@ -38,10 +39,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
       - name: Prepare full gate database
-        if: inputs.lane == 'cloudflare-full'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Validate complete application contract
-        if: inputs.lane == 'cloudflare-full'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues'
         run: bun run cloudflare:check
       - uses: actions/setup-go@v6
         if: inputs.lane == 'object-storage'
@@ -154,6 +155,19 @@ jobs:
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Install Queue acceptance browser
+        if: inputs.lane == 'publishing-queues'
+        run: bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Review Queue React changes
+        if: inputs.lane == 'publishing-queues'
+        working-directory: frontend/app
+        run: npx --yes react-doctor@latest --verbose --scope changed --base e3bad4a93f8c14b00464b106778c20dd5a7c7037
+      - name: Exercise durable Queue publishing
+        if: inputs.lane == 'publishing-queues'
+        env:
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: bun run --cwd frontend/app test:e2e e2e/publishing-queues.spec.ts --project queues --trace on
       - name: Smoke development stylesheet and self-hosted fonts
         if: inputs.lane == 'frontend-ui'
         run: |

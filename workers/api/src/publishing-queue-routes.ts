@@ -28,7 +28,7 @@ export function registerPublishingQueueRoutes(
       c,
       Effect.gen(function* () {
         const brandProfileId = yield* fromPromise(() =>
-          uuidParam(c.req.query("brand_profile_id"), "brand_profile_id"),
+          uuidParam(c.req.query("brand_profile_id") ?? "", "brand_profile_id"),
         );
         const limit = yield* fromPromise(() =>
           integerParam(c.req.query("limit"), "limit", 20, 1, 100),

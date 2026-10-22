@@ -23,6 +23,13 @@ const env = {
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 let profileId: string;
+const organizationId = randomUUID();
+const foreignOrganizationId = randomUUID();
+const members: Record<string, { userId: string; role: "admin" | "editor" | "viewer" }> = {
+  auth_user_local_alpha: { userId: "10000000-0000-4000-8000-000000000001", role: "admin" },
+  auth_user_local_gamma: { userId: "10000000-0000-4000-8000-000000000003", role: "editor" },
+  auth_user_local_delta: { userId: "10000000-0000-4000-8000-000000000004", role: "viewer" },
+};
 const identities: Record<string, JwtIdentity> = {
   owner: { subject: "auth_user_local_alpha", email: "alpha@meltiply.local", emailVerified: true },
   editor: { subject: "auth_user_local_gamma", email: "gamma@meltiply.local", emailVerified: true },
@@ -40,6 +47,27 @@ registry.register(
 const app = createApiApp({
   verifyJwtToken: async (_env, token) => identities[token]!,
   providerRegistry: registry,
+  // Only identity resolution is a fixture. Real memberships, tenant claims,
+  // route authorization, RLS and quota accounting use this isolated Workspace.
+  resolveActor: async (_env, identity, httpRequest) => {
+    const member = members[identity.subject]!;
+    const tenantId = httpRequest.headers.get("X-Workspace-ID") ?? organizationId;
+    return {
+      authUserId: identity.subject,
+      claims: {
+        organizationId: tenantId,
+        organizationRole: member.role,
+        subject: identity.subject,
+        userId: member.userId,
+      },
+      displayName: "Queue HTTP member",
+      email: identity.email!,
+      isInstallationOwner: false,
+      role: member.role,
+      userId: member.userId,
+      workspace: { id: tenantId, name: "Queue regression", slug: `queue-${tenantId}` },
+    };
+  },
 });
 
 let channelId: string;
@@ -61,6 +89,27 @@ function request(path: string, method = "GET", body?: unknown, key = randomUUID(
 }
 
 beforeAll(async () => {
+  await systemPoolFor(env).query(
+    "INSERT INTO organizations (id, name, slug) VALUES ($1, 'Queue regression', $2)",
+    [organizationId, `queue-${organizationId}`],
+  );
+  await systemPoolFor(env).query(
+    "INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'admin'), ($1, $3, 'editor'), ($1, $4, 'viewer')",
+    [
+      organizationId,
+      members.auth_user_local_alpha!.userId,
+      members.auth_user_local_gamma!.userId,
+      members.auth_user_local_delta!.userId,
+    ],
+  );
+  await systemPoolFor(env).query(
+    "INSERT INTO organizations (id, name, slug) VALUES ($1, 'Foreign Queue regression', $2)",
+    [foreignOrganizationId, `queue-${foreignOrganizationId}`],
+  );
+  await systemPoolFor(env).query(
+    "INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'admin')",
+    [foreignOrganizationId, members.auth_user_local_alpha!.userId],
+  );
   const response = await request("/brand-profiles", "POST", {
     name: `Queue regression ${randomUUID()}`,
     color: "#1d4ed8",
@@ -77,8 +126,9 @@ beforeAll(async () => {
   channelId = channel.rows[0]!.id;
 });
 afterAll(async () => {
-  if (profileId)
-    await systemPoolFor(env).query("DELETE FROM brand_profiles WHERE id = $1", [profileId]);
+  await systemPoolFor(env).query("DELETE FROM organizations WHERE id = ANY($1::uuid[])", [
+    [organizationId, foreignOrganizationId],
+  ]);
   await authenticatedPoolFor(env).end();
   await systemPoolFor(env).end();
 });
@@ -322,6 +372,18 @@ describe("durable publishing Queues through authenticated HTTP", () => {
       (await request(`/queues/${plan.id}`, "GET", undefined, randomUUID(), "viewer")).status,
     ).toBe(200);
     const post = await createPost();
+    for (const path of [
+      `/queues/${plan.id}`,
+      `/posts/${post.id}`,
+      `/queues?brand_profile_id=${profileId}`,
+    ]) {
+      const foreign = await app.request(
+        `/api/v1${path}`,
+        { headers: { Authorization: "Bearer owner", "X-Workspace-ID": foreignOrganizationId } },
+        env,
+      );
+      expect(foreign.status, path).toBe(404);
+    }
     expect(
       (
         await request(

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router";
 import {
   CalendarDays,
   Edit3,
@@ -80,6 +81,7 @@ function ChannelOutcomeRow({
   item,
   postAttachments,
   canMutate,
+  queueOwned,
   onRequestDelete,
 }: {
   item: PostDetailItem;
@@ -87,6 +89,8 @@ function ChannelOutcomeRow({
   postAttachments: number;
   /** False in the aggregate view: retry/reschedule/cancel stay hidden. */
   canMutate: boolean;
+  /** A recurring Queue owns this Post's shared instant; per-Channel rescheduling is unavailable until removal. */
+  queueOwned: boolean;
   onRequestDelete: (distributionIds: string[]) => void;
 }) {
   const { t } = useI18n();
@@ -279,6 +283,10 @@ function ChannelOutcomeRow({
               <Button
                 variant="outline"
                 size="sm"
+                disabled={queueOwned}
+                title={
+                  queueOwned ? t("Remove this Post from its Queue before rescheduling.") : undefined
+                }
                 onClick={() => {
                   setRescheduleValue(toLocalInputValue(distribution.scheduled_at));
                   setRescheduleOpen((open) => !open);
@@ -387,7 +395,7 @@ export function usePostDetailSurface({
   onEdit,
   onRequestDelete,
 }: PostDetailSurfaceProps): PostDrawerSurface | null {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const post = useLatchedValue(livePost);
 
   const surface = useMemo(() => {
@@ -509,6 +517,22 @@ export function usePostDetailSurface({
                 <dd className="text-ink">{dateLabel}</dd>
               </>
             )}
+            {post.post?.queue_membership && (
+              <>
+                <dt className="min-h-control text-ink-2">{t("Queue")}</dt>
+                <dd className="min-w-0 break-words text-ink">
+                  <Link className="text-accent-ink underline" to="/queues">
+                    {post.post.queue_membership.queue_name}
+                  </Link>
+                </dd>
+                <dt className="min-h-control text-ink-2">{t("Assigned time")}</dt>
+                <dd className="text-ink">
+                  <time dateTime={post.post.queue_membership.assigned_at}>
+                    {new Date(post.post.queue_membership.assigned_at).toLocaleString(language)}
+                  </time>
+                </dd>
+              </>
+            )}
           </dl>
           <section className="mt-6.5">
             <h3 className="mb-2 text-(length:--font-size-ui) font-semibold">{t("Caption")}</h3>
@@ -562,6 +586,7 @@ export function usePostDetailSurface({
                 item={item}
                 postAttachments={attachments.length}
                 canMutate={canMutate}
+                queueOwned={Boolean(post.post?.queue_membership)}
                 onRequestDelete={(ids) =>
                   onRequestDelete({
                     kind: "cancel-channels",
@@ -576,7 +601,7 @@ export function usePostDetailSurface({
         </>
       ),
     };
-  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, t]);
+  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, t, language]);
 
   return surface;
 }

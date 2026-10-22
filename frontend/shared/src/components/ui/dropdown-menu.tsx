@@ -131,7 +131,10 @@ DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayNam
  * Main floating popover menu panel rendered inside a {@link DropdownMenuPortal}.
  *
  * Uses a stable Popper position with opacity-only entrance/exit feedback so the
- * menu does not fight Radix's positioning transform during opening.
+ * menu does not fight Radix's positioning transform during opening. The shared
+ * `[data-menu-fit-trigger="dropdown"]` rule makes the panel at least as wide as
+ * its trigger, so list menus under full-width filter controls align to them;
+ * compact icon triggers keep the shared 200px floor.
  *
  * @param sideOffset - Distance in pixels from the trigger (defaults to 4px).
  * @param className - Optional CSS classes for custom width, max-height, or styling.
@@ -165,6 +168,7 @@ export const DropdownMenuContent = React.forwardRef<
         ref={setRefs}
         sideOffset={sideOffset}
         data-menu-surface=""
+        data-menu-fit-trigger="dropdown"
         data-menu-plain={highlight ? undefined : ""}
         className={cn("relative z-50 select-none", className)}
         {...props}

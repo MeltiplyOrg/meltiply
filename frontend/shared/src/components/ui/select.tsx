@@ -135,6 +135,9 @@ SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayNam
  * chrome comes from the shared `[data-menu-surface]` vocabulary, so a select
  * list matches the account menu, row actions, and every other floating menu;
  * only the opacity fade animates, keeping clear of Radix's popper transform.
+ * The panel and its viewport both honour the trigger width, so a Select opened
+ * from a wide field or toolbar control spans that control even when a caller
+ * caps the list with `max-w-*`.
  *
  * @param className - Optional CSS classes for custom dimensions or padding.
  * @param children - Group, Item, Label, and Separator children.
@@ -154,6 +157,7 @@ export const SelectContent = React.forwardRef<
       <SelectPrimitive.Content
         ref={ref}
         data-menu-surface=""
+        data-menu-fit-trigger="select"
         className={cn(
           "relative z-50 select-none",
           position === "popper" &&

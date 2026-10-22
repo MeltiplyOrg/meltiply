@@ -82,7 +82,6 @@ export function PlatformFilterSelect({ value, onValueChange, trigger }: Platform
       onValueChange={onValueChange}
       trigger={trigger}
       aggregateLabel={t("All platforms")}
-      className="w-44"
       options={PLATFORM_IDS.map((platform) => ({
         value: platform,
         label: (

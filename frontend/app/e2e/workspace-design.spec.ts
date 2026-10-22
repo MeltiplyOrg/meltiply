@@ -401,14 +401,13 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     name: "All platforms",
     exact: true,
   });
+  // The modal menu hides its trigger from the accessibility tree while open.
+  const platformTriggerBox = await platformFilterTrigger.boundingBox();
   await platformFilterTrigger.click();
   const platformMenuSurface = page.locator(
     "[data-radix-popper-content-wrapper] [data-menu-surface]",
   );
-  const [platformTriggerBox, platformMenuBox] = await Promise.all([
-    platformFilterTrigger.boundingBox(),
-    platformMenuSurface.boundingBox(),
-  ]);
+  const platformMenuBox = await platformMenuSurface.boundingBox();
   // The list must span the full-width filter control that opened it instead of
   // collapsing to the shared surface floor.
   expect(platformMenuBox?.width ?? 0).toBeGreaterThanOrEqual((platformTriggerBox?.width ?? 0) - 1);

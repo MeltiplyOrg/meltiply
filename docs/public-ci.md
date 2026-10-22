@@ -75,6 +75,10 @@ media/recovery/publishing journey against the controlled-Provider acceptance
 entries; provisioning helpers never run against production endpoints.
 Controlled fixture responses are schema-decoded using their wire ownership fields
 before those identities drive media copying or injected failures.
+Browser journeys create uniquely named Brand Profiles in the shared Workspace.
+Their selection helper restores that exact profile across reloads; a second
+browser context must receive the profile name explicitly. Fixture provisioning
+must not attach Channels to the first seeded profile.
 User-facing journeys and screenshots use production assets without DevBox chrome.
 `frontend-ui` runs both frontend checks, dead-code detection,
 documentation links, React review, development CSS/font HTTP smoke, and the

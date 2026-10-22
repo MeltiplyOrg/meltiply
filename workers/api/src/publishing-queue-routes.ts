@@ -5,24 +5,32 @@ import type { ApiWorkerEnvironment } from "./env";
 import { fromPromise } from "./effect/route";
 import { runRouteEffect } from "./effect/runtime";
 import { idempotencyHeaders } from "./idempotent-response";
+import type { PublishingQueueApiService } from "./publishing-queue-service";
+import { jsonResponse } from "./responses";
 import {
-  createPublishingQueueApiService,
-  type PublishingQueueApiService,
-} from "./publishing-queue-service";
-import {
+  idempotencyKey,
+  integerParam,
+  jsonBody,
   queueConfigurationSchema,
   queuePatchSchema,
   queueScopeSchema,
-} from "./publishing-queue-store";
-import { jsonResponse } from "./responses";
-import { idempotencyKey, integerParam, jsonBody, stringField, uuidParam } from "./validation";
+  uuidParam,
+} from "./validation";
 
-/** Registers the strict Queue HTTP seam. Schema validation precedes tenant writes; dependencies are constructed without capturing request state. */
+/** Registers the strict Queue HTTP seam. Schema validation precedes tenant writes; the route-local service is initialized once on first use, matching the Post service boundary without capturing request state. */
 export function registerPublishingQueueRoutes(
   app: Hono<ApiWorkerEnvironment>,
   configured?: PublishingQueueApiService,
 ): void {
-  const api = configured ?? createPublishingQueueApiService();
+  let servicePromise: Promise<PublishingQueueApiService> | undefined;
+  /** Keeps the SQL/Post projection graph off unrelated routes; injected contracts never construct real data access. A failed initialization remains a request failure, not a fallback. */
+  const queues = async (): Promise<PublishingQueueApiService> => {
+    if (configured) return configured;
+    servicePromise ??= import("./publishing-queue-service").then((module) =>
+      module.createPublishingQueueApiService(),
+    );
+    return servicePromise;
+  };
   app.get("/api/v1/queues", (c) =>
     runRouteEffect(
       c,
@@ -35,6 +43,7 @@ export function registerPublishingQueueRoutes(
         );
         const cursor = c.req.query("cursor");
         if (cursor !== undefined) yield* fromPromise(() => uuidParam(cursor, "cursor"));
+        const api = yield* fromPromise(queues);
         return jsonResponse(
           yield* api.list(c.env, c.get("actor").claims, brandProfileId, limit, cursor),
           200,
@@ -48,6 +57,7 @@ export function registerPublishingQueueRoutes(
       c,
       Effect.gen(function* () {
         const id = yield* fromPromise(() => uuidParam(c.req.param("queueId"), "queue_id"));
+        const api = yield* fromPromise(queues);
         return jsonResponse(
           yield* api.get(c.env, c.get("actor").claims, id),
           200,
@@ -85,6 +95,7 @@ export function registerPublishingQueueRoutes(
               ),
             );
           const key = yield* fromPromise(() => idempotencyKey(c));
+          const api = yield* fromPromise(queues);
           const result = yield* api.mutate(
             c.env,
             c.get("actor").claims,
@@ -121,16 +132,14 @@ export function registerPublishingQueueRoutes(
           return yield* Effect.fail(
             new CoreApiError(422, "validation_error", "Supply only the owning brand_profile_id."),
           );
-        const brandProfileId = yield* fromPromise(() =>
-          uuidParam(stringField(body, "brand_profile_id"), "brand_profile_id"),
-        );
         const key = yield* fromPromise(() => idempotencyKey(c));
+        const api = yield* fromPromise(queues);
         const result = yield* api.removePost(
           c.env,
           c.get("actor").claims,
           queueId,
           postId,
-          brandProfileId,
+          parsed.data.brand_profile_id,
           key,
         );
         return jsonResponse(

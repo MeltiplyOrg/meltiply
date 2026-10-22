@@ -25,6 +25,7 @@ import {
 } from "@meltiply/ui/center-alert-dialog";
 import { useWorkspace } from "@/context/workspace.context";
 import { WorkspaceSurface } from "@/components/layout/workspace-surface";
+import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import {
   useCreateQueue,
@@ -240,32 +241,122 @@ type Confirmation =
   | { kind: "delete"; queue: PublishingQueue }
   | { kind: "remove"; queue: PublishingQueue; post: Post };
 
+/** Owns one selected Queue's paged membership inspection. A Queue identity key resets pagination; removal confirmation stays with the directory, while assigned instants and Channel outcomes remain read-only. */
+function QueuePosts({
+  queue,
+  onRemove,
+}: {
+  queue: PublishingQueue | null;
+  onRemove: (post: Post) => void;
+}) {
+  const { t, language, tStatus } = useI18n();
+  const { canWriteContent } = useWorkspace();
+  const scope = useSessionScope();
+  const [offset, setOffset] = useState(0);
+  const posts = usePosts(
+    { ...scope, isSignedIn: scope.isSignedIn && queue !== null },
+    { queue_id: queue?.id, brand_profile_id: queue?.brand_profile_id, limit: 20, offset },
+  );
+  return (
+    <section aria-label={t("Queue Posts")} className="min-w-0 space-y-3">
+      {!queue ? (
+        <p className="text-sm text-ink-3">
+          {t("Inspect a Queue to see assigned times and Channel outcomes.")}
+        </p>
+      ) : (
+        <>
+          <h2 className="flex items-center gap-2 font-semibold">
+            <CalendarClock />
+            {queue.name}
+          </h2>
+          {posts.isPending ? (
+            <p role="status">{t("Loading Posts…")}</p>
+          ) : posts.error ? (
+            <Alert variant="destructive">{userFacingErrorMessage(posts.error, language)}</Alert>
+          ) : posts.data?.posts.length === 0 ? (
+            <p>{t("No Posts assigned to this Queue.")}</p>
+          ) : (
+            posts.data?.posts.map((post) => (
+              <article key={post.id} className="space-y-2 border-b border-line py-3">
+                <p className="break-words text-sm">
+                  {post.title || post.default_text || t("Media Post")}
+                </p>
+                <p className="text-xs text-ink-2">
+                  {post.queue_membership && (
+                    <time dateTime={post.queue_membership.assigned_at}>
+                      {new Date(post.queue_membership.assigned_at).toLocaleString(language, {
+                        timeZone: queue.timezone,
+                        timeZoneName: "short",
+                      })}
+                    </time>
+                  )}
+                </p>
+                <ul className="text-xs text-ink-2">
+                  {post.distributions.map((outcome) => (
+                    <li key={outcome.id}>
+                      {outcome.platform}: {tStatus(outcome.status)}
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild variant="outline">
+                    <Link to={`/posts?editPostId=${post.id}`}>{t("Open Post")}</Link>
+                  </Button>
+                  {canWriteContent &&
+                    post.distributions.every((outcome) =>
+                      ["scheduled", "queued", "cancelled"].includes(outcome.status),
+                    ) && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          onRemove(post);
+                        }}
+                      >
+                        {t("Remove from Queue")}
+                      </Button>
+                    )}
+                </div>
+              </article>
+            ))
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={offset === 0 || posts.isFetching}
+              onClick={() => setOffset((value) => Math.max(0, value - 20))}
+            >
+              {t("Previous")}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!posts.data?.has_more || posts.isFetching}
+              onClick={() => setOffset((value) => value + 20)}
+            >
+              {t("Next")}
+            </Button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 /** Durable Queue directory and membership inspection. Admins configure plans; content writers remove editable reservations; all members see assigned times and independent Channel outcomes after reload. */
 export default function QueuesPage() {
-  const { t, language, tStatus } = useI18n();
+  const { t, language } = useI18n();
   const weekdayLabels = useMemo(() => queueWeekdayLabels(language), [language]);
   const scope = useSessionScope();
+  const scrollRef = useSmoothScrollContainer();
   const {
     brandProfiles,
     selectedBrandProfileId,
     setSelectedBrandProfileId,
     canManageConfiguration,
-    canWriteContent,
   } = useWorkspace();
   const plans = useQueues(scope, selectedBrandProfileId);
   const queues = plans.data?.pages.flatMap((page) => page.items) ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = queues.find((queue) => queue.id === selectedId) ?? null;
-  const [offset, setOffset] = useState(0);
-  const posts = usePosts(
-    { ...scope, isSignedIn: scope.isSignedIn && selected !== null },
-    {
-      queue_id: selected?.id,
-      brand_profile_id: selectedBrandProfileId ?? undefined,
-      limit: 20,
-      offset,
-    },
-  );
   const [editor, setEditor] = useState<{
     queue: PublishingQueue | null;
     key: string;
@@ -330,7 +421,6 @@ export default function QueuesPage() {
           onValueChange={(value) => {
             setSelectedBrandProfileId(value);
             setSelectedId(null);
-            setOffset(0);
           }}
         >
           <SelectTrigger className="max-w-xs" aria-label={t("Queue Brand Profile")}>
@@ -355,6 +445,7 @@ export default function QueuesPage() {
         </Button>
       </div>
       <div
+        ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6"
         data-lenis-prevent=""
       >
@@ -392,7 +483,6 @@ export default function QueuesPage() {
                       aria-pressed={selected?.id === queue.id}
                       onClick={() => {
                         setSelectedId(queue.id);
-                        setOffset(0);
                       }}
                     >
                       {t("Inspect Posts")}
@@ -439,90 +529,16 @@ export default function QueuesPage() {
                 </Button>
               )}
             </section>
-            <section aria-label={t("Queue Posts")} className="min-w-0 space-y-3">
-              {!selected ? (
-                <p className="text-sm text-ink-3">
-                  {t("Inspect a Queue to see assigned times and Channel outcomes.")}
-                </p>
-              ) : (
-                <>
-                  <h2 className="flex items-center gap-2 font-semibold">
-                    <CalendarClock />
-                    {selected.name}
-                  </h2>
-                  {posts.isPending ? (
-                    <p role="status">{t("Loading Posts…")}</p>
-                  ) : posts.error ? (
-                    <Alert variant="destructive">
-                      {userFacingErrorMessage(posts.error, language)}
-                    </Alert>
-                  ) : posts.data?.posts.length === 0 ? (
-                    <p>{t("No Posts assigned to this Queue.")}</p>
-                  ) : (
-                    posts.data?.posts.map((post) => (
-                      <article key={post.id} className="space-y-2 border-b border-line py-3">
-                        <p className="break-words text-sm">
-                          {post.title || post.default_text || t("Media Post")}
-                        </p>
-                        <p className="text-xs text-ink-2">
-                          {post.queue_membership && (
-                            <time dateTime={post.queue_membership.assigned_at}>
-                              {new Date(post.queue_membership.assigned_at).toLocaleString(
-                                language,
-                                { timeZone: selected.timezone, timeZoneName: "short" },
-                              )}
-                            </time>
-                          )}
-                        </p>
-                        <ul className="text-xs text-ink-2">
-                          {post.distributions.map((outcome) => (
-                            <li key={outcome.id}>
-                              {outcome.platform}: {tStatus(outcome.status)}
-                            </li>
-                          ))}
-                        </ul>
-                        <div className="flex flex-wrap gap-2">
-                          <Button asChild variant="outline">
-                            <Link to={`/posts?editPostId=${post.id}`}>{t("Open Post")}</Link>
-                          </Button>
-                          {canWriteContent &&
-                            post.distributions.every((outcome) =>
-                              ["scheduled", "queued", "cancelled"].includes(outcome.status),
-                            ) && (
-                              <Button
-                                variant="ghost"
-                                onClick={() => {
-                                  setConfirmation({ kind: "remove", queue: selected, post });
-                                  setActionError(null);
-                                  setConfirmOpen(true);
-                                }}
-                              >
-                                {t("Remove from Queue")}
-                              </Button>
-                            )}
-                        </div>
-                      </article>
-                    ))
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      disabled={offset === 0 || posts.isFetching}
-                      onClick={() => setOffset((value) => Math.max(0, value - 20))}
-                    >
-                      {t("Previous")}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      disabled={!posts.data?.has_more || posts.isFetching}
-                      onClick={() => setOffset((value) => value + 20)}
-                    >
-                      {t("Next")}
-                    </Button>
-                  </div>
-                </>
-              )}
-            </section>
+            <QueuePosts
+              key={selected?.id ?? "unselected"}
+              queue={selected}
+              onRemove={(post) => {
+                if (!selected) return;
+                setConfirmation({ kind: "remove", queue: selected, post });
+                setActionError(null);
+                setConfirmOpen(true);
+              }}
+            />
           </div>
         )}
       </div>

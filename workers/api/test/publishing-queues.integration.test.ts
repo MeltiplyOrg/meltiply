@@ -61,7 +61,7 @@ const app = createApiApp({
         userId: member.userId,
       },
       displayName: "Queue HTTP member",
-      email: identity.email!,
+      email: identity.email,
       isInstallationOwner: false,
       role: member.role,
       userId: member.userId,
@@ -191,7 +191,7 @@ describe("durable publishing Queues through authenticated HTTP", () => {
       slots: [{ weekday: 1, time: "09:30" }],
     });
     expect(response.status, await response.clone().text()).toBe(201);
-    const queue = await response.json();
+    const queue: Schemas["PublishingQueue"] = await response.json();
     const read = await request(`/queues/${queue.id}`);
     expect(read.status).toBe(200);
     expect(await read.json()).toMatchObject({
@@ -242,6 +242,42 @@ describe("durable publishing Queues through authenticated HTTP", () => {
     expect(reloaded.targets).toEqual(first.targets);
   });
 
+  it("skips a slot that elapses while waiting for a target lock", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-26T09:00:00Z"));
+    const plan = await createPlan([
+      { weekday: 1, time: "09:01" },
+      { weekday: 1, time: "09:02" },
+    ]);
+    const post = await createPost();
+    const scheduled = await request(`/posts/${post.id}/schedule`, "POST", {
+      brand_profile_id: profileId,
+      scheduled_at: "2026-10-26T10:00:00Z",
+    });
+    expect(scheduled.status).toBe(200);
+    const locker = await systemPoolFor(env).connect();
+    let assignment: Promise<Schemas["Post"]> | undefined;
+    try {
+      await locker.query("BEGIN");
+      const process = await locker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      await locker.query("SELECT id FROM distributions WHERE post_id = $1 FOR UPDATE", [post.id]);
+      assignment = enqueue(post.id, plan.id);
+      // Observe a real waiter on this connection, not a delay tied to CPU speed.
+      await vi.waitFor(async () => {
+        const waiting = await systemPoolFor(env).query<{ blocked: boolean }>(
+          "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))) AS blocked",
+          [process.rows[0]!.pid],
+        );
+        expect(waiting.rows[0]?.blocked).toBe(true);
+      });
+      vi.setSystemTime(new Date("2026-10-26T09:01:30Z"));
+    } finally {
+      await locker.query("ROLLBACK");
+      locker.release();
+    }
+    expect((await assignment)?.queue_membership?.assigned_at).toBe("2026-10-26T09:02:00.000Z");
+  });
+
   it("serializes concurrent allocations and concurrent duplicate requests without reserving twice", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-26T09:00:00Z"));
@@ -264,7 +300,7 @@ describe("durable publishing Queues through authenticated HTTP", () => {
       enqueue(duplicatePost.id, plan.id, key),
     ]);
     expect(duplicate[0]).toEqual(duplicate[1]);
-    expect(duplicate[0]!.queue_membership?.assigned_at).toBe("2026-11-02T09:01:00.000Z");
+    expect(duplicate[0].queue_membership?.assigned_at).toBe("2026-11-02T09:01:00.000Z");
   });
 
   it.each([
@@ -348,6 +384,42 @@ describe("durable publishing Queues through authenticated HTTP", () => {
         })
       ).status,
     ).toBe(409);
+  });
+
+  it("lets an Editor release, reuse, and independently publish the same composition", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-26T09:00:00Z"));
+    const plan = await createPlan([{ weekday: 1, time: "09:01" }]);
+    const draft = await createPost();
+    const enqueueAsEditor = await request(
+      `/posts/${draft.id}/schedule`,
+      "POST",
+      { brand_profile_id: profileId, queue_id: plan.id },
+      randomUUID(),
+      "editor",
+    );
+    expect(enqueueAsEditor.status).toBe(200);
+    const original: Schemas["Post"] = await enqueueAsEditor.json();
+    const scope = { brand_profile_id: profileId };
+    const remove = () =>
+      request(`/queues/${plan.id}/posts/${draft.id}`, "DELETE", scope, randomUUID(), "editor");
+    expect((await remove()).status).toBe(200);
+    const reused = await enqueue(draft.id, plan.id);
+    expect(reused.queue_membership).toEqual(original.queue_membership);
+    expect(reused.distributions.map((outcome) => outcome.id)).toEqual(
+      original.distributions.map((outcome) => outcome.id),
+    );
+    expect(reused.targets).toEqual(draft.targets);
+    expect((await remove()).status).toBe(200);
+    const immediate = await request(`/posts/${draft.id}/schedule`, "POST", {
+      ...scope,
+      scheduled_at: null,
+    });
+    expect(immediate.status).toBe(200);
+    const publishedIntent: Schemas["Post"] = await immediate.json();
+    expect(publishedIntent.queue_membership).toBeNull();
+    expect(publishedIntent.distributions).toMatchObject([{ status: "queued", scheduled_at: null }]);
+    expect(publishedIntent.targets).toEqual(draft.targets);
   });
 
   it("enforces configuration roles, membership roles, exact scheduling mode and Brand Profile scope", async () => {

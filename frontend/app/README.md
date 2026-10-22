@@ -13,14 +13,23 @@ Read [shared UI ownership](../../docs/frontend-ui.md),
 They describe the current Gr8r-adapted design, not a second theme or migration plan.
 
 Posts orders Table, Calendar, Grid in its toolbar; Channels uses the Accounts/
-Brand Profiles directory; Settings exposes Appearance, Language, Account, and
-inline Security. The shell keeps Posts and Channels as single destinations and
-puts jump search in the top bar. Workspace identity is read-only.
+Brand Profiles directory; Queues manages named weekly publishing plans within one
+Brand Profile. Settings exposes Appearance, Language, Account, and inline Security.
+The shell keeps Posts, Channels, and Queues as single destinations and puts jump
+search in the top bar. Workspace identity is read-only.
 
 Features own authorized data, selection, labels, and mutations. Shared
 `CenterDialog`, `CenterAlertDialog`, and `SideDialog` own their frames, scrolling,
 focus, dismissal, and transitions. `usePostDetailSurface` supplies real properties,
 caption, attachments, and Channel outcomes to the edge/phone inspector.
+
+The composer supports Draft, Queue, Schedule, and Now. Queue mode reserves the
+next free future slot without changing composition, media, or Channel settings;
+it requires one owning Brand Profile. Existing manual modes retain independent
+multi-profile behavior. Configuration edits freeze prior reservations; safe
+removal cancels only unclaimed work without moving another Post. The
+[publishing guide](../public/content/docs/publishing.mdx#weekly-queues) owns
+timezone, DST, ordering, replay, retirement, and historical-membership semantics.
 
 There is one animation path, without a motion-mode provider, stored preference,
 root flag, mode props, or alternate branches. Preserve implemented animations

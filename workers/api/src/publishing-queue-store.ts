@@ -1,7 +1,6 @@
 import type { components } from "@meltiply/contracts/schema";
 import { isoDateTime, type DatabaseError } from "@meltiply/domain";
 import { Effect } from "effect";
-import { z } from "zod";
 import { requireActiveBrandProfileEffect } from "./brand-profile-guard";
 import { CoreApiError } from "./core-types";
 import type { EffectTransactionClient } from "./database";
@@ -9,42 +8,6 @@ import type { EffectTransactionClient } from "./database";
 type Schemas = components["schemas"];
 export type PublishingQueue = Schemas["PublishingQueue"];
 export type QueueMembership = Schemas["QueueMembership"];
-export const queueConfigurationSchema = z.strictObject({
-  brand_profile_id: z.uuid(),
-  name: z.string().trim().min(1).max(100),
-  timezone: z
-    .string()
-    .min(1)
-    .max(100)
-    .refine((value) => {
-      try {
-        new Intl.DateTimeFormat("en", { timeZone: value });
-        return !/^[+-]/.test(value);
-      } catch {
-        return false;
-      }
-    }, "Use a supported IANA timezone"),
-  slots: z
-    .array(
-      z.strictObject({
-        weekday: z.number().int().min(0).max(6),
-        time: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/),
-      }),
-    )
-    .min(1)
-    .max(168)
-    .refine(
-      (slots) => new Set(slots.map((slot) => `${slot.weekday}/${slot.time}`)).size === slots.length,
-      "Slots must be unique",
-    ),
-});
-export const queuePatchSchema = queueConfigurationSchema.partial({
-  name: true,
-  timezone: true,
-  slots: true,
-});
-export const queueScopeSchema = z.strictObject({ brand_profile_id: z.uuid() });
-export type QueueConfiguration = z.infer<typeof queueConfigurationSchema>;
 export interface QueueRow extends Record<string, unknown> {
   id: string;
   org_id: string;
@@ -90,30 +53,27 @@ export function readQueueEffect(
   });
 }
 
-/** Reads active membership in one batch. The immutable label snapshot and UTC instant survive configuration edits and Queue retirement. */
-export function loadQueueMembershipsEffect(
+/** Reads one active membership in the current tenant, or null after release. Its saved name and UTC instant remain unchanged by Queue configuration edits. */
+function readQueueMembershipEffect(
   client: EffectTransactionClient,
-  postIds: readonly string[],
-): Effect.Effect<Map<string, QueueMembership>, DatabaseError> {
+  postId: string,
+): Effect.Effect<QueueMembership | null, DatabaseError> {
   return client
-    .query<{ post_id: string; queue_id: string; queue_name: string; assigned_at: Date | string }>(
-      "SELECT post_id, queue_id, queue_name, assigned_at FROM publishing_queue_memberships WHERE post_id = ANY($1::uuid[]) AND released_at IS NULL",
-      [postIds],
+    .query<{ queue_id: string; queue_name: string; assigned_at: Date | string }>(
+      "SELECT queue_id, queue_name, assigned_at FROM publishing_queue_memberships WHERE post_id = $1 AND released_at IS NULL",
+      [postId],
     )
     .pipe(
-      Effect.map(
-        (result) =>
-          new Map(
-            result.rows.map((row) => [
-              row.post_id,
-              {
-                queue_id: row.queue_id,
-                queue_name: row.queue_name,
-                assigned_at: isoDateTime(row.assigned_at),
-              },
-            ]),
-          ),
-      ),
+      Effect.map((result) => {
+        const row = result.rows[0];
+        return row
+          ? {
+              queue_id: row.queue_id,
+              queue_name: row.queue_name,
+              assigned_at: isoDateTime(row.assigned_at),
+            }
+          : null;
+      }),
     );
 }
 
@@ -128,8 +88,7 @@ export function reserveQueueSlotEffect(
 ) {
   return Effect.gen(function* () {
     const queue = yield* readQueueEffect(client, queueId, brandProfileId);
-    const existing = yield* loadQueueMembershipsEffect(client, [postId]);
-    const membership = existing.get(postId);
+    const membership = yield* readQueueMembershipEffect(client, postId);
     if (membership) {
       if (
         membership.queue_id === queueId &&
@@ -188,8 +147,8 @@ export function reserveQueueSlotEffect(
 /** Rejects manual per-Post/per-Channel rescheduling while a Queue owns its instant; explicit removal is the only cutover. */
 export function requireNoQueueMembershipEffect(client: EffectTransactionClient, postId: string) {
   return Effect.gen(function* () {
-    const memberships = yield* loadQueueMembershipsEffect(client, [postId]);
-    if (memberships.has(postId))
+    const membership = yield* readQueueMembershipEffect(client, postId);
+    if (membership)
       return yield* Effect.fail(
         new CoreApiError(
           409,

@@ -18,10 +18,10 @@ import {
   mapQueue,
   readQueueEffect,
   releaseQueueMembershipEffect,
-  type QueueConfiguration,
   type QueueRow,
   type PublishingQueue,
 } from "./publishing-queue-store";
+import type { QueueConfiguration } from "./validation";
 
 type Schemas = components["schemas"];
 type QueueMutationInput = Pick<QueueConfiguration, "brand_profile_id"> &

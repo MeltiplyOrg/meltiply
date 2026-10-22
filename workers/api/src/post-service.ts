@@ -1913,6 +1913,8 @@ export function createPostApiService(
                 ),
               );
             }
+            // Allocate against the current clock only after target/quota checks
+            // and locks, rather than reserving a slot that elapsed while waiting.
             const deliveryAt = input.queueId
               ? yield* reserveQueueSlotEffect(
                   client,
@@ -1920,7 +1922,7 @@ export function createPostApiService(
                   post.brand_profile_id,
                   postId,
                   input.queueId,
-                  now,
+                  new Date(),
                 )
               : input.scheduledAt;
             const scheduled =

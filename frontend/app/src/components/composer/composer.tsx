@@ -756,6 +756,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   );
   const publishingQueues = queueQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const selectedQueue = publishingQueues.find((queue) => queue.id === selectedQueueId);
+  const hasSelectedQueue = selectedQueue !== undefined;
 
   // A saved target that has never been scheduled names no platform of its own,
   // so the Channel list is where its provider settings are resolved from. The
@@ -1796,7 +1797,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * because letting it through would bypass every local rule and surface the
    * API's masked generic error for violations the composer could have named.
    *
-   * @param type - Submission mode: `'draft'`, `'schedule'`, or `'now'`.
+   * @param type - Draft, Queue, manual Schedule, or Publish Now mode.
    * @returns Localized violation messages; empty when submission may proceed.
    */
   const validateSubmission = useCallback(
@@ -1837,7 +1838,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       }
       if (
         type === "queue" &&
-        (!selectedQueue ||
+        (!hasSelectedQueue ||
           selectedProfileIds.length !== 1 ||
           selectedProfileIds[0] !== selectedBrandProfileId ||
           profileCopiesRef.current.size > 0)
@@ -1973,7 +1974,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       channelOverrides,
       resolvedContentFor,
       scheduleDate,
-      selectedQueue,
+      hasSelectedQueue,
       selectedBrandProfileId,
       selectedProfileIds,
       profileNames,

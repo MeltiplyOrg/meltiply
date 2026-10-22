@@ -155,6 +155,11 @@ jobs:
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Start fresh Queue acceptance database
+        if: inputs.lane == 'publishing-queues'
+        # Integration suites deliberately exercise exhausted quotas. Browser
+        # acceptance starts with fresh seeded data, never relaxed production limits.
+        run: bash scripts/cloudflare-local/database.sh reset
       - name: Install Queue acceptance browser
         if: inputs.lane == 'publishing-queues'
         run: bun run --cwd frontend/app --no-install playwright install --with-deps chromium

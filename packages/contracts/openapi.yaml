@@ -4782,9 +4782,7 @@ components:
       required: [brand_profile_id]
       oneOf:
         - required: [scheduled_at]
-          not: { required: [queue_id] }
         - required: [queue_id]
-          not: { required: [scheduled_at] }
       description: |
         Schedules or immediately publishes the Post to its target Channels.
         scheduled_at null means publish now; a timestamp schedules every

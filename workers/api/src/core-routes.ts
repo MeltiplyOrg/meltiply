@@ -2196,7 +2196,7 @@ export function registerCoreRoutes(
           return yield* Effect.fail(
             new CoreApiError(
               400,
-              "invalid_request",
+              "validation_error",
               "Supply exactly one of scheduled_at or queue_id.",
             ),
           );

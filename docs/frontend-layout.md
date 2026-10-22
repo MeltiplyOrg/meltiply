@@ -16,6 +16,8 @@ This document owns layout and scroll boundaries for the current Gr8r-adapted int
 
 Posts is one destination. Its view switcher belongs in the page toolbar, in **Table → Calendar → Grid** order. Brand Profiles remain collection scope and a Channels tab; jump search belongs in the header.
 
+Queues is one destination with an explicit owning Brand Profile selector, a bounded plan list, and a paged membership panel. The panels stack on phones. Its scrollable content uses the canonical container controller; configuration and destructive confirmations retain the canonical centered dialog frames.
+
 The shell and drawer frames use the shared safe-area tokens for viewport cutouts and home indicators. Coarse-pointer buttons, select triggers, and menu rows have 44px minimum heights; text fields retain 16px text to avoid phone focus zoom. Fine-pointer controls keep desktop density.
 
 ## Collection surfaces

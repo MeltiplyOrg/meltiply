@@ -12,9 +12,10 @@ Most issues have a safe, self-serve fix. Work through the symptom you're seeing 
 ### The action buttons are disabled in the composer
 
 - Select Brand Profiles in the composer. Several selected profiles receive separate Posts; All Brand Profiles in the collection is still aggregate review.
-- Add text or media. **Save Drafts** needs no channels; Schedule and Publish Now need at least one eligible selected channel for each profile.
+- Add text or media. **Save Drafts** needs no Channels; Queue, Schedule, and Publish Now need eligible selected Channels. Queue mode needs one owning Brand Profile and a Queue from that profile; manual modes support multiple profiles with a Channel per profile.
 - If the Post belongs to another profile, use the profile named by the composer before changing its publishing targets.
 - For a partial multi-profile failure, read each profile's progress. Completed copies are retained. Resolve the reported connection, media, or quota problem, then retry the unchanged composition to finish remaining work without resending completed profiles.
+- If a Queue-owned Post refuses manual scheduling or Channel rescheduling, safely remove it from **Queues → Inspect Posts** first. Removal is refused once a Provider owns any Channel's work; inspect its actual outcome instead of resending.
 
 ### A channel can't be selected in Destinations
 

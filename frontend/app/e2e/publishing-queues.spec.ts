@@ -13,6 +13,7 @@ import { attachmentTitle, pngFixture } from "./media-fixtures";
 import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 
 type Schemas = components["schemas"];
+test.use({ actionTimeout: 30_000 });
 
 // Production browser/API/PostgreSQL/Outbox/transport/background paths, with only
 // the external Provider controlled. Real time reaches the reserved minute; no
@@ -25,16 +26,15 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   await page.setViewportSize({ width: 1440, height: 1000 });
   const workspace = await openIsolatedOwnerWorkspace(page);
   const providerAccountId = controlledProviderAccountId("threads");
-  const provisioned = await provisionControlledChannels(request, workspace.profileName, [
-    {
-      displayName: "Queue acceptance Threads",
-      platform: "threads",
-      providerUserId: providerAccountId,
-    },
-  ]);
+  const channelName = `Queue acceptance Threads ${providerAccountId}`;
   await page.goto("/queues");
   await page.getByRole("combobox", { name: "Queue Brand Profile", exact: true }).click();
-  await page.getByRole("option", { name: workspace.profileName, exact: true }).click();
+  const createdProfile = page.getByRole("option").filter({ hasText: workspace.credentials.name });
+  const profileName = (await createdProfile.innerText()).trim();
+  await createdProfile.click();
+  const provisioned = await provisionControlledChannels(request, profileName, [
+    { displayName: channelName, platform: "threads", providerUserId: providerAccountId },
+  ]);
   await page.getByRole("button", { name: "Create Queue", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Create Queue", exact: true });
   const queueName = `Acceptance Queue ${randomUUID().slice(0, 8)}`;
@@ -72,20 +72,12 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   for (const index of [0, 1]) {
     await page.goto("/posts");
     await waitForWorkspace(page);
-    await activeBrandProfileName(page);
+    await activeBrandProfileName(page, profileName);
     await page
       .locator("main header")
       .getByRole("button", { name: /create post/i })
       .click();
     const composer = page.getByRole("dialog", { name: /^(?:new post|edit post)$/i });
-    const destinations = composer.getByRole("region", { name: "Destinations", exact: true });
-    const unwanted = destinations
-      .locator('button[aria-pressed="true"]')
-      .filter({ hasNotText: "Queue acceptance Threads" });
-    while (await unwanted.count()) await unwanted.first().click();
-    const selectedChannel = destinations.getByRole("button", { name: /Queue acceptance Threads/ });
-    if ((await selectedChannel.getAttribute("aria-pressed")) !== "true")
-      await selectedChannel.click();
     const caption = `Queue acceptance composition ${index} ${queueName}`;
     await composer.getByPlaceholder(/what do you want to publish/i).fill(caption);
     if (index === 0) {
@@ -95,16 +87,27 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
         composer.getByRole("status").filter({ hasText: attachmentTitle(image.name) }),
       ).toContainText(/Ready$/, { timeout: 180_000 });
     }
-    // The fixture's one connected Channel remains selected with its real settings.
+    const destinations = composer.getByRole("region", { name: "Destinations", exact: true });
+    const unwanted = destinations
+      .locator("button[aria-pressed]")
+      .filter({ hasNotText: providerAccountId });
+    for (const channel of await unwanted.all()) {
+      if ((await channel.getAttribute("aria-pressed")) === "true") await channel.click();
+      await expect(channel).toHaveAttribute("aria-pressed", "false");
+    }
+    const selectedChannel = destinations
+      .getByRole("button", { name: /Queue acceptance Threads/ })
+      .filter({ hasText: providerAccountId });
+    if ((await selectedChannel.getAttribute("aria-pressed")) !== "true")
+      await selectedChannel.click();
+    // Finalize the intended target set after upload draft hydration settles.
     const channelEditor = composer.getByRole("region", {
-      name: "Queue acceptance Threads",
+      name: channelName,
       exact: true,
     });
     const override = `Queue Channel caption ${index}`;
     await channelEditor
-      .getByText(/custom text for/i)
-      .locator("..")
-      .getByRole("textbox")
+      .locator(`#channel-override-text-${provisioned.channels[0]!.id}`)
       .fill(override);
     await composer
       .getByRole("group", { name: "Publishing", exact: true })
@@ -147,8 +150,12 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   await page.goto("/queues");
   await page.reload();
   await page.getByRole("combobox", { name: "Queue Brand Profile", exact: true }).click();
-  await page.getByRole("option", { name: workspace.profileName, exact: true }).click();
-  await page.getByRole("button", { name: "Inspect Posts", exact: true }).click();
+  await page.getByRole("option", { name: profileName, exact: true }).click();
+  await page
+    .getByRole("article")
+    .filter({ has: page.getByRole("heading", { name: queueName, exact: true }) })
+    .getByRole("button", { name: "Inspect Posts", exact: true })
+    .click();
   const memberships = page.getByRole("region", { name: "Queue Posts", exact: true });
   // <section aria-label> is an accessible region; each reserved instant survives reload.
   for (const post of queuedPosts) {
@@ -201,6 +208,16 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   await expect
     .poll(
       async () => {
+        // Wrangler does not run Cron automatically. Dispatch its real scheduled
+        // handler at wall-clock time; never change a stored due time or inject
+        // a future clock. Repeated ticks exercise the normal idempotent relay.
+        if (Date.now() >= firstInstant.getTime()) {
+          const tick = await request.post(
+            `${apiOrigin}/cdn-cgi/local/explorer/api/local/scheduled?worker=meltiply-automation-local`,
+            { data: { cron: "0 * * * *" } },
+          );
+          expect(tick.status(), await tick.text()).toBe(200);
+        }
         const response = await request.get(`${apiOrigin}/api/v1/posts/${firstPost.id}`, {
           headers,
         });
@@ -209,13 +226,10 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
       },
       { timeout: 420_000, intervals: [1000, 3000, 5000] },
     )
-    .toBe("failed");
-  expect(await readLiveControlledCopies(request, providerAccountId)).toEqual([]);
-  const retry = await request.post(
-    `${apiOrigin}/api/v1/distributions/${firstPost.distributions[0]!.id}/retry`,
-    { headers: { ...headers, "Idempotency-Key": randomUUID() } },
-  );
-  expect(retry.status(), await retry.text()).toBe(202);
+    .toBe("published");
+  // The injected transient failure follows normal transport backoff. Its failed
+  // state may be shorter than a poll interval; the durable attempt count and one
+  // Provider-side copy prove recovery without imposing a different retry policy.
   await expect
     .poll(
       async () =>
@@ -223,6 +237,9 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
       { timeout: 90_000, intervals: [1000, 3000] },
     )
     .toEqual(["Queue Channel caption 0"]);
+  expect((await readLiveControlledCopies(request, providerAccountId))[0]?.media).toMatchObject([
+    { contentType: expect.stringMatching(/^image\//) },
+  ]);
   const delivered: Schemas["Post"] = await (
     await request.get(`${apiOrigin}/api/v1/posts/${firstPost.id}`, { headers })
   ).json();
@@ -247,6 +264,6 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   expect(history.queue_membership).toEqual(firstPost.queue_membership);
   expect(history.distributions).toMatchObject([{ status: "published" }]);
   console.log(
-    "Queue acceptance: real recurring allocation, reload, cancellation, scheduled failure, explicit retry, one controlled Provider publication, immutable history; no live Platform credentials used.",
+    "Queue acceptance: real recurring allocation, reload, cancellation, transient failure and transport retry, one controlled Provider publication with media, immutable history; no live Platform credentials used.",
   );
 });

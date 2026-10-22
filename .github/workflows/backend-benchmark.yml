@@ -3,16 +3,6 @@ name: Backend benchmark
 on:
   workflow_dispatch:
     inputs:
-      baseline_ref:
-        description: Git ref measured as the baseline
-        required: true
-        default: master
-        type: string
-      candidate_ref:
-        description: Git ref measured as the candidate (defaults to the selected ref)
-        required: false
-        default: ""
-        type: string
       repetitions:
         description: Alternating run blocks per revision
         required: true
@@ -66,14 +56,14 @@ jobs:
       - name: Check out candidate revision
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.candidate_ref || github.ref }}
+          ref: ${{ github.sha }}
           path: candidate
           fetch-depth: 0
           persist-credentials: false
       - name: Check out baseline revision
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.baseline_ref || 'master' }}
+          ref: master
           path: baseline
           fetch-depth: 0
           persist-credentials: false
@@ -98,8 +88,8 @@ jobs:
           (cd candidate && BENCHMARK_DATABASE_NAME=meltiply_bench_candidate bun scripts/benchmarks/backend/prepare-database.mjs)
       - name: Measure both revisions in alternating order
         env:
-          BASELINE_REF: ${{ inputs.baseline_ref || 'master' }}
-          CANDIDATE_REF: ${{ inputs.candidate_ref || github.ref }}
+          BASELINE_REF: master
+          CANDIDATE_REF: ${{ github.sha }}
         run: |
           mkdir -p benchmark-results
           baseline_env="BENCHMARK_DATABASE_AUTHENTICATED_URL=postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5432/meltiply_bench_baseline?sslmode=disable BENCHMARK_DATABASE_SYSTEM_URL=postgres://meltiply_system:meltiply-system-local@127.0.0.1:5432/meltiply_bench_baseline?sslmode=disable BENCHMARK_LABEL=baseline BENCHMARK_REF=$BASELINE_REF"

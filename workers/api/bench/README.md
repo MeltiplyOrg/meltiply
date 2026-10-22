@@ -96,9 +96,10 @@ Workspace, so repeated runs are independent.
 
 ## Revisions and comparison
 
-The GitHub workflow `.github/workflows/backend-benchmark.yml` checks out two
-revisions, installs each with the locked dependency graph, copies this harness
-into the baseline checkout, and gives each revision its own migrated database.
+The GitHub workflow `.github/workflows/backend-benchmark.yml` checks out
+`master` as the baseline and the dispatched commit as the candidate, installs
+each with the locked dependency graph, copies this harness into the baseline
+checkout, and gives each revision its own migrated database.
 Runs alternate baseline/candidate order by repetition; the workflow uses three
 repetitions, 30 read/mutation samples, and five samples per deletion batch. Raw JSON and the
 Markdown report are uploaded as artifacts.

@@ -7861,4 +7861,28 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     expect(errorCodeFrom(await expiredAccept.json())).toBe("invitation_expired");
     expect(sent).toHaveLength(2);
   });
+  it("builds the multi-chart dashboard aggregates with delta series and format breakdowns", async () => {
+    const start = new Date("2026-07-01T00:00:00Z");
+    const end = new Date("2026-07-31T23:59:59Z");
+    const dashboard = await Effect.runPromise(
+      service.dashboardAnalytics(env, alpha, { end, start }),
+    );
+    expect(dashboard.range).toEqual({
+      end: end.toISOString(),
+      start: start.toISOString(),
+    });
+    expect(Array.isArray(dashboard.series)).toBe(true);
+    expect(Array.isArray(dashboard.best_times)).toBe(true);
+    expect(Array.isArray(dashboard.formats)).toBe(true);
+    expect(Array.isArray(dashboard.platforms)).toBe(true);
+    expect(Array.isArray(dashboard.accumulation)).toBe(true);
+    expect(dashboard.unavailable_metrics).toContain("saves");
+    expect(dashboard.unavailable_metrics).toContain("clicks");
+
+    // Format filtering narrows the cohort to matching attachment configurations.
+    const videosOnly = await Effect.runPromise(
+      service.dashboardAnalytics(env, alpha, { end, format: "video", start }),
+    );
+    expect(videosOnly.formats.every((row) => row.format === "video")).toBe(true);
+  });
 });

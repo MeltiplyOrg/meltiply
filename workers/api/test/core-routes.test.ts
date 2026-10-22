@@ -121,6 +121,7 @@ function service(overrides: Partial<CoreApiService> = {}): CoreApiService {
     analyticsPosts: notImplemented,
     calendar: notImplemented,
     cancelDistribution: notImplemented,
+    dashboardAnalytics: notImplemented,
     disconnectPlatform: notImplemented,
     distributionAnalytics: notImplemented,
     getDistribution: notImplemented,

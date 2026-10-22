@@ -340,6 +340,11 @@ const cases: ConformanceCase[] = [
   },
   {
     method: "GET",
+    operationId: "getAnalyticsDashboard",
+    path: "/api/v1/analytics/dashboard?start=2026-01-01T00%3A00%3A00Z&end=2026-01-31T00%3A00%3A00Z",
+  },
+  {
+    method: "GET",
     operationId: "getAnalyticsPosts",
     path: "/api/v1/analytics/posts?start=2026-01-01T00%3A00%3A00Z&end=2026-01-31T00%3A00%3A00Z",
   },
@@ -363,6 +368,7 @@ function body<T>(operationId: string): T {
 const coreService = {
   activeOrganization: () => Effect.succeed("20000000-0000-4000-8000-000000000001"),
   analyticsPosts: () => Effect.succeed(body("getAnalyticsPosts")),
+  dashboardAnalytics: () => Effect.succeed(body("getAnalyticsDashboard")),
   calendar: () => Effect.succeed(body<{ events: unknown[] }>("listCalendarEvents").events),
   cancelDistribution: () =>
     Effect.succeed({

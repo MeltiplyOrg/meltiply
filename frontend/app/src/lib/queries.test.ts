@@ -1,6 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
-import { invalidateQueryKeys, mutationInvalidations, queryKeys } from "./queries";
+import { invalidateQueryKeys, mutationInvalidations, queryKeys, runBulkDelete } from "./queries";
+import { WorkspaceService, type ApiClientError } from "./effect";
 
 /**
  * Real QueryClient state must refresh affected Post/profile/detail resources
@@ -92,5 +94,54 @@ describe("React Query helpers", () => {
       queryClient.getQueryState(queryKeys.platformPublishingRequirements("platform-1"))
         ?.isInvalidated,
     ).toBe(true);
+  });
+});
+
+describe("bulk Post deletion", () => {
+  /**
+   * Six targets prove the bound rather than a coincidental two; the fake
+   * operation fails one typed request and dies on another so transport defects
+   * cannot abort the batch or hide committed successes.
+   */
+  it("bounds concurrency, isolates failures, and keys each request by position", async () => {
+    const targets = ["a", "b", "c", "d", "e", "f"].map((id) => ({
+      brandProfileId: `profile-${id}`,
+      id,
+    }));
+    const keys: string[] = [];
+    let inFlight = 0;
+    let maximumInFlight = 0;
+
+    const deleteOne = (target: (typeof targets)[number], idempotencyKey: string) =>
+      Effect.gen(function* () {
+        keys.push(idempotencyKey);
+        inFlight += 1;
+        maximumInFlight = Math.max(maximumInFlight, inFlight);
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 5)));
+        inFlight -= 1;
+        if (target.id === "b") {
+          return yield* Effect.fail({
+            message: "Post b was rejected",
+          } as unknown as ApiClientError);
+        }
+        if (target.id === "c") {
+          return yield* Effect.die(new Error("network down"));
+        }
+        return target.id;
+      });
+
+    const outcome = await Effect.runPromise(
+      Effect.provideService(runBulkDelete(deleteOne, targets, "batch-key"), WorkspaceService, {
+        workspaceId: null,
+      }),
+    );
+
+    expect(maximumInFlight).toBeLessThanOrEqual(4);
+    expect(keys).toEqual(targets.map((_, index) => `batch-key:${index}`));
+    expect(outcome.deletedIds).toEqual(["a", "d", "e", "f"]);
+    expect(outcome.failed).toEqual([
+      { id: "b", message: "Post b was rejected" },
+      { id: "c", message: "network down" },
+    ]);
   });
 });

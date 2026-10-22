@@ -237,6 +237,7 @@ function mapTarget(row: TargetRow): Schemas["PostTarget"] {
  */
 interface PostCollectionPreloads {
   attachments?: Map<string, Schemas["PostAttachment"][]>;
+  distributions?: Map<string, Schemas["Distribution"][]>;
   targets?: Map<string, Schemas["PostTarget"][]>;
 }
 
@@ -248,7 +249,8 @@ interface PostCollectionPreloads {
  * latest-snapshot lookup per published Distribution inside a single statement,
  * then sums per Post; older snapshots and unpublished Channels never contribute.
  * No snapshot means no analytics object, not zero. Draft-only batches skip that
- * statement. Caller-supplied attachment/target preloads are not read again.
+ * statement. Caller-supplied collection preloads are not read again, including
+ * the known-empty distributions of a newly inserted Post.
  *
  * @param client - Active tenant transaction client.
  * @param postIds - Post identifiers already read and authorized by the caller.
@@ -264,7 +266,7 @@ function loadPostCollectionsEffect(
     const collections: PostCollections = {
       analytics: new Map(),
       attachments: preloads.attachments ?? new Map(),
-      distributions: new Map(),
+      distributions: preloads.distributions ?? new Map(),
       targets: preloads.targets ?? new Map(),
     };
     if (postIds.length === 0) return collections;
@@ -305,20 +307,29 @@ function loadPostCollectionsEffect(
         collections.targets.set(postId, bucket);
       }
     }
-    const distributionRows = yield* client.query<Parameters<typeof mapDistribution>[0]>(
-      `SELECT ${distributionColumns},
-              ${publicationSnapshotColumn}
-         FROM distributions
-        WHERE post_id = ANY($1::uuid[])
-        ORDER BY post_id, event_at DESC, id DESC`,
-      [postIds],
-    );
-    for (const row of distributionRows.rows) {
-      const bucket = collections.distributions.get(row.post_id) ?? [];
-      bucket.push(mapDistribution(row));
-      collections.distributions.set(row.post_id, bucket);
+    if (!preloads.distributions) {
+      const distributionRows = yield* client.query<Parameters<typeof mapDistribution>[0]>(
+        `SELECT ${distributionColumns},
+                ${publicationSnapshotColumn}
+           FROM distributions
+          WHERE post_id = ANY($1::uuid[])
+          ORDER BY post_id, event_at DESC, id DESC`,
+        [postIds],
+      );
+      for (const row of distributionRows.rows) {
+        const bucket = collections.distributions.get(row.post_id) ?? [];
+        bucket.push(mapDistribution(row));
+        collections.distributions.set(row.post_id, bucket);
+      }
     }
-    if (distributionRows.rows.some((row) => row.status === "published")) {
+    let hasPublishedDistribution = false;
+    for (const distributions of collections.distributions.values()) {
+      if (distributions.some((row) => row.status === "published")) {
+        hasPublishedDistribution = true;
+        break;
+      }
+    }
+    if (hasPublishedDistribution) {
       const analyticsRows = yield* client.query<PostAnalyticsRow>(
         `SELECT d.post_id,
                 SUM(snapshot.likes) AS likes,
@@ -462,6 +473,35 @@ function lockPostEffect(
 }
 
 /**
+ * Locks every Asset currently attached to a Post in ascending Asset id order.
+ *
+ * The detach trigger locks each Asset as the attachment row is removed, so a
+ * deletion transaction must acquire those locks first and in the same global
+ * order a composition write uses. Otherwise two concurrent deletions of Posts
+ * that share media could each hold one Asset and wait for the other.
+ *
+ * @param client - Active tenant transaction client.
+ * @param postId - Post whose attached Assets are about to be detached.
+ * @returns Effect resolving once every attached Asset row is locked.
+ */
+function lockPostAttachmentAssetsEffect(
+  client: EffectTransactionClient,
+  postId: string,
+): Effect.Effect<void, DatabaseError> {
+  return client
+    .query(
+      `SELECT asset.id
+         FROM assets AS asset
+         JOIN post_attachments AS attachment ON attachment.asset_id = asset.id
+        WHERE attachment.post_id = $1
+        ORDER BY asset.id
+        FOR UPDATE OF asset`,
+      [postId],
+    )
+    .pipe(Effect.asVoid);
+}
+
+/**
  * Rejects a mutation that targets a different Brand Profile than the Post's.
  *
  * Composer mutations are scoped to one Brand Profile so content cannot move
@@ -483,18 +523,24 @@ function requireMatchingBrandProfile(post: PostRow, brandProfileId: string): voi
 }
 
 /**
- * Locks and validates every Asset a save intends to attach, in request order.
+ * Locks every Asset a composition write will touch and validates the ones being
+ * attached.
  *
  * An attachment is what retains stored media, so attaching proves the Asset
  * belongs to the same Brand Profile, is not already claimed for deletion, and —
  * for an upload still in flight — belongs to a session that has not expired.
- * Locking in request order keeps two concurrent saves of the same Post from
- * deadlocking, and the `post_attachments_guard_attachable` trigger
- * independently rejects a deletion claim that wins the race.
+ *
+ * All assets, including ones being detached, are locked in ascending Asset id
+ * order. The attachment triggers lock each Asset while detaching or inserting,
+ * so a transaction that reaches a trigger holding a lock this one acquires
+ * first would otherwise deadlock. One global order across create, update, and
+ * delete removes those cycles without serializing unrelated Posts.
  *
  * @param client - Active tenant transaction client.
  * @param brandProfileId - Brand Profile that will own the attachments.
- * @param attachmentIds - Ordered, de-duplicated Asset identifiers.
+ * @param attachmentIds - Ordered, de-duplicated Asset identifiers being attached.
+ * @param alsoLockIds - Additional Assets the same transaction will detach; they
+ *   are locked but not revalidated because their ownership was proven when attached.
  * @returns Effect resolving to the locked asset rows in the requested order.
  * @throws {CoreApiError} 422 `validation_error` when the selection repeats an Asset.
  * @throws {CoreApiError} 404 `asset_not_found` when an Asset is missing or owned by another workspace.
@@ -505,14 +551,16 @@ function lockAttachmentAssetsEffect(
   client: EffectTransactionClient,
   brandProfileId: string,
   attachmentIds: readonly string[],
+  alsoLockIds: readonly string[] = [],
 ): Effect.Effect<AssetRow[], CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
-    if (attachmentIds.length === 0) return [];
     if (new Set(attachmentIds).size !== attachmentIds.length) {
       return yield* Effect.fail(
         new CoreApiError(422, "validation_error", "attachment_ids must not repeat an asset."),
       );
     }
+    const lockIds = [...new Set([...alsoLockIds, ...attachmentIds])].sort();
+    if (lockIds.length === 0) return [];
     const locked = yield* client.query<AssetRow>(
       `SELECT ${assetColumns},
               EXISTS (
@@ -525,11 +573,11 @@ function lockAttachmentAssetsEffect(
          FROM assets AS asset
         WHERE asset.id = ANY($1::uuid[])
           AND asset.org_id = public.auth_active_org_id()
-        ORDER BY array_position($1::uuid[], asset.id)
+        ORDER BY asset.id
         FOR UPDATE`,
-      [attachmentIds],
+      [lockIds],
     );
-    if (locked.rows.length !== attachmentIds.length) {
+    if (locked.rows.length !== lockIds.length) {
       return yield* Effect.fail(
         new CoreApiError(404, "asset_not_found", "One of the attachments was not found."),
       );
@@ -585,21 +633,28 @@ function lockAttachmentAssetsEffect(
  * @param client - Active tenant transaction client.
  * @param post - Locked Post row owning the Brand Profile.
  * @param assetIds - Complete ordered attachment selection.
+ * @param previousIds - Current ordered attachment ids when the caller already
+ *   read them; omitted means the current set is not known yet.
  * @returns Effect resolving once the attachment set matches `assetIds`.
  */
 function replaceAttachmentsEffect(
   client: EffectTransactionClient,
   post: PostRow,
   assetIds: readonly string[],
+  previousIds?: readonly string[],
 ): Effect.Effect<void, DatabaseError> {
   return Effect.gen(function* () {
-    const previous = yield* client.query<{ asset_id: string }>(
-      `SELECT asset_id FROM post_attachments WHERE post_id = $1 ORDER BY position`,
-      [post.id],
-    );
+    const previous =
+      previousIds ??
+      (yield* client
+        .query<{ asset_id: string }>(
+          `SELECT asset_id FROM post_attachments WHERE post_id = $1 ORDER BY position`,
+          [post.id],
+        )
+        .pipe(Effect.map((result) => result.rows.map((row) => row.asset_id))));
     if (
-      previous.rows.length === assetIds.length &&
-      previous.rows.every((row, index) => row.asset_id === assetIds[index])
+      previous.length === assetIds.length &&
+      previous.every((id, index) => id === assetIds[index])
     ) {
       return;
     }
@@ -1350,6 +1405,10 @@ function insertPendingDistributionsEffect(
  * stays protected, and published rows remain as immutable history: local
  * deletion never unpublishes a live Platform copy.
  *
+ * Cancellation and command cleanup commit as one statement: the data-modifying
+ * CTEs remove the extra round trip a Post with pending work would otherwise
+ * pay inside the deletion transaction.
+ *
  * @param client - Active tenant transaction client.
  * @param postId - Post whose pending publications are cancelled.
  * @returns Effect resolving once cancellations and outbox cleanup commit.
@@ -1358,25 +1417,26 @@ function cancelPendingDistributionsEffect(
   client: EffectTransactionClient,
   postId: string,
 ): Effect.Effect<void, DatabaseError> {
-  return Effect.gen(function* () {
-    const cancelled = yield* client.query<{ id: string }>(
-      `UPDATE distributions
-          SET status = 'cancelled', updated_at = now()
-        WHERE post_id = $1
-          AND status IN ('scheduled', 'queued')
-        RETURNING id`,
+  return client
+    .query<{ cancelled_count: number }>(
+      `WITH cancelled AS (
+         UPDATE distributions
+            SET status = 'cancelled', updated_at = now()
+          WHERE post_id = $1
+            AND status IN ('scheduled', 'queued')
+          RETURNING id
+       ), dropped AS (
+         DELETE FROM outbox_events
+          WHERE aggregate_id IN (SELECT id FROM cancelled)
+            AND topic = 'distribution.publish.requested'
+            AND state IN ('pending', 'failed')
+          RETURNING 1
+       )
+       SELECT (SELECT COUNT(*)::integer FROM cancelled) AS cancelled_count,
+              (SELECT COUNT(*)::integer FROM dropped) AS dropped_count`,
       [postId],
-    );
-    const ids = cancelled.rows.map((row) => row.id);
-    if (ids.length === 0) return;
-    yield* client.query(
-      `DELETE FROM outbox_events
-        WHERE aggregate_id = ANY($1::uuid[])
-          AND topic = 'distribution.publish.requested'
-          AND state IN ('pending', 'failed')`,
-      [ids],
-    );
-  });
+    )
+    .pipe(Effect.asVoid);
 }
 
 /**
@@ -1399,6 +1459,11 @@ export function createPostApiService(
     configuredCapabilities.map((capability) => [capability.platform, structuredClone(capability)]),
   );
   return {
+    /**
+     * Creates an idempotent draft under the active Brand Profile, retaining
+     * Workspace and Asset locks. A new Post has no distributions or analytics;
+     * its response reuses those known-empty collections without reading them.
+     */
     createPost(
       env: ApiWorkerEnv,
       session: SessionClaims,
@@ -1443,9 +1508,20 @@ export function createPostApiService(
               [organizationId, input.brandProfileId, input.title ?? "", input.defaultText ?? ""],
             );
             const post = inserted.rows[0]!;
-            yield* replaceAttachmentsEffect(client, post, attachmentIds);
-            yield* replaceTargetsEffect(client, post, targets);
-            const value = yield* assembleSinglePostEffect(client, post);
+            // A new Post owns no attachment or target rows yet, so an empty
+            // selection has nothing to replace and no collection to re-read.
+            if (attachmentIds.length > 0)
+              yield* replaceAttachmentsEffect(client, post, attachmentIds, []);
+            if (targets.length > 0) yield* replaceTargetsEffect(client, post, targets);
+            const value = yield* assembleSinglePostEffect(client, post, {
+              distributions: new Map<string, Schemas["Distribution"][]>([[post.id, []]]),
+              ...(attachmentIds.length === 0
+                ? { attachments: new Map<string, Schemas["PostAttachment"][]>([[post.id, []]]) }
+                : {}),
+              ...(targets.length === 0
+                ? { targets: new Map<string, Schemas["PostTarget"][]>([[post.id, []]]) }
+                : {}),
+            });
             yield* completeIdempotencyEffect(
               client,
               organizationId,
@@ -1556,8 +1632,9 @@ export function createPostApiService(
               catch: validationError,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
-            const attachmentIds =
-              input.attachmentIds ?? (yield* loadPostAttachmentIdsEffect(client, postId));
+            const currentAttachmentIds = yield* loadPostAttachmentIdsEffect(client, postId);
+            const attachmentIds = input.attachmentIds ?? currentAttachmentIds;
+            const attachmentChange = input.attachmentIds !== undefined;
             const targets = input.targets;
             yield* Effect.try({
               try: () => {
@@ -1569,7 +1646,17 @@ export function createPostApiService(
               },
               catch: validationError,
             });
-            yield* lockAttachmentAssetsEffect(client, post.brand_profile_id, attachmentIds);
+            if (attachmentChange) {
+              // Lock the union of the current and requested sets in ascending
+              // Asset order so the detach and insert triggers cannot form a
+              // lock cycle with a concurrent composition write.
+              yield* lockAttachmentAssetsEffect(
+                client,
+                post.brand_profile_id,
+                attachmentIds,
+                currentAttachmentIds,
+              );
+            }
             if (targets) {
               yield* validateTargetScopesEffect(
                 client,
@@ -1579,7 +1666,9 @@ export function createPostApiService(
               );
               yield* replaceTargetsEffect(client, post, targets);
             }
-            yield* replaceAttachmentsEffect(client, post, attachmentIds);
+            if (attachmentChange) {
+              yield* replaceAttachmentsEffect(client, post, attachmentIds, currentAttachmentIds);
+            }
             const updated = yield* updatePostRowEffect(client, postId, {
               ...(input.title !== undefined ? { title: input.title } : {}),
               ...(input.defaultText !== undefined ? { defaultText: input.defaultText } : {}),
@@ -1599,6 +1688,12 @@ export function createPostApiService(
       });
     },
 
+    /**
+     * Schedules the explicit or saved Channel targets idempotently with quota
+     * enforcement. Existing provider-owned outcomes remain unchanged; dropping
+     * editable targets cancels their rows and removes only pending/failed
+     * publish commands in one statement, preserving consumer-owned leases.
+     */
     schedulePost(
       env: ApiWorkerEnv,
       session: SessionClaims,
@@ -1826,13 +1921,17 @@ export function createPostApiService(
             );
             if (dropped.length > 0) {
               const droppedIds = dropped.map((row) => row.id);
+              // Both writes use the same already-locked eligible ids. Keep the
+              // direct aggregate predicate so RLS uses the partial aggregate
+              // index instead of scanning pending work through a CTE subquery.
+              // The data-modifying CTE runs even without a RETURNING consumer.
               yield* client.query(
-                `UPDATE distributions SET status = 'cancelled', updated_at = now()
-                  WHERE id = ANY($1::uuid[])`,
-                [droppedIds],
-              );
-              yield* client.query(
-                `DELETE FROM outbox_events
+                `WITH cancelled AS (
+                   UPDATE distributions
+                      SET status = 'cancelled', updated_at = now()
+                    WHERE id = ANY($1::uuid[])
+                 )
+                 DELETE FROM outbox_events
                   WHERE aggregate_id = ANY($1::uuid[])
                     AND topic = 'distribution.publish.requested'
                     AND state IN ('pending', 'failed')`,
@@ -1894,7 +1993,10 @@ export function createPostApiService(
                 value: replay.response_body as Post,
               };
             }
-            yield* lockOrganizationEffect(client, organizationId);
+            // Deletion only releases retention and cancels pending work; it
+            // never charges quota. Locking the Workspace here would serialize
+            // every deletion in one tenant behind a single lock row without
+            // protecting anything deletion writes.
             const post = yield* lockPostEffect(client, postId);
             // Deleting is scoped like every other Post mutation: the request must
             // name the Brand Profile that owns the Post, so an aggregate-view
@@ -1930,6 +2032,7 @@ export function createPostApiService(
               }
             }
             yield* cancelPendingDistributionsEffect(client, postId);
+            yield* lockPostAttachmentAssetsEffect(client, postId);
             yield* client.query("DELETE FROM post_attachments WHERE post_id = $1", [postId]);
             yield* client.query("DELETE FROM post_targets WHERE post_id = $1", [postId]);
             const deleted = yield* client.query<PostRow>(
@@ -1939,7 +2042,13 @@ export function createPostApiService(
                 RETURNING ${postColumns}`,
               [postId],
             );
-            const value = yield* assembleSinglePostEffect(client, deleted.rows[0]!);
+            // Both collection statements above ran in this transaction, so
+            // their authoritative result is empty. Re-reading them in the
+            // response projection would repeat work the delete already did.
+            const value = yield* assembleSinglePostEffect(client, deleted.rows[0]!, {
+              attachments: new Map<string, Schemas["PostAttachment"][]>([[postId, []]]),
+              targets: new Map<string, Schemas["PostTarget"][]>([[postId, []]]),
+            });
             yield* completeIdempotencyEffect(
               client,
               organizationId,

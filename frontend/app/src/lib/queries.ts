@@ -6,7 +6,7 @@ import {
   type QueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 
 import {
   ApiClientService,
@@ -433,6 +433,119 @@ export function useDeletePost(scope: SessionScope) {
     scope,
     (api, variables: { id: string; brandProfileId: string }, idempotencyKey) =>
       api.deletePost(variables.id, variables.brandProfileId, { idempotencyKey }),
+    mutationInvalidations.deletePost,
+  );
+}
+
+/** One failed deletion in a bulk batch, kept so the caller can retry it. */
+interface BulkDeleteFailure {
+  id: string;
+  message: string;
+}
+
+/** Result of one confirmed bulk deletion: successful identities and retryable failures. */
+interface BulkDeleteOutcome {
+  deletedIds: string[];
+  failed: BulkDeleteFailure[];
+}
+
+/**
+ * Upper bound on concurrent per-Post deletion requests. Four keeps the batch
+ * responsive without turning a large selection into one unbounded burst; the
+ * backend row lock already serializes any two requests for the same Post.
+ */
+const BULK_DELETE_CONCURRENCY = 4;
+
+/** One Post deletion addressed by its owning Brand Profile. */
+export interface DeletePostTarget {
+  id: string;
+  brandProfileId: string;
+}
+
+/** Extracts a retry-facing message from a typed failure, defect, or interruption. */
+function deletionFailureMessage(cause: unknown): string {
+  if (cause instanceof Error) return cause.message;
+  if (
+    typeof cause === "object" &&
+    cause !== null &&
+    "message" in cause &&
+    typeof cause.message === "string"
+  ) {
+    return cause.message;
+  }
+  return String(cause);
+}
+
+/**
+ * Deletes a batch of Posts with bounded concurrency and per-item isolation.
+ *
+ * Every request uses the batch idempotency key plus the target position, so a
+ * retried batch reuses the same keys. `Effect.exit` captures both typed API
+ * failures and transport defects: a rejected request becomes one failed item
+ * instead of aborting the batch and discarding deletions that already
+ * committed. The caller receives successful identities and retryable failures
+ * as data.
+ *
+ * @param deleteOne Operation issuing one authenticated Post deletion.
+ * @param targets Posts to delete, in selection order.
+ * @param idempotencyKey Stable key for this batch.
+ * @returns Effect resolving to successful ids and per-target failures.
+ */
+export function runBulkDelete(
+  deleteOne: (
+    target: DeletePostTarget,
+    idempotencyKey: string,
+  ) => Effect.Effect<unknown, ApiClientError, WorkspaceService>,
+  targets: readonly DeletePostTarget[],
+  idempotencyKey: string,
+): Effect.Effect<BulkDeleteOutcome, never, WorkspaceService> {
+  return Effect.forEach(
+    targets,
+    (target, index) => Effect.exit(deleteOne(target, `${idempotencyKey}:${index}`)),
+    { concurrency: BULK_DELETE_CONCURRENCY },
+  ).pipe(
+    Effect.map((exits) => {
+      const deletedIds: string[] = [];
+      const failed: BulkDeleteFailure[] = [];
+      exits.forEach((exit, index) => {
+        const target = targets[index]!;
+        if (Exit.isSuccess(exit)) {
+          deletedIds.push(target.id);
+        } else {
+          failed.push({
+            id: target.id,
+            message: deletionFailureMessage(Cause.squash(exit.cause)),
+          });
+        }
+      });
+      return { deletedIds, failed };
+    }),
+  );
+}
+
+/**
+ * TanStack mutation hook deleting a batch of Posts with bounded concurrency and
+ * one cache invalidation after the batch settles.
+ *
+ * The per-Post endpoint is unchanged, so each request keeps its own
+ * idempotency key derived from the batch key and target position; a retried
+ * batch reuses those keys. Failures are returned as data instead of rejecting
+ * the mutation so one unavailable Post cannot discard the successes or the
+ * caller's retry list.
+ *
+ * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
+ * @returns Mutation hook accepting `{ targets }` and resolving `BulkDeleteOutcome`.
+ */
+export function useDeletePostsBatch(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { targets: readonly DeletePostTarget[] }, idempotencyKey) =>
+      runBulkDelete(
+        (target, itemKey) =>
+          api.deletePost(target.id, target.brandProfileId, { idempotencyKey: itemKey }),
+        variables.targets,
+        idempotencyKey,
+      ),
     mutationInvalidations.deletePost,
   );
 }

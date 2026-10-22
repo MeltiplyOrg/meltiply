@@ -2152,6 +2152,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     try {
       expect(created.replayed).toBe(false);
       expect(created.value).toMatchObject({
+        analytics: null,
         attachments: [],
         brand_profile_id: alphaBrandProfileId,
         default_text: "Reloadable draft",
@@ -2652,6 +2653,26 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       const addedId = second.value.distributions.find(
         ({ platform_account_id }) => platform_account_id === alphaSecondAccountId,
       )!.id;
+      // The same dropped Distribution can have retryable and leased delivery
+      // attempts. Remove only pending/failed publish commands, never the
+      // consumer-owned lease or a command for another topic.
+      await systemTransaction(env, (client) =>
+        client.query(
+          `INSERT INTO outbox_events
+             (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload,
+              state, lease_expires_at)
+           SELECT $1::uuid, command.topic, 'distribution', $2::uuid,
+                  command.dedupe_key, '{}'::jsonb, command.state,
+                  CASE WHEN command.state = 'leased'
+                       THEN now() + INTERVAL '5 minutes' END
+           FROM (VALUES
+             ('distribution.publish.requested', 'integration-drop-failed', 'failed'),
+             ('distribution.publish.requested', 'integration-drop-leased', 'leased'),
+             ('distribution.analytics.requested', 'integration-drop-other', 'pending')
+           ) AS command(topic, dedupe_key, state)`,
+          [alpha.organizationId, addedId],
+        ),
+      );
 
       // Dropping a Channel that is still queued cancels it and releases its
       // command, while the published row survives the same edit. A cancelled
@@ -2696,6 +2717,17 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       // consumer ever drains the outbox, so nothing deleted that command and
       // the count is 1 for it and 0 for the cancelled one.
       expect(commands.rows.map(({ commands: count }) => count).sort()).toEqual(["0", "1"]);
+      const retained = await systemTransaction(env, (client) =>
+        client.query<{ state: string; topic: string }>(
+          `SELECT topic, state FROM outbox_events
+           WHERE aggregate_id = $1 ORDER BY topic, state`,
+          [addedId],
+        ),
+      );
+      expect(retained.rows).toEqual([
+        { state: "pending", topic: "distribution.analytics.requested" },
+        { state: "leased", topic: "distribution.publish.requested" },
+      ]);
     } finally {
       await purgeIntegrationPosts(
         [postId],
@@ -5544,6 +5576,19 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     await expect(
       Effect.runPromise(harness.service.getUploadSession(env, beta, sessionId)),
     ).rejects.toMatchObject({ code: "not_found", status: 404 });
+    await expect(
+      Effect.runPromise(harness.service.getUploadSession(env, alpha, sessionId)),
+    ).resolves.toMatchObject({
+      upload_session: {
+        id: sessionId,
+        single_upload: {
+          headers: { "Content-Type": "image/png" },
+          method: "PUT",
+        },
+        strategy: "single",
+      },
+      uploaded_parts: [],
+    });
 
     const key = harness.uploadKeys[0]!;
     harness.objects.set(key, {

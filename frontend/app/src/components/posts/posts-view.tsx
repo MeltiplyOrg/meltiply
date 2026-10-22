@@ -7,7 +7,13 @@ import { AlertCircle, Plus, Trash2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@meltiply/ui/tooltip";
 
 import { useSessionScope } from "@/hooks/use-session-scope";
-import { useCalendar, useCancelDistribution, useDeletePost, usePosts } from "@/lib/queries";
+import {
+  useCalendar,
+  useCancelDistribution,
+  useDeletePost,
+  useDeletePostsBatch,
+  usePosts,
+} from "@/lib/queries";
 import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Trans, useI18n } from "@/lib/i18n";
 import { useSearchParams } from "@/lib/navigation";
@@ -420,6 +426,7 @@ export function PostsView({
     isCalendarMode ? { start: calendarRange.startDate, end: calendarRange.endDate } : undefined,
   );
   const deletePost = useDeletePost(scope);
+  const deletePostsBatch = useDeletePostsBatch(scope);
   const cancelDistribution = useCancelDistribution(scope);
 
   const integrationById = useMemo<IntegrationById>(() => {
@@ -705,13 +712,14 @@ export function PostsView({
   }, [selectedPosts, posts, canDeletePost]);
 
   /**
-   * Executes the confirmed bulk delete sequentially over the snapshot latched
-   * when the dialog opened — entries added to the selection afterwards are not
-   * deletable through this dialog. Each successful mutation removes its id
-   * immediately so a mid-run invalidation refetch can prune only resolved
-   * rows; failures stay selected for retry. The dialog stays open (and every
-   * selection control disabled) until all attempts settle, then the toast
-   * reports the real success/failure counts.
+   * Executes the confirmed bulk delete over the snapshot latched when the
+   * dialog opened — entries added to the selection afterwards are not
+   * deletable through this dialog. The batch hook issues bounded-concurrency
+   * requests and invalidates the affected caches once after the batch settles,
+   * instead of refetching Posts, Distributions, and Calendar after every item.
+   * Successful identities leave the selection together; failures stay selected
+   * for retry. The dialog stays open (and every selection control disabled)
+   * until all attempts settle, then the toast reports the real counts.
    */
   const handleConfirmBulkDelete = useCallback(async () => {
     const targets = bulkDeleteTargets;
@@ -720,22 +728,22 @@ export function PostsView({
     let succeeded = 0;
     let failed = 0;
     try {
-      for (const target of targets) {
-        try {
-          await deletePost.mutateAsync({
-            id: target.id,
-            brandProfileId: target.brandProfileId,
-          });
-          succeeded += 1;
-          setSelectedPosts((prev) => {
-            const next = new Map(prev);
-            next.delete(target.id);
-            return next;
-          });
-        } catch {
-          failed += 1;
-        }
-      }
+      const outcome = await deletePostsBatch.mutateAsync({
+        targets: targets.map((target) => ({
+          id: target.id,
+          brandProfileId: target.brandProfileId,
+        })),
+      });
+      succeeded = outcome.deletedIds.length;
+      failed = outcome.failed.length;
+      const deleted = new Set(outcome.deletedIds);
+      setSelectedPosts((prev) => {
+        const next = new Map(prev);
+        for (const id of deleted) next.delete(id);
+        return next;
+      });
+    } catch {
+      failed = targets.length;
     } finally {
       setBulkDeleteBusy(false);
       setBulkDeleteTargets(null);
@@ -759,7 +767,7 @@ export function PostsView({
         variant: "error",
       });
     }
-  }, [bulkDeleteTargets, bulkDeleteBusy, deletePost, t]);
+  }, [bulkDeleteTargets, bulkDeleteBusy, deletePostsBatch, t]);
 
   /**
    * Opens the composer drawer for a Post that still has an editable surface: a

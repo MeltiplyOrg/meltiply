@@ -15,6 +15,7 @@ import { usePathname, useSearchParams } from "@/lib/navigation";
 import { platformDisplayName } from "@/lib/platforms";
 import {
   useAnalyticsPosts,
+  useAnalyticsDashboard,
   useAnalyticsSummary,
   usePlatformCapabilities,
   usePlatforms,
@@ -30,6 +31,18 @@ import {
 } from "./analytics-helpers";
 import { AnalyticsToolbar, analyticsMetricLabel, analyticsRangeLabel } from "./analytics-toolbar";
 import { MetricCards } from "./metric-cards";
+import {
+  AccumulationChart,
+  BestTimeHeatmap,
+  ContentFormatBreakdown,
+  EngagementOverTimeChart,
+  FollowerEvolutionChart,
+  FrequencyScatterChart,
+  MetricOverTimeChart,
+  PlatformBreakdownTable,
+  PostsOverTimeChart,
+  PostsPerPlatformChart,
+} from "./analytics-insights";
 import { comparablePlatformRows, PlatformMetricChart } from "./platform-metric-chart";
 import { TopPostsTable } from "./top-posts-table";
 import type { Platform } from "@/types";
@@ -113,12 +126,15 @@ export function AnalyticsView(): React.ReactElement {
   const analyticsPlatforms: readonly Platform[] = (capabilitiesQuery.data ?? [])
     .filter((capability) => capability.analytics)
     .map((capability) => capability.platform);
-  const { range, platform, metric } = parseAnalyticsSearchParams(searchParams, analyticsPlatforms);
+  const { accountId, format, range, platform, metric } = parseAnalyticsSearchParams(
+    searchParams,
+    analyticsPlatforms,
+  );
 
   // A range/platform/metric/profile change starts a new top-N window without an
   // effect: the stored key that owns the limit no longer matches, so the derived
   // value falls back to the initial page until Load more sets it again.
-  const limitKey = `${range}|${platform ?? ""}|${metric}|${scope.brandProfileId ?? ""}`;
+  const limitKey = `${range}|${platform ?? ""}|${accountId ?? ""}|${format ?? ""}|${metric}|${scope.brandProfileId ?? ""}`;
   const [limitState, setLimitState] = useState({
     key: limitKey,
     limit: ANALYTICS_INITIAL_LIMIT,
@@ -126,21 +142,29 @@ export function AnalyticsView(): React.ReactElement {
   const limit = limitState.key === limitKey ? limitState.limit : ANALYTICS_INITIAL_LIMIT;
   const setLimit = (nextLimit: number) => setLimitState({ key: limitKey, limit: nextLimit });
 
-  const summaryQuery = useAnalyticsSummary(scope, { platform, range });
+  const analyticsFilters = {
+    account_id: accountId,
+    format,
+    platform,
+    range,
+  } as const;
+  const summaryQuery = useAnalyticsSummary(scope, analyticsFilters);
+  const dashboardQuery = useAnalyticsDashboard(scope, analyticsFilters);
   const postsQuery = useAnalyticsPosts(scope, {
+    ...analyticsFilters,
     limit,
     metric,
     offset: 0,
-    platform,
-    range,
   });
 
   const updateSearch = (next: {
-    range: typeof range;
-    platform: Platform | undefined;
+    accountId: string | undefined;
+    format: typeof format;
     metric: typeof metric;
+    platform: Platform | undefined;
+    range: typeof range;
   }) => {
-    navigate(`${pathname}?${formatAnalyticsSearchParams(next.range, next.platform, next.metric)}`);
+    navigate(`${pathname}?${formatAnalyticsSearchParams(next)}`);
   };
 
   const connectedPlatforms = new Set(
@@ -156,8 +180,10 @@ export function AnalyticsView(): React.ReactElement {
   );
   const referencesPending = capabilitiesQuery.isPending || accountsQuery.isPending;
   const referenceError = capabilitiesQuery.error ?? accountsQuery.error;
-  const error = summaryQuery.error ?? postsQuery.error ?? referenceError;
-  const refreshing = (summaryQuery.isFetching || postsQuery.isFetching) && !summaryQuery.isPending;
+  const error = summaryQuery.error ?? dashboardQuery.error ?? postsQuery.error ?? referenceError;
+  const refreshing =
+    (summaryQuery.isFetching || dashboardQuery.isFetching || postsQuery.isFetching) &&
+    !summaryQuery.isPending;
   const scopeLabel = selectedBrandProfile?.name ?? t("All Brand Profiles");
   const summary = summaryQuery.data;
   const lastSyncedAt = summary?.last_synced_at ?? null;
@@ -188,10 +214,12 @@ export function AnalyticsView(): React.ReactElement {
     void capabilitiesQuery.refetch();
     void accountsQuery.refetch();
     void summaryQuery.refetch();
+    void dashboardQuery.refetch();
     void postsQuery.refetch();
   };
 
-  const loading = referencesPending || summaryQuery.isPending || postsQuery.isPending;
+  const loading =
+    referencesPending || summaryQuery.isPending || dashboardQuery.isPending || postsQuery.isPending;
   const lastSyncStatus = summary ? (
     <span className="flex items-center gap-1.5 text-xs tabular-nums text-ink-3" aria-live="polite">
       {stale && <TriangleAlert className="size-3.5 text-orange" aria-hidden="true" />}
@@ -229,14 +257,50 @@ export function AnalyticsView(): React.ReactElement {
   return (
     <WorkspaceSurface title={t("Analytics")} description={description} actions={lastSyncStatus}>
       <AnalyticsToolbar
+        accounts={accountsQuery.data ?? []}
         platforms={analyticsPlatforms}
+        selectedAccountId={accountId}
+        selectedFormat={format}
         selectedRange={range}
         selectedPlatform={platform}
         selectedMetric={metric}
         refreshing={refreshing}
-        onRangeChange={(nextRange) => updateSearch({ metric, platform, range: nextRange })}
-        onPlatformChange={(nextPlatform) => updateSearch({ metric, platform: nextPlatform, range })}
-        onMetricChange={(nextMetric) => updateSearch({ metric: nextMetric, platform, range })}
+        onAccountChange={(nextAccountId) => {
+          const account = (accountsQuery.data ?? []).find(
+            (candidate) => candidate.id === nextAccountId,
+          );
+          updateSearch({
+            accountId: nextAccountId,
+            format,
+            metric,
+            platform: account ? account.platform : platform,
+            range,
+          });
+        }}
+        onFormatChange={(nextFormat) =>
+          updateSearch({ accountId, format: nextFormat, metric, platform, range })
+        }
+        onRangeChange={(nextRange) =>
+          updateSearch({ accountId, format, metric, platform, range: nextRange })
+        }
+        onPlatformChange={(nextPlatform) => {
+          const account = (accountsQuery.data ?? []).find(
+            (candidate) => candidate.id === accountId,
+          );
+          updateSearch({
+            accountId:
+              account && (!nextPlatform || account.platform === nextPlatform)
+                ? accountId
+                : undefined,
+            format,
+            metric,
+            platform: nextPlatform,
+            range,
+          });
+        }}
+        onMetricChange={(nextMetric) =>
+          updateSearch({ accountId, format, metric: nextMetric, platform, range })
+        }
         onRefresh={refresh}
       />
       <AnalyticsBody>
@@ -327,6 +391,29 @@ export function AnalyticsView(): React.ReactElement {
                 </CardContent>
               </Card>
             )}
+            {dashboardQuery.data && (
+              <>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <PostsPerPlatformChart dashboard={dashboardQuery.data} />
+                  <MetricOverTimeChart dashboard={dashboardQuery.data} metric={metric} />
+                  <PostsOverTimeChart dashboard={dashboardQuery.data} />
+                  <EngagementOverTimeChart dashboard={dashboardQuery.data} />
+                  <FollowerEvolutionChart dashboard={dashboardQuery.data} />
+                  <ContentFormatBreakdown dashboard={dashboardQuery.data} />
+                  <FrequencyScatterChart dashboard={dashboardQuery.data} />
+                  <AccumulationChart dashboard={dashboardQuery.data} />
+                </div>
+                <BestTimeHeatmap dashboard={dashboardQuery.data} />
+                <Card>
+                  <CardHeader className="p-4 pb-0">
+                    <CardTitle className="text-sm">{t("Platform breakdown")}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0 pt-2">
+                    <PlatformBreakdownTable dashboard={dashboardQuery.data} />
+                  </CardContent>
+                </Card>
+              </>
+            )}
             <Card>
               <CardHeader className="p-4 pb-0">
                 <CardTitle className="text-sm">{t("Top posts")}</CardTitle>
@@ -339,7 +426,7 @@ export function AnalyticsView(): React.ReactElement {
                   hasMore={postsQuery.data?.has_more ?? false}
                   loadingMore={postsQuery.isFetching && !postsQuery.isPending}
                   onMetricChange={(nextMetric) =>
-                    updateSearch({ metric: nextMetric, platform, range })
+                    updateSearch({ accountId, format, metric: nextMetric, platform, range })
                   }
                   onLoadMore={() => setLimit(nextAnalyticsLimit(limit))}
                 />

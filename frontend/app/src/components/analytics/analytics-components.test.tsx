@@ -77,12 +77,17 @@ const totals: AnalyticsSummary["totals"] = {
 };
 
 const toolbarProps = {
+  accounts: [],
+  onAccountChange: vi.fn(),
+  onFormatChange: vi.fn(),
   onMetricChange: vi.fn(),
   onPlatformChange: vi.fn(),
   onRangeChange: vi.fn(),
   onRefresh: vi.fn(),
   platforms: ["instagram", "threads"] as const,
   refreshing: false,
+  selectedAccountId: undefined,
+  selectedFormat: undefined,
   selectedMetric: "views" as const,
   selectedPlatform: undefined,
   selectedRange: "30d" as const,

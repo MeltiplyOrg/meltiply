@@ -9,6 +9,14 @@ Contract change: approved in conversation on 2026-10-19
 > videos now expose stored analytics too. The Instagram/Threads-only coverage
 > and provider out-of-scope statements below describe the initial spec and are
 > superseded by the capability inventory and the shipped Provider adapters.
+> Implementation note (2026-10-22): extended to the full 12-chart Social
+> Media Analytics Dashboard per graph requirements. Adds additive
+> `/analytics/dashboard` endpoint, account-level follower snapshots via
+> `platform_account_snapshots` (migration 013), content format breakdowns from
+> frozen attachments, 7x24 publication heatmaps, time series with period deltas,
+> frequency-vs-engagement scatter, engagement accumulation, and shared filters
+> for account and content format. Saves, clicks, and missing follower histories
+> are labeled "Not tracked" / unavailable rather than fabricated as zero.
 
 ## 1. Summary
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -13,12 +13,19 @@ const refetch = vi.hoisted(() => ({
   accounts: vi.fn(),
   capabilities: vi.fn(),
   posts: vi.fn(),
+  dashboard: vi.fn(),
   summary: vi.fn(),
 }));
 
 const state = vi.hoisted(() => ({
   accounts: { data: [] as unknown[], error: null as Error | null, isPending: false },
   capabilities: { data: [] as unknown[], error: null as Error | null, isPending: false },
+  dashboard: {
+    data: undefined as unknown,
+    error: null as Error | null,
+    isFetching: false,
+    isPending: false,
+  },
   posts: {
     data: undefined as unknown,
     error: null as Error | null,
@@ -54,6 +61,7 @@ vi.mock("@/context/workspace.context", () => ({
 vi.mock("@/lib/queries", () => ({
   usePlatformCapabilities: () => ({ ...state.capabilities, refetch: refetch.capabilities }),
   usePlatforms: () => ({ ...state.accounts, refetch: refetch.accounts }),
+  useAnalyticsDashboard: () => ({ ...state.dashboard, refetch: refetch.dashboard }),
   useAnalyticsSummary: () => ({ ...state.summary, refetch: refetch.summary }),
   useAnalyticsPosts: () => ({ ...state.posts, refetch: refetch.posts }),
 }));
@@ -134,6 +142,80 @@ function summary(overrides: Partial<AnalyticsSummary> = {}): AnalyticsSummary {
   };
 }
 
+function dashboardFixture() {
+  return {
+    range: { start: "2026-09-30T12:00:00Z", end: "2026-10-30T12:00:00Z" },
+    series: [
+      {
+        date: "2026-10-18",
+        platform: "instagram",
+        posts: 1,
+        views: 300,
+        likes: 10,
+        comments: 2,
+        shares: 1,
+        impressions: 0,
+        reach: 0,
+        last_synced_at: "2026-10-30T12:00:00Z",
+      },
+    ],
+    best_times: [
+      {
+        day_of_week: 1,
+        hour: 12,
+        posts: 2,
+        avg_views: 300,
+        avg_likes: 10,
+        avg_comments: 2,
+        avg_shares: 1,
+        avg_engagement: 13,
+      },
+    ],
+    formats: [
+      {
+        format: "text",
+        posts: 1,
+        views: 300,
+        likes: 10,
+        comments: 2,
+        shares: 1,
+        engagement: 13,
+        avg_views: 300,
+        avg_engagement: 13,
+        last_synced_at: "2026-10-30T12:00:00Z",
+      },
+    ],
+    platforms: [
+      {
+        platform: "instagram",
+        posts: 1,
+        views: 300,
+        likes: 10,
+        comments: 2,
+        shares: 1,
+        impressions: 0,
+        reach: 0,
+        engagement_rate: 0.043,
+        followers: 12400,
+        follower_gain: 42,
+        saves: null,
+        clicks: null,
+        last_synced_at: "2026-10-30T12:00:00Z",
+      },
+    ],
+    followers: [
+      {
+        platform: "instagram",
+        account_id: "e3000000-0000-4000-8000-000000000007",
+        account_name: "Alpha IG",
+        points: [{ captured_at: "2026-10-30T12:00:00Z", followers: 12400 }],
+      },
+    ],
+    accumulation: [{ elapsed_hours: 24, avg_engagement: 13, observations: 1 }],
+    unavailable_metrics: ["saves", "clicks"],
+  };
+}
+
 function posts(overrides: Record<string, unknown> = {}) {
   return {
     has_more: false,
@@ -183,6 +265,7 @@ beforeEach(() => {
     error: null,
     isPending: false,
   };
+  state.dashboard = { data: dashboardFixture(), error: null, isFetching: false, isPending: false };
   state.summary = { data: summary(), error: null, isFetching: false, isPending: false };
   state.posts = { data: posts(), error: null, isFetching: false, isPending: false };
   navigate.mockReset();
@@ -245,7 +328,8 @@ describe("analytics view", () => {
     renderView();
     fireEvent.click(screen.getByRole("button", { name: "Refresh analytics" }));
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["analytics"] });
-    fireEvent.click(screen.getByRole("button", { name: "Likes" }));
+    const toolbar = within(screen.getByRole("toolbar"));
+    fireEvent.click(toolbar.getByRole("button", { name: "Likes" }));
     expect(navigate).toHaveBeenCalledWith("/analytics?metric=likes&range=30d");
   });
 
@@ -258,7 +342,8 @@ describe("analytics view", () => {
     };
     renderView();
     expect(screen.getByText(/Published Last 7 days/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Comments" })).toHaveAttribute(
+    const toolbar = within(screen.getByRole("toolbar"));
+    expect(toolbar.getByRole("button", { name: "Comments" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

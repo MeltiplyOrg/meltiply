@@ -215,6 +215,14 @@ export type PlatformMetrics = components["schemas"]["PlatformMetrics"];
 export type AnalyticsSummary = components["schemas"]["AnalyticsSummary"];
 export type AnalyticsPostRow = components["schemas"]["AnalyticsPostRow"];
 export type AnalyticsPostsResponse = components["schemas"]["AnalyticsPostsResponse"];
+export type AnalyticsDashboard = components["schemas"]["AnalyticsDashboard"];
+export type AnalyticsDashboardQueryParams = NonNullable<
+  operations["getAnalyticsDashboard"]["parameters"]["query"]
+>;
+export type AnalyticsDaySeries = components["schemas"]["AnalyticsDaySeries"];
+export type AnalyticsBestTime = components["schemas"]["AnalyticsBestTime"];
+export type AnalyticsFormat = components["schemas"]["AnalyticsFormat"];
+export type AnalyticsPlatformBreakdown = components["schemas"]["AnalyticsPlatformBreakdown"];
 export type AnalyticsSummaryQueryParams = NonNullable<
   operations["getAnalyticsSummary"]["parameters"]["query"]
 >;
@@ -228,7 +236,9 @@ export type AnalyticsPostsQueryParams = NonNullable<
  * each query function so the key stays stable between renders.
  */
 export interface AnalyticsScopeParams {
+  account_id?: string;
   brand_profile_id?: string;
+  format?: AnalyticsFormat;
   platform?: Platform;
   range: AnalyticsRangePreset;
 }

@@ -107,6 +107,10 @@ export const queryKeys = {
     params === undefined
       ? (["calendar"] as const)
       : (["calendar", normalizeParams(params)] as const),
+  analyticsDashboard: (params?: AnalyticsScopeParams) =>
+    params === undefined
+      ? (["analytics", "dashboard"] as const)
+      : (["analytics", "dashboard", normalizeParams(params)] as const),
   analyticsSummary: (params?: AnalyticsScopeParams) =>
     params === undefined
       ? (["analytics", "summary"] as const)
@@ -726,7 +730,11 @@ export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
  * @returns Query result with the analytics summary.
  */
 export function useAnalyticsSummary(scope: SessionScope, params: AnalyticsScopeParams) {
-  const scopedParams = withBrandProfile(scope, { platform: params.platform });
+  const scopedParams = withBrandProfile(scope, {
+    account_id: params.account_id,
+    format: params.format,
+    platform: params.platform,
+  });
   const keyParams = { ...scopedParams, range: params.range };
   return useQuery({
     queryKey: queryKeys.analyticsSummary(keyParams),
@@ -735,6 +743,36 @@ export function useAnalyticsSummary(scope: SessionScope, params: AnalyticsScopeP
         scope,
         (api) =>
           api.getAnalyticsSummary({ ...scopedParams, ...analyticsRangeWindow(params.range) }),
+        signal,
+      ),
+    placeholderData: keepPreviousData,
+    staleTime: 60 * 1_000,
+    enabled: scope.isSignedIn,
+  });
+}
+
+/**
+ * Reads the dashboard's daily series, best-time cells, format and platform
+ * breakdowns, follower history, and engagement accumulation for one cohort.
+ *
+ * @param scope Session scope: signed-in gate, Workspace, and Brand Profile.
+ * @param params Range preset plus optional Platform, account, and format filters.
+ * @returns TanStack query carrying the dashboard aggregates.
+ */
+export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScopeParams) {
+  const scopedParams = withBrandProfile(scope, {
+    account_id: params.account_id,
+    format: params.format,
+    platform: params.platform,
+  });
+  const keyParams = { ...scopedParams, range: params.range };
+  return useQuery({
+    queryKey: queryKeys.analyticsDashboard(keyParams),
+    queryFn: ({ signal }) =>
+      runApiQuery(
+        scope,
+        (api) =>
+          api.getAnalyticsDashboard({ ...scopedParams, ...analyticsRangeWindow(params.range) }),
         signal,
       ),
     placeholderData: keepPreviousData,
@@ -760,7 +798,9 @@ export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScop
   const { range, ...filters } = params;
   const scopedParams = withBrandProfile(scope, filters);
   const keyParams: AnalyticsPostScopeParams = {
+    account_id: scopedParams?.account_id,
     brand_profile_id: scopedParams?.brand_profile_id,
+    format: scopedParams?.format,
     limit: params.limit,
     metric: params.metric,
     offset: params.offset,

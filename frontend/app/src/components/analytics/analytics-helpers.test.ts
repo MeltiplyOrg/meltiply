@@ -69,6 +69,8 @@ describe("analytics URL state", () => {
         platforms,
       ),
     ).toEqual({
+      accountId: undefined,
+      format: undefined,
       metric: "views",
       platform: undefined,
       range: "30d",
@@ -76,10 +78,12 @@ describe("analytics URL state", () => {
   });
 
   it("serializes only shareable state, omitting the aggregate platform", () => {
-    expect(formatAnalyticsSearchParams("90d", "instagram", "likes")).toBe(
-      "metric=likes&range=90d&platform=instagram",
+    expect(
+      formatAnalyticsSearchParams({ metric: "likes", platform: "instagram", range: "90d" }),
+    ).toBe("metric=likes&range=90d&platform=instagram");
+    expect(formatAnalyticsSearchParams({ metric: "views", range: "30d" })).toBe(
+      "metric=views&range=30d",
     );
-    expect(formatAnalyticsSearchParams("30d", undefined, "views")).toBe("metric=views&range=30d");
   });
 });
 

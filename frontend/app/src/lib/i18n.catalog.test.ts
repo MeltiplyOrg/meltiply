@@ -28,6 +28,8 @@ const intentionalIdenticalValues: Record<string, true> = Object.fromEntries(
 const allowedDynamicTranslationExpressions: Record<string, true> = {
   "asset.asset_type": true,
   "card.definition": true,
+  'grouping === "day" ? "Day" : grouping === "week" ? "Week" : "Month"': true,
+  "FORMAT_LABELS[format]": true,
   "card.label": true,
   genericErrorMessage: true,
   error: true,

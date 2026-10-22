@@ -2,6 +2,8 @@ import { Context, Effect, Layer } from "effect";
 import type { components } from "@meltiply/contracts/schema";
 
 import type {
+  AnalyticsDashboard,
+  AnalyticsDashboardQueryParams,
   AnalyticsPostsQueryParams,
   AnalyticsPostsResponse,
   AnalyticsSummary,
@@ -56,6 +58,7 @@ import {
   getAsset,
   getAssetDownloadUrl,
   getAssetPreviewUrl,
+  getAnalyticsDashboard,
   getAnalyticsPosts,
   getAnalyticsSummary,
   getCalendar,
@@ -258,6 +261,10 @@ export interface ApiClientServiceShape {
     params: CalendarQueryParams,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<CalendarResponse>;
+  readonly getAnalyticsDashboard: (
+    params: AnalyticsDashboardQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AnalyticsDashboard>;
   readonly getAnalyticsSummary: (
     params: AnalyticsSummaryQueryParams,
     options?: ApiRequestOptions,
@@ -310,6 +317,7 @@ export function createApiClientServiceTest(
     getAssetDownloadUrl: unstubbed("getAssetDownloadUrl"),
     getAssetPreviewUrl: unstubbed("getAssetPreviewUrl"),
     getCalendar: unstubbed("getCalendar"),
+    getAnalyticsDashboard: unstubbed("getAnalyticsDashboard"),
     getAnalyticsPosts: unstubbed("getAnalyticsPosts"),
     getAnalyticsSummary: unstubbed("getAnalyticsSummary"),
     getCurrentUser: unstubbed("getCurrentUser"),
@@ -378,6 +386,8 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => getAssetPreviewUrl(workspaceId, id, options)),
     getCalendar: (params, options) =>
       inWorkspace((workspaceId) => getCalendar(workspaceId, params, options)),
+    getAnalyticsDashboard: (params, options) =>
+      inWorkspace((workspaceId) => getAnalyticsDashboard(workspaceId, params, options)),
     getAnalyticsPosts: (params, options) =>
       inWorkspace((workspaceId) => getAnalyticsPosts(workspaceId, params, options)),
     getAnalyticsSummary: (params, options) =>

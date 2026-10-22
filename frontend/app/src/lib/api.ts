@@ -25,6 +25,8 @@ import type {
   OAuthSelectionConfirmRequest,
   Platform,
   PlatformAccountsResponse,
+  AnalyticsDashboard,
+  AnalyticsDashboardQueryParams,
   PlatformCapabilitiesResponse,
   PlatformQueryParams,
   Post,
@@ -1219,6 +1221,31 @@ export function getAnalyticsSummary(
   return unwrap<AnalyticsSummary>(
     (signal) =>
       client().GET("/analytics", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the dashboard's daily series, best-time cells, format and platform
+ * breakdowns, follower history, and engagement accumulation.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param params Cohort bounds plus optional Platform, account, format, and Brand Profile scope.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the stored-snapshot dashboard aggregates.
+ */
+export function getAnalyticsDashboard(
+  workspaceId: string | null,
+  params: AnalyticsDashboardQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AnalyticsDashboard>(
+    (signal) =>
+      client().GET("/analytics/dashboard", {
         headers: workspaceHeaders(workspaceId),
         params: { query: params },
         signal,

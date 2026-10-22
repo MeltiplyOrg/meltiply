@@ -1,6 +1,7 @@
 import type { Language } from "@/lib/i18n";
 import { isAnalyticsRangePreset } from "@/lib/analytics-range";
 import type {
+  AnalyticsFormat,
   AnalyticsMetric,
   AnalyticsPostRow,
   AnalyticsRangePreset,
@@ -15,6 +16,9 @@ export const ANALYTICS_METRICS: readonly AnalyticsMetric[] = [
   "comments",
   "shares",
 ];
+
+const ANALYTICS_FORMATS: readonly AnalyticsFormat[] = ["text", "image", "video", "carousel"];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Default metric when the URL carries no supported value. */
 const DEFAULT_ANALYTICS_METRIC: AnalyticsMetric = "views";
@@ -43,11 +47,21 @@ export type AnalyticsMetricState = "measured" | "partial" | "unsupported" | "awa
 export function parseAnalyticsSearchParams(
   searchParams: URLSearchParams,
   availablePlatforms: readonly Platform[],
-): { metric: AnalyticsMetric; platform: Platform | undefined; range: AnalyticsRangePreset } {
+): {
+  accountId: string | undefined;
+  format: AnalyticsFormat | undefined;
+  metric: AnalyticsMetric;
+  platform: Platform | undefined;
+  range: AnalyticsRangePreset;
+} {
   const rangeValue = searchParams.get("range");
   const metricValue = searchParams.get("metric");
   const platformValue = searchParams.get("platform");
+  const accountValue = searchParams.get("account");
+  const formatValue = searchParams.get("format");
   return {
+    accountId: accountValue && UUID_PATTERN.test(accountValue) ? accountValue : undefined,
+    format: ANALYTICS_FORMATS.find((format) => format === formatValue),
     metric:
       metricValue === "likes" || metricValue === "comments" || metricValue === "shares"
         ? metricValue
@@ -66,13 +80,17 @@ export function parseAnalyticsSearchParams(
  * @param metric - Selected ranking metric.
  * @returns Query-string body without a leading `?`.
  */
-export function formatAnalyticsSearchParams(
-  range: AnalyticsRangePreset,
-  platform: Platform | undefined,
-  metric: AnalyticsMetric,
-): string {
-  const params = new URLSearchParams({ metric, range });
-  if (platform) params.set("platform", platform);
+export function formatAnalyticsSearchParams(input: {
+  accountId?: string;
+  format?: AnalyticsFormat;
+  metric: AnalyticsMetric;
+  platform?: Platform;
+  range: AnalyticsRangePreset;
+}): string {
+  const params = new URLSearchParams({ metric: input.metric, range: input.range });
+  if (input.platform) params.set("platform", input.platform);
+  if (input.accountId) params.set("account", input.accountId);
+  if (input.format) params.set("format", input.format);
   return params.toString();
 }
 

@@ -5,11 +5,16 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { z } from "zod";
+import { Effect } from "effect";
 import { PLATFORM_IDS, type Platform } from "../../packages/domain/src/index";
 import { createProviderRegistryFromEnvironment } from "../../packages/providers/src/index";
 import { createApiApp } from "../../workers/api/src/app";
 import { authenticatedPoolFor, systemPoolFor } from "../../workers/api/src/database";
 import type { ApiWorkerEnv } from "../../workers/api/src/env";
+import { processProviderSyncMessage } from "../../workers/automation/src/provider-sync";
+import { createQueuePublisherLive } from "../../workers/automation/src/effect/services";
+import { systemPoolFor as automationPoolFor } from "../../workers/automation/src/database";
+import { tokenCipherFor } from "../../workers/api/src/token-credentials";
 
 const nonce = randomUUID().replaceAll("-", "");
 const organizationId = "20000000-0000-4000-8000-000000000001";
@@ -31,10 +36,13 @@ const youtubeScopes = [
 ];
 let youtubeChallenge = "";
 let tokenGeneration = 0;
+const refreshRequests = { tiktok: 0, youtube: 0 };
 const requested = new Set<string>();
+let providerCallCount = 0;
 
 /** Serves first-party documented wire contracts, rejecting unknown requests instead of falling back to live services. */
 const providerFetch: typeof fetch = async (input, init = {}) => {
+  providerCallCount++;
   const url = new URL(input.toString());
   const form = new URLSearchParams(String(init.body ?? ""));
   requested.add(`${url.origin}${url.pathname}`);
@@ -90,16 +98,27 @@ const providerFetch: typeof fetch = async (input, init = {}) => {
       return Response.json({ id: expectedIds.threads, username: "threads_creator" });
   }
   if (url.origin === "https://open.tiktokapis.com") {
-    if (url.pathname === "/v2/oauth/token/")
+    if (url.pathname === "/v2/oauth/token/") {
+      const refreshing = form.get("grant_type") === "refresh_token";
+      assert.equal(init.method, "POST");
+      assert.equal(form.get("client_key"), "tiktok-client");
+      if (refreshing) {
+        assert.equal(form.get("refresh_token"), "tiktok-smoke-refresh");
+        refreshRequests.tiktok++;
+      } else {
+        assert.equal(form.get("redirect_uri"), `${origin}/api/v1/platforms/tiktok/callback`);
+        assert.equal(form.has("code_verifier"), false);
+      }
       return Response.json({
-        access_token: token("tiktok"),
-        refresh_token: "tiktok-smoke-refresh",
+        access_token: refreshing ? `tiktok-refreshed-${tokenGeneration}` : token("tiktok"),
+        refresh_token: refreshing ? "tiktok-rotated-refresh" : "tiktok-smoke-refresh",
         open_id: expectedIds.tiktok,
         token_type: "Bearer",
         scope: "user.info.basic,video.publish",
         expires_in: 86_400,
         refresh_expires_in: 31_536_000,
       });
+    }
     if (url.pathname === "/v2/user/info/")
       return Response.json({
         data: { user: { open_id: expectedIds.tiktok, display_name: "TikTok Creator" } },
@@ -107,17 +126,25 @@ const providerFetch: typeof fetch = async (input, init = {}) => {
       });
   }
   if (url.origin === "https://oauth2.googleapis.com" && url.pathname === "/token") {
-    assert.equal(
-      createHash("sha256")
-        .update(z.string().min(43).parse(form.get("code_verifier")))
-        .digest("base64url"),
-      youtubeChallenge,
-    );
+    const refreshing = form.get("grant_type") === "refresh_token";
+    if (refreshing) {
+      assert.equal(form.get("refresh_token"), "youtube-smoke-refresh");
+      assert.equal(form.has("code_verifier"), false);
+      refreshRequests.youtube++;
+    } else {
+      assert.equal(
+        createHash("sha256")
+          .update(z.string().min(43).parse(form.get("code_verifier")))
+          .digest("base64url"),
+        youtubeChallenge,
+      );
+      assert.equal(form.get("redirect_uri"), `${origin}/api/v1/platforms/youtube/callback`);
+    }
     return Response.json({
-      access_token: token("youtube"),
-      refresh_token: "youtube-smoke-refresh",
+      access_token: refreshing ? `youtube-refreshed-${tokenGeneration}` : token("youtube"),
+      ...(!refreshing ? { refresh_token: "youtube-smoke-refresh" } : {}),
       token_type: "Bearer",
-      scope: youtubeScopes.join(" "),
+      scope: [...youtubeScopes, "openid", "email", "profile"].join(" "),
       expires_in: 3_600,
     });
   }
@@ -244,8 +271,8 @@ async function request(path: string, method = "GET", body?: unknown, key = rando
   );
 }
 
-/** Completes the actual OAuth state round trip; authorization is not allowed to persist a Channel before explicit assignment. */
-async function authorize(platform: Platform) {
+/** Starts real authorization with account choice and validates provider-specific redirect/PKCE settings. */
+async function startAuthorization(platform: Platform) {
   const start = await request(`/api/v1/platforms/${platform}/connect`);
   assert.equal(start.status, 200);
   const authorization = new URL(
@@ -254,8 +281,17 @@ async function authorize(platform: Platform) {
   if (platform === "threads") assert.equal(authorization.origin, "https://threads.com");
   if (platform === "instagram")
     assert.equal(authorization.searchParams.get("force_reauth"), "true");
-  if (platform === "youtube")
+  if (platform === "tiktok") assert.equal(authorization.searchParams.get("disable_auto_auth"), "1");
+  if (platform === "youtube") {
+    assert.equal(authorization.searchParams.get("prompt"), "consent select_account");
     youtubeChallenge = z.string().parse(authorization.searchParams.get("code_challenge"));
+  }
+  return authorization;
+}
+
+/** Completes the actual OAuth state round trip; authorization cannot persist a Channel before explicit assignment. */
+async function authorize(platform: Platform) {
+  const authorization = await startAuthorization(platform);
   const callback = `/api/v1/platforms/${platform}/callback?${new URLSearchParams({ state: z.string().parse(authorization.searchParams.get("state")), code: "controlled-code" })}`;
   const result = await request(callback);
   assert.equal(result.status, 302);
@@ -270,6 +306,87 @@ async function authorize(platform: Platform) {
     "state_invalid",
   );
   return selectionId;
+}
+
+/**
+ * Exercises the real automation refresh consumer against encrypted persisted
+ * credentials, including TikTok rotation, Google's omitted replacement, and
+ * stale queue replay. Only external HTTP is controlled; no token-persistence
+ * implementation or encryption boundary is mocked.
+ */
+async function refreshConnectedAccount(platform: "tiktok" | "youtube", id: string) {
+  const pool = systemPoolFor(env);
+  const eventId = randomUUID();
+  await pool.query(
+    `UPDATE platform_accounts SET token_expires_at = now() - interval '1 minute',
+       token_refresh_event_id = $2::uuid WHERE id = $1 AND org_id = $3`,
+    [id, eventId, organizationId],
+  );
+  const message = {
+    event_id: eventId,
+    request_id: randomUUID(),
+    target_id: id,
+    type: "provider.sync" as const,
+    version: 1 as const,
+    workload: "token_refresh" as const,
+  };
+  const process = () =>
+    Effect.runPromise(
+      Effect.provide(
+        processProviderSyncMessage(env, message, { providerRegistry: registry }),
+        createQueuePublisherLive(),
+      ),
+    );
+  assert.equal(await process(), "processed");
+  const row = z
+    .object({
+      access_token: z.string(),
+      refresh_token: z.string(),
+      connection_status: z.literal("connected"),
+      expires_in_future: z.literal(true),
+    })
+    .parse(
+      (
+        await pool.query(
+          `SELECT access_token, refresh_token, connection_status,
+             token_expires_at > now() AS expires_in_future
+           FROM platform_accounts WHERE id = $1 AND org_id = $2`,
+          [id, organizationId],
+        )
+      ).rows[0],
+    );
+  const cipher = tokenCipherFor(env);
+  assert.equal(await cipher.decrypt(row.access_token), `${platform}-refreshed-${tokenGeneration}`);
+  assert.equal(
+    await cipher.decrypt(row.refresh_token),
+    platform === "tiktok" ? "tiktok-rotated-refresh" : "youtube-smoke-refresh",
+  );
+  assert.equal(refreshRequests[platform], 1);
+  assert.equal(await process(), "skipped");
+  assert.equal(refreshRequests[platform], 1);
+  console.log(`${platform}: encrypted refresh persistence and stale queue replay passed`);
+}
+
+/** Checks consent denial and forged-state callbacks never exchange tokens or stage accounts. */
+async function rejectInvalidAuthorization(platform: "tiktok" | "youtube") {
+  const authorization = await startAuthorization(platform);
+  const state = z.string().parse(authorization.searchParams.get("state"));
+  const callsBefore = providerCallCount;
+  const forged = await request(
+    `/api/v1/platforms/${platform}/callback?${new URLSearchParams({ state: `${state}forged`, code: "controlled-code" })}`,
+  );
+  assert.equal(
+    new URL(z.string().parse(forged.headers.get("Location"))).searchParams.get("oauth"),
+    "state_invalid",
+  );
+  const denied = await request(
+    `/api/v1/platforms/${platform}/callback?${new URLSearchParams({ state, error: "access_denied" })}`,
+  );
+  assert.equal(
+    new URL(z.string().parse(denied.headers.get("Location"))).searchParams.get("oauth"),
+    "consent_denied",
+  );
+  assert.equal(providerCallCount, callsBefore);
 }
 
 try {
@@ -291,6 +408,7 @@ try {
   const accountListSchema = z.object({
     accounts: z.array(
       z.object({
+        id: z.uuid(),
         brand_profile_id: z.string(),
         platform: z.string(),
         platform_user_id: z.string(),
@@ -299,6 +417,9 @@ try {
     ),
   });
   for (const platform of PLATFORM_IDS) {
+    if (platform === "tiktok" || platform === "youtube") {
+      await rejectInvalidAuthorization(platform);
+    }
     const selectionId = await authorize(platform);
     const selectionResponse = await request(`/api/v1/oauth-selections/${selectionId}`);
     assert.equal(selectionResponse.status, 200);
@@ -375,6 +496,9 @@ try {
           account.connection_status === "connected" || account.connection_status === "expiring",
       ),
     );
+    if (platform === "tiktok" || platform === "youtube") {
+      await refreshConnectedAccount(platform, z.string().parse(connected[0]?.id));
+    }
     const pending = await authorize(platform);
     assert.equal((await request(`/api/v1/oauth-selections/${pending}`, "DELETE")).status, 204);
     assert.equal(
@@ -400,6 +524,7 @@ try {
   } finally {
     await authenticatedPoolFor(env).end();
     await pool.end();
+    await automationPoolFor(env).end();
     await runtime.dispose();
   }
 }

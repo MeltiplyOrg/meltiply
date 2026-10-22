@@ -156,6 +156,7 @@ describe("createTikTokAdapter", () => {
     expect(url.pathname).toBe("/v2/auth/authorize/");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       client_key: "tiktok-client-key",
+      disable_auto_auth: "1",
       redirect_uri: redirectUri,
       response_type: "code",
       scope: "user.info.basic,video.publish",
@@ -250,6 +251,30 @@ describe("createTikTokAdapter", () => {
       failure: { code: "provider_transient" },
     });
   });
+
+  it.each(["user.info.basic", "video.publish"])(
+    "rejects a partial TikTok grant containing only %s before reading a profile",
+    async (scope) => {
+      const providerCalls = sequence(() =>
+        json({
+          access_token: "access-secret",
+          expires_in: 86_400,
+          open_id: "open-id-1",
+          refresh_token: "refresh-secret",
+          scope,
+          token_type: "Bearer",
+        }),
+      );
+      await expect(
+        adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+          code: "authorization-code",
+          codeVerifier: "unused-by-tiktok-web",
+          redirectUri,
+        }),
+      ).rejects.toBeInstanceOf(ProviderAdapterError);
+      expect(providerCalls.calls.map(({ url }) => url.pathname)).toEqual(["/v2/oauth/token/"]);
+    },
+  );
 
   it("normalizes current creator publication requirements", async () => {
     const providerCalls = sequence(() =>

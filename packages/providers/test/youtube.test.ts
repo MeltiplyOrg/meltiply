@@ -175,7 +175,7 @@ describe("createYouTubeAdapter", () => {
       code_challenge: "a".repeat(43),
       code_challenge_method: "S256",
       include_granted_scopes: "true",
-      prompt: "consent",
+      prompt: "consent select_account",
       redirect_uri: redirectUri,
       response_type: "code",
       scope:
@@ -191,68 +191,71 @@ describe("createYouTubeAdapter", () => {
     ).toThrow("does not match configuration");
   });
 
-  it("exchanges a code and binds the connection to one YouTube channel", async () => {
-    const providerCalls = sequence(
-      (url, init) => {
-        expect(url.toString()).toBe("https://oauth2.googleapis.com/token");
-        expect(String(init.body)).toContain("code=authorization-code");
-        expect(String(init.body)).toContain(`code_verifier=${"b".repeat(43)}`);
-        return json({
-          access_token: "access-secret",
-          expires_in: 3_600,
-          refresh_token: "refresh-secret",
-          scope:
-            "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
-          token_type: "Bearer",
-        });
-      },
-      (url, init) => {
-        expect(url.pathname).toBe("/youtube/v3/channels");
-        expect(Object.fromEntries(url.searchParams)).toEqual({
-          maxResults: "2",
-          mine: "true",
-          part: "id,snippet",
-        });
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-secret");
-        return json({
-          items: [
-            {
-              id: "channel-1",
-              snippet: {
-                thumbnails: {
-                  default: { url: "https://cdn.example/channel.jpg" },
+  it.each(["", "openid email profile"])(
+    "exchanges a code with additional granted scopes %j and binds one YouTube channel",
+    async (additionalScopes) => {
+      const providerCalls = sequence(
+        (url, init) => {
+          expect(url.toString()).toBe("https://oauth2.googleapis.com/token");
+          expect(String(init.body)).toContain("code=authorization-code");
+          expect(String(init.body)).toContain(`code_verifier=${"b".repeat(43)}`);
+          return json({
+            access_token: "access-secret",
+            expires_in: 3_600,
+            refresh_token: "refresh-secret",
+            scope:
+              `https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly ${additionalScopes}`.trim(),
+            token_type: "Bearer",
+          });
+        },
+        (url, init) => {
+          expect(url.pathname).toBe("/youtube/v3/channels");
+          expect(Object.fromEntries(url.searchParams)).toEqual({
+            maxResults: "2",
+            mine: "true",
+            part: "id,snippet",
+          });
+          expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-secret");
+          return json({
+            items: [
+              {
+                id: "channel-1",
+                snippet: {
+                  thumbnails: {
+                    default: { url: "https://cdn.example/channel.jpg" },
+                  },
+                  customUrl: "@meltiply",
+                  title: "Meltiply Channel",
                 },
-                customUrl: "@meltiply",
-                title: "Meltiply Channel",
               },
-            },
-          ],
-        });
-      },
-    );
+            ],
+          });
+        },
+      );
 
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "b".repeat(43),
-        redirectUri,
-      }),
-    ).resolves.toEqual({
-      accessToken: "access-secret",
-      account: {
-        avatarUrl: "https://cdn.example/channel.jpg",
-        displayName: "Meltiply Channel",
-        id: "channel-1",
-        username: "meltiply",
-      },
-      expiresAt: "2026-07-19T01:00:00.000Z",
-      refreshToken: "refresh-secret",
-      scopes: [
-        "https://www.googleapis.com/auth/youtube.upload",
-        "https://www.googleapis.com/auth/youtube.readonly",
-      ],
-    });
-  });
+      await expect(
+        adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+          code: "authorization-code",
+          codeVerifier: "b".repeat(43),
+          redirectUri,
+        }),
+      ).resolves.toEqual({
+        accessToken: "access-secret",
+        account: {
+          avatarUrl: "https://cdn.example/channel.jpg",
+          displayName: "Meltiply Channel",
+          id: "channel-1",
+          username: "meltiply",
+        },
+        expiresAt: "2026-07-19T01:00:00.000Z",
+        refreshToken: "refresh-secret",
+        scopes: [
+          "https://www.googleapis.com/auth/youtube.upload",
+          "https://www.googleapis.com/auth/youtube.readonly",
+        ],
+      });
+    },
+  );
 
   it.each([
     { reason: "no channel", body: { items: [] } },
@@ -306,6 +309,26 @@ describe("createYouTubeAdapter", () => {
       failure: { classification: "transient", code: "provider_transient" },
     });
     expect(providerCalls.calls).toHaveLength(1);
+  });
+
+  it("refuses an initial connection without an offline refresh token", async () => {
+    const providerCalls = sequence(() =>
+      json({
+        access_token: "access-secret",
+        expires_in: 3_600,
+        scope:
+          "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+        token_type: "Bearer",
+      }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+        code: "authorization-code",
+        codeVerifier: "b".repeat(43),
+        redirectUri,
+      }),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
+    expect(providerCalls.calls.map(({ url }) => url.pathname)).toEqual(["/token"]);
   });
 
   it("initiates and completes a full resumable upload without buffering", async () => {
@@ -774,6 +797,8 @@ describe("createYouTubeAdapter", () => {
           access_token: "access-2",
           expires_in: 3_600,
           token_type: "Bearer",
+          scope:
+            "openid email profile https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
         }),
       () =>
         json({

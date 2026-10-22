@@ -472,13 +472,15 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
     extractRateLimitBudget: (headers) => extractRateLimitBudget("tiktok", headers),
     /**
      * Builds the TikTok v2 authorize URL for the configured client key, redirect URI,
-     * scopes, and caller-supplied state. Throws TypeError when the attempted redirect
-     * URI does not match the adapter configuration.
+     * scopes, and caller-supplied state. Forces the authorization page so another
+     * account can be connected instead of silently reusing a prior grant. Throws
+     * TypeError when the redirect URI does not match the adapter configuration.
      */
     authorizationUrl(input) {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
       const url = new URL("/v2/auth/authorize/", authorizationOrigin);
       url.searchParams.set("client_key", clientKey);
+      url.searchParams.set("disable_auto_auth", "1");
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", configuredScopes.join(","));

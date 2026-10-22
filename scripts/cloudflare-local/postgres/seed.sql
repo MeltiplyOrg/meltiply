@@ -2267,6 +2267,55 @@ WHERE id IN (
   'd8000000-0000-4000-8000-000000000002'
 );
 
+-- Account-level follower history for the demo workspace. Nine weekly points
+-- give the dashboard a baseline before the 30-day window and enough range for
+-- the 90-day chart. Values are deterministic per Platform so reseeding is
+-- idempotent and screenshots remain stable.
+INSERT INTO platform_account_snapshots
+  (platform_account_id, org_id, followers, following, posts, captured_at)
+SELECT
+  account.id,
+  account.org_id,
+  (CASE account.platform
+    WHEN 'instagram' THEN 12400
+    WHEN 'threads' THEN 8300
+    WHEN 'facebook' THEN 5100
+    WHEN 'tiktok' THEN 21600
+    WHEN 'youtube' THEN 34800
+    ELSE 1000
+  END
+  + (account_row.ordinality * 137)
+  + (week.week * (CASE account.platform
+      WHEN 'instagram' THEN 42
+      WHEN 'threads' THEN 31
+      WHEN 'facebook' THEN 18
+      WHEN 'tiktok' THEN 96
+      WHEN 'youtube' THEN 125
+      ELSE 10
+    END)))::bigint,
+  NULL,
+  NULL,
+  now() - ((8 - week.week) * INTERVAL '7 days')
+FROM platform_accounts AS account
+JOIN LATERAL (
+  SELECT row_number() OVER (ORDER BY candidate.id) AS ordinality
+  FROM platform_accounts AS candidate
+  WHERE candidate.org_id = account.org_id
+    AND candidate.connection_status IN ('connected', 'expiring')
+) AS account_row ON account_row.ordinality = (
+  SELECT count(*) FROM platform_accounts AS prior
+  WHERE prior.org_id = account.org_id
+    AND prior.connection_status IN ('connected', 'expiring')
+    AND prior.id <= account.id
+)
+CROSS JOIN generate_series(0, 8) AS week(week)
+WHERE account.org_id = '20000000-0000-4000-8000-000000000005'
+  AND account.connection_status IN ('connected', 'expiring')
+ON CONFLICT (platform_account_id, captured_at) DO UPDATE
+SET followers = EXCLUDED.followers,
+    following = EXCLUDED.following,
+    posts = EXCLUDED.posts;
+
 -- Usage meters for the demo workspace are written once, by the `usage_records`
 -- insert above the demo set: an hourly reconciliation recomputes them from the
 -- rows in this file exactly, so the sweep never rewrites the demo counters.

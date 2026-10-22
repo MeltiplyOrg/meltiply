@@ -38,6 +38,11 @@ Channels uses the Members-style directory composition, not a copy of Posts group
 
 The directory header row stays pinned to the top of the accounts viewport, and that viewport owns both scroll axes, so the wide table scrolls sideways without capturing the sticky header in an inner scroller. Accounts show identity, platform, owning profile, a single accessible health icon, and channel settings. The Brand Profiles tab shows real profile cards and connection counts. Both tabs use the same background and canonical controls as Posts. Table horizontal overflow stays inside the directory viewport.
 
+Account identity keeps the saved name above a single compact username/ID line.
+Adding a username does not add another line or increase row height. Both metadata
+values truncate within the Channel column and are directly clickable for copying;
+there are no separate copy-icon columns or vertically stacked copy controls.
+
 The post-OAuth `/channels/connect` page pairs the shared Meltiply mark and provider
 mark directly on the canvas, without logo tiles, with a link glyph between them.
 Brand Profile assignment uses a bounded native-scrolling radio list with a focus

@@ -78,6 +78,14 @@ Post deletion soft-deletes composition and stops only pending delivery; it does 
 
 Channels follows the Members directory composition: Accounts/Brand Profiles tabs, account search, status segments, field-row filters, identity table, and real profile cards. The section tabs' accent rule and the status segments' surface pill are each one travelling `SlidingHighlight`, so switching a section or a status slides the selection instead of repainting two controls. Connection cells contain one accessible health icon; recovery remains available without duplicate status text. Its background and controls match Posts.
 
+Channel identity uses a saved-name line followed by one compact metadata line
+containing the available username and provider ID. `ChannelCopyValues` composes
+shared link-style `Button` controls: the values themselves copy their raw text,
+without separate icon buttons, through the existing clipboard helper and
+success/error toast. Values truncate without wrapping, so detecting a username
+does not add another row or change directory density. Keyboard focus and the
+shared coarse-pointer targets remain intact.
+
 Connection cards stack platform identity above saved-account status and connection actions on phones. The connection dialog uses one outer native scroller at narrow widths; its platform list gets its own bounded scroller only when the panel has room.
 
 `BulkSelectionBar` owns the inverse-ink floating pill, separators, count, action icon/label, and icon-only Deselect. Callers own selection, confirmation, and mutations. Select-all is visually checked only when the entire visible collection is selected. Partial selection stays unchecked while the pill reports the real count. Confirm a stable batch; remove successful targets and retain failures for retry.

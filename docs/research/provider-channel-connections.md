@@ -37,6 +37,14 @@ single-entry `data` array, with `access_token`, app-scoped `user_id`, and grante
 `permissions`. `force_reauth=true` lets users authenticate another professional
 account rather than silently reusing the browser's Instagram session.
 
+Live verification on 2026-10-22 exposed another contract difference: the token
+response supplied `permissions` as an array, with all four configured permissions
+granted. The string-only decoder incorrectly raised `instagram_permissions_missing`
+after the token exchange had succeeded. Decode both this live array shape and
+Meta's documented comma-separated string; array entries must be non-empty bounded
+strings and every configured permission remains required. Do not bypass the grant
+check or disable engagement to work around the representation difference.
+
 The [Instagram Login getting-started contract](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/get-started)
 distinguishes `id` (app-scoped identity) from `user_id` (professional account ID,
 also used by webhooks). It documents `Business` and `Media_Creator` account types
@@ -147,3 +155,11 @@ The [passing full-gate run](https://github.com/MeltiplyOrg/meltiply/actions/runs
 at `ce7a9a2d6313eee1b8a16e5bc9215fc92bdf843c` passed all five connection smoke
 flows, the self-hosted script type-check, and `bun run cloudflare:check`.
 No live third-party OAuth credentials or consent sessions were used.
+
+The [2026-10-22 full-gate run](https://github.com/MeltiplyOrg/meltiply/actions/runs/39716428009)
+at `55ccd63` passed the corrected Instagram grant regression tests, all five
+connection lifecycles with real SQLite state and PostgreSQL persistence,
+`bun run cloudflare:check`, and the focused assignment/navigation browser journey.
+The connection smoke now uses Instagram's observed permission-array format.
+External provider HTTP responses remain controlled in that smoke; this is not
+a claim that a fresh live Instagram connection completed after the patch.

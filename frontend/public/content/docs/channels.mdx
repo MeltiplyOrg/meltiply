@@ -66,11 +66,16 @@ Each account row shows:
 
 | Column        | What it contains                                                                                                            |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Account       | Avatar or initials, saved name, and available username/provider ID with copy controls.                                      |
+| Account       | Avatar or initials, saved name, and one compact line of available username/provider ID. Click either value to copy it.      |
 | Platform      | The provider's mark and name.                                                                                               |
 | Brand Profile | The owning profile, or Unknown profile when it no longer resolves.                                                          |
 | Connection    | One health icon. Its accessible name and tooltip expose the status; connections needing attention provide recovery actions. |
 | Settings      | The account's settings action, including permissions, publishing support, owning profile, and disconnect controls.          |
+
+Click a username or provider ID directly to copy its raw value. A toast confirms
+the copy; if clipboard access fails, it explains how to copy manually. These text
+actions also work with the keyboard. Accounts retain the same compact layout
+whether or not a username is available.
 
 ### Search and filters
 

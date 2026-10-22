@@ -83,13 +83,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
-      - name: Restore Bun downloads
-        uses: actions/cache@v5
-        with:
-          path: ~/.bun/install/cache
-          key: bun-bench-${{ runner.os }}-${{ runner.arch }}-1.4.2-${{ hashFiles('candidate/bun.lock', 'candidate/bunfig.toml', 'candidate/package.json') }}
-          restore-keys: |
-            bun-bench-${{ runner.os }}-${{ runner.arch }}-1.4.2-
       - name: Install both revisions
         run: |
           (cd candidate && bun install --frozen-lockfile)

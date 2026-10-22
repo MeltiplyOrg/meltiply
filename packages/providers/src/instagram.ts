@@ -495,8 +495,9 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
      * ig_exchange_token to a long-lived token, then reads the authorized Business or
      * Creator profile. The token's app-scoped ID must match `id`; the connection
      * retains `user_id`, Instagram's professional account ID used for publishing
-     * and webhooks. Rejects malformed profiles or incomplete explicit permission
-     * grants; retains the long-lived token as its own refresh token.
+     * and webhooks. Accepts permissions as Meta's live array or documented
+     * comma-separated string, rejecting malformed lists or incomplete grants;
+     * retains the long-lived token as its own refresh token.
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -518,10 +519,21 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       const exchangedAccountId = providerIdentifier(String(shortBody?.user_id ?? ""));
       if (!shortToken || !exchangedAccountId) throw malformed();
       if (shortBody.permissions !== undefined) {
-        const permissions = boundedString(shortBody.permissions, 4_096)
-          ?.split(",")
-          .map((scope) => scope.trim());
-        if (!permissions || configuredScopes.some((scope) => !permissions.includes(scope))) {
+        let permissions: (string | undefined)[] | undefined;
+        if (Array.isArray(shortBody.permissions)) {
+          if (shortBody.permissions.length <= 32) {
+            permissions = shortBody.permissions.map((scope: unknown) => boundedString(scope, 128));
+          }
+        } else {
+          permissions = boundedString(shortBody.permissions, 4_096)
+            ?.split(",")
+            .map((scope) => scope.trim());
+        }
+        if (
+          !permissions ||
+          permissions.some((scope) => !scope) ||
+          configuredScopes.some((scope) => !permissions.includes(scope))
+        ) {
           throw new ProviderAdapterError(
             classifyProviderFailure({ code: "instagram_permissions_missing", status: 403 }),
           );

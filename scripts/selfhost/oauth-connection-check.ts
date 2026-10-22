@@ -46,7 +46,7 @@ const providerFetch: typeof fetch = async (input, init = {}) => {
         {
           access_token: "ig-short",
           user_id: `scoped-${nonce}`,
-          permissions: instagramScopes.join(","),
+          permissions: instagramScopes,
         },
       ],
     });

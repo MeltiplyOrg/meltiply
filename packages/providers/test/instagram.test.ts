@@ -97,74 +97,84 @@ describe("createInstagramAdapter", () => {
     ).toThrow("does not match configuration");
   });
 
-  it("exchanges a code for a long-lived professional account token", async () => {
-    const providerCalls = sequence(
-      (url, init) => {
-        expect(url.origin).toBe("https://api.instagram.com");
-        expect(init.method).toBe("POST");
-        expect(String(init.body)).toContain("client_secret=instagram-client-secret");
-        return json({
-          data: [
-            {
-              access_token: "short-secret",
-              user_id: "12345",
-              permissions:
-                "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_comments,instagram_business_manage_insights",
-            },
-          ],
-        });
-      },
-      (url) => {
-        expect(url.searchParams.get("grant_type")).toBe("ig_exchange_token");
-        expect(url.searchParams.get("access_token")).toBe("short-secret");
-        return json({
-          access_token: "long-secret",
-          expires_in: 5_184_000,
-          token_type: "bearer",
-        });
-      },
-      (url, init) => {
-        expect(url.pathname).toBe("/v25.0/me");
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer long-secret");
-        return json({
-          data: [
-            {
-              account_type: "Business",
-              id: "12345",
-              user_id: "17841400000098765",
-              name: "Creator Real Name",
-              profile_picture_url: "https://cdn.example/avatar.jpg",
-              username: "creator",
-            },
-          ],
-        });
-      },
-    );
+  it.each(["string", "array"] as const)(
+    "exchanges a professional account grant with $0 permissions",
+    async (permissionFormat) => {
+      const providerCalls = sequence(
+        (url, init) => {
+          expect(url.origin).toBe("https://api.instagram.com");
+          expect(init.method).toBe("POST");
+          expect(String(init.body)).toContain("client_secret=instagram-client-secret");
+          return json({
+            data: [
+              {
+                access_token: "short-secret",
+                user_id: "12345",
+                permissions:
+                  permissionFormat === "array"
+                    ? [
+                        "instagram_business_basic",
+                        "instagram_business_content_publish",
+                        "instagram_business_manage_comments",
+                        "instagram_business_manage_insights",
+                      ]
+                    : "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_comments,instagram_business_manage_insights",
+              },
+            ],
+          });
+        },
+        (url) => {
+          expect(url.searchParams.get("grant_type")).toBe("ig_exchange_token");
+          expect(url.searchParams.get("access_token")).toBe("short-secret");
+          return json({
+            access_token: "long-secret",
+            expires_in: 5_184_000,
+            token_type: "bearer",
+          });
+        },
+        (url, init) => {
+          expect(url.pathname).toBe("/v25.0/me");
+          expect(new Headers(init.headers).get("Authorization")).toBe("Bearer long-secret");
+          return json({
+            data: [
+              {
+                account_type: "Business",
+                id: "12345",
+                user_id: "17841400000098765",
+                name: "Creator Real Name",
+                profile_picture_url: "https://cdn.example/avatar.jpg",
+                username: "creator",
+              },
+            ],
+          });
+        },
+      );
 
-    await expect(
-      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-        code: "authorization-code",
-        codeVerifier: "unused-by-instagram",
-        redirectUri,
-      }),
-    ).resolves.toEqual({
-      accessToken: "long-secret",
-      account: {
-        avatarUrl: "https://cdn.example/avatar.jpg",
-        displayName: "Creator Real Name",
-        id: "17841400000098765",
-        username: "creator",
-      },
-      expiresAt: "2026-09-17T00:00:00.000Z",
-      refreshToken: "long-secret",
-      scopes: [
-        "instagram_business_basic",
-        "instagram_business_content_publish",
-        "instagram_business_manage_comments",
-        "instagram_business_manage_insights",
-      ],
-    });
-  });
+      await expect(
+        adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+          code: "authorization-code",
+          codeVerifier: "unused-by-instagram",
+          redirectUri,
+        }),
+      ).resolves.toEqual({
+        accessToken: "long-secret",
+        account: {
+          avatarUrl: "https://cdn.example/avatar.jpg",
+          displayName: "Creator Real Name",
+          id: "17841400000098765",
+          username: "creator",
+        },
+        expiresAt: "2026-09-17T00:00:00.000Z",
+        refreshToken: "long-secret",
+        scopes: [
+          "instagram_business_basic",
+          "instagram_business_content_publish",
+          "instagram_business_manage_comments",
+          "instagram_business_manage_insights",
+        ],
+      });
+    },
+  );
 
   it.each([
     { account_type: "Media_Creator", id: "12345", user_id: "17841400000098765", valid: true },
@@ -195,14 +205,26 @@ describe("createInstagramAdapter", () => {
     },
   );
 
-  it("refuses a partial Instagram publishing grant before upgrading its token", async () => {
+  it.each([
+    { permissions: "instagram_business_basic" },
+    { permissions: ["instagram_business_basic"] },
+    {
+      permissions: [
+        "instagram_business_basic",
+        "instagram_business_content_publish",
+        "instagram_business_manage_comments",
+        "instagram_business_manage_insights",
+        null,
+      ],
+    },
+  ])("refuses incomplete or malformed Instagram grants: %j", async ({ permissions }) => {
     const providerCalls = sequence(() =>
       json({
         data: [
           {
             access_token: "short-secret",
             user_id: "12345",
-            permissions: "instagram_business_basic",
+            permissions,
           },
         ],
       }),

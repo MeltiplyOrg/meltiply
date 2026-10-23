@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import {
   Bar,
@@ -37,10 +37,10 @@ const GROUPINGS = ["day", "week", "month"] as const;
 type Grouping = (typeof GROUPINGS)[number];
 
 /**
- * View-change timing for chart marks. One chart stays mounted while the
- * previously displayed shape is sampled onto the destination's buckets and
- * eased into place; this is the shared length for every chart that offers a
- * view mode. Reduced motion renders the destination immediately instead.
+ * View-change timing for chart marks. Bars FLIP from the previous view's
+ * rendered geometry; the line chart samples the previous curve onto the new
+ * buckets and eases its values. Both use this one length, and reduced motion
+ * renders the destination immediately instead.
  */
 const CHART_MORPH_MS = 360;
 
@@ -232,50 +232,144 @@ function blendRows(
   });
 }
 
+/** One morph: the view whose rows are on screen, and those rows. */
+interface MorphState {
+  rows: ChartRow[];
+  view: Grouping;
+}
+
 /**
  * Morphs chart rows between view modes instead of swapping them.
  *
  * Recharts renders one mounted chart; this hook supplies the intermediate
  * geometry, sampling the previous shape onto the new bucket positions and
- * easing the values across {@link CHART_MORPH_MS}. A change that is not a view
+ * easing the values across {@link CHART_MORPH_MS}. The first frame is derived
+ * during the render that introduces the new view, so the chart never paints the
+ * previous grouping against the destination axis. A change that is not a view
  * change (range, filters) renders immediately, an interrupted change continues
  * from what is on screen, and reduced motion skips the interpolation.
  */
 function useMorphedRows(target: readonly ChartRow[], view: Grouping, enabled: boolean): ChartRow[] {
-  const [rows, setRows] = useState<ChartRow[]>(() => [...target]);
-  const displayedRef = useRef<ChartRow[]>([...target]);
-  const viewRef = useRef(view);
+  const [state, setState] = useState<MorphState>(() => ({ rows: [...target], view }));
+  const changing = state.view !== view;
+  // Pure first frame for the destination view; `null` once the view is committed.
+  const start = changing ? (enabled ? morphStart(state.rows, target) : [...target]) : null;
+  const frameRef = useRef(0);
+
+  useEffect(() => () => cancelAnimationFrame(frameRef.current), []);
 
   useEffect(() => {
-    const changedView = viewRef.current !== view;
-    viewRef.current = view;
-    const previous = displayedRef.current;
-    displayedRef.current = [...target];
-    if (!changedView || !enabled || previous.length === 0) {
-      setRows([...target]);
+    if (start === null) return;
+    if (!enabled) {
+      setState({ rows: [...target], view });
       return;
     }
-    const start = morphStart(previous, target);
-    const begin = performance.now();
-    let frame = 0;
+    cancelAnimationFrame(frameRef.current);
+    let begin = 0;
     const step = (now: number) => {
-      const progress = Math.min(1, (now - begin) / CHART_MORPH_MS);
+      // The first callback starts the clock: a rAF timestamp can predate a
+      // `performance.now()` read from the effect that scheduled it.
+      if (begin === 0) begin = now;
+      const progress = Math.min(1, Math.max(0, (now - begin) / CHART_MORPH_MS));
       const eased = progress < 0.5 ? 2 * progress * progress : 1 - (-2 * progress + 2) ** 2 / 2;
       const next = progress >= 1 ? [...target] : blendRows(start, target, eased);
-      displayedRef.current = next;
-      setRows(next);
-      if (progress < 1) frame = requestAnimationFrame(step);
+      console.log("morphFrame", Math.round(progress * 1000) / 10, Math.round(now - begin));
+      setState({ rows: next, view });
+      if (progress < 1) frameRef.current = requestAnimationFrame(step);
     };
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [target, view, enabled]);
+    frameRef.current = requestAnimationFrame(step);
+  }, [start, target, enabled, view]);
 
-  return rows;
+  return start ?? state.rows;
 }
 
-/** Sum of the stacked series on one row, for a stable value-axis ceiling. */
-function stackedTotal(row: ChartRow, fields: readonly string[]): number {
-  return fields.reduce((sum, field) => sum + Number(row[field] ?? 0), 0);
+/** One rendered bar segment: its element and viewport geometry. */
+interface BarSegment {
+  element: SVGPathElement;
+  rect: { height: number; left: number; top: number; width: number };
+}
+
+/**
+ * Reads the rendered stacked bars grouped into columns (one per time bucket),
+ * ordered left to right with each stack ordered bottom to top. Geometry comes
+ * from the live DOM so a capture taken mid-animation reflects what is on
+ * screen, not the last settled frame.
+ */
+function readBarColumns(root: HTMLElement): BarSegment[][] {
+  const columns = new Map<number, BarSegment[]>();
+  for (const element of root.querySelectorAll<SVGPathElement>(".recharts-bar-rectangle path")) {
+    const box = element.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) continue;
+    const key = Math.round(box.left);
+    const column = columns.get(key) ?? [];
+    column.push({
+      element,
+      rect: { height: box.height, left: box.left, top: box.top, width: box.width },
+    });
+    columns.set(key, column);
+  }
+  return [...columns.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, column]) => column.sort((left, right) => left.rect.top - right.rect.top));
+}
+
+/**
+ * Morphs freshly rendered bars from the previous view's geometry.
+ *
+ * The chart renders the destination once; each new column borrows the column
+ * nearest its position in the previous view and each segment borrows the
+ * nearest segment of that column. A FLIP transform then travels from that
+ * start box to the rendered destination, so days merge into weeks (and split
+ * back) without a React render per frame. Reduced motion skips the effect.
+ */
+function morphBarColumns(
+  root: HTMLElement,
+  previous: readonly BarSegment[][],
+  reduceMotion: boolean,
+): number {
+  if (reduceMotion || previous.length === 0) return 0;
+  const next = readBarColumns(root);
+  // Wait for the destination marks: Recharts publishes its new bars after the
+  // data change, so the container is observed until the column geometry moves.
+  const previousWidth = previous[0]?.[0]?.rect.width ?? 0;
+  const nextWidth = next[0]?.[0]?.rect.width ?? 0;
+  if (next.length === 0 || nextWidth === previousWidth) return 0;
+  let applied = 0;
+  for (const [columnIndex, column] of next.entries()) {
+    const sourceIndex =
+      next.length > 1 ? Math.round((columnIndex / (next.length - 1)) * (previous.length - 1)) : 0;
+    const source = previous[sourceIndex];
+    if (!source) continue;
+    for (const [segmentIndex, segment] of column.entries()) {
+      const from = source[Math.min(segmentIndex, source.length - 1)];
+      if (!from) continue;
+      const { left, top, width, height } = segment.rect;
+      const scaleX = from.rect.width / width;
+      const scaleY = from.rect.height / height;
+      const translateX = from.rect.left - left;
+      const translateY = from.rect.top - top;
+      if (
+        Math.abs(scaleX - 1) < 0.01 &&
+        Math.abs(scaleY - 1) < 0.01 &&
+        Math.abs(translateX) < 0.5 &&
+        Math.abs(translateY) < 0.5
+      )
+        continue;
+      segment.element.style.transformBox = "fill-box";
+      segment.element.style.transformOrigin = "0 0";
+      applied += 1;
+      segment.element.animate(
+        [
+          {
+            transform: `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`,
+          },
+          { transform: "translate(0px, 0px) scale(1, 1)" },
+        ],
+        { duration: CHART_MORPH_MS, easing: "ease-in-out", fill: "none" },
+      );
+    }
+  }
+  return applied;
 }
 
 /** Stacked publication counts per time bucket and Platform, morphing on grouping changes. */
@@ -290,23 +384,33 @@ export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboar
     () => groupSeries(dashboard.series, grouping, language),
     [dashboard.series, grouping, language],
   );
-  const rows = useMorphedRows(buckets, grouping, !reduceMotion);
-  // The value axis must cover both ends of the morph: the previous grouping's
-  // buckets supply the sampled start, so a coarse-to-fine change cannot clip the
-  // taller starting bars while they shrink into the new scale.
-  const previousGroupingRef = useRef(grouping);
-  const startBuckets = useMemo(
-    () => groupSeries(dashboard.series, previousGroupingRef.current, language),
-    [dashboard.series, language, grouping],
-  );
-  useEffect(() => {
-    previousGroupingRef.current = grouping;
-  }, [grouping]);
-  const postsMax = Math.max(
-    1,
-    ...buckets.map((row) => stackedTotal(row, platforms)),
-    ...startBuckets.map((row) => stackedTotal(row, platforms)),
-  );
+  const chartRef = useRef<HTMLDivElement>(null);
+  const capturedBars = useRef<BarSegment[][]>([]);
+
+  useLayoutEffect(() => {
+    const root = chartRef.current;
+    const previous = capturedBars.current;
+    capturedBars.current = [];
+    if (!root || previous.length === 0 || reduceMotion) return;
+    // Recharts publishes the new bars after the data change, so a single
+    // layout read would still see the old marks. Observe until the destination
+    // geometry appears, then morph before the next paint. The fallback timeout
+    // stops observing if the chart never changes (e.g., an empty range).
+    const observer = new MutationObserver(() => {
+      if (morphBarColumns(root, previous, reduceMotion) > 0) observer.disconnect();
+    });
+    observer.observe(root, { childList: true, subtree: true });
+    const frame = requestAnimationFrame(() => {
+      if (morphBarColumns(root, previous, reduceMotion) > 0) observer.disconnect();
+    });
+    const timeout = window.setTimeout(() => observer.disconnect(), 600);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+    };
+  }, [grouping, reduceMotion]);
+
   if (buckets.length === 0)
     return <EmptyInsight message={t("No published posts in this range.")} />;
   return (
@@ -315,20 +419,22 @@ export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboar
       description={t("Publishing consistency by platform.")}
     >
       <div className="mb-2 flex justify-end">
-        <GroupingControl grouping={grouping} onChange={setGrouping} />
+        <GroupingControl
+          grouping={grouping}
+          onChange={(next) => {
+            if (next === grouping) return;
+            const root = chartRef.current;
+            capturedBars.current = root ? readBarColumns(root) : [];
+            setGrouping(next);
+          }}
+        />
       </div>
-      <div className="h-64">
+      <div ref={chartRef} className="h-64">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={rows} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
+          <BarChart data={buckets} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" />
             <XAxis dataKey="label" tickLine={false} axisLine={false} />
-            <YAxis
-              allowDecimals={false}
-              tickLine={false}
-              axisLine={false}
-              width={32}
-              domain={[0, postsMax]}
-            />
+            <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} />
             <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--hover)" }} />
             <Legend />
             {platforms.map((platform) => (

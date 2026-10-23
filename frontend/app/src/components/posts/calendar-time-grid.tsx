@@ -271,10 +271,10 @@ export function CalendarTimeGrid({
                             onClick={() => onViewDetails(post.id)}
                             aria-label={`${slot ? `${t("Filled slot")} · ` : ""}${caption} · ${time} · ${tStatus(status)}`}
                             className={cn(
-                              "absolute top-(--event-top) left-(--event-left) z-10 h-12 w-(--event-width) min-w-0 flex-col items-start justify-start gap-0.5 overflow-hidden rounded-control border border-accent/20 bg-accent-tint px-1.5 py-1 text-left text-xs hover:bg-hover focus-visible:z-30",
-                              status === "published" && "border-green/20 bg-green-tint",
+                              "absolute top-(--event-top) left-(--event-left) z-10 h-12 w-(--event-width) min-w-0 flex-col items-start justify-start gap-0.5 overflow-hidden rounded-control border border-accent/20 bg-accent-tint-solid px-1.5 py-1 text-left text-xs hover:brightness-95 focus-visible:z-30",
+                              status === "published" && "border-green/20 bg-green-tint-solid",
                               (status === "failed" || status === "needs_reconciliation") &&
-                                "border-red/20 bg-red-tint",
+                                "border-red/20 bg-red-tint-solid",
                             )}
                             style={
                               {

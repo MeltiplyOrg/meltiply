@@ -78,6 +78,7 @@ function QueueEditor({
   const create = useCreateQueue(scope);
   const update = useUpdateQueue(scope);
   const [name, setName] = useState(queue?.name ?? "");
+  const [timezonePanelOpen, setTimezonePanelOpen] = useState(false);
   const [timezone, setTimezone] = useState(
     queue?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
   );
@@ -116,7 +117,9 @@ function QueueEditor({
     >
       <CenterDialogContent
         onEscapeKeyDown={(event) => {
-          if (busy) event.preventDefault();
+          // The timezone panel owns Escape while open; Radix listens on the
+          // document, so the dialog must decline the same keypress.
+          if (busy || timezonePanelOpen) event.preventDefault();
         }}
         onInteractOutside={(event) => {
           if (busy) event.preventDefault();
@@ -146,67 +149,74 @@ function QueueEditor({
                 maxLength={100}
               />
             </label>
-            <QueueTimezonePicker value={timezone} onChange={setTimezone} disabled={busy} />
+            <QueueTimezonePicker
+              value={timezone}
+              onChange={setTimezone}
+              onOpenChange={setTimezonePanelOpen}
+              disabled={busy}
+            />
             <p className="text-xs text-ink-3">
               {t(
                 "Use an IANA timezone, for example America/New_York. Nonexistent DST slots are skipped; repeated times use the later occurrence.",
               )}
             </p>
             <div className="space-y-2" role="group" aria-label={t("Weekly slots")}>
-              {slots.map((slot, index) => (
-                <div key={slot.key} className="flex min-w-0 flex-wrap items-end gap-2">
-                  <label className="min-w-32 flex-1 text-xs">
-                    {t("Weekday {number}", { number: index + 1 })}
-                    <Select
-                      value={String(slot.weekday)}
-                      onValueChange={(value) =>
-                        setSlots((previous) =>
-                          previous.map((entry) =>
-                            entry.key === slot.key ? { ...entry, weekday: Number(value) } : entry,
-                          ),
-                        )
+              <div className="max-h-72 space-y-2 overflow-y-auto overscroll-contain pr-1">
+                {slots.map((slot, index) => (
+                  <div key={slot.key} className="flex min-w-0 flex-wrap items-end gap-2">
+                    <label className="min-w-32 flex-1 text-xs">
+                      {t("Weekday {number}", { number: index + 1 })}
+                      <Select
+                        value={String(slot.weekday)}
+                        onValueChange={(value) =>
+                          setSlots((previous) =>
+                            previous.map((entry) =>
+                              entry.key === slot.key ? { ...entry, weekday: Number(value) } : entry,
+                            ),
+                          )
+                        }
+                      >
+                        <SelectTrigger aria-label={t("Weekday {number}", { number: index + 1 })}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {weekdayLabels.map((day, weekday) => (
+                            <SelectItem key={day} value={String(weekday)}>
+                              {day}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </label>
+                    <div className="min-w-28 flex-1">
+                      <TimeOfDayField
+                        label={t("Slot time {number}", { number: index + 1 })}
+                        value={slot.time}
+                        disabled={busy}
+                        required
+                        onChange={(time) =>
+                          setSlots((previous) =>
+                            previous.map((entry) =>
+                              entry.key === slot.key ? { ...entry, time } : entry,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={slots.length === 1}
+                      onClick={() =>
+                        setSlots((previous) => previous.filter((entry) => entry.key !== slot.key))
                       }
+                      aria-label={t("Remove slot {number}", { number: index + 1 })}
                     >
-                      <SelectTrigger aria-label={t("Weekday {number}", { number: index + 1 })}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {weekdayLabels.map((day, weekday) => (
-                          <SelectItem key={day} value={String(weekday)}>
-                            {day}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <div className="min-w-28 flex-1">
-                    <TimeOfDayField
-                      label={t("Slot time {number}", { number: index + 1 })}
-                      value={slot.time}
-                      disabled={busy}
-                      required
-                      onChange={(time) =>
-                        setSlots((previous) =>
-                          previous.map((entry) =>
-                            entry.key === slot.key ? { ...entry, time } : entry,
-                          ),
-                        )
-                      }
-                    />
+                      {t("Remove")}
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={slots.length === 1}
-                    onClick={() =>
-                      setSlots((previous) => previous.filter((entry) => entry.key !== slot.key))
-                    }
-                    aria-label={t("Remove slot {number}", { number: index + 1 })}
-                  >
-                    {t("Remove")}
-                  </Button>
-                </div>
-              ))}
+                ))}
+              </div>
               <Button
                 type="button"
                 variant="outline"

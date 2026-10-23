@@ -92,6 +92,11 @@
   --green-tint: color-mix(in srgb, var(--green) 11%, transparent);
   --orange-tint: color-mix(in srgb, var(--orange) 12%, transparent);
   --red-tint: color-mix(in srgb, var(--red) 10%, transparent);
+  /* Opaque twins for chips laid over a canvas (the hourly grid): the
+     translucent tints above would let hour rules show through the chip. */
+  --accent-tint-solid: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  --green-tint-solid: color-mix(in srgb, var(--green) 11%, var(--surface));
+  --red-tint-solid: color-mix(in srgb, var(--red) 10%, var(--surface));
   --overlay: #181613;
   --ink-inverse: #ffffff;
 

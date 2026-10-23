@@ -85,9 +85,22 @@ instead of unreadably narrow Post chips; selecting a date/count opens its Week.
 `QueueTimezonePicker` owns Queue timezone selection: the finite browser IANA
 catalog plus `UTC` and the saved alias, ranked by substring then ordered
 character gaps, so `ktm` finds Asia/Katmandu and `yk` finds Reykjavik or Yakutsk.
-It composes the shared Popover, Input, Button and menu vocabulary with React
-Aria's keyboard listbox; search never commits, and choosing an identifier closes
-the panel and returns focus to the trigger.
+The panel renders **inline** under its trigger, not in a portal: a portalled list
+inside a modal dialog has its wheel events cancelled by the dialog's scroll lock
+and cannot scroll. It composes the shared menu surface, Input, Button and React
+Aria's keyboard listbox, holds a fixed 240px list that scrolls inside the dialog,
+and centers the saved zone when it opens. Search never commits (Enter in the
+search field must not submit the Queue form), choosing an identifier closes the
+panel, and Escape belongs to the panel while it is open — the dialog declines the
+same keypress so one layer closes at a time.
+
+Week chips paint over the hourly canvas, so they use the opaque
+`--accent-tint-solid`/`--green-tint-solid`/`--red-tint-solid` twins rather than the
+translucent tints; otherwise the hour rules show through the chip.
+
+The Queue editor bounds its Weekly slots list (`max-h-72`, its own scroll) so a
+plan with many slots scrolls inside the dialog instead of stretching it; `Add
+slot` sits below the scroller and stays reachable.
 
 `calendarSlots` projects the validated weekly plan onto the visible civil days
 for display only, applying the allocator's rules: nonexistent DST occurrences are

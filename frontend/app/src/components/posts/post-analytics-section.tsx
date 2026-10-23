@@ -21,13 +21,13 @@ import { postAnalyticsColumns } from "./post-view-options";
 import { postAnalyticsHistory, type PostAnalyticsPoint } from "./post-analytics-history";
 
 const ENGAGEMENT = [
-  { key: "likes", label: "Likes", color: "var(--accent)", dash: undefined },
-  { key: "comments", label: "Comments", color: "var(--green)", dash: "5 3" },
-  { key: "shares", label: "Shares", color: "var(--orange)", dash: "2 3" },
+  { key: "likes", color: "var(--accent)", dash: undefined },
+  { key: "comments", color: "var(--green)", dash: "5 3" },
+  { key: "shares", color: "var(--orange)", dash: "2 3" },
 ] as const;
 const EXPOSURE = [
-  { key: "reach", label: "Reach", color: "var(--accent)", dash: undefined },
-  { key: "impressions", label: "Impressions", color: "var(--green)", dash: "5 3" },
+  { key: "reach", color: "var(--accent)", dash: undefined },
+  { key: "impressions", color: "var(--green)", dash: "5 3" },
 ] as const;
 
 /**
@@ -46,6 +46,7 @@ function PostTimeline({
   series: readonly ((typeof ENGAGEMENT)[number] | (typeof EXPOSURE)[number])[];
 }) {
   const { t, language } = useI18n();
+  const labels = new Map(postAnalyticsColumns(t).map((column) => [column.id, column.name]));
   const withinTwoDays = (data.at(-1)?.timestamp ?? 0) - (data[0]?.timestamp ?? 0) < 172_800_000;
   const { date, dateTime, count } = useMemo(
     () => ({
@@ -105,11 +106,11 @@ function PostTimeline({
                     }}
                   />
                   <Legend iconType="plainline" />
-                  {series.map(({ key, label, color, dash }) => (
+                  {series.map(({ key, color, dash }) => (
                     <Line
                       key={key}
                       dataKey={key}
-                      name={t(label)}
+                      name={labels.get(key)}
                       type="linear"
                       stroke={color}
                       strokeWidth={2}
@@ -128,9 +129,9 @@ function PostTimeline({
                 <thead>
                   <tr>
                     <th scope="col">{t("Date")}</th>
-                    {series.map(({ key, label }) => (
+                    {series.map(({ key }) => (
                       <th key={key} scope="col">
-                        {t(label)}
+                        {labels.get(key)}
                       </th>
                     ))}
                   </tr>

@@ -100,15 +100,18 @@ export function QueueCalendar({
   function navigate(offset: number, unit: "days" | "months") {
     setAnchor((day) => day.add({ [unit]: offset }));
   }
-  /** Day activation keeps the Queue scope and opens its hourly timeline instead of scheduling or moving work. */
-  function inspectDay(date: Date) {
+  /** Month-date activation opens the containing Week without scheduling or moving work. */
+  function inspectWeek(date: Date) {
     setAnchor(new CalendarDate(date.getFullYear(), date.getMonth() + 1, date.getDate()));
-    setPeriod("day");
+    setPeriod("week");
   }
   return (
-    <section aria-label={t("Queue Posts")} className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section
+      aria-label={t("Queue Posts")}
+      className="flex min-h-120 min-w-0 flex-1 flex-col lg:min-h-0"
+    >
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-3 sm:px-6">
-        <h2 className="min-w-0 break-words text-sm font-semibold">{queue.name}</h2>
+        <h2 className="hidden min-w-0 break-words text-sm font-semibold lg:block">{queue.name}</h2>
         <span className="inline-flex items-center gap-1.5 text-xs text-ink-3">
           <Globe2 className="size-3.5" />
           {queue.timezone}
@@ -166,14 +169,13 @@ export function QueueCalendar({
         onNextMonth={() => navigate(1, "months")}
         onToday={() => setAnchor(toCalendarDate(fromDate(new Date(), queue.timezone)))}
         onWeekNavigate={(offset) => navigate(offset * 7, "days")}
-        onCellClick={inspectDay}
-        onScheduleDate={inspectDay}
+        onCellClick={inspectWeek}
+        onScheduleDate={inspectWeek}
         onViewDetails={setInspectedId}
         canSchedule={false}
         timeline={{
           mode: period,
           onModeChange: setPeriod,
-          onDayNavigate: (offset) => navigate(offset, "days"),
           timeZone: queue.timezone,
           now,
         }}

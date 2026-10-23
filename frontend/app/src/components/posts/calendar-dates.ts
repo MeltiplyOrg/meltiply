@@ -7,7 +7,7 @@ import {
 } from "@internationalized/date";
 import type { CalendarDayCell } from "./types";
 
-export type CalendarPeriod = "month" | "week" | "day";
+export type CalendarPeriod = "month" | "week";
 
 /** Buckets an actual instant by the display timezone, never by the browser's calendar date. */
 export function calendarDateKey(instant: Date | string, timeZone: string): string {
@@ -22,18 +22,8 @@ export function calendarLabelDate(day: CalendarDate): Date {
 
 /** Builds Monday-first visible days and a half-open UTC query window from the Queue's civil timezone. Midnight conversion uses the existing date library, preserving 23/25-hour DST days rather than adding fixed milliseconds. Month includes adjacent dates and at least five rows. */
 export function calendarWindow(anchor: CalendarDate, period: CalendarPeriod, timeZone: string) {
-  const start =
-    period === "month"
-      ? startOfWeek(startOfMonth(anchor), "en-GB")
-      : period === "week"
-        ? startOfWeek(anchor, "en-GB")
-        : anchor;
-  const count =
-    period === "month"
-      ? Math.max(5, getWeeksInMonth(anchor, "en-GB")) * 7
-      : period === "week"
-        ? 7
-        : 1;
+  const start = startOfWeek(period === "month" ? startOfMonth(anchor) : anchor, "en-GB");
+  const count = period === "month" ? Math.max(5, getWeeksInMonth(anchor, "en-GB")) * 7 : 7;
   const days: CalendarDayCell[] = Array.from({ length: count }, (_, index) => {
     const day = start.add({ days: index });
     return {

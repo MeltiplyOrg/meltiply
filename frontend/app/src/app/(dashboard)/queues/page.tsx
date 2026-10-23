@@ -1,9 +1,19 @@
-import { useMemo, useState, type FormEvent } from "react";
-import { Plus } from "lucide-react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
+import { Link } from "react-router";
+import { CalendarClock, MoreHorizontal, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Alert } from "@meltiply/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@meltiply/ui/dropdown-menu";
+import { SidebarGlideHighlight } from "@meltiply/ui/sidebar-glide-highlight";
+import { cn } from "@meltiply/ui/utils";
 import {
   CenterDialog,
   CenterDialogContent,
@@ -37,6 +47,7 @@ import { useI18n } from "@/lib/i18n";
 import { userFacingErrorMessage } from "@/lib/frontend-errors";
 import type { PublishingQueue, Post } from "@/types";
 import { QueueCalendar } from "@/components/posts/queue-calendar";
+import { TimeOfDayField } from "@/components/posts/time-of-day-field";
 
 /** Localizes the Queue contract's Sunday-zero weekdays without interpreting them in the browser's timezone. */
 function queueWeekdayLabels(language: string): string[] {
@@ -175,22 +186,21 @@ function QueueEditor({
                       </SelectContent>
                     </Select>
                   </label>
-                  <label className="min-w-24 flex-1 text-xs">
-                    {t("Slot time {number}", { number: index + 1 })}
-                    <Input
-                      type="time"
-                      required
-                      step={60}
+                  <div className="min-w-28 flex-1">
+                    <TimeOfDayField
+                      label={t("Slot time {number}", { number: index + 1 })}
                       value={slot.time}
-                      onChange={(event) =>
+                      disabled={busy}
+                      required
+                      onChange={(time) =>
                         setSlots((previous) =>
                           previous.map((entry) =>
-                            entry.key === slot.key ? { ...entry, time: event.target.value } : entry,
+                            entry.key === slot.key ? { ...entry, time } : entry,
                           ),
                         )
                       }
                     />
-                  </label>
+                  </div>
                   <Button
                     type="button"
                     variant="ghost"
@@ -236,6 +246,45 @@ function QueueEditor({
   );
 }
 
+/** Queue configuration menu shared by the desktop rail and compact phone selector. Callers retain editor/confirmation state and render it only for authorized administrators; selecting an action never changes the active Queue. */
+function QueueActions({
+  queue,
+  onEdit,
+  onDelete,
+}: {
+  queue: PublishingQueue;
+  onEdit: (queue: PublishingQueue) => void;
+  onDelete: (queue: PublishingQueue) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          data-glide-ignore=""
+          className="relative z-10 size-8 shrink-0"
+          aria-label={t("Actions for {name}", { name: queue.name })}
+        >
+          <MoreHorizontal className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => onEdit(queue)}>
+          <Pencil className="size-3.5" />
+          {t("Edit Queue")}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="text-red focus:text-red" onSelect={() => onDelete(queue)}>
+          <Trash2 className="size-3.5" />
+          {t("Delete Queue")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 type Confirmation =
   | { kind: "delete"; queue: PublishingQueue }
   | { kind: "remove"; queue: PublishingQueue; post: Post };
@@ -243,16 +292,24 @@ type Confirmation =
 /** Calendar-first Queue workspace. Admin configuration remains in the compact plan rail; the selected Queue owns its timezone-aware calendar, while the directory confirms safe removal and retirement. */
 export default function QueuesPage() {
   const { t, language } = useI18n();
-  const weekdayLabels = useMemo(() => queueWeekdayLabels(language), [language]);
   const scope = useSessionScope();
   const scrollRef = useSmoothScrollContainer();
+  const pageScrollRef = useSmoothScrollContainer();
+  const queueListRef = useRef<HTMLDivElement>(null);
   const {
     brandProfiles,
     selectedBrandProfileId,
     setSelectedBrandProfileId,
     canManageConfiguration,
+    isLoading: workspaceLoading,
   } = useWorkspace();
-  const plans = useQueues(scope, selectedBrandProfileId);
+  // Queue configuration always has one owner, without changing the workspace's
+  // aggregate selection merely because this route supplies its initial default.
+  const activeProfileId =
+    brandProfiles.find((profile) => profile.id === selectedBrandProfileId)?.id ??
+    brandProfiles[0]?.id ??
+    null;
+  const plans = useQueues(scope, activeProfileId);
   const queues = plans.data?.pages.flatMap((page) => page.items) ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = queues.find((queue) => queue.id === selectedId) ?? queues[0] ?? null;
@@ -268,6 +325,17 @@ export default function QueuesPage() {
   const remove = useRemovePostFromQueue(scope);
   const retire = useDeleteQueue(scope);
   const busy = remove.isPending || retire.isPending;
+  /** Opens an identity-keyed editor without discarding another Queue's persisted configuration. */
+  function editQueue(queue: PublishingQueue) {
+    setEditor({ queue, key: crypto.randomUUID(), brandProfileId: queue.brand_profile_id });
+    setEditorOpen(true);
+  }
+  /** Opens the existing destructive confirmation; no retirement occurs until confirmed. */
+  function deleteQueue(queue: PublishingQueue) {
+    setConfirmation({ kind: "delete", queue });
+    setActionError(null);
+    setConfirmOpen(true);
+  }
   /** Commits the confirmed scope only; a lifecycle conflict stays visible without discarding the pending confirmation. */
   async function confirm() {
     if (!confirmation || busy) return;
@@ -293,17 +361,21 @@ export default function QueuesPage() {
   return (
     <WorkspaceSurface
       title={t("Queues")}
-      description={t("Reusable weekly publishing plans with durable assigned times.")}
+      description={
+        <span className="hidden sm:inline">
+          {t("Reusable weekly publishing plans with durable assigned times.")}
+        </span>
+      }
       actions={
         canManageConfiguration && (
           <Button
-            disabled={!selectedBrandProfileId}
+            disabled={!activeProfileId}
             onClick={() => {
-              if (!selectedBrandProfileId) return;
+              if (!activeProfileId) return;
               setEditor({
                 queue: null,
                 key: crypto.randomUUID(),
-                brandProfileId: selectedBrandProfileId,
+                brandProfileId: activeProfileId,
               });
               setEditorOpen(true);
             }}
@@ -314,142 +386,159 @@ export default function QueuesPage() {
         )
       }
     >
-      <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 pb-3 sm:px-6">
-        <Select
-          value={selectedBrandProfileId ?? ""}
-          onValueChange={(value) => {
-            setSelectedBrandProfileId(value);
-            setSelectedId(null);
-          }}
-        >
-          <SelectTrigger className="max-w-xs" aria-label={t("Queue Brand Profile")}>
-            <SelectValue placeholder={t("Choose a Brand Profile")} />
-          </SelectTrigger>
-          <SelectContent>
-            {brandProfiles.map((profile) => (
-              <SelectItem key={profile.id} value={profile.id}>
-                {profile.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          variant="ghost"
-          disabled={!selectedBrandProfileId || plans.isFetching}
-          onClick={() => {
-            void plans.refetch();
-          }}
-        >
-          {t("Refresh")}
-        </Button>
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col">
-        {!selectedBrandProfileId ? (
-          <p>{t("Choose a Brand Profile to inspect its Queues.")}</p>
-        ) : plans.isPending ? (
-          <p role="status">{t("Loading Queues…")}</p>
-        ) : plans.error ? (
-          <Alert variant="destructive">{userFacingErrorMessage(plans.error, language)}</Alert>
-        ) : queues.length === 0 ? (
-          <p>{t("No Queues yet. Create a plan, then choose Queue in the composer.")}</p>
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-            <section
-              aria-label={t("Publishing Queues")}
-              ref={scrollRef}
-              data-lenis-prevent=""
-              className="max-h-52 min-h-0 min-w-0 shrink-0 space-y-3 overflow-y-auto border-b border-line p-3 lg:max-h-none lg:w-80 lg:border-b-0 lg:border-r"
+      <div
+        ref={pageScrollRef}
+        data-lenis-prevent=""
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto lg:overflow-hidden"
+      >
+        <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-4 pb-3 sm:px-6">
+          <Select
+            value={activeProfileId ?? ""}
+            onValueChange={(value) => {
+              setSelectedBrandProfileId(value);
+              setSelectedId(null);
+            }}
+          >
+            <SelectTrigger
+              className="min-w-0 flex-1 sm:max-w-xs"
+              aria-label={t("Queue Brand Profile")}
             >
-              {queues.map((queue) => (
-                <article
-                  key={queue.id}
-                  className={
-                    selected?.id === queue.id
-                      ? "space-y-2 rounded-control border border-accent/30 bg-accent-tint p-3"
-                      : "space-y-2 rounded-control border border-line p-3"
-                  }
-                >
-                  <h2 className="break-words text-sm font-semibold">{queue.name}</h2>
-                  <p className="break-words text-xs text-ink-2">{queue.timezone}</p>
-                  <details className="text-xs text-ink-3">
-                    <summary className="cursor-pointer">{t("Weekly slots")}</summary>
-                    <ul className="mt-1 max-h-40 overflow-auto text-xs text-ink-2">
-                      {queue.slots.map((slot) => (
-                        <li key={`${slot.weekday}/${slot.time}`}>
-                          {t("{day} at {time}", {
-                            day: weekdayLabels[slot.weekday]!,
-                            time: slot.time,
-                          })}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      aria-pressed={selected?.id === queue.id}
-                      onClick={() => {
-                        setSelectedId(queue.id);
-                      }}
-                    >
-                      {t("Inspect Posts")}
+              <SelectValue placeholder={t("Brand Profiles")} />
+            </SelectTrigger>
+            <SelectContent>
+              {brandProfiles.map((profile) => (
+                <SelectItem key={profile.id} value={profile.id}>
+                  {profile.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="ghost"
+            aria-label={t("Refresh")}
+            disabled={!activeProfileId || plans.isFetching}
+            onClick={() => {
+              void plans.refetch();
+            }}
+          >
+            <RotateCw className="size-4" />
+            <span className="hidden sm:inline">{t("Refresh")}</span>
+          </Button>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {!activeProfileId ? (
+            <div className="p-4 sm:p-6">
+              {workspaceLoading ? (
+                <p role="status">{t("Loading Queues…")}</p>
+              ) : (
+                <Alert>
+                  {t(
+                    "No Brand Profiles yet. Ask a workspace admin to create one, or use Create Brand Profile if you are an admin.",
+                  )}
+                  {canManageConfiguration && (
+                    <Button asChild variant="outline" className="mt-3">
+                      <Link to="/channels">{t("Channels")}</Link>
                     </Button>
+                  )}
+                </Alert>
+              )}
+            </div>
+          ) : plans.isPending ? (
+            <p className="p-4 sm:p-6" role="status">
+              {t("Loading Queues…")}
+            </p>
+          ) : plans.error ? (
+            <Alert variant="destructive">{userFacingErrorMessage(plans.error, language)}</Alert>
+          ) : queues.length === 0 ? (
+            <p>{t("No Queues yet. Create a plan, then choose Queue in the composer.")}</p>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+              <section
+                aria-label={t("Publishing Queues")}
+                ref={scrollRef}
+                data-lenis-prevent=""
+                className="max-h-52 min-h-0 min-w-0 shrink-0 overflow-y-auto border-b border-line px-4 py-2 lg:max-h-none lg:w-80 lg:border-b-0 lg:border-r lg:px-2.5 lg:py-4"
+              >
+                <h2 className="hidden px-2 pb-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 lg:block">
+                  {t("Publishing Queues")}
+                </h2>
+                {selected && (
+                  <div className="flex min-w-0 items-center gap-2 lg:hidden">
+                    <Select value={selected.id} onValueChange={setSelectedId}>
+                      <SelectTrigger className="min-w-0 flex-1" aria-label={t("Choose a Queue")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {queues.map((queue) => (
+                          <SelectItem key={queue.id} value={queue.id}>
+                            {queue.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     {canManageConfiguration && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            setEditor({
-                              queue,
-                              key: crypto.randomUUID(),
-                              brandProfileId: queue.brand_profile_id,
-                            });
-                            setEditorOpen(true);
-                          }}
-                        >
-                          {t("Edit Queue")}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            setConfirmation({ kind: "delete", queue });
-                            setActionError(null);
-                            setConfirmOpen(true);
-                          }}
-                        >
-                          {t("Delete Queue")}
-                        </Button>
-                      </>
+                      <QueueActions queue={selected} onEdit={editQueue} onDelete={deleteQueue} />
                     )}
                   </div>
-                </article>
-              ))}
-              {plans.hasNextPage && (
-                <Button
-                  variant="outline"
-                  disabled={plans.isFetchingNextPage}
-                  onClick={() => {
-                    void plans.fetchNextPage();
+                )}
+                <div ref={queueListRef} className="relative hidden space-y-1 lg:block">
+                  <SidebarGlideHighlight containerRef={queueListRef} snapThreshold={12} />
+                  {queues.map((queue) => (
+                    <div key={queue.id} className="relative flex min-w-0 items-center gap-1">
+                      <Button
+                        variant={selected?.id === queue.id ? "secondary" : "ghost"}
+                        data-sidebar-item=""
+                        aria-label={queue.name}
+                        aria-pressed={selected?.id === queue.id}
+                        onClick={() => setSelectedId(queue.id)}
+                        className={cn(
+                          "relative z-10 h-auto min-h-11 min-w-0 flex-1 justify-start gap-2.5 px-2 py-2 text-left font-normal",
+                          selected?.id === queue.id ? "hover:bg-secondary" : "hover:bg-transparent",
+                        )}
+                      >
+                        <CalendarClock className="size-4 shrink-0 text-ink-3" />
+                        <span className="min-w-0 space-y-0.5">
+                          <span className="block truncate text-(length:--font-size-control) font-medium">
+                            {queue.name}
+                          </span>
+                          <span className="block truncate text-(length:--font-size-micro) text-ink-3">
+                            {queue.timezone}
+                          </span>
+                        </span>
+                      </Button>
+                      {canManageConfiguration && (
+                        <QueueActions queue={queue} onEdit={editQueue} onDelete={deleteQueue} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {plans.hasNextPage && (
+                  <Button
+                    variant="outline"
+                    disabled={plans.isFetchingNextPage}
+                    onClick={() => {
+                      void plans.fetchNextPage();
+                    }}
+                  >
+                    {t("Load more Queues")}
+                  </Button>
+                )}
+              </section>
+              {selected && (
+                <QueueCalendar
+                  key={`${selected.id}:${selected.timezone}`}
+                  queue={selected}
+                  onRemove={(post) => {
+                    if (!selected) return;
+                    setConfirmation({ kind: "remove", queue: selected, post });
+                    setActionError(null);
+                    setConfirmOpen(true);
                   }}
-                >
-                  {t("Load more Queues")}
-                </Button>
+                />
               )}
-            </section>
-            {selected && (
-              <QueueCalendar
-                key={`${selected.id}:${selected.timezone}`}
-                queue={selected}
-                onRemove={(post) => {
-                  if (!selected) return;
-                  setConfirmation({ kind: "remove", queue: selected, post });
-                  setActionError(null);
-                  setConfirmOpen(true);
-                }}
-              />
-            )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </div>
       {editor && (
         <QueueEditor

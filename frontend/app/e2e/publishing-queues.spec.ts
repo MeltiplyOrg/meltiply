@@ -50,9 +50,17 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
       instant,
     );
     await page.getByRole("option", { name: day, exact: true }).click();
-    await editor
-      .getByLabel(`Slot time ${index + 1}`, { exact: true })
-      .fill(instant.toISOString().slice(11, 16));
+    await editor.getByRole("button", { name: "Choose time", exact: true }).nth(index).click();
+    const timePicker = page.getByRole("dialog", { name: "Choose time", exact: true });
+    await timePicker.getByRole("combobox", { name: "Hour", exact: true }).click();
+    await page
+      .getByRole("option", { name: instant.toISOString().slice(11, 13), exact: true })
+      .click();
+    await timePicker.getByRole("combobox", { name: "Minute", exact: true }).click();
+    await page
+      .getByRole("option", { name: instant.toISOString().slice(14, 16), exact: true })
+      .click();
+    await timePicker.getByRole("button", { name: "Done", exact: true }).click();
   }
   const createdResponse = page.waitForResponse(
     (response) =>
@@ -152,9 +160,8 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   await page.getByRole("combobox", { name: "Queue Brand Profile", exact: true }).click();
   await page.getByRole("option", { name: profileName, exact: true }).click();
   await page
-    .getByRole("article")
-    .filter({ has: page.getByRole("heading", { name: queueName, exact: true }) })
-    .getByRole("button", { name: "Inspect Posts", exact: true })
+    .getByRole("region", { name: "Publishing Queues", exact: true })
+    .getByRole("button", { name: queueName, exact: true })
     .click();
   const memberships = page.getByRole("region", { name: "Queue Posts", exact: true });
   // <section aria-label> is an accessible region; each reserved instant survives reload.
@@ -191,6 +198,30 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
       expect(
         await page.locator("main").evaluate((main) => main.scrollWidth <= main.clientWidth),
       ).toBe(true);
+      if (size === "phone") {
+        await expect(
+          page.getByRole("combobox", { name: "Choose a Queue", exact: true }),
+        ).toHaveText(queueName);
+        await page.getByRole("button", { name: `Actions for ${queueName}`, exact: true }).click();
+        await page.getByRole("menuitem", { name: "Edit Queue", exact: true }).click();
+        const phoneEditor = page.getByRole("dialog", { name: "Edit Queue", exact: true });
+        await phoneEditor.getByRole("button", { name: "Choose time", exact: true }).first().click();
+        const phonePicker = page.getByRole("dialog", { name: "Choose time", exact: true });
+        await phonePicker.getByRole("button", { name: "Done", exact: true }).click();
+        await expect(phonePicker).toBeHidden();
+        await phoneEditor.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(phoneEditor).toBeHidden();
+        await memberships
+          .locator("[data-hour-canvas] button")
+          .filter({
+            has: page.locator(`time[datetime="${queuedPosts[1]!.queue_membership!.assigned_at}"]`),
+          })
+          .click();
+        const phonePost = page.getByRole("dialog", { name: "Queue Post", exact: true });
+        await expect(phonePost).toContainText(`Queue acceptance composition 1 ${queueName}`);
+        await phonePost.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(phonePost).toHaveCount(0);
+      }
       await page.screenshot({
         path: testInfo.outputPath(`queues-${size}-${palette}.png`),
         fullPage: true,

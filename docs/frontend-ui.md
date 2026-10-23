@@ -70,12 +70,17 @@ Posts Table and its Columns menu share `postAnalyticsColumns`: Likes, Cmts, Shrs
 The empty Table message and Create post action belong to the visible viewport outside the wide table body, so they do not disappear offscreen with analytics columns. Calendar navigation is outside its independently scrolling date canvas; horizontal or vertical calendar movement cannot carry Today, period navigation, or Month/Week away.
 
 Queues extends `PostCalendarGridView` rather than introducing a second month grid
-or period toolbar. `CalendarTimeGrid` owns hourly Week/Day geometry and current-time
+or period toolbar. `CalendarTimeGrid` owns hourly Week geometry and current-time
 paint; `QueueCalendar` owns Queue timezone, bounded fully paged reads, its live
 clock, upcoming assignment selection and focused reservation actions. `post-row.ts`
 projects real Post/Channel data for both routes, including frozen Provider content.
 The existing shared Button, SegmentedControl, Tooltip and centered dialog owners
 retain focus, selection, animation and destructive confirmation behavior.
+Desktop Queue navigation uses neutral shared Buttons and `SidebarGlideHighlight`;
+phones use a compact Select, with the same administrator actions in DropdownMenu.
+The Week canvas initially reveals today and keeps its time axis visible during
+horizontal swipes. Phone Month fits all seven dates and uses assignment counts
+instead of unreadably narrow Post chips; selecting a date/count opens its Week.
 
 Post deletion soft-deletes composition and stops only pending delivery; it does not delete platform copies or retained publication history. Both Post and Calendar collection reads exclude soft-deleted Posts, so view switching and reloads cannot reconstruct them from retained Distributions.
 
@@ -120,7 +125,7 @@ Destination cards use 8px padding and gaps, with the display name and platform s
 
 Each Channel's attachment mode uses the canonical `Switch`: off persists a text-only target, on restores inheritance of all current/future Post attachments, and an explicit non-empty attachment subset keeps the switch on. Individual attachment choices remain available. `ProviderPanel` supplies an inline-size container so all six TikTok interaction/disclosure switches share one flat grid: two columns when the panel has room, one on narrow panels, with full-row labels and unchanged creator-availability gates. Provider capability metadata keeps the adapters' canonical caption ceilings even when credentials/live acceptance are absent; publish/connect flags remain false, and the composer does not invent a fallback limit.
 
-`ScheduleDateTime` (`frontend/app/src/components/composer/schedule-date-time.tsx`) shows a compact date button beside one React Aria segmented 24-hour time field, with the browser's time zone underneath. The date button opens a 280px Radix popover containing React DayPicker; coarse pointers get a 328px panel and 44px day targets. The calendar uses only the weeks its month needs. Canonical `Button`/`buttonVariants` and `Input`/`inputVariants` own control styling; the popover reuses the shared menu surface and motion hooks. Keep the popover's Radix release aligned with the drawer's dismissal/focus primitives so Escape closes only the top layer. Libraries own calendar geometry, localization, focus, and hour/minute typing and arrow-key editing. Selecting a date closes the popover and returns focus to its button. Browsing does not commit a date; choosing one preserves time, and changing time preserves the local date. The composer still owns seed/hydration/recovery, local-to-ISO conversion, and submit validation.
+`ScheduleDateTime` (`frontend/app/src/components/composer/schedule-date-time.tsx`) shows a compact date button beside `TimeOfDayField` (`frontend/app/src/components/posts/time-of-day-field.tsx`), with the browser's time zone underneath. The same publishing-feature wall-time editor serves recurring Queue slots; it accepts complete `HH:mm` values without converting timezones and composes React Aria segments with the canonical Input, Popover and Select owners. Disabled slots disable both segmented editing and chooser controls. The date button opens a 280px Radix popover containing React DayPicker; coarse pointers get a 328px panel and 44px day targets. The calendar uses only the weeks its month needs. Canonical `Button`/`buttonVariants` and `Input`/`inputVariants` own control styling; the popover reuses the shared menu surface and motion hooks. Keep the popover's Radix release aligned with the drawer's dismissal/focus primitives so Escape closes only the top layer. Libraries own calendar geometry, localization, focus, and hour/minute typing and arrow-key editing. Selecting a date closes the popover and returns focus to its button. Browsing does not commit a date; choosing one preserves time, and changing time preserves the local date. The composer still owns seed/hydration/recovery, local-to-ISO conversion, and submit validation.
 
 `@meltiply/ui/popover` owns anchored, non-menu form panels, including both scheduler pickers. It portals Radix content with the shared surface/motion hooks, a 6px offset, and 16px collision padding; feature callers own labels, dimensions, and form state rather than importing Radix directly.
 

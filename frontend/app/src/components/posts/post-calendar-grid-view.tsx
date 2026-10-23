@@ -43,11 +43,10 @@ export interface PostCalendarGridViewProps {
   canSchedule: boolean;
   /** Reserves space for the shared bulk bar; selection remains in day details. */
   selectionActive?: boolean;
-  /** Queue calendars control all three periods in their own timezone; Posts retains its existing Month/Week contract. */
+  /** Queue calendars control Month/Week in their own timezone; Posts retains its existing local-time contract. */
   timeline?: {
     mode: CalendarPeriod;
     onModeChange: (mode: CalendarPeriod) => void;
-    onDayNavigate: (offset: number) => void;
     timeZone: string;
     now: Date;
   };
@@ -62,7 +61,7 @@ const PLACEHOLDER_CHIPS = [["chip-1", "chip-2"], ["chip-1"], []] as const;
 
 /**
  * Shared period bar with Today, stepping, a localized heading, and canonical
- * segmented selection. Queue timelines opt into Day; Posts retains Month/Week.
+ * Month/Week selection for Posts and Queue calendars.
  * Navigation callbacks move the caller's civil query anchor, never Post times.
  */
 function CalendarToolbar({
@@ -72,7 +71,6 @@ function CalendarToolbar({
   onToday,
   onPrevious,
   onNext,
-  allowDay = false,
 }: {
   mode: CalendarPeriod;
   onModeChange: (mode: CalendarPeriod) => void;
@@ -80,7 +78,6 @@ function CalendarToolbar({
   onToday: () => void;
   onPrevious: () => void;
   onNext: () => void;
-  allowDay?: boolean;
 }) {
   const { t } = useI18n();
 
@@ -94,13 +91,7 @@ function CalendarToolbar({
           variant="ghost"
           size="icon"
           className="size-7"
-          aria-label={
-            mode === "month"
-              ? t("Previous month")
-              : mode === "week"
-                ? t("Previous week")
-                : t("Previous day")
-          }
+          aria-label={mode === "month" ? t("Previous month") : t("Previous week")}
           onClick={onPrevious}
         >
           <ChevronLeft className="size-4" />
@@ -109,26 +100,25 @@ function CalendarToolbar({
           variant="ghost"
           size="icon"
           className="size-7"
-          aria-label={
-            mode === "month" ? t("Next month") : mode === "week" ? t("Next week") : t("Next day")
-          }
+          aria-label={mode === "month" ? t("Next month") : t("Next week")}
           onClick={onNext}
         >
           <ChevronRight className="size-4" />
         </Button>
       </div>
-      <h2 aria-live="polite" className="mx-1 text-[15px] font-semibold tracking-tight">
+      <h2
+        aria-live="polite"
+        className="order-last w-full text-(length:--font-size-control) font-semibold tracking-tight sm:order-none sm:mx-1 sm:w-auto"
+      >
         {label}
       </h2>
       <div className="ml-auto">
         <SegmentedControl
-          options={allowDay ? (["month", "week", "day"] as const) : (["month", "week"] as const)}
+          options={["month", "week"] as const}
           value={mode}
           onChange={onModeChange}
           label={t("Calendar period")}
-          renderOption={(value) =>
-            value === "month" ? t("Month") : value === "week" ? t("Week") : t("Day")
-          }
+          renderOption={(value) => (value === "month" ? t("Month") : t("Week"))}
         />
       </div>
     </div>
@@ -144,7 +134,7 @@ function CalendarToolbar({
  * current, so crossing month/year boundaries fetches the displayed dates.
  * While `isLoading`, the real month heading, dates, and controls stay in place and
  * only the chips become placeholders.
- * Queue callers provide a timezone, a live clock and controlled Month/Week/Day
+ * Queue callers provide a timezone, a live clock and controlled Month/Week
  * state; their hourly canvas reuses the toolbar and month chips without changing
  * the existing Posts Week layout or its local-time scheduling behavior.
  */
@@ -220,21 +210,14 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
       };
     });
   }, [calendarMonth]);
-  const days =
-    mode === "month"
-      ? calendarDays
-      : mode === "day"
-        ? [{ date: calendarMonth, dayNumber: calendarMonth.getDate(), isCurrentMonth: true }]
-        : weekDays;
+  const days = mode === "month" ? calendarDays : weekDays;
   const today = timeline
     ? calendarDateKey(timeline.now, timeline.timeZone)
     : toLocalDateKey(new Date());
   const label =
     mode === "month"
       ? monthLabel.format(calendarMonth)
-      : mode === "day"
-        ? dateLabel.format(calendarMonth)
-        : `${shortLabel.format(weekDays[0]!.date)} – ${shortLabel.format(weekDays[6]!.date)}, ${weekDays[6]!.date.getFullYear()}`;
+      : `${shortLabel.format(weekDays[0]!.date)} – ${shortLabel.format(weekDays[6]!.date)}, ${weekDays[6]!.date.getFullYear()}`;
 
   return (
     <TooltipProvider>
@@ -247,21 +230,8 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
           onModeChange={timeline?.onModeChange ?? setLocalMode}
           label={label}
           onToday={onToday}
-          onPrevious={() =>
-            mode === "month"
-              ? onPrevMonth()
-              : mode === "day"
-                ? timeline?.onDayNavigate(-1)
-                : onWeekNavigate(-1)
-          }
-          onNext={() =>
-            mode === "month"
-              ? onNextMonth()
-              : mode === "day"
-                ? timeline?.onDayNavigate(1)
-                : onWeekNavigate(1)
-          }
-          allowDay={timeline !== undefined}
+          onPrevious={() => (mode === "month" ? onPrevMonth() : onWeekNavigate(-1))}
+          onNext={() => (mode === "month" ? onNextMonth() : onWeekNavigate(1))}
         />
         {timeline && mode !== "month" ? (
           <CalendarTimeGrid
@@ -272,7 +242,6 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
             timeZone={timeline.timeZone}
             isLoading={isLoading}
             onViewDetails={onViewDetails}
-            onDayClick={onCellClick}
           />
         ) : (
           <div
@@ -282,7 +251,12 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
               selectionActive && "pb-24",
             )}
           >
-            <div className="flex min-h-160 min-w-196 flex-1 flex-col">
+            <div
+              className={cn(
+                "flex flex-1 flex-col",
+                timeline ? "min-w-0 sm:min-h-160 sm:min-w-196" : "min-h-160 min-w-196",
+              )}
+            >
               {mode === "month" && (
                 <div className="grid grid-cols-7 border-b border-line">
                   {weekDays.map((day) => (
@@ -295,7 +269,11 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
               <div
                 className={cn(
                   "grid flex-1 grid-cols-7",
-                  mode === "month" ? "auto-rows-[minmax(112px,1fr)]" : "grid-rows-1",
+                  mode === "month"
+                    ? timeline
+                      ? "auto-rows-min sm:auto-rows-[minmax(112px,1fr)]"
+                      : "auto-rows-[minmax(112px,1fr)]"
+                    : "grid-rows-1",
                 )}
               >
                 {days.map((cell, index) => {
@@ -310,7 +288,11 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                       aria-label={fullDate}
                       className={cn(
                         "group/day relative flex min-w-0 flex-col border-b border-r border-line [&:nth-child(7n)]:border-r-0",
-                        mode === "month" ? "gap-0.75 p-1.5" : "min-h-0",
+                        mode === "month"
+                          ? timeline
+                            ? "gap-0.75 p-1 sm:p-1.5"
+                            : "gap-0.75 p-1.5"
+                          : "min-h-0",
                         mode === "month" && !cell.isCurrentMonth && "bg-inset",
                       )}
                     >
@@ -329,7 +311,9 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                           className={cn(
                             "tabular-nums",
                             mode === "month"
-                              ? "size-5.5 rounded-full text-xs font-medium"
+                              ? timeline
+                                ? "h-auto min-h-16 w-full flex-col gap-1 rounded-control px-0 py-2 text-xs font-medium sm:size-5.5 sm:min-h-0 sm:rounded-full sm:p-0"
+                                : "size-5.5 rounded-full text-xs font-medium"
                               : "size-7 text-xl font-semibold tracking-tight",
                             isToday &&
                               (mode === "month"
@@ -339,6 +323,15 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                           )}
                         >
                           {cell.dayNumber}
+                          {timeline && mode === "month" && !isLoading && dayPosts.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-(length:--font-size-micro) sm:hidden">
+                              <span
+                                className="size-1 shrink-0 rounded-full bg-current"
+                                aria-hidden="true"
+                              />
+                              {dayPosts.length}
+                            </span>
+                          )}
                         </Button>
                         {mode === "week" && (
                           <span className="text-xs text-ink-3">
@@ -370,6 +363,7 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                         className={cn(
                           "flex min-w-0 flex-col",
                           mode === "month" ? "gap-0.75" : "flex-1 gap-1.5 overflow-y-auto p-2",
+                          timeline && mode === "month" && "hidden sm:flex",
                         )}
                       >
                         {isLoading ? (

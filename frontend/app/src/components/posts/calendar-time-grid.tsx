@@ -32,7 +32,7 @@ function eventLanes(posts: PostRow[], timeZone: string) {
   return { placed, lanes: Math.max(1, ends.length) };
 }
 
-/** Hourly Week/Day canvas with independent scrolling, sticky dates, real timestamp chips and a current-time rule only when today is visible. The caller owns the clock and timezone. Initial scroll centers now (or 08:00 for other dates); subsequent clock ticks never steal scroll or focus. */
+/** Hourly Week canvas with independent scrolling, sticky dates/time axis, real timestamp chips and a current-time rule only when today is visible. The caller owns the clock and timezone. Initial scroll centers now and today's column (or 08:00/Monday for other weeks), including on narrow screens; subsequent clock ticks never steal scroll or focus. */
 export function CalendarTimeGrid({
   days,
   posts,
@@ -40,7 +40,6 @@ export function CalendarTimeGrid({
   timeZone,
   isLoading,
   onViewDetails,
-  onDayClick,
 }: {
   days: CalendarDayCell[];
   posts: PostRow[];
@@ -48,7 +47,6 @@ export function CalendarTimeGrid({
   timeZone: string;
   isLoading: boolean;
   onViewDetails: (postId: string) => void;
-  onDayClick: (date: Date) => void;
 }) {
   const { t, tStatus, language } = useI18n();
   const viewport = useRef<HTMLDivElement>(null);
@@ -64,6 +62,7 @@ export function CalendarTimeGrid({
   const todayIndex = days.findIndex((day) => toLocalDateKey(day.date) === today);
   const minute = minuteOfDay(now, timeZone);
   const [initialMinute] = useState(() => (todayIndex >= 0 ? minute : 8 * 60));
+  const [initialDay] = useState(todayIndex);
   useEffect(() => {
     const node = viewport.current;
     if (node) {
@@ -73,8 +72,17 @@ export function CalendarTimeGrid({
           0,
           (initialMinute / 1440) * canvas.offsetHeight - node.clientHeight / 3,
         );
+      const day = canvas?.children[initialDay + 1];
+      if (canvas && initialDay >= 0 && day && node.scrollWidth > node.clientWidth) {
+        node.scrollLeft = Math.max(
+          0,
+          day.getBoundingClientRect().left -
+            canvas.getBoundingClientRect().left -
+            (node.clientWidth - day.clientWidth) / 2,
+        );
+      }
     }
-  }, [initialMinute]);
+  }, [initialMinute, initialDay]);
   const byDay = useMemo(() => {
     const grouped = new Map<string, PostRow[]>();
     for (const post of posts) {
@@ -107,31 +115,34 @@ export function CalendarTimeGrid({
       className="min-h-0 flex-1 overflow-auto overscroll-contain"
       aria-busy={isLoading}
     >
-      <div className={cn("min-w-0", days.length > 1 && "min-w-196")}>
-        <div className="sticky top-0 z-20 flex border-b border-line bg-surface">
-          <div className="w-14 shrink-0 border-r border-line" />
+      <div className="min-w-196">
+        <div className="sticky top-0 z-30 flex border-b border-line bg-surface">
+          <div className="sticky left-0 z-40 w-14 shrink-0 border-r border-line bg-surface" />
           {days.map((day) => {
             const isToday = toLocalDateKey(day.date) === today;
             return (
-              <Button
+              <div
                 key={day.date.toISOString()}
-                variant="ghost"
                 className={cn(
-                  "h-auto min-w-0 flex-1 flex-col gap-0.5 rounded-none border-r border-line py-2 last:border-r-0",
+                  "flex min-w-0 flex-1 flex-col items-center gap-0.5 border-r border-line py-2 last:border-r-0",
                   isToday && "bg-accent-tint text-accent-ink",
                 )}
-                onClick={() => onDayClick(day.date)}
-                aria-label={t("View posts on {date}", { date: fullDate.format(day.date) })}
-                aria-current={isToday ? "date" : undefined}
               >
-                <span className="text-xs font-normal">{weekday.format(day.date)}</span>
-                <span className="text-xl font-semibold tabular-nums">{day.dayNumber}</span>
-              </Button>
+                <span className="text-xs text-ink-3">{weekday.format(day.date)}</span>
+                <time
+                  dateTime={toLocalDateKey(day.date)}
+                  aria-label={fullDate.format(day.date)}
+                  aria-current={isToday ? "date" : undefined}
+                  className="text-xl font-semibold tabular-nums"
+                >
+                  {day.dayNumber}
+                </time>
+              </div>
             );
           })}
         </div>
         <div data-hour-canvas="" className="relative flex h-(--calendar-day-height)">
-          <div className="w-14 shrink-0 border-r border-line bg-surface">
+          <div className="sticky left-0 z-10 w-14 shrink-0 border-r border-line bg-surface">
             {HOURS.map((hour) => (
               <div
                 key={hour}
@@ -211,7 +222,7 @@ export function CalendarTimeGrid({
               data-current-time=""
               role="img"
               aria-label={t("Current time: {time}", { time: timeLabel.format(now) })}
-              className="pointer-events-none absolute inset-x-0 top-(--current-time-top) z-10 flex -translate-y-1/2 items-center text-red"
+              className="pointer-events-none absolute inset-x-0 top-(--current-time-top) z-20 flex -translate-y-1/2 items-center text-red"
               style={
                 {
                   "--current-time-top": `${(minute / 1440) * 100}%`,
@@ -221,7 +232,7 @@ export function CalendarTimeGrid({
             >
               <time
                 dateTime={now.toISOString()}
-                className="w-14 shrink-0 bg-surface pr-1 text-right text-(length:--font-size-micro) font-medium tabular-nums"
+                className="sticky left-0 z-20 w-14 shrink-0 bg-surface pr-1 text-right text-(length:--font-size-micro) font-medium tabular-nums"
               >
                 {timeLabel.format(now)}
               </time>

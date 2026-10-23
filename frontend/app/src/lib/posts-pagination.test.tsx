@@ -74,7 +74,9 @@ describe("Post pagination and browser cache", () => {
     await act(async () => {
       await first.result.current.fetchNextPage();
     });
-    expect(first.result.current.data?.map((post) => post.id)).toEqual(all.map((post) => post.id));
+    await waitFor(() =>
+      expect(first.result.current.data?.map((post) => post.id)).toEqual(all.map((post) => post.id)),
+    );
     expect(first.result.current.hasNextPage).toBe(false);
     await act(async () => {
       await first.result.current.fetchNextPage();
@@ -110,7 +112,8 @@ describe("Post pagination and browser cache", () => {
     await act(async () => {
       await result.current.fetchNextPage();
     });
-    expect(result.current.isFetchNextPageError).toBe(true);
+    // fetchNextPage settles before TanStack's scheduled observer notification.
+    await waitFor(() => expect(result.current.isFetchNextPageError).toBe(true));
     expect(result.current.data?.map((post) => post.id)).toEqual(
       posts(0, 60).map((post) => post.id),
     );
@@ -118,8 +121,10 @@ describe("Post pagination and browser cache", () => {
     await act(async () => {
       await result.current.fetchNextPage();
     });
-    expect(result.current.data?.map((post) => post.id)).toEqual(
-      posts(0, 120).map((post) => post.id),
+    await waitFor(() =>
+      expect(result.current.data?.map((post) => post.id)).toEqual(
+        posts(0, 120).map((post) => post.id),
+      ),
     );
     expect(vi.mocked(listPosts).mock.calls.map(([, params]) => params?.offset)).toEqual([
       0, 60, 60,
@@ -141,8 +146,10 @@ describe("Post pagination and browser cache", () => {
     await act(async () => {
       await result.current.fetchNextPage();
     });
-    expect(result.current.data?.map((post) => post.id)).toEqual(
-      posts(0, 61).map((post) => post.id),
+    await waitFor(() =>
+      expect(result.current.data?.map((post) => post.id)).toEqual(
+        posts(0, 61).map((post) => post.id),
+      ),
     );
   });
 });

@@ -22,9 +22,22 @@ make doctor
 make dev
 ```
 
-`make setup` installs dependencies, creates the ignored root `.env` from [`.env.example`](.env.example), starts PostgreSQL, applies migrations, and seeds local fixtures. Open the URLs printed by `make dev`.
+`make setup` installs dependencies, creates the ignored root `.env` from [`.env.example`](.env.example), fills blank auth/bootstrap/encryption secrets with private random values, starts PostgreSQL, applies migrations, and seeds local fixtures. Existing secret values are preserved on subsequent runs. Open the URLs printed by `make dev`.
 
 Development stays on loopback by default. Set `MELTIPLY_DEV_TUNNEL=1 make dev` only when OAuth or webhook callbacks need a public URL. Tunnel settings and an explicit network-host override are documented in [`.env.example`](.env.example).
+
+There is one application address: `APP_URL` serves the dashboard and `/api/*`.
+Local host/port and public tunnel values are derived automatically. Set it only
+when overriding that origin; `PUBLIC_SITE_URL` is for the separate landing/docs
+site. CORS trusts the app origin automatically, and provider callback/media URLs
+are derived from it. Credentials, provider approvals, and activation flags remain
+explicit.
+
+For existing configurations, replace `FRONTEND_URL`, `PUBLIC_API_URL`,
+`API_BASE_URL`, `BETTER_AUTH_URL`, and `SELFHOST_ORIGIN` with one `APP_URL`.
+The removed keys are not aliases. Restart the stack after migrating; if the
+public host changes, update the registered provider callbacks and verified media
+domain too. The TLS gateway derives its hostname from `APP_URL`.
 
 Seeded local accounts all use `MeltiplyLocal1!` and share the single Workspace:
 

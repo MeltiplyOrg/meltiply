@@ -2292,36 +2292,6 @@ describe("core API routes", () => {
     expect(finalizeSelection).toHaveBeenCalledWith(savedId);
   });
 
-  it("redirects callback URL configuration failures to the frontend provider error", async () => {
-    const { exchangeAuthorizationCode, registry } = oauthRegistry();
-    const app = authenticatedApp(service(), { providerRegistry: registry });
-    const response = await app.request(
-      `/api/v1/platforms/threads/callback?state=${"A".repeat(22)}.state-with-enough-length&code=provider-code`,
-      undefined,
-      {
-        ...env,
-        APP_URL: undefined,
-        OAUTH_STATE: {
-          getByName: () => ({
-            consume: async () => ({
-              expires_at: Date.now() + 60_000,
-              organization_id: actor.workspace.id,
-              pkce_verifier: "pkce-verifier",
-              provider: "threads",
-              redirect_path: "/channels",
-              user_id: actor.userId,
-            }),
-          }),
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
-      },
-    );
-    expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe(
-      "http://localhost:3000/channels?oauth=provider_error&provider=threads",
-    );
-    expect(exchangeAuthorizationCode).not.toHaveBeenCalled();
-  });
-
   it("logs a safe diagnostic when an OAuth provider exchange fails", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { exchangeAuthorizationCode, registry } = oauthRegistry();

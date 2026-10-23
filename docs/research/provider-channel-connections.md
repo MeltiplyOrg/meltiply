@@ -171,7 +171,7 @@ callback paths under the deployment's public **API** origin:
 | YouTube  | `YOUTUBE_SHORTS_CLIENT_ID`, `YOUTUBE_SHORTS_CLIENT_SECRET`; Google Web application client, enabled YouTube Data API v3, and permitted consent-screen users | `/api/v1/platforms/youtube/callback` |
 
 TikTok's media prefix defaults to
-`<PUBLIC_API_URL origin>/api/v1/provider-media/`. Leave `TIKTOK_MEDIA_URL_PREFIX`
+`<APP_URL>/api/v1/provider-media/`. Leave `TIKTOK_MEDIA_URL_PREFIX`
 unset or blank for this default; API startup and release validation do not require
 an override. A nonblank override must be an exact HTTPS directory prefix with a
 trailing slash and must cover the media URLs emitted by the API. This setting

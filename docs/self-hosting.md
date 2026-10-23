@@ -62,6 +62,12 @@ The generator creates private random credentials in `.env.selfhost` with mode
 0600 and refuses to overwrite an existing file. Keep it outside version control
 and backups accessible only to administrators.
 
+`APP_URL` is the single public dashboard/API origin. It defaults to
+`http://localhost:8080` in the generated file; set it to your public HTTPS origin
+when exposing the installation. Authentication, OAuth callbacks and return links,
+signed media URLs, browser API requests, and the optional TLS gateway use that
+same origin. There is no separate API or authentication URL to configure.
+
 Mail is optional. When `MAIL_FROM_ADDRESS` and `SELFHOST_SMTP_URL` are both set,
 startup verifies the SMTP connection and email verification remains required. Use
 an authenticated `smtps://` URL or a properly configured STARTTLS SMTP server;
@@ -173,9 +179,8 @@ characters. Existing environment files must add it; the generator does not
 overwrite them. It is an API-only bootstrap credential, never a browser build
 variable. Setup status reveals only whether the installation has an Owner.
 
-JWT issuer and audience use the public `BETTER_AUTH_URL` origin (falling back to
-`PUBLIC_API_URL`). By default the API retrieves signing keys from that origin's
-`/api/auth/jwks`. If browser-only ingress authentication protects the public host,
+JWT issuer and audience use `APP_URL`. By default the API retrieves signing keys
+from that origin's `/api/auth/jwks`. If browser-only ingress authentication protects the public host,
 set `BETTER_AUTH_JWKS_URL` to a trusted internal endpoint for the same installation;
 this changes only key retrieval, not issuer, audience, or live-session validation.
 The local development launchers automatically use loopback on their selected API
@@ -219,8 +224,7 @@ factor material is encrypted, and replacing keys can make it unreadable.
 Point the app's DNS name at the host, allow TCP 80/443 and optionally UDP 443, and add:
 
 ```dotenv
-SELFHOST_ORIGIN=https://app.example.com
-SELFHOST_APP_DOMAIN=app.example.com
+APP_URL=https://app.example.com
 ```
 
 Then start the same file with its TLS profile:
@@ -229,7 +233,7 @@ Then start the same file with its TLS profile:
 docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile tls up -d --wait
 ```
 
-Caddy provisions certificates and forwards the app. Its origin must match the
+Caddy derives its certificate hostname from `APP_URL` and forwards the app. Its origin must match the
 browser-visible URL because authentication, verification links, and signed
 storage capabilities depend on it. Register the application callback URLs with
 each Provider. An existing reverse proxy can replace the optional gateway; route

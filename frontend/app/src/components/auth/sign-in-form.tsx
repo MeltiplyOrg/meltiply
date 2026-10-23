@@ -6,6 +6,8 @@ import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Alert } from "@meltiply/ui/alert";
 import { authClient } from "@/lib/auth-client";
+import { localDevOwnerSignIn } from "@/lib/dev-sign-in";
+import { isDevMode } from "@/lib/env";
 import { useI18n } from "@/lib/i18n";
 
 export interface SignInFormProps {
@@ -19,6 +21,8 @@ type Mode = "loading" | "unavailable" | "setup" | "signin" | "recovery" | "reset
  * Coordinates installation-aware owner setup, sign-in, and recovery state.
  * Server status selects setup; it never grants signup authority. Passwords and
  * setup/challenge secrets stay in component memory and support paste/autofill.
+ * In development mode only, the resolved sign-in state prefills the seeded
+ * local owner credentials; setup and password-reset flows stay empty.
  * Deployed signup waits for email verification instead of claiming a session.
  * Async errors preserve inputs, announce recovery, and never expose account data.
  */
@@ -48,7 +52,15 @@ function useOwnerEntry({ onSuccess, redirectTo = "/posts" }: SignInFormProps) {
       .setupStatus()
       .then((status) => {
         if (!cancelled) {
-          setMode(!status.initialized ? "setup" : resetToken ? "reset" : "signin");
+          const initialMode: Mode = !status.initialized ? "setup" : resetToken ? "reset" : "signin";
+          setMode(initialMode);
+          // Prefill only the first resolved sign-in state: setup, reset, and
+          // post-reset sign-in must keep their own credentials. Existing input
+          // always wins so a retry never overwrites what the owner typed.
+          if (initialMode === "signin" && isDevMode()) {
+            setEmail((current) => current || localDevOwnerSignIn.email);
+            setPassword((current) => current || localDevOwnerSignIn.password);
+          }
           setError(
             linkError
               ? "This link is invalid or expired. Request a new verification or password reset link."

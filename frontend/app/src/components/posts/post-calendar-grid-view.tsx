@@ -222,6 +222,11 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
     });
   }, [calendarMonth]);
   const days = mode === "month" ? calendarDays : weekDays;
+  /** Only the seven days that survive into Week morph; naming all 35–42 Month cells would snapshot the whole grid. */
+  const morphKeys = useMemo(
+    () => new Set(weekDays.map((day) => toLocalDateKey(day.date))),
+    [weekDays],
+  );
   const today = timeline
     ? calendarDateKey(timeline.now, timeline.timeZone)
     : toLocalDateKey(new Date());
@@ -434,9 +439,9 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                             aria-label={t("View posts on {date}", { date: fullDate })}
                             aria-current={isToday ? "date" : undefined}
                             onClick={() => onCellClick(cell.date)}
-                            data-calendar-date={timeline ? "" : undefined}
+                            data-calendar-date={timeline && morphKeys.has(key) ? "" : undefined}
                             style={
-                              timeline
+                              timeline && morphKeys.has(key)
                                 ? ({
                                     "--calendar-date-name": `calendar-date-${key}`,
                                   } as CSSProperties)

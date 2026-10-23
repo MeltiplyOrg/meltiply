@@ -287,7 +287,6 @@ export default function QueuesPage() {
   const { t, language } = useI18n();
   const scope = useSessionScope();
   const scrollRef = useSmoothScrollContainer();
-  const pageScrollRef = useSmoothScrollContainer();
   const queueListRef = useRef<HTMLDivElement>(null);
   const {
     brandProfiles,
@@ -379,11 +378,7 @@ export default function QueuesPage() {
         )
       }
     >
-      <div
-        ref={pageScrollRef}
-        data-lenis-prevent=""
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto lg:overflow-hidden"
-      >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain lg:overflow-hidden">
         <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-4 pb-3 sm:px-6">
           <Select
             value={activeProfileId ?? ""}

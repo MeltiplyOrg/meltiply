@@ -42,10 +42,13 @@ seven columns with assignment counts, and Week initially reveals today while its
 time axis stays fixed during horizontal swipes. `calendarSlots` projects the plan
 onto the visible window with the allocator's DST rules: filled slots reuse the real
 Post chip, unfilled occurrences render dashed open slots, and elapsed ones mute.
-Month↔Week morphs date labels through native View Transitions. Queue timezone
+Month↔Week morphs only the seven shared date labels through native View Transitions
+while the rest of the calendar crossfades. Queue timezone
 selection uses a searchable IANA picker; Queue slots and composer scheduling share
 the publishing feature's segmented `TimeOfDayField` and canonical styled
-hour/minute chooser.
+hour/minute chooser. On short phones the page body scrolls natively — only the
+calendar viewport owns smooth scrolling — so nested scroll owners never fight
+a touch gesture.
 
 There is one animation path, without a motion-mode provider, stored preference,
 root flag, mode props, or alternate branches. Preserve implemented animations

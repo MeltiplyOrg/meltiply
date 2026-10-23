@@ -119,21 +119,27 @@ export function CalendarTimeGrid({
       ),
     [days, byDay, slots, timeZone],
   );
-  const timeLabel = new Intl.DateTimeFormat(language, {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  });
-  const eventTime = new Intl.DateTimeFormat(language, {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "shortOffset",
-    hourCycle: "h23",
-  });
-  const fullDate = new Intl.DateTimeFormat(language, { dateStyle: "full" });
-  const weekday = new Intl.DateTimeFormat(language, { weekday: "short" });
+  const formatters = useMemo(
+    () => ({
+      timeLabel: new Intl.DateTimeFormat(language, {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }),
+      eventTime: new Intl.DateTimeFormat(language, {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZoneName: "shortOffset",
+        hourCycle: "h23",
+      }),
+      fullDate: new Intl.DateTimeFormat(language, { dateStyle: "full" }),
+      weekday: new Intl.DateTimeFormat(language, { weekday: "short" }),
+    }),
+    [language, timeZone],
+  );
+  const { timeLabel, eventTime, fullDate, weekday } = formatters;
   return (
     <div
       ref={attach}

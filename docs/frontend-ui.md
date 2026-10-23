@@ -102,10 +102,13 @@ both on the hourly canvas.
 
 The red current-time rule is painted only inside today's column, with its clock
 label anchored there, and never spans the week or other dates. Month↔Week changes
-commit through `transitionViewEffect` (native View Transitions): date labels keep
-one `view-transition-name` across both layouts so they morph, the toolbar stays
-still, and unsupported browsers or native reduced motion commit immediately.
+commit through `transitionViewEffect` (native View Transitions): only the seven
+date labels that survive into Week keep a `view-transition-name`, they morph while
+the rest of the calendar crossfades, the toolbar stays still, and unsupported
+browsers or native reduced motion commit immediately.
 Repeated choices skip the previous transition without skipping its state commit.
+The Queue page body never installs a second smooth-scroll controller on phones;
+only the calendar viewport owns it.
 
 Post deletion soft-deletes composition and stops only pending delivery; it does not delete platform copies or retained publication history. Both Post and Calendar collection reads exclude soft-deleted Posts, so view switching and reloads cannot reconstruct them from retained Distributions.
 

@@ -12,22 +12,18 @@
 }
 
 /* Native calendar snapshots preserve date identity while Month expands into
-   Week. The root stays still; only named calendar date labels morph. */
+   Week: the named date labels morph while the rest of the calendar crossfades
+   on the browser's own short fade, so the change never reads as a hard swap. */
 [data-calendar-date] {
   view-transition-name: var(--calendar-date-name);
 }
 
 ::view-transition-group(*) {
-  animation-duration: 320ms;
-  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
-}
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
-  mix-blend-mode: normal;
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 ::view-transition-group(root) {
-  animation-duration: 0s;
+  animation-duration: 180ms;
 }
 
 /* A palette commit is one paint, never a stagger of component color transitions. */

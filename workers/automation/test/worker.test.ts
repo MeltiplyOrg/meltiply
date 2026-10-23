@@ -7,7 +7,7 @@ import {
   type ProviderAdapter,
   type ProviderOperationResult,
 } from "@meltiply/providers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { withSystemTransactionEffect } = vi.hoisted(() => ({
   withSystemTransactionEffect: vi.fn(),
@@ -31,6 +31,11 @@ import { sweepDueProviderJobs } from "../src/provider-sync";
 import { logRecords } from "./log-records";
 
 const worker = createAutomationHandler();
+beforeEach(() => {
+  // Unoverridden hourly units still run their production queries in the
+  // scheduled tests; an empty result keeps that work from throwing.
+  withSystemTransactionEffect.mockReturnValue(Effect.succeed({ rows: [] }));
+});
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -338,6 +343,7 @@ describe("Automation Worker foundation", () => {
     [
       "0 * * * *",
       [
+        "account-analytics-sweep",
         "due-scan",
         "relay",
         "maintenance",
@@ -350,6 +356,7 @@ describe("Automation Worker foundation", () => {
     [
       undefined,
       [
+        "account-analytics-sweep",
         "due-scan",
         "relay",
         "maintenance",
@@ -371,6 +378,12 @@ describe("Automation Worker foundation", () => {
       Effect.sync(() => {
         calls.push("provider-sync-sweep");
         return { analytics: 1, comments: 2, token_refresh: 1 };
+      }),
+    );
+    const sweepAccountAnalytics = vi.fn(() =>
+      Effect.sync(() => {
+        calls.push("account-analytics-sweep");
+        return { failed: 0, recorded: 0, scanned: 0 };
       }),
     );
     const sweepDue = vi.fn(() =>
@@ -418,6 +431,7 @@ describe("Automation Worker foundation", () => {
           return { claimed: 0, dead: 0, failed: 0, published: 0 };
         }),
       ),
+      sweepAccountAnalytics,
       sweepDue,
       sweepProviderDue,
     });
@@ -438,6 +452,11 @@ describe("Automation Worker foundation", () => {
       expect(enqueueDue).toHaveBeenCalledWith(env);
     } else {
       expect(enqueueDue).not.toHaveBeenCalled();
+    }
+    if (expected.includes("account-analytics-sweep")) {
+      expect(sweepAccountAnalytics).toHaveBeenCalledWith(env);
+    } else {
+      expect(sweepAccountAnalytics).not.toHaveBeenCalled();
     }
     if (expected.includes("provider-sync-sweep")) {
       expect(sweepProviderDue).toHaveBeenCalledWith(env);
@@ -1972,6 +1991,7 @@ describe("Scheduled entry delayed delivery", () => {
       }),
       enqueueDue: vi.fn(() => Effect.succeed(0)),
       enqueueDueReplyReconciliations: vi.fn(() => Effect.succeed(0)),
+      sweepAccountAnalytics: vi.fn(() => Effect.succeed({ failed: 0, recorded: 0, scanned: 0 })),
       sweepProviderDue: vi.fn(() =>
         Effect.succeed({
           analytics: 0,

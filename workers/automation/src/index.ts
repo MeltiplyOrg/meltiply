@@ -214,6 +214,10 @@ export interface AutomationDependencies {
   /** Selects publication adapters; omission uses the environment-configured registry. */
   providerRegistry?: ProviderRegistry;
   assetProcessorFor?: (env: AutomationEnv) => AssetJobProcessor | Promise<AssetJobProcessor>;
+  /** Overrides the bounded hourly follower-history sweep for tests. */
+  sweepAccountAnalytics?: (
+    env: AutomationEnv,
+  ) => Effect.Effect<{ failed: number; recorded: number; scanned: number }, unknown>;
   relay?: (env: AutomationEnv) => Effect.Effect<OutboxRelayResult, unknown>;
   enqueueDue?: (env: AutomationEnv) => Effect.Effect<number, unknown>;
   sweepDue?: (env: AutomationEnv) => Effect.Effect<number, unknown>;
@@ -638,14 +642,19 @@ export function createAutomationHandler(
       empty: { failed: 0, recorded: 0, scanned: 0 },
       field: "account_analytics",
       name: "account-analytics-sweep",
-      run: (env) =>
-        Effect.flatMap(
-          Effect.tryPromise({
-            catch: (cause) => classifyJobError(cause),
-            try: () => import("./account-analytics"),
-          }),
-          (module) => module.sweepAccountAnalytics(env),
-        ),
+      run: dependencies.sweepAccountAnalytics
+        ? (env) =>
+            Effect.suspend(() => dependencies.sweepAccountAnalytics!(env)).pipe(
+              Effect.mapError((cause) => classifyJobError(cause)),
+            )
+        : (env) =>
+            Effect.flatMap(
+              Effect.tryPromise({
+                catch: (cause) => classifyJobError(cause),
+                try: () => import("./account-analytics"),
+              }),
+              (module) => module.sweepAccountAnalytics(env),
+            ),
       tier: "hourly",
     },
     {

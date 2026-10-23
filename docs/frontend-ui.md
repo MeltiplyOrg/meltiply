@@ -82,6 +82,31 @@ The Week canvas initially reveals today and keeps its time axis visible during
 horizontal swipes. Phone Month fits all seven dates and uses assignment counts
 instead of unreadably narrow Post chips; selecting a date/count opens its Week.
 
+`QueueTimezonePicker` owns Queue timezone selection: the finite browser IANA
+catalog plus `UTC` and the saved alias, ranked by substring then ordered
+character gaps, so `ktm` finds Asia/Katmandu and `yk` finds Reykjavik or Yakutsk.
+It composes the shared Popover, Input, Button and menu vocabulary with React
+Aria's keyboard listbox; search never commits, and choosing an identifier closes
+the panel and returns focus to the trigger.
+
+`calendarSlots` projects the validated weekly plan onto the visible civil days
+for display only, applying the allocator's rules: nonexistent DST occurrences are
+skipped and repeated hours use the later instant. An exact-instant membership
+renders a **filled** slot using the real Post chip; every other projected
+occurrence renders a dashed **open** slot, muted once elapsed. Off-plan immutable
+reservations remain ordinary Post chips rather than being folded into a slot. The
+projection is bounded by the visible window (at most 42 days) and the plan's
+slots; it never allocates, moves, or mutates work. Month interleaves slots and
+off-plan Posts in time order and summarizes filled/unfilled counts; Week places
+both on the hourly canvas.
+
+The red current-time rule is painted only inside today's column, with its clock
+label anchored there, and never spans the week or other dates. Month↔Week changes
+commit through `transitionViewEffect` (native View Transitions): date labels keep
+one `view-transition-name` across both layouts so they morph, the toolbar stays
+still, and unsupported browsers or native reduced motion commit immediately.
+Repeated choices skip the previous transition without skipping its state commit.
+
 Post deletion soft-deletes composition and stops only pending delivery; it does not delete platform copies or retained publication history. Both Post and Calendar collection reads exclude soft-deleted Posts, so view switching and reloads cannot reconstruct them from retained Distributions.
 
 Channels follows the Members directory composition: Accounts/Brand Profiles tabs, account search, status segments, field-row filters, identity table, and real profile cards. The section tabs' accent rule and the status segments' surface pill are each one travelling `SlidingHighlight`, so switching a section or a status slides the selection instead of repainting two controls. Connection cells contain one accessible health icon; recovery remains available without duplicate status text. Its background and controls match Posts.

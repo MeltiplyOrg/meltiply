@@ -32,15 +32,20 @@ removal cancels only unclaimed work without moving another Post. The
 timezone, DST, ordering, replay, retirement, and historical-membership semantics.
 
 Queues reuses the Posts calendar and row projection for Month, adding a shared
-hourly Week canvas. Its current-time marker follows the Queue's timezone,
-updates every 30 seconds and on tab return, and never alters stored assignments
-or recenters the user's scrolling. Calendar reads use paired, half-open Queue
-assignment filters and drain every page in the displayed window. The page defaults
-to the first available profile when no valid profile is selected. Phone navigation
-uses a compact Queue selector/actions menu, Month fits seven columns with assignment
-counts, and Week initially reveals today while its time axis stays fixed during
-horizontal swipes. Queue slots and composer scheduling share the publishing
-feature's segmented `TimeOfDayField` and canonical styled hour/minute chooser.
+hourly Week canvas. Its current-time rule is painted only inside today's column,
+follows the Queue's timezone, updates every 30 seconds and on tab return, and never
+alters stored assignments or recenters the user's scrolling. Calendar reads use
+paired, half-open Queue assignment filters and drain every page in the displayed
+window. The page defaults to the first available profile when no valid profile is
+selected. Phone navigation uses a compact Queue selector/actions menu, Month fits
+seven columns with assignment counts, and Week initially reveals today while its
+time axis stays fixed during horizontal swipes. `calendarSlots` projects the plan
+onto the visible window with the allocator's DST rules: filled slots reuse the real
+Post chip, unfilled occurrences render dashed open slots, and elapsed ones mute.
+Month↔Week morphs date labels through native View Transitions. Queue timezone
+selection uses a searchable IANA picker; Queue slots and composer scheduling share
+the publishing feature's segmented `TimeOfDayField` and canonical styled
+hour/minute chooser.
 
 There is one animation path, without a motion-mode provider, stored preference,
 root flag, mode props, or alternate branches. Preserve implemented animations

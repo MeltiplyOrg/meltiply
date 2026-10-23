@@ -8,6 +8,13 @@ import { useI18n } from "@/lib/i18n";
 import { normalizePostStatus, resolveRowCaption, toLocalDateKey } from "./posts-helpers";
 import type { CalendarDayCell, PostRow } from "./types";
 import { calendarDateKey } from "./calendar-dates";
+import type { CalendarSlot } from "./calendar-slots";
+
+interface GridEntry {
+  date: string;
+  post?: PostRow;
+  slot?: CalendarSlot;
+}
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 
@@ -18,11 +25,11 @@ function minuteOfDay(instant: Date | string, timeZone: string): number {
 }
 
 /** Partitions overlapping 45-minute visual chips into lanes, preserving every actual instant rather than covering nearby reservations. These are point-in-time publications, not claimed event durations. */
-function eventLanes(posts: PostRow[], timeZone: string) {
+function eventLanes(entries: GridEntry[], timeZone: string) {
   const ends: number[] = [];
-  const events = posts
-    .map((post) => ({ post, minute: minuteOfDay(post.date, timeZone) }))
-    .sort((a, b) => a.minute - b.minute || a.post.date.localeCompare(b.post.date));
+  const events = entries
+    .map((entry) => ({ ...entry, minute: minuteOfDay(entry.date, timeZone) }))
+    .sort((a, b) => a.minute - b.minute || a.date.localeCompare(b.date));
   const placed = events.map((event) => {
     const available = ends.findIndex((end) => end <= event.minute);
     const lane = available < 0 ? ends.length : available;
@@ -40,6 +47,7 @@ export function CalendarTimeGrid({
   timeZone,
   isLoading,
   onViewDetails,
+  slots,
 }: {
   days: CalendarDayCell[];
   posts: PostRow[];
@@ -47,6 +55,7 @@ export function CalendarTimeGrid({
   timeZone: string;
   isLoading: boolean;
   onViewDetails: (postId: string) => void;
+  slots: Map<string, CalendarSlot[]>;
 }) {
   const { t, tStatus, language } = useI18n();
   const viewport = useRef<HTMLDivElement>(null);
@@ -93,6 +102,23 @@ export function CalendarTimeGrid({
     }
     return grouped;
   }, [posts, timeZone]);
+  const placedDays = useMemo(
+    () =>
+      new Map(
+        days.map((day) => {
+          const key = toLocalDateKey(day.date);
+          const daySlots = slots.get(key) ?? [];
+          const entries: GridEntry[] = (byDay.get(key) ?? []).map((post) => ({
+            date: post.date,
+            post,
+            slot: daySlots.find((slot) => slot.postId === post.id),
+          }));
+          for (const slot of daySlots) if (!slot.postId) entries.push({ date: slot.instant, slot });
+          return [key, eventLanes(entries, timeZone)] as const;
+        }),
+      ),
+    [days, byDay, slots, timeZone],
+  );
   const timeLabel = new Intl.DateTimeFormat(language, {
     timeZone,
     hour: "2-digit",
@@ -133,6 +159,12 @@ export function CalendarTimeGrid({
                   dateTime={toLocalDateKey(day.date)}
                   aria-label={fullDate.format(day.date)}
                   aria-current={isToday ? "date" : undefined}
+                  data-calendar-date=""
+                  style={
+                    {
+                      "--calendar-date-name": `calendar-date-${toLocalDateKey(day.date)}`,
+                    } as CSSProperties
+                  }
                   className="text-xl font-semibold tabular-nums"
                 >
                   {day.dayNumber}
@@ -154,7 +186,7 @@ export function CalendarTimeGrid({
           </div>
           {days.map((day) => {
             const key = toLocalDateKey(day.date);
-            const { placed, lanes } = eventLanes(byDay.get(key) ?? [], timeZone);
+            const { placed, lanes } = placedDays.get(key) ?? { placed: [], lanes: 1 };
             return (
               <div
                 key={key}
@@ -173,8 +205,54 @@ export function CalendarTimeGrid({
                     <div className="h-1/2 border-b border-line/40" />
                   </div>
                 ))}
+                {key === today && (
+                  <div
+                    data-current-time=""
+                    role="img"
+                    aria-label={t("Current time: {time}", { time: timeLabel.format(now) })}
+                    className="pointer-events-none absolute inset-x-0 top-(--current-time-top) z-20 -translate-y-1/2 border-t border-red text-red"
+                    style={{ "--current-time-top": `${(minute / 1440) * 100}%` } as CSSProperties}
+                  >
+                    <span className="absolute -left-1 -top-1 size-2 rounded-full bg-red" />
+                    <time
+                      dateTime={now.toISOString()}
+                      className="absolute bottom-1 left-1 bg-surface px-1 text-(length:--font-size-micro) font-medium tabular-nums"
+                    >
+                      {timeLabel.format(now)}
+                    </time>
+                  </div>
+                )}
                 {!isLoading &&
-                  placed.map(({ post, minute: at, lane }) => {
+                  placed.map(({ post, slot, minute: at, lane }) => {
+                    if (!post && slot) {
+                      const elapsed = new Date(slot.instant) <= now;
+                      return (
+                        <div
+                          key={slot.instant}
+                          data-slot-state="unfilled"
+                          aria-label={`${elapsed ? t("Unfilled slot") : t("Open slot")} · ${slot.time}`}
+                          className={cn(
+                            "absolute top-(--event-top) left-(--event-left) h-12 w-(--event-width) min-w-0 overflow-hidden rounded-control border border-dashed border-line-strong bg-surface px-1.5 py-1 text-xs text-ink-3",
+                            elapsed && "opacity-60",
+                          )}
+                          style={
+                            {
+                              "--event-top": `min(${(at / 1440) * 100}%, calc(100% - 3rem))`,
+                              "--event-left": `calc(${(lane / lanes) * 100}% + var(--spacing) / 2)`,
+                              "--event-width": `calc(${100 / lanes}% - var(--spacing))`,
+                            } as CSSProperties
+                          }
+                        >
+                          <time dateTime={slot.instant} className="block truncate tabular-nums">
+                            {slot.time}
+                          </time>
+                          <span className="block truncate text-(length:--font-size-micro)">
+                            {elapsed ? t("Unfilled slot") : t("Open slot")}
+                          </span>
+                        </div>
+                      );
+                    }
+                    if (!post) return null;
                     const caption = resolveRowCaption(post) || t("Untitled post");
                     const status = normalizePostStatus(post);
                     const time = eventTime.format(new Date(post.date));
@@ -183,8 +261,9 @@ export function CalendarTimeGrid({
                         <TooltipTrigger asChild>
                           <Button
                             variant="ghost"
+                            data-slot-state={slot ? "filled" : undefined}
                             onClick={() => onViewDetails(post.id)}
-                            aria-label={`${caption} · ${time} · ${tStatus(status)}`}
+                            aria-label={`${slot ? `${t("Filled slot")} · ` : ""}${caption} · ${time} · ${tStatus(status)}`}
                             className={cn(
                               "absolute top-(--event-top) left-(--event-left) z-10 h-12 w-(--event-width) min-w-0 flex-col items-start justify-start gap-0.5 overflow-hidden rounded-control border border-accent/20 bg-accent-tint px-1.5 py-1 text-left text-xs hover:bg-hover focus-visible:z-30",
                               status === "published" && "border-green/20 bg-green-tint",
@@ -217,30 +296,6 @@ export function CalendarTimeGrid({
               </div>
             );
           })}
-          {todayIndex >= 0 && (
-            <div
-              data-current-time=""
-              role="img"
-              aria-label={t("Current time: {time}", { time: timeLabel.format(now) })}
-              className="pointer-events-none absolute inset-x-0 top-(--current-time-top) z-20 flex -translate-y-1/2 items-center text-red"
-              style={
-                {
-                  "--current-time-top": `${(minute / 1440) * 100}%`,
-                  "--current-day-left": `calc(${(todayIndex / days.length) * 100}% - var(--spacing))`,
-                } as CSSProperties
-              }
-            >
-              <time
-                dateTime={now.toISOString()}
-                className="sticky left-0 z-20 w-14 shrink-0 bg-surface pr-1 text-right text-(length:--font-size-micro) font-medium tabular-nums"
-              >
-                {timeLabel.format(now)}
-              </time>
-              <div className="relative flex-1 border-t border-red">
-                <span className="absolute -top-1 left-(--current-day-left) size-2 rounded-full bg-red" />
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

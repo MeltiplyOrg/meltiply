@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarDate, fromDate, toCalendarDate } from "@internationalized/date";
+import { flushSync } from "react-dom";
+import { transitionViewEffect } from "@meltiply/ui/effects";
 import { Link } from "react-router";
 import { Clock, Globe2 } from "lucide-react";
 import { Alert } from "@meltiply/ui/alert";
@@ -21,6 +23,7 @@ import type { Post, PublishingQueue } from "@/types";
 import { PostCalendarGridView } from "./post-calendar-grid-view";
 import { calendarLabelDate, calendarWindow, type CalendarPeriod } from "./calendar-dates";
 import { toPostRow } from "./post-row";
+import { calendarSlots } from "./calendar-slots";
 
 /** Live Queue calendar: bounded, fully paged immutable assignments in the Queue's timezone, independent Channel outcomes and safe removal. A Queue identity key resets its civil anchor and selection. The 30-second clock also refreshes immediately after tab focus/visibility changes, never changing reservation times. */
 export function QueueCalendar({
@@ -79,6 +82,7 @@ export function QueueCalendar({
         : [],
     );
   }, [posts, integrations]);
+  const slots = useMemo(() => calendarSlots(queue, range.days, rows), [queue, range.days, rows]);
   const loading = query.isPending || (hasNextPage && !isFetchNextPageError);
   const next = loading
     ? undefined
@@ -102,8 +106,12 @@ export function QueueCalendar({
   }
   /** Month-date activation opens the containing Week without scheduling or moving work. */
   function inspectWeek(date: Date) {
-    setAnchor(new CalendarDate(date.getFullYear(), date.getMonth() + 1, date.getDate()));
-    setPeriod("week");
+    transitionViewEffect(() =>
+      flushSync(() => {
+        setAnchor(new CalendarDate(date.getFullYear(), date.getMonth() + 1, date.getDate()));
+        setPeriod("week");
+      }),
+    );
   }
   return (
     <section
@@ -178,6 +186,7 @@ export function QueueCalendar({
           onModeChange: setPeriod,
           timeZone: queue.timezone,
           now,
+          slots,
         }}
       />
       <CenterDialog

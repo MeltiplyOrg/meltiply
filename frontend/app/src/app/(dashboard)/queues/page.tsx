@@ -48,6 +48,7 @@ import { userFacingErrorMessage } from "@/lib/frontend-errors";
 import type { PublishingQueue, Post } from "@/types";
 import { QueueCalendar } from "@/components/posts/queue-calendar";
 import { TimeOfDayField } from "@/components/posts/time-of-day-field";
+import { QueueTimezonePicker } from "@/components/posts/queue-timezone-picker";
 
 /** Localizes the Queue contract's Sunday-zero weekdays without interpreting them in the browser's timezone. */
 function queueWeekdayLabels(language: string): string[] {
@@ -145,15 +146,7 @@ function QueueEditor({
                 maxLength={100}
               />
             </label>
-            <label className="grid gap-1.5 text-sm">
-              {t("Queue timezone")}
-              <Input
-                value={timezone}
-                onChange={(event) => setTimezone(event.target.value)}
-                required
-                maxLength={100}
-              />
-            </label>
+            <QueueTimezonePicker value={timezone} onChange={setTimezone} disabled={busy} />
             <p className="text-xs text-ink-3">
               {t(
                 "Use an IANA timezone, for example America/New_York. Nonexistent DST slots are skipped; repeated times use the later occurrence.",

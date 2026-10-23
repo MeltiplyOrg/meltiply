@@ -85,28 +85,37 @@ Wide composers give destinations and publishing a compact column, leaving more r
 
 ## Weekly Queues
 
-Open **Queues** and select **Create Queue**. The first available Brand Profile is selected automatically when you have not chosen one; use the profile selector to change its owner. Give the plan a name, a supported IANA timezone such as `America/New_York`, and one or more weekday/time slots. Type hours and minutes in the segmented 24-hour field, or use its clock button to open the styled hour/minute chooser. Duplicate slots are refused. Admins manage configuration, Editors and Admins can enqueue or remove Posts, and Viewers can inspect plans and outcomes.
+Open **Queues** and select **Create Queue**. The first available Brand Profile is selected automatically when you have not chosen one; use the profile selector to change its owner. Give the plan a name, a supported IANA timezone such as `America/New_York`, and one or more weekday/time slots. Choose the timezone from a searchable list: type any part of the name or its initials (`ktm` finds Asia/Katmandu, `yk` finds Reykjavik or Yakutsk). Type hours and minutes in the segmented 24-hour field, or use its clock button to open the styled hour/minute chooser. Duplicate slots are refused. Admins manage configuration, Editors and Admins can enqueue or remove Posts, and Viewers can inspect plans and outcomes.
 
 Select a Queue's name in the desktop list, or use the compact Queue selector on a phone. Its three-dot menu holds **Edit Queue** and **Delete Queue** for administrators. In the composer, keep exactly one Brand Profile selected, choose **Queue**, select its plan, and use **Add to Queue**. Queue mode does not make independent copies across several profiles; use Draft, Schedule, or Now for those workflows. Reopen the Queue to see assigned times and per-Channel outcomes after reload. Post Details also retains membership and its assigned instant.
 
 The Queue calendar opens in **Week**. Switch between **Month** and **Week**,
 use the arrows to browse, or choose **Today** to return to the current date in
-the Queue's timezone. Selecting a month date opens its containing Week.
+the Queue's timezone. Selecting a month date opens its containing Week; the date
+labels carry across so Month and Week feel like one surface changing shape.
 Calendar chips show actual assigned Posts, not speculative future slot events.
 Choose a Post to inspect its assigned time and independent Channel outcomes,
 open the full Post, or request safe removal.
 
-Week has an hourly timeline with a **red current-time line** when the
-displayed dates include today. It advances every 30 seconds and refreshes when
-you return to the tab. The calendar initially scrolls near now, but clock updates
-do not move your scroll position. Month highlights today instead of drawing an
-hourly line across date cells. **Next in this view** identifies the next pending
-assignment in the displayed window; it does not imply that other dates are empty.
-All dates, the clock, and the time line use the selected Queue's named timezone,
-not your device's timezone. Repeated DST-hour Posts retain distinct offset labels;
-the timeline represents wall-clock time, not event durations or rescheduling.
+The calendar also shows the plan itself. A **filled** slot is an occurrence that
+holds a real assigned Post and appears as that Post's chip. An **open** slot is a
+configured occurrence with nothing assigned yet and appears with a dashed outline;
+once its time has passed it is muted and labeled as unfilled. Slots follow the same
+rules as allocation: times skipped by a daylight-saving change are not shown, and a
+repeated hour uses the later occurrence. Posts reserved before a plan edit stay on
+their original instants and appear as ordinary chips rather than moving into a slot.
 
-On phones, Month shows all seven weekday columns and compact assignment counts;
+Week has a **red current-time line** drawn only inside today's column when that
+column is visible. It advances every 30 seconds and refreshes when you return to
+the tab. The calendar initially scrolls near now, but clock updates do not move your
+scroll position. Month highlights today and shows filled/unfilled counts per date
+instead of drawing an hourly line across cells. **Next in this view** identifies the
+next pending assignment in the displayed window; it does not imply that other dates
+are empty. All dates, the clock, and the time line use the selected Queue's named
+timezone, not your device's timezone. Repeated DST-hour Posts retain distinct offset
+labels; the timeline represents wall-clock time, not event durations or rescheduling.
+
+On phones, Month shows all seven weekday columns and compact filled/unfilled counts;
 tap a date or count to open its Week. Swipe the Week timeline sideways to reach
 other dates and vertically to reach other hours. Today is initially brought into
 view, and the time labels stay fixed at the left while you swipe. Profile, Queue,

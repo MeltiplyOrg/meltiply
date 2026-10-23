@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, type CSSProperties } from "react";
+import { flushSync } from "react-dom";
+import { transitionViewEffect } from "@meltiply/ui/effects";
 import {
   AlertCircle,
   ChevronLeft,
@@ -21,6 +23,7 @@ import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import type { PostRow, CalendarDayCell } from "./types";
 import { CalendarTimeGrid } from "./calendar-time-grid";
 import { calendarDateKey, type CalendarPeriod } from "./calendar-dates";
+import type { CalendarSlot } from "./calendar-slots";
 
 export interface PostCalendarGridViewProps {
   posts: PostRow[];
@@ -49,6 +52,7 @@ export interface PostCalendarGridViewProps {
     onModeChange: (mode: CalendarPeriod) => void;
     timeZone: string;
     now: Date;
+    slots: Map<string, CalendarSlot[]>;
   };
 }
 
@@ -158,6 +162,13 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
   const scrollRef = useSmoothScrollContainer();
   const [localMode, setLocalMode] = useState<CalendarPeriod>("month");
   const mode = timeline?.mode ?? localMode;
+  /** Morphs the named calendar/date snapshots without animating the toolbar or delaying state changes. */
+  function changeMode(next: CalendarPeriod) {
+    if (next === mode) return;
+    const commit = () => flushSync(() => (timeline?.onModeChange ?? setLocalMode)(next));
+    if (timeline) transitionViewEffect(commit);
+    else commit();
+  }
   const timeZone = timeline?.timeZone;
   const dateLabel = useMemo(
     () => new Intl.DateTimeFormat(language, { dateStyle: "full" }),
@@ -218,6 +229,99 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
     mode === "month"
       ? monthLabel.format(calendarMonth)
       : `${shortLabel.format(weekDays[0]!.date)} – ${shortLabel.format(weekDays[6]!.date)}, ${weekDays[6]!.date.getFullYear()}`;
+  const postById = useMemo(() => new Map(posts.map((row) => [row.id, row])), [posts]);
+  /** Dashed unfilled-slot chip; elapsed occurrences stay muted so they cannot read as bookable. */
+  function renderSlotChip(slot: CalendarSlot) {
+    const elapsed = timeline ? new Date(slot.instant) <= timeline.now : false;
+    return (
+      <div
+        key={slot.instant}
+        data-slot-state="unfilled"
+        className={cn(
+          "flex min-w-0 items-center gap-1 rounded-control border border-dashed border-line-strong px-1 py-0.5 text-(length:--font-size-micro) text-ink-3",
+          elapsed && "opacity-60",
+        )}
+      >
+        <time dateTime={slot.instant} className="shrink-0 tabular-nums">
+          {slot.time}
+        </time>
+        <span className="truncate">{elapsed ? t("Unfilled slot") : t("Open slot")}</span>
+      </div>
+    );
+  }
+  /** One real Post chip shared by both calendar lists; Month keeps its compact time-prefixed chip. */
+  function renderPostChip(row: PostRow) {
+    const caption = resolveRowCaption(row) || t("Untitled post");
+    const status = normalizePostStatus(row);
+    const published = status === "published";
+    const failed = status === "failed" || status === "needs_reconciliation";
+    const Icon = published
+      ? CircleCheck
+      : failed
+        ? AlertCircle
+        : status === "draft"
+          ? FileText
+          : status === "cancelled"
+            ? CircleX
+            : Clock;
+    return (
+      <Tooltip key={row.id}>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            onClick={() => onViewDetails(row.id)}
+            className={cn(
+              "min-w-0 justify-start text-left font-normal",
+              mode === "month"
+                ? "h-5.5 gap-1.25 rounded-control border border-accent/20 bg-accent-tint px-1.5 py-0 text-xs hover:bg-accent-tint/70"
+                : "h-auto flex-col items-stretch gap-1.25 whitespace-normal rounded-control border border-line bg-surface px-2 py-1.75 hover:border-line-strong",
+              published &&
+                mode === "month" &&
+                "border-green/20 bg-green-tint hover:bg-green-tint/70",
+              failed && mode === "month" && "border-red/20 bg-red-tint hover:bg-red-tint/70",
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-1.25">
+              <Icon
+                className={cn(
+                  "size-2.75 shrink-0",
+                  published ? "text-green" : failed ? "text-red" : "text-accent",
+                )}
+              />
+              <span
+                className={cn(
+                  mode === "month"
+                    ? "truncate"
+                    : "line-clamp-2 text-(length:--font-size-control) font-medium leading-snug",
+                )}
+              >
+                {timeline && (
+                  <time dateTime={row.date} className="mr-1 font-medium tabular-nums">
+                    {timeLabel.format(new Date(row.date))}
+                  </time>
+                )}
+                {caption}
+              </span>
+            </span>
+            {mode === "week" && (
+              <span className="flex flex-wrap items-center gap-1.5 text-(length:--font-size-micro) text-ink-3">
+                <StatusBadge status={status} />
+                <time dateTime={row.date}>
+                  {new Date(row.date).toLocaleTimeString(language, {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </time>
+              </span>
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {caption} · {tStatus(status)}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
 
   return (
     <TooltipProvider>
@@ -227,255 +331,315 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
       >
         <CalendarToolbar
           mode={mode}
-          onModeChange={timeline?.onModeChange ?? setLocalMode}
+          onModeChange={changeMode}
           label={label}
           onToday={onToday}
           onPrevious={() => (mode === "month" ? onPrevMonth() : onWeekNavigate(-1))}
           onNext={() => (mode === "month" ? onNextMonth() : onWeekNavigate(1))}
         />
-        {timeline && mode !== "month" ? (
-          <CalendarTimeGrid
-            key={`${mode}:${toLocalDateKey(days[0]!.date)}:${timeline.timeZone}`}
-            days={days}
-            posts={posts}
-            now={timeline.now}
-            timeZone={timeline.timeZone}
-            isLoading={isLoading}
-            onViewDetails={onViewDetails}
-          />
-        ) : (
-          <div
-            ref={scrollRef}
-            className={cn(
-              "min-h-0 flex-1 overflow-auto overscroll-contain",
-              selectionActive && "pb-24",
-            )}
-          >
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {timeline && mode !== "month" ? (
+            <CalendarTimeGrid
+              key={`${mode}:${toLocalDateKey(days[0]!.date)}:${timeline.timeZone}`}
+              days={days}
+              posts={posts}
+              now={timeline.now}
+              timeZone={timeline.timeZone}
+              isLoading={isLoading}
+              onViewDetails={onViewDetails}
+              slots={timeline.slots}
+            />
+          ) : (
             <div
+              ref={scrollRef}
               className={cn(
-                "flex flex-1 flex-col",
-                timeline ? "min-w-0 sm:min-h-160 sm:min-w-196" : "min-h-160 min-w-196",
+                "min-h-0 flex-1 overflow-auto overscroll-contain",
+                selectionActive && "pb-24",
               )}
             >
-              {mode === "month" && (
-                <div className="grid grid-cols-7 border-b border-line">
-                  {weekDays.map((day) => (
-                    <div key={day.dayNumber} className="px-2.5 py-2 text-xs font-medium text-ink-3">
-                      {weekdayLabel.format(day.date)}
-                    </div>
-                  ))}
-                </div>
-              )}
               <div
                 className={cn(
-                  "grid flex-1 grid-cols-7",
-                  mode === "month"
-                    ? timeline
-                      ? "auto-rows-min sm:auto-rows-[minmax(112px,1fr)]"
-                      : "auto-rows-[minmax(112px,1fr)]"
-                    : "grid-rows-1",
+                  "flex flex-1 flex-col",
+                  timeline ? "min-w-0 sm:min-h-160 sm:min-w-196" : "min-h-160 min-w-196",
                 )}
               >
-                {days.map((cell, index) => {
-                  const key = toLocalDateKey(cell.date);
-                  const dayPosts = postsByDay.get(key) ?? [];
-                  const isToday = key === today;
-                  const fullDate = dateLabel.format(cell.date);
-                  return (
-                    <div
-                      key={key}
-                      role="group"
-                      aria-label={fullDate}
-                      className={cn(
-                        "group/day relative flex min-w-0 flex-col border-b border-r border-line [&:nth-child(7n)]:border-r-0",
-                        mode === "month"
-                          ? timeline
-                            ? "gap-0.75 p-1 sm:p-1.5"
-                            : "gap-0.75 p-1.5"
-                          : "min-h-0",
-                        mode === "month" && !cell.isCurrentMonth && "bg-inset",
-                      )}
-                    >
+                {mode === "month" && (
+                  <div className="grid grid-cols-7 border-b border-line">
+                    {weekDays.map((day) => (
                       <div
+                        key={day.dayNumber}
+                        className="px-2.5 py-2 text-xs font-medium text-ink-3"
+                      >
+                        {weekdayLabel.format(day.date)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div
+                  className={cn(
+                    "grid flex-1 grid-cols-7",
+                    mode === "month"
+                      ? timeline
+                        ? "auto-rows-min sm:auto-rows-[minmax(112px,1fr)]"
+                        : "auto-rows-[minmax(112px,1fr)]"
+                      : "grid-rows-1",
+                  )}
+                >
+                  {days.map((cell, index) => {
+                    const key = toLocalDateKey(cell.date);
+                    const dayPosts = postsByDay.get(key) ?? [];
+                    const daySlots = timeline?.slots.get(key) ?? [];
+                    const emptySlots = daySlots.filter((slot) => !slot.postId);
+                    const filledSlots = daySlots.length - emptySlots.length;
+                    // Slots and off-plan Posts interleave in time order; filled slots render their real Post chip.
+                    const monthEntries =
+                      mode === "month" && timeline
+                        ? [
+                            ...daySlots.flatMap((slot) => {
+                              if (!slot.postId) return [renderSlotChip(slot)];
+                              const row = postById.get(slot.postId);
+                              return row ? [renderPostChip(row)] : [];
+                            }),
+                            ...dayPosts
+                              .filter((row) => !daySlots.some((slot) => slot.postId === row.id))
+                              .map((row) => renderPostChip(row)),
+                          ]
+                        : [];
+                    const isToday = key === today;
+                    const fullDate = dateLabel.format(cell.date);
+                    return (
+                      <div
+                        key={key}
+                        role="group"
+                        aria-label={fullDate}
                         className={cn(
-                          "flex items-center gap-1.5",
-                          mode === "week" && "border-b border-line p-2.5",
+                          "group/day relative flex min-w-0 flex-col border-b border-r border-line [&:nth-child(7n)]:border-r-0",
+                          mode === "month"
+                            ? timeline
+                              ? "gap-0.75 p-1 sm:p-1.5"
+                              : "gap-0.75 p-1.5"
+                            : "min-h-0",
+                          mode === "month" && !cell.isCurrentMonth && "bg-inset",
                         )}
                       >
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t("View posts on {date}", { date: fullDate })}
-                          aria-current={isToday ? "date" : undefined}
-                          onClick={() => onCellClick(cell.date)}
+                        <div
                           className={cn(
-                            "tabular-nums",
-                            mode === "month"
-                              ? timeline
-                                ? "h-auto min-h-16 w-full flex-col gap-1 rounded-control px-0 py-2 text-xs font-medium sm:size-5.5 sm:min-h-0 sm:rounded-full sm:p-0"
-                                : "size-5.5 rounded-full text-xs font-medium"
-                              : "size-7 text-xl font-semibold tracking-tight",
-                            isToday &&
-                              (mode === "month"
-                                ? "bg-accent text-accent-foreground hover:bg-accent/90"
-                                : "text-accent"),
-                            !cell.isCurrentMonth && mode === "month" && "text-ink-3",
+                            "flex items-center gap-1.5",
+                            mode === "week" && "border-b border-line p-2.5",
                           )}
                         >
-                          {cell.dayNumber}
-                          {timeline && mode === "month" && !isLoading && dayPosts.length > 0 && (
-                            <span className="inline-flex items-center gap-1 text-(length:--font-size-micro) sm:hidden">
-                              <span
-                                className="size-1 shrink-0 rounded-full bg-current"
-                                aria-hidden="true"
-                              />
-                              {dayPosts.length}
-                            </span>
-                          )}
-                        </Button>
-                        {mode === "week" && (
-                          <span className="text-xs text-ink-3">
-                            {weekdayLabel.format(cell.date)}
-                          </span>
-                        )}
-                        {canSchedule && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className={cn(
-                                  "ml-auto size-6",
-                                  mode === "month" &&
-                                    "opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover/day:opacity-100 group-focus-within/day:opacity-100 focus-visible:opacity-100",
-                                )}
-                                aria-label={t("Schedule post on {date}", { date: fullDate })}
-                                onClick={() => onScheduleDate(cell.date)}
-                              >
-                                <Plus className="size-3.25" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>{t("Schedule post for this date")}</TooltipContent>
-                          </Tooltip>
-                        )}
-                      </div>
-                      <div
-                        className={cn(
-                          "flex min-w-0 flex-col",
-                          mode === "month" ? "gap-0.75" : "flex-1 gap-1.5 overflow-y-auto p-2",
-                          timeline && mode === "month" && "hidden sm:flex",
-                        )}
-                      >
-                        {isLoading ? (
-                          <div className="flex min-w-0 flex-col gap-0.75" aria-hidden="true">
-                            {PLACEHOLDER_CHIPS[index % PLACEHOLDER_CHIPS.length]!.map((chip) => (
-                              <Skeleton key={chip} className="h-5.5 rounded-control" />
-                            ))}
-                          </div>
-                        ) : (
-                          (mode === "month" ? dayPosts.slice(0, 3) : dayPosts).map((row) => {
-                            const caption = resolveRowCaption(row) || t("Untitled post");
-                            const status = normalizePostStatus(row);
-                            const published = status === "published";
-                            const failed = status === "failed" || status === "needs_reconciliation";
-                            const Icon = published
-                              ? CircleCheck
-                              : failed
-                                ? AlertCircle
-                                : status === "draft"
-                                  ? FileText
-                                  : status === "cancelled"
-                                    ? CircleX
-                                    : Clock;
-                            return (
-                              <Tooltip key={row.id}>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    onClick={() => onViewDetails(row.id)}
-                                    className={cn(
-                                      "min-w-0 justify-start text-left font-normal",
-                                      mode === "month"
-                                        ? "h-5.5 gap-1.25 rounded-control border border-accent/20 bg-accent-tint px-1.5 py-0 text-xs hover:bg-accent-tint/70"
-                                        : "h-auto flex-col items-stretch gap-1.25 whitespace-normal rounded-control border border-line bg-surface px-2 py-1.75 hover:border-line-strong",
-                                      published &&
-                                        mode === "month" &&
-                                        "border-green/20 bg-green-tint hover:bg-green-tint/70",
-                                      failed &&
-                                        mode === "month" &&
-                                        "border-red/20 bg-red-tint hover:bg-red-tint/70",
-                                    )}
-                                  >
-                                    <span className="flex min-w-0 items-center gap-1.25">
-                                      <Icon
-                                        className={cn(
-                                          "size-2.75 shrink-0",
-                                          published
-                                            ? "text-green"
-                                            : failed
-                                              ? "text-red"
-                                              : "text-accent",
-                                        )}
-                                      />
-                                      <span
-                                        className={cn(
-                                          mode === "month"
-                                            ? "truncate"
-                                            : "line-clamp-2 text-(length:--font-size-control) font-medium leading-snug",
-                                        )}
-                                      >
-                                        {timeline && (
-                                          <time
-                                            dateTime={row.date}
-                                            className="mr-1 font-medium tabular-nums"
-                                          >
-                                            {timeLabel.format(new Date(row.date))}
-                                          </time>
-                                        )}
-                                        {caption}
-                                      </span>
-                                    </span>
-                                    {mode === "week" && (
-                                      <span className="flex flex-wrap items-center gap-1.5 text-(length:--font-size-micro) text-ink-3">
-                                        <StatusBadge status={status} />
-                                        <time dateTime={row.date}>
-                                          {new Date(row.date).toLocaleTimeString(language, {
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                          })}
-                                        </time>
-                                      </span>
-                                    )}
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  {caption} · {tStatus(status)}
-                                </TooltipContent>
-                              </Tooltip>
-                            );
-                          })
-                        )}
-                        {!isLoading && mode === "month" && dayPosts.length > 3 && (
                           <Button
                             variant="ghost"
-                            size="sm"
-                            className="h-5 justify-start px-1.5 text-(length:--font-size-micro) font-normal text-ink-2"
+                            size="icon"
+                            aria-label={t("View posts on {date}", { date: fullDate })}
+                            aria-current={isToday ? "date" : undefined}
                             onClick={() => onCellClick(cell.date)}
+                            data-calendar-date={timeline ? "" : undefined}
+                            style={
+                              timeline
+                                ? ({
+                                    "--calendar-date-name": `calendar-date-${key}`,
+                                  } as CSSProperties)
+                                : undefined
+                            }
+                            className={cn(
+                              "tabular-nums",
+                              mode === "month"
+                                ? timeline
+                                  ? "h-auto min-h-16 w-full flex-col gap-1 rounded-control px-0 py-2 text-xs font-medium sm:size-5.5 sm:min-h-0 sm:rounded-full sm:p-0"
+                                  : "size-5.5 rounded-full text-xs font-medium"
+                                : "size-7 text-xl font-semibold tracking-tight",
+                              isToday &&
+                                (mode === "month"
+                                  ? "bg-accent text-accent-foreground hover:bg-accent/90"
+                                  : "text-accent"),
+                              !cell.isCurrentMonth && mode === "month" && "text-ink-3",
+                            )}
                           >
-                            {t("+{count} more", { count: dayPosts.length - 3 })}
+                            {cell.dayNumber}
+                            {timeline &&
+                              mode === "month" &&
+                              !isLoading &&
+                              (daySlots.length > 0 || dayPosts.length > 0) && (
+                                <span
+                                  className="inline-flex items-center gap-1 text-(length:--font-size-micro) sm:hidden"
+                                  aria-label={t("{filled} filled · {empty} unfilled", {
+                                    filled: filledSlots,
+                                    empty: emptySlots.length,
+                                  })}
+                                >
+                                  <span
+                                    className="size-1.5 rounded-full bg-current"
+                                    aria-hidden="true"
+                                  />
+                                  {filledSlots}
+                                  <span
+                                    className="size-1.5 rounded-full border border-current"
+                                    aria-hidden="true"
+                                  />
+                                  {emptySlots.length}
+                                </span>
+                              )}
                           </Button>
-                        )}
-                        {!isLoading && mode === "week" && dayPosts.length === 0 && (
-                          <p className="p-1 text-xs text-ink-3">{t("No posts")}</p>
-                        )}
+                          {mode === "week" && (
+                            <span className="text-xs text-ink-3">
+                              {weekdayLabel.format(cell.date)}
+                            </span>
+                          )}
+                          {canSchedule && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className={cn(
+                                    "ml-auto size-6",
+                                    mode === "month" &&
+                                      "opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover/day:opacity-100 group-focus-within/day:opacity-100 focus-visible:opacity-100",
+                                  )}
+                                  aria-label={t("Schedule post on {date}", { date: fullDate })}
+                                  onClick={() => onScheduleDate(cell.date)}
+                                >
+                                  <Plus className="size-3.25" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t("Schedule post for this date")}</TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                        <div
+                          className={cn(
+                            "flex min-w-0 flex-col",
+                            mode === "month" ? "gap-0.75" : "flex-1 gap-1.5 overflow-y-auto p-2",
+                            timeline && mode === "month" && "hidden sm:flex",
+                          )}
+                        >
+                          {timeline && mode === "month" && !isLoading && daySlots.length > 0 && (
+                            <p className="px-1 text-(length:--font-size-micro) text-ink-3">
+                              {t("{filled} filled · {empty} unfilled", {
+                                filled: filledSlots,
+                                empty: emptySlots.length,
+                              })}
+                            </p>
+                          )}
+                          {isLoading ? (
+                            <div className="flex min-w-0 flex-col gap-0.75" aria-hidden="true">
+                              {PLACEHOLDER_CHIPS[index % PLACEHOLDER_CHIPS.length]!.map((chip) => (
+                                <Skeleton key={chip} className="h-5.5 rounded-control" />
+                              ))}
+                            </div>
+                          ) : mode === "month" && timeline ? (
+                            monthEntries.slice(0, 3)
+                          ) : (
+                            dayPosts.map((row) => {
+                              const caption = resolveRowCaption(row) || t("Untitled post");
+                              const status = normalizePostStatus(row);
+                              const published = status === "published";
+                              const failed =
+                                status === "failed" || status === "needs_reconciliation";
+                              const Icon = published
+                                ? CircleCheck
+                                : failed
+                                  ? AlertCircle
+                                  : status === "draft"
+                                    ? FileText
+                                    : status === "cancelled"
+                                      ? CircleX
+                                      : Clock;
+                              return (
+                                <Tooltip key={row.id}>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      onClick={() => onViewDetails(row.id)}
+                                      className={cn(
+                                        "min-w-0 justify-start text-left font-normal",
+                                        mode === "month"
+                                          ? "h-5.5 gap-1.25 rounded-control border border-accent/20 bg-accent-tint px-1.5 py-0 text-xs hover:bg-accent-tint/70"
+                                          : "h-auto flex-col items-stretch gap-1.25 whitespace-normal rounded-control border border-line bg-surface px-2 py-1.75 hover:border-line-strong",
+                                        published &&
+                                          mode === "month" &&
+                                          "border-green/20 bg-green-tint hover:bg-green-tint/70",
+                                        failed &&
+                                          mode === "month" &&
+                                          "border-red/20 bg-red-tint hover:bg-red-tint/70",
+                                      )}
+                                    >
+                                      <span className="flex min-w-0 items-center gap-1.25">
+                                        <Icon
+                                          className={cn(
+                                            "size-2.75 shrink-0",
+                                            published
+                                              ? "text-green"
+                                              : failed
+                                                ? "text-red"
+                                                : "text-accent",
+                                          )}
+                                        />
+                                        <span
+                                          className={cn(
+                                            mode === "month"
+                                              ? "truncate"
+                                              : "line-clamp-2 text-(length:--font-size-control) font-medium leading-snug",
+                                          )}
+                                        >
+                                          {timeline && (
+                                            <time
+                                              dateTime={row.date}
+                                              className="mr-1 font-medium tabular-nums"
+                                            >
+                                              {timeLabel.format(new Date(row.date))}
+                                            </time>
+                                          )}
+                                          {caption}
+                                        </span>
+                                      </span>
+                                      {mode === "week" && (
+                                        <span className="flex flex-wrap items-center gap-1.5 text-(length:--font-size-micro) text-ink-3">
+                                          <StatusBadge status={status} />
+                                          <time dateTime={row.date}>
+                                            {new Date(row.date).toLocaleTimeString(language, {
+                                              hour: "2-digit",
+                                              minute: "2-digit",
+                                            })}
+                                          </time>
+                                        </span>
+                                      )}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    {caption} · {tStatus(status)}
+                                  </TooltipContent>
+                                </Tooltip>
+                              );
+                            })
+                          )}
+                          {!isLoading &&
+                            mode === "month" &&
+                            (timeline ? monthEntries.length : dayPosts.length) > 3 && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 justify-start px-1.5 text-(length:--font-size-micro) font-normal text-ink-2"
+                                onClick={() => onCellClick(cell.date)}
+                              >
+                                {t("+{count} more", {
+                                  count: (timeline ? monthEntries.length : dayPosts.length) - 3,
+                                })}
+                              </Button>
+                            )}
+                          {!isLoading && mode === "week" && dayPosts.length === 0 && (
+                            <p className="p-1 text-xs text-ink-3">{t("No posts")}</p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </section>
     </TooltipProvider>
   );

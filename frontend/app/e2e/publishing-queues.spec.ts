@@ -39,7 +39,11 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   const editor = page.getByRole("dialog", { name: "Create Queue", exact: true });
   const queueName = `Acceptance Queue ${randomUUID().slice(0, 8)}`;
   await editor.getByLabel("Queue name", { exact: true }).fill(queueName);
-  await editor.getByLabel("Queue timezone", { exact: true }).fill("UTC");
+  await editor.getByRole("button", { name: /^Queue timezone:/ }).click();
+  const timezonePicker = page.getByRole("dialog", { name: "Queue timezone", exact: true });
+  await timezonePicker.getByRole("textbox", { name: "Search timezones…", exact: true }).fill("utc");
+  await timezonePicker.getByRole("option", { name: "UTC", exact: true }).click();
+  await expect(timezonePicker).toBeHidden();
   // Allow the real media processor and two submissions to settle before due work.
   const firstInstant = new Date(Math.ceil((Date.now() + 240_000) / 60_000) * 60_000);
   const secondInstant = new Date(firstInstant.getTime() + 60_000);

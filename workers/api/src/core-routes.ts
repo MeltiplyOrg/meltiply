@@ -2074,6 +2074,20 @@ export function registerCoreRoutes(
         const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
         const queueId = c.req.query("queue_id");
         if (queueId !== undefined) yield* fromPromise(() => uuidParam(queueId, "queue_id"));
+        const from = c.req.query("queue_assigned_from");
+        const before = c.req.query("queue_assigned_before");
+        const queueWindow =
+          from === undefined && before === undefined
+            ? undefined
+            : yield* fromPromise(() => {
+                if (!queueId)
+                  throw new CoreApiError(
+                    400,
+                    "invalid_request",
+                    "Queue assignment windows require queue_id.",
+                  );
+                return dateRange(from, before, 63);
+              });
         const limit = yield* fromPromise(() =>
           integerParam(c.req.query("limit"), "limit", 20, 1, 100),
         );
@@ -2084,6 +2098,7 @@ export function registerCoreRoutes(
         const result = yield* postService.listPosts(c.env, c.get("actor").claims, {
           ...(brandProfileId ? { brandProfileId } : {}),
           ...(queueId ? { queueId } : {}),
+          ...(queueWindow ? { queueWindow } : {}),
           limit,
           offset,
           ...(status ? { status } : {}),

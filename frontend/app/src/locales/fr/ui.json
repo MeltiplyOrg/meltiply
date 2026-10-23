@@ -754,5 +754,12 @@
   "No entries on this page": "Aucune entrée sur cette page",
   "Toggle active state for {name}": "Activer ou désactiver {name}",
   "Actions for {name}": "Actions pour {name}",
-  "Refresh": "Actualiser"
+  "Refresh": "Actualiser",
+  "Day": "Jour",
+  "Previous day": "Jour précédent",
+  "Next day": "Jour suivant",
+  "Current time: {time}": "Heure actuelle : {time}",
+  "Next in this view": "À suivre dans cette vue",
+  "No upcoming Posts in this view.": "Aucun Post à venir dans cette vue.",
+  "Queue Post": "Post de la Queue"
 }

@@ -69,6 +69,14 @@ Posts Table and its Columns menu share `postAnalyticsColumns`: Likes, Cmts, Shrs
 
 The empty Table message and Create post action belong to the visible viewport outside the wide table body, so they do not disappear offscreen with analytics columns. Calendar navigation is outside its independently scrolling date canvas; horizontal or vertical calendar movement cannot carry Today, period navigation, or Month/Week away.
 
+Queues extends `PostCalendarGridView` rather than introducing a second month grid
+or period toolbar. `CalendarTimeGrid` owns hourly Week/Day geometry and current-time
+paint; `QueueCalendar` owns Queue timezone, bounded fully paged reads, its live
+clock, upcoming assignment selection and focused reservation actions. `post-row.ts`
+projects real Post/Channel data for both routes, including frozen Provider content.
+The existing shared Button, SegmentedControl, Tooltip and centered dialog owners
+retain focus, selection, animation and destructive confirmation behavior.
+
 Post deletion soft-deletes composition and stops only pending delivery; it does not delete platform copies or retained publication history. Both Post and Calendar collection reads exclude soft-deleted Posts, so view switching and reloads cannot reconstruct them from retained Distributions.
 
 Channels follows the Members directory composition: Accounts/Brand Profiles tabs, account search, status segments, field-row filters, identity table, and real profile cards. The section tabs' accent rule and the status segments' surface pill are each one travelling `SlidingHighlight`, so switching a section or a status slides the selection instead of repainting two controls. Connection cells contain one accessible health icon; recovery remains available without duplicate status text. Its background and controls match Posts.

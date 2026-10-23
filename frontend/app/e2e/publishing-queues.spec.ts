@@ -160,7 +160,9 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   // <section aria-label> is an accessible region; each reserved instant survives reload.
   for (const post of queuedPosts) {
     await expect(
-      memberships.locator(`time[datetime="${post.queue_membership!.assigned_at}"]`),
+      memberships.locator(
+        `[data-hour-canvas] time[datetime="${post.queue_membership!.assigned_at}"]`,
+      ),
     ).toBeVisible();
     const read = await request.get(`${apiOrigin}/api/v1/posts/${post.id}`, { headers });
     expect(read.status()).toBe(200);
@@ -184,6 +186,11 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
+      // A bounded document can still hide overflow in the workspace scroller,
+      // shifting the entire page when a calendar control receives focus.
+      expect(
+        await page.locator("main").evaluate((main) => main.scrollWidth <= main.clientWidth),
+      ).toBe(true);
       await page.screenshot({
         path: testInfo.outputPath(`queues-${size}-${palette}.png`),
         fullPage: true,
@@ -191,10 +198,16 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
     }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
-  const secondRow = memberships
-    .locator("article")
-    .filter({ hasText: queuedPosts[1]!.default_text });
-  await secondRow.getByRole("button", { name: "Remove from Queue", exact: true }).click();
+  await memberships
+    .locator("[data-hour-canvas] button")
+    .filter({
+      has: page.locator(`time[datetime="${queuedPosts[1]!.queue_membership!.assigned_at}"]`),
+    })
+    .click();
+  await page
+    .getByRole("dialog", { name: "Queue Post", exact: true })
+    .getByRole("button", { name: "Remove from Queue", exact: true })
+    .click();
   const confirm = page.getByRole("alertdialog", { name: "Remove from Queue?", exact: true });
   await confirm.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(confirm).toBeHidden();

@@ -596,6 +596,23 @@ export function useQueues(scope: SessionScope, brandProfileId: string | null, en
   });
 }
 
+/** Pages only one Queue's bounded calendar window. Consumers drain pages before declaring the window complete; Post-prefix invalidation refreshes reservations after removal/scheduling, and 30-second polling follows due work even before its first transition. */
+export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryParams) {
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.posts(params), "queue-calendar"],
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) =>
+      runApiQuery(
+        scope,
+        (api) => api.listPosts({ ...params, limit: 100, offset: pageParam }),
+        signal,
+      ),
+    getNextPageParam: (page) => (page.has_more ? page.offset + page.limit : undefined),
+    refetchInterval: 30_000,
+    enabled: scope.isSignedIn,
+  });
+}
+
 /** Creates a recurring plan with the shared stable-key mutation lifecycle. */
 export function useCreateQueue(scope: SessionScope) {
   return useIdempotentMutation(

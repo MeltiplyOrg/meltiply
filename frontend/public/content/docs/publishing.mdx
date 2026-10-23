@@ -89,6 +89,23 @@ Open **Queues**, choose the owning Brand Profile, and select **Create Queue**. G
 
 In the composer, keep exactly one Brand Profile selected, choose **Queue**, select its plan, and use **Add to Queue**. Queue mode does not make independent copies across several profiles; use Draft, Schedule, or Now for those workflows. Reopen the Queue and choose **Inspect Posts** to see assigned times and per-Channel outcomes after reload. Post Details also retains membership and its assigned instant.
 
+The Queue calendar opens in **Week**. Switch between **Month**, **Week**, and
+**Day**, use the arrows to browse, or choose **Today** to return to the current
+date in the Queue's timezone. Selecting a month date opens its Day timeline.
+Calendar chips show actual assigned Posts, not speculative future slot events.
+Choose a Post to inspect its assigned time and independent Channel outcomes,
+open the full Post, or request safe removal.
+
+Week and Day have an hourly timeline with a **red current-time line** when the
+displayed dates include today. It advances every 30 seconds and refreshes when
+you return to the tab. The calendar initially scrolls near now, but clock updates
+do not move your scroll position. Month highlights today instead of drawing an
+hourly line across date cells. **Next in this view** identifies the next pending
+assignment in the displayed window; it does not imply that other dates are empty.
+All dates, the clock, and the time line use the selected Queue's named timezone,
+not your device's timezone. Repeated DST-hour Posts retain distinct offset labels;
+the timeline represents wall-clock time, not event durations or rescheduling.
+
 ### Allocation and timezones
 
 - The earliest free occurrence strictly after allocation time wins. A slot exactly at the current instant, a past occurrence, or an occupied reservation is skipped. When the week's remaining slots are full or past, allocation rolls into the following week.

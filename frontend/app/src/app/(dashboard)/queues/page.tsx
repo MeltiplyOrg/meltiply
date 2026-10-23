@@ -1,6 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router";
-import { Plus, CalendarClock } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Alert } from "@meltiply/ui/alert";
@@ -32,12 +31,12 @@ import {
   useUpdateQueue,
   useDeleteQueue,
   useQueues,
-  usePosts,
   useRemovePostFromQueue,
 } from "@/lib/queries";
 import { useI18n } from "@/lib/i18n";
 import { userFacingErrorMessage } from "@/lib/frontend-errors";
 import type { PublishingQueue, Post } from "@/types";
+import { QueueCalendar } from "@/components/posts/queue-calendar";
 
 /** Localizes the Queue contract's Sunday-zero weekdays without interpreting them in the browser's timezone. */
 function queueWeekdayLabels(language: string): string[] {
@@ -241,107 +240,7 @@ type Confirmation =
   | { kind: "delete"; queue: PublishingQueue }
   | { kind: "remove"; queue: PublishingQueue; post: Post };
 
-/** Owns one selected Queue's paged membership inspection. A Queue identity key resets pagination; removal confirmation stays with the directory, while assigned instants and Channel outcomes remain read-only. */
-function QueuePosts({
-  queue,
-  onRemove,
-}: {
-  queue: PublishingQueue | null;
-  onRemove: (post: Post) => void;
-}) {
-  const { t, language, tStatus } = useI18n();
-  const { canWriteContent } = useWorkspace();
-  const scope = useSessionScope();
-  const [offset, setOffset] = useState(0);
-  const posts = usePosts(
-    { ...scope, isSignedIn: scope.isSignedIn && queue !== null },
-    { queue_id: queue?.id, brand_profile_id: queue?.brand_profile_id, limit: 20, offset },
-  );
-  return (
-    <section aria-label={t("Queue Posts")} className="min-w-0 space-y-3 lg:flex-1">
-      {!queue ? (
-        <p className="text-sm text-ink-3">
-          {t("Inspect a Queue to see assigned times and Channel outcomes.")}
-        </p>
-      ) : (
-        <>
-          <h2 className="flex items-center gap-2 font-semibold">
-            <CalendarClock />
-            {queue.name}
-          </h2>
-          {posts.isPending ? (
-            <p role="status">{t("Loading Posts…")}</p>
-          ) : posts.error ? (
-            <Alert variant="destructive">{userFacingErrorMessage(posts.error, language)}</Alert>
-          ) : posts.data?.posts.length === 0 ? (
-            <p>{t("No Posts assigned to this Queue.")}</p>
-          ) : (
-            posts.data?.posts.map((post) => (
-              <article key={post.id} className="space-y-2 border-b border-line py-3">
-                <p className="break-words text-sm">
-                  {post.title || post.default_text || t("Media Post")}
-                </p>
-                <p className="text-xs text-ink-2">
-                  {post.queue_membership && (
-                    <time dateTime={post.queue_membership.assigned_at}>
-                      {new Date(post.queue_membership.assigned_at).toLocaleString(language, {
-                        timeZone: queue.timezone,
-                        timeZoneName: "short",
-                      })}
-                    </time>
-                  )}
-                </p>
-                <ul className="text-xs text-ink-2">
-                  {post.distributions.map((outcome) => (
-                    <li key={outcome.id}>
-                      {outcome.platform}: {tStatus(outcome.status)}
-                    </li>
-                  ))}
-                </ul>
-                <div className="flex flex-wrap gap-2">
-                  <Button asChild variant="outline">
-                    <Link to={`/posts?editPostId=${post.id}`}>{t("Open Post")}</Link>
-                  </Button>
-                  {canWriteContent &&
-                    post.distributions.every((outcome) =>
-                      ["scheduled", "queued", "cancelled"].includes(outcome.status),
-                    ) && (
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          onRemove(post);
-                        }}
-                      >
-                        {t("Remove from Queue")}
-                      </Button>
-                    )}
-                </div>
-              </article>
-            ))
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              disabled={offset === 0 || posts.isFetching}
-              onClick={() => setOffset((value) => Math.max(0, value - 20))}
-            >
-              {t("Previous")}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!posts.data?.has_more || posts.isFetching}
-              onClick={() => setOffset((value) => value + 20)}
-            >
-              {t("Next")}
-            </Button>
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
-/** Durable Queue directory and membership inspection. Admins configure plans; content writers remove editable reservations; all members see assigned times and independent Channel outcomes after reload. */
+/** Calendar-first Queue workspace. Admin configuration remains in the compact plan rail; the selected Queue owns its timezone-aware calendar, while the directory confirms safe removal and retirement. */
 export default function QueuesPage() {
   const { t, language } = useI18n();
   const weekdayLabels = useMemo(() => queueWeekdayLabels(language), [language]);
@@ -356,7 +255,7 @@ export default function QueuesPage() {
   const plans = useQueues(scope, selectedBrandProfileId);
   const queues = plans.data?.pages.flatMap((page) => page.items) ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selected = queues.find((queue) => queue.id === selectedId) ?? null;
+  const selected = queues.find((queue) => queue.id === selectedId) ?? queues[0] ?? null;
   const [editor, setEditor] = useState<{
     queue: PublishingQueue | null;
     key: string;
@@ -444,11 +343,7 @@ export default function QueuesPage() {
           {t("Refresh")}
         </Button>
       </div>
-      <div
-        ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6"
-        data-lenis-prevent=""
-      >
+      <div className="flex min-h-0 flex-1 flex-col">
         {!selectedBrandProfileId ? (
           <p>{t("Choose a Brand Profile to inspect its Queues.")}</p>
         ) : plans.isPending ? (
@@ -458,28 +353,37 @@ export default function QueuesPage() {
         ) : queues.length === 0 ? (
           <p>{t("No Queues yet. Create a plan, then choose Queue in the composer.")}</p>
         ) : (
-          <div className="flex flex-col gap-4 lg:flex-row">
+          <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
             <section
               aria-label={t("Publishing Queues")}
-              className="min-w-0 space-y-3 lg:w-80 lg:shrink-0"
+              ref={scrollRef}
+              data-lenis-prevent=""
+              className="max-h-52 min-h-0 min-w-0 shrink-0 space-y-3 overflow-y-auto border-b border-line p-3 lg:max-h-none lg:w-80 lg:border-b-0 lg:border-r"
             >
               {queues.map((queue) => (
                 <article
                   key={queue.id}
-                  className="space-y-3 rounded-card border border-line bg-surface p-4"
+                  className={
+                    selected?.id === queue.id
+                      ? "space-y-2 rounded-control border border-accent/30 bg-accent-tint p-3"
+                      : "space-y-2 rounded-control border border-line p-3"
+                  }
                 >
-                  <h2 className="break-words font-semibold">{queue.name}</h2>
+                  <h2 className="break-words text-sm font-semibold">{queue.name}</h2>
                   <p className="break-words text-xs text-ink-2">{queue.timezone}</p>
-                  <ul className="max-h-40 overflow-auto text-xs text-ink-2">
-                    {queue.slots.map((slot) => (
-                      <li key={`${slot.weekday}/${slot.time}`}>
-                        {t("{day} at {time}", {
-                          day: weekdayLabels[slot.weekday]!,
-                          time: slot.time,
-                        })}
-                      </li>
-                    ))}
-                  </ul>
+                  <details className="text-xs text-ink-3">
+                    <summary className="cursor-pointer">{t("Weekly slots")}</summary>
+                    <ul className="mt-1 max-h-40 overflow-auto text-xs text-ink-2">
+                      {queue.slots.map((slot) => (
+                        <li key={`${slot.weekday}/${slot.time}`}>
+                          {t("{day} at {time}", {
+                            day: weekdayLabels[slot.weekday]!,
+                            time: slot.time,
+                          })}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       variant="outline"
@@ -532,16 +436,18 @@ export default function QueuesPage() {
                 </Button>
               )}
             </section>
-            <QueuePosts
-              key={selected?.id ?? "unselected"}
-              queue={selected}
-              onRemove={(post) => {
-                if (!selected) return;
-                setConfirmation({ kind: "remove", queue: selected, post });
-                setActionError(null);
-                setConfirmOpen(true);
-              }}
-            />
+            {selected && (
+              <QueueCalendar
+                key={`${selected.id}:${selected.timezone}`}
+                queue={selected}
+                onRemove={(post) => {
+                  if (!selected) return;
+                  setConfirmation({ kind: "remove", queue: selected, post });
+                  setActionError(null);
+                  setConfirmOpen(true);
+                }}
+              />
+            )}
           </div>
         )}
       </div>

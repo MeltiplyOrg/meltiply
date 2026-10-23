@@ -754,5 +754,12 @@
   "No entries on this page": "此页没有条目",
   "Toggle active state for {name}": "切换 {name} 的启用状态",
   "Actions for {name}": "针对 {name} 的操作",
-  "Refresh": "刷新"
+  "Refresh": "刷新",
+  "Day": "日",
+  "Previous day": "前一天",
+  "Next day": "后一天",
+  "Current time: {time}": "当前时间：{time}",
+  "Next in this view": "此视图中的下一篇",
+  "No upcoming Posts in this view.": "此视图中暂无即将发布的 Post。",
+  "Queue Post": "Queue 中的 Post"
 }

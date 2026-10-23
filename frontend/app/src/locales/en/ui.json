@@ -754,5 +754,12 @@
   "No entries on this page": "No entries on this page",
   "Toggle active state for {name}": "Toggle active state for {name}",
   "Actions for {name}": "Actions for {name}",
-  "Refresh": "Refresh"
+  "Refresh": "Refresh",
+  "Day": "Day",
+  "Previous day": "Previous day",
+  "Next day": "Next day",
+  "Current time: {time}": "Current time: {time}",
+  "Next in this view": "Next in this view",
+  "No upcoming Posts in this view.": "No upcoming Posts in this view.",
+  "Queue Post": "Queue Post"
 }

@@ -17,6 +17,8 @@ type Schemas = components["schemas"];
 interface PostFilters {
   brandProfileId?: string;
   queueId?: string;
+  /** Paired half-open assignment window; HTTP validation requires queueId and at most 63 days. */
+  queueWindow?: { start: Date; end: Date };
   limit: number;
   offset: number;
   status?: Schemas["PostStatus"];

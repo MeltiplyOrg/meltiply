@@ -4877,6 +4877,17 @@ export interface operations {
                  */
                 brand_profile_id?: components["parameters"]["BrandProfileId"];
                 queue_id?: string;
+                /**
+                 * @description Inclusive Queue assignment instant. Supply with queue_id and
+                 *     queue_assigned_before; the UTC window must not exceed 63 days.
+                 */
+                queue_assigned_from?: string;
+                /**
+                 * @description Exclusive Queue assignment instant. Supply with queue_id and
+                 *     queue_assigned_from; filters immutable membership times, not
+                 *     per-Channel delivery or Post creation times.
+                 */
+                queue_assigned_before?: string;
             };
             header?: {
                 /**

@@ -202,6 +202,46 @@ describe("durable publishing Queues through authenticated HTTP", () => {
       slots: [{ weekday: 1, time: "09:30" }],
     });
   });
+  it("windows Queue assignments by UTC instant with inclusive start, exclusive end and stable pagination", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-26T08:00:00Z"));
+    const plan = await createPlan([
+      { weekday: 1, time: "09:00" },
+      { weekday: 1, time: "10:00" },
+      { weekday: 2, time: "09:00" },
+    ]);
+    const first = await enqueue((await createPost()).id, plan.id);
+    const second = await enqueue((await createPost()).id, plan.id);
+    await enqueue((await createPost()).id, plan.id);
+    const window = new URLSearchParams({
+      queue_id: plan.id,
+      queue_assigned_from: "2026-10-26T09:00:00Z",
+      queue_assigned_before: "2026-10-26T10:00:00Z",
+    });
+    const response = await request(`/posts?${window}`);
+    expect(response.status).toBe(200);
+    const result: Schemas["PostListResponse"] = await response.json();
+    expect(result.posts.map((post) => post.id)).toEqual([first.id]);
+    window.set("queue_assigned_before", "2026-10-27T00:00:00Z");
+    window.set("limit", "1");
+    const pageOne: Schemas["PostListResponse"] = await (await request(`/posts?${window}`)).json();
+    window.set("offset", "1");
+    const pageTwo: Schemas["PostListResponse"] = await (await request(`/posts?${window}`)).json();
+    expect(new Set([...pageOne.posts, ...pageTwo.posts].map((post) => post.id))).toEqual(
+      new Set([first.id, second.id]),
+    );
+    expect(pageOne.has_more).toBe(true);
+    expect(pageTwo.has_more).toBe(false);
+    expect((await request(`/posts?queue_assigned_from=2026-10-26T00:00:00Z`)).status).toBe(400);
+    expect(
+      (await request(`/posts?queue_id=${plan.id}&queue_assigned_before=2026-10-27T00:00:00Z`))
+        .status,
+    ).toBe(400);
+    window.set("queue_assigned_from", "2026-10-28T00:00:00Z");
+    expect((await request(`/posts?${window}`)).status).toBe(400);
+    window.set("queue_assigned_from", "2026-01-01T00:00:00Z");
+    expect((await request(`/posts?${window}`)).status).toBe(400);
+  });
   it("allocates successive future slots, preserves composition, and replays without another intent", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-26T09:00:00Z"));

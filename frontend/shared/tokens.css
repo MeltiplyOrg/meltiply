@@ -48,6 +48,10 @@
   --font-size-micro: 11px;
   --icon-stroke: 1.8;
 
+  /* Shared wall-clock calendar geometry; event chips represent instants, not durations. */
+  --calendar-hour-height: 4rem;
+  --calendar-day-height: calc(var(--calendar-hour-height) * 24);
+
   /* Viewport cutouts and home indicators, shared by shell and dialog frames. */
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);

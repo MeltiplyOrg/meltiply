@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add paired `queue_assigned_from` (inclusive) and `queue_assigned_before`
+  (exclusive) filters to `listPosts`, requiring `queue_id` and a window of at
+  most 63 days. Queue calendars read immutable assignments without scanning
+  unrelated Post history; existing pagination remains unchanged.
+
 - Add Brand Profile-scoped recurring publishing Queues (`listQueues`,
   `createQueue`, `getQueue`, `updateQueue`, `deleteQueue`), explicit pending
   membership removal (`removePostFromQueue`), `Post.queue_membership` and the

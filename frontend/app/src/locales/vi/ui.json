@@ -754,5 +754,12 @@
   "No entries on this page": "Không có mục nào trên trang này",
   "Toggle active state for {name}": "Bật hoặc tắt trạng thái hoạt động của {name}",
   "Actions for {name}": "Thao tác cho {name}",
-  "Refresh": "Làm mới"
+  "Refresh": "Làm mới",
+  "Day": "Ngày",
+  "Previous day": "Ngày trước",
+  "Next day": "Ngày tiếp theo",
+  "Current time: {time}": "Thời gian hiện tại: {time}",
+  "Next in this view": "Tiếp theo trong chế độ xem này",
+  "No upcoming Posts in this view.": "Không có Post sắp tới trong chế độ xem này.",
+  "Queue Post": "Post trong Queue"
 }

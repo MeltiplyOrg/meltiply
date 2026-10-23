@@ -1647,6 +1647,23 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: queue_assigned_from
+          in: query
+          description: |
+            Inclusive Queue assignment instant. Supply with queue_id and
+            queue_assigned_before; the UTC window must not exceed 63 days.
+          schema:
+            type: string
+            format: date-time
+        - name: queue_assigned_before
+          in: query
+          description: |
+            Exclusive Queue assignment instant. Supply with queue_id and
+            queue_assigned_from; filters immutable membership times, not
+            per-Channel delivery or Post creation times.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Paginated Posts in stable identity order.

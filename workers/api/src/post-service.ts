@@ -1549,6 +1549,7 @@ export function createPostApiService(
       });
     },
 
+    /** Lists retained tenant-visible Posts in stable order; an optional paired Queue window filters immutable active membership instants before pagination and batched projection. */
     listPosts(env: ApiWorkerEnv, session: SessionClaims, filters: PostFilters) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -1568,9 +1569,13 @@ export function createPostApiService(
             conditions.push(`posts.brand_profile_id = ${parameter(filters.brandProfileId)}`);
           }
           if (filters.queueId) {
+            const window = filters.queueWindow
+              ? `AND membership.assigned_at >= ${parameter(filters.queueWindow.start)}
+                 AND membership.assigned_at < ${parameter(filters.queueWindow.end)}`
+              : "";
             conditions.push(`EXISTS (SELECT 1 FROM publishing_queue_memberships membership
               WHERE membership.post_id = posts.id AND membership.queue_id = ${parameter(filters.queueId)}
-                AND membership.released_at IS NULL)`);
+                AND membership.released_at IS NULL ${window})`);
           }
           values.push(filters.limit + 1, filters.offset);
           const result = yield* client.query<PostRow>(

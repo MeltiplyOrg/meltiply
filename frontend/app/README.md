@@ -31,6 +31,12 @@ removal cancels only unclaimed work without moving another Post. The
 [publishing guide](../public/content/docs/publishing.mdx#weekly-queues) owns
 timezone, DST, ordering, replay, retirement, and historical-membership semantics.
 
+Queues reuses the Posts calendar and row projection for Month, adding a shared
+hourly Week/Day canvas. Its current-time marker follows the Queue's timezone,
+updates every 30 seconds and on tab return, and never alters stored assignments
+or recenters the user's scrolling. Calendar reads use paired, half-open Queue
+assignment filters and drain every page in the displayed window.
+
 There is one animation path, without a motion-mode provider, stored preference,
 root flag, mode props, or alternate branches. Preserve implemented animations
 during cleanup; extend their canonical owners for new animation work.

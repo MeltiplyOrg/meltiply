@@ -17,6 +17,10 @@ import {
   TopToolbarFilters,
   TopToolbarReset,
 } from "@/components/layout/top-toolbar";
+import {
+  BrandProfileSelect,
+  brandProfileFilterLabel,
+} from "@/components/workspace/brand-profile-select";
 import { platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
 import { DEFAULT_ANALYTICS_RANGE } from "./analytics-helpers";
@@ -24,6 +28,7 @@ import type {
   AnalyticsFormat,
   AnalyticsMetric,
   AnalyticsRangePreset,
+  BrandProfile,
   Platform,
   PlatformAccount,
 } from "@/types";
@@ -73,6 +78,10 @@ export function analyticsFormatLabel(format: AnalyticsFormat, t: (message: strin
 export interface AnalyticsToolbarProps {
   /** Connected accounts available for the selected Platform (or all). */
   accounts: readonly PlatformAccount[];
+  brandProfiles: BrandProfile[];
+  selectedBrandProfileId: string | null;
+  onBrandProfileChange: (brandProfileId: string | null) => void;
+  onResetFilters: () => void;
   /** Analytics-capable platforms offered as a single-select filter. */
   platforms: readonly Platform[];
   selectedAccountId: string | undefined;
@@ -90,9 +99,9 @@ export interface AnalyticsToolbarProps {
 
 /**
  * Analytics filter row using the shared collection filter builder: one compact
- * Filter disclosure holds the range, platform, account, and format fields, and
- * active values become removable chips. This keeps the toolbar to two controls
- * instead of four always-visible selects, matching the Posts surface.
+ * Filter disclosure holds Brand Profile, range, platform, account, and format
+ * fields, and active values become removable chips. Profile selection uses the
+ * workspace scope, matching the other collection surfaces.
  *
  * The range default is not "active": the cohort caption already states it, and
  * the builder keeps it available under "Add filter". Only filters that narrow
@@ -100,6 +109,10 @@ export interface AnalyticsToolbarProps {
  */
 export function AnalyticsToolbar({
   accounts,
+  brandProfiles,
+  selectedBrandProfileId,
+  onBrandProfileChange,
+  onResetFilters,
   platforms,
   selectedAccountId,
   selectedFormat,
@@ -120,24 +133,35 @@ export function AnalyticsToolbar({
   const accountLabel = selectedAccount
     ? (selectedAccount.display_name ?? selectedAccount.platform_user_id)
     : t("Account");
+  const profileLabel = brandProfileFilterLabel(selectedBrandProfileId, brandProfiles, t);
   const activeCount =
+    Number(selectedBrandProfileId !== null) +
     Number(selectedRange !== DEFAULT_ANALYTICS_RANGE) +
     Number(selectedPlatform !== undefined) +
     Number(selectedAccountId !== undefined) +
     Number(selectedFormat !== undefined);
-  const reset = () => {
-    onRangeChange(DEFAULT_ANALYTICS_RANGE);
-    onPlatformChange(undefined);
-    onAccountChange(undefined);
-    onFormatChange(undefined);
-  };
   return (
     <>
       <TopToolbar>
         <TopToolbarFilters
           activeCount={activeCount}
-          onClearAll={reset}
+          onClearAll={onResetFilters}
           fields={[
+            {
+              id: "brandProfile",
+              label: t("Brand Profile"),
+              active: selectedBrandProfileId !== null,
+              onClear: () => onBrandProfileChange(null),
+              control: (
+                <BrandProfileSelect
+                  value={selectedBrandProfileId ?? "all"}
+                  onValueChange={(id) => onBrandProfileChange(id === "all" ? null : id)}
+                  brandProfiles={brandProfiles}
+                  label={t("Brand Profile")}
+                  trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
+                />
+              ),
+            },
             {
               id: "range",
               label: t("Range"),
@@ -273,6 +297,9 @@ export function AnalyticsToolbar({
       </TopToolbar>
       {activeCount > 0 && (
         <TopToolbarFilterChips>
+          {selectedBrandProfileId !== null && (
+            <TopToolbarFilterChip label={profileLabel} onClear={() => onBrandProfileChange(null)} />
+          )}
           {selectedRange !== DEFAULT_ANALYTICS_RANGE && (
             <TopToolbarFilterChip
               label={analyticsRangeLabel(selectedRange, t)}
@@ -294,7 +321,7 @@ export function AnalyticsToolbar({
               onClear={() => onFormatChange(undefined)}
             />
           )}
-          <TopToolbarReset hasActiveFilters onReset={reset} className="ml-auto" />
+          <TopToolbarReset hasActiveFilters onReset={onResetFilters} className="ml-auto" />
         </TopToolbarFilterChips>
       )}
     </>

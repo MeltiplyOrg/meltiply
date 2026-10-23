@@ -108,7 +108,8 @@ function AnalyticsEmpty({
  */
 export function AnalyticsView(): React.ReactElement {
   const scope = useSessionScope();
-  const { selectedBrandProfile } = useWorkspace();
+  const { brandProfiles, selectedBrandProfile, selectedBrandProfileId, setSelectedBrandProfileId } =
+    useWorkspace();
   const { t, language } = useI18n();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -234,24 +235,28 @@ export function AnalyticsView(): React.ReactElement {
     );
   }
 
-  if (!error && !capableConnectedPlatforms.length) {
-    return (
-      <WorkspaceSurface title={t("Analytics")} description={description} actions={lastSyncStatus}>
-        <AnalyticsEmpty
-          title={t("Analytics needs a connected channel that reports analytics.")}
-          description={t(
-            "Connect an account on a platform whose Provider reports analytics. Reconnect an existing channel if its analytics scope was not granted.",
-          )}
-          showChannelsLink
-        />
-      </WorkspaceSurface>
-    );
-  }
-
   return (
     <WorkspaceSurface title={t("Analytics")} description={description} actions={lastSyncStatus}>
       <AnalyticsToolbar
         accounts={accountsQuery.data ?? []}
+        brandProfiles={brandProfiles}
+        selectedBrandProfileId={selectedBrandProfileId}
+        onBrandProfileChange={(id) => {
+          setSelectedBrandProfileId(id);
+          // Accounts belong to one profile; do not carry a stale account into a
+          // different cohort. Other filters remain valid across profile scopes.
+          updateSearch({ accountId: undefined, format, metric, platform, range });
+        }}
+        onResetFilters={() => {
+          setSelectedBrandProfileId(null);
+          updateSearch({
+            accountId: undefined,
+            format: undefined,
+            metric,
+            platform: undefined,
+            range: "30d",
+          });
+        }}
         platforms={analyticsPlatforms}
         selectedAccountId={accountId}
         selectedFormat={format}
@@ -312,6 +317,14 @@ export function AnalyticsView(): React.ReactElement {
               {t("Retry")}
             </Button>
           </Alert>
+        ) : !capableConnectedPlatforms.length ? (
+          <AnalyticsEmpty
+            title={t("Analytics needs a connected channel that reports analytics.")}
+            description={t(
+              "Connect an account on a platform whose Provider reports analytics. Reconnect an existing channel if its analytics scope was not granted.",
+            )}
+            showChannelsLink
+          />
         ) : emptyState ? (
           <AnalyticsEmpty
             title={

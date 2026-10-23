@@ -78,6 +78,10 @@ const totals: AnalyticsSummary["totals"] = {
 
 const toolbarProps = {
   accounts: [],
+  brandProfiles: [],
+  selectedBrandProfileId: null,
+  onBrandProfileChange: vi.fn(),
+  onResetFilters: vi.fn(),
   onAccountChange: vi.fn(),
   onFormatChange: vi.fn(),
   onPlatformChange: vi.fn(),

@@ -9,6 +9,7 @@ import type { AnalyticsSummary, PlatformMetrics } from "@/types";
 
 const navigate = vi.hoisted(() => vi.fn());
 const invalidateQueries = vi.hoisted(() => vi.fn());
+const setSelectedBrandProfileId = vi.hoisted(() => vi.fn());
 const refetch = vi.hoisted(() => ({
   accounts: vi.fn(),
   capabilities: vi.fn(),
@@ -18,6 +19,7 @@ const refetch = vi.hoisted(() => ({
 }));
 
 const state = vi.hoisted(() => ({
+  selectedBrandProfileId: null as string | null,
   accounts: { data: [] as unknown[], error: null as Error | null, isPending: false },
   capabilities: { data: [] as unknown[], error: null as Error | null, isPending: false },
   dashboard: {
@@ -53,10 +55,19 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries }),
 }));
 vi.mock("@/hooks/use-session-scope", () => ({
-  useSessionScope: () => ({ brandProfileId: null, isSignedIn: true, workspaceId: "workspace-1" }),
+  useSessionScope: () => ({
+    brandProfileId: state.selectedBrandProfileId,
+    isSignedIn: true,
+    workspaceId: "workspace-1",
+  }),
 }));
 vi.mock("@/context/workspace.context", () => ({
-  useWorkspace: () => ({ selectedBrandProfile: null }),
+  useWorkspace: () => ({
+    brandProfiles: [],
+    selectedBrandProfile: null,
+    selectedBrandProfileId: state.selectedBrandProfileId,
+    setSelectedBrandProfileId,
+  }),
 }));
 vi.mock("@/lib/queries", () => ({
   usePlatformCapabilities: () => ({ ...state.capabilities, refetch: refetch.capabilities }),
@@ -254,6 +265,8 @@ function renderView() {
 }
 
 beforeEach(() => {
+  state.selectedBrandProfileId = null;
+  setSelectedBrandProfileId.mockReset();
   state.searchParams = new URLSearchParams();
   state.capabilities = {
     data: [capability("instagram", true), capability("threads", true)],
@@ -278,6 +291,34 @@ afterEach(() => {
 });
 
 describe("analytics view", () => {
+  it("keeps profile clearing available when that profile has no capable channels", () => {
+    state.selectedBrandProfileId = "empty-profile";
+    state.accounts.data = [];
+    renderView();
+    expect(
+      screen.getByText("Analytics needs a connected channel that reports analytics."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear Unknown profile filter" }));
+    expect(setSelectedBrandProfileId).toHaveBeenCalledWith(null);
+  });
+
+  it("clears the profile and URL filters atomically while preserving the ranking metric", () => {
+    state.selectedBrandProfileId = "profile-1";
+    state.searchParams = new URLSearchParams(
+      "account=e3000000-0000-4000-8000-000000000002&format=video&platform=instagram&range=7d&metric=likes",
+    );
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(setSelectedBrandProfileId).toHaveBeenCalledWith(null);
+    expect(navigate).toHaveBeenCalledOnce();
+    const query = new URL(navigate.mock.calls[0]![0], "https://meltiply.local").searchParams;
+    expect(query.get("metric")).toBe("likes");
+    expect(query.get("range")).toBe("30d");
+    expect(query.has("account")).toBe(false);
+    expect(query.has("platform")).toBe(false);
+    expect(query.has("format")).toBe(false);
+  });
+
   it("renders the cohort KPIs, coverage, chart, and ranked Posts", () => {
     state.summary = {
       data: summary({

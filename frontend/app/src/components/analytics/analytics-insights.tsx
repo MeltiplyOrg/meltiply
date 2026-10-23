@@ -719,7 +719,10 @@ type PlatformSortKey =
   | "followers"
   | "follower_gain";
 
-/** Consolidated platform table with client-side sorting and honest null cells. */
+/**
+ * Sorts platform metrics with honest null cells. Native column sizing fills the
+ * available width using only visible metrics; narrow viewports scroll locally.
+ */
 export function PlatformBreakdownTable({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const [sort, setSort] = useState<{ key: PlatformSortKey; direction: "asc" | "desc" }>({
@@ -766,22 +769,7 @@ export function PlatformBreakdownTable({ dashboard }: { dashboard: AnalyticsDash
   return (
     <div>
       <div className="overflow-x-auto">
-        <Table className="min-w-[1080px]">
-          <colgroup>
-            <col className="w-[12%]" />
-            <col className="w-[6%]" />
-            <col className="w-[8%]" />
-            <col className="w-[6%]" />
-            <col className="w-[8%]" />
-            <col className="w-[6%]" />
-            <col className="w-[7%]" />
-            <col className="w-[9%]" />
-            <col className="w-[11%]" />
-            <col className="w-[8%]" />
-            <col className="w-[9%]" />
-            <col className="w-[5%]" />
-            <col className="w-[5%]" />
-          </colgroup>
+        <Table className="min-w-[1080px] table-auto">
           <TableHeader>
             <TableRow>
               <TableHead className="whitespace-nowrap">{t("Platform")}</TableHead>

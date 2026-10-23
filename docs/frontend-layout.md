@@ -63,7 +63,7 @@ Brand Profile is available inside the same Filter builder and scopes every analy
 
 The standard table collapses to stacked Post rows below `lg`, with metric labels beside each value. The chart keeps its documented `role="img"` summary and a visually hidden equivalent table. Loading skeletons preserve the KPI, chart, and table heights, and refreshing keeps prior data mounted.
 
-Analytics Day/Week/Month changes morph the marks in place. Bars keep the chart mounted and FLIP each rendered stack from the previous view's geometry, so days merge into weeks and split back without a React render per frame; the published value axis describes the destination from the first frame. The line chart samples the previously displayed curve onto the new bucket positions and eases its values into the destination. An interrupted change starts from what is on screen. Heatmap metric changes interpolate cell intensity without replacing the grid or scroll position. Native reduced motion renders both updates immediately.
+Analytics Day/Week/Month changes morph the marks in place. Bars keep the chart mounted and FLIP each rendered stack from the previous view's geometry, so days merge into weeks and split back without a React render per frame; the published value axis describes the destination from the first frame. The line chart animates each rendered path from the previous curve sampled at the new endpoints, so the curve reshapes into its new bends instead of redrawing. An interrupted change starts from what is on screen. Heatmap metric changes interpolate cell intensity without replacing the grid or scroll position. Native reduced motion renders both updates immediately.
 
 ## Settings
 

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import {
   Bar,
@@ -177,110 +177,170 @@ function platformRows(dashboard: AnalyticsDashboard) {
   return dashboard.platforms.filter((row) => PLATFORMS.includes(row.platform));
 }
 
-/** One flat chart row: a category label plus numeric series fields. */
-type ChartRow = Record<string, number | string | null>;
+/** One endpoint of a rendered line path, in drawing order. */
+interface PathCommand {
+  command: string;
+  x: number;
+  y: number;
+}
 
 /**
- * Reads a numeric series field at a normalized position across a row set,
- * linearly between neighbouring buckets. This is how a coarser or finer
- * grouping supplies the shape a morph starts from.
+ * Parses the drawing commands of a rendered line path into their endpoints.
+ * Recharts emits `M`, `C`, and `L` segments for these charts; control points of
+ * a cubic segment are skipped because only the curve's endpoints matter for
+ * sampling the previous shape.
  */
-function sampleRowField(rows: readonly ChartRow[], field: string, position: number): number {
-  if (rows.length === 0) return 0;
-  if (rows.length === 1) return Number(rows[0]?.[field] ?? 0);
-  const scaled = position * (rows.length - 1);
-  const lower = Math.floor(scaled);
-  const upper = Math.min(rows.length - 1, lower + 1);
-  const from = Number(rows[lower]?.[field] ?? 0);
-  const to = Number(rows[upper]?.[field] ?? 0);
-  return from + (to - from) * (scaled - lower);
+function readPathCommands(d: string): PathCommand[] {
+  const tokens = d.match(/[A-Za-z]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi) ?? [];
+  const commands: PathCommand[] = [];
+  let index = 0;
+  let active = "";
+  const number = () => Number(tokens[index++]);
+  while (index < tokens.length) {
+    const token = tokens[index]!;
+    if (/[A-Za-z]/.test(token)) {
+      active = token;
+      index += 1;
+      if (active === "Z") continue;
+      continue;
+    }
+    if (active === "M" || active === "L") {
+      const x = number();
+      const y = number();
+      commands.push({ command: active, x, y });
+      // Extra pairs after M are implicit line-to commands.
+      if (active === "M") active = "L";
+    } else if (active === "C") {
+      number();
+      number();
+      number();
+      number();
+      const x = number();
+      const y = number();
+      commands.push({ command: "C", x, y });
+    } else {
+      index += 1;
+    }
+  }
+  return commands;
+}
+
+/** Reads a line path's current shape, including an in-flight morph. */
+function readLinePath(path: SVGPathElement): string {
+  const computed = path.ownerDocument.defaultView?.getComputedStyle(path).d;
+  const animated = computed?.match(/^path\("(.*)"\)$/)?.[1];
+  return animated ?? path.getAttribute("d") ?? "";
+}
+
+/** Reads every trend line's shape, in series order, as a morph snapshot. */
+function readLinePaths(root: HTMLElement): string[] {
+  return [...root.querySelectorAll<SVGPathElement>(".recharts-line-curve")].map(readLinePath);
+}
+
+/** Interpolates the previous curve's y at an x position. */
+function samplePathY(commands: readonly PathCommand[], x: number): number {
+  if (commands.length === 0) return 0;
+  const first = commands[0]!;
+  if (x <= first.x) return first.y;
+  for (let index = 1; index < commands.length; index += 1) {
+    const left = commands[index - 1]!;
+    const right = commands[index]!;
+    if (x > right.x) continue;
+    const width = right.x - left.x;
+    return width === 0 ? right.y : left.y + ((x - left.x) / width) * (right.y - left.y);
+  }
+  return commands.at(-1)!.y;
 }
 
 /**
- * Builds the first frame of a view change: the target rows, but with every
- * numeric series sampled from the previously displayed shape. Labels are the
- * target's, so the axis describes the destination while the marks travel.
+ * Builds the shape a line starts from: the previous curve sampled at every
+ * endpoint of the destination path, using the same command structure so the
+ * browser can interpolate `d` directly. Control points of the start curve lie
+ * on the straight segment, so the curve visibly settles into its new bends.
  */
-function morphStart(previous: readonly ChartRow[], target: readonly ChartRow[]): ChartRow[] {
-  return target.map((row, index) => {
-    const position = target.length > 1 ? index / (target.length - 1) : 0;
-    const start: ChartRow = {};
-    for (const [field, value] of Object.entries(row)) {
-      start[field] = typeof value === "number" ? sampleRowField(previous, field, position) : value;
+function morphPathStart(previousD: string, targetD: string): string | null {
+  const target = readPathCommands(targetD);
+  const previous = readPathCommands(previousD);
+  if (target.length < 2 || previous.length < 2) return null;
+  let shape = "";
+  let cursor = { x: 0, y: 0 };
+  for (const command of target) {
+    const y = samplePathY(previous, command.x);
+    if (command.command === "M") {
+      shape += `M${command.x},${y}`;
+    } else if (command.command === "C") {
+      const c1x = cursor.x + (command.x - cursor.x) / 3;
+      const c1y = cursor.y + (y - cursor.y) / 3;
+      const c2x = cursor.x + (2 * (command.x - cursor.x)) / 3;
+      const c2y = cursor.y + (2 * (y - cursor.y)) / 3;
+      shape += `C${c1x},${c1y} ${c2x},${c2y} ${command.x},${y}`;
+    } else {
+      shape += `L${command.x},${y}`;
     }
-    return start;
-  });
-}
-
-/** Linear blend from `start` to `target`; non-numeric fields switch immediately. */
-function blendRows(
-  start: readonly ChartRow[],
-  target: readonly ChartRow[],
-  progress: number,
-): ChartRow[] {
-  return target.map((row, index) => {
-    const blended: ChartRow = {};
-    for (const [field, value] of Object.entries(row)) {
-      if (typeof value !== "number") {
-        blended[field] = value;
-        continue;
-      }
-      const from = Number(start[index]?.[field] ?? value);
-      blended[field] = from + (value - from) * progress;
-    }
-    return blended;
-  });
-}
-
-/** One morph: the view whose rows are on screen, and those rows. */
-interface MorphState {
-  rows: ChartRow[];
-  view: Grouping;
+    cursor = { x: command.x, y };
+  }
+  return shape;
 }
 
 /**
- * Morphs chart rows between view modes instead of swapping them.
+ * Animates every trend line from its previous shape to the rendered shape.
+ * The browser interpolates the `d` path directly, so a grouping change costs no
+ * React render per frame. Runs once the destination paths exist; browsers
+ * without CSS path interpolation render the destination immediately.
+ */
+function morphLinePaths(
+  root: HTMLElement,
+  previous: readonly string[],
+  reduceMotion: boolean,
+): boolean {
+  if (reduceMotion || previous.length === 0) return true;
+  const paths = [...root.querySelectorAll<SVGPathElement>(".recharts-line-curve")];
+  const target = paths.map((path) => path.getAttribute("d") ?? "");
+  // The destination has not been published yet: keep waiting.
+  if (target.length === 0 || target[0] === previous[0]) return false;
+  if (!root.ownerDocument.defaultView?.CSS?.supports?.("d", 'path("M0,0")')) return true;
+  for (const [index, path] of paths.entries()) {
+    const from = previous[index];
+    const to = target[index];
+    if (!from || !to || from === to) continue;
+    const start = morphPathStart(from, to);
+    if (!start) continue;
+    path.animate([{ d: `path("${start}")` }, { d: `path("${to}")` }] as Keyframe[], {
+      duration: CHART_MORPH_MS,
+      easing: "ease-in-out",
+      fill: "none",
+    });
+  }
+  return true;
+}
+
+/**
+ * Runs an animation once the chart has rendered its destination marks.
+ * Recharts publishes new marks after the data change, so a layout read still
+ * sees the previous chart. Observing stops as soon as `attempt` reports the
+ * animation was applied; the timeout covers a range with no marks to morph.
  *
- * Recharts renders one mounted chart; this hook supplies the intermediate
- * geometry, sampling the previous shape onto the new bucket positions and
- * easing the values across {@link CHART_MORPH_MS}. The first frame is derived
- * during the render that introduces the new view, so the chart never paints the
- * previous grouping against the destination axis. A change that is not a view
- * change (range, filters) renders immediately, an interrupted change continues
- * from what is on screen, and reduced motion skips the interpolation.
+ * @returns Cleanup that disconnects the observer and cancels pending work.
  */
-function useMorphedRows(target: readonly ChartRow[], view: Grouping, enabled: boolean): ChartRow[] {
-  const [state, setState] = useState<MorphState>(() => ({ rows: [...target], view }));
-  const changing = state.view !== view;
-  // Pure first frame for the destination view; `null` once the view is committed.
-  const start = changing ? (enabled ? morphStart(state.rows, target) : [...target]) : null;
-  const frameRef = useRef(0);
-
-  useEffect(() => () => cancelAnimationFrame(frameRef.current), []);
-
-  useEffect(() => {
-    if (start === null) return;
-    if (!enabled) {
-      setState({ rows: [...target], view });
-      return;
+function whenMarksSettle(root: HTMLElement, attempt: () => boolean): () => void {
+  let applied = false;
+  let observer: MutationObserver;
+  const run = () => {
+    if (applied) return;
+    if (attempt()) {
+      applied = true;
+      observer.disconnect();
     }
-    cancelAnimationFrame(frameRef.current);
-    let begin = 0;
-    const step = (now: number) => {
-      // The first callback starts the clock: a rAF timestamp can predate a
-      // `performance.now()` read from the effect that scheduled it.
-      if (begin === 0) begin = now;
-      const progress = Math.min(1, Math.max(0, (now - begin) / CHART_MORPH_MS));
-      const eased = progress < 0.5 ? 2 * progress * progress : 1 - (-2 * progress + 2) ** 2 / 2;
-      const next = progress >= 1 ? [...target] : blendRows(start, target, eased);
-      console.log("morphFrame", Math.round(progress * 1000) / 10, Math.round(now - begin));
-      setState({ rows: next, view });
-      if (progress < 1) frameRef.current = requestAnimationFrame(step);
-    };
-    frameRef.current = requestAnimationFrame(step);
-  }, [start, target, enabled, view]);
-
-  return start ?? state.rows;
+  };
+  observer = new MutationObserver(run);
+  observer.observe(root, { childList: true, subtree: true });
+  const frame = requestAnimationFrame(run);
+  const timeout = window.setTimeout(() => observer.disconnect(), 600);
+  return () => {
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+    window.clearTimeout(timeout);
+  };
 }
 
 /** One rendered bar segment: its element and viewport geometry. */
@@ -392,23 +452,7 @@ export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboar
     const previous = capturedBars.current;
     capturedBars.current = [];
     if (!root || previous.length === 0 || reduceMotion) return;
-    // Recharts publishes the new bars after the data change, so a single
-    // layout read would still see the old marks. Observe until the destination
-    // geometry appears, then morph before the next paint. The fallback timeout
-    // stops observing if the chart never changes (e.g., an empty range).
-    const observer = new MutationObserver(() => {
-      if (morphBarColumns(root, previous, reduceMotion) > 0) observer.disconnect();
-    });
-    observer.observe(root, { childList: true, subtree: true });
-    const frame = requestAnimationFrame(() => {
-      if (morphBarColumns(root, previous, reduceMotion) > 0) observer.disconnect();
-    });
-    const timeout = window.setTimeout(() => observer.disconnect(), 600);
-    return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
-    };
+    return whenMarksSettle(root, () => morphBarColumns(root, previous, reduceMotion) > 0);
   }, [grouping, reduceMotion]);
 
   if (buckets.length === 0)
@@ -601,9 +645,9 @@ function TrendTooltip({ active, label, payload }: TooltipProps) {
 /**
  * One trend chart for every stored metric. Cumulative changes are indexed to
  * 100 at the first measured period so views cannot flatten likes, comments, and
- * shares; hovering restores absolute values. A grouping change reshapes the
- * same mounted lines: the previous curve is sampled onto the new bucket
- * positions and eased into the destination over the shared morph timing.
+ * shares; hovering restores absolute values. A grouping change animates each
+ * line's rendered path from its previous shape to the new one, so the curve
+ * reshapes without a React render per frame.
  */
 export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
@@ -613,7 +657,17 @@ export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashb
     () => trendSeries(dashboard, grouping, language),
     [dashboard, grouping, language],
   );
-  const rows = useMorphedRows(data, grouping, !reduceMotion);
+  const chartRef = useRef<HTMLDivElement>(null);
+  const capturedLines = useRef<string[]>([]);
+
+  useLayoutEffect(() => {
+    const root = chartRef.current;
+    const previous = capturedLines.current;
+    capturedLines.current = [];
+    if (!root || previous.length === 0) return;
+    return whenMarksSettle(root, () => morphLinePaths(root, previous, reduceMotion));
+  }, [grouping, reduceMotion]);
+
   if (data.length === 0 || metrics.length === 0)
     return <EmptyInsight message={t("No measured changes in this range yet.")} />;
   return (
@@ -624,11 +678,19 @@ export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashb
       )}
     >
       <div className="mb-2 flex justify-end">
-        <GroupingControl grouping={grouping} onChange={setGrouping} />
+        <GroupingControl
+          grouping={grouping}
+          onChange={(next) => {
+            if (next === grouping) return;
+            const root = chartRef.current;
+            capturedLines.current = root ? readLinePaths(root) : [];
+            setGrouping(next);
+          }}
+        />
       </div>
-      <div className="h-72">
+      <div ref={chartRef} className="h-72">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={rows} margin={{ bottom: 0, left: 0, right: 12, top: 8 }}>
+          <LineChart data={data} margin={{ bottom: 0, left: 0, right: 12, top: 8 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" />
             <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} />
             <YAxis

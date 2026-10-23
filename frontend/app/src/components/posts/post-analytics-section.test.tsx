@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { PostAnalyticsSection } from "./post-analytics-section";
 import type { PostAnalyticsSummary } from "./posts-helpers";
 
@@ -33,6 +33,19 @@ vi.mock("@/hooks/use-session-scope", () => ({
   useSessionScope: () => ({ isSignedIn: true, workspaceId: "w1" }),
 }));
 vi.mock("@/lib/queries", () => ({ usePostAnalyticsHistory: () => state }));
+
+// jsdom has no layout observer; browser smoke covers the actual responsive SVG.
+beforeAll(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
+afterAll(() => vi.unstubAllGlobals());
 
 const summary: PostAnalyticsSummary = {
   awaiting: false,

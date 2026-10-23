@@ -25,12 +25,14 @@ export interface PostCardProps extends PostActionsProps {
   selected: boolean;
   selectionDisabled?: boolean;
   onToggleSelection: (postId: string) => void;
+  onViewDetails: (postId: string) => void;
 }
 
 /**
  * Canonical media Grid card over real caption, profile, channel, date, and
- * attachment data. The title button's stretched hit area opens inspection with
- * native keyboard semantics; selection and quick actions sit above that area.
+ * attachment data. The title button's stretched hit area sits above the preview
+ * as well as the text, so the thumbnail opens inspection with native keyboard
+ * semantics; selection and quick actions stack above that area.
  */
 export const PostCard = React.memo(function PostCard({
   post,
@@ -59,7 +61,7 @@ export const PostCard = React.memo(function PostCard({
       <Button
         variant="ghost"
         data-post-details
-        className="h-auto justify-start whitespace-normal p-0 text-left text-(length:--font-size-ui) font-normal leading-snug text-ink after:absolute after:inset-0 after:rounded-card hover:bg-transparent"
+        className="h-auto justify-start whitespace-normal p-0 text-left text-(length:--font-size-ui) font-normal leading-snug text-ink after:absolute after:inset-0 after:z-[1] after:rounded-card hover:bg-transparent"
         title={t("View details")}
         onClick={(event) => {
           event.stopPropagation();

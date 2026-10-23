@@ -138,18 +138,18 @@ export default defineConfig(() => {
     ),
     plugins: lazyPlugins(() => [
       react(),
+      // Local builds must reach the Wrangler API process directly; deployed
+      // environments omit API_ORIGIN and route through the API service binding.
       cloudflare({
-        config: (config) => ({
-          ...(localApp
-            ? { services: config.services?.filter(({ binding }) => binding !== "API") }
-            : {}),
-          vars: {
-            ...config.vars,
-            ...(localApp || !config.services?.some(({ binding }) => binding === "API")
-              ? { API_ORIGIN: `http://127.0.0.1:${localApiPort}` }
-              : {}),
-          },
-        }),
+        config: (config) =>
+          localApp
+            ? {
+                vars: {
+                  ...config.vars,
+                  API_ORIGIN: `http://127.0.0.1:${localApiPort}`,
+                },
+              }
+            : {},
       }),
       rootEnvReloadPlugin(),
       canonicalFrontendOriginPlugin(frontendUrl),

@@ -209,6 +209,22 @@ describe("frontend Worker API proxy", () => {
     expect(forwarded.headers.get("Cookie")).toBe("better-auth.session_token=secret");
   });
 
+  it("prefers a local API origin over a bound service in built previews", async () => {
+    const upstream = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", upstream);
+    const api = { fetch: vi.fn() };
+
+    const response = await worker.fetch(new Request("https://frontend.test/api/auth/get-session"), {
+      ...environment,
+      API: api,
+      API_ORIGIN: "http://127.0.0.1:8787",
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(api.fetch).not.toHaveBeenCalled();
+  });
+
   it("rewrites /api/* onto API_ORIGIN when no service binding exists", async () => {
     const upstream = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", upstream);

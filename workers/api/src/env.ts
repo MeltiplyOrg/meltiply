@@ -205,7 +205,8 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
  *
  * Ensures all required environment variables, Hyperdrive databases, R2 storage, a usable
  * Email Sending binding with a valid sender and live-accepted provider
- * credentials (Meta, TikTok, YouTube) are fully configured in staging.
+ * credentials (Meta, TikTok, YouTube) are fully configured in staging. TikTok's
+ * media prefix is optional: the provider registry derives it from PUBLIC_API_URL.
  *
  * The mail checks run before the presence list so a malformed sender or
  * unusable binding reports a precise cause instead of a bare missing name.
@@ -275,13 +276,8 @@ export function validateProductionBindings(env: ApiWorkerEnv): void {
   if (threadsAccepted === "true" && (!env.THREADS_CLIENT_ID || !env.THREADS_CLIENT_SECRET)) {
     throw new Error("accepted Threads provider requires client ID and client secret bindings");
   }
-  if (
-    tiktokAccepted === "true" &&
-    (!env.TIKTOK_CLIENT_KEY || !env.TIKTOK_CLIENT_SECRET || !env.TIKTOK_MEDIA_URL_PREFIX)
-  ) {
-    throw new Error(
-      "accepted TikTok provider requires client key, client secret, and verified media URL prefix bindings",
-    );
+  if (tiktokAccepted === "true" && (!env.TIKTOK_CLIENT_KEY || !env.TIKTOK_CLIENT_SECRET)) {
+    throw new Error("accepted TikTok provider requires client key and client secret bindings");
   }
   if (
     youtubeAccepted === "true" &&

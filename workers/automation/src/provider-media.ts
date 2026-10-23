@@ -30,9 +30,9 @@ export const providerMediaRetrievalLeaseSeconds = 24 * 60 * 60;
  * The Automation Worker signs URLs under this path on the `PUBLIC_API_URL` origin; the API
  * Worker verifies the signature and streams the private R2 object. The literal is duplicated
  * in `workers/api/src/core-routes.ts` because worker bundles cannot share source modules —
- * both sides must stay byte-identical. Operators point `TIKTOK_MEDIA_URL_PREFIX` at
- * `https://<api-domain>/api/v1/provider-media/` so emitted URLs satisfy the TikTok adapter's
- * verified-domain pathname-prefix check.
+ * both sides must stay byte-identical. The provider registry derives TikTok's
+ * media prefix from this route on PUBLIC_API_URL; any explicit
+ * TIKTOK_MEDIA_URL_PREFIX must still cover emitted URLs.
  */
 const providerMediaRoutePrefix = "/api/v1/provider-media/";
 

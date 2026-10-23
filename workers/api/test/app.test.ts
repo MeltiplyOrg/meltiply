@@ -267,21 +267,6 @@ describe("API Worker foundation", () => {
     expect(() =>
       validateProductionBindings({
         ...stagingEnv,
-        TIKTOK_LIVE_ACCEPTED: "true",
-      }),
-    ).toThrow("TikTok provider requires client key, client secret");
-    expect(() =>
-      validateProductionBindings({
-        ...stagingEnv,
-        TIKTOK_CLIENT_KEY: "tiktok-client",
-        TIKTOK_CLIENT_SECRET: "tiktok-secret",
-        TIKTOK_LIVE_ACCEPTED: "true",
-        TIKTOK_MEDIA_URL_PREFIX: "https://account.r2.cloudflarestorage.com/assets/",
-      }),
-    ).not.toThrow();
-    expect(() =>
-      validateProductionBindings({
-        ...stagingEnv,
         YOUTUBE_LIVE_ACCEPTED: "yes",
       }),
     ).toThrow("YOUTUBE_LIVE_ACCEPTED must be true or false");

@@ -70,7 +70,7 @@ export interface AutomationEnv {
   TIKTOK_CLIENT_KEY?: string;
   TIKTOK_CLIENT_SECRET?: string;
   TIKTOK_LIVE_ACCEPTED?: string;
-  /** Verified-domain HTTPS directory prefix TikTok validates remote-ingest URLs against; must cover the API provider-media route. */
+  /** Optional verified HTTPS directory override; defaults to PUBLIC_API_URL's /api/v1/provider-media/ route and must cover emitted media URLs. */
   TIKTOK_MEDIA_URL_PREFIX?: string;
   TIKTOK_PUBLISH_QUEUE?: Queue<unknown>;
   /** Shared secret; also the HMAC-SHA256 material signing verified-domain provider-media URLs. */

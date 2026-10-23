@@ -7,7 +7,11 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { z } from "zod";
 import { Effect } from "effect";
 import { PLATFORM_IDS, type Platform } from "../../packages/domain/src/index";
-import { createProviderRegistryFromEnvironment } from "../../packages/providers/src/index";
+import {
+  createProviderRegistryFromEnvironment,
+  ProviderAdapterError,
+  type PublishInput,
+} from "../../packages/providers/src/index";
 import { createApiApp } from "../../workers/api/src/app";
 import { authenticatedPoolFor, systemPoolFor } from "../../workers/api/src/database";
 import type { ApiWorkerEnv } from "../../workers/api/src/env";
@@ -231,7 +235,6 @@ const env = {
   TIKTOK_CLIENT_KEY: "tiktok-client",
   TIKTOK_CLIENT_SECRET: "tiktok-smoke-secret",
   TIKTOK_LIVE_ACCEPTED: "true",
-  TIKTOK_MEDIA_URL_PREFIX: `${origin}/api/v1/provider-media/`,
   YOUTUBE_SHORTS_CLIENT_ID: "youtube-client",
   YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-smoke-secret",
   YOUTUBE_LIVE_ACCEPTED: "true",
@@ -389,7 +392,103 @@ async function rejectInvalidAuthorization(platform: "tiktok" | "youtube") {
   assert.equal(providerCallCount, callsBefore);
 }
 
+/**
+ * Exercises default/blank and explicit TikTok media prefixes through real Direct Post
+ * validation. Only TikTok HTTP is controlled: the accepted media URL must reach init,
+ * while the other origin must fail before any additional provider request.
+ */
+async function verifyTikTokMediaConfiguration() {
+  const defaultUrl = "https://api.oauth-smoke.example.test/api/v1/provider-media/smoke/video.mp4";
+  const overrideUrl = "https://media.oauth-smoke.example.test/verified/video.mp4";
+  for (const [prefix, mediaUrl, rejectedUrl] of [
+    ["  ", defaultUrl, overrideUrl],
+    [" https://media.oauth-smoke.example.test/verified/ ", overrideUrl, defaultUrl],
+  ]) {
+    let calls = 0;
+    const provider = createProviderRegistryFromEnvironment(
+      { ...env, TIKTOK_MEDIA_URL_PREFIX: prefix },
+      {
+        fetch: async (input, init = {}) => {
+          calls++;
+          const url = new URL(input.toString());
+          assert.equal(url.origin, "https://open.tiktokapis.com");
+          if (url.pathname === "/v2/post/publish/creator_info/query/") {
+            return Response.json({
+              data: {
+                comment_disabled: false,
+                creator_avatar_url: "https://cdn.example.test/avatar.jpg",
+                creator_nickname: "Smoke Creator",
+                creator_username: "smoke.creator",
+                duet_disabled: false,
+                max_video_post_duration_sec: 300,
+                privacy_level_options: ["SELF_ONLY"],
+                stitch_disabled: false,
+              },
+              error: { code: "ok" },
+            });
+          }
+          assert.equal(url.pathname, "/v2/post/publish/video/init/");
+          assert.equal(
+            z
+              .object({ source_info: z.object({ video_url: z.string() }) })
+              .parse(JSON.parse(String(init.body))).source_info.video_url,
+            mediaUrl,
+          );
+          return Response.json({
+            data: { publish_id: "v_pub_url~media-smoke" },
+            error: { code: "ok" },
+          });
+        },
+      },
+    ).get("tiktok")!;
+    const media = {
+      contentType: "video/mp4",
+      fileSize: 1_024,
+      metadata: { durationSeconds: 120, height: 1_920, width: 1_080 },
+      mode: "remote_ingest" as const,
+      url: z.string().parse(mediaUrl),
+    };
+    const input: PublishInput = {
+      caption: "Media configuration smoke",
+      hashtags: [],
+      idempotencyKey: randomUUID(),
+      media: [media],
+      providerOptions: {
+        tiktok: {
+          allowComment: false,
+          allowDuet: false,
+          allowStitch: false,
+          brandContent: false,
+          brandOrganic: false,
+          isAiGenerated: false,
+          musicUsageConfirmed: true,
+          privacyLevel: "SELF_ONLY",
+        },
+      },
+    };
+    const context = { operationId: randomUUID(), requestId: randomUUID() };
+    const credentials = { accessToken: "media-smoke-access", accountId: expectedIds.tiktok };
+    assert.equal(
+      (await provider.publish!(context, credentials, input)).outcome,
+      "confirmed_success",
+    );
+    await assert.rejects(
+      () =>
+        provider.publish!(context, credentials, {
+          ...input,
+          media: [{ ...media, url: z.string().parse(rejectedUrl) }],
+        }),
+      (error: unknown) =>
+        error instanceof ProviderAdapterError &&
+        error.failure.code === "tiktok_media_prefix_invalid",
+    );
+    assert.equal(calls, 2);
+  }
+  console.log("TikTok: derived media prefix, explicit override and cross-prefix rejection passed");
+}
+
 try {
+  await verifyTikTokMediaConfiguration();
   const profileResponse = await request("/api/v1/brand-profiles", "POST", {
     name: `OAuth smoke ${nonce}`,
     color: "#1d4ed8",

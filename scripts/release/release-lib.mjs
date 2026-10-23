@@ -290,7 +290,8 @@ export function containsCredentialMaterial(serialized) {
  * and ISO 8601 restore point expiry. Rejects secrets, private keys, and connection strings.
  * Object storage defaults to R2; S3 selection requires a bucket and HTTPS origin,
  * with region us-east-1 and path-style addressing by default. Credentials stay
- * in provider-specific remote secrets, never this document.
+ * in provider-specific remote secrets, never this document. TikTok's optional media
+ * prefix overrides the provider registry's default derived from the public API origin.
  * @param {unknown} input - Raw release specification object
  * @returns {object} Normalized, validated release specification
  * @throws {TypeError} If validation fails or forbidden secrets are present
@@ -411,9 +412,6 @@ export function validateReleaseSpec(input) {
     if (acceptance[provider] && !validatedRuntime[fields.clientField]) {
       throw new TypeError(`${fields.clientField} is required when ${provider} is accepted`);
     }
-  }
-  if (acceptance.tiktok && !validatedRuntime.tiktok_media_url_prefix) {
-    throw new TypeError("tiktok_media_url_prefix is required when TikTok is accepted");
   }
 
   const automationGuard = assertPlainObject(spec.automation_guard, "automation_guard");

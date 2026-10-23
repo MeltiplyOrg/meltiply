@@ -298,7 +298,9 @@ function trustedPublicUrl(value: string | undefined): URL {
 /**
  * Factory that initializes and populates a ProviderRegistry from environment variables.
  * Checks live acceptance flags (`<PLATFORM>_LIVE_ACCEPTED=true`), verifies credentials,
- * derives canonical redirect URIs, and configures provider adapters with HTTP clients and timeouts.
+ * derives canonical redirect URIs and the default TikTok provider-media prefix from PUBLIC_API_URL,
+ * and configures provider adapters with HTTP clients and timeouts. A nonblank
+ * TIKTOK_MEDIA_URL_PREFIX overrides the derived HTTPS directory; blank values use the default.
  * Returns populated ProviderRegistry. Throws TypeError if accepted provider configurations are incomplete.
  */
 export function createProviderRegistryFromEnvironment(
@@ -365,7 +367,7 @@ export function createProviderRegistryFromEnvironment(
   const tiktokClientKey = environment.TIKTOK_CLIENT_KEY?.trim();
   const tiktokClientSecret = environment.TIKTOK_CLIENT_SECRET?.trim();
   const tiktokMediaUrlPrefix = environment.TIKTOK_MEDIA_URL_PREFIX?.trim();
-  if (tiktokAccepted && (!tiktokClientKey || !tiktokClientSecret || !tiktokMediaUrlPrefix)) {
+  if (tiktokAccepted && (!tiktokClientKey || !tiktokClientSecret)) {
     throw new TypeError("accepted TikTok provider configuration is incomplete");
   }
   const youtubeClientId = environment.YOUTUBE_SHORTS_CLIENT_ID?.trim();
@@ -423,7 +425,8 @@ export function createProviderRegistryFromEnvironment(
       createTikTokAdapter({
         clientKey: tiktokClientKey!,
         clientSecret: tiktokClientSecret!,
-        mediaUrlPrefix: tiktokMediaUrlPrefix!,
+        mediaUrlPrefix:
+          tiktokMediaUrlPrefix || new URL("/api/v1/provider-media/", publicUrl).toString(),
         redirectUri: new URL(oauthCallbackPath("tiktok"), publicUrl).toString(),
         ...commonOptions,
       }),

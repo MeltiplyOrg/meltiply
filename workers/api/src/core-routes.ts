@@ -572,9 +572,9 @@ async function pkceChallenge(verifier: string): Promise<string> {
  * its own byte-identical copy in `workers/automation/src/provider-media.ts` because
  * separate worker bundles cannot share source modules. The Automation Worker signs
  * `<PUBLIC_API_URL>/api/v1/provider-media/<key>?expires=<unix>&signature=<b64url>` URLs;
- * this route verifies the HMAC before streaming the private R2 object. Operators point
- * `TIKTOK_MEDIA_URL_PREFIX` at this prefix on the verified API domain so the TikTok
- * adapter's pathname-prefix check accepts emitted URLs.
+ * this route verifies the HMAC before streaming the private R2 object. The provider
+ * registry derives TikTok's media prefix from this route on PUBLIC_API_URL by default;
+ * any explicit TIKTOK_MEDIA_URL_PREFIX must still cover emitted URLs.
  */
 export const providerMediaRoutePrefix = "/api/v1/provider-media/";
 

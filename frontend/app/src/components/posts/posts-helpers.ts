@@ -109,13 +109,13 @@ const POST_ANALYTICS_COUNTERS = [
 ] as const satisfies readonly (keyof NonNullable<Post["analytics"]>)[];
 
 /** One measured counter of a Post's stored analytics. */
-export interface PostAnalyticsMetric {
+interface PostAnalyticsMetric {
   id: keyof NonNullable<Post["analytics"]>;
   value: number;
 }
 
 /** One published Channel's latest stored counters, ready for the inspector chart. */
-export interface PostChannelAnalytics {
+interface PostChannelAnalytics {
   /** Distribution id; stable join key to the row's Channel outcome. */
   id: string;
   platform: Platform;

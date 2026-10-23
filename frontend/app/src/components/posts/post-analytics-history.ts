@@ -8,6 +8,7 @@ export interface PostAnalyticsPoint {
   likes: number;
   comments: number;
   shares: number;
+  views: number;
   reach: number;
   impressions: number;
 }
@@ -25,8 +26,8 @@ export function postAnalyticsHistory(snapshots: readonly Snapshot[]): PostAnalyt
   const ordered = [...snapshots].sort(
     (a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at) || a.id.localeCompare(b.id),
   );
-  const totals = { likes: 0, comments: 0, shares: 0, reach: 0, impressions: 0 };
-  const metrics = ["likes", "comments", "shares", "reach", "impressions"] as const;
+  const totals = { likes: 0, comments: 0, shares: 0, views: 0, reach: 0, impressions: 0 };
+  const metrics = ["likes", "comments", "shares", "views", "reach", "impressions"] as const;
   for (const snapshot of ordered) {
     const previous = latest.get(snapshot.distribution_id);
     for (const metric of metrics) totals[metric] += snapshot[metric] - (previous?.[metric] ?? 0);

@@ -28,6 +28,7 @@ const ENGAGEMENT = [
 const EXPOSURE = [
   { key: "reach", color: "var(--accent)", dash: undefined },
   { key: "impressions", color: "var(--green)", dash: "5 3" },
+  { key: "views", color: "var(--orange)", dash: "2 3" },
 ] as const;
 
 /**
@@ -157,7 +158,7 @@ function PostTimeline({
 
 /**
  * Published Post totals and two stored-snapshot timelines: engagement counters,
- * then reach/impressions. Reads histories only while a published Post is inspected;
+ * then reach/impressions/media views. Reads histories only while a published Post is inspected;
  * loading and retry states never replace failures with a fabricated flat line.
  * Totals carry each Channel's last reported value forward between its syncs;
  * reach is reported across Channels, not a deduplicated audience.

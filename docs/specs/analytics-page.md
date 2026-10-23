@@ -61,8 +61,9 @@ Contract change: approved in conversation on 2026-10-19
 >
 > Post inspector revision: the owner replaced the per-Channel comparison bars
 > with two chronological line charts: Engagement over time (likes, comments,
-> shares) and Reach & impressions over time. These show cumulative reported
-> counters from stored snapshots, not activity deltas or invented live data.
+> shares) and Reach & impressions over time (reach, impressions, and media views).
+> These show cumulative reported counters from stored snapshots, not activity
+> deltas or invented live data.
 > Each Channel contributes its latest measured counters at each observed time;
 > reach is not deduplicated across Channels. History reads use the existing
 > Distribution analytics endpoint, bounded to its first 500 measurements per

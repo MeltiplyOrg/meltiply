@@ -31,10 +31,12 @@ describe("Post snapshot timelines", () => {
       snapshot("a", "a", 10, 10),
       snapshot("b", "b", 11, 20),
     ]);
-    expect(points.map(({ likes, reach, impressions }) => [likes, reach, impressions])).toEqual([
-      [10, 20, 30],
-      [30, 60, 90],
-      [35, 70, 105],
+    expect(
+      points.map(({ likes, views, reach, impressions }) => [likes, views, reach, impressions]),
+    ).toEqual([
+      [10, 100, 20, 30],
+      [30, 300, 60, 90],
+      [35, 350, 70, 105],
     ]);
   });
   it("groups simultaneous syncs and preserves downward provider corrections", () => {
@@ -43,6 +45,9 @@ describe("Post snapshot timelines", () => {
       snapshot("b", "b", 10, 20),
       snapshot("c", "a", 11, 8),
     ]);
-    expect(points.map(({ likes }) => likes)).toEqual([30, 28]);
+    expect(points.map(({ likes, views }) => [likes, views])).toEqual([
+      [30, 300],
+      [28, 280],
+    ]);
   });
 });

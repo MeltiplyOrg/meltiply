@@ -86,6 +86,8 @@ describe("Post analytics timelines", () => {
     const exposure = screen.getByRole("table", { name: "Reach & impressions over time" });
     expect(within(exposure).getByRole("cell", { name: "100" })).toBeInTheDocument();
     expect(within(exposure).getByRole("cell", { name: "300" })).toBeInTheDocument();
+    expect(within(exposure).getByRole("columnheader", { name: "Views" })).toBeInTheDocument();
+    expect(within(exposure).getByRole("cell", { name: "250" })).toBeInTheDocument();
   });
   it("keeps failed history distinct from a measured zero and offers retry", () => {
     state.isError = true;
@@ -95,13 +97,15 @@ describe("Post analytics timelines", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(state.refetch).toHaveBeenCalledOnce();
   });
-  it("does not draw untracked reach as measured zero", () => {
+  it("keeps media views available when reach and impressions are untracked", () => {
     render(
       <PostAnalyticsSection analytics={{ ...summary, untracked: ["reach", "impressions"] }} />,
     );
+    const exposure = screen.getByRole("table", { name: "Reach & impressions over time" });
+    expect(within(exposure).getByRole("cell", { name: "250" })).toBeInTheDocument();
+    expect(within(exposure).queryByRole("columnheader", { name: "Reach" })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("table", { name: "Reach & impressions over time" }),
+      within(exposure).queryByRole("columnheader", { name: "Impressions" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Not measured")).toBeInTheDocument();
   });
 });

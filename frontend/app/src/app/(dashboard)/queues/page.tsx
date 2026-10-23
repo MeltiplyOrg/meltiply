@@ -258,7 +258,7 @@ function QueuePosts({
     { queue_id: queue?.id, brand_profile_id: queue?.brand_profile_id, limit: 20, offset },
   );
   return (
-    <section aria-label={t("Queue Posts")} className="min-w-0 space-y-3">
+    <section aria-label={t("Queue Posts")} className="min-w-0 space-y-3 lg:flex-1">
       {!queue ? (
         <p className="text-sm text-ink-3">
           {t("Inspect a Queue to see assigned times and Channel outcomes.")}
@@ -458,8 +458,11 @@ export default function QueuesPage() {
         ) : queues.length === 0 ? (
           <p>{t("No Queues yet. Create a plan, then choose Queue in the composer.")}</p>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-[minmax(240px,320px)_minmax(0,1fr)]">
-            <section aria-label={t("Publishing Queues")} className="min-w-0 space-y-3">
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <section
+              aria-label={t("Publishing Queues")}
+              className="min-w-0 space-y-3 lg:w-80 lg:shrink-0"
+            >
               {queues.map((queue) => (
                 <article
                   key={queue.id}

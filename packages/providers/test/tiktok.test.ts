@@ -159,7 +159,7 @@ describe("createTikTokAdapter", () => {
       disable_auto_auth: "1",
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "user.info.basic,video.publish",
+      scope: "user.info.basic,video.publish,user.info.profile",
       state: "oauth-state",
     });
     expect(() =>
@@ -195,13 +195,14 @@ describe("createTikTokAdapter", () => {
       },
       (url, init) => {
         expect(url.pathname).toBe("/v2/user/info/");
-        expect(url.searchParams.get("fields")).toBe("open_id,display_name,avatar_url");
+        expect(url.searchParams.get("fields")).toBe("open_id,display_name,avatar_url,username");
         expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-secret");
         return success({
           user: {
             avatar_url: "https://cdn.example.com/avatar.jpg",
             display_name: "Meltiply Creator",
             open_id: "open-id-1",
+            username: "meltiply.creator",
           },
         });
       },
@@ -218,7 +219,39 @@ describe("createTikTokAdapter", () => {
         avatarUrl: "https://cdn.example.com/avatar.jpg",
         displayName: "Meltiply Creator",
         id: "open-id-1",
+        username: "meltiply.creator",
       },
+      expiresAt: "2026-07-20T00:00:00.000Z",
+      refreshToken: "refresh-secret",
+      scopes: ["user.info.basic", "video.publish"],
+    });
+  });
+
+  it("still connects when the optional profile scope is denied", async () => {
+    const providerCalls = sequence(
+      () =>
+        json({
+          access_token: "access-secret",
+          expires_in: 86_400,
+          open_id: "open-id-1",
+          refresh_token: "refresh-secret",
+          scope: "user.info.basic,video.publish",
+          token_type: "Bearer",
+        }),
+      () =>
+        success({
+          user: { display_name: "Meltiply Creator", open_id: "open-id-1" },
+        }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+        code: "authorization-code",
+        codeVerifier: "unused-by-tiktok-web",
+        redirectUri,
+      }),
+    ).resolves.toEqual({
+      accessToken: "access-secret",
+      account: { displayName: "Meltiply Creator", id: "open-id-1" },
       expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-secret",
       scopes: ["user.info.basic", "video.publish"],

@@ -113,7 +113,9 @@ refresh tokens can rotate and the returned replacement must be stored.
 [User Info](https://developers.tiktok.com/doc/tiktok-api-v2-get-user-info)
 returns one `data.user`, whose `open_id` must match the token subject.
 `user.info.basic` covers the requested identity, display name and avatar;
-`video.publish` authorizes Direct Post. Existing adapter behavior follows these
+`video.publish` authorizes Direct Post. `user.info.profile` is requested
+optionally: it supplies the Channel username, and a denied grant must not block
+the connection. Existing adapter behavior follows these
 contracts; no Facebook-style account-list endpoint should be invented.
 
 The [web authorization contract](https://developers.tiktok.com/doc/login-kit-web)
@@ -167,7 +169,7 @@ callback paths under the deployment's public **API** origin:
 
 | Platform | Required configuration                                                                                                                                     | Callback path                        |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| TikTok   | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`; Login Kit and `user.info.basic,video.publish` access                                                          | `/api/v1/platforms/tiktok/callback`  |
+| TikTok   | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`; Login Kit and `user.info.basic,video.publish` access; optional `user.info.profile` for usernames              | `/api/v1/platforms/tiktok/callback`  |
 | YouTube  | `YOUTUBE_SHORTS_CLIENT_ID`, `YOUTUBE_SHORTS_CLIENT_SECRET`; Google Web application client, enabled YouTube Data API v3, and permitted consent-screen users | `/api/v1/platforms/youtube/callback` |
 
 TikTok's media prefix defaults to

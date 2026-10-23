@@ -446,7 +446,9 @@ describe("ProviderRegistry", () => {
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/api/v1/platforms/tiktok/callback",
     );
-    expect(authorizationUrl.searchParams.get("scope")).toBe("user.info.basic,video.publish");
+    expect(authorizationUrl.searchParams.get("scope")).toBe(
+      "user.info.basic,video.publish,user.info.profile",
+    );
   });
 
   it("requires complete accepted YouTube configuration and pins the callback", () => {

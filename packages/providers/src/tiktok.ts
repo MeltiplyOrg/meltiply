@@ -35,7 +35,17 @@ const authorizationOrigin = "https://www.tiktok.com";
 const imageMaximumBytes = 20 * 1024 * 1024;
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 2 * 24 * 60 * 60;
-const configuredScopes = ["user.info.basic", "video.publish"] as const;
+/**
+ * Scopes publishing cannot work without; a grant missing either one is rejected.
+ */
+const requiredScopes = ["user.info.basic", "video.publish"] as const;
+/**
+ * Scopes requested for richer account metadata but never required: TikTok lets a
+ * user deny a toggleable scope, and a denied `user.info.profile` must still yield a
+ * usable publishing connection (only the username is then unavailable).
+ */
+const optionalScopes = ["user.info.profile"] as const;
+const requestedScopes = [...requiredScopes, ...optionalScopes] as const;
 const privacyLevels = new Set<TikTokPrivacyLevel>([
   "PUBLIC_TO_EVERYONE",
   "MUTUAL_FOLLOW_FRIENDS",
@@ -64,6 +74,7 @@ const capability: PlatformCapability = {
     "A photo post is images only; mixing a video with images is not supported.",
     "Privacy, interaction, commercial-content, AI, and music-usage choices are explicit per target.",
     "Media uses PULL_FROM_URL from an HTTPS URL prefix verified in the TikTok developer portal.",
+    "The Channel username appears only when the optional user.info.profile scope is granted.",
     "Creator eligibility and current account limits are queried immediately before publication.",
     "Analytics, comments, and replies are not claimed.",
     "TikTok app audit and approved live-account acceptance remain required.",
@@ -91,6 +102,8 @@ interface TikTokTokenBody {
   expiresAt: string;
   openId: string;
   refreshToken: string;
+  /** Scopes the user actually granted, when the response included them. */
+  scopes?: string[];
 }
 
 /**
@@ -248,7 +261,7 @@ function tokenBody(value: unknown, now: Date, requireGrantedScopes: boolean): Ti
         }),
       );
     }
-    const missingScopes = configuredScopes.filter((scope) => !scopes?.has(scope));
+    const missingScopes = requiredScopes.filter((scope) => !scopes?.has(scope));
     if (missingScopes.length > 0) {
       throw new ProviderAdapterError(
         classifyProviderFailure({ code: "tiktok_scope_not_granted", status: 400 }),
@@ -256,11 +269,13 @@ function tokenBody(value: unknown, now: Date, requireGrantedScopes: boolean): Ti
       );
     }
   }
+  const grantedScopes = scopeSet(body?.scope);
   return {
     accessToken,
     expiresAt: addSeconds(now, body?.expires_in, tokenLifetimeMaximumSeconds),
     openId,
     refreshToken,
+    ...(grantedScopes ? { scopes: [...grantedScopes] } : {}),
   };
 }
 
@@ -522,7 +537,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       url.searchParams.set("disable_auto_auth", "1");
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
-      url.searchParams.set("scope", configuredScopes.join(","));
+      url.searchParams.set("scope", requestedScopes.join(","));
       url.searchParams.set("state", required("state", input.state, 1_024));
       return url.toString();
     },
@@ -569,7 +584,8 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
      * Exchanges the authorization code for TikTok OAuth tokens, then binds the
      * connection to the user profile whose open_id matches the token response. Throws
      * TypeError on redirect URI mismatch; returns the OAuthConnection with access and
-     * refresh tokens, expiry, scopes, and the user's display name and avatar.
+     * refresh tokens, granted scopes, and the user's display name, username when the
+     * optional profile scope was granted, and avatar.
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -588,7 +604,9 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       });
       const tokens = tokenBody(tokenResponse.body, now(), true);
       const userUrl = new URL("/v2/user/info/", apiOrigin);
-      userUrl.searchParams.set("fields", "open_id,display_name,avatar_url");
+      // `username` is only returned when the optional `user.info.profile` scope
+      // was granted; requesting the field without the scope is harmless.
+      userUrl.searchParams.set("fields", "open_id,display_name,avatar_url,username");
       const userResponse = await http.request<unknown>(context, {
         headers: bearer(tokens.accessToken),
         method: "GET",
@@ -598,6 +616,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       const openId = tiktokOpaqueIdentifier(user?.open_id);
       const displayName = boundedText(user?.display_name, 500);
       const avatarUrl = user?.avatar_url === undefined ? undefined : secureUrl(user.avatar_url);
+      const username = boundedString(user?.username, 255);
       if (
         openId !== tokens.openId ||
         !displayName ||
@@ -611,10 +630,11 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
           ...(avatarUrl ? { avatarUrl } : {}),
           displayName,
           id: openId,
+          ...(username ? { username } : {}),
         },
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes ?? [...requiredScopes],
       };
     },
 
@@ -923,7 +943,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         accessToken: tokens.accessToken,
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes ?? [...requiredScopes],
       };
     },
 

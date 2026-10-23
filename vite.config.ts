@@ -59,6 +59,7 @@ export default defineConfig({
       "**/.wrangler/",
       "**/playwright-report/",
       "**/test-results/",
+      ".agents/skills/",
       "frontend/app/**/*.md",
       "frontend/app/**/cloudflare-env.d.ts",
     ],

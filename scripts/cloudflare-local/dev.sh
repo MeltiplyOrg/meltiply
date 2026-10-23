@@ -47,9 +47,21 @@ claim_stack() {
       kill -TERM "$owner" 2>/dev/null || true
     fi
     if ! flock -w 15 9; then
-      printf 'Previous development stack did not stop; refusing to start overlapping services.\n' >&2
-      return 1
-    fi
+      # Orphaned children from an older launcher may still hold the lock even
+      # after the recorded owner died. Terminate them and retry once.
+      local holder fd_path
+      for fd_path in /proc/[0-9]*/fd/9; do
+        [[ -e "$fd_path" ]] || continue
+        [[ "$(readlink "$fd_path" 2>/dev/null || true)" == "$stack_lock" ]] || continue
+        holder="${fd_path#/proc/}"; holder="${holder%%/*}"
+        [[ "$holder" == "$$" ]] && continue
+        kill -TERM "$holder" 2>/dev/null || true
+      done
+      if ! flock -w 10 9; then
+        printf 'Previous development stack did not stop; refusing to start overlapping services.\n' >&2
+        return 1
+      fi
+  fi
   fi
   printf '%s\n' "$$" >"$stack_owner"
   owns_stack=1
@@ -126,7 +138,7 @@ launch_quick_tunnel() {
   # setsid makes the connector its own group leader, so the shared cleanup
   # reaps the tunnel with the same signal path used for wrangler and Vite.
   setsid "$repo_root/scripts/cloudflare-local/dev-tunnel.sh" run "$port" \
-    >"$log" 2>&1 &
+    >"$log" 2>&1 9>&- &
   local pid=$!
   service_pids+=("$pid")
 
@@ -167,7 +179,7 @@ launch_named_tunnel() {
   mkdir -p "$tunnel_log_dir"
   : >"$log"
   setsid "$repo_root/scripts/cloudflare-local/dev-tunnel.sh" run-named \
-    "$config" "$name" >"$log" 2>&1 &
+    "$config" "$name" >"$log" 2>&1 9>&- &
   service_pids+=("$!")
 
   tunnel_urls[app]="https://$(node \
@@ -207,13 +219,24 @@ apply_tunnel_origins() {
 # browser on the first write. Runs detached so a slow tunnel never delays the
 # stack, and reports a single conclusive line either way.
 probe_tunnel() {
-  local app_url=$1 code=000
+  local app_url=$1 code=000 redirect="" response
   command -v curl >/dev/null 2>&1 || return 0
   for _ in $(seq 1 40); do
-    code="$(curl --silent --max-time 10 --output /dev/null --write-out '%{http_code}' \
-      --header "Origin: $app_url" "$app_url/api/v1/health" 2>/dev/null)" || code="000"
+    response="$(curl --silent --max-time 10 --output /dev/null \
+      --write-out '%{http_code} %{redirect_url}' \
+      --header "Origin: $app_url" "$app_url/api/v1/health" 2>/dev/null)" || response="000 "
+    code="${response%% *}"
+    redirect="${response#* }"
     if [[ "$code" == '200' ]]; then
       printf 'Tunnel live: app and API reachable at %s\n' "$app_url"
+      return 0
+    fi
+    # Cloudflare Access sits in front of the public hostname and redirects
+    # unauthenticated probes to its login page. That 302 still proves the
+    # request traversed the tunnel; a 200 here would require Access credentials.
+    if [[ "$code" == '302' && "$redirect" == https://*.cloudflareaccess.com/* ]]; then
+      printf 'Tunnel live: %s is reachable behind Cloudflare Access (HTTP 302)\n' \
+        "$app_url"
       return 0
     fi
     sleep 3
@@ -363,21 +386,21 @@ if ! start_tunnel; then
   exit 1
 fi
 if [[ -n "${tunnel_urls[app]+published}" ]]; then
-  (probe_tunnel "${tunnel_urls[app]}") &
+  (probe_tunnel "${tunnel_urls[app]}") 9>&- &
   cleanup_pids+=("$!")
 fi
 print_stack_summary
 
-setsid "$repo_root/scripts/cloudflare-local/dev-backend.sh" &
+setsid "$repo_root/scripts/cloudflare-local/dev-backend.sh" 9>&- &
 service_pids+=("$!")
 setsid bash -c 'cd "$1"; exec "$2" run --no-install dev --port "$3" --strictPort' _ \
-  "$repo_root/frontend/app" "$bun" "$frontend_dev_port" &
+  "$repo_root/frontend/app" "$bun" "$frontend_dev_port" 9>&- &
 service_pids+=("$!")
 # ASTRO_DEV_BACKGROUND pins the dev server to the foreground: Astro detects
 # agentic shells and otherwise self-daemonizes, whose clean exit would make
 # wait -n tear down the whole stack.
 setsid bash -c 'cd "$1"; exec env ASTRO_DEV_BACKGROUND=1 "$2" run --no-install dev --host "$3" --port "$4"' _ \
-  "$repo_root/frontend/public" "$bun" "$FRONTEND_DEV_HOST" "$public_dev_port" &
+  "$repo_root/frontend/public" "$bun" "$FRONTEND_DEV_HOST" "$public_dev_port" 9>&- &
 service_pids+=("$!")
 
 set +e

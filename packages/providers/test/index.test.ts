@@ -403,7 +403,7 @@ describe("ProviderRegistry", () => {
       "https://api.example.com/api/v1/platforms/facebook/callback",
     );
     expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights",
+      "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights,business_management",
     );
   });
 

@@ -1,7 +1,8 @@
 import {
-  MailSubmissionError,
   type DatabaseError,
+  MailSubmissionError,
   StorageUnavailableError,
+  type Platform,
   type PlatformCapability,
   COMMUNITY_LIMITS,
 } from "@meltiply/domain";
@@ -15,7 +16,6 @@ import {
 } from "@meltiply/providers";
 import type { JwtIdentity } from "@meltiply/auth";
 import { Effect } from "effect";
-import { withAuthenticatedTransactionEffect, type TransactionClient } from "@meltiply/database";
 import {
   createStorageServiceTest,
   type EffectMultipartUpload,
@@ -24,7 +24,24 @@ import {
   type StorageServiceShape,
 } from "@meltiply/storage";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
-import { resolveActor, type ResolvedActor } from "../src/actor-resolution";
+import type * as Domain from "@meltiply/domain";
+
+// Exercise finite-policy boundaries even though community deployments are
+// unrestricted. Individual scenarios also load the real community policy.
+vi.mock("@meltiply/domain", async (importOriginal) => ({
+  ...(await importOriginal<typeof Domain>()),
+  COMMUNITY_LIMITS: {
+    max_distributions: 30,
+    max_platforms: 2,
+    max_storage_bytes: 1024 * 1024 * 1024,
+    max_uploads: 10,
+  },
+}));
+
+import {
+  resolveActor as resolveActorWithRequestId,
+  type ResolvedActor,
+} from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
 import { createAssetApiService } from "../src/asset-service";
 import { createCoreApiService } from "../src/core-service";
@@ -106,34 +123,6 @@ function systemTransaction<A, E>(
   return Effect.runPromise(withSystemTransactionEffect(env, operation));
 }
 
-interface LifecycleWorkspaceResponse {
-  id: string;
-  slug: string;
-}
-
-/**
- * Narrows a native Workspace creation response before subsequent lifecycle
- * requests use its identifier. A malformed response fails the integration test
- * at the boundary rather than letting an untyped value reach route assertions.
- *
- * @param value - Decoded JSON response from the Workspace creation route.
- * @returns Workspace identifier and slug required by the lifecycle scenario.
- * @throws Error when the response omits either required string field.
- */
-function lifecycleWorkspaceResponse(value: unknown): LifecycleWorkspaceResponse {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    !("id" in value) ||
-    !("slug" in value) ||
-    typeof value.id !== "string" ||
-    typeof value.slug !== "string"
-  ) {
-    throw new Error("Workspace creation response must include string id and slug.");
-  }
-  return { id: value.id, slug: value.slug };
-}
-
 /**
  * Narrows an API error-envelope body to its machine-readable code. Returns
  * undefined for any non-conforming payload instead of trusting a cast.
@@ -154,25 +143,6 @@ function errorCodeFrom(value: unknown): string | undefined {
     return value.error.code;
   }
   return undefined;
-}
-
-/**
- * Narrows a WorkspaceInvitation response to its identifier.
- *
- * @param value - Decoded JSON invitation response.
- * @returns Invitation UUID required by the revoke route.
- * @throws Error when the response omits a string `id`.
- */
-function invitationIdFrom(value: unknown): string {
-  if (
-    value !== null &&
-    typeof value === "object" &&
-    "id" in value &&
-    typeof value.id === "string"
-  ) {
-    return value.id;
-  }
-  throw new Error("Invitation response must include a string id.");
 }
 
 /**
@@ -197,6 +167,15 @@ function actorRequest(headers: Record<string, string> = {}): Request {
   return new Request("https://api.meltiply.local/api/v1/platforms", {
     headers,
   });
+}
+
+/** Resolves an actor with the middleware request id the app supplies. */
+function resolveActor(
+  env: ApiWorkerEnv,
+  identity: JwtIdentity,
+  request: Request,
+): Promise<ResolvedActor> {
+  return resolveActorWithRequestId(env, identity, request, "core-service-test-request");
 }
 
 const connectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
@@ -363,11 +342,13 @@ const alphaTiktokAccountId = "94000000-0000-4000-8000-000000000203";
 const alphaActor: ResolvedActor = {
   authUserId: alpha.subject,
   claims: alpha,
+  displayName: "Alpha Creator",
+  email: "alpha@meltiply.local",
+  isInstallationOwner: true,
   role: "admin",
   userId: alpha.userId,
   workspace: {
     id: alpha.organizationId,
-    isPersonal: false,
     name: "Alpha Studio",
     slug: "alpha-studio",
   },
@@ -518,27 +499,28 @@ function lifecycleInvitationHarness(options: {
 }
 
 /**
- * Capability list with one publish-enabled platform for scheduling tests.
+ * Capability list with the requested Platforms opted into publishing.
  *
  * The registry ships every adapter as explicitly unavailable, so a scheduling
- * scenario opts a single platform into publishing with the media limits its
+ * scenario opts one or more Platforms into publishing with the media limits its
  * fixture uses. Both the Post scheduler and the per-Distribution operations
  * validate against the same list, which is why the builder is shared.
  *
- * @param platform - Platform to enable for publishing.
+ * @param platform - Platform(s) to enable for publishing.
  * @param patch - Extra capability fields overriding the defaults.
- @returns Registry capabilities with the requested publish override.
+ * @returns Registry capabilities with the requested publish override.
  */
 function publishableCapabilities(
-  platform: "tiktok" | "youtube",
+  platform: Platform | readonly Platform[],
   patch: Partial<PlatformCapability> = {},
 ) {
+  const platforms = typeof platform === "string" ? [platform] : platform;
   const limits =
-    platform === "youtube"
-      ? { max_file_size: 25 * 1024 * 1024 }
-      : { max_file_size: 20 * 1024 * 1024 };
+    platform === "tiktok"
+      ? { max_file_size: 20 * 1024 * 1024 }
+      : { max_file_size: 25 * 1024 * 1024 };
   return new ProviderRegistry().capabilities().map((capability) =>
-    capability.platform === platform
+    platforms.includes(capability.platform)
       ? {
           ...capability,
           accepted_mime_types: ["image/png"],
@@ -551,24 +533,30 @@ function publishableCapabilities(
   );
 }
 
-/** Core service for per-Distribution operations against publish-enabled YouTube. */
-function distributionServiceWithYoutube(patch: Partial<PlatformCapability> = {}) {
-  return createCoreApiService(publishableCapabilities("youtube", patch));
+/** Core service for per-Distribution operations against publish-enabled Platforms. */
+function distributionServiceWith(
+  platform: Platform | readonly Platform[] = "youtube",
+  patch: Partial<PlatformCapability> = {},
+) {
+  return createCoreApiService(publishableCapabilities(platform, patch));
 }
 
 /**
- * Post composition service for a platform that can publish.
+ * Post composition service for the Platforms that can publish.
  *
  * Scheduling validates the resolved caption, media, and provider options
  * against the platform capability before any Distribution is accepted, so
- * every scheduling scenario must build the service with the platform it
+ * every scheduling scenario must build the service with the platform(s) it
  * intends to publish to.
  *
- * @param platform - Platform the scenario schedules against.
+ * @param platform - Platform(s) the scenario schedules against.
  * @param patch - Extra capability fields overriding the defaults.
- @returns Post service whose scheduler accepts that platform.
+ * @returns Post service whose scheduler accepts those platforms.
  */
-function postServiceWith(platform: "tiktok" | "youtube", patch: Partial<PlatformCapability> = {}) {
+function postServiceWith(
+  platform: Platform | readonly Platform[],
+  patch: Partial<PlatformCapability> = {},
+) {
   return createPostApiService(publishableCapabilities(platform, patch));
 }
 
@@ -771,6 +759,12 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           "DELETE FROM idempotency_keys WHERE idempotency_key LIKE 'integration-%'",
         );
         yield* client.query(
+          `DELETE FROM workspace_invitations
+           WHERE token_hash = 'integration-actor-invitation-hash'
+              OR email LIKE 'lifecycle-seat-%@meltiply.local'
+              OR email LIKE 'lifecycle-delete-%@meltiply.local'`,
+        );
+        yield* client.query(
           `UPDATE comments
          SET reply_text = NULL,
              reply_status = 'none',
@@ -812,9 +806,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     await systemPoolFor(env).end();
   });
 
-  it("provisions a personal Better Auth identity idempotently and isolates its private workspace", async () => {
-    // The Better Auth signup row exists before the first verified JWT; actor
-    // resolution binds it to the internal user and personal workspace.
+  it("binds the first verified identity to the installation without granting a workspace", async () => {
+    // Better Auth owns the identity row; actor resolution binds the internal
+    // user. Without an invitation, no shared Workspace membership is created.
     await systemTransaction(env, (client) =>
       client.query(
         `INSERT INTO "user" (id, name, email, "emailVerified")
@@ -829,88 +823,38 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       name: "Actor Personal",
     });
 
-    const first = await resolveActor(env, actorIdentity, actorRequest());
-    const second = await resolveActor(env, actorIdentity, actorRequest());
-    expect(second).toEqual(first);
-    expect(first).toMatchObject({
-      authUserId: personalActorUserId,
-      claims: {
-        organizationId: first.workspace.id,
-        organizationRole: "admin",
-        subject: personalActorUserId,
-        userId: first.userId,
-      },
-      role: "admin",
-      workspace: { isPersonal: true },
+    await expect(resolveActor(env, actorIdentity, actorRequest())).rejects.toMatchObject({
+      code: "workspace_membership_required",
+      status: 403,
     });
 
     const identity = await systemTransaction(env, (client) =>
-      client.query<{
-        membership_count: string;
-        reconciliation_count: string;
-        role: string;
-        user_count: string;
-        workspace_count: string;
-      }>(
+      client.query<{ membership_count: string; user_count: string }>(
         `SELECT COUNT(DISTINCT u.id)::text AS user_count,
-                COUNT(DISTINCT o.id)::text AS workspace_count,
-                COUNT(DISTINCT om.id)::text AS membership_count,
-                MAX(om.role) AS role,
-                COUNT(DISTINCT reconciliation.org_id)::text AS reconciliation_count
+                COUNT(DISTINCT om.id)::text AS membership_count
          FROM users u
-         JOIN organizations o ON o.personal_user_id = u.id
-         JOIN org_members om ON om.org_id = o.id AND om.user_id = u.id
-         LEFT JOIN usage_reconciliation_state reconciliation
-           ON reconciliation.org_id = o.id
+         LEFT JOIN org_members om ON om.user_id = u.id
          WHERE u.auth_user_id = $1`,
         [personalActorUserId],
       ),
     );
-    expect(identity.rows).toEqual([
-      {
-        membership_count: "1",
-        reconciliation_count: "1",
-        role: "admin",
-        user_count: "1",
-        workspace_count: "1",
-      },
-    ]);
-
-    // A subject-only JWT identity resolves the personal workspace through RLS
-    // and sees none of the seeded tenant assets.
-    const personalRls = await Effect.runPromise(
-      withAuthenticatedTransactionEffect(
-        authenticatedPoolFor(env),
-        { sub: personalActorUserId },
-        (client) =>
-          client.query<{ is_personal: boolean; visible_assets: string }>(
-            `SELECT
-               o.personal_user_id IS NOT NULL AS is_personal,
-               (SELECT count(*)::text FROM assets) AS visible_assets
-             FROM organizations o
-             WHERE o.id = public.auth_active_org_id()`,
-          ),
-      ),
-    );
-    expect(personalRls.rows).toEqual([{ is_personal: true, visible_assets: "0" }]);
+    expect(identity.rows).toEqual([{ membership_count: "0", user_count: "0" }]);
   });
 
-  it("resolves a seeded team membership with its authoritative role", async () => {
-    // Resolve the Better Auth identity first so the internal users row exists.
-    // Team membership is then created through the native Workspace data model.
+  it("resolves the seeded shared workspace and rejects a non-shared selection", async () => {
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
         yield* client.query(
           `INSERT INTO "user" (id, name, email, "emailVerified")
-         VALUES ($1, 'Actor Organization', 'actor-organization@meltiply.local', TRUE)
-         ON CONFLICT (id) DO NOTHING`,
+           VALUES ($1, 'Actor Organization', 'actor-organization@meltiply.local', TRUE)
+           ON CONFLICT (id) DO NOTHING`,
           [organizationActorUserId],
         );
         yield* client.query(
-          `INSERT INTO organizations (id, name, slug)
-         VALUES ($1, 'Actor Organization', 'actor-organization')
-         ON CONFLICT (id) DO NOTHING`,
-          [organizationActorOrgId],
+          `INSERT INTO users (auth_user_id, email)
+           VALUES ($1, 'actor-organization@meltiply.local')
+           ON CONFLICT (auth_user_id) DO NOTHING`,
+          [organizationActorUserId],
         );
       }),
     );
@@ -919,59 +863,78 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       id: organizationActorUserId,
       name: "Actor Organization",
     });
-    const provisioned = await resolveActor(env, actorIdentity, actorRequest());
-    await systemTransaction(env, (client) =>
-      client.query(
-        `INSERT INTO org_members (org_id, user_id, role)
-         VALUES ($1, $2, 'admin')
-         ON CONFLICT (org_id, user_id) DO NOTHING`,
-        [organizationActorOrgId, provisioned.userId],
-      ),
+    const provisioned = await resolveActor(env, actorIdentity, actorRequest()).catch(
+      (cause: unknown) => cause,
     );
-    const selectTeam = actorRequest({
-      "x-workspace-id": organizationActorOrgId,
+    expect(provisioned).toMatchObject({
+      code: "workspace_membership_required",
+      status: 403,
     });
 
-    const first = await resolveActor(env, actorIdentity, selectTeam);
-    const second = await resolveActor(
-      env,
-      actorIdentity,
-      actorRequest({ "x-workspace-id": organizationActorOrgId }),
+    await systemTransaction(env, (client) =>
+      Effect.gen(function* () {
+        const user = yield* client.query<{ id: string }>(
+          "SELECT id FROM users WHERE auth_user_id = $1",
+          [organizationActorUserId],
+        );
+        yield* client.query(
+          `INSERT INTO org_members (org_id, user_id, role)
+           VALUES ('20000000-0000-4000-8000-000000000005', $1, 'editor')
+           ON CONFLICT (org_id, user_id) DO UPDATE SET role = 'editor'`,
+          [user.rows[0]!.id],
+        );
+      }),
     );
+
+    const first = await resolveActor(env, actorIdentity, actorRequest());
+    const second = await resolveActor(env, actorIdentity, actorRequest());
     expect(second).toEqual(first);
     expect(first).toMatchObject({
       claims: {
-        organizationId: organizationActorOrgId,
-        organizationRole: "admin",
+        organizationId: "20000000-0000-4000-8000-000000000005",
+        organizationRole: "editor",
         subject: organizationActorUserId,
       },
-      role: "admin",
-      workspace: { id: organizationActorOrgId, isPersonal: false },
+      role: "editor",
+      workspace: { id: "20000000-0000-4000-8000-000000000005" },
     });
 
-    const membership = await systemTransaction(env, (client) =>
-      client.query<{ membership_count: string; role: string }>(
-        `SELECT COUNT(*)::text AS membership_count, MAX(om.role) AS role
-         FROM org_members om
-         JOIN users u ON u.id = om.user_id
-         JOIN organizations o ON o.id = om.org_id
-         WHERE u.auth_user_id = $1 AND o.id = $2`,
-        [organizationActorUserId, organizationActorOrgId],
-      ),
+    await expect(
+      resolveActor(env, actorIdentity, actorRequest({ "x-workspace-id": organizationActorOrgId })),
+    ).rejects.toMatchObject({ code: "workspace_forbidden", status: 403 });
+
+    await systemTransaction(env, (client) =>
+      client.query("DELETE FROM users WHERE auth_user_id = $1", [organizationActorUserId]),
     );
-    expect(membership.rows).toEqual([{ membership_count: "1", role: "admin" }]);
   });
 
-  it("provisions a new creator on first actor resolution before their first read", async () => {
-    // Signup persists the Better Auth user row; the first verified JWT then
-    // binds the internal user and personal workspace atomically.
+  it("accepts a pending invitation on the first authenticated request", async () => {
     await systemTransaction(env, (client) =>
-      client.query(
-        `INSERT INTO "user" (id, name, email, "emailVerified")
-         VALUES ($1, 'Personal Provision', 'personal-provision@meltiply.local', TRUE)
-         ON CONFLICT (id) DO NOTHING`,
-        [personalProvisionUserId],
-      ),
+      Effect.gen(function* () {
+        yield* client.query(
+          `INSERT INTO "user" (id, name, email, "emailVerified")
+           VALUES ($1, 'Personal Provision', 'personal-provision@meltiply.local', TRUE)
+           ON CONFLICT (id) DO NOTHING`,
+          [personalProvisionUserId],
+        );
+        yield* client.query(
+          `DELETE FROM workspace_invitations
+           WHERE token_hash = 'integration-actor-invitation-hash'
+              OR email = 'personal-provision@meltiply.local'`,
+        );
+        yield* client.query(
+          `INSERT INTO workspace_invitations
+             (org_id, email, role, invited_by, token_hash, expires_at)
+           VALUES (
+             '20000000-0000-4000-8000-000000000005',
+             'personal-provision@meltiply.local',
+             'editor',
+             '10000000-0000-4000-8000-000000000001',
+             'integration-actor-invitation-hash',
+             now() + interval '7 days'
+           )`,
+        );
+      }),
     );
     const actorIdentity = jwtIdentity({
       email: "personal-provision@meltiply.local",
@@ -980,163 +943,33 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     });
 
     const actor = await resolveActor(env, actorIdentity, actorRequest());
-    expect(actor.workspace.isPersonal).toBe(true);
+    expect(actor).toMatchObject({
+      role: "editor",
+      workspace: { id: "20000000-0000-4000-8000-000000000005" },
+    });
 
-    // The first read after signup succeeds against the workspace actor
-    // resolution already provisioned.
-    const personal = { subject: personalProvisionUserId };
-    await expect(Effect.runPromise(service.listPlatformAccounts(env, personal))).resolves.toEqual(
-      [],
-    );
-
-    const identity = await systemTransaction(env, (client) =>
-      client.query<{
-        member_count: string;
-        reconciliation_count: string;
-        workspace_count: string;
-      }>(
-        `SELECT COUNT(DISTINCT om.id)::text AS member_count,
-                COUNT(DISTINCT reconciliation.org_id)::text AS reconciliation_count,
-                COUNT(DISTINCT o.id)::text AS workspace_count
-         FROM users u
-         JOIN organizations o ON o.personal_user_id = u.id
-         LEFT JOIN org_members om ON om.org_id = o.id AND om.user_id = u.id
-         LEFT JOIN usage_reconciliation_state reconciliation
-           ON reconciliation.org_id = o.id
-         WHERE u.auth_user_id = $1`,
+    const accepted = await systemTransaction(env, (client) =>
+      client.query<{ accepted: boolean; membership_count: string }>(
+        `SELECT
+           (SELECT accepted_at IS NOT NULL FROM workspace_invitations
+             WHERE token_hash = 'integration-actor-invitation-hash') AS accepted,
+           (SELECT count(*)::text FROM org_members om
+             JOIN users u ON u.id = om.user_id
+             WHERE u.auth_user_id = $1
+               AND om.org_id = '20000000-0000-4000-8000-000000000005') AS membership_count`,
         [personalProvisionUserId],
       ),
     );
-    expect(identity.rows).toEqual([
-      { member_count: "1", reconciliation_count: "1", workspace_count: "1" },
-    ]);
-  });
+    expect(accepted.rows).toEqual([{ accepted: true, membership_count: "1" }]);
 
-  it("recovers a missed personal workspace on the first authenticated request", async () => {
-    // A user row without its private workspace simulates a partially applied
-    // signup; actor resolution must provision the missing workspace.
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
+        yield* client.query("DELETE FROM users WHERE auth_user_id = $1", [personalProvisionUserId]);
         yield* client.query(
-          `INSERT INTO "user" (id, name, email, "emailVerified")
-         VALUES ($1, 'Personal Recovery', 'personal-recovery@meltiply.local', TRUE)
-         ON CONFLICT (id) DO NOTHING`,
-          [personalRecoveryUserId],
-        );
-        yield* client.query(
-          `INSERT INTO users (auth_user_id, email)
-         VALUES ($1, 'personal-recovery@meltiply.local')
-         ON CONFLICT (auth_user_id) DO NOTHING`,
-          [personalRecoveryUserId],
-        );
-        yield* client.query(
-          `DELETE FROM organizations o USING users u
-         WHERE o.personal_user_id = u.id AND u.auth_user_id = $1`,
-          [personalRecoveryUserId],
+          "DELETE FROM workspace_invitations WHERE token_hash = 'integration-actor-invitation-hash'",
         );
       }),
     );
-    const actorIdentity = jwtIdentity({
-      email: "personal-recovery@meltiply.local",
-      id: personalRecoveryUserId,
-      name: "Personal Recovery",
-    });
-
-    const actor = await resolveActor(env, actorIdentity, actorRequest());
-    expect(actor.workspace.isPersonal).toBe(true);
-
-    const personal = { subject: personalRecoveryUserId };
-    await expect(Effect.runPromise(service.listPlatformAccounts(env, personal))).resolves.toEqual(
-      [],
-    );
-
-    const recovered = await systemTransaction(env, (client) =>
-      client.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count
-         FROM organizations o
-         JOIN org_members om ON om.org_id = o.id AND om.user_id = o.personal_user_id
-         JOIN usage_reconciliation_state reconciliation ON reconciliation.org_id = o.id
-         JOIN users u ON u.id = o.personal_user_id
-         WHERE u.auth_user_id = $1`,
-        [personalRecoveryUserId],
-      ),
-    );
-    expect(recovered.rows).toEqual([{ count: "1" }]);
-  });
-
-  it("gives warm personal reads the same query shape and isolation as team reads", async () => {
-    const personal = { subject: personalProvisionUserId };
-
-    // Prime the memoized guard so this measures the steady-state read path.
-    await Effect.runPromise(service.listPlatformAccounts(env, personal));
-
-    async function measure<T>(operation: () => Promise<T>) {
-      const systemCounter = { connections: 0, statements: 0 };
-      const authenticatedCounter = { connections: 0, statements: 0 };
-      const patchPool = (
-        pool: ReturnType<typeof authenticatedPoolFor>,
-        counter: { connections: number; statements: number },
-      ) => {
-        const mutable = pool as unknown as {
-          connect: () => Promise<TransactionClient>;
-        };
-        const originalConnect = mutable.connect;
-        const connect = originalConnect.bind(pool);
-        mutable.connect = async () => {
-          const client = await connect();
-          counter.connections += 1;
-          const measuredQuery: TransactionClient["query"] = async <
-            Row extends Record<string, unknown> = Record<string, unknown>,
-          >(
-            text: string,
-            values?: readonly unknown[],
-          ) => {
-            counter.statements += 1;
-            return client.query<Row>(text, values);
-          };
-          return { query: measuredQuery, release: () => client.release() };
-        };
-        return () => {
-          mutable.connect = originalConnect;
-        };
-      };
-      const restoreAuthenticated = patchPool(authenticatedPoolFor(env), authenticatedCounter);
-      const restoreSystem = patchPool(systemPoolFor(env), systemCounter);
-      try {
-        const result = await operation();
-        return {
-          authenticatedStatements: authenticatedCounter.statements,
-          result,
-          systemStatements: systemCounter.statements,
-        };
-      } finally {
-        restoreAuthenticated();
-        restoreSystem();
-      }
-    }
-
-    const teamRead = await measure(() =>
-      Effect.runPromise(service.listPlatformAccounts(env, alpha)),
-    );
-    const personalRead = await measure(() =>
-      Effect.runPromise(service.listPlatformAccounts(env, personal)),
-    );
-
-    // Neither read touches the system pool once the workspace is confirmed.
-    expect(personalRead.systemStatements).toBe(0);
-    expect(teamRead.systemStatements).toBe(0);
-    expect(personalRead.authenticatedStatements).toBe(teamRead.authenticatedStatements);
-    expect(personalRead.result).toEqual([]);
-    // The team workspace owns Channels; which ones is composition-fixture state,
-    // so isolation is asserted on ownership rather than on a row total.
-    expect(teamRead.result.every((account) => account.org_id === alpha.organizationId)).toBe(true);
-
-    // Personal sessions stay fenced inside their own workspace under RLS.
-    await expect(
-      Effect.runPromise(
-        service.getDistribution(env, personal, "60000000-0000-4000-8000-000000000001"),
-      ),
-    ).rejects.toMatchObject({ status: 404 });
   });
 
   it("lists platform accounts only for the authenticated tenant", async () => {
@@ -1183,7 +1016,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const alphaCommentId = "80000000-0000-4000-8000-000000000001";
     const alphaPostId = "48000000-0000-4000-8000-000000000001";
     const asset = assetServiceHarness([]).service;
-    const distribution = distributionServiceWithYoutube();
+    const distribution = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const crossTenantCases: Array<{
       expectedStatus: number;
@@ -2530,8 +2363,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
    * The fixture state is the precondition each scenario asserts against: one
    * publishable image, one second publishable image for ordered multi-attachment
    * work, one Asset still processing with no verified media, one failed Asset,
-   * two extra connected YouTube Channels beyond the seeded canonical account, and
-   * one connected TikTok Channel. The TikTok Channel exists because scheduling a
+   * two extra connected Channels beyond the seeded canonical YouTube
+   * account — one Instagram and one Facebook, because a Brand Profile owns at
+   * most one Channel per Provider — and one connected TikTok Channel. The
+   * TikTok Channel exists because scheduling a
    * Post that carries TikTok provider options must resolve a real Channel of that
    * platform first; without it the scenario would stop at a 404 account lookup
    * instead of reaching the provider-option validation it is asserting. Inserting
@@ -2586,10 +2421,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
             display_name, access_token, scopes, metadata)
          VALUES
            ($1, '20000000-0000-4000-8000-000000000001', '${alphaBrandProfileId}',
-            'youtube', 'integration-post-secondary', 'Integration Channel 2',
+            'instagram', 'integration-post-secondary', 'Integration Channel 2',
             'integration-post-token-2', ARRAY['upload'], '{"fixture":true}'),
            ($2, '20000000-0000-4000-8000-000000000001', '${alphaBrandProfileId}',
-            'youtube', 'integration-post-tertiary', 'Integration Channel 3',
+            'facebook', 'integration-post-tertiary', 'Integration Channel 3',
             'integration-post-token-3', ARRAY['upload'], '{"fixture":true}'),
            ($3, '20000000-0000-4000-8000-000000000001', '${alphaBrandProfileId}',
             'tiktok', 'integration-post-tiktok', 'Integration TikTok Channel',
@@ -2757,6 +2592,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     try {
       expect(created.replayed).toBe(false);
       expect(created.value).toMatchObject({
+        analytics: null,
         attachments: [],
         brand_profile_id: alphaBrandProfileId,
         default_text: "Reloadable draft",
@@ -3016,10 +2852,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // One Post identity fans out to one Distribution per Channel, and only the
   // Channels that are still editable are created, updated, or cancelled.
   it("schedules many Channels once with atomic usage and outbox state", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram", "facebook"]);
     const period = currentUsagePeriod;
     const usageBefore = await currentUsageCount();
-    // Exhaust the shared community allowance to prove quota refusal is atomic.
+    // Exhaust a finite test allowance to prove quota refusal remains atomic.
     const distributionAllowance = COMMUNITY_LIMITS.max_distributions ?? 0;
     const draft = await createAlphaPost(
       posts,
@@ -3177,6 +3013,37 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         distributions: String(distributionAllowance),
         idempotency_count: 0,
       });
+
+      const boundedPolicy = { ...COMMUNITY_LIMITS };
+      try {
+        const community = await vi.importActual<typeof Domain>("@meltiply/domain");
+        Object.assign(COMMUNITY_LIMITS, community.COMMUNITY_LIMITS);
+        const accepted = await scheduleAlphaPost(
+          posts,
+          postId,
+          [{ platformAccountId: alphaThirdAccountId }],
+          null,
+          quotaKey,
+        );
+        expect(accepted.value.distributions).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ platform_account_id: alphaThirdAccountId }),
+          ]),
+        );
+        expect(await currentUsageCount()).toBe(distributionAllowance + 1);
+        await expect(
+          scheduleAlphaPost(
+            posts,
+            postId,
+            [{ platformAccountId: alphaThirdAccountId }],
+            null,
+            quotaKey,
+          ),
+        ).resolves.toEqual({ ...accepted, replayed: true });
+        expect(await currentUsageCount()).toBe(distributionAllowance + 1);
+      } finally {
+        Object.assign(COMMUNITY_LIMITS, boundedPolicy);
+      }
     } finally {
       await purgeIntegrationPosts(
         [postId],
@@ -3190,7 +3057,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // claimed, while an outcome a provider already owns keeps its own lifecycle
   // and its published copy is never un-published locally.
   it("edits pending targets in place while leaving published history immutable", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -3257,6 +3124,26 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       const addedId = second.value.distributions.find(
         ({ platform_account_id }) => platform_account_id === alphaSecondAccountId,
       )!.id;
+      // The same dropped Distribution can have retryable and leased delivery
+      // attempts. Remove only pending/failed publish commands, never the
+      // consumer-owned lease or a command for another topic.
+      await systemTransaction(env, (client) =>
+        client.query(
+          `INSERT INTO outbox_events
+             (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload,
+              state, lease_expires_at)
+           SELECT $1::uuid, command.topic, 'distribution', $2::uuid,
+                  command.dedupe_key, '{}'::jsonb, command.state,
+                  CASE WHEN command.state = 'leased'
+                       THEN now() + INTERVAL '5 minutes' END
+           FROM (VALUES
+             ('distribution.publish.requested', 'integration-drop-failed', 'failed'),
+             ('distribution.publish.requested', 'integration-drop-leased', 'leased'),
+             ('distribution.analytics.requested', 'integration-drop-other', 'pending')
+           ) AS command(topic, dedupe_key, state)`,
+          [alpha.organizationId, addedId],
+        ),
+      );
 
       // Dropping a Channel that is still queued cancels it and releases its
       // command, while the published row survives the same edit. A cancelled
@@ -3301,6 +3188,17 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       // consumer ever drains the outbox, so nothing deleted that command and
       // the count is 1 for it and 0 for the cancelled one.
       expect(commands.rows.map(({ commands: count }) => count).sort()).toEqual(["0", "1"]);
+      const retained = await systemTransaction(env, (client) =>
+        client.query<{ state: string; topic: string }>(
+          `SELECT topic, state FROM outbox_events
+           WHERE aggregate_id = $1 ORDER BY topic, state`,
+          [addedId],
+        ),
+      );
+      expect(retained.rows).toEqual([
+        { state: "pending", topic: "distribution.analytics.requested" },
+        { state: "leased", topic: "distribution.publish.requested" },
+      ]);
     } finally {
       await purgeIntegrationPosts(
         [postId],
@@ -3320,7 +3218,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // Channel reschedules, instead of the revoked Channel failing the whole
   // schedule.
   it("reschedules pending Channels when a settled Channel's credential lapsed", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -3425,7 +3323,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // read, and both surfaces expose the identical frozen publication.
   it("reads the frozen publication identically on Post and Distribution after edits", async () => {
     const posts = postServiceWith("youtube");
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -3567,7 +3465,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     // The fixture Platform publishes one attachment at a time by default, so
     // the capability is widened to accept a text-only target and a
     // multi-attachment one side by side.
-    const posts = postServiceWith("youtube", {
+    const posts = postServiceWith(["youtube", "instagram"], {
       max_media_count: 3,
       min_media_count: 0,
       multi_asset_types: ["image"],
@@ -3764,7 +3662,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // without revival the request would succeed while publishing nothing. A
   // Channel whose outcome a provider already owns keeps that outcome instead.
   it("revives a dropped Channel instead of succeeding without publishing", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -4075,7 +3973,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // A local deletion never un-publishes a live Platform copy and never
   // releases media another retained Post still holds.
   it("deletes a Post by cancelling only its pending work", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -4207,7 +4105,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // Cancelling one Channel outcome removes only its own unleased command, so a
   // leased command stays with the consumer that already owns the attempt.
   it("accepts an idempotent schedule and removes its unpublished work on cancel", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
@@ -4282,7 +4180,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   });
 
   it("cancel keeps leased publish work for the automation consumer", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
@@ -4348,8 +4246,8 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // editable, in-flight work is only asked to stop, and anything that already
   // published or failed permanently is refused instead of silently rewritten.
   it("keeps per-Channel outcomes editable only while they are pending", async () => {
-    const distributionService = distributionServiceWithYoutube();
-    const posts = postServiceWith("youtube");
+    const distributionService = distributionServiceWith(["youtube", "instagram", "facebook"]);
+    const posts = postServiceWith(["youtube", "instagram", "facebook"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -4583,7 +4481,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // the same Distribution and adds a distinct command rather than reviving the
   // one that already ran.
   it("emits one distinct outbox command for every accepted distribution retry intent", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
@@ -4746,7 +4644,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // the delivery horizon, and cancelling drops every unpublished command so a
   // stale delayed message cannot resurrect the publication.
   it("re-keys deferred commands on reschedule and stops emitting beyond the delivery horizon", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const start = Date.now();
@@ -4866,7 +4764,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // Each target of one deferred schedule carries its own command at the shared
   // instant, and a schedule past the horizon is durable without commands.
   it("emits per-target deferred commands inside the horizon and none beyond it", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const inHorizonAt = new Date(Date.now() + 7_200_000);
     const inHorizonDraft = await createAlphaPost(
@@ -4955,7 +4853,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // The monthly allowance is the last contended slot, so exactly one of two
   // simultaneous schedules is admitted and the loser reserves nothing.
   it("admits only one schedule at the final concurrent quota slot", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const period = currentUsagePeriod;
     const initial = await systemTransaction(env, (client) =>
       Effect.gen(function* () {
@@ -5132,7 +5030,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // the Post retires the identity and cancels what is still pending, but work
   // in flight stays with the consumer that owns the attempt.
   it("keeps claimed publication work alive when its Post is deleted", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -6149,6 +6047,19 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     await expect(
       Effect.runPromise(harness.service.getUploadSession(env, beta, sessionId)),
     ).rejects.toMatchObject({ code: "not_found", status: 404 });
+    await expect(
+      Effect.runPromise(harness.service.getUploadSession(env, alpha, sessionId)),
+    ).resolves.toMatchObject({
+      upload_session: {
+        id: sessionId,
+        single_upload: {
+          headers: { "Content-Type": "image/png" },
+          method: "PUT",
+        },
+        strategy: "single",
+      },
+      uploaded_parts: [],
+    });
 
     const key = harness.uploadKeys[0]!;
     harness.objects.set(key, {
@@ -6964,11 +6875,17 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       { length: allowance - 1 },
       (_, index) => `integration-quota-baseline-${index}`,
     );
-    const accountIds = ["integration-quota-a", "integration-quota-b"];
-    const connection = (id: string) =>
+    // One Channel per Provider per Brand Profile: the concurrent candidates use
+    // distinct Providers so the quota, not provider uniqueness, decides them.
+    const candidates = [
+      { id: "integration-quota-a", platform: "youtube" as const },
+      { id: "integration-quota-b", platform: "tiktok" as const },
+    ];
+    const accountIds = candidates.map(({ id }) => id);
+    const connection = (id: string, platform: "threads" | "youtube" | "tiktok") =>
       saveOAuthConnection(
         env,
-        "threads",
+        platform,
         {
           brandProfileId: betaBrandProfileId,
           organizationId: beta.organizationId,
@@ -6981,15 +6898,17 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         },
       );
     try {
-      for (const id of baselineIds) await connection(id);
-      const results = await Promise.allSettled(accountIds.map(connection));
+      for (const id of baselineIds) await connection(id, "threads");
+      const results = await Promise.allSettled(
+        candidates.map(({ id, platform }) => connection(id, platform)),
+      );
       expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
       const rejected = results.find(
         (result): result is PromiseRejectedResult => result.status === "rejected",
       );
       expect(rejected?.reason).toMatchObject({ code: "quota_exceeded", status: 403 });
-      const acceptedId = accountIds[results.findIndex((result) => result.status === "fulfilled")]!;
-      await expect(connection(acceptedId)).resolves.toBeUndefined();
+      const accepted = candidates[results.findIndex((result) => result.status === "fulfilled")]!;
+      await expect(connection(accepted.id, accepted.platform)).resolves.toBeUndefined();
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           const result = yield* client.query<{ count: string }>(
@@ -6999,6 +6918,24 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           expect(result.rows[0]?.count).toBe(String(allowance));
         }),
       );
+
+      const boundedPolicy = { ...COMMUNITY_LIMITS };
+      try {
+        const community = await vi.importActual<typeof Domain>("@meltiply/domain");
+        Object.assign(COMMUNITY_LIMITS, community.COMMUNITY_LIMITS);
+        await Promise.all(candidates.map(({ id, platform }) => connection(id, platform)));
+        await systemTransaction(env, (client) =>
+          Effect.gen(function* () {
+            const result = yield* client.query<{ count: string }>(
+              "SELECT COUNT(*)::text AS count FROM platform_accounts WHERE org_id = $1",
+              [beta.organizationId],
+            );
+            expect(result.rows[0]?.count).toBe(String(allowance + 1));
+          }),
+        );
+      } finally {
+        Object.assign(COMMUNITY_LIMITS, boundedPolicy);
+      }
     } finally {
       await systemTransaction(env, (client) =>
         client.query(
@@ -7084,6 +7021,56 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
+  it("allows one Channel per Provider per Brand Profile", async () => {
+    const acceptedId = "integration-provider-unique-accepted";
+    const rejectedId = "integration-provider-unique-rejected";
+    const connection = (id: string) =>
+      saveOAuthConnection(
+        env,
+        "threads",
+        {
+          brandProfileId: betaBrandProfileId,
+          organizationId: beta.organizationId,
+          userId: beta.userId,
+        },
+        {
+          accessToken: `access-${id}`,
+          account: { id },
+          scopes: ["threads_basic"],
+        },
+      );
+    try {
+      // The seeded Beta profile owns no Threads Channel yet, so the first
+      // external identity fills the single Provider slot.
+      await expect(connection(acceptedId)).resolves.toBeUndefined();
+      await expect(connection(rejectedId)).rejects.toMatchObject({
+        code: "invalid_state",
+        status: 409,
+      });
+      // Reconnecting the accepted external identity refreshes its own Channel
+      // rather than competing for the slot.
+      await expect(connection(acceptedId)).resolves.toBeUndefined();
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          const result = yield* client.query<{ count: string; platform_user_id: string }>(
+            `SELECT COUNT(*)::text AS count, MIN(platform_user_id) AS platform_user_id
+               FROM platform_accounts
+              WHERE brand_profile_id = $1 AND platform = 'threads'`,
+            [betaBrandProfileId],
+          );
+          expect(result.rows[0]).toEqual({ count: "1", platform_user_id: acceptedId });
+        }),
+      );
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query("DELETE FROM platform_accounts WHERE platform_user_id IN ($1, $2)", [
+          acceptedId,
+          rejectedId,
+        ]),
+      );
+    }
+  });
+
   it("reveals a revocation token only through the owning tenant", async () => {
     const revoke = vi.fn(async () => undefined);
     const registry = new ProviderRegistry();
@@ -7106,6 +7093,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   it("reveals publication credentials only after an owning-tenant read", async () => {
     const accountId = "50000000-0000-4000-8000-000000000008";
+    // A dedicated Brand Profile keeps the TikTok fixture free of the seeded
+    // YouTube Channel and the composition fixtures' Provider slots.
+    const credentialProfileId = "a0000000-0000-4000-8000-0000000000c1";
     const readRequirements = vi.fn(
       async (_context: ProviderRequestContext, providerCredentials: ProviderCredentials) => {
         expect(providerCredentials).toEqual({
@@ -7137,15 +7127,21 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
         yield* client.query(
+          `INSERT INTO brand_profiles (id, org_id, name, color)
+           VALUES ($1, '20000000-0000-4000-8000-000000000001',
+                   'Integration Credential Brand', '#1d4ed8')`,
+          [credentialProfileId],
+        );
+        yield* client.query(
           `INSERT INTO platform_accounts
            (id, org_id, brand_profile_id, platform, platform_user_id,
             access_token, scopes, connection_status, token_expires_at)
          VALUES ($1, '20000000-0000-4000-8000-000000000001',
-                 '${alphaBrandProfileId}', 'tiktok',
-                 'integration-tiktok-creator', $2,
+                 $2, 'tiktok',
+                 'integration-tiktok-creator', $3,
                  ARRAY['user.info.basic', 'video.publish'], 'connected',
                  '2026-08-01T00:00:00Z')`,
-          [accountId, encrypted],
+          [accountId, credentialProfileId, encrypted],
         );
       }),
     );
@@ -7232,634 +7228,438 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(readRequirements).toHaveBeenCalledTimes(3);
     } finally {
       await systemTransaction(env, (client) =>
-        client.query("DELETE FROM platform_accounts WHERE id = $1", [accountId]),
+        client.query("DELETE FROM brand_profiles WHERE id = $1", [credentialProfileId]),
       );
     }
   });
 
-  it("provisions, joins, updates, and deletes through the workspace lifecycle", async () => {
-    // The native lifecycle replaced webhook-driven identity sync: Better Auth signup
-    // persists the "user" row, actor resolution binds the internal identity,
-    // and workspace routes own team membership changes.
-    await systemTransaction(env, (client) =>
-      Effect.gen(function* () {
-        yield* client.query(
-          `INSERT INTO "user" (id, name, email, "emailVerified")
-         VALUES
-           ($1, 'Lifecycle Owner', 'lifecycle-owner@meltiply.local', TRUE),
-           ($2, 'Lifecycle Member', 'lifecycle-member@meltiply.local', TRUE)
-         ON CONFLICT (id) DO NOTHING`,
-          [lifecycleUserId, lifecycleMemberId],
-        );
-      }),
-    );
-    const ownerIdentity = jwtIdentity({
-      email: "lifecycle-owner@meltiply.local",
-      id: lifecycleUserId,
-      name: "Lifecycle Owner",
-    });
-    const memberIdentity = jwtIdentity({
-      email: "lifecycle-member@meltiply.local",
-      id: lifecycleMemberId,
-      name: "Lifecycle Member",
-    });
-
-    // First verified JWT is idempotent: repeat resolution returns the same actor.
-    const owner = await resolveActor(env, ownerIdentity, actorRequest());
-    const ownerAgain = await resolveActor(env, ownerIdentity, actorRequest());
-    expect(ownerAgain).toEqual(owner);
-    expect(owner.workspace.isPersonal).toBe(true);
-    const member = await resolveActor(env, memberIdentity, actorRequest());
-
-    // Invitation mail flows through the shared MailService seam; the test
-    // Layer captures each neutral MailMessage so the acceptance token and
-    // rendered bodies stay test-local without a delivery vendor.
-    const mailedMessages: MailMessage[] = [];
-    const app = createApiApp({
-      resolveActor,
-      // The bearer token selects which seeded identity the request acts as;
-      // verifyJwtToken returns the verified JWT identity for that subject.
-      verifyJwtToken: async (_envArg, token) =>
-        token === "lifecycle-member" ? memberIdentity : ownerIdentity,
-      workspaceLifecycle: {
-        mailServiceLayer: createMailServiceTest({
-          send: (message) =>
-            Effect.sync(() => {
-              mailedMessages.push(message);
-              return { submissionId: "test-submission-id" };
-            }),
-        }),
-      },
-    });
-    const request = (
-      path: string,
-      init: {
-        body?: string;
-        headers?: Record<string, string>;
-        method: string;
-      },
-      as: "member" | "owner" = "owner",
-    ) =>
-      app.request(
-        path,
-        {
-          body: init.body,
-          headers: {
-            Authorization: `Bearer lifecycle-${as}`,
-            ...init.headers,
-          },
-          method: init.method,
-        },
-        env,
-      );
-
-    const created = await request("/api/v1/workspaces", {
-      body: JSON.stringify({
-        name: "Worker Lifecycle",
-        slug: lifecycleWorkspaceSlug,
-      }),
-      headers: { "Idempotency-Key": "integration-lifecycle-workspace" },
-      method: "POST",
-    });
-    expect(created.status).toBe(201);
-    const workspace = lifecycleWorkspaceResponse(await created.json());
-    expect(workspace.slug).toBe(lifecycleWorkspaceSlug);
-
-    // Replaying the same idempotency key returns the recorded response.
-    const replayed = await request("/api/v1/workspaces", {
-      body: JSON.stringify({
-        name: "Worker Lifecycle",
-        slug: lifecycleWorkspaceSlug,
-      }),
-      headers: { "Idempotency-Key": "integration-lifecycle-workspace" },
-      method: "POST",
-    });
-    expect(replayed.status).toBe(201);
-    expect(replayed.headers.get("Idempotency-Replayed")).toBe("true");
-
-    const invited = await request(`/api/v1/workspaces/${workspace.id}/invitations`, {
-      body: JSON.stringify({ email: "lifecycle-member@meltiply.local" }),
-      headers: { "Idempotency-Key": "integration-lifecycle-invite" },
-      method: "POST",
-    });
-    expect(invited.status).toBe(201);
-    expect(mailedMessages).toHaveLength(1);
-    const token = invitationTokenFrom(mailedMessages[0]!);
-
-    const accepted = await request(
-      `/api/v1/workspace-invitations/${token}/accept`,
-      { method: "POST" },
-      "member",
-    );
-    expect(accepted.status).toBe(200);
-
-    const promoted = await request(`/api/v1/workspaces/${workspace.id}/members/${member.userId}`, {
-      body: JSON.stringify({ role: "admin" }),
-      headers: { "Idempotency-Key": "integration-lifecycle-promote" },
-      method: "PATCH",
-    });
-    expect(promoted.status).toBe(200);
-
-    await systemTransaction(env, (client) =>
-      client
-        .query<{
-          email: string;
-          reconciliation_org_id: string;
-          role: string;
-          slug: string;
-        }>(
-          `SELECT u.email, o.slug, om.role,
-                reconciliation.org_id AS reconciliation_org_id
-         FROM users u
-         JOIN org_members om ON om.user_id = u.id
-         JOIN organizations o ON o.id = om.org_id
-         JOIN usage_reconciliation_state AS reconciliation
-           ON reconciliation.org_id = o.id
-         WHERE u.auth_user_id = $1 AND o.id = $2`,
-          [lifecycleMemberId, workspace.id],
-        )
-        .pipe(
-          Effect.tap((result) =>
-            Effect.sync(() => {
-              expect(result.rows[0]).toEqual({
-                email: "lifecycle-member@meltiply.local",
-                reconciliation_org_id: expect.any(String),
-                role: "admin",
-                slug: lifecycleWorkspaceSlug,
-              });
-            }),
-          ),
-        ),
-    );
-
-    const removed = await request(`/api/v1/workspaces/${workspace.id}/members/${member.userId}`, {
-      headers: { "Idempotency-Key": "integration-lifecycle-remove" },
-      method: "DELETE",
-    });
-    expect(removed.status).toBe(204);
-
-    // Deleting the auth subject cascades the internal user, its memberships,
-    // and its personal workspace.
-    await systemTransaction(env, (client) =>
-      client.query('DELETE FROM "user" WHERE id = $1', [lifecycleUserId]),
-    );
-    const remaining = await systemTransaction(env, (client) =>
-      client.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count
-         FROM users
-         WHERE auth_user_id = $1`,
-        [lifecycleUserId],
-      ),
-    );
-    expect(remaining.rows[0]?.count).toBe("0");
-  });
-
-  it("commits the invitation before submission and grants the invited role", async () => {
-    // The send double runs inside the request after the lifecycle transaction
-    // commits, so it can observe the persisted invitation row: that visibility
-    // proves commit-before-send without inspecting the route's control flow.
-    const ownerSubject = "auth_user_worker_invite_commit_owner";
-    const memberSubject = "auth_user_worker_invite_commit_member";
-    const memberEmail = "invite-commit-member@meltiply.local";
-    await seedLifecycleUser(ownerSubject, "invite-commit-owner@meltiply.local", "Commit Owner");
-    await seedLifecycleUser(memberSubject, memberEmail, "Commit Member");
-
-    const ownerIdentity = jwtIdentity({
-      email: "invite-commit-owner@meltiply.local",
-      id: ownerSubject,
-      name: "Commit Owner",
-    });
-    const memberIdentity = jwtIdentity({
-      email: memberEmail,
-      id: memberSubject,
-      name: "Commit Member",
-    });
-
+  it("administers the shared workspace, roles, invitations, seats, and audit", async () => {
+    const sharedWorkspaceId = "20000000-0000-4000-8000-000000000005";
     const run = lifecycleRunToken();
-    const slug = `invite-commit-${run}`;
-    let committedPendingRow = false;
-    const { request, sent } = lifecycleInvitationHarness({
-      identities: { member: memberIdentity, owner: ownerIdentity },
-      // The invitation row is located by workspace slug rather than by a
-      // captured id so the double only observes what the request committed.
-      send: (message) =>
-        Effect.promise(() =>
-          systemTransaction(env, (client) =>
-            client.query<{ pending: boolean }>(
-              `SELECT (i.accepted_at IS NULL AND i.revoked_at IS NULL) AS pending
-               FROM workspace_invitations i
-               JOIN organizations o ON o.id = i.org_id
-               WHERE o.slug = $1 AND i.email = $2`,
-              [slug, message.to],
-            ),
-          ),
-        ).pipe(
-          Effect.tap((result) =>
-            Effect.sync(() => {
-              committedPendingRow = result.rows[0]?.pending === true;
-            }),
-          ),
-          Effect.as({ submissionId: "test-submission-id" }),
-        ),
-    });
-
-    const created = await request("/api/v1/workspaces", {
-      body: JSON.stringify({ name: "Commit Order", slug }),
-      method: "POST",
-      headers: { "Idempotency-Key": `invite-commit-${run}-workspace` },
-    });
-    expect(created.status).toBe(201);
-    const workspaceId = lifecycleWorkspaceResponse(await created.json()).id;
-
-    const invited = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: memberEmail, role: "admin" }),
-      headers: { "Idempotency-Key": `invite-commit-${run}-invite` },
-      method: "POST",
-    });
-    expect(invited.status).toBe(201);
-    expect(sent).toHaveLength(1);
-    expect(committedPendingRow).toBe(true);
-
-    // Replaying the stored response must not submit a second message.
-    const replayed = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: memberEmail, role: "admin" }),
-      headers: { "Idempotency-Key": `invite-commit-${run}-invite` },
-      method: "POST",
-    });
-    expect(replayed.status).toBe(201);
-    expect(replayed.headers.get("Idempotency-Replayed")).toBe("true");
-    expect(sent).toHaveLength(1);
-
-    const accepted = await request(
-      `/api/v1/workspace-invitations/${invitationTokenFrom(sent[0]!)}/accept`,
-      { method: "POST" },
-      "member",
-    );
-    expect(accepted.status).toBe(200);
-    expect(await accepted.json()).toMatchObject({
-      member: { email: memberEmail, role: "admin" },
-      workspace: { id: workspaceId },
-    });
-
-    const membership = await systemTransaction(env, (client) =>
-      client.query<{ role: string }>(
-        `SELECT om.role
-         FROM org_members om
-         JOIN users u ON u.id = om.user_id
-         WHERE om.org_id = $1 AND u.auth_user_id = $2`,
-        [workspaceId, memberSubject],
-      ),
-    );
-    expect(membership.rows[0]?.role).toBe("admin");
-  });
-
-  it("renders a hostile workspace name safely in invitation HTML and text", async () => {
-    const ownerSubject = "auth_user_worker_invite_render_owner";
-    await seedLifecycleUser(ownerSubject, "invite-render-owner@meltiply.local", "Render Owner");
+    const inviteEmail = `lifecycle-seat-${run}@meltiply.local`;
     const ownerIdentity = jwtIdentity({
-      email: "invite-render-owner@meltiply.local",
-      id: ownerSubject,
-      name: "Render Owner",
+      email: "alpha@meltiply.local",
+      id: alpha.subject,
+      name: "Alpha Creator",
     });
-    const { request, sent } = lifecycleInvitationHarness({
-      identities: { owner: ownerIdentity },
+    const adminIdentity = jwtIdentity({
+      email: "beta@meltiply.local",
+      id: beta.subject,
+      name: "Beta Admin",
     });
-
-    const hostileName = `<script>alert('xss')</script>" onmouseover="pwn&`;
-    const run = lifecycleRunToken();
-    const slug = `invite-render-${run}`;
-    const created = await request("/api/v1/workspaces", {
-      body: JSON.stringify({ name: hostileName, slug }),
-      method: "POST",
-      headers: { "Idempotency-Key": `invite-render-${run}-workspace` },
-    });
-    expect(created.status).toBe(201);
-    const workspaceId = lifecycleWorkspaceResponse(await created.json()).id;
-
-    const invited = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: "render-target@meltiply.local" }),
-      headers: { "Idempotency-Key": `invite-render-${run}-invite` },
-      method: "POST",
-    });
-    expect(invited.status).toBe(201);
-    expect(sent).toHaveLength(1);
-    const message = sent[0]!;
-    // HTML markup from the workspace name must be entity-escaped so invitee
-    // clients never execute operator-controlled markup; the plain-text body
-    // carries the raw name because entities would display literally there.
-    expect(message.html).toContain("&lt;script&gt;");
-    expect(message.html).not.toContain("<script>");
-    expect(message.html).toContain("&#39;xss&#39;");
-    expect(message.html).toContain("&quot;");
-    expect(message.html).toContain("pwn&amp;");
-    expect(message.text).toContain("<script>alert('xss')</script>");
-    // The acceptance link survives in both bodies, and the subject cannot
-    // smuggle CRLF header injection through the workspace name.
-    expect(message.html).toContain("Accept the invitation");
-    expect(invitationTokenFrom(message)).toHaveLength(64);
-    expect(message.subject).not.toMatch(/[\r\n]/);
-    expect(message.subject).toContain("You're invited to");
-    expect(message.to).toBe("render-target@meltiply.local");
-  });
-
-  it("revokes the invitation when mail submission is rejected", async () => {
-    const ownerSubject = "auth_user_worker_invite_reject_owner";
-    const memberSubject = "auth_user_worker_invite_reject_member";
-    const memberEmail = "invite-reject-member@meltiply.local";
-    await seedLifecycleUser(ownerSubject, "invite-reject-owner@meltiply.local", "Reject Owner");
-    await seedLifecycleUser(memberSubject, memberEmail, "Reject Member");
-
-    const ownerIdentity = jwtIdentity({
-      email: "invite-reject-owner@meltiply.local",
-      id: ownerSubject,
-      name: "Reject Owner",
-    });
-    const memberIdentity = jwtIdentity({
-      email: memberEmail,
-      id: memberSubject,
-      name: "Reject Member",
-    });
-    const { request, sent } = lifecycleInvitationHarness({
-      identities: { member: memberIdentity, owner: ownerIdentity },
-      send: () =>
-        Effect.fail(
-          new MailSubmissionError({
-            classification: "rejected",
-            message: "The mail service rejected the submission. (E_RECIPIENT_SUPPRESSED)",
-          }),
-        ),
-    });
-
-    const run = lifecycleRunToken();
-    const slug = `invite-reject-${run}`;
-    const created = await request("/api/v1/workspaces", {
-      body: JSON.stringify({ name: "Reject Target", slug }),
-      method: "POST",
-      headers: { "Idempotency-Key": `invite-reject-${run}-workspace` },
-    });
-    expect(created.status).toBe(201);
-    const workspaceId = lifecycleWorkspaceResponse(await created.json()).id;
-
-    const invited = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: memberEmail }),
-      headers: { "Idempotency-Key": `invite-reject-${run}-invite` },
-      method: "POST",
-    });
-    expect(invited.status).toBe(502);
-    expect(errorCodeFrom(await invited.json())).toBe("email_delivery_failed");
-    expect(sent).toHaveLength(1);
-
-    // Suppression-style rejection is definitive: the row is revoked so the
-    // captured link is dead and the pending slot is released.
-    const rejectedToken = invitationTokenFrom(sent[0]!);
-    const rows = await systemTransaction(env, (client) =>
-      client.query<{ revoked_at: string | null }>(
-        `SELECT revoked_at FROM workspace_invitations
-         WHERE org_id = $1 AND email = $2`,
-        [workspaceId, memberEmail],
-      ),
-    );
-    expect(rows.rows[0]?.revoked_at).not.toBeNull();
-    const accepted = await request(
-      `/api/v1/workspace-invitations/${rejectedToken}/accept`,
-      { method: "POST" },
-      "member",
-    );
-    expect(accepted.status).toBe(410);
-    expect(errorCodeFrom(await accepted.json())).toBe("invitation_revoked");
-  });
-
-  it("reports email_unavailable when the live mail binding is unconfigured", async () => {
-    const ownerSubject = "auth_user_worker_invite_unavailable_owner";
-    await seedLifecycleUser(
-      ownerSubject,
-      "invite-unavailable-owner@meltiply.local",
-      "Unavailable Owner",
-    );
-    const ownerIdentity = jwtIdentity({
-      email: "invite-unavailable-owner@meltiply.local",
-      id: ownerSubject,
-      name: "Unavailable Owner",
-    });
-    // No mailServiceLayer override: the live Cloudflare sender sees the test
-    // env's missing MAIL binding/MAIL_FROM_ADDRESS and fails closed.
-    const { request, sent } = lifecycleInvitationHarness({
-      identities: { owner: ownerIdentity },
-      useLiveMail: true,
-    });
-
-    const run = lifecycleRunToken();
-    const slug = `invite-unavailable-${run}`;
-    const created = await request("/api/v1/workspaces", {
-      body: JSON.stringify({ name: "Unavailable Mail", slug }),
-      method: "POST",
-      headers: { "Idempotency-Key": `invite-unavailable-${run}-workspace` },
-    });
-    expect(created.status).toBe(201);
-    const workspaceId = lifecycleWorkspaceResponse(await created.json()).id;
-
-    const invited = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: "unavailable-target@meltiply.local" }),
-      headers: { "Idempotency-Key": `invite-unavailable-${run}-invite` },
-      method: "POST",
-    });
-    expect(invited.status).toBe(503);
-    expect(errorCodeFrom(await invited.json())).toBe("email_unavailable");
-    expect(sent).toHaveLength(0);
-
-    const rows = await systemTransaction(env, (client) =>
-      client.query<{ revoked_at: string | null }>(
-        `SELECT revoked_at FROM workspace_invitations
-         WHERE org_id = $1 AND email = $2`,
-        [workspaceId, "unavailable-target@meltiply.local"],
-      ),
-    );
-    expect(rows.rows[0]?.revoked_at).not.toBeNull();
-  });
-
-  it("keeps an ambiguous submission pending and never resends it", async () => {
-    const ownerSubject = "auth_user_worker_invite_ambiguous_owner";
-    await seedLifecycleUser(
-      ownerSubject,
-      "invite-ambiguous-owner@meltiply.local",
-      "Ambiguous Owner",
-    );
-    const ownerIdentity = jwtIdentity({
-      email: "invite-ambiguous-owner@meltiply.local",
-      id: ownerSubject,
-      name: "Ambiguous Owner",
-    });
-    const { request, sent } = lifecycleInvitationHarness({
-      identities: { owner: ownerIdentity },
-      send: () =>
-        Effect.fail(
-          new MailSubmissionError({
-            classification: "ambiguous",
-            message:
-              "The mail submission outcome is uncertain; the message may already have been accepted.",
-          }),
-        ),
-    });
-
-    const run = lifecycleRunToken();
-    const slug = `invite-ambiguous-${run}`;
-    const created = await request("/api/v1/workspaces", {
-      body: JSON.stringify({ name: "Ambiguous Outcome", slug }),
-      method: "POST",
-      headers: { "Idempotency-Key": `invite-ambiguous-${run}-workspace` },
-    });
-    expect(created.status).toBe(201);
-    const workspaceId = lifecycleWorkspaceResponse(await created.json()).id;
-
-    const invited = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: "ambiguous-target@meltiply.local" }),
-      headers: { "Idempotency-Key": `invite-ambiguous-${run}-invite` },
-      method: "POST",
-    });
-    expect(invited.status).toBe(502);
-    expect(errorCodeFrom(await invited.json())).toBe("email_delivery_failed");
-    expect(sent).toHaveLength(1);
-
-    // The uncertain write is never revoked on unproven evidence: the row stays
-    // pending so a possibly-accepted message keeps a usable link, and neither
-    // idempotent replay nor a fresh invite submits a second send.
-    const rows = await systemTransaction(env, (client) =>
-      client.query<{ revoked_at: string | null }>(
-        `SELECT revoked_at FROM workspace_invitations
-         WHERE org_id = $1 AND email = $2`,
-        [workspaceId, "ambiguous-target@meltiply.local"],
-      ),
-    );
-    expect(rows.rows[0]?.revoked_at).toBeNull();
-
-    const replayed = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: "ambiguous-target@meltiply.local" }),
-      headers: { "Idempotency-Key": `invite-ambiguous-${run}-invite` },
-      method: "POST",
-    });
-    expect(replayed.status).toBe(201);
-    expect(replayed.headers.get("Idempotency-Replayed")).toBe("true");
-    expect(sent).toHaveLength(1);
-
-    const freshInvite = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: "ambiguous-target@meltiply.local" }),
-      headers: { "Idempotency-Key": `invite-ambiguous-${run}-invite-again` },
-      method: "POST",
-    });
-    expect(freshInvite.status).toBe(409);
-    expect(errorCodeFrom(await freshInvite.json())).toBe("invitation_pending");
-    expect(sent).toHaveLength(1);
-  });
-
-  it("enforces revoked, expired, and email-mismatch acceptance rules", async () => {
-    const ownerSubject = "auth_user_worker_invite_rules_owner";
-    const memberSubject = "auth_user_worker_invite_rules_member";
-    const otherSubject = "auth_user_worker_invite_rules_other";
-    const expiredSubject = "auth_user_worker_invite_rules_expired";
-    const memberEmail = "invite-rules-member@meltiply.local";
-    const expiredEmail = "invite-rules-expired@meltiply.local";
-    await seedLifecycleUser(ownerSubject, "invite-rules-owner@meltiply.local", "Rules Owner");
-    await seedLifecycleUser(memberSubject, memberEmail, "Rules Member");
-    await seedLifecycleUser(otherSubject, "invite-rules-other@meltiply.local", "Rules Other");
-    await seedLifecycleUser(expiredSubject, expiredEmail, "Rules Expired");
-
-    const ownerIdentity = jwtIdentity({
-      email: "invite-rules-owner@meltiply.local",
-      id: ownerSubject,
-      name: "Rules Owner",
-    });
-    const memberIdentity = jwtIdentity({
-      email: memberEmail,
-      id: memberSubject,
-      name: "Rules Member",
-    });
-    const otherIdentity = jwtIdentity({
-      email: "invite-rules-other@meltiply.local",
-      id: otherSubject,
-      name: "Rules Other",
-    });
-    const expiredIdentity = jwtIdentity({
-      email: expiredEmail,
-      id: expiredSubject,
-      name: "Rules Expired",
+    const editorIdentity = jwtIdentity({
+      email: "gamma@meltiply.local",
+      id: "auth_user_local_gamma",
+      name: "Gamma Editor",
     });
     const { request, sent } = lifecycleInvitationHarness({
       identities: {
-        expired: expiredIdentity,
-        member: memberIdentity,
-        other: otherIdentity,
+        admin: adminIdentity,
+        editor: editorIdentity,
         owner: ownerIdentity,
       },
     });
 
-    const run = lifecycleRunToken();
-    const slug = `invite-rules-${run}`;
-    const created = await request("/api/v1/workspaces", {
-      body: JSON.stringify({ name: "Acceptance Rules", slug }),
-      method: "POST",
-      headers: { "Idempotency-Key": `invite-rules-${run}-workspace` },
+    const installation = await request("/api/v1/installation", { method: "GET" });
+    expect(installation.status).toBe(200);
+    expect(await installation.json()).toMatchObject({
+      seat_limit: 10,
+      workspace: {
+        created_at: expect.any(String),
+        id: sharedWorkspaceId,
+        role: "admin",
+        updated_at: expect.any(String),
+      },
     });
-    expect(created.status).toBe(201);
-    const workspaceId = lifecycleWorkspaceResponse(await created.json()).id;
 
-    const invited = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: memberEmail }),
-      headers: { "Idempotency-Key": `invite-rules-${run}-invite` },
+    const members = await request(`/api/v1/workspaces/${sharedWorkspaceId}/members`, {
+      method: "GET",
+    });
+    expect(members.status).toBe(200);
+    const memberBody = await members.json<{
+      members: { email: string; is_installation_owner: boolean; role: string }[];
+    }>();
+    expect(memberBody.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          email: "alpha@meltiply.local",
+          is_installation_owner: true,
+          role: "admin",
+        }),
+        expect.objectContaining({ email: "gamma@meltiply.local", role: "editor" }),
+      ]),
+    );
+
+    // A Workspace Admin may invite an Editor but never another Admin.
+    const forbiddenAdminInvite = await request(
+      `/api/v1/workspaces/${sharedWorkspaceId}/invitations`,
+      {
+        body: JSON.stringify({ email: `admin-invite-${run}@meltiply.local`, role: "admin" }),
+        headers: { "Idempotency-Key": `admin-invite-${run}` },
+        method: "POST",
+      },
+      "admin",
+    );
+    expect(forbiddenAdminInvite.status).toBe(403);
+    expect(errorCodeFrom(await forbiddenAdminInvite.json())).toBe("forbidden_role_assignment");
+
+    const invited = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
+      body: JSON.stringify({ email: inviteEmail, role: "editor" }),
+      headers: { "Idempotency-Key": `owner-invite-${run}` },
       method: "POST",
     });
     expect(invited.status).toBe(201);
     expect(sent).toHaveLength(1);
-    const token = invitationTokenFrom(sent[0]!);
-    const invitationId = invitationIdFrom(await invited.json());
+    const invitation = await invited.json<{ id: string; role: string; status: string }>();
+    expect(invitation).toMatchObject({ role: "editor", status: "pending" });
 
-    // An invitee-mismatched account can never consume the link.
-    const mismatched = await request(
-      `/api/v1/workspace-invitations/${token}/accept`,
-      { method: "POST" },
-      "other",
-    );
-    expect(mismatched.status).toBe(403);
-    expect(errorCodeFrom(await mismatched.json())).toBe("invitation_email_mismatch");
-
-    // Admin revocation kills the link before expiry or acceptance can apply.
-    const revoked = await request(`/api/v1/workspaces/${workspaceId}/invitations/${invitationId}`, {
-      headers: { "Idempotency-Key": `invite-rules-${run}-revoke` },
-      method: "DELETE",
+    const pending = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
+      method: "GET",
     });
-    expect(revoked.status).toBe(204);
-    const revokedAccept = await request(
-      `/api/v1/workspace-invitations/${token}/accept`,
-      { method: "POST" },
-      "member",
-    );
-    expect(revokedAccept.status).toBe(410);
-    expect(errorCodeFrom(await revokedAccept.json())).toBe("invitation_revoked");
+    expect(pending.status).toBe(200);
+    expect(await pending.json()).toMatchObject({
+      invitations: expect.arrayContaining([
+        expect.objectContaining({ email: inviteEmail, role: "editor" }),
+      ]),
+    });
 
-    // An expired invitation stays expired even for the matching recipient.
-    const expired = await request(`/api/v1/workspaces/${workspaceId}/invitations`, {
-      body: JSON.stringify({ email: expiredEmail }),
-      headers: { "Idempotency-Key": `invite-rules-${run}-expired-invite` },
+    const revoked = await request(
+      `/api/v1/workspaces/${sharedWorkspaceId}/invitations/${invitation.id}`,
+      {
+        headers: { "Idempotency-Key": `owner-revoke-${run}` },
+        method: "DELETE",
+      },
+    );
+    expect(revoked.status).toBe(204);
+
+    // A role change applies to the next request and is audited.
+    const roleChange = await request(
+      `/api/v1/workspaces/${sharedWorkspaceId}/members/10000000-0000-4000-8000-000000000003`,
+      {
+        body: JSON.stringify({ role: "viewer" }),
+        headers: { "Idempotency-Key": `role-change-${run}` },
+        method: "PATCH",
+      },
+    );
+    expect(roleChange.status).toBe(200);
+    try {
+      const editorRead = await request("/api/v1/users/me", { method: "GET" }, "editor");
+      expect(editorRead.status).toBe(200);
+      await expect(editorRead.json()).resolves.toMatchObject({
+        active_organization: { role: "viewer" },
+      });
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query(
+          `UPDATE org_members SET role = 'editor'
+           WHERE org_id = $1 AND user_id = '10000000-0000-4000-8000-000000000003'`,
+          [sharedWorkspaceId],
+        ),
+      );
+    }
+
+    const renamed = await request(`/api/v1/workspaces/${sharedWorkspaceId}`, {
+      body: JSON.stringify({ name: `Shared Workspace ${run}` }),
+      headers: { "Idempotency-Key": `rename-${run}` },
+      method: "PATCH",
+    });
+    expect(renamed.status).toBe(200);
+    await systemTransaction(env, (client) =>
+      client.query("UPDATE organizations SET name = 'Alpha Creator''s workspace' WHERE id = $1", [
+        sharedWorkspaceId,
+      ]),
+    );
+
+    const audit = await request(`/api/v1/workspaces/${sharedWorkspaceId}/audit`, {
+      method: "GET",
+    });
+    expect(audit.status).toBe(200);
+    const auditBody = await audit.json<{ entries: { action: string }[] }>();
+    expect(auditBody.entries.map((entry) => entry.action)).toEqual(
+      expect.arrayContaining([
+        "invitation.created",
+        "invitation.revoked",
+        "member.role_changed",
+        "workspace.renamed",
+      ]),
+    );
+
+    const forbiddenAudit = await request(
+      `/api/v1/workspaces/${sharedWorkspaceId}/audit`,
+      { method: "GET" },
+      "editor",
+    );
+    expect(forbiddenAudit.status).toBe(403);
+  });
+
+  it("enforces the ten-Seat limit and renews expired invitations atomically", async () => {
+    const sharedWorkspaceId = "20000000-0000-4000-8000-000000000005";
+    const run = lifecycleRunToken();
+    const ownerIdentity = jwtIdentity({
+      email: "alpha@meltiply.local",
+      id: alpha.subject,
+      name: "Alpha Creator",
+    });
+    const { request } = lifecycleInvitationHarness({ identities: { owner: ownerIdentity } });
+    const emailFor = (index: number) => `seat-limit-${run}-${index}@meltiply.local`;
+    const created: { id: string; email: string }[] = [];
+    try {
+      // Start from the seeded Seat usage minus any pending invitations so the
+      // ten-Seat arithmetic is independent of fixture invitations.
+      await systemTransaction(env, (client) =>
+        client.query(
+          `DELETE FROM workspace_invitations
+           WHERE org_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL`,
+          [sharedWorkspaceId],
+        ),
+      );
+      for (let index = 0; index < 6; index += 1) {
+        const response = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
+          body: JSON.stringify({ email: emailFor(index), role: "viewer" }),
+          headers: { "Idempotency-Key": `seat-invite-${run}-${index}` },
+          method: "POST",
+        });
+        expect(response.status).toBe(201);
+        const body = await response.json<{ email: string; id: string }>();
+        created.push({ email: body.email, id: body.id });
+      }
+
+      const overflow = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
+        body: JSON.stringify({ email: emailFor(6), role: "viewer" }),
+        headers: { "Idempotency-Key": `seat-overflow-${run}` },
+        method: "POST",
+      });
+      expect(overflow.status).toBe(409);
+      expect(errorCodeFrom(await overflow.json())).toBe("seat_limit_reached");
+
+      // Expiring one invitation releases its reservation; a new invitation may
+      // consume that Seat. Renewing the expired row must then fail rather than
+      // pushing usage above the limit.
+      await systemTransaction(env, (client) =>
+        client.query(
+          `UPDATE workspace_invitations SET expires_at = now() - interval '1 day'
+           WHERE id = $1`,
+          [created[0]!.id],
+        ),
+      );
+      const replacement = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
+        body: JSON.stringify({ email: emailFor(6), role: "viewer" }),
+        headers: { "Idempotency-Key": `seat-replacement-${run}` },
+        method: "POST",
+      });
+      expect(replacement.status).toBe(201);
+      const replacementBody = await replacement.json<{ id: string }>();
+      created.push({ email: emailFor(6), id: replacementBody.id });
+
+      const renew = await request(
+        `/api/v1/workspaces/${sharedWorkspaceId}/invitations/${created[0]!.id}/resend`,
+        {
+          headers: { "Idempotency-Key": `seat-renew-${run}` },
+          method: "POST",
+        },
+      );
+      expect(renew.status).toBe(409);
+      expect(errorCodeFrom(await renew.json())).toBe("seat_limit_reached");
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query("DELETE FROM workspace_invitations WHERE email LIKE $1", [
+          `seat-limit-${run}-%`,
+        ]),
+      );
+    }
+  });
+
+  it("allows a resend retry after a definitive mail failure", async () => {
+    const sharedWorkspaceId = "20000000-0000-4000-8000-000000000005";
+    const run = lifecycleRunToken();
+    const email = `resend-failure-${run}@meltiply.local`;
+    const ownerIdentity = jwtIdentity({
+      email: "alpha@meltiply.local",
+      id: alpha.subject,
+      name: "Alpha Creator",
+    });
+    let failSubmission = false;
+    const { request, sent } = lifecycleInvitationHarness({
+      identities: { owner: ownerIdentity },
+      send: () =>
+        failSubmission
+          ? Effect.fail(
+              new MailSubmissionError({
+                classification: "rejected",
+                message: "The mail service rejected the submission.",
+              }),
+            )
+          : Effect.succeed({ submissionId: "test-submission-id" }),
+    });
+
+    const created = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
+      body: JSON.stringify({ email, role: "viewer" }),
+      headers: { "Idempotency-Key": `resend-failure-create-${run}` },
       method: "POST",
     });
-    expect(expired.status).toBe(201);
-    expect(sent).toHaveLength(2);
-    const expiredToken = invitationTokenFrom(sent[1]!);
-    await systemTransaction(env, (client) =>
-      client.query(
-        `UPDATE workspace_invitations
-         SET expires_at = now() - INTERVAL '1 day'
-         WHERE org_id = $1 AND email = $2`,
-        [workspaceId, expiredEmail],
+    expect(created.status).toBe(201);
+    const invitationId = (await created.json<{ id: string }>()).id;
+
+    try {
+      const resendKey = `resend-failure-retry-${run}`;
+      failSubmission = true;
+      const resend = await request(
+        `/api/v1/workspaces/${sharedWorkspaceId}/invitations/${invitationId}/resend`,
+        {
+          headers: { "Idempotency-Key": resendKey },
+          method: "POST",
+        },
+      );
+      expect(resend.status).toBe(502);
+      expect(errorCodeFrom(await resend.json())).toBe("email_delivery_failed");
+      expect(sent).toHaveLength(2);
+
+      // The failed resend keeps the invitation pending and drops its committed
+      // idempotency record, so reusing the key can rotate and resend.
+      const pending = await systemTransaction(env, (client) =>
+        client.query<{ revoked_at: Date | string | null }>(
+          "SELECT revoked_at FROM workspace_invitations WHERE id = $1",
+          [invitationId],
+        ),
+      );
+      expect(pending.rows[0]?.revoked_at).toBeNull();
+
+      failSubmission = false;
+      const retry = await request(
+        `/api/v1/workspaces/${sharedWorkspaceId}/invitations/${invitationId}/resend`,
+        {
+          headers: { "Idempotency-Key": resendKey },
+          method: "POST",
+        },
+      );
+      expect(retry.status).toBe(200);
+      expect(sent).toHaveLength(3);
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query("DELETE FROM workspace_invitations WHERE id = $1", [invitationId]),
+      );
+    }
+  });
+
+  it("protects the last admin and blocks owner self-removal", async () => {
+    const sharedWorkspaceId = "20000000-0000-4000-8000-000000000005";
+    const run = lifecycleRunToken();
+    const ownerIdentity = jwtIdentity({
+      email: "alpha@meltiply.local",
+      id: alpha.subject,
+      name: "Alpha Creator",
+    });
+    const { request } = lifecycleInvitationHarness({ identities: { owner: ownerIdentity } });
+
+    const removedBeta = await request(
+      `/api/v1/workspaces/${sharedWorkspaceId}/members/10000000-0000-4000-8000-000000000002`,
+      {
+        headers: { "Idempotency-Key": `remove-beta-${run}` },
+        method: "DELETE",
+      },
+    );
+    expect(removedBeta.status).toBe(204);
+    try {
+      const demote = await request(
+        `/api/v1/workspaces/${sharedWorkspaceId}/members/10000000-0000-4000-8000-000000000001`,
+        {
+          body: JSON.stringify({ role: "editor" }),
+          headers: { "Idempotency-Key": `demote-owner-${run}` },
+          method: "PATCH",
+        },
+      );
+      expect(demote.status).toBe(409);
+      expect(errorCodeFrom(await demote.json())).toBe("owner_role_required");
+
+      const selfDelete = await request(
+        `/api/v1/workspaces/${sharedWorkspaceId}/members/10000000-0000-4000-8000-000000000001`,
+        {
+          headers: { "Idempotency-Key": `remove-owner-${run}` },
+          method: "DELETE",
+        },
+      );
+      expect(selfDelete.status).toBe(409);
+      expect(errorCodeFrom(await selfDelete.json())).toBe("owner_self_removal");
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query(
+          `INSERT INTO org_members (org_id, user_id, role)
+           VALUES ($1, '10000000-0000-4000-8000-000000000002', 'admin')
+           ON CONFLICT (org_id, user_id) DO UPDATE SET role = 'admin'`,
+          [sharedWorkspaceId],
+        ),
+      );
+    }
+  });
+
+  it("accepts an invitation through the link and hard-deletes the invited account", async () => {
+    const sharedWorkspaceId = "20000000-0000-4000-8000-000000000005";
+    const run = lifecycleRunToken();
+    const inviteEmail = `lifecycle-delete-${run}@meltiply.local`;
+    const subject = `auth_user_lifecycle_delete_${run}`;
+    const ownerIdentity = jwtIdentity({
+      email: "alpha@meltiply.local",
+      id: alpha.subject,
+      name: "Alpha Creator",
+    });
+    const inviteeIdentity = jwtIdentity({
+      email: inviteEmail,
+      id: subject,
+      name: "Delete Target",
+    });
+    const { request, sent } = lifecycleInvitationHarness({
+      identities: { invitee: inviteeIdentity, owner: ownerIdentity },
+    });
+
+    const invited = await request(`/api/v1/workspaces/${sharedWorkspaceId}/invitations`, {
+      body: JSON.stringify({ email: inviteEmail, role: "viewer" }),
+      headers: { "Idempotency-Key": `delete-invite-${run}` },
+      method: "POST",
+    });
+    expect(invited.status).toBe(201);
+    const token = invitationTokenFrom(sent[0]!);
+
+    await seedLifecycleUser(subject, inviteEmail, "Delete Target");
+    const accepted = await request(
+      `/api/v1/workspace-invitations/${token}/accept`,
+      { method: "POST" },
+      "invitee",
+    );
+    expect(accepted.status).toBe(200);
+    const acceptedBody = await accepted.json<{ member: { user_id: string } }>();
+    const memberId = acceptedBody.member.user_id;
+
+    const suspended = await request(`/api/v1/installation/members/${memberId}/suspend`, {
+      body: JSON.stringify({ reason: "Test offboarding" }),
+      headers: { "Idempotency-Key": `suspend-${run}` },
+      method: "POST",
+    });
+    expect(suspended.status).toBe(200);
+    expect(await suspended.json()).toMatchObject({ status: "suspended" });
+
+    const blocked = await request("/api/v1/users/me", { method: "GET" }, "invitee");
+    expect(blocked.status).toBe(403);
+
+    const reactivated = await request(`/api/v1/installation/members/${memberId}/reactivate`, {
+      headers: { "Idempotency-Key": `reactivate-${run}` },
+      method: "POST",
+    });
+    expect(reactivated.status).toBe(200);
+    expect(await reactivated.json()).toMatchObject({ status: "active" });
+
+    const deleted = await request(`/api/v1/installation/members/${memberId}`, {
+      body: JSON.stringify({ confirm_email: inviteEmail }),
+      headers: { "Idempotency-Key": `delete-${run}` },
+      method: "DELETE",
+    });
+    expect(deleted.status).toBe(204);
+    const remaining = await systemTransaction(env, (client) =>
+      client.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM users WHERE auth_user_id = $1",
+        [subject],
       ),
     );
-    const expiredAccept = await request(
-      `/api/v1/workspace-invitations/${expiredToken}/accept`,
-      { method: "POST" },
-      "expired",
-    );
-    expect(expiredAccept.status).toBe(410);
-    expect(errorCodeFrom(await expiredAccept.json())).toBe("invitation_expired");
-    expect(sent).toHaveLength(2);
+    expect(remaining.rows[0]?.count).toBe("0");
   });
   it("builds the multi-chart dashboard aggregates with delta series and format breakdowns", async () => {
     const start = new Date("2026-07-01T00:00:00Z");

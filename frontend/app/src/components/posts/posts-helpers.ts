@@ -39,6 +39,31 @@ export function isCancellableStatus(status: string): boolean {
 }
 
 /**
+ * Outcome states that make Post deletion Admin-only.
+ *
+ * A Provider attempt may already have published: `processing` is in flight,
+ * `awaiting_provider` and `needs_reconciliation` are ambiguous, and `published`
+ * is retained history. The Worker's service guard and RLS policy use the same
+ * set, so the UI must not offer Editors a deletion the server will reject.
+ */
+const PROTECTED_DELETE_STATUSES: Record<string, true> = {
+  processing: true,
+  awaiting_provider: true,
+  published: true,
+  needs_reconciliation: true,
+};
+
+/**
+ * Reports whether a Distribution status makes its Post Admin-only for deletion.
+ *
+ * @param status - Raw distribution or channel status string.
+ * @returns True when the Post has protected publication history or an attempt.
+ */
+export function isPublishedDistributionStatus(status: string): boolean {
+  return PROTECTED_DELETE_STATUSES[status] === true;
+}
+
+/**
  * Aggregates independent Channel outcomes into one worst-case display status.
  *
  * Priority order surfaces actionable states first: failures and reconciliation

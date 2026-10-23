@@ -1094,27 +1094,30 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
    * Plans a fresh single-PUT grant for an active session inside the session's
    * own transaction.
    *
-   * The session row is re-read under `FOR UPDATE`, which is what serializes
-   * minting against abort and completion: whichever transaction commits first
-   * decides, so a grant is either recorded before an abort retains its hold or
-   * never minted because the locked read already sees the terminal status. The
-   * planned deadline is persisted on the staging row's `write_hold_until`
-   * before this transaction ends, so every URL the caller exposes afterwards
-   * has its writer window durably inventoried — the sweep can never reclaim
-   * underneath a live grant.
+   * Existing session rows are read under `FOR UPDATE` to serialize minting
+   * against abort and completion: whichever transaction commits first decides.
+   * Callers that already hold the row lock or just inserted the row pass it in;
+   * others read it here. The planned deadline is persisted on the staging row
+   * as `write_hold_until` before this transaction ends, so every URL exposed
+   * afterwards has its writer window durably inventoried — the sweep can never
+   * reclaim underneath a live grant.
    *
    * @param client - Active PostgreSQL EffectTransactionClient owning the session row lock.
    * @param sessionId - Upload session to plan a grant for.
    * @param current - Reference timestamp; the planned deadline is `signedExpiry(current, expires_at)`.
+   * @param lockedRow - Session row locked or inserted by this transaction, if any.
    * @returns The locked row plus the deadline to sign with; `grantDeadline` is null when the session mints no single-PUT grant.
    */
   function planSingleUploadGrantEffect(
     client: EffectTransactionClient,
     sessionId: string,
     current: Date,
+    lockedRow?: UploadSessionRow,
   ): Effect.Effect<{ grantDeadline: Date | null; row: UploadSessionRow }, AssetServiceError> {
     return Effect.gen(function* () {
-      const row = yield* getSessionRowEffect(client, sessionId, true);
+      // An inserted row is also owned by this transaction and cannot be
+      // concurrently aborted or completed before commit.
+      const row = lockedRow ?? (yield* getSessionRowEffect(client, sessionId, true));
       if (
         row.strategy !== "single" ||
         !["created", "uploading"].includes(row.status) ||
@@ -1211,6 +1214,8 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
      * Validates upload parameters against mime policy, reserves upload quota,
      * provisions R2 multipart upload state if file size exceeds threshold (100MB),
      * and returns the initialized upload session with signed URL for single uploads.
+     * Reuses the inserted session row for grant planning; replays still lock and
+     * read the existing session before persisting a fresh writer deadline.
      *
      * @param env - Worker environment bindings.
      * @param session - Authenticated user session claims.
@@ -1385,7 +1390,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                 const expiresAt = new Date(
                   current.getTime() + ASSET_UPLOAD_POLICY.sessionTtlSeconds * 1_000,
                 );
-                yield* client.query<UploadSessionRow>(
+                const sessionResult = yield* client.query<UploadSessionRow>(
                   `INSERT INTO asset_upload_sessions
                        (id, org_id, asset_id, uploaded_by, strategy, status,
                         content_type, file_size, object_key, multipart_upload_id,
@@ -1426,7 +1431,12 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                   201,
                   { session_id: sessionId },
                 );
-                const plan = yield* planSingleUploadGrantEffect(client, sessionId, current);
+                const plan = yield* planSingleUploadGrantEffect(
+                  client,
+                  sessionId,
+                  current,
+                  sessionResult.rows[0],
+                );
                 return {
                   asset: mapAsset(assetResult.rows[0]!),
                   grantDeadline: plan.grantDeadline,
@@ -1475,7 +1485,7 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
      * Retrieves status and progress details of an existing upload session via Effect.
      *
      * Automatically sweeps and marks the session as expired if its deadline has passed.
-     * Includes list of successfully uploaded parts and signs fresh single upload URLs if applicable.
+     * Lists recorded parts only for multipart sessions and signs fresh single upload URLs if applicable.
      * Sessions whose asset sits under a soft-deleted Brand Profile resolve as not found.
      *
      * @param env - Worker environment bindings.
@@ -1499,25 +1509,26 @@ export function createAssetApiService(options: AssetServiceOptions = {}): AssetA
                 row.status = "expired";
                 yield* expireSingleSessionEffect(client, row.id, row.asset_id);
               }
-              // Re-read under the held lock so a mint decision uses the
-              // committed state rather than a snapshot taken before a
-              // concurrent abort could land; the planned deadline is
-              // persisted on the staging row inside this transaction.
-              const plan = yield* planSingleUploadGrantEffect(client, row.id, current);
-              const parts = yield* client.query<UploadPartRow>(
-                `SELECT part_number, etag, size
-                   FROM asset_upload_parts
-                   WHERE session_id = $1
-                   ORDER BY part_number`,
-                [row.id],
-              );
+              // The held session lock serializes grant planning with abort and
+              // completion; persist the deadline before exposing a signed URL.
+              const plan = yield* planSingleUploadGrantEffect(client, row.id, current, row);
+              const parts =
+                row.strategy === "multipart"
+                  ? (yield* client.query<UploadPartRow>(
+                      `SELECT part_number, etag, size
+                           FROM asset_upload_parts
+                           WHERE session_id = $1
+                           ORDER BY part_number`,
+                      [row.id],
+                    )).rows
+                  : [];
               const assetRow = yield* getAssetRowEffect(client, plan.row.asset_id, {
                 requireActiveProfile: true,
               });
               return {
                 asset: mapAsset(assetRow),
                 grantDeadline: plan.grantDeadline,
-                parts: parts.rows,
+                parts,
                 row: plan.row,
               };
             }),

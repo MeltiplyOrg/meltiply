@@ -48,7 +48,9 @@ implementation detail.
   Platform account connection, Brand Profile organization, scheduled and
   monitored publication, and read-only Analytics over stored provider snapshots.
   Backend comment APIs do not imply an available creator-facing Inbox surface.
-  Community resource quotas do not imply subscriptions.
+  Community deployments have unrestricted resource allowances; their
+  administrators own capacity, consumption, and costs. Quota enforcement is
+  retained for bounded hosted policies.
 - Provider-specific logic stays inside `packages/providers` behind the shared
   provider interface; generic pipelines never branch on provider identity.
 - All SQL is parameterized; schema migrations live in
@@ -131,6 +133,7 @@ sections. Workspace identity stays read-only.
 - `CenterDialog` handles focused forms/search, `CenterAlertDialog` handles
   destructive confirmation, and `SideDialog` handles large Post inspection.
   Shared primitives own frames, focus, dismissal, scrolling, and transitions.
+  Phone navigation is a left-edge sidebar layer over the workspace.
 - Feedback uses the shared toast store/Sileo renderer. Name the affected object
   and useful recovery; clipboard feedback includes the copied value.
 - There is one animation implementation, without a separate motion mode,

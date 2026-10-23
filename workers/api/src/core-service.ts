@@ -669,10 +669,12 @@ export function createCoreApiService(
      *
      * Cohorts on `published_at` (never the calendar's scheduled `event_at`)
      * and derives coverage from the Platforms actually published in scope.
-     * Employs a set-based Common Table Expression (CTE) with `DISTINCT ON` to
-     * select the latest snapshot per Distribution at or before the range end,
-     * computing sums for views, likes, comments, shares, watch time, reach, and
-     * impressions.
+     * One bounded CTE selects the window's published distributions, then a
+     * LATERAL lookup reads the newest snapshot of each distribution as of the
+     * range end. Keeping the lookup correlated per candidate prevents the
+     * planner from materializing a latest set it then re-executes once per
+     * candidate row when row estimates are small; the index on
+     * `(distribution_id, snapshot_at DESC)` serves each probe.
      *
      * @param env - Worker environment bindings.
      * @param session - Authenticated user session claims.
@@ -694,30 +696,29 @@ export function createCoreApiService(
                  AND ($5::uuid IS NULL OR platform_account_id = $5)
                  AND ($6::text IS NULL OR ${analyticsFormatExpression("distributions")} = $6)
                  AND ${activeBrandProfilePredicate("brand_profile_id")}
-             ),
-             latest AS (
-               SELECT DISTINCT ON (s.distribution_id)
-                 s.distribution_id,
-                 s.views, s.likes, s.comments, s.shares,
-                 s.watch_time_sec, s.reach, s.impressions, s.snapshot_at
-               FROM analytics_snapshots s
-               JOIN candidates c ON c.id = s.distribution_id
-               WHERE s.snapshot_at <= $2
-               ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC
              )
              SELECT
                c.platform,
-               COALESCE(SUM(l.views), 0) AS views,
-               COALESCE(SUM(l.likes), 0) AS likes,
-               COALESCE(SUM(l.comments), 0) AS comments,
-               COALESCE(SUM(l.shares), 0) AS shares,
-               COALESCE(SUM(l.watch_time_sec), 0) AS watch_time_sec,
-               COALESCE(SUM(l.reach), 0) AS reach,
-               COALESCE(SUM(l.impressions), 0) AS impressions,
+               COALESCE(SUM(latest.views), 0) AS views,
+               COALESCE(SUM(latest.likes), 0) AS likes,
+               COALESCE(SUM(latest.comments), 0) AS comments,
+               COALESCE(SUM(latest.shares), 0) AS shares,
+               COALESCE(SUM(latest.watch_time_sec), 0) AS watch_time_sec,
+               COALESCE(SUM(latest.reach), 0) AS reach,
+               COALESCE(SUM(latest.impressions), 0) AS impressions,
                COUNT(*) AS post_count,
-               MAX(l.snapshot_at) AS last_synced_at
+               MAX(latest.snapshot_at) AS last_synced_at
              FROM candidates c
-             LEFT JOIN latest l ON l.distribution_id = c.id
+             LEFT JOIN LATERAL (
+               SELECT
+                 s.views, s.likes, s.comments, s.shares,
+                 s.watch_time_sec, s.reach, s.impressions, s.snapshot_at
+               FROM analytics_snapshots s
+               WHERE s.distribution_id = c.id
+                 AND s.snapshot_at <= $2
+               ORDER BY s.snapshot_at DESC, s.id DESC
+               LIMIT 1
+             ) latest ON true
              GROUP BY c.platform
              ORDER BY c.platform ASC`,
             [

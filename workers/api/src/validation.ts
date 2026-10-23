@@ -787,3 +787,34 @@ export function enumParam<T extends string>(
   }
   return value as T;
 }
+
+/**
+ * Parses and bounds an optional free-text query parameter.
+ *
+ * Surrounding whitespace is trimmed and an empty result is treated as omitted,
+ * so `?q=` behaves like an absent filter. Control characters are rejected
+ * before the value reaches a query, log, or error message.
+ *
+ * @param value - Raw query string value or undefined.
+ * @param name - Parameter name for error messages.
+ * @param maximumLength - Inclusive character ceiling from the contract.
+ * @returns Trimmed value, or undefined when omitted or blank.
+ * @throws {CoreApiError} 400 if the value exceeds the ceiling or contains control characters.
+ */
+export function textParam(
+  value: string | undefined,
+  name: string,
+  maximumLength: number,
+): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (trimmed === "") return undefined;
+  if (trimmed.length > maximumLength || /[\x00-\x1F\x7F]/.test(trimmed)) {
+    throw new CoreApiError(
+      400,
+      "invalid_request",
+      `${name} must contain at most ${maximumLength} non-control characters.`,
+    );
+  }
+  return trimmed;
+}

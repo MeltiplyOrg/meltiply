@@ -508,6 +508,19 @@ html.theme-changing *::after {
     animation: menu-surface-out 120ms var(--ease-exit) both;
   }
 
+  /* An anchored list is never narrower than the control that opened it. Radix
+     writes the trigger's measured box as a CSS variable on the popper content,
+     so a list under a full-width filter control spans that control instead of
+     collapsing to the 200px floor. Compact icon triggers keep the floor, and
+     surfaces without a trigger variable fall back to it. */
+  [data-menu-surface][data-menu-fit-trigger="dropdown"] {
+    min-width: max(200px, var(--radix-dropdown-menu-trigger-width, 0px));
+  }
+
+  [data-menu-surface][data-menu-fit-trigger="select"] {
+    min-width: max(200px, var(--radix-select-trigger-width, 0px));
+  }
+
   /* A row never paints its own fill: `SlidingHighlight` owns the hover pill,
      and it tracks the same `data-dropdown-item` attribute this hook styles. */
   [data-menu-item] {

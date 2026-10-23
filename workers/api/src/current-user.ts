@@ -14,6 +14,7 @@ interface CurrentUserRow extends Record<string, unknown> {
   display_name: string | null;
   email: string;
   id: string;
+  installation_owner: boolean;
   organization_id: string;
   organization_name: string;
   organization_slug: string;
@@ -49,6 +50,7 @@ export async function loadCurrentUser(
              u.avatar_url,
              u.created_at,
              u.updated_at,
+             u.installation_owner,
              o.id AS organization_id,
              o.name AS organization_name,
              o.slug AS organization_slug,
@@ -77,6 +79,7 @@ export async function loadCurrentUser(
               display_name: row.display_name,
               email: row.email,
               id: row.id,
+              is_installation_owner: row.installation_owner,
               updated_at: isoDateTime(row.updated_at),
             } satisfies UserProfile;
           }),

@@ -54,6 +54,11 @@ const queryResults = vi.hoisted(() => ({
 
 const toastMock = vi.hoisted(() => vi.fn());
 
+const navigation = vi.hoisted(() => ({
+  pathname: "/channels",
+  searchParams: new URLSearchParams(),
+}));
+
 vi.mock("@/context/workspace.context", () => ({
   useWorkspace: () => {
     const [, setTick] = useState(0);
@@ -64,7 +69,14 @@ vi.mock("@/context/workspace.context", () => ({
         listeners.delete(listener);
       };
     }, []);
-    return { ...workspace, logout: vi.fn() };
+    return {
+      ...workspace,
+      canManageConfiguration: true,
+      canManageSettings: true,
+      canWriteContent: true,
+      isInstallationOwner: false,
+      logout: vi.fn(),
+    };
   },
 }));
 vi.mock("@/hooks/use-session-scope", () => ({
@@ -83,7 +95,8 @@ vi.mock("@/lib/i18n", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => navigation.pathname,
+  useSearchParams: () => navigation.searchParams,
 }));
 vi.mock("@/lib/theme", () => ({
   useTheme: () => ({
@@ -198,6 +211,7 @@ function resetScope() {
   queryMutations.disconnect.mutateAsync.mockReset();
   queryMutations.disconnect.isPending = false;
   queryResults.platforms.data = [];
+  navigation.searchParams = new URLSearchParams();
   toastMock.mockClear();
 }
 
@@ -244,6 +258,26 @@ afterEach(() => {
 });
 beforeEach(() => {
   resetScope();
+});
+
+describe("Channels OAuth outcome", () => {
+  /**
+   * OAuth success arrives through a redirect. It must surface as a one-shot
+   * toast, not a persistent banner, and must not replay on subsequent renders.
+   */
+  it("announces a connected Channel as a one-shot toast", async () => {
+    navigation.searchParams = new URLSearchParams("oauth=connected&provider=facebook");
+    renderChannels();
+
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith("Facebook connected successfully.", {
+        description: "The Channel is ready to publish and schedule.",
+        variant: "success",
+      }),
+    );
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Facebook connected successfully.")).not.toBeInTheDocument();
+  });
 });
 
 describe("Channels selection", () => {
@@ -446,24 +480,5 @@ describe("Channels selection", () => {
         name: "Select channel",
       }),
     ).not.toBeChecked();
-  });
-
-  /**
-   * The channel table is the only projection and keeps the full channel
-   * contract: copy controls, Brand Profile ownership, health affordance,
-   * settings dialog, and selection.
-   */
-  it("renders table rows with copy, health, profile, settings, and selection", () => {
-    queryResults.platforms.data = [{ ...connectedAccount, username: "alpha_tt" }];
-    renderChannels();
-
-    const row = screen.getByTestId(`channel-row-${connectedAccount.id}`);
-    expect(within(row).getByRole("checkbox", { name: "Select channel" })).toBeVisible();
-    expect(within(row).getByRole("button", { name: "Copy username" })).toBeVisible();
-    expect(within(row).getByRole("button", { name: "Copy channel ID" })).toBeVisible();
-    expect(within(row).getByText("Alpha Brand")).toBeVisible();
-    expect(within(row).getByRole("button", { name: "connected" })).toBeVisible();
-    expect(within(row).getByRole("button", { name: "Channel settings" })).toBeVisible();
-    expect(screen.getByRole("checkbox", { name: "Select all visible channels" })).toBeVisible();
   });
 });

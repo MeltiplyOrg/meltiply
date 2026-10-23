@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import type { components } from "@meltiply/contracts/schema";
 
 import type {
+  AccountLifecycle,
   AnalyticsDashboard,
   AnalyticsDashboardQueryParams,
   AnalyticsPostsQueryParams,
@@ -9,6 +10,8 @@ import type {
   AnalyticsSummary,
   AnalyticsSummaryQueryParams,
   Asset,
+  AuditListResponse,
+  AuditQueryParams,
   BrandProfile,
   BrandProfileListResponse,
   CalendarQueryParams,
@@ -22,6 +25,8 @@ import type {
   Distribution,
   DistributionListResponse,
   DistributionQueryParams,
+  InstallationSummary,
+  InvitationPreview,
   OAuthSelection,
   OAuthSelectionConfirmRequest,
   Platform,
@@ -40,9 +45,15 @@ import type {
   UploadSessionDetailResponse,
   UploadSessionResponse,
   UserProfile,
+  WorkspaceInvitation,
+  WorkspaceInvitationListResponse,
+  WorkspaceMember,
+  WorkspaceMemberListResponse,
+  WorkspaceRole,
 } from "@/types";
 import {
   abortUploadSession,
+  acceptWorkspaceInvitation,
   ApiError,
   cancelOAuthSelection,
   confirmOAuthSelection,
@@ -52,7 +63,9 @@ import {
   createPost,
   createUploadPartUrls,
   createUploadSession,
+  createWorkspaceInvitation,
   deleteBrandProfile,
+  deleteInstallationMember,
   deletePost,
   disconnectPlatform,
   getAsset,
@@ -63,6 +76,8 @@ import {
   getAnalyticsSummary,
   getCalendar,
   getCurrentUser,
+  getInstallation,
+  getInvitationPreview,
   getOAuthSelection,
   getDistribution,
   getPlatformPublishingRequirements,
@@ -74,13 +89,24 @@ import {
   listPlatformCapabilities,
   listPlatforms,
   listPosts,
+  listWorkspaceAudit,
+  listWorkspaceInvitations,
+  listWorkspaceMembers,
+  reactivateInstallationMember,
+  removeWorkspaceMember,
+  resendWorkspaceInvitation,
   restoreBrandProfile,
   retryDistribution,
+  revokeWorkspaceInvitation,
   schedulePost,
   startPlatformOAuth,
+  suspendInstallationMember,
+  transferInstallationOwnership,
   updateBrandProfile,
   updatePost,
   updateScheduledDistribution,
+  updateWorkspaceMember,
+  updateWorkspaceName,
   type ApiRequestOptions,
 } from "../api";
 
@@ -215,7 +241,6 @@ export interface ApiClientServiceShape {
   ) => ApiClientEffect<PlatformCapabilitiesResponse>;
   readonly startPlatformOAuth: (
     platform: Platform,
-    brandProfileId: string,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<OAuthStartResponse>;
   readonly getOAuthSelection: (
@@ -273,6 +298,88 @@ export interface ApiClientServiceShape {
     params: AnalyticsPostsQueryParams,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<AnalyticsPostsResponse>;
+  readonly listWorkspaceMembers: (
+    workspaceId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<WorkspaceMemberListResponse>;
+  readonly listWorkspaceInvitations: (
+    workspaceId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<WorkspaceInvitationListResponse>;
+  readonly createWorkspaceInvitation: (
+    workspaceId: string,
+    input: { email: string; role: WorkspaceRole },
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<WorkspaceInvitation>;
+  readonly resendWorkspaceInvitation: (
+    workspaceId: string,
+    invitationId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<WorkspaceInvitation>;
+  readonly revokeWorkspaceInvitation: (
+    workspaceId: string,
+    invitationId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<void>;
+  readonly updateWorkspaceMember: (
+    workspaceId: string,
+    memberId: string,
+    role: WorkspaceRole,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<WorkspaceMember>;
+  readonly removeWorkspaceMember: (
+    workspaceId: string,
+    memberId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<void>;
+  readonly updateWorkspaceName: (
+    workspaceId: string,
+    input: { name: string },
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<{ id: string; name: string; slug: string; role: WorkspaceRole }>;
+  readonly getInstallation: (
+    workspaceId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<InstallationSummary>;
+  readonly suspendInstallationMember: (
+    workspaceId: string,
+    memberId: string,
+    reason: string | undefined,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AccountLifecycle>;
+  readonly reactivateInstallationMember: (
+    workspaceId: string,
+    memberId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AccountLifecycle>;
+  readonly deleteInstallationMember: (
+    workspaceId: string,
+    memberId: string,
+    confirmEmail: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<void>;
+  readonly transferInstallationOwnership: (
+    workspaceId: string,
+    targetUserId: string,
+    password: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<{ installation_owner_user_id: string }>;
+  readonly listWorkspaceAudit: (
+    workspaceId: string,
+    params: AuditQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AuditListResponse>;
+  readonly getInvitationPreview: (
+    token: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<InvitationPreview>;
+  readonly acceptWorkspaceInvitation: (
+    token: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<{
+    member: WorkspaceMember;
+    workspace: { id: string; name: string; role: WorkspaceRole; slug: string };
+  }>;
 }
 
 /**
@@ -304,13 +411,16 @@ export function createApiClientServiceTest(
 
   const service: ApiClientServiceShape = {
     abortUploadSession: unstubbed("abortUploadSession"),
+    acceptWorkspaceInvitation: unstubbed("acceptWorkspaceInvitation"),
     cancelDistribution: unstubbed("cancelDistribution"),
     completeUploadSession: unstubbed("completeUploadSession"),
     createBrandProfile: unstubbed("createBrandProfile"),
     createPost: unstubbed("createPost"),
     createUploadPartUrls: unstubbed("createUploadPartUrls"),
     createUploadSession: unstubbed("createUploadSession"),
+    createWorkspaceInvitation: unstubbed("createWorkspaceInvitation"),
     deleteBrandProfile: unstubbed("deleteBrandProfile"),
+    deleteInstallationMember: unstubbed("deleteInstallationMember"),
     deletePost: unstubbed("deletePost"),
     disconnectPlatform: unstubbed("disconnectPlatform"),
     getAsset: unstubbed("getAsset"),
@@ -322,6 +432,8 @@ export function createApiClientServiceTest(
     getAnalyticsSummary: unstubbed("getAnalyticsSummary"),
     getCurrentUser: unstubbed("getCurrentUser"),
     getDistribution: unstubbed("getDistribution"),
+    getInstallation: unstubbed("getInstallation"),
+    getInvitationPreview: unstubbed("getInvitationPreview"),
     getPlatformPublishingRequirements: unstubbed("getPlatformPublishingRequirements"),
     getPost: unstubbed("getPost"),
     getUploadSession: unstubbed("getUploadSession"),
@@ -331,16 +443,27 @@ export function createApiClientServiceTest(
     listPlatformCapabilities: unstubbed("listPlatformCapabilities"),
     listPlatforms: unstubbed("listPlatforms"),
     listPosts: unstubbed("listPosts"),
+    listWorkspaceAudit: unstubbed("listWorkspaceAudit"),
+    listWorkspaceInvitations: unstubbed("listWorkspaceInvitations"),
+    listWorkspaceMembers: unstubbed("listWorkspaceMembers"),
+    reactivateInstallationMember: unstubbed("reactivateInstallationMember"),
+    removeWorkspaceMember: unstubbed("removeWorkspaceMember"),
+    resendWorkspaceInvitation: unstubbed("resendWorkspaceInvitation"),
     restoreBrandProfile: unstubbed("restoreBrandProfile"),
     retryDistribution: unstubbed("retryDistribution"),
+    revokeWorkspaceInvitation: unstubbed("revokeWorkspaceInvitation"),
     schedulePost: unstubbed("schedulePost"),
     startPlatformOAuth: unstubbed("startPlatformOAuth"),
+    suspendInstallationMember: unstubbed("suspendInstallationMember"),
+    transferInstallationOwnership: unstubbed("transferInstallationOwnership"),
     getOAuthSelection: unstubbed("getOAuthSelection"),
     confirmOAuthSelection: unstubbed("confirmOAuthSelection"),
     cancelOAuthSelection: unstubbed("cancelOAuthSelection"),
     updateBrandProfile: unstubbed("updateBrandProfile"),
     updatePost: unstubbed("updatePost"),
     updateScheduledDistribution: unstubbed("updateScheduledDistribution"),
+    updateWorkspaceMember: unstubbed("updateWorkspaceMember"),
+    updateWorkspaceName: unstubbed("updateWorkspaceName"),
     ...impl,
   };
 
@@ -361,6 +484,7 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
   {
     abortUploadSession: (sessionId, options) =>
       inWorkspace((workspaceId) => abortUploadSession(workspaceId, sessionId, options)),
+    acceptWorkspaceInvitation: (token, options) => acceptWorkspaceInvitation(token, options),
     cancelDistribution: (id, options) =>
       inWorkspace((workspaceId) => cancelDistribution(workspaceId, id, options)),
     completeUploadSession: (sessionId, input, options) =>
@@ -373,8 +497,12 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => createUploadPartUrls(workspaceId, sessionId, input, options)),
     createUploadSession: (input, options) =>
       inWorkspace((workspaceId) => createUploadSession(workspaceId, input, options)),
+    createWorkspaceInvitation: (workspaceId, input, options) =>
+      createWorkspaceInvitation(workspaceId, input, options),
     deleteBrandProfile: (profileId, options) =>
       inWorkspace((workspaceId) => deleteBrandProfile(workspaceId, profileId, options)),
+    deleteInstallationMember: (workspaceId, memberId, confirmEmail, options) =>
+      deleteInstallationMember(workspaceId, memberId, confirmEmail, options),
     deletePost: (id, brandProfileId, options) =>
       inWorkspace((workspaceId) => deletePost(workspaceId, id, brandProfileId, options)),
     disconnectPlatform: (id, options) =>
@@ -395,6 +523,8 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     getCurrentUser: () => inWorkspace((workspaceId) => getCurrentUser(workspaceId)),
     getDistribution: (id, options) =>
       inWorkspace((workspaceId) => getDistribution(workspaceId, id, options)),
+    getInstallation: (workspaceId, options) => getInstallation(workspaceId, options),
+    getInvitationPreview: (token, options) => getInvitationPreview(token, options),
     getPlatformPublishingRequirements: (id, options) =>
       inWorkspace((workspaceId) => getPlatformPublishingRequirements(workspaceId, id, options)),
     getPost: (id, options) => inWorkspace((workspaceId) => getPost(workspaceId, id, options)),
@@ -412,16 +542,31 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => listPlatforms(workspaceId, params, options)),
     listPosts: (params, options) =>
       inWorkspace((workspaceId) => listPosts(workspaceId, params, options)),
+    listWorkspaceAudit: (workspaceId, params, options) =>
+      listWorkspaceAudit(workspaceId, params, options),
+    listWorkspaceInvitations: (workspaceId, options) =>
+      listWorkspaceInvitations(workspaceId, options),
+    listWorkspaceMembers: (workspaceId, options) => listWorkspaceMembers(workspaceId, options),
+    reactivateInstallationMember: (workspaceId, memberId, options) =>
+      reactivateInstallationMember(workspaceId, memberId, options),
+    removeWorkspaceMember: (workspaceId, memberId, options) =>
+      removeWorkspaceMember(workspaceId, memberId, options),
+    resendWorkspaceInvitation: (workspaceId, invitationId, options) =>
+      resendWorkspaceInvitation(workspaceId, invitationId, options),
     restoreBrandProfile: (profileId, options) =>
       inWorkspace((workspaceId) => restoreBrandProfile(workspaceId, profileId, options)),
     retryDistribution: (id, options) =>
       inWorkspace((workspaceId) => retryDistribution(workspaceId, id, options)),
+    revokeWorkspaceInvitation: (workspaceId, invitationId, options) =>
+      revokeWorkspaceInvitation(workspaceId, invitationId, options),
     schedulePost: (id, input, options) =>
       inWorkspace((workspaceId) => schedulePost(workspaceId, id, input, options)),
-    startPlatformOAuth: (platform, brandProfileId, options) =>
-      inWorkspace((workspaceId) =>
-        startPlatformOAuth(workspaceId, platform, brandProfileId, options),
-      ),
+    startPlatformOAuth: (platform, options) =>
+      inWorkspace((workspaceId) => startPlatformOAuth(workspaceId, platform, options)),
+    suspendInstallationMember: (workspaceId, memberId, reason, options) =>
+      suspendInstallationMember(workspaceId, memberId, reason, options),
+    transferInstallationOwnership: (workspaceId, targetUserId, password, options) =>
+      transferInstallationOwnership(workspaceId, targetUserId, password, options),
     getOAuthSelection: (selectionId, options) =>
       inWorkspace((workspaceId) => getOAuthSelection(workspaceId, selectionId, options)),
     confirmOAuthSelection: (selectionId, input, options) =>
@@ -434,5 +579,9 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => updatePost(workspaceId, id, input, options)),
     updateScheduledDistribution: (id, input, options) =>
       inWorkspace((workspaceId) => updateScheduledDistribution(workspaceId, id, input, options)),
+    updateWorkspaceMember: (workspaceId, memberId, role, options) =>
+      updateWorkspaceMember(workspaceId, memberId, role, options),
+    updateWorkspaceName: (workspaceId, input, options) =>
+      updateWorkspaceName(workspaceId, input, options),
   },
 );

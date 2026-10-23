@@ -86,7 +86,7 @@ describe("createThreadsAdapter", () => {
       state: "oauth-state",
     });
     const url = new URL(value);
-    expect(url.origin).toBe("https://threads.net");
+    expect(url.origin).toBe("https://threads.com");
     expect(url.pathname).toBe("/oauth/authorize");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       client_id: "threads-client",
@@ -107,13 +107,15 @@ describe("createThreadsAdapter", () => {
 
   it("exchanges a code for a long-lived token and bounded profile", async () => {
     const providerCalls = sequence(
-      (_url, init) => {
+      (url, init) => {
+        expect(url.origin).toBe("https://graph.threads.com");
         expect(init.method).toBe("POST");
         expect(String(init.body)).toContain("client_secret=threads-client-secret");
         return json({ access_token: "short-secret", user_id: 12345 });
       },
-      (_url, init) => {
-        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer short-secret");
+      (url) => {
+        expect(url.origin).toBe("https://graph.threads.com");
+        expect(url.searchParams.get("access_token")).toBe("short-secret");
         return json({
           access_token: "long-secret",
           expires_in: 5_184_000,
@@ -506,7 +508,7 @@ describe("createThreadsAdapter", () => {
 
     // Rejects child item container when media_type discriminator is omitted
     const omittedUrl = new URL(
-      "https://graph.threads.net/me/threads?is_carousel_item=true&image_url=https://assets.example/one.jpg",
+      "https://graph.threads.com/me/threads?is_carousel_item=true&image_url=https://assets.example/one.jpg",
     );
     const omittedResponse = await strictResponder(omittedUrl, {
       method: "POST",
@@ -515,7 +517,7 @@ describe("createThreadsAdapter", () => {
 
     // Rejects child item container when media_type discriminator is wrong/mismatched
     const wrongUrl = new URL(
-      "https://graph.threads.net/me/threads?is_carousel_item=true&media_type=VIDEO&image_url=https://assets.example/one.jpg",
+      "https://graph.threads.com/me/threads?is_carousel_item=true&media_type=VIDEO&image_url=https://assets.example/one.jpg",
     );
     const wrongResponse = await strictResponder(wrongUrl, { method: "POST" });
     expect(wrongResponse.status).toBe(400);
@@ -893,8 +895,9 @@ describe("createThreadsAdapter", () => {
   });
 
   it("refreshes a Threads long-lived access token", async () => {
-    const providerCalls = sequence((_url, init) => {
-      expect(new Headers(init.headers).get("Authorization")).toBe("Bearer current-long-token");
+    const providerCalls = sequence((url) => {
+      expect(url.origin).toBe("https://graph.threads.com");
+      expect(url.searchParams.get("access_token")).toBe("current-long-token");
       return json({
         access_token: "refreshed-long-token",
         expires_in: 5_184_000,

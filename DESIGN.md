@@ -115,18 +115,17 @@ Success, warning, and danger indicate actual semantic state. Provider identity c
 **Body and heading font:** self-hosted Geist with system sans-serif fallbacks. **Code and shortcut font:** self-hosted Geist Mono with system monospace fallbacks.
 
 Both sites serve losslessly compressed WOFF2 assets from the shared token owner. Preserve the original glyph coverage and metrics; conversion and source/output hashes are recorded in the font provenance manifest.
-
 The hierarchy is compact and information-led. Shared title, UI, control, and micro roles are recorded above; primitives retain their intentional local sizes, such as the text input's 13px field text. Public reading and landing typography scale for their own tasks without replacing the font family.
 
 Use weight and spacing before additional color. Interface glyphs use the canonical Lucide system; preserve Meltiply's faceted brand mark and actual provider marks.
 
 ## Layout
 
-The desktop workspace uses a 252px rail, or 52px when collapsed, from the 1024px breakpoint. The top bar is 46px from 640px and 52px below it. Mobile navigation replaces the rail rather than squeezing it beside content. The shared workspace gutter is recorded in frontmatter; feature layouts supply responsive reductions.
+The desktop workspace uses a 252px rail, or 52px when collapsed, from the 1024px breakpoint. The top bar is 46px from 640px and 52px below it. Mobile navigation replaces the rail rather than squeezing it beside content: it is its own left-edge layer over the workspace, reusing the rail's content, and slides in from the left behind a fading scrim. Escape, the scrim, a destination, or reaching the desktop breakpoint closes it. The shared workspace gutter is recorded in frontmatter; feature layouts supply responsive reductions.
 
 Posts is one destination with **Table → Calendar → Grid**. Channels follows the Members-style directory composition with matching surfaces and controls. Collection rows use a 40px baseline. Calendar Month/Week retains real date geometry and nested day overflow rather than introducing a second card language.
 
-Settings uses one bounded 672px content column for every section. Its section rail is 220px from 768px and horizontal below; theme choices remain compact rather than stretching across the column. The Channels directory has a centered 1200px ceiling. Do not apply Settings' form width to collection tables.
+Settings keeps its bounded 672px form column for Appearance, Language, Account, and Security. Administration is a directory surface with a centered 1200px ceiling, height-locked to the content pane: spreadsheet grid tables for Members and pending invitations, a compact label/value seat summary, and a filtered Audit log whose 100-entry pages scroll under a pinned header. A crown marks the Installation Owner, the lifecycle action is a toggle, and per-row actions live behind a three-dot menu. Do not apply Settings' form width to collection tables.
 
 The side dialog is a 620px drawer at the right edge and fills the phone viewport. Its 46px record toolbar remains separate from the native scrolling body. The same drawer hosts composition: **Shared Content**, attached media, and every selected channel's customization and provider settings appear in one continuous editor, beside a compact 340px destinations/publishing column on wide panels. The editor takes the remaining width and scrolls independently while destinations and timing stay in view; the draft's save state and single publishing action stay pinned below. Date and segmented 24-hour time controls share one row, with the calendar available in a compact popover rather than permanently expanded. The split follows the panel's own width, not the viewport, so a narrow panel stacks in one reading order. See [layout ownership](docs/frontend-layout.md) for scroll boundaries and responsive details.
 

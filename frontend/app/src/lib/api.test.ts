@@ -3,13 +3,6 @@ import { afterEach, describe, expect, it, vi, type Mock } from "vite-plus/test";
 
 import * as api from "./api";
 
-/**
- * Fixed Brand Profile UUID shared by every fixture that must name the profile
- * owning the mutated resource; the contract requires `brand_profile_id` on
- * brand-owned mutations and on the OAuth start handoff.
- */
-const BRAND_PROFILE_ID = "00000000-0000-4000-8000-000000000111";
-
 function requestAt(fetchMock: Mock, index: number): Request {
   const input = fetchMock.mock.calls[index]?.[0];
   return input instanceof Request ? input : new Request(String(input));
@@ -112,7 +105,7 @@ describe("generated API client adapters", () => {
     const request = requestAt(fetchMock, 0);
     expect(request.headers.get("Authorization")).toBeNull();
     expect(request.headers.get("X-Workspace-ID")).toBeNull();
-    expect(credentialsAt(fetchMock, 0)).toBe("omit");
+    expect(credentialsAt(fetchMock, 0)).toBe("same-origin");
   });
 
   it("uses a safe fallback for malformed or future error payloads", async () => {
@@ -144,15 +137,11 @@ describe("generated API client adapters", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      Effect.runPromise(api.startPlatformOAuth(null, "threads", BRAND_PROFILE_ID)),
-    ).resolves.toEqual({
+    await expect(Effect.runPromise(api.startPlatformOAuth(null, "threads"))).resolves.toEqual({
       authorization_url: "https://provider.example/authorize",
     });
     const request = requestAt(fetchMock, 0);
-    expect(request.url).toBe(
-      `http://localhost:8787/api/v1/platforms/threads/connect?brand_profile_id=${BRAND_PROFILE_ID}`,
-    );
+    expect(request.url).toBe("http://localhost:8787/api/v1/platforms/threads/connect");
     expect(request.headers.get("Accept")).toBe("application/json");
     expect(request.headers.get("Authorization")).toBeNull();
   });
@@ -176,12 +165,12 @@ describe("generated API client adapters", () => {
     expect(requestAt(fetchMock, 1).headers.get("X-Workspace-ID")).toBeNull();
     expect(requestAt(fetchMock, 2).headers.get("X-Workspace-ID")).toBeNull();
     for (let index = 0; index < fetchMock.mock.calls.length; index += 1) {
-      expect(credentialsAt(fetchMock, index)).toBe("omit");
+      expect(credentialsAt(fetchMock, index)).toBe("same-origin");
       expect(headerAt(fetchMock, index, "Authorization")).toBeNull();
     }
   });
 
-  it("sends the session JWT as a bearer credential without cookies", async () => {
+  it("keeps bearer credentials on API calls and excludes them from signed object reads", async () => {
     const storageUrl = "https://objects.example/original.png";
     const originalBytes = new Uint8Array([0, 127, 255]);
     const fetchMock = vi
@@ -219,16 +208,17 @@ describe("generated API client adapters", () => {
     const blob = await Effect.runPromise(isolatedApi.getAssetBlob("ws-123", "asset-1"));
     expect(new Uint8Array(await blob.arrayBuffer())).toEqual(originalBytes);
 
-    // The auth lifecycle request keeps the session cookie; API requests carry
-    // only the bearer JWT and must not send cookies.
+    // Auth and same-origin API calls may traverse Cloudflare Access. Signed
+    // object-store downloads must never inherit API headers or session cookies.
     expect(credentialsAt(fetchMock, 0)).toBe("include");
     expect(headerAt(fetchMock, 1, "Authorization")).toBe("Bearer session-jwt-1");
-    expect(credentialsAt(fetchMock, 1)).toBe("omit");
+    expect(credentialsAt(fetchMock, 1)).toBe("same-origin");
     expect(headerAt(fetchMock, 2, "Authorization")).toBe("Bearer session-jwt-1");
     expect(headerAt(fetchMock, 2, "X-Workspace-ID")).toBe("ws-123");
-    expect(credentialsAt(fetchMock, 2)).toBe("omit");
+    expect(credentialsAt(fetchMock, 2)).toBe("same-origin");
     expect(headerAt(fetchMock, 3, "Authorization")).toBe("Bearer session-jwt-1");
     expect(headerAt(fetchMock, 3, "X-Workspace-ID")).toBe("ws-123");
+    expect(credentialsAt(fetchMock, 3)).toBe("same-origin");
     expect(headerAt(fetchMock, 4, "Authorization")).toBeNull();
     expect(headerAt(fetchMock, 4, "X-Workspace-ID")).toBeNull();
     expect(credentialsAt(fetchMock, 4)).toBe("omit");

@@ -9,7 +9,7 @@ import type { ResolvedActor } from "../src/actor-resolution";
 import { CoreApiError } from "../src/core-types";
 import worker from "../src/index";
 import type { ApiWorkerEnv, AutomationRelayStub, OAuthStateStub } from "../src/env";
-import { validateProductionBindings } from "../src/env";
+import { requiresEmailVerification, validateProductionBindings } from "../src/env";
 import { logRecords } from "./log-records";
 
 afterEach(() => {
@@ -66,11 +66,13 @@ const actor: ResolvedActor = {
     subject: "user_better_alpha",
     userId: "00000000-0000-4000-8000-000000000011",
   },
+  displayName: "Alpha Admin",
+  email: "alpha@example.com",
+  isInstallationOwner: false,
   role: "admin",
   userId: "00000000-0000-4000-8000-000000000011",
   workspace: {
     id: "00000000-0000-4000-8000-000000000001",
-    isPersonal: false,
     name: "Alpha",
     slug: "alpha",
   },
@@ -104,6 +106,7 @@ const userProfile: UserProfile = {
   display_name: "Alpha User",
   email: "alpha@example.com",
   id: actor.userId,
+  is_installation_owner: true,
   updated_at: "2026-01-01T00:00:00.000Z",
 };
 
@@ -342,6 +345,26 @@ describe("API Worker foundation", () => {
     ).toThrow("MAIL_FROM_ADDRESS/MAIL_FROM_NAME must configure a valid sender");
   });
 
+  it("allows missing mail when verification is explicitly disabled", () => {
+    const env = {
+      ...stagingEnv,
+      MAIL: undefined,
+      MAIL_FROM_ADDRESS: undefined,
+      MAIL_FROM_NAME: undefined,
+      REQUIRE_EMAIL_VERIFICATION: "false",
+    };
+    expect(requiresEmailVerification(env)).toBe(false);
+    expect(() => validateProductionBindings(env)).not.toThrow();
+  });
+
+  it("keeps verification enabled by default in deployed environments", () => {
+    expect(requiresEmailVerification(stagingEnv)).toBe(true);
+    expect(requiresEmailVerification({ ...stagingEnv, ENVIRONMENT: "local" })).toBe(false);
+    expect(requiresEmailVerification({ ...stagingEnv, REQUIRE_EMAIL_VERIFICATION: "true" })).toBe(
+      true,
+    );
+  });
+
   it("logs invalid staging configuration and returns only a generic response", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const response = await worker.fetch(
@@ -442,6 +465,30 @@ describe("API Worker foundation", () => {
       ]),
       status: "unavailable",
     });
+  });
+
+  it("reports ready without mail when verification is disabled", async () => {
+    const app = createApiApp();
+    const response = await app.request(
+      "/api/v1/ready",
+      {},
+      {
+        ...stagingEnv,
+        MAIL: undefined,
+        MAIL_FROM_ADDRESS: undefined,
+        MAIL_FROM_NAME: undefined,
+        REQUIRE_EMAIL_VERIFICATION: "false",
+      },
+    );
+    expect(response.status).toBe(200);
+    const body: unknown = await response.json();
+    for (const name of ["MAIL", "MAIL_FROM_ADDRESS"]) {
+      expect(body).not.toEqual(
+        expect.objectContaining({
+          components: expect.arrayContaining([expect.objectContaining({ name })]),
+        }),
+      );
+    }
   });
 
   it("reports mail ready without calling send on the binding", async () => {
@@ -1065,7 +1112,12 @@ describe("API Worker foundation", () => {
 
     expect(response.status).toBe(200);
     expect(verifyJwtToken).toHaveBeenCalledWith(expect.anything(), "test-only.jwt");
-    expect(resolveActor).toHaveBeenCalledWith(expect.anything(), jwtIdentity, expect.any(Request));
+    expect(resolveActor).toHaveBeenCalledWith(
+      expect.anything(),
+      jwtIdentity,
+      expect.any(Request),
+      response.headers.get("X-Request-ID"),
+    );
     expect(loadCurrentUser).toHaveBeenCalledWith(expect.anything(), actor.claims);
     expect(fakeBetterAuth.api.getSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({

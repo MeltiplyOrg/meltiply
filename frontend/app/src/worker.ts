@@ -134,13 +134,63 @@ function sameOrigin(request: Request, url: URL): boolean {
  * @param url Parsed inbound request URL.
  * @returns The API Worker's response, or 502 when the upstream is unreachable.
  */
+/**
+ * Reports whether a request path belongs to the bearer-authenticated public API.
+ * Only these paths must have the Better Auth session cookie stripped before
+ * proxying, so the API Worker never receives it.
+ *
+ * @param pathname Request URL pathname.
+ * @returns `true` when the path is `/api/v1` or below.
+ */
+function isPublicApiPath(pathname: string): boolean {
+  return pathname === "/api/v1" || pathname.startsWith("/api/v1/");
+}
+
+/**
+ * Removes Better Auth session cookies from a `Cookie` header value, preserving
+ * any other cookies (such as a Cloudflare Access session) that the edge needs.
+ *
+ * @param cookieHeader Raw `Cookie` header value or null.
+ * @returns Filtered cookie string, or null when no cookies remain.
+ */
+function stripBetterAuthCookies(cookieHeader: string | null): string | null {
+  if (!cookieHeader) return null;
+  const kept = cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => {
+      if (part.length === 0) return false;
+      const name = part.split("=", 1)[0]?.trim() ?? "";
+      return !/^(?:__Secure-|__Host-)?better-auth\.session_token$/.test(name);
+    });
+  return kept.length > 0 ? kept.join("; ") : null;
+}
+
 async function proxyApiRequest(request: Request, env: Env, url: URL): Promise<Response> {
+  const headers = new Headers(request.headers);
+  if (isPublicApiPath(url.pathname)) {
+    const stripped = stripBetterAuthCookies(headers.get("Cookie"));
+    if (stripped === null) {
+      headers.delete("Cookie");
+    } else {
+      headers.set("Cookie", stripped);
+    }
+  }
+
+  const init: RequestInit = {
+    body: request.body,
+    headers,
+    method: request.method,
+    redirect: "manual",
+    ...(request.body ? { duplex: "half" } : {}),
+  };
+
   if (env.API) {
-    return env.API.fetch(request);
+    return env.API.fetch(new Request(request.url, init));
   }
   const origin = env.API_ORIGIN ?? "http://127.0.0.1:8787";
   const target = new URL(`${url.pathname}${url.search}`, origin);
-  return fetch(new Request(target, request));
+  return fetch(new Request(target, init));
 }
 
 /**

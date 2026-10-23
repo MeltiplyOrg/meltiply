@@ -38,15 +38,18 @@ No Cloudflare account or remote Workers are needed by this deployment.
 ## First start from source
 
 Requirements: Docker Engine with a recent Docker Compose v2 supporting inline
-`configs.content`, Node 24 for the configuration generator, and a delivering SMTP
-server. Images support Linux amd64 and ARM64, with native CI builds and complete
-Compose smoke checks on both architectures; no emulation is required.
+`configs.content`, and Node 24 for the configuration generator. Images support
+Linux amd64 and ARM64, with native CI builds and complete Compose smoke checks on
+both architectures; no emulation is required. SMTP is optional; without it the
+installation disables email verification.
 
 From the repository root:
 
 ```bash
 node scripts/selfhost/configure.mjs
-# Edit .env.selfhost: set MAIL_FROM_ADDRESS and SELFHOST_SMTP_URL.
+# Edit .env.selfhost if you want email delivery and verification:
+#   MAIL_FROM_ADDRESS=no-reply@example.com
+#   SELFHOST_SMTP_URL=smtps://user:pass@mail.example.com:465
 docker compose --env-file .env.selfhost -f compose.selfhost.yml build
 docker compose --env-file .env.selfhost -f compose.selfhost.yml up -d --wait
 ```
@@ -57,16 +60,23 @@ Only 64-bit ARM is supported; 32-bit ARM is not a release target.
 
 The generator creates private random credentials in `.env.selfhost` with mode
 0600 and refuses to overwrite an existing file. Keep it outside version control
-and backups accessible only to administrators. Use an authenticated `smtps://`
-URL or a properly configured STARTTLS SMTP server; URL-encode credential
-characters. Startup verifies the SMTP connection. The `verification` profile
-contains a capture-only Mailpit service for CI, **not email delivery**.
+and backups accessible only to administrators.
+
+Mail is optional. When `MAIL_FROM_ADDRESS` and `SELFHOST_SMTP_URL` are both set,
+startup verifies the SMTP connection and email verification remains required. Use
+an authenticated `smtps://` URL or a properly configured STARTTLS SMTP server;
+URL-encode credential characters. When both are empty, verification is disabled
+and owner setup signs in immediately. Set `SELFHOST_REQUIRE_EMAIL_VERIFICATION=true`
+to require verification explicitly; doing so requires working SMTP settings.
+The `verification` profile contains a capture-only Mailpit service for CI,
+**not email delivery**.
 
 Open <http://localhost:8080/sign-in>. On an empty installation, enter the private
 `AUTH_SETUP_SECRET` from `.env.selfhost`, your name, email, and a unique password
-to create the installation's only owner. Follow the emailed verification link,
-then sign in. Once the owner exists, registration closes, including direct API
-requests. Development fixtures and passwords are not installed. PostgreSQL is
+to create the installation's only owner. With SMTP configured, follow the emailed
+verification link, then sign in; without SMTP, setup completes without a
+verification step. Once the owner exists, registration closes, including direct
+API requests. Development fixtures and passwords are not installed. PostgreSQL is
 not published to the host. Only loopback application ports are published by default.
 
 Signed storage URLs support a path prefix of at most 128 characters after
@@ -76,8 +86,8 @@ remain invalid.
 
 Set optional Provider/billing variables in `.env.selfhost` using the names in
 [`.env.example`](../.env.example). Self-hosting does not bypass Provider live-mode
-checks or account permissions. Do not change `ENVIRONMENT` to disable verification;
-the supervisor deliberately retains deployed security behavior.
+checks or account permissions. Do not change `ENVIRONMENT` to control verification;
+use `SELFHOST_REQUIRE_EMAIL_VERIFICATION` instead.
 
 ## Object storage
 
@@ -142,23 +152,34 @@ copy. For full copy coverage, run the same command with `S3_CHECK_ENDPOINT`,
 against a **disposable empty bucket**: the check creates the bucket and writes
 and deletes fixture objects. Never use production credentials or a real bucket.
 
-## Authentication and owner recovery
+## Authentication, invitations, and owner recovery
 
-Each installation accepts one owner, without changing Workspace or Brand Profile
-ownership. The database enforces the singleton even if two setup requests race.
-Migration `010_single_owner_auth.sql` adopts a sole existing account; it refuses
-to choose between multiple existing accounts. Back up and explicitly reconcile
-authentication identities and their domain ownership before retrying that migration;
-do not delete accounts blindly or reset production data to bypass the guard.
-For local development databases seeded before this migration, use `make reset`
-to recreate the disposable fixtures; never use it against production data.
+The first bootstrapped account becomes the Installation Owner and creates the
+single shared Workspace. The Owner and Workspace Admins invite people by email;
+public registration then stays closed, including direct API requests. Invitations
+are bound to the invited address, expire after seven days, and require email
+verification before membership activates. Each installation supports at most ten
+people, counting active members and pending invitations; suspension or revocation
+frees a Seat.
+
+The Owner controls installation-level actions: suspending, reactivating, and
+hard-deleting accounts, and transferring ownership after reauthentication.
+Workspace Admins manage Editors and Viewers, Brand Profiles, Channels, the
+Workspace name, and the audit trail. Editors create and publish content; Viewers
+read Posts, Channels, analytics, and Inbox.
 
 `AUTH_SETUP_SECRET` must be a private, randomly generated value of at least 32
 characters. Existing environment files must add it; the generator does not
 overwrite them. It is an API-only bootstrap credential, never a browser build
-variable. Setup status reveals only whether registration has closed. After setup,
-the owner's password and optional second factor authenticate sign-in, not the
-bootstrap secret.
+variable. Setup status reveals only whether the installation has an Owner.
+
+JWT issuer and audience use the public `BETTER_AUTH_URL` origin (falling back to
+`PUBLIC_API_URL`). By default the API retrieves signing keys from that origin's
+`/api/auth/jwks`. If browser-only ingress authentication protects the public host,
+set `BETTER_AUTH_JWKS_URL` to a trusted internal endpoint for the same installation;
+this changes only key retrieval, not issuer, audience, or live-session validation.
+The local development launchers automatically use loopback on their selected API
+port, so Cloudflare Access on a dev tunnel cannot block signing-key retrieval.
 
 Better Auth stores salted scrypt password hashes, not plaintext passwords.
 Passwords are 8–128 characters; use a password manager and a unique passphrase.
@@ -265,6 +286,31 @@ The migration service runs the existing migration ledger before starting the
 runtime. A runtime rollback does not reverse database migrations; restore a
 compatible backup if schema compatibility requires it.
 
+The Channel-return branch originally numbered its one-Channel-per-Provider
+migration `012_one_channel_per_provider.sql`. Integration with the shared-Workspace
+migrations moves it to `016_one_channel_per_provider.sql` without changing its SQL.
+For a database that already applied the former filename, verify its recorded
+checksum is `4f3093462c43460f9b629d984fc5cefd2fade838b5d6f01d1ce5a13969d60e41`
+and that `platform_accounts_brand_profile_platform_unique` exists, then rename
+only that ledger entry before upgrading:
+
+```sql
+UPDATE public.schema_migrations
+SET name = '016_one_channel_per_provider.sql'
+WHERE name = '012_one_channel_per_provider.sql'
+  AND checksum = '4f3093462c43460f9b629d984fc5cefd2fade838b5d6f01d1ce5a13969d60e41'
+  AND to_regclass('public.platform_accounts_brand_profile_platform_unique') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.schema_migrations
+    WHERE name = '016_one_channel_per_provider.sql'
+  );
+```
+
+Expect exactly one updated row when the old entry exists. If its checksum differs
+or the index is absent, stop and investigate rather than rerunning the migration
+or resetting data. Fresh databases and databases upgraded only from master do
+not need this ledger adjustment.
+
 ## Administration and recovery
 
 Administrator operations use a mode-0600 Unix socket inside the runtime container;
@@ -282,7 +328,20 @@ docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T runtime 
 # Replay a bounded batch after correcting the underlying failure:
 docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T runtime \
   node scripts/selfhost/admin.mjs replay QUEUE_NAME-selfhost-dlq 100
+
+# Break-glass: promote an existing account to Installation Owner. Use this only
+# when the Owner session and recovery path are lost; the target must already have
+# an account. It also restores that account to Workspace Admin, clears any
+# suspension so the new Owner can authenticate, and records the ownership,
+# membership, and reactivation changes in the Workspace Audit trail.
+docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T runtime \
+  node scripts/selfhost/admin.mjs promote-owner owner@example.com
 ```
+
+Managed deployments use the same action through the operator runbook: an
+on-call operator with privileged access promotes the existing account, records
+the incident, and asks the new Owner to rotate credentials. Ownership transfer
+inside the product remains the normal path.
 
 Send the token as `Cf-Access-Jwt-Assertion` to canonical `/operator/v1/*` routes
 on the configured app hostname. Tokens expire after 15 minutes. Invalid tokens

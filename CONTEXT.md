@@ -20,8 +20,9 @@ means of reaching it.
 _Avoid_: connector, client, integration, platform
 
 **Platform account**:
-A creator's connected account on one Platform, held by exactly one Brand Profile. The
-user interface calls a Platform account a Channel.
+A creator's connected account on one Platform, held by exactly one Brand Profile. A
+Brand Profile holds at most one Channel per Platform. The user interface calls a
+Platform account a Channel.
 _Avoid_: connection, social account, provider account
 
 **Channel ID**:
@@ -68,64 +69,72 @@ _Avoid_: engagement, interaction, mention
 The surface where a creator reads Comments and sends Replies.
 _Avoid_: engagement view, messages, feed
 
-## Workspace and entitlement
+## Workspace and resource usage
 
 **Workspace**:
 The tenant that contains Brand Profiles and Usage records, and the unit that all
 tenant-scoped access is isolated by. An installation hosts one shared Workspace
-for its team.
+for its team; personal Workspaces are retired.
 _Avoid_: organization, org, team, tenant, account
+
+**Installation Owner**:
+The single account that bootstrapped the installation and holds
+installation-level authority: transferring ownership and suspending,
+reactivating, or deleting accounts. Ownership is separate from Workspace
+roles; the Owner always holds the Admin role in the shared Workspace. Content
+access follows ordinary Workspace membership; an Installation Owner is not an
+Operator.
+_Avoid_: superadmin, root, owner account, personal workspace owner
+
+**Workspace member**:
+An account with one active membership and exactly one role in the shared
+Workspace.
+_Avoid_: user, seat, teammate
+
+**Workspace Admin**:
+The Workspace role that manages Brand Profiles, Channels, members, invitations,
+settings, and Audit, in addition to acting on its content. Admins cannot assign
+or modify another Admin.
+_Avoid_: owner, superadmin
+
+**Editor**:
+The Workspace role that creates and edits Posts, uploads Assets, schedules and
+publishes, retries or cancels Distributions, and replies to Comments. Editors
+read Channels and Brand Profiles but cannot configure them or manage members,
+settings, or Audit.
+_Avoid_: member, creator, writer
+
+**Viewer**:
+The Workspace role with read-only access to Posts, Channels, analytics, and
+Inbox.
+_Avoid_: guest, read-only member
+
+**Invitation**:
+A single-use, seven-day, hashed-token offer to join the shared Workspace at a
+specific email address and role. Only the invited address may accept it, and
+pending invitations reserve Seats.
+_Avoid_: invite, request, onboarding link
+
+**Seat**:
+One unit of installation capacity. The limit is ten active members including
+the Installation Owner; pending invitations reserve Seats and suspension or
+revocation releases them.
+_Avoid_: license, user limit, quota
+
+**Suspended member**:
+A member whose sign-in and sessions are blocked while their membership and
+content attribution remain. Suspension releases the Seat.
+_Avoid_: banned user, disabled account, deleted account
+
+**Audit entry**:
+An append-only Workspace record of an administrative action: actor identity
+snapshot, action, target, before/after state, request id, and timestamp.
+_Avoid_: log line, activity, event
 
 > **Naming seam.** Use Workspace in module names, types, variables, UI copy, and
 > documentation. Below the persistence seam the established internal names are
 > `org_id` / `org_role`; native Workspace membership supplies their values.
 > This seam is intentionally internal rather than an external identity-provider contract.
-
-**Installation Owner**:
-The person who owns a Meltiply installation and administers its user accounts,
-invitations, and Workspace creation. Content access follows ordinary Workspace
-membership; an Installation Owner is not an Operator.
-_Avoid_: superadmin, admin, owner
-
-**Workspace member**:
-A person with an active membership in a Workspace. Every member holds exactly one
-Workspace role.
-_Avoid_: user, seat, collaborator
-
-**Workspace Admin**:
-A Workspace member who manages the Workspace's members, settings, Brand Profiles,
-and Channels, in addition to acting on its content.
-_Avoid_: owner, manager, operator
-
-**Editor**:
-A Workspace member who creates, edits, schedules, and publishes content and
-replies to Inbox activity, but does not manage members, settings, Brand Profiles,
-or Channels.
-_Avoid_: creator, publisher, contributor
-
-**Viewer**:
-A Workspace member with read-only access to the Workspace's content and Channels.
-_Avoid_: guest, observer, read-only user
-
-**Invitation**:
-An email-bound offer to become a Workspace member with a specific role. Only the
-invited address may accept it.
-_Avoid_: invite link, request, signup
-
-**Seat**:
-One of the installation's ten active Workspace member places. A pending
-Invitation reserves a Seat; a suspended member releases one.
-_Avoid_: license, slot
-
-**Suspended member**:
-A Workspace member whose sign-in is blocked and whose Seat is released while
-their data and history remain.
-_Avoid_: deleted user, inactive account
-
-**Audit entry**:
-A durable record of an administrative action, including its actor, target, and
-what changed.
-_Avoid_: log line, event
 
 **Brand Profile**:
 A named, color-labelled identity within one Workspace that can carry an optional short
@@ -133,11 +142,11 @@ description and owns its Posts, Assets, Platform accounts, Distributions,
 analytics, and Inbox activity. A Workspace can contain multiple Brand Profiles.
 
 **Usage record**:
-A durable measurement of Workspace consumption used to enforce resource limits.
+A durable measurement of Workspace consumption used for usage reporting and, when a deployment defines quotas, resource enforcement.
 _Avoid_: metric, quota row, counter
 
 **Workspace quota**:
-A limit on the uploads, publication distributions, connected Channels, or storage a Workspace may consume, measured over the applicable usage period or current occupancy. It is separate from a User's authorization to act in that Workspace.
+An optional limit on the uploads, publication distributions, connected Channels, or storage a Workspace may consume over a usage period or current occupancy. Community deployments impose no such quotas; they are separate from a User's authorization.
 _Avoid_: paid plan, subscription tier, entitlement, permission
 
 **Operator**:

@@ -35,5 +35,5 @@ await writeFile(
   { mode: 0o600, flag: "wx" },
 );
 console.log(
-  `Created ${path} with private random credentials. Set MAIL_FROM_ADDRESS and SELFHOST_SMTP_URL before starting.`,
+  `Created ${path} with private random credentials. Email is optional: set MAIL_FROM_ADDRESS and SELFHOST_SMTP_URL to require verification, or leave them empty to allow unverified owner setup.`,
 );

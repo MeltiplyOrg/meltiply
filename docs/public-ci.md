@@ -55,12 +55,30 @@ against R2 and MinIO. They run on GitHub-hosted machines without deployment
 secrets. A passing automatic `ci-gate` does not imply that a manual lane ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
+`cloudflare-full` first runs the [provider connection smoke](../scripts/selfhost/oauth-connection-check.ts)
+against its disposable seeded database and the built SQLite OAuth state Worker.
+All five implemented Providers exercise real authorization-state consumption,
+encrypted selection, explicit assignment, idempotent replay (including rejecting
+a changed Brand Profile), reconnection, and cancellation through API handlers and
+PostgreSQL persistence. Only actor authentication and external provider HTTP
+responses are controlled. The full application gate runs afterward, followed by a
+focused production-app browser journey covering mobile focus containment,
+portalled account-menu dismissal, and reconnect eligibility at desktop/phone widths
+in both palettes. Its owner, profiles, and Channels are real fixture state; pending
+selection metadata is controlled. Screenshots and traces are retained as artifacts.
+This does not certify live provider consent, app review, account permissions, or
+real social publication; see the [provider contract research](research/provider-channel-connections.md).
+
 `frontend-full` provisions local signing/storage configuration before browser
 journeys. It runs production-entry browser scenarios, then the cross-profile
 media/recovery/publishing journey against the controlled-Provider acceptance
 entries; provisioning helpers never run against production endpoints.
 Controlled fixture responses are schema-decoded using their wire ownership fields
 before those identities drive media copying or injected failures.
+Browser journeys create uniquely named Brand Profiles in the shared Workspace.
+Their selection helper restores that exact profile across reloads; a second
+browser context must receive the profile name explicitly. Fixture provisioning
+must not attach Channels to the first seeded profile.
 User-facing journeys and screenshots use production assets without DevBox chrome.
 `frontend-ui` runs both frontend checks, dead-code detection,
 documentation links, React review, development CSS/font HTTP smoke, and the
@@ -75,6 +93,20 @@ creation, SMTP-captured verification/reset links, closed registration, password
 changes, and optional authenticator recovery. Login screenshots contain only
 blank forms, not credentials or browser traces. These checks do not prove
 external inbox delivery or a managed Cloudflare rollout.
+
+## Backend benchmarks
+
+[The backend benchmark workflow](../.github/workflows/backend-benchmark.yml) is a
+manual two-revision measurement job, not part of `ci-gate`. It checks out
+`master` as the baseline and the dispatched commit as the candidate, gives each
+a dedicated PostgreSQL 18.6 database migrated from that revision, and runs the
+same in-process API workload against both in alternating order. Raw JSON and the
+generated comparison files are uploaded as artifacts. It measures Posts,
+Distributions, Calendar, analytics, Inbox, Asset upload-session reads and creation,
+schedule fan-out and target removal, and bulk Post deletion at batch sizes
+1/5/10/25/50 under sequential and bounded concurrency. The results and methodology
+behind the current optimizations are in
+the [backend comparison report](benchmarks/backend-optimization.md).
 
 ## Self-hosted release images
 

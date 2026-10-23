@@ -3,11 +3,14 @@ import type { components } from "@meltiply/contracts/schema";
 import { Effect } from "effect";
 
 import type {
+  AccountLifecycle,
   AnalyticsPostsQueryParams,
   AnalyticsPostsResponse,
   AnalyticsSummary,
   AnalyticsSummaryQueryParams,
   Asset,
+  AuditListResponse,
+  AuditQueryParams,
   BrandProfile,
   BrandProfileListResponse,
   CalendarQueryParams,
@@ -21,6 +24,8 @@ import type {
   Distribution,
   DistributionListResponse,
   DistributionQueryParams,
+  InstallationSummary,
+  InvitationPreview,
   OAuthSelection,
   OAuthSelectionConfirmRequest,
   Platform,
@@ -41,6 +46,11 @@ import type {
   UploadSessionDetailResponse,
   UploadSessionResponse,
   UserProfile,
+  WorkspaceInvitation,
+  WorkspaceInvitationListResponse,
+  WorkspaceMember,
+  WorkspaceMemberListResponse,
+  WorkspaceRole,
 } from "@/types";
 import { applyAuthJwt } from "./auth-token";
 import { getApiBaseUrl, type PublicEnvSource } from "./env";
@@ -66,15 +76,17 @@ let cachedClient: { baseUrl: string; value: MeltiplyClient } | undefined;
  * Fetch implementation bound to the generated OpenAPI client.
  * Merges caller-supplied headers (whether carried on a `Request` input or via
  * `init`), stamps `Authorization: Bearer <jwt>` from the in-memory holder when
- * one is held, and forces `credentials: "omit"` so the Better Auth session
- * cookie never reaches `/api/v1` — the bearer JWT is the only credential the
- * public API accepts. Callers cannot upgrade credential mode.
+ * one is held, and uses `credentials: "same-origin"` so Cloudflare Access on
+ * protected dev tunnels can see the visitor's session cookie. The Better Auth
+ * session cookie is never allowed to reach the API Worker: the frontend Worker
+ * strips it from `/api/v1/*` proxy requests before forwarding them. Callers
+ * cannot override the credential mode.
  */
 const runtimeFetch: typeof globalThis.fetch = (input, init) => {
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
   applyAuthJwt(headers);
-  return globalThis.fetch(input, { ...init, credentials: "omit", headers });
+  return globalThis.fetch(input, { ...init, credentials: "same-origin", headers });
 };
 
 export type ApiPath = string;
@@ -896,27 +908,25 @@ export function listPlatformCapabilities(workspaceId: string | null, options?: A
 /**
  * Initiates the OAuth authorization handshake for a social media provider.
  *
- * The `brandProfileId` is pinned into durable OAuth state at initiation so the
- * callback can verify the profile still belongs to the active workspace; the
- * new channel is owned by this Brand Profile.
+ * No Brand Profile is chosen here: the callback stages the authorized
+ * account(s), and the assignment view selects the owning profile immediately
+ * before persistence.
  *
  * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
  * @param platform Target social platform to connect.
- * @param brandProfileId Active Brand Profile UUID that will own the connected channel.
  * @param options Request options including optional abort signal.
  * @returns Effect resolving to the response containing the external provider OAuth authorization URL.
  */
 export function startPlatformOAuth(
   workspaceId: string | null,
   platform: Platform,
-  brandProfileId: string,
   options?: ApiRequestOptions,
 ) {
   return unwrap<OAuthStartResponse>(
     (signal) =>
       client().GET("/platforms/{platform}/connect", {
         headers: { ...workspaceHeaders(workspaceId), Accept: "application/json" },
-        params: { path: { platform }, query: { brand_profile_id: brandProfileId } },
+        params: { path: { platform } },
         signal,
       }),
     options?.signal,
@@ -1230,6 +1240,25 @@ export function getAnalyticsSummary(
 }
 
 /**
+ * Lists Workspace members with role, account status, and join date.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the member list.
+ */
+export function listWorkspaceMembers(workspaceId: string, options?: ApiRequestOptions) {
+  return unwrap<WorkspaceMemberListResponse>(
+    (signal) =>
+      client().GET("/workspaces/{workspaceId}/members", {
+        headers: workspaceHeaders(workspaceId),
+        params: { path: { workspaceId } },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
  * Reads the dashboard's daily series, best-time cells, format and platform
  * breakdowns, follower history, and engagement accumulation.
  *
@@ -1248,6 +1277,25 @@ export function getAnalyticsDashboard(
       client().GET("/analytics/dashboard", {
         headers: workspaceHeaders(workspaceId),
         params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Lists pending, unexpired Workspace invitations.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the pending invitation list.
+ */
+export function listWorkspaceInvitations(workspaceId: string, options?: ApiRequestOptions) {
+  return unwrap<WorkspaceInvitationListResponse>(
+    (signal) =>
+      client().GET("/workspaces/{workspaceId}/invitations", {
+        headers: workspaceHeaders(workspaceId),
+        params: { path: { workspaceId } },
         signal,
       }),
     options?.signal,
@@ -1277,6 +1325,372 @@ export function getAnalyticsPosts(
       client().GET("/analytics/posts", {
         headers: workspaceHeaders(workspaceId),
         params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Invites an email address with an assignable Workspace role.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param input Invited email and role.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the pending invitation.
+ */
+export function createWorkspaceInvitation(
+  workspaceId: string,
+  input: { email: string; role: WorkspaceRole },
+  options?: ApiRequestOptions,
+) {
+  return unwrap<WorkspaceInvitation>(
+    (signal) =>
+      client().POST("/workspaces/{workspaceId}/invitations", {
+        body: input,
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+          path: { workspaceId },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Rotates an invitation token and resends the acceptance email.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param invitationId Invitation UUID.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the reissued invitation.
+ */
+export function resendWorkspaceInvitation(
+  workspaceId: string,
+  invitationId: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<WorkspaceInvitation>(
+    (signal) =>
+      client().POST("/workspaces/{workspaceId}/invitations/{invitationId}/resend", {
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+          path: { invitationId, workspaceId },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Revokes a pending invitation and frees its reserved Seat.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param invitationId Invitation UUID.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving when the invitation is revoked.
+ */
+export function revokeWorkspaceInvitation(
+  workspaceId: string,
+  invitationId: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<void>(
+    (signal) =>
+      client().DELETE("/workspaces/{workspaceId}/invitations/{invitationId}", {
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+          path: { invitationId, workspaceId },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Changes a member's Workspace role.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param memberId Internal user UUID.
+ * @param role New role.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the updated member.
+ */
+export function updateWorkspaceMember(
+  workspaceId: string,
+  memberId: string,
+  role: WorkspaceRole,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<WorkspaceMember>(
+    (signal) =>
+      client().PATCH("/workspaces/{workspaceId}/members/{memberId}", {
+        body: { role },
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+          path: { memberId, workspaceId },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Removes a member's Workspace membership.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param memberId Internal user UUID.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving when the membership is removed.
+ */
+export function removeWorkspaceMember(
+  workspaceId: string,
+  memberId: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<void>(
+    (signal) =>
+      client().DELETE("/workspaces/{workspaceId}/members/{memberId}", {
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+          path: { memberId, workspaceId },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Renames the shared Workspace.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param input New display name.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the updated Workspace.
+ */
+export function updateWorkspaceName(
+  workspaceId: string,
+  input: { name: string },
+  options?: ApiRequestOptions,
+) {
+  return unwrap<{ id: string; name: string; slug: string; role: WorkspaceRole }>(
+    (signal) =>
+      client().PATCH("/workspaces/{workspaceId}", {
+        body: input,
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+          path: { workspaceId },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads Seat usage, the shared Workspace, and the current Installation Owner.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the installation summary.
+ */
+export function getInstallation(workspaceId: string, options?: ApiRequestOptions) {
+  return unwrap<InstallationSummary>(
+    (signal) =>
+      client().GET("/installation", {
+        headers: workspaceHeaders(workspaceId),
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Suspends a member, revoking sessions and releasing their Seat.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param memberId Internal user UUID.
+ * @param reason Optional administrative reason recorded in the audit trail.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the suspended account state.
+ */
+export function suspendInstallationMember(
+  workspaceId: string,
+  memberId: string,
+  reason: string | undefined,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AccountLifecycle>(
+    (signal) =>
+      client().POST("/installation/members/{memberId}/suspend", {
+        body: reason === undefined ? {} : { reason },
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+          path: { memberId },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reactivates a suspended member when a Seat is free.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param memberId Internal user UUID.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the active account state.
+ */
+export function reactivateInstallationMember(
+  workspaceId: string,
+  memberId: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AccountLifecycle>(
+    (signal) =>
+      client().POST("/installation/members/{memberId}/reactivate", {
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+          path: { memberId },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Permanently deletes a member account after email confirmation.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param memberId Internal user UUID.
+ * @param confirmEmail Exact member email required by the server.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving when the account is deleted.
+ */
+export function deleteInstallationMember(
+  workspaceId: string,
+  memberId: string,
+  confirmEmail: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<void>(
+    (signal) =>
+      client().DELETE("/installation/members/{memberId}", {
+        body: { confirm_email: confirmEmail },
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+          path: { memberId },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Transfers installation ownership to an active Workspace Admin after
+ * reauthenticating the current Owner.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param targetUserId Receiving member's internal user UUID.
+ * @param password Current Owner's password.
+ * @param options Request options with optional idempotency key.
+ * @returns Effect resolving to the new owner id.
+ */
+export function transferInstallationOwnership(
+  workspaceId: string,
+  targetUserId: string,
+  password: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<{ installation_owner_user_id: string }>(
+    (signal) =>
+      client().POST("/installation/ownership-transfer", {
+        body: { password, target_user_id: targetUserId },
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the reverse-chronological Workspace Audit trail.
+ *
+ * @param workspaceId Shared Workspace UUID.
+ * @param params Pagination window.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the audit entries.
+ */
+export function listWorkspaceAudit(
+  workspaceId: string,
+  params: AuditQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AuditListResponse>(
+    (signal) =>
+      client().GET("/workspaces/{workspaceId}/audit", {
+        headers: workspaceHeaders(workspaceId),
+        params: { path: { workspaceId }, query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Inspects an invitation token before sign-in. The token is the credential.
+ *
+ * @param token Raw invitation token from the email link.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the invitation preview.
+ */
+export function getInvitationPreview(token: string, options?: ApiRequestOptions) {
+  return unwrap<InvitationPreview>(
+    (signal) =>
+      client().GET("/workspace-invitations/{token}", {
+        params: { path: { token } },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Accepts an invitation for the authenticated account. The token is the
+ * idempotency credential and the caller's email must match the invitation.
+ *
+ * @param token Raw invitation token from the email link.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the joined Workspace and member.
+ */
+export function acceptWorkspaceInvitation(token: string, options?: ApiRequestOptions) {
+  return unwrap<{
+    member: WorkspaceMember;
+    workspace: { id: string; name: string; role: WorkspaceRole; slug: string };
+  }>(
+    (signal) =>
+      client().POST("/workspace-invitations/{token}/accept", {
+        params: { path: { token } },
         signal,
       }),
     options?.signal,

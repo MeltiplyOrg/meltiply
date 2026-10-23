@@ -468,7 +468,7 @@ metric into SQL.
 
 ### 6.4 Index migration
 
-Add `packages/database/migrations/012_analytics_page_indexes.sql`:
+Add `packages/database/migrations/017_analytics_page_indexes.sql`:
 
 ```sql
 CREATE INDEX IF NOT EXISTS idx_distributions_org_published_at

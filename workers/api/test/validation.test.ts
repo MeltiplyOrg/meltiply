@@ -7,6 +7,7 @@ import {
   enumParam,
   platformParam,
   REPLY_STATUS_VALUES,
+  textParam,
 } from "../src/validation";
 
 describe("request enum validation", () => {
@@ -29,5 +30,24 @@ describe("request enum validation", () => {
   it("validates platforms against the canonical domain roster", () => {
     expect(platformParam("tiktok")).toBe("tiktok");
     expect(() => platformParam("unknown")).toThrow("The platform is not supported.");
+  });
+});
+
+describe("request text validation", () => {
+  it("trims a provided filter and treats blank text as absent", () => {
+    expect(textParam("  member.role_changed  ", "action", 100)).toBe("member.role_changed");
+    expect(textParam("   ", "q", 100)).toBeUndefined();
+    expect(textParam(undefined, "q", 100)).toBeUndefined();
+  });
+
+  it("rejects values over the contract ceiling", () => {
+    expect(() => textParam("a".repeat(101), "q", 100)).toThrow(
+      "q must contain at most 100 non-control characters.",
+    );
+  });
+
+  it("rejects control characters before they reach a query or log", () => {
+    expect(() => textParam("member\nrole", "action", 100)).toThrow(CoreApiError);
+    expect(() => textParam("member\u0000role", "action", 100)).toThrow(CoreApiError);
   });
 });

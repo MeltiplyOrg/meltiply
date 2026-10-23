@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Sun,
   UserRound,
+  Users,
 } from "lucide-react";
 import { useSearchParams } from "react-router";
 import { Button } from "@meltiply/ui/button";
@@ -19,8 +20,10 @@ import { useWorkspace } from "@/context/workspace.context";
 import { useTheme } from "@/lib/theme";
 import { supportedLanguages, useI18n } from "@/lib/i18n";
 import { AccountSecurity } from "@/components/auth/account-security";
+import SettingsPage from "@/app/(dashboard)/settings/page";
 
 const SECTION_IDS = ["appearance", "language", "account", "security"] as const;
+type SettingsSection = (typeof SECTION_IDS)[number] | "administration";
 const LANGUAGE_CODES = supportedLanguages.map(({ code }) => code);
 
 /** Decorative miniature lines shared by both halves of every theme preview; no palette values are copied. */
@@ -46,9 +49,20 @@ function PreviewLines() {
  */
 export default function WorkspaceSettings() {
   const { requestedTheme, setTheme } = useTheme();
-  const { user, workspaceName } = useWorkspace();
+  const { user, workspaceName, canManageSettings } = useWorkspace();
   const { t, language, setLanguage } = useI18n();
-  const sections = {
+  const sections: Record<
+    SettingsSection,
+    { label: string; navLabel: string; description: string; icon: typeof Palette }
+  > = {
+    administration: {
+      label: t("Administration"),
+      navLabel: t("Administration"),
+      description: t(
+        "Manage who can access this installation, the shared workspace, and its audit trail.",
+      ),
+      icon: Users,
+    },
     appearance: {
       label: t("Appearance"),
       navLabel: t("Appearance"),
@@ -78,7 +92,10 @@ export default function WorkspaceSettings() {
   };
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSection = searchParams.get("section");
-  const section = SECTION_IDS.find((id) => id === requestedSection) ?? "appearance";
+  const sectionIds: readonly SettingsSection[] = canManageSettings
+    ? ["administration", ...SECTION_IDS]
+    : SECTION_IDS;
+  const section = sectionIds.find((id) => id === requestedSection) ?? "appearance";
   const current = sections[section];
   const handleSignOut = useWorkspaceSignOut();
   const navRef = useRef<HTMLElement | null>(null);
@@ -95,7 +112,7 @@ export default function WorkspaceSettings() {
         <span className="hidden px-2 pb-2 text-(length:--font-size-micro) font-semibold uppercase tracking-wide text-ink-3 md:block">
           {t("Settings")}
         </span>
-        {SECTION_IDS.map((id) => {
+        {sectionIds.map((id) => {
           const Icon = sections[id].icon;
           const isCurrent = section === id;
           return (
@@ -116,8 +133,20 @@ export default function WorkspaceSettings() {
           );
         })}
       </nav>
-      <div className="min-h-0 min-w-0 overflow-y-auto px-4 pb-20 pt-6 sm:px-10 sm:pt-8">
-        <div className="w-full max-w-2xl">
+      <div
+        className={cn(
+          "min-h-0 min-w-0 px-4 pb-20 pt-6 sm:px-10 sm:pt-8",
+          section === "administration" ? "overflow-hidden" : "overflow-y-auto",
+        )}
+      >
+        <div
+          className={cn(
+            "w-full",
+            section === "administration"
+              ? "mx-auto flex h-full min-h-0 max-w-300 flex-col"
+              : "max-w-2xl",
+          )}
+        >
           <h1 className="text-(length:--text-title) font-semibold leading-tight tracking-page-title">
             {current.label}
           </h1>
@@ -215,6 +244,7 @@ export default function WorkspaceSettings() {
             </section>
           )}
           {section === "security" && <AccountSecurity />}
+          {section === "administration" && <SettingsPage embedded />}
         </div>
       </div>
     </div>

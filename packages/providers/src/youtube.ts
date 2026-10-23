@@ -143,9 +143,9 @@ function pkce(name: string, value: string): string {
 }
 
 /**
- * Parses a whitespace-delimited OAuth scope string into a validated Set of Google API scope URIs.
- * Bounds total length, validates max 20 unique HTTPS scope URLs, and verifies standard URI syntax.
- * Returns Set of scope URIs, or undefined if absent or malformed.
+ * Parses whitespace-delimited OAuth scope tokens, including Google's non-URL
+ * OpenID grants combined by incremental authorization. Bounds length and unique count.
+ * Returns a Set of scope tokens, or undefined if absent or malformed.
  */
 function scopeSet(value: unknown): Set<string> | undefined {
   const normalized = boundedString(value, 4_096);
@@ -154,7 +154,7 @@ function scopeSet(value: unknown): Set<string> | undefined {
   if (
     scopes.length > 20 ||
     new Set(scopes).size !== scopes.length ||
-    scopes.some((scope) => !/^https:\/\/[A-Za-z0-9./_-]+$/.test(scope))
+    scopes.some((scope) => !/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(scope))
   ) {
     return undefined;
   }
@@ -1047,9 +1047,9 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
     extractRateLimitBudget: (headers) => extractRateLimitBudget("youtube", headers),
     /**
      * Builds the Google OAuth v2 authorization URL with offline access, PKCE S256
-     * challenge, incremental scope grants, consent prompt, and the configured redirect
-     * URI, scopes, and state. Throws TypeError when the attempted redirect URI does not
-     * match the adapter configuration.
+     * challenge, incremental grants, account selection and consent prompts, and the
+     * configured redirect URI, scopes, and state. Throws TypeError if the redirect
+     * URI does not match the adapter configuration.
      */
     authorizationUrl(input) {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -1059,7 +1059,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       url.searchParams.set("code_challenge", pkce("codeChallenge", input.codeChallenge));
       url.searchParams.set("code_challenge_method", "S256");
       url.searchParams.set("include_granted_scopes", "true");
-      url.searchParams.set("prompt", "consent");
+      url.searchParams.set("prompt", "consent select_account");
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", configuredScopes.join(" "));

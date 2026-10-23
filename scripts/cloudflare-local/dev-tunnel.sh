@@ -334,7 +334,7 @@ cloudflared_tunnel_exists() {
 # single target, so it can only ever point at one tunnel and would capture every
 # other branch. A wildcard is therefore only correct in shared-tunnel mode.
 setup_named_tunnel() {
-  local cloudflared name
+  local cloudflared name tunnel_exists tunnel_id creds_file
   if ! cloudflared="$(resolve_cloudflared)"; then
     print_binary >&2
     return 1
@@ -354,7 +354,19 @@ LOGIN
     return 1
   fi
 
+  tunnel_exists=0
   if cloudflared_tunnel_exists "$cloudflared"; then
+    tunnel_id="$(tunnel_uuid "$cloudflared" "$name")"
+    creds_file="$HOME/.cloudflared/${tunnel_id}.json"
+    if [[ -z "$tunnel_id" || -s "$creds_file" ]]; then
+      tunnel_exists=1
+    else
+      printf 'Tunnel %s exists but its credentials file is missing; recreating.\n' "$name"
+      "$cloudflared" tunnel delete "$name" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if ((tunnel_exists)); then
     printf 'Tunnel %s already exists.\n' "$name"
   else
     printf 'Creating tunnel %s for this branch...\n' "$name"

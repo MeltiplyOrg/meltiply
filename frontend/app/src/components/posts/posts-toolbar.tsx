@@ -174,6 +174,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
                   onValueChange={onProfileChange}
                   brandProfiles={brandProfiles}
                   unresolvedProfileIds={unresolvedProfileIds}
+
                   trigger={<TopToolbarButton label={profileLabel} className="w-full" />}
                 />
               ),

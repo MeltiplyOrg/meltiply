@@ -54,7 +54,6 @@ export default {
     if (action === "probe-write") {
       await writeMarker(store, key);
       await state.create(key, {
-        brand_profile_id: id,
         organization_id: organizationId,
         user_id: id,
         provider: "facebook",

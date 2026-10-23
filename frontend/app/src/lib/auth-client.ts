@@ -35,7 +35,8 @@ interface SignInCredentials {
 
 interface SignUpCredentials extends SignInCredentials {
   name: string;
-  setupSecret: string;
+  setupSecret?: string;
+  invitationToken?: string;
 }
 
 /**
@@ -132,18 +133,23 @@ async function signInEmail(credentials: SignInCredentials): Promise<AuthTokenRes
  */
 async function signUpEmail({
   setupSecret,
+  invitationToken,
   ...credentials
 }: SignUpCredentials): Promise<AuthTokenResult> {
   const baseUrl = getApiBaseUrl();
+  const callbackURL = invitationToken
+    ? `${window.location.origin}/invitations/accept?token=${encodeURIComponent(invitationToken)}`
+    : `${window.location.origin}/sign-in?verified=1`;
   const response = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
     body: JSON.stringify({
       ...credentials,
-      callbackURL: `${window.location.origin}/sign-in?verified=1`,
+      callbackURL,
     }),
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      "X-Setup-Secret": setupSecret,
+      ...(setupSecret ? { "X-Setup-Secret": setupSecret } : {}),
+      ...(invitationToken ? { "X-Invitation-Token": invitationToken } : {}),
     },
     method: "POST",
   });

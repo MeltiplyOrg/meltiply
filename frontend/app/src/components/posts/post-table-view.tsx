@@ -32,6 +32,7 @@ export interface PostTableViewProps extends PostSelectionProps {
   hiddenColumns: ReadonlySet<string>;
   onSortChange: (key: PostSortKey) => void;
   onViewDetails: (postId: string) => void;
+  canCreate: boolean;
   onCreatePost: () => void;
 }
 
@@ -320,11 +321,13 @@ export const PostTableView = React.memo(function PostTableView({
   hiddenColumns,
   onSortChange,
   onViewDetails,
+  canCreate,
   onCreatePost,
   selectedIds,
   onToggleSelection,
   onSetSelection,
   selectionDisabled,
+  canSelect,
 }: PostTableViewProps) {
   const { t, tStatus } = useI18n();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -337,9 +340,9 @@ export const PostTableView = React.memo(function PostTableView({
     () => new Map(brandProfiles.map((profile) => [profile.id, profile.name])),
     [brandProfiles],
   );
-  const visibleIds = posts.map((post) => post.id);
-  const selectedCount = visibleIds.reduce((count, id) => count + Number(selectedIds.has(id)), 0);
-  const allSelected = visibleIds.length > 0 && selectedCount === visibleIds.length;
+  const selectableIds = (canSelect ? posts.filter(canSelect) : posts).map((post) => post.id);
+  const selectedCount = selectableIds.reduce((count, id) => count + Number(selectedIds.has(id)), 0);
+  const allSelected = selectableIds.length > 0 && selectedCount === selectableIds.length;
   const showStatus = !hiddenColumns.has("status");
   const showChannels = !hiddenColumns.has("channels");
   const showDate = !hiddenColumns.has("date");
@@ -386,8 +389,8 @@ export const PostTableView = React.memo(function PostTableView({
                 type="checkbox"
                 aria-label={t("Select all visible posts")}
                 checked={allSelected}
-                disabled={selectionDisabled || visibleIds.length === 0}
-                onChange={() => onSetSelection(visibleIds, !allSelected)}
+                disabled={selectionDisabled || selectableIds.length === 0}
+                onChange={() => onSetSelection(selectableIds, !allSelected)}
               />
             </TableHead>
             <TableHead>{t("Post")}</TableHead>
@@ -484,7 +487,7 @@ export const PostTableView = React.memo(function PostTableView({
                           post={post}
                           selected={selectedIds.has(post.id)}
                           collapsed={Boolean(isCollapsed)}
-                          selectionDisabled={selectionDisabled}
+                          selectionDisabled={selectionDisabled || !(canSelect?.(post) ?? true)}
                           profileName={
                             profileNames.get(post.brandProfileId) ?? t("Unknown profile")
                           }
@@ -500,7 +503,7 @@ export const PostTableView = React.memo(function PostTableView({
                     </Fragment>
                   );
                 })}
-          {posts.length > 0 && (
+          {canCreate && posts.length > 0 && (
             <TableRow>
               <TableCell colSpan={columnCount}>
                 <Button
@@ -519,10 +522,12 @@ export const PostTableView = React.memo(function PostTableView({
       {!isLoading && posts.length === 0 && (
         <Empty className="sticky left-0 min-h-60 w-full gap-3.5 border-0 px-4">
           <EmptyDescription>{t("No posts found matching the active filters.")}</EmptyDescription>
-          <Button variant="outline" onClick={onCreatePost}>
-            <Plus className="size-3.5" />
-            {t("Create post")}
-          </Button>
+          {canCreate && (
+            <Button variant="outline" onClick={onCreatePost}>
+              <Plus className="size-3.5" />
+              {t("Create post")}
+            </Button>
+          )}
         </Empty>
       )}
     </div>

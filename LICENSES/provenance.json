@@ -1,6 +1,13 @@
 {
-  "checked": "2026-10-19",
+  "checked": "2026-10-21",
   "upstreams": {
+    "essential-kit-skills": {
+      "source": "Essential-kit/skills",
+      "license": "MIT",
+      "license_blob": "6c0a62f99a975aac1e15e861b36aad8693098956",
+      "source_url": "https://github.com/Essential-kit/skills/blob/main/LICENSE",
+      "path": "LICENSES/essential-kit-skills.txt"
+    },
     "cloudflare-skills": {
       "source": "cloudflare/skills",
       "license": "Apache-2.0",

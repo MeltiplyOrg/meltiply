@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { Check, Copy, Ellipsis, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { Check, Ellipsis, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { copyText } from "@meltiply/ui/copy-text";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
@@ -26,7 +26,7 @@ import { formatUsername } from "@/lib/format";
 import { cn } from "@meltiply/ui/utils";
 
 /**
- * Consistent icon-button chrome for the channel table's copy, health, and settings controls.
+ * Consistent icon-button chrome for the channel table's health and settings controls.
  */
 const channelActionClass =
   "size-7 shrink-0 text-ink-3 hover:bg-hover hover:text-ink [&_svg]:size-3.5";
@@ -69,57 +69,55 @@ function useCopyChannelValue(): (value: string, successTitle: string) => Promise
   );
 }
 
-export interface ChannelCopyRowsProps {
+export interface ChannelCopyValuesProps {
   account: PlatformAccount;
 }
 
 /**
- * Renders copyable handle and provider ID rows; missing values are omitted so a
- * channel with no username never shows an empty row. Each row copies the raw
- * provider value (without the display @ prefix or ID label) via the shared
- * clipboard helper. Values truncate while copy buttons align at the row's right edge.
+ * Keeps the handle and provider ID on one compact metadata line, regardless of
+ * username availability. The values themselves are keyboard-accessible copy
+ * targets, using the shared Button, clipboard helper, and success/error toast.
+ * Copies raw values without display labels; long values truncate without wrapping.
  */
-export function ChannelCopyRows({ account }: ChannelCopyRowsProps): React.ReactElement | null {
+export function ChannelCopyValues({ account }: ChannelCopyValuesProps): React.ReactElement | null {
   const { t } = useI18n();
   const copyValue = useCopyChannelValue();
-  const formattedUsername = formatUsername(account.username);
+  const username = account.username?.trim();
+  const formattedUsername = formatUsername(username);
   const providerId = account.platform_user_id?.trim();
   if (!formattedUsername && !providerId) return null;
   return (
-    <div className="mt-0.5 space-y-0.5">
-      {formattedUsername && (
-        <div className="flex min-w-0 items-center gap-1">
-          <span className="min-w-0 flex-1 truncate text-xs text-ink-2" title={formattedUsername}>
-            {formattedUsername}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={channelActionClass}
-            aria-label={t("Copy username")}
-            onClick={() => void copyValue(account.username!.trim(), t("Username copied"))}
-          >
-            <Copy aria-hidden="true" />
-          </Button>
-        </div>
+    <div className="flex min-w-0 items-center gap-1.5 leading-4">
+      {username && formattedUsername && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto min-w-0 justify-start p-0 text-xs leading-4 font-normal text-ink-2"
+          aria-label={t("Copy username")}
+          title={formattedUsername}
+          onClick={() => void copyValue(username, t("Username copied"))}
+        >
+          <span className="truncate">{formattedUsername}</span>
+        </Button>
+      )}
+      {username && providerId && (
+        <span aria-hidden="true" className="shrink-0 text-ink-3">
+          ·
+        </span>
       )}
       {providerId && (
-        <div className="flex min-w-0 items-center gap-1">
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-3" title={providerId}>
-            {t("ID: {id}", { id: providerId })}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={channelActionClass}
-            aria-label={t("Copy channel ID")}
-            onClick={() => void copyValue(providerId, t("Channel ID copied"))}
-          >
-            <Copy aria-hidden="true" />
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto min-w-0 justify-start p-0 font-mono text-xs leading-4 font-normal text-ink-3"
+          aria-label={t("Copy channel ID")}
+          title={providerId}
+          onClick={() => void copyValue(providerId, t("Channel ID copied"))}
+        >
+          <span className="truncate">{t("ID: {id}", { id: providerId })}</span>
+        </Button>
       )}
     </div>
   );
@@ -129,7 +127,8 @@ export interface ChannelHealthControlProps {
   account: PlatformAccount;
   statusReason?: string | null;
   isReconnecting?: boolean;
-  onReconnect: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles, leaving the status passive. */
+  onReconnect?: (account: PlatformAccount) => void;
 }
 
 /**
@@ -160,30 +159,32 @@ export function ChannelHealthControl({
       {healthy ? <Check aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}
     </Button>
   );
+  if (healthy || onReconnect === undefined) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{statusControl}</TooltipTrigger>
+        <TooltipContent className="max-w-64">{healthDescription}</TooltipContent>
+      </Tooltip>
+    );
+  }
   return (
     <DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
-          {healthy ? (
-            statusControl
-          ) : (
-            <DropdownMenuTrigger asChild>{statusControl}</DropdownMenuTrigger>
-          )}
+          <DropdownMenuTrigger asChild>{statusControl}</DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent className="max-w-64">{healthDescription}</TooltipContent>
       </Tooltip>
-      {!healthy && (
-        <DropdownMenuContent align="end" className="max-w-72">
-          <p className="px-2 py-1.5 text-xs text-ink-2">{healthDescription}</p>
-          <DropdownMenuItem disabled={isReconnecting} onSelect={() => onReconnect(account)}>
-            <RefreshCw
-              className={cn("size-3.5", isReconnecting && "animate-spin")}
-              aria-hidden="true"
-            />
-            {isReconnecting ? t("Redirecting…") : t("Re-authenticate")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      )}
+      <DropdownMenuContent align="end" className="max-w-72">
+        <p className="px-2 py-1.5 text-xs text-ink-2">{healthDescription}</p>
+        <DropdownMenuItem disabled={isReconnecting} onSelect={() => onReconnect(account)}>
+          <RefreshCw
+            className={cn("size-3.5", isReconnecting && "animate-spin")}
+            aria-hidden="true"
+          />
+          {isReconnecting ? t("Redirecting…") : t("Re-authenticate")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 }
@@ -194,7 +195,8 @@ export interface ChannelSettingsActionProps {
   profile?: BrandProfile | null;
   /** Resolved display title used as the dialog's accessible name. */
   channelName: string;
-  onDisconnect: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles, leaving settings informational. */
+  onDisconnect?: (account: PlatformAccount) => void;
 }
 
 /**
@@ -266,20 +268,22 @@ export function ChannelSettingsAction({
               <p className="text-sm text-ink-3">{t("No permissions granted")}</p>
             )}
           </section>
-          <div className="border-t border-line-soft pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              className="text-red hover:bg-red-tint hover:text-red"
-              onClick={() => {
-                setSettingsOpen(false);
-                onDisconnect(account);
-              }}
-            >
-              <Trash2 className="size-3.5" aria-hidden="true" />
-              {t("Disconnect")}
-            </Button>
-          </div>
+          {onDisconnect !== undefined && (
+            <div className="border-t border-line-soft pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                className="text-red hover:bg-red-tint hover:text-red"
+                onClick={() => {
+                  setSettingsOpen(false);
+                  onDisconnect(account);
+                }}
+              >
+                <Trash2 className="size-3.5" aria-hidden="true" />
+                {t("Disconnect")}
+              </Button>
+            </div>
+          )}
         </div>
       </CenterDialogContent>
     </CenterDialog>

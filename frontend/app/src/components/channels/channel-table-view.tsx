@@ -9,7 +9,7 @@ import { ChannelAvatar } from "@/components/channels/channel-avatar";
 import { brandProfileColorClass, type BrandProfile, type PlatformAccount } from "@/types";
 import { cn } from "@meltiply/ui/utils";
 import {
-  ChannelCopyRows,
+  ChannelCopyValues,
   ChannelHealthControl,
   ChannelSelectionCheckbox,
   ChannelSettingsAction,
@@ -33,8 +33,10 @@ export interface ChannelTableViewProps {
   onToggleVisibleSelection: () => void;
   onToggleSelection: (id: string) => void;
   selectionDisabled?: boolean;
-  onReconnect: (account: PlatformAccount) => void;
-  onDisconnect: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles. */
+  onReconnect?: (account: PlatformAccount) => void;
+  /** Admin-only; omitted for read-only roles. */
+  onDisconnect?: (account: PlatformAccount) => void;
 }
 
 /**
@@ -126,7 +128,7 @@ export function ChannelTableView({
                         >
                           {channelName}
                         </div>
-                        <ChannelCopyRows account={account} />
+                        <ChannelCopyValues account={account} />
                       </div>
                     </div>
                   </TableCell>

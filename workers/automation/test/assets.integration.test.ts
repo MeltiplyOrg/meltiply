@@ -17,6 +17,19 @@ import {
   mediaUploadMaximum,
 } from "@meltiply/domain";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import type * as Domain from "@meltiply/domain";
+
+// Keep storage-boundary coverage under an explicit finite test policy while the
+// real community policy is unrestricted. Scenarios may load that policy too.
+vi.mock("@meltiply/domain", async (importOriginal) => ({
+  ...(await importOriginal<typeof Domain>()),
+  COMMUNITY_LIMITS: {
+    max_distributions: 30,
+    max_platforms: 2,
+    max_storage_bytes: 1024 * 1024 * 1024,
+    max_uploads: 10,
+  },
+}));
 
 import { createApiApp } from "../../api/src/app";
 import { createCoreApiService } from "../../api/src/core-service";
@@ -74,7 +87,7 @@ const seededYouTubeAccountId = "50000000-0000-4000-8000-000000000001";
 const currentUsagePeriod = new Date().toISOString().slice(0, 7);
 const storageLimit = COMMUNITY_LIMITS.max_storage_bytes;
 if (storageLimit === null) {
-  throw new Error("Storage boundary scenarios require a bounded community storage limit.");
+  throw new Error("Storage boundary scenarios require a bounded test policy.");
 }
 let currentUsageBefore:
   | {
@@ -8678,13 +8691,14 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
           subject: "auth_user_local_alpha",
           userId,
         },
+        displayName: "Alpha Creator",
+        email: "alpha@meltiply.local",
+        isInstallationOwner: false,
         role: "admin",
         userId,
         workspace: {
           id: organizationId,
-          isPersonal: false,
           name: "Alpha Studio",
-          plan: "creator",
           slug: "alpha-studio",
         },
       }),

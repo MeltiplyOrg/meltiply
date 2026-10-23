@@ -43,9 +43,14 @@ Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. I
 
 ## Navigation, search, and filters
 
-`SidebarNav` and `NavigationShell` own the rail, header, mobile navigation, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations in Posts → Analytics → Channels order. Posts, Analytics, and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
+`SidebarNav`, `MobileNavigationSidebar`, and `NavigationShell` own the rail, header, mobile navigation layer, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations in Posts → Analytics → Channels order. Posts, Analytics, and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
 
-The phone navigation panel renders `SidebarNav` with `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
+The phone navigation panel is `MobileNavigationSidebar`: the same `SidebarNav` as the desktop rail, positioned as a fixed left-edge layer over the workspace with a fading scrim, sliding in from the left. It renders `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
+
+The sidebar imports unstyled `FocusScope` from the shared `@meltiply/ui/center-dialog`
+owner. It loops Tab/Shift+Tab while open and shares Radix's focus stack with the
+portalled account menu, so nested menus can take focus without fighting the
+navigation trap. The shell's background `inert` state is separate from containment.
 
 `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`) owns the rail's hover background: every `data-sidebar-item` row is a target, and one pill springs to the hovered row instead of rows painting their own hover fill. The Settings section rail reuses the same component with its own container and a tighter snap radius. Rows keep `relative z-10` so labels and the selected surface read above it, keyboard focus rings are unchanged, and the public docs rail reuses the same component with its nested Radix viewport.
 
@@ -59,7 +64,7 @@ The footer uses one compact avatar/name account trigger with trailing chevrons, 
 
 Shared tooltips use the reference-derived compact inverse treatment and timing. Radix owns focus, Escape, collision, and portals. Keyboard hints supplement accessible names, never replace them.
 
-`DropdownMenu` and `Select` render one menu vocabulary: the surface (`data-menu-surface`), rows (`[data-menu-item]`), right-aligned accent checks (`[data-menu-indicator]`), labels (`[data-menu-label]`), and separators (`[data-menu-separator]`) all come from `frontend/shared/motion.css`, so the account menu, row actions, filter panels, platform multi-select, and every listbox stay identical. `data-state` drives one shared entrance (`menu-surface-in`, 160ms settle) and exit (`menu-surface-out`, 120ms) for every surface; Radix writes that state, and a native disclosure sets it and stays mounted through the exit before closing. `SlidingHighlight` owns the hover pill inside a menu, exactly as `SidebarGlideHighlight` does in a rail. Posts rows use the table's own shared hover fill, not a glide pill. Extend these wrappers instead of restyling a surface; a page-composed panel marks itself with the same `data-menu-surface` hook.
+`DropdownMenu` and `Select` render one menu vocabulary: the surface (`data-menu-surface`), rows (`[data-menu-item]`), right-aligned accent checks (`[data-menu-indicator]`), labels (`[data-menu-label]`), and separators (`[data-menu-separator]`) all come from `frontend/shared/motion.css`, so the account menu, row actions, filter panels, platform multi-select, and every listbox stay identical. An anchored surface inherits the trigger box as a minimum width (`data-menu-fit-trigger` reads Radix's `--radix-*-trigger-width`), so a list under a full-width filter or field control spans that control while icon-triggered action menus keep the shared 200px floor. `data-state` drives one shared entrance (`menu-surface-in`, 160ms settle) and exit (`menu-surface-out`, 120ms) for every surface; Radix writes that state, and a native disclosure sets it and stays mounted through the exit before closing. `SlidingHighlight` owns the hover pill inside a menu, exactly as `SidebarGlideHighlight` does in a rail. Posts rows use the table's own shared hover fill, not a glide pill. Extend these wrappers instead of restyling a surface; a page-composed panel marks itself with the same `data-menu-surface` hook.
 
 ## Collections and selection
 
@@ -73,13 +78,21 @@ Post deletion soft-deletes composition and stops only pending delivery; it does 
 
 Channels follows the Members directory composition: Accounts/Brand Profiles tabs, account search, status segments, field-row filters, identity table, and real profile cards. The section tabs' accent rule and the status segments' surface pill are each one travelling `SlidingHighlight`, so switching a section or a status slides the selection instead of repainting two controls. Connection cells contain one accessible health icon; recovery remains available without duplicate status text. Its background and controls match Posts.
 
+Channel identity uses a saved-name line followed by one compact metadata line
+containing the available username and provider ID. `ChannelCopyValues` composes
+shared link-style `Button` controls: the values themselves copy their raw text,
+without separate icon buttons, through the existing clipboard helper and
+success/error toast. Values truncate without wrapping, so detecting a username
+does not add another row or change directory density. Keyboard focus and the
+shared coarse-pointer targets remain intact.
+
 Connection cards stack platform identity above saved-account status and connection actions on phones. The connection dialog uses one outer native scroller at narrow widths; its platform list gets its own bounded scroller only when the panel has room.
 
 `BulkSelectionBar` owns the inverse-ink floating pill, separators, count, action icon/label, and icon-only Deselect. Callers own selection, confirmation, and mutations. Select-all is visually checked only when the entire visible collection is selected. Partial selection stays unchecked while the pill reports the real count. Confirm a stable batch; remove successful targets and retain failures for retry.
 
 ## Settings and dialogs
 
-`WorkspaceSettings` is a full route with Appearance, Language, Account, and Security. Every section shares the same background and bounded content column. Compact theme cards offer Light/Dark/System; System follows live OS palette changes. Current-page preferences work without optional storage; persistence follows the shared consent-aware owners. Account identity is read-only. Security controls are inline and retain password verification, authenticator enrollment, and recovery-code requirements.
+`WorkspaceSettings` is a full route with Appearance, Language, Account, Security, and — for administrators — Administration. Every section shares the same background; the preference and security sections use the bounded form column while Administration follows the directory composition. Compact theme cards offer Light/Dark/System; System follows live OS palette changes. Current-page preferences work without optional storage; persistence follows the shared consent-aware owners. Account identity is read-only. Security controls are inline and retain password verification, authenticator enrollment, and recovery-code requirements. Administration reuses the shared spreadsheet `Table` (grid columns) for members and invitations; rows carry a lifecycle `Switch`, the Installation Owner wears a crown tooltip, and row actions sit behind a three-dot menu. Workspace is a label/value settings form with compact seat counts, not a table. `AuditLogTable` owns the filtered, paginated log and defers filtering and paging to the route's query; its search and filter controls keep fixed widths so selecting a value cannot reflow the toolbar, and Refresh re-reads the current page. The Administration surface is height-locked to the content pane so only the lists scroll, and the tab strip is content-width rather than stretched across the surface.
 
 | Task                        | Primitive           |
 | --------------------------- | ------------------- |

@@ -189,11 +189,17 @@ describe("brand profile contract", async () => {
     }
   });
 
-  it("requires brand_profile_id when starting provider OAuth", () => {
-    const parameter = brandProfileQueryParameter(document, "/platforms/{platform}/connect", "get");
-    expect(parameter).toBeDefined();
-    expect(parameter!.required).toBe(true);
-    expect(parameter!.schema).toMatchObject({
+  it("assigns the Brand Profile when confirming OAuth, not at start", () => {
+    expect(
+      brandProfileQueryParameter(document, "/platforms/{platform}/connect", "get"),
+    ).toBeUndefined();
+
+    const selection = schemaOf(document, "OAuthSelection");
+    expect(selection.required ?? []).not.toContain("brand_profile_id");
+
+    const confirm = schemaOf(document, "OAuthSelectionConfirmRequest");
+    expect(confirm.required).toContain("brand_profile_id");
+    expect(confirm.properties?.brand_profile_id).toMatchObject({
       type: "string",
       format: "uuid",
     });

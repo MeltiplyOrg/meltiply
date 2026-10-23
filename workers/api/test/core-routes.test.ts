@@ -1,5 +1,9 @@
 import type { components } from "@meltiply/contracts/schema";
-import type { OAuthSelectionCandidate, OAuthSelectionInit } from "@meltiply/contracts";
+import type {
+  OAuthSelectionCandidate,
+  OAuthSelectionInit,
+  OAuthStateRecord,
+} from "@meltiply/contracts";
 import {
   classifyProviderFailure,
   ProviderAdapterError,
@@ -51,11 +55,13 @@ const session = {
 const actor: ResolvedActor = {
   authUserId: session.subject,
   claims: session,
+  displayName: "Alpha Admin",
+  email: "alpha@example.com",
+  isInstallationOwner: false,
   role: "admin",
   userId: session.userId,
   workspace: {
     id: session.organizationId,
-    isPersonal: false,
     name: "Alpha",
     slug: "alpha",
   },
@@ -1497,13 +1503,13 @@ describe("core API routes", () => {
       brandProfileService: brandProfileService(),
     });
     const response = await app.request(
-      `/api/v1/platforms/tiktok/connect?brand_profile_id=${brandProfileId}`,
+      `/api/v1/platforms/tiktok/connect`,
       { headers: bearerHeaders },
       {
         ...env,
         OAUTH_STATE: {
           getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace,
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
         TIKTOK_CLIENT_KEY: "tiktok-client",
         TIKTOK_CLIENT_SECRET: "tiktok-secret",
         TIKTOK_LIVE_ACCEPTED: "true",
@@ -1517,7 +1523,9 @@ describe("core API routes", () => {
     expect(location.searchParams.get("redirect_uri")).toBe(
       "http://localhost:8787/api/v1/platforms/tiktok/callback",
     );
-    expect(location.searchParams.get("scope")).toBe("user.info.basic,video.publish,video.list");
+    expect(location.searchParams.get("scope")).toBe(
+      "user.info.basic,user.info.stats,video.publish,video.list",
+    );
     expect(create).toHaveBeenCalledOnce();
   });
 
@@ -1546,13 +1554,13 @@ describe("core API routes", () => {
       brandProfileService: brandProfileService(),
     });
     const response = await app.request(
-      `/api/v1/platforms/threads/connect?brand_profile_id=${brandProfileId}`,
+      `/api/v1/platforms/threads/connect`,
       { headers: bearerHeaders },
       {
         ...env,
         OAUTH_STATE: {
           getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace,
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
         THREADS_CLIENT_ID: "threads-client",
         THREADS_CLIENT_SECRET: "threads-secret",
         THREADS_LIVE_ACCEPTED: "true",
@@ -1560,7 +1568,7 @@ describe("core API routes", () => {
     );
     expect(response.status).toBe(307);
     const location = new URL(response.headers.get("Location")!);
-    expect(location.origin).toBe("https://threads.net");
+    expect(location.origin).toBe("https://threads.com");
     expect(location.searchParams.get("client_id")).toBe("threads-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
       "http://localhost:8787/api/v1/platforms/threads/callback",
@@ -1593,7 +1601,7 @@ describe("core API routes", () => {
       brandProfileService: brandProfileService(),
     });
     const response = await app.request(
-      `/api/v1/platforms/facebook/connect?brand_profile_id=${brandProfileId}`,
+      `/api/v1/platforms/facebook/connect`,
       { headers: bearerHeaders },
       {
         ...env,
@@ -1602,7 +1610,7 @@ describe("core API routes", () => {
         FACEBOOK_LIVE_ACCEPTED: "true",
         OAUTH_STATE: {
           getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace,
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
       },
     );
     expect(response.status).toBe(307);
@@ -1640,13 +1648,13 @@ describe("core API routes", () => {
       brandProfileService: brandProfileService(),
     });
     const response = await app.request(
-      `/api/v1/platforms/youtube/connect?brand_profile_id=${brandProfileId}`,
+      `/api/v1/platforms/youtube/connect`,
       { headers: bearerHeaders },
       {
         ...env,
         OAUTH_STATE: {
           getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace,
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
         YOUTUBE_LIVE_ACCEPTED: "true",
         YOUTUBE_SHORTS_CLIENT_ID: "youtube-client",
         YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-secret",
@@ -1963,7 +1971,7 @@ describe("core API routes", () => {
 
   it("keeps unaccepted OAuth providers explicitly unavailable", async () => {
     const response = await authenticatedApp(service()).request(
-      `/api/v1/platforms/tiktok/connect?brand_profile_id=${brandProfileId}`,
+      `/api/v1/platforms/tiktok/connect`,
       { headers: bearerHeaders },
       env,
     );
@@ -1973,92 +1981,28 @@ describe("core API routes", () => {
     });
   });
 
-  it("requires a Brand Profile selection before starting OAuth", async () => {
+  it("starts OAuth without a Brand Profile and stages assignment later", async () => {
     const { registry } = oauthRegistry();
-    const create = vi.fn(async () => undefined);
+    const create = vi.fn(async (_state: string, _record: OAuthStateRecord) => undefined);
     const app = authenticatedApp(service({ platformCapabilities: () => registry.capabilities() }), {
-      brandProfileService: brandProfileService(),
       providerRegistry: registry,
     });
+    const oauthEnv: ApiWorkerEnv = {
+      ...env,
+      OAUTH_STATE: {
+        getByName: () => ({ create, consume: vi.fn() }),
+      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+    };
     const response = await app.request(
       "/api/v1/platforms/threads/connect",
       { headers: bearerHeaders },
-      {
-        ...env,
-        OAUTH_STATE: {
-          getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace,
-      },
+      oauthEnv,
     );
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "invalid_request" },
-    });
-    expect(create).not.toHaveBeenCalled();
+    expect(response.status).toBe(307);
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]?.[1]).not.toHaveProperty("brand_profile_id");
   });
 
-  it("rejects OAuth start for a soft-deleted Brand Profile without creating state", async () => {
-    const { registry } = oauthRegistry();
-    const create = vi.fn(async () => undefined);
-    const getBrandProfile = vi.fn(() =>
-      Effect.succeed({
-        ...brandProfile,
-        deleted_at: "2026-08-01T00:00:00Z",
-        purge_at: "2026-08-08T00:00:00Z",
-      }),
-    );
-    const app = authenticatedApp(service({ platformCapabilities: () => registry.capabilities() }), {
-      brandProfileService: brandProfileService({ getBrandProfile }),
-      providerRegistry: registry,
-    });
-    const response = await app.request(
-      `/api/v1/platforms/threads/connect?brand_profile_id=${brandProfileId}`,
-      { headers: bearerHeaders },
-      {
-        ...env,
-        OAUTH_STATE: {
-          getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace,
-      },
-    );
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "brand_profile_deleted" },
-    });
-    expect(getBrandProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ PUBLIC_API_URL: env.PUBLIC_API_URL }),
-      session,
-      brandProfileId,
-    );
-    expect(create).not.toHaveBeenCalled();
-  });
-
-  it("keeps a missing or foreign Brand Profile not-found without creating state", async () => {
-    const { registry } = oauthRegistry();
-    const create = vi.fn(async () => undefined);
-    const getBrandProfile = vi.fn(() =>
-      Effect.fail(new CoreApiError(404, "not_found", "The brand profile was not found.")),
-    );
-    const app = authenticatedApp(service({ platformCapabilities: () => registry.capabilities() }), {
-      brandProfileService: brandProfileService({ getBrandProfile }),
-      providerRegistry: registry,
-    });
-    const response = await app.request(
-      `/api/v1/platforms/threads/connect?brand_profile_id=${brandProfileId}`,
-      { headers: bearerHeaders },
-      {
-        ...env,
-        OAUTH_STATE: {
-          getByName: () => ({ create, consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace,
-      },
-    );
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "not_found" },
-    });
-    expect(create).not.toHaveBeenCalled();
-  });
   it("lists the workspace brand profiles through the brand profile service", async () => {
     const listBrandProfiles = vi.fn(() => Effect.succeed([brandProfile]));
     const app = authenticatedApp(service(), {
@@ -2292,7 +2236,7 @@ describe("core API routes", () => {
       ...env,
       OAUTH_STATE: {
         getByName,
-      } as unknown as DurableObjectNamespace,
+      } as unknown as DurableObjectNamespace<OAuthStateStub>,
     };
     const app = authenticatedApp(service({ platformCapabilities: () => registry.capabilities() }), {
       brandProfileService: brandProfileService(),
@@ -2300,7 +2244,7 @@ describe("core API routes", () => {
     });
 
     const response = await app.request(
-      `/api/v1/platforms/threads/connect?brand_profile_id=${brandProfileId}`,
+      `/api/v1/platforms/threads/connect`,
       { headers: bearerHeaders },
       oauthEnv,
     );
@@ -2313,7 +2257,6 @@ describe("core API routes", () => {
     expect(getByName).toHaveBeenCalledWith(state.split(".", 1)[0]);
     expect(record).toMatchObject({
       organization_id: actor.workspace.id,
-      brand_profile_id: brandProfileId,
       pkce_verifier: expect.any(String),
       provider: "threads",
       redirect_path: "/channels",
@@ -2334,13 +2277,13 @@ describe("core API routes", () => {
       providerRegistry: registry,
     });
     const response = await app.request(
-      `/api/v1/platforms/threads/connect?brand_profile_id=${brandProfileId}`,
+      `/api/v1/platforms/threads/connect`,
       { headers: { ...bearerHeaders, Accept: "application/json" } },
       {
         ...env,
         OAUTH_STATE: {
           getByName: () => ({ create: vi.fn(), consume: vi.fn() }),
-        } as unknown as DurableObjectNamespace,
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
       },
     );
 
@@ -2350,23 +2293,35 @@ describe("core API routes", () => {
     });
   });
 
-  it("exchanges a consumed OAuth state and persists the encrypted connection path", async () => {
+  it("stages a single-account OAuth exchange for explicit assignment", async () => {
     const { exchangeAuthorizationCode, registry } = oauthRegistry();
     const consume = vi.fn(async () => ({
       expires_at: Date.now() + 60_000,
-      brand_profile_id: brandProfileId,
       organization_id: actor.workspace.id,
       pkce_verifier: "pkce-verifier",
       provider: "threads",
       redirect_path: "/channels",
       user_id: actor.userId,
     }));
+    const createSelection = vi.fn(
+      async (_selectionId: string, _init: OAuthSelectionInit) => undefined,
+    );
+    const appendSelectionCandidates = vi.fn(
+      async (_selectionId: string, _candidates: OAuthSelectionCandidate[]) => undefined,
+    );
+    const finalizeSelection = vi.fn(async (_selectionId: string) => undefined);
     const saveOAuthConnection = vi.fn(() => Effect.succeed(undefined));
     const oauthEnv = {
       ...env,
+      TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
       OAUTH_STATE: {
-        getByName: () => ({ consume }),
-      } as unknown as DurableObjectNamespace,
+        getByName: () => ({
+          appendSelectionCandidates,
+          consume,
+          createSelection,
+          finalizeSelection,
+        }),
+      } as unknown as DurableObjectNamespace<OAuthStateStub>,
     };
     const app = authenticatedApp(service(), {
       providerRegistry: registry,
@@ -2380,8 +2335,8 @@ describe("core API routes", () => {
     );
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe(
-      "http://localhost:3000/channels?oauth=connected&provider=threads",
+    expect(response.headers.get("Location")).toContain(
+      "/channels/connect?oauth=select_account&provider=threads&selection_id=",
     );
     expect(consume).toHaveBeenCalledWith(`${"A".repeat(22)}.state-with-enough-length`);
     expect(exchangeAuthorizationCode).toHaveBeenCalledWith(
@@ -2395,19 +2350,28 @@ describe("core API routes", () => {
         redirectUri: "http://localhost:8787/api/v1/platforms/threads/callback",
       },
     );
-    expect(saveOAuthConnection).toHaveBeenCalledWith(
-      oauthEnv,
-      "threads",
-      {
-        organizationId: actor.workspace.id,
-        brandProfileId,
-        userId: actor.userId,
-      },
-      expect.objectContaining({
-        accessToken: "provider-access-token",
-        account: { displayName: "Creator", id: "provider-user-1" },
-      }),
-    );
+    expect(saveOAuthConnection).not.toHaveBeenCalled();
+    expect(createSelection).toHaveBeenCalledOnce();
+    const [savedId, savedInit] = createSelection.mock.calls[0]!;
+    expect(savedInit.platform).toBe("threads");
+    expect(savedInit).not.toHaveProperty("brand_profile_id");
+    expect(appendSelectionCandidates).toHaveBeenCalledOnce();
+    const [appendedId, appendedCandidates] = appendSelectionCandidates.mock.calls[0]!;
+    expect(appendedId).toBe(savedId);
+    expect(appendedCandidates).toHaveLength(1);
+    expect(appendedCandidates[0]!.account).toEqual({
+      avatar_url: null,
+      display_name: "Creator",
+      id: "provider-user-1",
+      username: null,
+    });
+    const sealedConnection = appendedCandidates[0]!.encryptedConnection;
+    expect(sealedConnection).not.toContain("provider-access-token");
+    expect(JSON.parse(await tokenCipherFor(oauthEnv).decrypt(sealedConnection))).toMatchObject({
+      accessToken: "provider-access-token",
+      account: { id: "provider-user-1" },
+    });
+    expect(finalizeSelection).toHaveBeenCalledWith(savedId);
   });
 
   it("redirects callback URL configuration failures to the frontend provider error", async () => {
@@ -2423,7 +2387,6 @@ describe("core API routes", () => {
           getByName: () => ({
             consume: async () => ({
               expires_at: Date.now() + 60_000,
-              brand_profile_id: brandProfileId,
               organization_id: actor.workspace.id,
               pkce_verifier: "pkce-verifier",
               provider: "threads",
@@ -2431,7 +2394,7 @@ describe("core API routes", () => {
               user_id: actor.userId,
             }),
           }),
-        } as unknown as DurableObjectNamespace,
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
       },
     );
     expect(response.status).toBe(302);
@@ -2461,7 +2424,6 @@ describe("core API routes", () => {
     );
     const consume = vi.fn(async () => ({
       expires_at: Date.now() + 60_000,
-      brand_profile_id: brandProfileId,
       organization_id: actor.workspace.id,
       pkce_verifier: "pkce-verifier",
       provider: "threads",
@@ -2481,7 +2443,7 @@ describe("core API routes", () => {
         ...env,
         OAUTH_STATE: {
           getByName: () => ({ consume }),
-        } as unknown as DurableObjectNamespace,
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
       },
     );
 
@@ -2564,7 +2526,6 @@ describe("core API routes", () => {
             getByName: () => ({
               consume: async () => ({
                 expires_at: Date.now() + 60_000,
-                brand_profile_id: brandProfileId,
                 organization_id: actor.workspace.id,
                 pkce_verifier: "pkce-verifier",
                 provider: "threads",
@@ -2572,7 +2533,7 @@ describe("core API routes", () => {
                 user_id: actor.userId,
               }),
             }),
-          } as unknown as DurableObjectNamespace,
+          } as unknown as DurableObjectNamespace<OAuthStateStub>,
         },
       );
 
@@ -2609,7 +2570,7 @@ describe("core API routes", () => {
           ...env,
           OAUTH_STATE: {
             getByName,
-          } as unknown as DurableObjectNamespace,
+          } as unknown as DurableObjectNamespace<OAuthStateStub>,
         },
       );
 
@@ -2633,7 +2594,7 @@ describe("core API routes", () => {
         ...env,
         OAUTH_STATE: {
           getByName,
-        } as unknown as DurableObjectNamespace,
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
       },
     );
 
@@ -2801,7 +2762,6 @@ describe("OAuth Page selection flow", () => {
       transferModes: [],
     });
     const consume = vi.fn(async () => ({
-      brand_profile_id: brandProfileId,
       expires_at: Date.now() + 60_000,
       organization_id: actor.workspace.id,
       pkce_verifier: "pkce-verifier-fb",
@@ -2843,13 +2803,15 @@ describe("OAuth Page selection flow", () => {
 
     expect(response.status).toBe(302);
     const location = response.headers.get("Location");
-    expect(location).toContain("/channels?oauth=select_account&provider=facebook&selection_id=");
+    expect(location).toContain(
+      "/channels/connect?oauth=select_account&provider=facebook&selection_id=",
+    );
     expect(saveOAuthConnection).not.toHaveBeenCalled();
     expect(createSelection).toHaveBeenCalledTimes(1);
     const [savedId, savedInit] = createSelection.mock.calls[0]!;
     expect(savedId).toMatch(new RegExp(`^${routingKey}\\.`));
     expect(savedInit.platform).toBe("facebook");
-    expect(savedInit.brand_profile_id).toBe(brandProfileId);
+    expect(savedInit).not.toHaveProperty("brand_profile_id");
     expect(appendSelectionCandidates).toHaveBeenCalledTimes(1);
     const [appendedId, appendedCandidates] = appendSelectionCandidates.mock.calls[0]!;
     expect(appendedId).toBe(savedId);
@@ -2881,7 +2843,6 @@ describe("OAuth Page selection flow", () => {
           username: "fbpage1",
         },
       ],
-      brand_profile_id: brandProfileId,
       expires_at: "2026-10-12T12:00:00.000Z",
       id: selectionId,
       platform: "facebook",
@@ -2911,7 +2872,6 @@ describe("OAuth Page selection flow", () => {
           username: "fbpage1",
         },
       ],
-      brand_profile_id: brandProfileId,
       expires_at: "2026-10-12T12:00:00.000Z",
       id: selectionId,
       platform: "facebook",
@@ -2965,7 +2925,6 @@ describe("OAuth Page selection flow", () => {
     };
     const sealed = await cipher.encrypt(JSON.stringify(pageConnection));
     const claimSelection = vi.fn(async () => ({
-      brandProfileId,
       claimToken: "claim-token-123",
       encryptedConnection: sealed,
       organizationId: actor.workspace.id,
@@ -2982,12 +2941,15 @@ describe("OAuth Page selection flow", () => {
         getByName: () => ({ claimSelection, completeSelection }),
       } as unknown as DurableObjectNamespace<OAuthStateStub>,
     };
-    const app = authenticatedApp(service(), { saveOAuthConnection });
+    const app = authenticatedApp(service(), {
+      brandProfileService: brandProfileService(),
+      saveOAuthConnection,
+    });
 
     const response = await app.request(
       `/api/v1/oauth-selections/${selectionId}/confirm`,
       {
-        body: JSON.stringify({ account_id: "fb-page-1" }),
+        body: JSON.stringify({ account_id: "fb-page-1", brand_profile_id: brandProfileId }),
         headers: {
           ...bearerHeaders,
           "Content-Type": "application/json",
@@ -3031,12 +2993,15 @@ describe("OAuth Page selection flow", () => {
         getByName: () => ({ claimSelection }),
       } as unknown as DurableObjectNamespace<OAuthStateStub>,
     };
-    const app = authenticatedApp(service(), { saveOAuthConnection });
+    const app = authenticatedApp(service(), {
+      brandProfileService: brandProfileService(),
+      saveOAuthConnection,
+    });
 
     const response = await app.request(
       `/api/v1/oauth-selections/${selectionId}/confirm`,
       {
-        body: JSON.stringify({ account_id: "fb-page-1" }),
+        body: JSON.stringify({ account_id: "fb-page-1", brand_profile_id: brandProfileId }),
         headers: {
           ...bearerHeaders,
           "Content-Type": "application/json",
@@ -3065,7 +3030,6 @@ describe("OAuth Page selection flow", () => {
     };
     const sealed = await cipher.encrypt(JSON.stringify(pageConnection));
     const claimSelection = vi.fn(async () => ({
-      brandProfileId,
       claimToken: "claim-token-quota",
       encryptedConnection: sealed,
       organizationId: actor.workspace.id,
@@ -3087,12 +3051,15 @@ describe("OAuth Page selection flow", () => {
         getByName: () => ({ claimSelection, releaseSelectionClaim }),
       } as unknown as DurableObjectNamespace<OAuthStateStub>,
     };
-    const app = authenticatedApp(service(), { saveOAuthConnection });
+    const app = authenticatedApp(service(), {
+      brandProfileService: brandProfileService(),
+      saveOAuthConnection,
+    });
 
     const response = await app.request(
       `/api/v1/oauth-selections/${selectionId}/confirm`,
       {
-        body: JSON.stringify({ account_id: "fb-page-1" }),
+        body: JSON.stringify({ account_id: "fb-page-1", brand_profile_id: brandProfileId }),
         headers: {
           ...bearerHeaders,
           "Content-Type": "application/json",
@@ -3136,12 +3103,12 @@ describe("OAuth Page selection flow", () => {
         getByName: () => ({ claimSelection }),
       } as unknown as DurableObjectNamespace<OAuthStateStub>,
     };
-    const app = authenticatedApp(service());
+    const app = authenticatedApp(service(), { brandProfileService: brandProfileService() });
 
     const activeRes = await app.request(
       `/api/v1/oauth-selections/${selectionId}/confirm`,
       {
-        body: JSON.stringify({ account_id: "fb-page-1" }),
+        body: JSON.stringify({ account_id: "fb-page-1", brand_profile_id: brandProfileId }),
         headers: {
           ...bearerHeaders,
           "Content-Type": "application/json",
@@ -3156,7 +3123,7 @@ describe("OAuth Page selection flow", () => {
     const switchRes = await app.request(
       `/api/v1/oauth-selections/${selectionId}/confirm`,
       {
-        body: JSON.stringify({ account_id: "fb-page-2" }),
+        body: JSON.stringify({ account_id: "fb-page-2", brand_profile_id: brandProfileId }),
         headers: {
           ...bearerHeaders,
           "Content-Type": "application/json",

@@ -29,18 +29,22 @@
 BEGIN;
 
 -- Better Auth subjects backing the seeded internal users. The API worker and
--- RLS integration tests authenticate as these session subjects.
+-- RLS integration tests authenticate as these session subjects. Alpha is the
+-- Installation Owner; Beta is a Workspace Admin; Gamma and Delta exercise the
+-- Editor and Viewer roles; Epsilon is a suspended Viewer so the settings
+-- surface shows suspension and reactivation.
 INSERT INTO "user" (id, name, email, "emailVerified")
 VALUES
   ('auth_user_local_alpha', 'Alpha Creator', 'alpha@meltiply.local', TRUE),
-  ('auth_user_local_beta', 'Beta Creator', 'beta@meltiply.local', TRUE)
+  ('auth_user_local_beta', 'Beta Admin', 'beta@meltiply.local', TRUE),
+  ('auth_user_local_gamma', 'Gamma Editor', 'gamma@meltiply.local', TRUE),
+  ('auth_user_local_delta', 'Delta Viewer', 'delta@meltiply.local', TRUE),
+  ('auth_user_local_epsilon', 'Epsilon Suspended', 'epsilon@meltiply.local', TRUE)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     email = EXCLUDED.email,
     "emailVerified" = EXCLUDED."emailVerified",
     "updatedAt" = now();
-UPDATE "user" SET "installationOwner" = (id = 'auth_user_local_alpha')
-WHERE id IN ('auth_user_local_alpha', 'auth_user_local_beta');
 
 -- Credential accounts so the seeded users can sign in through the real
 -- /sign-in UI instead of bypassing auth. accountId mirrors Better Auth's
@@ -60,6 +64,27 @@ VALUES
     'credential',
     'auth_user_local_beta',
     '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914'
+  ),
+  (
+    'auth_account_local_gamma',
+    'auth_user_local_gamma',
+    'credential',
+    'auth_user_local_gamma',
+    '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914'
+  ),
+  (
+    'auth_account_local_delta',
+    'auth_user_local_delta',
+    'credential',
+    'auth_user_local_delta',
+    '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914'
+  ),
+  (
+    'auth_account_local_epsilon',
+    'auth_user_local_epsilon',
+    'credential',
+    'auth_user_local_epsilon',
+    '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914'
   )
 ON CONFLICT (id) DO UPDATE
 SET "accountId" = EXCLUDED."accountId",
@@ -67,15 +92,37 @@ SET "accountId" = EXCLUDED."accountId",
     password = EXCLUDED.password,
     "updatedAt" = now();
 
-INSERT INTO users (id, auth_user_id, email, display_name)
+INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
 VALUES
-  ('10000000-0000-4000-8000-000000000001', 'auth_user_local_alpha', 'alpha@meltiply.local', 'Alpha Creator'),
-  ('10000000-0000-4000-8000-000000000002', 'auth_user_local_beta', 'beta@meltiply.local', 'Beta Creator')
+  ('10000000-0000-4000-8000-000000000001', 'auth_user_local_alpha', 'alpha@meltiply.local', 'Alpha Creator', TRUE),
+  ('10000000-0000-4000-8000-000000000002', 'auth_user_local_beta', 'beta@meltiply.local', 'Beta Admin', FALSE),
+  ('10000000-0000-4000-8000-000000000003', 'auth_user_local_gamma', 'gamma@meltiply.local', 'Gamma Editor', FALSE),
+  ('10000000-0000-4000-8000-000000000004', 'auth_user_local_delta', 'delta@meltiply.local', 'Delta Viewer', FALSE),
+  ('10000000-0000-4000-8000-000000000005', 'auth_user_local_epsilon', 'epsilon@meltiply.local', 'Epsilon Suspended', FALSE)
 ON CONFLICT (id) DO UPDATE
 SET auth_user_id = EXCLUDED.auth_user_id,
     email = EXCLUDED.email,
     display_name = EXCLUDED.display_name,
     updated_at = now();
+
+UPDATE users
+SET suspended_at = now() - interval '2 days',
+    suspension_reason = 'On leave — sample suspended member'
+WHERE id = '10000000-0000-4000-8000-000000000005';
+
+UPDATE users
+SET suspended_at = NULL,
+    suspension_reason = NULL
+WHERE id <> '10000000-0000-4000-8000-000000000005'
+  AND (suspended_at IS NOT NULL OR suspension_reason IS NOT NULL);
+
+UPDATE users
+SET installation_owner = FALSE
+WHERE installation_owner
+  AND id <> '10000000-0000-4000-8000-000000000001';
+UPDATE users
+SET installation_owner = TRUE
+WHERE id = '10000000-0000-4000-8000-000000000001';
 
 INSERT INTO organizations (
   id, name, slug, plan, billing_status,
@@ -95,41 +142,33 @@ SET name = EXCLUDED.name,
     billing_event_at = EXCLUDED.billing_event_at,
     updated_at = now();
 
--- The API auto-provisions a personal workspace (random id) on first sign-in.
--- Reseeding must address it by a stable id, so retire any random-id personal
--- workspace for the seeded users and replace it with the deterministic row.
--- Children cascade; this is fixture-only data on an ephemeral local database.
-DELETE FROM organizations
-WHERE personal_user_id IN (
-    '10000000-0000-4000-8000-000000000001',
-    '10000000-0000-4000-8000-000000000002'
-  )
-  AND id NOT IN (
-    '20000000-0000-4000-8000-000000000005',
-    '20000000-0000-4000-8000-000000000006'
-  );
+-- Exactly one shared Workspace. The deterministic id …0005 remains the
+-- day-to-day demo workspace and now holds every seeded role.
+UPDATE organizations
+SET is_shared = FALSE
+WHERE is_shared
+  AND id <> '20000000-0000-4000-8000-000000000005';
 
-INSERT INTO organizations (id, personal_user_id, name, slug, plan, billing_status)
+INSERT INTO organizations (id, name, slug, plan, billing_status, is_shared)
 VALUES
   (
     '20000000-0000-4000-8000-000000000005',
-    '10000000-0000-4000-8000-000000000001',
     'Alpha Creator''s workspace',
-    'personal-10000000000040008000000000000001',
+    'workspace-10000000000040008000000000000001',
     'creator',
-    'free'
+    'free',
+    TRUE
   ),
   (
     '20000000-0000-4000-8000-000000000006',
-    '10000000-0000-4000-8000-000000000002',
-    'Beta Creator''s workspace',
-    'personal-10000000000040008000000000000002',
+    'Beta Studio Archive',
+    'workspace-10000000000040008000000000000002',
     'free',
-    'free'
+    'free',
+    FALSE
   )
 ON CONFLICT (id) DO UPDATE
-SET personal_user_id = EXCLUDED.personal_user_id,
-    name = EXCLUDED.name,
+SET name = EXCLUDED.name,
     slug = EXCLUDED.slug,
     plan = EXCLUDED.plan,
     billing_status = EXCLUDED.billing_status,
@@ -145,8 +184,115 @@ VALUES
   ('30000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'admin'),
   ('30000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'admin'),
   ('30000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000001', 'admin'),
-  ('30000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000002', 'admin')
+  ('30000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000002', 'admin'),
+  ('30000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000003', 'editor'),
+  ('30000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000004', 'viewer'),
+  ('30000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000005', 'viewer')
 ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
+UPDATE organizations SET is_shared = TRUE
+WHERE id = '20000000-0000-4000-8000-000000000005';
+
+-- A pending invitation demonstrates the reserved-Seat, resend, and revoke UI.
+INSERT INTO workspace_invitations (
+  id, org_id, email, role, invited_by, token_hash, expires_at
+)
+VALUES (
+  'f0000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000005',
+  'pending.invitee@meltiply.local',
+  'editor',
+  '10000000-0000-4000-8000-000000000001',
+  'seed-pending-invitation-token-hash',
+  now() + interval '7 days'
+)
+ON CONFLICT (id) DO UPDATE
+SET email = EXCLUDED.email,
+    role = EXCLUDED.role,
+    invited_by = EXCLUDED.invited_by,
+    token_hash = EXCLUDED.token_hash,
+    expires_at = EXCLUDED.expires_at,
+    accepted_at = NULL,
+    revoked_at = NULL,
+    updated_at = now();
+
+-- Recent administrative history so the Audit tab is meaningful on first load.
+INSERT INTO workspace_audit_entries (
+  id, org_id, actor_user_id, actor_email, actor_display_name,
+  action, target_type, target_id, before_state, after_state, request_id, created_at
+)
+VALUES
+  (
+    'f0000000-0000-4000-8000-000000000011',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000001',
+    'alpha@meltiply.local',
+    'Alpha Creator',
+    'workspace.renamed',
+    'workspace',
+    '20000000-0000-4000-8000-000000000005',
+    '{"name":"Alpha''s workspace","slug":"personal-alpha"}'::jsonb,
+    '{"name":"Alpha Creator''s workspace","slug":"workspace-10000000000040008000000000000001"}'::jsonb,
+    'seed-admin-demo-rename',
+    now() - interval '6 days'
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000012',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000001',
+    'alpha@meltiply.local',
+    'Alpha Creator',
+    'invitation.created',
+    'invitation',
+    'f0000000-0000-4000-8000-000000000001',
+    NULL,
+    '{"email":"pending.invitee@meltiply.local","role":"editor"}'::jsonb,
+    'seed-admin-demo-invite',
+    now() - interval '5 days'
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000013',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000001',
+    'alpha@meltiply.local',
+    'Alpha Creator',
+    'member.role_changed',
+    'member',
+    '10000000-0000-4000-8000-000000000003',
+    '{"role":"viewer"}'::jsonb,
+    '{"role":"editor"}'::jsonb,
+    'seed-admin-demo-role',
+    now() - interval '4 days'
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000014',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000001',
+    'alpha@meltiply.local',
+    'Alpha Creator',
+    'account.suspended',
+    'member',
+    '10000000-0000-4000-8000-000000000005',
+    '{"status":"active"}'::jsonb,
+    '{"reason":"On leave — sample suspended member","status":"suspended"}'::jsonb,
+    'seed-admin-demo-suspend',
+    now() - interval '2 days'
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000015',
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000002',
+    'beta@meltiply.local',
+    'Beta Admin',
+    'invitation.revoked',
+    'invitation',
+    'f0000000-0000-4000-8000-000000000099',
+    '{"email":"former.member@meltiply.local","role":"viewer"}'::jsonb,
+    NULL,
+    'seed-admin-demo-revoke',
+    now() - interval '1 day'
+  )
+ON CONFLICT (id) DO NOTHING;
 
 -- Brand Profiles are the mandatory ownership boundary for assets, platform
 -- accounts, and distributions. The team-workspace profiles (a000…0001/0002)
@@ -212,7 +358,7 @@ VALUES
     'local-only-not-a-provider-credential',
     ARRAY['upload', 'analytics'],
     '{"fixture": true}'::jsonb,
-    'connected',
+    'revoked',
     now() - interval '26 hours'
   ),
   (
@@ -242,24 +388,11 @@ VALUES
     now() - interval '3 days'
   ),
   (
-    'e3000000-0000-4000-8000-000000000007',
-    '20000000-0000-4000-8000-000000000005',
-    'c0000000-0000-4000-8000-000000000001',
-    'instagram',
-    'local-instagram-alpha',
-    '@alpha.studio',
-    'local-only-not-a-provider-credential',
-    ARRAY['upload', 'analytics'],
-    '{"fixture": true}'::jsonb,
-    'connected',
-    now() - interval '2 hours'
-  ),
-  (
-    'e3000000-0000-4000-8000-000000000009',
+    'e3000000-0000-4000-8000-000000000001',
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
     'facebook',
-    'local-facebook-analytics-alpha',
+    'local-facebook-alpha',
     'Alpha Page',
     'local-only-not-a-provider-credential',
     ARRAY['upload', 'analytics'],
@@ -268,17 +401,30 @@ VALUES
     now() - interval '2 hours'
   ),
   (
-    'e3000000-0000-4000-8000-000000000008',
+    'e3000000-0000-4000-8000-000000000002',
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
-    'threads',
-    'local-threads-analytics-alpha',
-    '@alpha.threads',
+    'instagram',
+    'local-instagram-alpha',
+    NULL,
     'local-only-not-a-provider-credential',
     ARRAY['upload', 'analytics'],
     '{"fixture": true}'::jsonb,
     'connected',
-    now() - interval '2 hours'
+    now() - interval '1 day'
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'threads',
+    'local-threads-alpha',
+    '@alpha.threads',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload', 'analytics'],
+    '{"fixture": true}'::jsonb,
+    'expiring',
+    now() - interval '3 hours'
   )
 ON CONFLICT (platform, platform_user_id) DO UPDATE
 SET display_name = EXCLUDED.display_name,
@@ -815,7 +961,7 @@ VALUES
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
     '48000000-0000-4000-8000-000000000007',
-    'e3000000-0000-4000-8000-000000000007',
+    'e3000000-0000-4000-8000-000000000002',
     'instagram',
     'published',
     NULL,
@@ -831,7 +977,7 @@ VALUES
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
     '48000000-0000-4000-8000-000000000007',
-    'e3000000-0000-4000-8000-000000000008',
+    'e3000000-0000-4000-8000-000000000003',
     'threads',
     'published',
     NULL,
@@ -847,7 +993,7 @@ VALUES
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
     '48000000-0000-4000-8000-000000000008',
-    'e3000000-0000-4000-8000-000000000009',
+    'e3000000-0000-4000-8000-000000000001',
     'facebook',
     'published',
     NULL,
@@ -1028,9 +1174,10 @@ SET uploads = EXCLUDED.uploads,
 -- Post, a published + failed pair, a non-retryable failure, text-only and
 -- media-only compositions, ordered multi-attachment Posts, a caption that is
 -- only a long unbroken token, an empty caption, and attachments that are
--- processing or failed. The `e300…`/`e400…` accounts cover all five connection
--- states across all six Providers, and `c400…0001` adds a third Brand Profile so
--- profile grouping and the profile scope have more than two rows to show.
+-- processing or failed. The `e000…`/`e300…`/`e400…` accounts cover all five
+-- connection states across all five Providers without giving any Brand Profile
+-- two Channels on the same Provider, and `c400…0001` adds a third Brand Profile
+-- so profile grouping and the profile scope have more than two rows to show.
 --
 -- Ids are disjoint from the canonical team fixtures (orgs …0001/…0002), from
 -- every id the integration suites allocate, and from the retired ranges.
@@ -1048,11 +1195,25 @@ SET name = EXCLUDED.name,
     color = EXCLUDED.color,
     updated_at = now();
 
--- Every remaining Provider and connection state on the demo profiles, so
--- /channels and the composer's destination chips show connected, expiring,
--- expired, revoked, and reconnect-required accounts. `e300…0002` deliberately
--- carries no display name: the directory must fall back to the platform user id
--- rather than rendering an empty name cell.
+-- Additional Providers on the demo profiles, so /channels and the composer's
+-- destination chips show expiring, expired, and reconnect-required accounts
+-- alongside the revoked TikTok above. `e300…0002` deliberately carries no
+-- display name: the directory must fall back to the platform user id rather
+-- than rendering an empty name cell.
+--
+-- LinkedIn is not a supported Provider — the roster, the API contract, and the
+-- frontend label map carry the five platforms above — so retire the accounts an
+-- earlier seed created with that slug. `platform` is part of the upsert key
+-- below, so a retired row would collide on its primary key instead of
+-- converging. Its Post targets cascade away and its Distributions are re-pointed
+-- by the upserts later in this transaction; both ids are re-inserted on
+-- supported platforms.
+DELETE FROM platform_accounts
+WHERE platform = 'linkedin'
+  AND id IN (
+    'e3000000-0000-4000-8000-000000000002',
+    'e4000000-0000-4000-8000-000000000002'
+  );
 INSERT INTO platform_accounts (
   id, org_id, brand_profile_id, platform, platform_user_id, display_name,
   access_token, scopes, metadata, connection_status, last_synced_at, revoked_at
@@ -1076,11 +1237,11 @@ VALUES
     'e3000000-0000-4000-8000-000000000002',
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
-    'linkedin',
-    'local-linkedin-alpha',
+    'instagram',
+    'local-instagram-alpha',
     NULL,
     'local-only-not-a-provider-credential',
-    ARRAY['upload'],
+    ARRAY['upload', 'analytics'],
     '{"fixture": true}'::jsonb,
     'connected',
     now() - interval '1 day',
@@ -1094,27 +1255,14 @@ VALUES
     'local-threads-alpha',
     '@alpha.threads',
     'local-only-not-a-provider-credential',
-    ARRAY['upload'],
+    ARRAY['upload', 'analytics'],
     '{"fixture": true}'::jsonb,
     'expiring',
     now() - interval '3 hours',
     NULL
   ),
   (
-    'e3000000-0000-4000-8000-000000000004',
-    '20000000-0000-4000-8000-000000000005',
-    'c0000000-0000-4000-8000-000000000001',
-    'tiktok',
-    'local-tiktok-alpha-clips',
-    '@alpha.clips',
-    'local-only-not-a-provider-credential',
-    ARRAY['upload'],
-    '{"fixture": true}'::jsonb,
-    'revoked',
-    now() - interval '20 days',
-    now() - interval '20 days'
-  ),
-  (
+
     'e3000000-0000-4000-8000-000000000005',
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000002',
@@ -1160,8 +1308,8 @@ VALUES
     'e4000000-0000-4000-8000-000000000002',
     '20000000-0000-4000-8000-000000000005',
     'c4000000-0000-4000-8000-000000000001',
-    'linkedin',
-    'local-linkedin-labs',
+    'facebook',
+    'local-facebook-labs',
     'Alpha Labs',
     'local-only-not-a-provider-credential',
     ARRAY['upload'],
@@ -1614,7 +1762,7 @@ VALUES
   ('4b000000-0000-4000-8000-000000000005', 'e4000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c4000000-0000-4000-8000-000000000001', 'Labs target, no outcome', NULL, NULL),
   ('4b000000-0000-4000-8000-000000000006', 'e3000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000002', 'Permanent provider failure', NULL, NULL),
   ('4b000000-0000-4000-8000-000000000007', 'e0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Two channels, one revoked', NULL, NULL),
-  ('4b000000-0000-4000-8000-000000000007', 'e3000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Two channels, one revoked', NULL, ARRAY['d7000000-0000-4000-8000-000000000002']::uuid[])
+  ('4b000000-0000-4000-8000-000000000007', 'e0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000001', 'Two channels, one revoked', NULL, ARRAY['d7000000-0000-4000-8000-000000000002']::uuid[])
 ON CONFLICT (post_id, platform_account_id) DO UPDATE
 SET title_override = EXCLUDED.title_override,
     description_override = EXCLUDED.description_override,
@@ -1774,12 +1922,12 @@ VALUES
     'c0000000-0000-4000-8000-000000000001',
     '49000000-0000-4000-8000-000000000004',
     'e3000000-0000-4000-8000-000000000002',
-    'linkedin',
+    'instagram',
     'published',
     NULL,
     now() - interval '8 days',
-    'local-post-everywhere-linkedin',
-    'https://example.invalid/linkedin/local-post-everywhere-linkedin',
+    'local-post-everywhere-instagram',
+    'https://example.invalid/instagram/local-post-everywhere-instagram',
     'Everything, everywhere',
     NULL,
     NULL, 0, 1, now() - interval '8 days', NULL, NULL,
@@ -1869,7 +2017,7 @@ VALUES
     'c4000000-0000-4000-8000-000000000001',
     '49000000-0000-4000-8000-000000000008',
     'e4000000-0000-4000-8000-000000000002',
-    'linkedin',
+    'facebook',
     'scheduled',
     now() + interval '28 days',
     NULL, NULL, NULL,
@@ -1929,7 +2077,7 @@ VALUES
     'c0000000-0000-4000-8000-000000000001',
     '49000000-0000-4000-8000-000000000012',
     'e3000000-0000-4000-8000-000000000002',
-    'linkedin',
+    'instagram',
     'cancel_requested',
     now() + interval '2 days',
     NULL, NULL, NULL,
@@ -1992,7 +2140,7 @@ VALUES
     '20000000-0000-4000-8000-000000000005',
     'c0000000-0000-4000-8000-000000000001',
     '4b000000-0000-4000-8000-000000000007',
-    'e3000000-0000-4000-8000-000000000004',
+    'e0000000-0000-4000-8000-000000000002',
     'tiktok',
     'published',
     NULL,

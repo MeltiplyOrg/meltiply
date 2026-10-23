@@ -55,11 +55,13 @@ const queryBudgetClaims = {
 const queryBudgetActor: ResolvedActor = {
   authUserId: queryBudgetClaims.subject,
   claims: queryBudgetClaims,
+  displayName: "Query Budget User",
+  email: "query-budget@meltiply.local",
+  isInstallationOwner: false,
   role: "admin",
   userId: queryBudgetClaims.userId,
   workspace: {
     id: queryBudgetClaims.organizationId,
-    isPersonal: false,
     name: "Query Budget Studio",
     slug: "query-budget-studio",
   },
@@ -295,26 +297,32 @@ describeIntegration("core API PostgreSQL query budgets", () => {
   const assetId = "a1000000-0000-4000-8000-000000000001";
   const postId = "c0000000-0000-4000-8000-000000000001";
   const distributionId = "d1000000-0000-4000-8000-000000000001";
-  // Brand Profile owning every seeded post, asset, channel, and distribution in
-  // the query-budget workspace; mandatory ownership boundary for those rows.
+  // First Brand Profile in the query-budget workspace; owner of the scaled read
+  // fixture (assets, distributions, and their Posts). Profiles
+  // b4000…002–020 own the remaining scheduling pairs.
   const brandProfileId = "b4000000-0000-4000-8000-000000000001";
   let batchCreateSample = 0;
   let createSample = 0;
   let scheduledBatchCreateSample = 0;
   let uploadSample = 0;
-  // Forty-two saved Posts each targeting all twenty Channels: the
-  // multi-Channel scheduling budget is one Post producing twenty independent
-  // outcomes, so the measurement still spans a full page of targets per
-  // mutation. Each schedule route consumes its warmup call plus twenty
-  // measured samples, and a Post an earlier route already scheduled would
-  // exercise the reschedule path — set-based UPDATE and outbox replacement —
-  // instead of the create path this fixture exists to measure, so the two
-  // routes partition the ids disjointly: immediate schedules take 0–20 and
-  // deferred schedules take 21–41.
+  // Forty-two saved Posts, each owned by one of the twenty profile/Threads
+  // pairs and targeting that profile's single Channel: a Brand Profile owns at
+  // most one Channel per Provider, so a Post cannot fan out to twenty
+  // same-platform targets. Each schedule route consumes its warmup call plus
+  // twenty measured samples, and a Post an earlier route already scheduled
+  // would exercise the reschedule path — set-based UPDATE and outbox
+  // replacement — instead of the create path this fixture exists to measure,
+  // so the two routes partition the ids disjointly: immediate schedules take
+  // 0–20 and deferred schedules take 21–41.
   const scheduledPostIds = Array.from(
     { length: 42 },
     (_, index) => `c1000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
   );
+  // Posts cycle through the twenty profile/Threads pairs in the same order the
+  // fixture inserted them, so the owning Brand Profile is a function of the
+  // scheduled Post's index.
+  const scheduledPostProfileId = (index: number) =>
+    `b4000000-0000-4000-8000-${String((index % 20) + 1).padStart(12, "0")}`;
 
   /**
    * Gives each mutation sample independent monthly headroom outside measurement.
@@ -376,13 +384,16 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                'b1000000-0000-4000-8000-000000000001', 'admin'
              )`,
           );
+          // One Brand Profile owns at most one Channel per Provider, so the 20
+          // scaled accounts are split across 20 profiles: each owns exactly one
+          // YouTube read Channel and one Threads scheduling Channel.
           yield* client.query(
             `INSERT INTO brand_profiles (id, org_id, name, color)
-             VALUES (
-               'b4000000-0000-4000-8000-000000000001',
-               'b2000000-0000-4000-8000-000000000001',
-               'Query Budget Brand', '#1d4ed8'
-             )`,
+             SELECT
+               ('b4000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
+               'b2000000-0000-4000-8000-000000000001'::uuid,
+               'Query Budget Brand ' || item, '#1d4ed8'
+             FROM generate_series(1, 20) AS item`,
           );
           yield* client.query(
             `INSERT INTO platform_accounts
@@ -391,7 +402,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
              SELECT
                ('b5000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
                'b2000000-0000-4000-8000-000000000001'::uuid,
-               'b4000000-0000-4000-8000-000000000001'::uuid,
+               ('b4000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
                'youtube',
                'query-budget-youtube-' || item,
                'Query Budget Channel ' || item,
@@ -411,7 +422,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
              SELECT
                ('b6000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
                'b2000000-0000-4000-8000-000000000001'::uuid,
-               'b4000000-0000-4000-8000-000000000001'::uuid,
+               ('b4000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
                'threads',
                'query-budget-threads-' || item,
                'Query Budget Threads Channel ' || item,
@@ -499,38 +510,38 @@ describeIntegration("core API PostgreSQL query budgets", () => {
             FROM generate_series(1, $2::integer) AS item`,
             [fixturePrefix, fixtureCount],
           );
-          // Saved Posts carrying every Channel as a target: scheduling one of
-          // them resolves twenty independent outcomes per Post, which is the
-          // bounded per-mutation row count the budget asserts.
+          // Saved Posts each carrying their own Brand Profile's single Threads
+          // Channel as a target: scheduling one resolves one independent
+          // outcome per Post, which is the bounded per-mutation row count the
+          // budget asserts. Targets leave attachment_ids unset, so each Channel
+          // inherits the Post's text-only composition instead of inventing
+          // processed media.
           yield* client.query(
             `INSERT INTO posts
                (id, org_id, brand_profile_id, title, default_text, status)
              SELECT
                ('c1000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
                'b2000000-0000-4000-8000-000000000001'::uuid,
-               'b4000000-0000-4000-8000-000000000001'::uuid,
+               ('b4000000-0000-4000-8000-'
+                 || lpad((((item - 1) % 20) + 1)::text, 12, '0'))::uuid,
                'Query budget scheduled post ' || item,
                $1::text || item::text, 'draft'
             FROM generate_series(1, 42) AS item`,
             [fixturePrefix],
           );
-          // Saved Posts carrying every Threads Channel as a target: scheduling
-          // one of them resolves twenty independent outcomes per Post, which is
-          // the bounded per-mutation row count the budget asserts. Targets leave
-          // attachment_ids unset, so each Channel inherits the Post's
-          // text-only composition instead of inventing processed media.
           yield* client.query(
             `INSERT INTO post_targets
                (post_id, platform_account_id, org_id, brand_profile_id,
                 title_override)
              SELECT
                ('c1000000-0000-4000-8000-' || lpad(post_item::text, 12, '0'))::uuid,
-               ('b6000000-0000-4000-8000-' || lpad(account_item::text, 12, '0'))::uuid,
+               ('b6000000-0000-4000-8000-'
+                 || lpad((((post_item - 1) % 20) + 1)::text, 12, '0'))::uuid,
                'b2000000-0000-4000-8000-000000000001'::uuid,
-               'b4000000-0000-4000-8000-000000000001'::uuid,
+               ('b4000000-0000-4000-8000-'
+                 || lpad((((post_item - 1) % 20) + 1)::text, 12, '0'))::uuid,
                'Query budget target'
-            FROM generate_series(1, 42) AS post_item
-             CROSS JOIN generate_series(1, 20) AS account_item`,
+            FROM generate_series(1, 42) AS post_item`,
           );
           yield* client.query(
             `INSERT INTO analytics_snapshots
@@ -757,11 +768,10 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 1,
-        // 11 statements: org id check, idempotency reservation, workspace lock,
-        // Brand Profile guard, Post insert, attachment-set diff read,
-        // post_targets delete, the three grouped projection reads (attachments,
-        // targets, distributions), and complete idempotency.
-        maxStatements: 11,
+        // A text-only draft needs only the tenant check, idempotency reserve,
+        // Workspace lock, Brand Profile guard, Post insert, and idempotency
+        // completion; all response collections are known empty.
+        maxStatements: 6,
         minRows: 1,
         name: "post draft create",
         run: async () => {
@@ -783,9 +793,10 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 20,
-        // Scheduling 20 Channels must stay bounded rather than growing with the
-        // target count, and the fifteen statements this route issues are the
-        // same fifteen for one Channel as for twenty: org id check,
+        // Scheduling a Post's single Channel must stay bounded rather than
+        // growing with the workspace's Channel count, and the fifteen
+        // statements this route issues are the same fifteen regardless of how
+        // many Channels exist: org id check,
         // idempotency reservation, workspace lock, Post lock, Brand Profile
         // guard, saved-target read, attachment-id read, Channel read,
         // existing-outcome read, usage guard, the set-based Distribution
@@ -794,11 +805,10 @@ describeIntegration("core API PostgreSQL query budgets", () => {
         // from rows this transaction already read), and complete idempotency.
         // These text-only Posts select no media, so the rendition-candidate
         // read is skipped entirely and the bound sits at the real count: a
-        // per-target INSERT/UPDATE or per-target validation read would push a
-        // twenty-Channel schedule to roughly thirty-five statements and fail
-        // here.
+        // per-target INSERT/UPDATE or per-target validation read would add a
+        // statement per target and fail here.
         maxStatements: 15,
-        minRows: 20,
+        minRows: 1,
         name: "post schedule create",
         prepare: prepareMutationSample,
         run: async () => {
@@ -810,7 +820,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
               queryBudgetClaims,
               scheduledPostIds[sample]!,
               {
-                brandProfileId,
+                brandProfileId: scheduledPostProfileId(sample),
                 scheduledAt: null,
               },
               `query-budget-schedule-${sample}`,
@@ -826,7 +836,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
         // deferred to the sweep poller and the batch insert issues no statement
         // at all.
         maxStatements: 14,
-        minRows: 20,
+        minRows: 1,
         name: "scheduled post schedule create",
         prepare: prepareMutationSample,
         run: async () => {
@@ -838,7 +848,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
               queryBudgetClaims,
               scheduledPostIds[21 + sample]!,
               {
-                brandProfileId,
+                brandProfileId: scheduledPostProfileId(21 + sample),
                 scheduledAt: new Date("2099-01-01T00:00:00.000Z"),
               },
               `query-budget-scheduled-schedule-${sample}`,
@@ -849,12 +859,9 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 1,
-        // 12 statements: workspace lock, lazy quota reservation release,
-        // organization usage, idempotency reservation, Brand Profile guard,
-        // asset row insert, staging object insert, session insert, quota
-        // reservation insert, complete idempotency, session lock for the
-        // single-PUT grant, and the write-hold record on the staging row.
-        maxStatements: 12,
+        // Reuse the inserted session for grant planning: creation retains the
+        // quota checks and persisted staging write hold without a session read.
+        maxStatements: 11,
         minRows: 1,
         name: "upload session create",
         prepare: prepareMutationSample,

@@ -1,9 +1,9 @@
 import { createBetterAuth, type BetterAuthInstance } from "@meltiply/auth";
-import type { ApiWorkerEnv } from "./env";
+import { requiresEmailVerification, type ApiWorkerEnv } from "./env";
 import { sha256Hex } from "./crypto";
 import { allowedOriginsFor } from "./verifier-cache";
 import { createCloudflareMailSender, mailSenderConfiguration } from "./mail";
-import { ownerAuthHandler } from "./auth-policy";
+import { authPolicyHandler } from "./auth-policy";
 
 let betterAuthCached:
   | {
@@ -72,7 +72,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     env.BETTER_AUTH_URL?.trim() ||
     (env.PUBLIC_API_URL?.trim() ? env.PUBLIC_API_URL.trim() : undefined);
   const origins = env.ALLOWED_ORIGINS?.trim() || "";
-  const requireEmailVerification = !isLocalOrTest;
+  const requireEmailVerification = requiresEmailVerification(env);
   const senderAddress = mailSenderConfiguration(env);
   const mailUsable =
     senderAddress !== undefined && env.MAIL !== undefined && typeof env.MAIL.send === "function";
@@ -104,11 +104,18 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
   // Exception: dynamic import avoids loading pg in workerd unit test isolates
   const { systemPoolFor } = await import("./database");
   const database = systemPoolFor(env);
-  const auth = ownerAuthHandler(
+  const auth = authPolicyHandler(
     env,
     await createBetterAuth({
       baseURL,
       database,
+      isAccountActive: async (userId: string) => {
+        const result = await database.query<{ suspended_at: Date | string | null }>(
+          `SELECT suspended_at FROM users WHERE auth_user_id = $1 LIMIT 1`,
+          [userId],
+        );
+        return result.rows[0]?.suspended_at === null || result.rows[0] === undefined;
+      },
       ...(mailUsable
         ? {
             email: {
@@ -161,6 +168,7 @@ const AUTH_RATE_LIMITS: Record<string, AuthRateLimitRule> = {
   "send-verification-email": { maxAttempts: 5, windowSeconds: 3600 },
   "sign-in": { maxAttempts: 10, windowSeconds: 600 },
   "sign-up": { maxAttempts: 5, windowSeconds: 3600 },
+  "invitation-accept": { maxAttempts: 10, windowSeconds: 600 },
   "two-factor": { maxAttempts: 10, windowSeconds: 600 },
   "change-password": { maxAttempts: 10, windowSeconds: 600 },
 };

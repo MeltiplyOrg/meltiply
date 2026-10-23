@@ -167,13 +167,27 @@ callback paths under the deployment's public **API** origin:
 
 | Platform | Required configuration                                                                                                                                     | Callback path                        |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| TikTok   | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_MEDIA_URL_PREFIX`; Login Kit and `user.info.basic,video.publish` access                               | `/api/v1/platforms/tiktok/callback`  |
+| TikTok   | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`; Login Kit and `user.info.basic,video.publish` access                                                          | `/api/v1/platforms/tiktok/callback`  |
 | YouTube  | `YOUTUBE_SHORTS_CLIENT_ID`, `YOUTUBE_SHORTS_CLIENT_SECRET`; Google Web application client, enabled YouTube Data API v3, and permitted consent-screen users | `/api/v1/platforms/youtube/callback` |
 
-TikTok's media prefix must cover the API's `/api/v1/provider-media/` path on a
-verified domain. `TIKTOK_LIVE_ACCEPTED` and `YOUTUBE_LIVE_ACCEPTED` remain explicit
-deployment activation controls; tests do not enable them in an operator's `.env`.
-Never treat fixture credentials or a passing hosted gate as provider app approval.
+TikTok's media prefix defaults to
+`<PUBLIC_API_URL origin>/api/v1/provider-media/`. Leave `TIKTOK_MEDIA_URL_PREFIX`
+unset or blank for this default; API startup and release validation do not require
+an override. A nonblank override must be an exact HTTPS directory prefix with a
+trailing slash and must cover the media URLs emitted by the API. This setting
+does not change where Meltiply hosts media. The matching domain or URL prefix
+must still be verified in TikTok's developer portal; derivation does not perform
+or bypass verification.
+
+The [hosted configuration smoke](https://github.com/MeltiplyOrg/meltiply/actions/runs/39910725878)
+at `12b62be` exercised connection and refresh with no explicit prefix, then real
+adapter Direct Post validation with blank/default and explicit override prefixes.
+Media outside the selected prefix was rejected before provider HTTP; external
+TikTok responses were controlled, not live publishing.
+
+`TIKTOK_LIVE_ACCEPTED` and `YOUTUBE_LIVE_ACCEPTED` remain explicit deployment
+activation controls; tests do not enable them in an operator's `.env`. Never
+treat fixture credentials or a passing hosted gate as provider app approval.
 
 ## Verification boundary
 

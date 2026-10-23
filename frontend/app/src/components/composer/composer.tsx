@@ -21,6 +21,15 @@ import { Input } from "@meltiply/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { Alert } from "@meltiply/ui/alert";
+import {
+  CenterAlertDialog,
+  CenterAlertDialogCancel,
+  CenterAlertDialogContent,
+  CenterAlertDialogDescription,
+  CenterAlertDialogFooter,
+  CenterAlertDialogHeader,
+  CenterAlertDialogTitle,
+} from "@meltiply/ui/center-alert-dialog";
 
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { cn } from "@meltiply/ui/utils";
@@ -675,6 +684,16 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const tiktokRequirementsRef = useRef<Record<string, TikTokPublishingRequirements | null>>({});
   const [pendingOwnershipAssetIds, setPendingOwnershipAssetIds] = useState<string[] | null>(null);
   const [isDragActive, setDragActive] = useState(false);
+  /**
+   * Destination a composer-initiated navigation asked for while its unsaved
+   * work could not survive the unmount. The dialog stays until the creator
+   * saves a draft or explicitly discards; `null` means no departure is waiting.
+   */
+  const [pendingNavigation, setPendingNavigation] = useState<{
+    view: WorkspaceView;
+    options?: { search?: string };
+  } | null>(null);
+  const [isSavingBeforeLeave, setIsSavingBeforeLeave] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceTargetRef = useRef<string | null>(null);
@@ -2033,16 +2052,18 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * names its constraint.
    *
    * @param type - Submission mode: `'draft'`, `'schedule'`, or `'now'`.
+   * @returns True when the requested save/schedule/publish was accepted; false
+   *   on validation, identity change, or request failure, with every input kept.
    */
   const handleSubmit = useCallback(
-    async (type: PublishMode) => {
+    async (type: PublishMode): Promise<boolean> => {
       setErrorMessage(null);
       const errors = validateSubmission(type);
       setValidationErrors(errors);
-      if (errors.length > 0) return;
+      if (errors.length > 0) return false;
       // validateSubmission already reported the aggregate view as an error, so a
       // null selection cannot reach the scoped mutations.
-      if (selectedBrandProfileId === null) return;
+      if (selectedBrandProfileId === null) return false;
       const brandProfileId = selectedBrandProfileId;
       // Async completion must affect only the composition that submitted it.
       const recoveryNamespaceAtSubmit = recoveryNamespaceRef.current;
@@ -2103,7 +2124,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             },
           });
           if (controller.signal.aborted || composerIdentityRef.current !== composerIdentityAtSubmit)
-            return;
+            return false;
           const anchor = profileCopiesRef.current.get(brandProfileId);
           await refreshWorkspace();
           if (!succeeded) {
@@ -2113,7 +2134,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                 "Some profiles could not be completed. Completed profiles are kept; retry to finish the remaining work.",
               ),
             );
-            return;
+            return false;
           }
           clearRecoveryAfterSave(recoveryNamespaceAtSubmit);
           dirtyRef.current = false;
@@ -2133,7 +2154,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             resetComposer();
             onPostSuccess?.();
           }
-          return;
+          return true;
         }
         const saved = await persistPost(brandProfileId);
         setCreatedPostId(saved.id);
@@ -2152,7 +2173,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             variant: "success",
             description: t("Your post text, attachments, and channel settings are stored."),
           });
-          return;
+          return true;
         }
 
         await schedulePost.mutateAsync({
@@ -2190,8 +2211,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         );
         await refreshWorkspace();
         onPostSuccess?.();
+        return true;
       } catch (error) {
-        if (composerIdentityRef.current !== composerIdentityAtSubmit) return;
+        if (composerIdentityRef.current !== composerIdentityAtSubmit) return false;
         // A rejected mutation that carried structured per-field violations names
         // each one in the fix-list; anything else falls back to the masked
         // user-facing message so internals never surface.
@@ -2203,6 +2225,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             : [];
         if (details.length > 0) setValidationErrors(details);
         else setErrorMessage(userFacingErrorMessage(error, language));
+        return false;
       } finally {
         setIsSubmitting(false);
       }
@@ -2232,6 +2255,54 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       validateSubmission,
     ],
   );
+
+  /**
+   * Leaves for the waiting destination after the creator accepted the loss or
+   * the draft was saved; the guard is not re-evaluated because that decision
+   * already happened.
+   */
+  const continuePendingNavigation = useCallback(() => {
+    if (!pendingNavigation) return;
+    const { view, options } = pendingNavigation;
+    setPendingNavigation(null);
+    onNavigate?.(view, options);
+  }, [onNavigate, pendingNavigation]);
+
+  /**
+   * Routes composer-initiated navigation (Manage Queues, Add Channel) through
+   * an explicit decision when unmounting would destroy work that recovery
+   * cannot restore: without functional-storage consent nothing is persisted,
+   * so an unsaved composition survives only while this mount stays alive.
+   * Recoverable work leaves immediately and restores when the composer reopens.
+   *
+   * @param view - Workspace destination requested from inside the composer.
+   * @param options - Optional query deep link forwarded to the destination page.
+   */
+  const requestNavigate = useCallback(
+    (view: WorkspaceView, options?: { search?: string }) => {
+      if (!onNavigate) return;
+      if (isDirty && !functionalConsent) {
+        setPendingNavigation({ view, options });
+        return;
+      }
+      onNavigate(view, options);
+    },
+    [functionalConsent, isDirty, onNavigate],
+  );
+
+  /**
+   * Saves the composition as a draft, then leaves only when the server accepted
+   * it. Validation or request failures keep the creator in the composer with
+   * the existing inline errors instead of navigating away from unsaved work.
+   */
+  const saveDraftAndContinue = useCallback(async () => {
+    if (isSavingBeforeLeave) return;
+    setIsSavingBeforeLeave(true);
+    const saved = await handleSubmit("draft");
+    setIsSavingBeforeLeave(false);
+    if (saved) continuePendingNavigation();
+    else setPendingNavigation(null);
+  }, [continuePendingNavigation, handleSubmit, isSavingBeforeLeave]);
 
   const postLoadError = postQuery.error;
   const isPostLoading = postId !== null && !postQuery.data && !postLoadError;
@@ -2870,7 +2941,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             stretching to half the composer. Mobile retains the same DOM order. */}
         <div className="flex min-w-0 flex-col gap-6 @4xl:-my-1 @4xl:min-h-0 @4xl:w-85 @4xl:shrink-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:py-1 @4xl:pr-1 @4xl:pl-6">
           <DestinationSelector
-            onNavigate={onNavigate}
+            onNavigate={requestNavigate}
             selectedProfileIds={selectedProfileIds}
             onProfilesChange={(ids) => {
               setSelectedProfileIds(ids);
@@ -2946,7 +3017,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                     {t("Load more Queues")}
                   </Button>
                 )}
-                <Button variant="link" onClick={() => onNavigate?.("queues")}>
+                <Button variant="link" onClick={() => requestNavigate("queues")}>
                   {t("Manage Queues")}
                 </Button>
                 {postQuery.data?.queue_membership && (
@@ -3025,6 +3096,48 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             : publishModeAction(publishMode, postId, t)}
         </Button>
       </div>
+
+      {/* Navigation out of the composer unmounts it. With functional-storage
+          consent the recovery record restores the composition on return; without
+          it, leaving would silently destroy the creator's work, so the departure
+          waits for an explicit save-or-discard decision. */}
+      <CenterAlertDialog
+        open={pendingNavigation !== null}
+        onOpenChange={(open) => {
+          if (!open && !isSavingBeforeLeave) setPendingNavigation(null);
+        }}
+      >
+        <CenterAlertDialogContent>
+          <CenterAlertDialogHeader>
+            <CenterAlertDialogTitle>{t("Save this Post before leaving?")}</CenterAlertDialogTitle>
+            <CenterAlertDialogDescription>
+              {t(
+                "This composition has unsaved changes that cannot be restored after you leave. Save it as a draft, discard it, or keep editing.",
+              )}
+            </CenterAlertDialogDescription>
+          </CenterAlertDialogHeader>
+          <CenterAlertDialogFooter>
+            <CenterAlertDialogCancel disabled={isSavingBeforeLeave}>
+              {t("Keep editing")}
+            </CenterAlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isSavingBeforeLeave}
+              onClick={continuePendingNavigation}
+            >
+              {t("Discard and continue")}
+            </Button>
+            <Button
+              type="button"
+              disabled={isSavingBeforeLeave}
+              onClick={() => void saveDraftAndContinue()}
+            >
+              {isSavingBeforeLeave ? t("Saving…") : t("Save draft and continue")}
+            </Button>
+          </CenterAlertDialogFooter>
+        </CenterAlertDialogContent>
+      </CenterAlertDialog>
     </fieldset>
   );
 }

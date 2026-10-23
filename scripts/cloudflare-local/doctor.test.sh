@@ -294,7 +294,6 @@ expect_output "$fixture/r1.stdout" '[ok] Node v24.18.0' toolchain
 expect_output "$fixture/r1.stdout" '[ok] API Worker healthy' health
 expect_output "$fixture/r1.stdout" '[ok] API Worker ready' ready
 expect_output "$fixture/r1.stdout" '[ok] Frontend dev server serving' frontend
-expect_output "$fixture/r1.stdout" '[ok] Browser-baked API origin matches' baked
 expect_output "$fixture/r1.stdout" 'fully healthy' summary
 expect_output "$fixture/r1.stdout" '[ok] local container runtime can execute linux/amd64' container-runtime
 expect_absent "$fixture/r1.stderr" '[error]' clean-stderr

@@ -2415,54 +2415,177 @@ WHERE id IN (
   'd8000000-0000-4000-8000-000000000002'
 );
 
--- Account-level follower history for the demo workspace. Nine weekly points
--- give the dashboard a baseline before the 30-day window and enough range for
--- the 90-day chart. Values are deterministic per Platform so reseeding is
--- idempotent and screenshots remain stable.
-INSERT INTO platform_account_snapshots
-  (platform_account_id, org_id, followers, following, posts, captured_at)
-SELECT
-  account.id,
-  account.org_id,
-  (CASE account.platform
-    WHEN 'instagram' THEN 12400
-    WHEN 'threads' THEN 8300
-    WHEN 'facebook' THEN 5100
-    WHEN 'tiktok' THEN 21600
-    WHEN 'youtube' THEN 34800
-    ELSE 1000
-  END
-  + (account_row.ordinality * 137)
-  + (week.week * (CASE account.platform
-      WHEN 'instagram' THEN 42
-      WHEN 'threads' THEN 31
-      WHEN 'facebook' THEN 18
-      WHEN 'tiktok' THEN 96
-      WHEN 'youtube' THEN 125
-      ELSE 10
-    END)))::bigint,
-  NULL,
-  NULL,
-  now() - ((8 - week.week) * INTERVAL '7 days')
-FROM platform_accounts AS account
-JOIN LATERAL (
-  SELECT row_number() OVER (ORDER BY candidate.id) AS ordinality
-  FROM platform_accounts AS candidate
-  WHERE candidate.org_id = account.org_id
-    AND candidate.connection_status IN ('connected', 'expiring')
-) AS account_row ON account_row.ordinality = (
-  SELECT count(*) FROM platform_accounts AS prior
-  WHERE prior.org_id = account.org_id
-    AND prior.connection_status IN ('connected', 'expiring')
-    AND prior.id <= account.id
+-- Dense analytics campaign history. Only the personal demo workspace is touched;
+-- stable 4f1/f9/ae ids leave canonical integration fixtures and outcome examples
+-- alone. Thirty publications per Channel cover the last 90 days, with six older
+-- campaign checkpoints for the annual range. UTC hours vary across weekdays.
+-- A temporary roster keeps Posts, frozen media, targets, and metrics consistent.
+CREATE TEMP TABLE demo_analytics_campaign ON COMMIT DROP AS
+WITH channels (ordinal, account_id, campaign, multiplier) AS (
+  VALUES
+    (1, 'e3000000-0000-4000-8000-000000000001'::uuid, 'Community dispatch', 3),
+    (2, 'e3000000-0000-4000-8000-000000000002'::uuid, 'Studio journal', 5),
+    (3, 'e3000000-0000-4000-8000-000000000003'::uuid, 'Creator conversation', 2),
+    (4, 'e0000000-0000-4000-8000-000000000001'::uuid, 'Inside the launch', 12),
+    (5, 'e0000000-0000-4000-8000-000000000002'::uuid, 'One-minute workshop', 9),
+    (6, 'e3000000-0000-4000-8000-000000000006'::uuid, 'After-hours sessions', 7),
+    (7, 'e4000000-0000-4000-8000-000000000001'::uuid, 'Build log', 4)
+), publications AS (
+  SELECT channels.*, account.org_id, account.brand_profile_id, account.platform,
+    edition,
+    (ordinal * 100 + edition) AS fixture_number,
+    (date_trunc('day', now() AT TIME ZONE 'UTC')
+      - make_interval(days => CASE WHEN edition <= 30 THEN edition * 3 - 2
+                                  ELSE 90 + (edition - 30) * 30 END)
+      + make_interval(hours => 6 + ((edition * 7 + ordinal * 3) % 17)))
+      AT TIME ZONE 'UTC' AS published_at,
+    media.images, media.videos
+  FROM channels
+  JOIN platform_accounts AS account ON account.id = channels.account_id
+  CROSS JOIN generate_series(1, 36) AS editions(edition)
+  CROSS JOIN LATERAL (
+    SELECT
+      array_agg(asset.id ORDER BY asset.id) FILTER (WHERE asset.asset_type = 'image') AS images,
+      array_agg(asset.id ORDER BY asset.id) FILTER (WHERE asset.asset_type = 'video') AS videos
+    FROM assets AS asset
+    WHERE asset.brand_profile_id = account.brand_profile_id
+      AND asset.status = 'ready'
+  ) AS media
 )
-CROSS JOIN generate_series(0, 8) AS week(week)
-WHERE account.org_id = '20000000-0000-4000-8000-000000000005'
-  AND account.connection_status IN ('connected', 'expiring')
-ON CONFLICT (platform_account_id, captured_at) DO UPDATE
-SET followers = EXCLUDED.followers,
-    following = EXCLUDED.following,
-    posts = EXCLUDED.posts;
+SELECT *,
+  ('4f100000-0000-4000-8000-' || lpad(fixture_number::text, 12, '0'))::uuid AS post_id,
+  ('f9000000-0000-4000-8000-' || lpad(fixture_number::text, 12, '0'))::uuid AS distribution_id,
+  campaign || ' · ' || lpad(edition::text, 2, '0') AS title,
+  CASE
+    WHEN platform IN ('youtube', 'tiktok') AND videos IS NOT NULL THEN videos[1:1]
+    WHEN edition % 4 = 0 THEN ARRAY[]::uuid[]
+    WHEN edition % 4 = 1 AND cardinality(images) >= 2 THEN images[1:2]
+    WHEN edition % 4 = 2 AND videos IS NOT NULL THEN videos[1:1]
+    ELSE images[1:1]
+  END AS attachment_ids,
+  -- Different campaign shapes: a rising baseline, repeatable weekly variation,
+  -- occasional breakout posts, and quieter releases, never random fixtures.
+  (multiplier * (160 + (37 - edition) * 19 + (edition * 83 % 470))
+    * CASE WHEN edition % 11 = 0 THEN 5 WHEN edition % 7 = 0 THEN 0.35 ELSE 1 END)::bigint
+    AS final_views
+FROM publications;
+
+INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status, created_at)
+SELECT post_id, org_id, brand_profile_id, title,
+  campaign || ': ' || (ARRAY[
+    'A practical look behind the scenes, with the details that made the difference.',
+    'Three lessons from this week. What would you like us to explore next?',
+    'From the first sketch to the finished release — the full story.',
+    'A small experiment, a surprising result, and the next idea to try.'
+  ])[1 + edition % 4], 'active', published_at - interval '2 days'
+FROM demo_analytics_campaign
+ON CONFLICT (id) DO UPDATE
+SET title = EXCLUDED.title, default_text = EXCLUDED.default_text,
+    created_at = EXCLUDED.created_at, updated_at = now();
+
+INSERT INTO post_attachments (post_id, asset_id, org_id, brand_profile_id, position)
+SELECT campaign.post_id, attachment.asset_id, campaign.org_id, campaign.brand_profile_id,
+  (attachment.position - 1)::integer
+FROM demo_analytics_campaign AS campaign
+CROSS JOIN LATERAL unnest(campaign.attachment_ids) WITH ORDINALITY AS attachment(asset_id, position)
+ON CONFLICT (post_id, position) DO UPDATE SET asset_id = EXCLUDED.asset_id;
+
+INSERT INTO post_targets (
+  post_id, platform_account_id, org_id, brand_profile_id, title_override, attachment_ids
+)
+SELECT post_id, account_id, org_id, brand_profile_id, title, attachment_ids
+FROM demo_analytics_campaign
+ON CONFLICT (post_id, platform_account_id) DO UPDATE
+SET title_override = EXCLUDED.title_override, attachment_ids = EXCLUDED.attachment_ids,
+    updated_at = now();
+
+INSERT INTO distributions (
+  id, org_id, brand_profile_id, post_id, platform_account_id, platform, status,
+  published_at, platform_post_id, platform_url, title_override, attachment_ids, created_at
+)
+SELECT distribution_id, org_id, brand_profile_id, post_id, account_id, platform, 'published',
+  published_at, 'local-campaign-' || fixture_number,
+  'https://example.invalid/' || platform || '/local-campaign-' || fixture_number,
+  title, attachment_ids,
+  -- Historical imports must not consume the current period's publishing budget.
+  LEAST(published_at - interval '2 days',
+    date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' - interval '1 second')
+FROM demo_analytics_campaign
+ON CONFLICT (id) DO UPDATE
+SET published_at = EXCLUDED.published_at, attachment_ids = EXCLUDED.attachment_ids,
+    title_override = EXCLUDED.title_override, created_at = EXCLUDED.created_at,
+    updated_at = now();
+
+-- Three cumulative readings per publication show early pickup, growth, and the
+-- latest stored outcome. Saves/clicks remain null: seeded Providers do not track
+-- them. Recent posts compress checkpoints into their elapsed lifetime so even
+-- a reseed just after UTC midnight keeps all three readings after publication.
+INSERT INTO analytics_snapshots (
+  id, distribution_id, org_id, views, likes, comments, shares,
+  watch_time_sec, reach, impressions, snapshot_at
+)
+SELECT
+  ('ae000000-0000-4000-8000-' || lpad((fixture_number * 10 + reading.step)::text, 12, '0'))::uuid,
+  distribution_id, org_id,
+  (final_views * reading.fraction)::bigint,
+  (final_views * reading.fraction * (0.035 + (edition % 5) * 0.009))::bigint,
+  (final_views * reading.fraction * (0.003 + (edition % 3) * 0.002))::bigint,
+  (final_views * reading.fraction * (0.006 + (edition % 4) * 0.003))::bigint,
+  CASE WHEN platform IN ('youtube', 'tiktok') THEN (final_views * reading.fraction * 12)::bigint ELSE 0 END,
+  CASE WHEN platform IN ('youtube', 'tiktok', 'facebook') THEN (final_views * reading.fraction * 0.78)::bigint ELSE 0 END,
+  CASE WHEN platform IN ('youtube', 'tiktok', 'facebook') THEN (final_views * reading.fraction * 1.24)::bigint ELSE 0 END,
+  published_at + LEAST(reading.elapsed, (now() - interval '1 hour' - published_at) * reading.fraction)
+FROM demo_analytics_campaign
+CROSS JOIN (VALUES
+  (1, 0.15, interval '1 hour'),
+  (2, 0.48, interval '6 hours'),
+  (3, 1.0, interval '2 days')
+) AS reading(step, fraction, elapsed)
+ON CONFLICT (id) DO UPDATE
+SET views = EXCLUDED.views, likes = EXCLUDED.likes, comments = EXCLUDED.comments,
+    shares = EXCLUDED.shares, watch_time_sec = EXCLUDED.watch_time_sec,
+    reach = EXCLUDED.reach, impressions = EXCLUDED.impressions,
+    snapshot_at = EXCLUDED.snapshot_at;
+
+-- Daily follower readings in the 90-day window, weekly before it. Stable ids
+-- converge on reseed; history uses UTC midnight and today's reading is current.
+-- Campaign bursts and small dips vary by Channel.
+INSERT INTO platform_account_snapshots
+  (id, platform_account_id, org_id, followers, following, posts, captured_at, raw_data)
+SELECT
+  ('af000000-0000-4000-8000-' || lpad((channel.ordinal * 1000 + day.age)::text, 12, '0'))::uuid,
+  channel.account_id, channel.org_id,
+  (CASE channel.platform
+    WHEN 'instagram' THEN 12400 WHEN 'threads' THEN 8300 WHEN 'facebook' THEN 5100
+    WHEN 'tiktok' THEN 21600 WHEN 'youtube' THEN 34800
+  END + channel.account_rank * 137
+    + (56 - day.age) * channel.weekly_gain / 7.0
+    + sin(day.age / 4.0 + channel.ordinal) * channel.weekly_gain * 0.3
+    + CASE WHEN day.age < 18 THEN (18 - day.age) * channel.weekly_gain * 0.15 ELSE 0 END)::bigint,
+  120 + channel.ordinal * 31,
+  400 + (365 - day.age) / 3,
+  CASE WHEN day.age = 0 THEN now()
+    ELSE (date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => day.age))
+      AT TIME ZONE 'UTC' END,
+  '{"fixture": true, "seed": "analytics-campaign"}'::jsonb
+FROM (
+  SELECT roster.*, row_number() OVER (ORDER BY account_id) AS account_rank,
+    CASE platform WHEN 'instagram' THEN 42 WHEN 'threads' THEN 31
+      WHEN 'facebook' THEN 18 WHEN 'tiktok' THEN 96 WHEN 'youtube' THEN 125 END AS weekly_gain
+  FROM (
+    SELECT DISTINCT ordinal, account_id, org_id, platform
+    FROM demo_analytics_campaign
+  ) AS roster
+) AS channel
+CROSS JOIN (
+  SELECT generate_series(0, 90) AS age
+  UNION ALL
+  SELECT generate_series(97, 363, 7) AS age
+) AS day
+ON CONFLICT (id) DO UPDATE
+SET followers = EXCLUDED.followers, following = EXCLUDED.following,
+    posts = EXCLUDED.posts, captured_at = EXCLUDED.captured_at,
+    raw_data = EXCLUDED.raw_data;
 
 -- Usage meters for the demo workspace are written once, by the `usage_records`
 -- insert above the demo set: an hourly reconciliation recomputes them from the

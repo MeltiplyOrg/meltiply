@@ -42,6 +42,16 @@ first sign-in. These credentials are for local development only. Production
 installations create their own owner through the protected first-run setup described
 in [self-hosting](docs/self-hosting.md#authentication-invitations-and-owner-recovery).
 
+For visual Analytics development, the personal demo workspace includes 252 campaign
+publications across all three Brand Profiles and all five Platforms, with text,
+image, carousel, and video formats. Ninety days of dense publication history,
+older campaign checkpoints, three cumulative metric readings per publication,
+and daily/weekly follower history populate every range and filter without
+replacing the existing failure or awaiting-sync examples. Run `bun run db:seed`
+to refresh these deterministic fixtures in an existing local database; it does
+not reset the database. These historical imports do not consume the current
+period's publishing budget.
+
 ## Deployment targets
 
 Keep the [managed Cloudflare deployment](infra/cloudflare/README.md), or run the

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import {
   CalendarDays,
+  CalendarClock,
   Edit3,
   Trash2,
   RotateCw,
@@ -392,7 +393,9 @@ export interface PostDetailSurfaceProps {
  * rewrites another's result. Compact breadcrumb/action chrome frames flat
  * property rows, the full caption, ordered attachments, and real per-channel
  * outcomes; no task-only properties or editable publication status are copied
- * from the reference.
+ * from the reference. Every property row carries a leading icon in one fixed
+ * column so labels and values share an axis, and queue instants use the same
+ * minute-precision date format as the publish date.
  *
  * @param props - Inspected row, mutation scope, and the view's edit/delete routing.
  * @returns The inspector surface, or null before any row has been inspected.
@@ -406,7 +409,7 @@ export function usePostDetailSurface({
   onRequestDelete,
   extraActions,
 }: PostDetailSurfaceProps): PostDrawerSurface | null {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const post = useLatchedValue(livePost);
 
   const surface = useMemo(() => {
@@ -414,6 +417,7 @@ export function usePostDetailSurface({
 
     const caption = resolveRowCaption(post);
     const dateLabel = formatPostDate(post.date);
+    const assignedLabel = formatPostDate(post.post?.queue_membership?.assigned_at);
     const attachments = post.post?.attachments ?? [];
     const isDraft = post.post?.status === "draft";
     const cancellableIds = resolveCancellableDistributionIds(post);
@@ -507,40 +511,46 @@ export function usePostDetailSurface({
           </h2>
           <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-(length:--font-size-control)">
             <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-              <CircleDot className="size-3.5 text-ink-3" />
+              <CircleDot className="size-3.5 shrink-0 text-ink-3" />
               {t("Status")}
             </dt>
-            <dd>
+            <dd className="flex min-h-control items-center">
               <StatusBadge status={status} compact />
             </dd>
             <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-              <Share2 className="size-3.5 text-ink-3" />
+              <Share2 className="size-3.5 shrink-0 text-ink-3" />
               {t("Channels")}
             </dt>
-            <dd className="text-ink">
+            <dd className="flex min-h-control items-center text-ink">
               <RollingCount value={post.channels.length} />
             </dd>
             {dateLabel && (
               <>
                 <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-                  <CalendarDays className="size-3.5 text-ink-3" />
+                  <CalendarDays className="size-3.5 shrink-0 text-ink-3" />
                   {isDraft ? t("Created") : t("Publish date")}
                 </dt>
-                <dd className="text-ink">{dateLabel}</dd>
+                <dd className="flex min-h-control items-center text-ink">{dateLabel}</dd>
               </>
             )}
             {post.post?.queue_membership && (
               <>
-                <dt className="min-h-control text-ink-2">{t("Queue")}</dt>
-                <dd className="min-w-0 break-words text-ink">
-                  <Link className="text-accent-ink underline" to="/queues">
+                <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+                  <CalendarClock className="size-3.5 shrink-0 text-ink-3" />
+                  {t("Queue")}
+                </dt>
+                <dd className="flex min-h-control min-w-0 items-center text-ink">
+                  <Link className="min-w-0 break-words text-accent-ink underline" to="/queues">
                     {post.post.queue_membership.queue_name}
                   </Link>
                 </dd>
-                <dt className="min-h-control text-ink-2">{t("Assigned time")}</dt>
-                <dd className="text-ink">
-                  <time dateTime={post.post.queue_membership.assigned_at}>
-                    {new Date(post.post.queue_membership.assigned_at).toLocaleString(language)}
+                <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+                  <Clock className="size-3.5 shrink-0 text-ink-3" />
+                  {t("Assigned time")}
+                </dt>
+                <dd className="flex min-h-control items-center text-ink">
+                  <time className="tabular-nums" dateTime={post.post.queue_membership.assigned_at}>
+                    {assignedLabel ?? post.post.queue_membership.assigned_at}
                   </time>
                 </dd>
               </>
@@ -613,18 +623,7 @@ export function usePostDetailSurface({
         </>
       ),
     };
-  }, [
-    post,
-    livePost,
-    canMutate,
-    canDelete,
-    onClose,
-    onEdit,
-    onRequestDelete,
-    extraActions,
-    t,
-    language,
-  ]);
+  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, extraActions, t]);
 
   return surface;
 }

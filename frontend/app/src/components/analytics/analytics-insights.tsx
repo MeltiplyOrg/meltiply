@@ -1,12 +1,5 @@
-import { useState } from "react";
-import {
-  AnimatePresence,
-  LazyMotion,
-  domAnimation,
-  m,
-  useIsPresent,
-  useReducedMotion,
-} from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useReducedMotion } from "motion/react";
 import {
   Bar,
   BarChart,
@@ -24,8 +17,6 @@ import { Button } from "@meltiply/ui/button";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Card, CardContent, CardHeader, CardTitle } from "@meltiply/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@meltiply/ui/table";
-import { effectDurationMs } from "@meltiply/ui/effects";
-import { cn } from "@meltiply/ui/utils";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
@@ -44,6 +35,14 @@ import type {
 const GROUPINGS = ["day", "week", "month"] as const;
 
 type Grouping = (typeof GROUPINGS)[number];
+
+/**
+ * View-change timing for chart marks. One chart stays mounted while the
+ * previously displayed shape is sampled onto the destination's buckets and
+ * eased into place; this is the shared length for every chart that offers a
+ * view mode. Reduced motion renders the destination immediately instead.
+ */
+const CHART_MORPH_MS = 360;
 
 const PLATFORM_COLORS: Record<Platform, string> = {
   facebook: "var(--platform-facebook)",
@@ -173,73 +172,143 @@ function GroupingControl({
   );
 }
 
-/**
- * Retains the outgoing plot only for its crossfade. It becomes inert and hidden
- * from assistive technology immediately; the incoming plot alone owns hover and
- * keyboard interaction. Native reduced motion makes the same handoff instant.
- */
-function ChartViewLayer({ children }: { children: React.ReactNode }) {
-  const isPresent = useIsPresent();
-  const reduceMotion = useReducedMotion();
-  return (
-    <m.div
-      className="col-start-1 row-start-1 h-full min-h-0 min-w-0"
-      inert={!isPresent}
-      aria-hidden={!isPresent || undefined}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{
-        duration: reduceMotion ? 0 : effectDurationMs / 1000,
-        ease: "easeInOut",
-      }}
-    >
-      {children}
-    </m.div>
-  );
-}
-
-/**
- * Crossfades a chart's marks and axes as one fixed-height view when its grouping
- * changes. The controls stay mounted outside it. Initial mount is immediate;
- * interrupted selections retire through the same presence lifecycle, without
- * queued callbacks or interpolating unrelated day/week/month buckets.
- */
-function ChartViewTransition({
-  view,
-  children,
-  className,
-}: {
-  view: Grouping;
-  children: React.ReactNode;
-  className: string;
-}) {
-  return (
-    <div className={cn("grid min-w-0", className)}>
-      <LazyMotion features={domAnimation}>
-        <AnimatePresence initial={false}>
-          <ChartViewLayer key={view}>{children}</ChartViewLayer>
-        </AnimatePresence>
-      </LazyMotion>
-    </div>
-  );
-}
-
 /** Analytics-capable platforms in the cohort, in the shared display order. */
 function platformRows(dashboard: AnalyticsDashboard) {
   return dashboard.platforms.filter((row) => PLATFORMS.includes(row.platform));
 }
 
-/** Stacked publication counts per time bucket and Platform, crossfading on grouping changes. */
+/** One flat chart row: a category label plus numeric series fields. */
+type ChartRow = Record<string, number | string | null>;
+
+/**
+ * Reads a numeric series field at a normalized position across a row set,
+ * linearly between neighbouring buckets. This is how a coarser or finer
+ * grouping supplies the shape a morph starts from.
+ */
+function sampleRowField(rows: readonly ChartRow[], field: string, position: number): number {
+  if (rows.length === 0) return 0;
+  if (rows.length === 1) return Number(rows[0]?.[field] ?? 0);
+  const scaled = position * (rows.length - 1);
+  const lower = Math.floor(scaled);
+  const upper = Math.min(rows.length - 1, lower + 1);
+  const from = Number(rows[lower]?.[field] ?? 0);
+  const to = Number(rows[upper]?.[field] ?? 0);
+  return from + (to - from) * (scaled - lower);
+}
+
+/**
+ * Builds the first frame of a view change: the target rows, but with every
+ * numeric series sampled from the previously displayed shape. Labels are the
+ * target's, so the axis describes the destination while the marks travel.
+ */
+function morphStart(previous: readonly ChartRow[], target: readonly ChartRow[]): ChartRow[] {
+  return target.map((row, index) => {
+    const position = target.length > 1 ? index / (target.length - 1) : 0;
+    const start: ChartRow = {};
+    for (const [field, value] of Object.entries(row)) {
+      start[field] = typeof value === "number" ? sampleRowField(previous, field, position) : value;
+    }
+    return start;
+  });
+}
+
+/** Linear blend from `start` to `target`; non-numeric fields switch immediately. */
+function blendRows(
+  start: readonly ChartRow[],
+  target: readonly ChartRow[],
+  progress: number,
+): ChartRow[] {
+  return target.map((row, index) => {
+    const blended: ChartRow = {};
+    for (const [field, value] of Object.entries(row)) {
+      if (typeof value !== "number") {
+        blended[field] = value;
+        continue;
+      }
+      const from = Number(start[index]?.[field] ?? value);
+      blended[field] = from + (value - from) * progress;
+    }
+    return blended;
+  });
+}
+
+/**
+ * Morphs chart rows between view modes instead of swapping them.
+ *
+ * Recharts renders one mounted chart; this hook supplies the intermediate
+ * geometry, sampling the previous shape onto the new bucket positions and
+ * easing the values across {@link CHART_MORPH_MS}. A change that is not a view
+ * change (range, filters) renders immediately, an interrupted change continues
+ * from what is on screen, and reduced motion skips the interpolation.
+ */
+function useMorphedRows(target: readonly ChartRow[], view: Grouping, enabled: boolean): ChartRow[] {
+  const [rows, setRows] = useState<ChartRow[]>(() => [...target]);
+  const displayedRef = useRef<ChartRow[]>([...target]);
+  const viewRef = useRef(view);
+
+  useEffect(() => {
+    const changedView = viewRef.current !== view;
+    viewRef.current = view;
+    const previous = displayedRef.current;
+    displayedRef.current = [...target];
+    if (!changedView || !enabled || previous.length === 0) {
+      setRows([...target]);
+      return;
+    }
+    const start = morphStart(previous, target);
+    const begin = performance.now();
+    let frame = 0;
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - begin) / CHART_MORPH_MS);
+      const eased = progress < 0.5 ? 2 * progress * progress : 1 - (-2 * progress + 2) ** 2 / 2;
+      const next = progress >= 1 ? [...target] : blendRows(start, target, eased);
+      displayedRef.current = next;
+      setRows(next);
+      if (progress < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target, view, enabled]);
+
+  return rows;
+}
+
+/** Sum of the stacked series on one row, for a stable value-axis ceiling. */
+function stackedTotal(row: ChartRow, fields: readonly string[]): number {
+  return fields.reduce((sum, field) => sum + Number(row[field] ?? 0), 0);
+}
+
+/** Stacked publication counts per time bucket and Platform, morphing on grouping changes. */
 export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const [grouping, setGrouping] = useState<Grouping>("week");
-  const buckets = groupSeries(dashboard.series, grouping, language);
-  if (buckets.length === 0)
-    return <EmptyInsight message={t("No published posts in this range.")} />;
+  const reduceMotion = useReducedMotion() ?? false;
   const platforms = PLATFORMS.filter((platform) =>
     dashboard.series.some((row) => row.platform === platform && row.posts > 0),
   );
+  const buckets = useMemo(
+    () => groupSeries(dashboard.series, grouping, language),
+    [dashboard.series, grouping, language],
+  );
+  const rows = useMorphedRows(buckets, grouping, !reduceMotion);
+  // The value axis must cover both ends of the morph: the previous grouping's
+  // buckets supply the sampled start, so a coarse-to-fine change cannot clip the
+  // taller starting bars while they shrink into the new scale.
+  const previousGroupingRef = useRef(grouping);
+  const startBuckets = useMemo(
+    () => groupSeries(dashboard.series, previousGroupingRef.current, language),
+    [dashboard.series, language, grouping],
+  );
+  useEffect(() => {
+    previousGroupingRef.current = grouping;
+  }, [grouping]);
+  const postsMax = Math.max(
+    1,
+    ...buckets.map((row) => stackedTotal(row, platforms)),
+    ...startBuckets.map((row) => stackedTotal(row, platforms)),
+  );
+  if (buckets.length === 0)
+    return <EmptyInsight message={t("No published posts in this range.")} />;
   return (
     <InsightCard
       title={t("Posts over time")}
@@ -248,12 +317,18 @@ export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboar
       <div className="mb-2 flex justify-end">
         <GroupingControl grouping={grouping} onChange={setGrouping} />
       </div>
-      <ChartViewTransition view={grouping} className="h-64">
+      <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={buckets} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
+          <BarChart data={rows} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" />
             <XAxis dataKey="label" tickLine={false} axisLine={false} />
-            <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} />
+            <YAxis
+              allowDecimals={false}
+              tickLine={false}
+              axisLine={false}
+              width={32}
+              domain={[0, postsMax]}
+            />
             <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--hover)" }} />
             <Legend />
             {platforms.map((platform) => (
@@ -269,7 +344,7 @@ export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboar
             ))}
           </BarChart>
         </ResponsiveContainer>
-      </ChartViewTransition>
+      </div>
     </InsightCard>
   );
 }
@@ -420,13 +495,19 @@ function TrendTooltip({ active, label, payload }: TooltipProps) {
 /**
  * One trend chart for every stored metric. Cumulative changes are indexed to
  * 100 at the first measured period so views cannot flatten likes, comments, and
- * shares; hovering restores absolute values. Grouping changes crossfade the
- * plot and axes together, rather than morphing unrelated time buckets.
+ * shares; hovering restores absolute values. A grouping change reshapes the
+ * same mounted lines: the previous curve is sampled onto the new bucket
+ * positions and eased into the destination over the shared morph timing.
  */
 export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const [grouping, setGrouping] = useState<Grouping>("week");
-  const { data, metrics } = trendSeries(dashboard, grouping, language);
+  const reduceMotion = useReducedMotion() ?? false;
+  const { data, metrics } = useMemo(
+    () => trendSeries(dashboard, grouping, language),
+    [dashboard, grouping, language],
+  );
+  const rows = useMorphedRows(data, grouping, !reduceMotion);
   if (data.length === 0 || metrics.length === 0)
     return <EmptyInsight message={t("No measured changes in this range yet.")} />;
   return (
@@ -439,9 +520,9 @@ export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashb
       <div className="mb-2 flex justify-end">
         <GroupingControl grouping={grouping} onChange={setGrouping} />
       </div>
-      <ChartViewTransition view={grouping} className="h-72">
+      <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ bottom: 0, left: 0, right: 12, top: 8 }}>
+          <LineChart data={rows} margin={{ bottom: 0, left: 0, right: 12, top: 8 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" />
             <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} />
             <YAxis
@@ -468,7 +549,7 @@ export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashb
             ))}
           </LineChart>
         </ResponsiveContainer>
-      </ChartViewTransition>
+      </div>
       {/* A block wrapper keeps the visually hidden table from leaking its caption. */}
       <div className="sr-only">
         <table>

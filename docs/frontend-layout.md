@@ -30,6 +30,8 @@ The shell and drawer frames use the shared safe-area tokens for viewport cutouts
 
 Table, Grid, and Calendar day lists share real Post identity, selection, and supported actions. A partial selection leaves select-all visually unchecked. The shared bottom pill reports the actual selected count and opens the existing destructive confirmation.
 
+Post collection reads request at most 60 records at a time. Grid renders at most 60 matching cards, with Previous page, a page number, and Next page beneath the cards; page changes return its viewport to the top. Table keeps loaded rows and appends the next batch only through its bottom Load more button, which remains reachable outside the horizontally wide table. Presentation filters operate on the loaded collection and reset Grid to its first page; navigation remains reachable when no loaded rows match. Calendar retains its separately bounded month event query.
+
 All three views load inside the same frame they resolve into: while a query is pending, the page header reports the loading state instead of a zero count, the toolbar and table head stay mounted, the Table renders its real column slots as placeholder rows, the Grid renders placeholder cards with the `PostCard` anatomy, and the Calendar keeps its real period controls and dates with placeholder chips. The shell's own frame covers the session and route-chunk waits as one shape (`WorkspaceLoadingSkeleton`, painted from `index.html` before the module graph arrives), and the header's workspace name holds a placeholder bar until the Brand Profile resolves. Loading therefore never changes the page's height, columns, or scrollbars.
 
 ### Channels

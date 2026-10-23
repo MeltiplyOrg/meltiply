@@ -62,6 +62,14 @@ In **Posts → Grid**, each card has a compact bottom row for views, likes,
 comments, and shares, with an icon before each value. Counts stay on one line;
 drafts, unpublished Posts, and unmeasured counters show a dash rather than zero.
 
+Posts loads 60 records at a time. In **Grid**, use **Previous page** and **Next
+page** beneath the cards; each page shows at most 60 cards. In **Table**, **Load
+more** appends the next batch without replacing existing rows. Filters apply to
+the loaded Posts and reset the Grid to page one. Fetched pages are reused from
+the browser's memory cache across view and route changes; inactive cached pages
+expire after 30 minutes. They are not saved across a browser reload. Publishing
+progress and mutations still refresh cached data.
+
 Open a published Post from **Posts** to see its latest totals and two line charts:
 
 - **Engagement over time** shows likes, comments, and shares.

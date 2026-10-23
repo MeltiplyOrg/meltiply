@@ -1654,8 +1654,40 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         impressions: 320,
         reach: 108,
       });
+      expect(page.posts.find((post) => post.id === postIds[0])?.distribution_analytics).toEqual([
+        {
+          analytics: {
+            likes: 7,
+            comments: 2,
+            shares: 1,
+            saves: null,
+            clicks: null,
+            views: 10,
+            impressions: 20,
+            reach: 8,
+          },
+          distribution_id: distributionIds[1],
+          platform: "tiktok",
+        },
+        {
+          analytics: {
+            likes: 10,
+            comments: 0,
+            shares: 2,
+            saves: null,
+            clicks: null,
+            views: 200,
+            impressions: 300,
+            reach: 100,
+          },
+          distribution_id: distributionIds[0],
+          platform: "youtube",
+        },
+      ]);
       expect(page.posts.find((post) => post.id === postIds[1])?.analytics).toBeNull();
+      expect(page.posts.find((post) => post.id === postIds[1])?.distribution_analytics).toEqual([]);
       expect(page.posts.find((post) => post.id === postIds[2])?.analytics).toBeNull();
+      expect(page.posts.find((post) => post.id === postIds[2])?.distribution_analytics).toEqual([]);
       expect(page.posts.find((post) => post.id === postIds[3])?.analytics).toEqual({
         likes: 0,
         comments: 0,
@@ -1666,6 +1698,22 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         impressions: 0,
         reach: 0,
       });
+      expect(page.posts.find((post) => post.id === postIds[3])?.distribution_analytics).toEqual([
+        {
+          analytics: {
+            likes: 0,
+            comments: 0,
+            shares: 0,
+            saves: null,
+            clicks: null,
+            views: 0,
+            impressions: 0,
+            reach: 0,
+          },
+          distribution_id: distributionIds[4],
+          platform: "youtube",
+        },
+      ]);
       await expect(Effect.runPromise(posts.getPost(env, beta, postIds[0]!))).rejects.toMatchObject({
         status: 404,
       });

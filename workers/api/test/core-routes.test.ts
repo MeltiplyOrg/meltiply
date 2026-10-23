@@ -170,6 +170,7 @@ const asset: components["schemas"]["Asset"] = {
 // saved Channel yet, which is the state every composer route must support.
 const post: components["schemas"]["Post"] = {
   analytics: null,
+  distribution_analytics: [],
   attachments: [{ asset_id: asset.id, asset, position: 0 }],
   brand_profile_id: brandProfileId,
   created_at: "2026-07-18T00:00:00.000Z",

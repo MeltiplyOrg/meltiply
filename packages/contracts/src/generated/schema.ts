@@ -2540,10 +2540,24 @@ export interface components {
              *     explicitly measured zero remains zero. Unsupported metrics are null.
              */
             analytics: components["schemas"]["PostAnalytics"] | null;
+            /**
+             * @description Latest measured snapshot for each published Distribution, ordered
+             *     by Platform then Distribution id. Empty when no published Channel
+             *     has a stored snapshot. A Distribution with no snapshot is omitted,
+             *     so the inspector can distinguish awaiting sync from a measured
+             *     zero; this is the per-Channel source of `analytics`.
+             */
+            distribution_analytics: components["schemas"]["PostDistributionAnalytics"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        PostDistributionAnalytics: {
+            /** Format: uuid */
+            distribution_id: string;
+            platform: components["schemas"]["Platform"];
+            analytics: components["schemas"]["PostAnalytics"];
         };
         /**
          * @description Latest measured counters summed across a Post's published Channels.

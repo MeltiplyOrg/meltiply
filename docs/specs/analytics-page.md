@@ -47,7 +47,8 @@ Contract change: approved in conversation on 2026-10-19
 > Brand Profile in the filter builder because it is the page's profile selector
 > (the workspace header only displays the active profile), restores stored
 > analytics in the published Post detail surface alongside the existing Posts
-> table columns, and adds Reach, Impressions, and an engagement rate to the
+> table columns, including a per-Channel bar comparison for views, likes,
+> comments, or shares, and adds Reach, Impressions, and an engagement rate to the
 > dashboard platform breakdown. These supersede the "Metrics", "Posts surface",
 > and "second profile selector" statements below. The toolbar disables its
 > Platform filter when no connected channel reports analytics; the platform

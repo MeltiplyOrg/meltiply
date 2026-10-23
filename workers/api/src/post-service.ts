@@ -171,14 +171,17 @@ interface PendingTargetRow extends ResolvedTargetRow {
 
 interface PostCollections {
   analytics: Map<string, Schemas["PostAnalytics"]>;
+  analyticsByDistribution: Map<string, Schemas["PostDistributionAnalytics"][]>;
   attachments: Map<string, Schemas["PostAttachment"][]>;
   distributions: Map<string, Schemas["Distribution"][]>;
   targets: Map<string, Schemas["PostTarget"][]>;
 }
 
-/** Latest measured counters grouped by Post; PostgreSQL SUM(bigint) returns numeric text. */
+/** One published Distribution's latest measured counters; PostgreSQL bigint columns return text. */
 interface PostAnalyticsRow extends Record<string, unknown> {
   post_id: string;
+  distribution_id: string;
+  platform: Platform;
   likes: number | string;
   comments: number | string;
   shares: number | string;
@@ -265,6 +268,7 @@ function loadPostCollectionsEffect(
   return Effect.gen(function* () {
     const collections: PostCollections = {
       analytics: new Map(),
+      analyticsByDistribution: new Map(),
       attachments: preloads.attachments ?? new Map(),
       distributions: preloads.distributions ?? new Map(),
       targets: preloads.targets ?? new Map(),
@@ -330,14 +334,13 @@ function loadPostCollectionsEffect(
       }
     }
     if (hasPublishedDistribution) {
+      // One latest-snapshot probe per published Distribution, then the Post
+      // totals are summed in memory. Keeping the per-Distribution rows lets
+      // the inspector compare Channels without a second query or endpoint.
       const analyticsRows = yield* client.query<PostAnalyticsRow>(
-        `SELECT d.post_id,
-                SUM(snapshot.likes) AS likes,
-                SUM(snapshot.comments) AS comments,
-                SUM(snapshot.shares) AS shares,
-                SUM(snapshot.views) AS views,
-                SUM(snapshot.impressions) AS impressions,
-                SUM(snapshot.reach) AS reach
+        `SELECT d.post_id, d.id AS distribution_id, d.platform,
+                snapshot.likes, snapshot.comments, snapshot.shares,
+                snapshot.views, snapshot.impressions, snapshot.reach
            FROM distributions d
            JOIN LATERAL (
              SELECT likes, comments, shares, views, impressions, reach
@@ -347,11 +350,11 @@ function loadPostCollectionsEffect(
               LIMIT 1
            ) snapshot ON true
           WHERE d.post_id = ANY($1::uuid[]) AND d.status = 'published'
-          GROUP BY d.post_id`,
+          ORDER BY d.post_id, d.platform, d.id`,
         [postIds],
       );
       for (const row of analyticsRows.rows) {
-        collections.analytics.set(row.post_id, {
+        const analytics: Schemas["PostAnalytics"] = {
           likes: Number(row.likes),
           comments: Number(row.comments),
           shares: Number(row.shares),
@@ -360,6 +363,25 @@ function loadPostCollectionsEffect(
           views: Number(row.views),
           impressions: Number(row.impressions),
           reach: Number(row.reach),
+        };
+        const channelRows = collections.analyticsByDistribution.get(row.post_id) ?? [];
+        channelRows.push({
+          analytics,
+          distribution_id: row.distribution_id,
+          platform: row.platform,
+        });
+        collections.analyticsByDistribution.set(row.post_id, channelRows);
+
+        const totals = collections.analytics.get(row.post_id);
+        collections.analytics.set(row.post_id, {
+          likes: (totals?.likes ?? 0) + (analytics.likes ?? 0),
+          comments: (totals?.comments ?? 0) + (analytics.comments ?? 0),
+          shares: (totals?.shares ?? 0) + (analytics.shares ?? 0),
+          saves: null,
+          clicks: null,
+          views: (totals?.views ?? 0) + (analytics.views ?? 0),
+          impressions: (totals?.impressions ?? 0) + (analytics.impressions ?? 0),
+          reach: (totals?.reach ?? 0) + (analytics.reach ?? 0),
         });
       }
     }
@@ -381,6 +403,7 @@ function loadPostCollectionsEffect(
 function assemblePost(row: PostRow, collections: PostCollections): Post {
   return {
     analytics: collections.analytics.get(row.id) ?? null,
+    distribution_analytics: collections.analyticsByDistribution.get(row.id) ?? [],
     attachments: collections.attachments.get(row.id) ?? [],
     brand_profile_id: row.brand_profile_id,
     created_at: isoDateTime(row.created_at),

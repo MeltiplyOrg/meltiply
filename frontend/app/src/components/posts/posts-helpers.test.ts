@@ -403,6 +403,41 @@ describe("resolvePostAnalytics", () => {
     expect(analytics.untracked).toEqual(["saves", "clicks", "impressions", "reach"]);
   });
 
+  it("exposes published Channel snapshots for the inspector comparison", () => {
+    const youtube = { ...baseDistribution, id: "dist-youtube", platform: "youtube" as const };
+    const tiktok = { ...baseDistribution, id: "dist-tiktok", platform: "tiktok" as const };
+    const analytics = resolvePostAnalytics(
+      postRow({
+        channels: [
+          channelItem({ status: "published", distribution: youtube }),
+          channelItem({ status: "published", distribution: tiktok }),
+        ],
+        post: {
+          ...basePost,
+          analytics: { ...measured },
+          distribution_analytics: [
+            { distribution_id: youtube.id, platform: "youtube", analytics: { ...measured } },
+            {
+              distribution_id: tiktok.id,
+              platform: "tiktok",
+              analytics: { ...measured, likes: 4 },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(analytics.channels).toEqual([
+      { id: youtube.id, platform: "youtube", label: "YouTube", analytics: { ...measured } },
+      {
+        id: tiktok.id,
+        platform: "tiktok",
+        label: "TikTok",
+        analytics: { ...measured, likes: 4 },
+      },
+    ]);
+  });
+
   it("hides analytics for drafts and pending Posts even with a stale aggregate", () => {
     const aggregate = { ...measured };
     const draft = postRow({

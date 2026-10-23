@@ -4401,6 +4401,7 @@ components:
           targets,
           distributions,
           analytics,
+          distribution_analytics,
           created_at,
           updated_at,
         ]
@@ -4468,12 +4469,34 @@ components:
             read in the same scoped Post batch. Null when no published Channel
             has measurements. Missing measurements do not become zero; an
             explicitly measured zero remains zero. Unsupported metrics are null.
+        distribution_analytics:
+          type: array
+          description: |
+            Latest measured snapshot for each published Distribution, ordered
+            by Platform then Distribution id. Empty when no published Channel
+            has a stored snapshot. A Distribution with no snapshot is omitted,
+            so the inspector can distinguish awaiting sync from a measured
+            zero; this is the per-Channel source of `analytics`.
+          items:
+            $ref: "#/components/schemas/PostDistributionAnalytics"
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    PostDistributionAnalytics:
+      type: object
+      additionalProperties: false
+      required: [distribution_id, platform, analytics]
+      properties:
+        distribution_id:
+          type: string
+          format: uuid
+        platform:
+          $ref: "#/components/schemas/Platform"
+        analytics:
+          $ref: "#/components/schemas/PostAnalytics"
     PostAnalytics:
       type: object
       additionalProperties: false

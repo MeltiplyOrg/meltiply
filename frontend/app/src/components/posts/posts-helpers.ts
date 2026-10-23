@@ -1,4 +1,5 @@
-import type { Distribution, Post, PostAttachment, PostTarget } from "@/types";
+import { platformDisplayName } from "@/lib/platforms";
+import type { Distribution, Platform, Post, PostAttachment, PostTarget } from "@/types";
 import type { ChannelMediaItem, FilterCriteria, PostRow, PostSelectionEntry } from "./types";
 
 /**
@@ -113,6 +114,16 @@ export interface PostAnalyticsMetric {
   value: number;
 }
 
+/** One published Channel's latest stored counters, ready for the inspector chart. */
+export interface PostChannelAnalytics {
+  /** Distribution id; stable join key to the row's Channel outcome. */
+  id: string;
+  platform: Platform;
+  /** Saved Channel name, falling back to the Platform display name. */
+  label: string;
+  analytics: NonNullable<Post["analytics"]>;
+}
+
 /** What the Post inspector may show about one Post's stored analytics. */
 export interface PostAnalyticsSummary {
   /** Analytics belongs to a Post only once at least one Channel published. */
@@ -121,6 +132,8 @@ export interface PostAnalyticsSummary {
   awaiting: boolean;
   /** Measured counters in the Posts column order; unmeasured counters are omitted. */
   metrics: readonly PostAnalyticsMetric[];
+  /** Per-Channel latest snapshots, ordered by Platform then Distribution id. */
+  channels: readonly PostChannelAnalytics[];
   /** Counters no connected provider measured; named in the inspector footnote. */
   untracked: readonly PostAnalyticsMetric["id"][];
 }
@@ -150,7 +163,24 @@ export function resolvePostAnalytics(row: PostRow): PostAnalyticsSummary {
     if (value === null) untracked.push(id);
     else metrics.push({ id, value });
   }
-  return { awaiting: visible && metrics.length === 0, metrics, untracked, visible };
+  const channels: PostChannelAnalytics[] = (row.post?.distribution_analytics ?? []).map((item) => {
+    const outcome = row.channels.find(
+      (channel) => channel.distribution?.id === item.distribution_id,
+    );
+    return {
+      id: item.distribution_id,
+      platform: item.platform,
+      label: outcome?.integration?.name ?? platformDisplayName(item.platform),
+      analytics: item.analytics,
+    };
+  });
+  return {
+    awaiting: visible && metrics.length === 0,
+    channels,
+    metrics,
+    untracked,
+    visible,
+  };
 }
 
 /**

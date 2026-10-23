@@ -114,6 +114,7 @@ afterEach(() => {
 
 const hydratedPost: Post = {
   analytics: null,
+  distribution_analytics: [],
   id: "post-hydrated",
   org_id: "org-1",
   brand_profile_id: "profile-a",

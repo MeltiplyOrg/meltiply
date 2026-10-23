@@ -1,78 +1,94 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vite-plus/test";
-
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { PostAnalyticsSection } from "./post-analytics-section";
 import type { PostAnalyticsSummary } from "./posts-helpers";
-import type { Post } from "@/types";
 
-const counters = {
-  likes: 12,
-  comments: 2,
-  shares: 3,
-  saves: null,
-  clicks: null,
-  views: 250,
-  impressions: 300,
-  reach: 100,
-} satisfies NonNullable<Post["analytics"]>;
+const state = vi.hoisted(() => ({
+  isPending: false,
+  isError: false,
+  refetch: vi.fn(),
+  data: [
+    {
+      snapshots: [
+        {
+          id: "s1",
+          distribution_id: "d1",
+          post_id: "p1",
+          likes: 12,
+          comments: 2,
+          shares: 3,
+          views: 250,
+          reach: 100,
+          impressions: 300,
+          watch_time_sec: 0,
+          snapshot_at: "2026-07-01T10:00:00Z",
+        },
+      ],
+    },
+  ],
+}));
+vi.mock("@/hooks/use-session-scope", () => ({
+  useSessionScope: () => ({ isSignedIn: true, workspaceId: "w1" }),
+}));
+vi.mock("@/lib/queries", () => ({ usePostAnalyticsHistory: () => state }));
 
 const summary: PostAnalyticsSummary = {
   awaiting: false,
   channels: [
     {
-      analytics: { ...counters, likes: 10, views: 200 },
-      id: "dist-youtube",
+      id: "d1",
       label: "YouTube",
       platform: "youtube",
-    },
-    {
-      analytics: { ...counters, likes: 2, views: 50 },
-      id: "dist-tiktok",
-      label: "TikTok",
-      platform: "tiktok",
+      analytics: {
+        likes: 12,
+        comments: 2,
+        shares: 3,
+        views: 250,
+        reach: 100,
+        impressions: 300,
+        saves: null,
+        clicks: null,
+      },
     },
   ],
-  metrics: [
-    { id: "likes", value: 12 },
-    { id: "comments", value: 2 },
-    { id: "shares", value: 3 },
-    { id: "views", value: 250 },
-  ],
-  untracked: ["saves", "clicks", "impressions", "reach"],
+  metrics: [{ id: "views", value: 250 }],
+  untracked: ["saves", "clicks"],
   visible: true,
 };
-
 afterEach(() => {
   cleanup();
+  state.isError = false;
+  state.isPending = false;
 });
 
-describe("post analytics section", () => {
-  it("shows totals and a per-Channel bar comparison for the selected metric", () => {
+describe("Post analytics timelines", () => {
+  it("exposes engagement and exposure measurements separately, including a single snapshot", () => {
     render(<PostAnalyticsSection analytics={summary} />);
-
-    expect(screen.getByRole("heading", { name: "Analytics" })).toBeInTheDocument();
-    expect(screen.getByText("250")).toBeInTheDocument();
-    const channels = screen.getByRole("list", { name: "Channels" });
-    expect(within(channels).getByText("YouTube")).toBeInTheDocument();
-    expect(within(channels).getByText("TikTok")).toBeInTheDocument();
-    expect(within(channels).getByText("200")).toBeInTheDocument();
-    expect(within(channels).getByText("50")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Likes" }));
-    expect(within(channels).getByText("10")).toBeInTheDocument();
-    expect(within(channels).getByText("2")).toBeInTheDocument();
+    const engagement = screen.getByRole("table", { name: "Engagement over time" });
+    expect(within(engagement).getByRole("cell", { name: "12" })).toBeInTheDocument();
+    expect(within(engagement).getByRole("cell", { name: "2" })).toBeInTheDocument();
+    expect(within(engagement).getByRole("cell", { name: "3" })).toBeInTheDocument();
+    const exposure = screen.getByRole("table", { name: "Reach & impressions over time" });
+    expect(within(exposure).getByRole("cell", { name: "100" })).toBeInTheDocument();
+    expect(within(exposure).getByRole("cell", { name: "300" })).toBeInTheDocument();
   });
-
-  it("renders the awaiting state without inventing a chart", () => {
+  it("keeps failed history distinct from a measured zero and offers retry", () => {
+    state.isError = true;
+    render(<PostAnalyticsSection analytics={summary} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Analytics could not be loaded");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(state.refetch).toHaveBeenCalledOnce();
+  });
+  it("does not draw untracked reach as measured zero", () => {
     render(
-      <PostAnalyticsSection
-        analytics={{ ...summary, awaiting: true, channels: [], metrics: [] }}
-      />,
+      <PostAnalyticsSection analytics={{ ...summary, untracked: ["reach", "impressions"] }} />,
     );
-
-    expect(screen.getByText("Metrics appear after the first provider sync.")).toBeInTheDocument();
-    expect(screen.queryByRole("list", { name: "Channels" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("table", { name: "Reach & impressions over time" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Not measured")).toBeInTheDocument();
   });
 });

@@ -80,6 +80,7 @@ import {
   getInvitationPreview,
   getOAuthSelection,
   getDistribution,
+  getDistributionAnalytics,
   getPlatformPublishingRequirements,
   getPost,
   getUploadSession,
@@ -298,6 +299,10 @@ export interface ApiClientServiceShape {
     params: AnalyticsPostsQueryParams,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<AnalyticsPostsResponse>;
+  readonly getDistributionAnalytics: (
+    id: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<components["schemas"]["AnalyticsSnapshotsResponse"]>;
   readonly listWorkspaceMembers: (
     workspaceId: string,
     options?: ApiRequestOptions,
@@ -432,6 +437,7 @@ export function createApiClientServiceTest(
     getAnalyticsSummary: unstubbed("getAnalyticsSummary"),
     getCurrentUser: unstubbed("getCurrentUser"),
     getDistribution: unstubbed("getDistribution"),
+    getDistributionAnalytics: unstubbed("getDistributionAnalytics"),
     getInstallation: unstubbed("getInstallation"),
     getInvitationPreview: unstubbed("getInvitationPreview"),
     getPlatformPublishingRequirements: unstubbed("getPlatformPublishingRequirements"),
@@ -523,6 +529,8 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     getCurrentUser: () => inWorkspace((workspaceId) => getCurrentUser(workspaceId)),
     getDistribution: (id, options) =>
       inWorkspace((workspaceId) => getDistribution(workspaceId, id, options)),
+    getDistributionAnalytics: (id, options) =>
+      inWorkspace((workspaceId) => getDistributionAnalytics(workspaceId, id, options)),
     getInstallation: (workspaceId, options) => getInstallation(workspaceId, options),
     getInvitationPreview: (token, options) => getInvitationPreview(token, options),
     getPlatformPublishingRequirements: (id, options) =>

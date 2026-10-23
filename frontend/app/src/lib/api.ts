@@ -1332,6 +1332,26 @@ export function getAnalyticsPosts(
 }
 
 /**
+ * Reads up to 500 chronological stored snapshots for one Distribution.
+ * Workspace authorization and cancellation follow the normal API boundary.
+ */
+export function getDistributionAnalytics(
+  workspaceId: string | null,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<components["schemas"]["AnalyticsSnapshotsResponse"]>(
+    (signal) =>
+      client().GET("/analytics/{distribution_id}", {
+        headers: workspaceHeaders(workspaceId),
+        params: { path: { distribution_id: id }, query: { limit: 500 } },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
  * Invites an email address with an assignable Workspace role.
  *
  * @param workspaceId Shared Workspace UUID.

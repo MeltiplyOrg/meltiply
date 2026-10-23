@@ -884,6 +884,27 @@ export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScop
 }
 
 /**
+ * Loads the inspected Post's stored histories with at most four simultaneous
+ * requests. The Post prefix shares mutation invalidation; Workspace and sorted
+ * Distribution identities prevent data leaking between inspectors or tenants.
+ * Any failed Channel rejects the whole read rather than presenting partial totals.
+ */
+export function usePostAnalyticsHistory(scope: SessionScope, distributionIds: readonly string[]) {
+  const ids = [...distributionIds].sort();
+  return useQuery({
+    queryKey: ["posts", "analytics-history", scope.workspaceId, ids],
+    queryFn: ({ signal }) =>
+      runApiQuery(
+        scope,
+        (api) => Effect.forEach(ids, (id) => api.getDistributionAnalytics(id), { concurrency: 4 }),
+        signal,
+      ),
+    staleTime: 60_000,
+    enabled: scope.isSignedIn && ids.length > 0,
+  });
+}
+
+/**
  * Lists Workspace members with role, status, and join date.
  *
  * @param scope Session scope gating execution.

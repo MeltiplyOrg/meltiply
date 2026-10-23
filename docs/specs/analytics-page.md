@@ -58,6 +58,15 @@ Contract change: approved in conversation on 2026-10-19
 > marks an incomplete baseline as "Not tracked" rather than summing it as zero.
 > The dashboard response carries the same cohort summary as `/analytics`, so
 > the page issues one cohort request instead of two.
+>
+> Post inspector revision: the owner replaced the per-Channel comparison bars
+> with two chronological line charts: Engagement over time (likes, comments,
+> shares) and Reach & impressions over time. These show cumulative reported
+> counters from stored snapshots, not activity deltas or invented live data.
+> Each Channel contributes its latest measured counters at each observed time;
+> reach is not deduplicated across Channels. History reads use the existing
+> Distribution analytics endpoint, bounded to its first 500 measurements per
+> Channel with a visible limit notice.
 
 ## 1. Summary
 

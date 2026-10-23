@@ -56,6 +56,21 @@ reports lifetime aggregates for the uploaded video and shares Google's quota.
 TikTok reports the creator's current video counters. After an analytics scope is
 added, reconnect the Channel so the Provider issues a token that can read it.
 
+## Inspect one Post
+
+Open a published Post from **Posts** to see its latest totals and two line charts:
+
+- **Engagement over time** shows likes, comments, and shares.
+- **Reach & impressions over time** shows the provider-reported exposure counters.
+
+The charts use stored measurement times and cumulative counters, not live activity
+or activity gained during each interval. Between Channel syncs, each Channel keeps
+its last measured value; historical snapshots are never added together. Reach is
+not deduplicated across Channels. A single measurement appears as a point rather
+than a fabricated trend. Untracked metrics are labelled instead of plotted as zero.
+The inspector shows up to the first 500 measurements per Channel and displays a
+notice if that bound is reached. Failed history reads have a Retry action.
+
 ## Coverage and freshness
 
 Missing measurement is never displayed as zero:

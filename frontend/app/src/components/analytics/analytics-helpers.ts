@@ -170,6 +170,21 @@ const INTEGER_FORMATS: Record<Language, Intl.NumberFormat> = {
 export function formatAnalyticsInteger(value: number, language: Language = "en"): string {
   return INTEGER_FORMATS[language].format(value);
 }
+const COMPACT_FORMATS: Record<Language, Intl.NumberFormat> = {
+  en: new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, notation: "compact" }),
+  es: new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1, notation: "compact" }),
+  "pt-BR": new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1, notation: "compact" }),
+  fr: new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1, notation: "compact" }),
+  de: new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1, notation: "compact" }),
+  it: new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1, notation: "compact" }),
+  zh: new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1, notation: "compact" }),
+  vi: new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1, notation: "compact" }),
+};
+
+/** Formats a stored counter compactly with at most one decimal; defaults to English. */
+export function formatAnalyticsCompact(value: number, language: Language = "en"): string {
+  return COMPACT_FORMATS[language].format(value);
+}
 
 const TIMESTAMP_OPTIONS: Intl.DateTimeFormatOptions = {
   day: "numeric",

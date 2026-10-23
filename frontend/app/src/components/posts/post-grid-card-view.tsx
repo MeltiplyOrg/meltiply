@@ -70,7 +70,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
       <div className={GRID_VIEWPORT_CLASS}>
         <div className={cn("grid gap-3", gridColumnClass)}>
           {/* Same anatomy as `post-card.tsx` - profile line, caption, the
-              `h-35` media box, status, and meta row - so resolved cards drop
+              `h-35` media box, status, meta row, and analytics footer - so resolved cards drop
               into these slots without moving anything. */}
           {SKELETON_CARD_KEYS.map((key) => (
             <Card key={key} aria-hidden="true" className="flex min-w-0 flex-col gap-2 px-3 py-2.5">
@@ -81,6 +81,11 @@ export const PostGridCardView = React.memo(function PostGridCardView({
               <Skeleton className="h-4.5 w-20 rounded-chip" />
               <div className="flex min-h-4.5 items-center gap-2">
                 <Skeleton className="h-3.5 w-28" />
+              </div>
+              <div className="mt-auto grid grid-cols-4 gap-2 border-t border-line pt-2">
+                {["views", "likes", "comments", "shares"].map((metric) => (
+                  <Skeleton key={metric} className="h-3.5 w-full" />
+                ))}
               </div>
             </Card>
           ))}

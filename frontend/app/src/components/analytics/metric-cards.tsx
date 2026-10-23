@@ -3,20 +3,8 @@ import { Button } from "@meltiply/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@meltiply/ui/tooltip";
 import { cn } from "@meltiply/ui/utils";
 import { useI18n } from "@/lib/i18n";
-import type { Language } from "@/lib/i18n";
-import { formatAnalyticsInteger } from "./analytics-helpers";
+import { formatAnalyticsCompact, formatAnalyticsInteger } from "./analytics-helpers";
 import type { AnalyticsSummary } from "@/types";
-
-const COMPACT_FORMATS: Record<Language, Intl.NumberFormat> = {
-  en: new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, notation: "compact" }),
-  es: new Intl.NumberFormat("es-ES", { maximumFractionDigits: 1, notation: "compact" }),
-  "pt-BR": new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1, notation: "compact" }),
-  fr: new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1, notation: "compact" }),
-  de: new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1, notation: "compact" }),
-  it: new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1, notation: "compact" }),
-  zh: new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1, notation: "compact" }),
-  vi: new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1, notation: "compact" }),
-};
 
 const CARDS = [
   { key: "views", label: "Views", definition: "Views reported for posts published in this range." },
@@ -55,7 +43,7 @@ export function MetricCards({
           // Only totals wider than seven digits compact, and only on narrow
           // screens. Desktop always carries the exact grouped integer.
           const compactOnPhone = value >= 10_000_000;
-          const compact = COMPACT_FORMATS[language].format(value);
+          const compact = formatAnalyticsCompact(value, language);
           return (
             <div
               key={card.key}

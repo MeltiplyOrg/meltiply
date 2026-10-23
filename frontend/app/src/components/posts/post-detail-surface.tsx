@@ -365,10 +365,20 @@ export interface PostDetailSurfaceProps {
   /** Whether this Post may be deleted by the current role. */
   canDelete: boolean;
   onClose: () => void;
-  /** Opens the composer for a Post that still has an editable surface. */
-  onEdit: (postId: string) => void;
-  /** Routes a destructive cancel/delete request to the view-level CenterAlertDialog. */
-  onRequestDelete: (request: PostDestructiveRequest) => void;
+  /**
+   * Opens the composer for a Post that still has an editable surface. Pages
+   * that inspect without mutating (the Queue calendar) omit it, and the edit
+   * action is not rendered.
+   */
+  onEdit?: (postId: string) => void;
+  /** Routes a destructive cancel/delete request to the view-level CenterAlertDialog; omitted by read-only inspectors. */
+  onRequestDelete?: (request: PostDestructiveRequest) => void;
+  /**
+   * Plan-owned actions appended after the Post's own actions, such as removing
+   * the Post from its Queue. The owning view supplies them; the Post inspector
+   * stays the single presentation of Post content.
+   */
+  extraActions?: React.ReactNode;
 }
 
 /**
@@ -394,6 +404,7 @@ export function usePostDetailSurface({
   onClose,
   onEdit,
   onRequestDelete,
+  extraActions,
 }: PostDetailSurfaceProps): PostDrawerSurface | null {
   const { t, language } = useI18n();
   const post = useLatchedValue(livePost);
@@ -430,7 +441,7 @@ export function usePostDetailSurface({
         : t("{count} channel(s)", { count: post.channels.length }),
       actions: (
         <>
-          {canMutate && editable && (
+          {canMutate && editable && onEdit && (
             <Button
               variant="ghost"
               size="sm"
@@ -441,7 +452,7 @@ export function usePostDetailSurface({
               {t("Edit post")}
             </Button>
           )}
-          {canMutate && cancellableIds.length > 0 && (
+          {canMutate && cancellableIds.length > 0 && onRequestDelete && (
             <Button
               variant="ghost"
               size="sm"
@@ -462,7 +473,7 @@ export function usePostDetailSurface({
           {/* Delete is the only remaining action, so it is its own control: a menu
               holding one item would only add a step to a destructive intent. The
               confirmation still owns the consequence. */}
-          {canDelete && (
+          {canDelete && onRequestDelete && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -485,6 +496,7 @@ export function usePostDetailSurface({
               <TooltipContent>{isDraft ? t("Delete draft") : t("Delete post")}</TooltipContent>
             </Tooltip>
           )}
+          {extraActions}
         </>
       ),
       onClose,
@@ -588,7 +600,7 @@ export function usePostDetailSurface({
                 canMutate={canMutate}
                 queueOwned={Boolean(post.post?.queue_membership)}
                 onRequestDelete={(ids) =>
-                  onRequestDelete({
+                  onRequestDelete?.({
                     kind: "cancel-channels",
                     postId: post.id,
                     brandProfileId: post.brandProfileId,
@@ -601,7 +613,18 @@ export function usePostDetailSurface({
         </>
       ),
     };
-  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, t, language]);
+  }, [
+    post,
+    livePost,
+    canMutate,
+    canDelete,
+    onClose,
+    onEdit,
+    onRequestDelete,
+    extraActions,
+    t,
+    language,
+  ]);
 
   return surface;
 }

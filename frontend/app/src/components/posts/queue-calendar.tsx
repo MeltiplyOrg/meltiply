@@ -2,18 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { CalendarDate, fromDate, toCalendarDate } from "@internationalized/date";
 import { flushSync } from "react-dom";
 import { transitionViewEffect } from "@meltiply/ui/effects";
-import { Link } from "react-router";
+import { useNavigate } from "react-router";
 import { Clock, Globe2 } from "lucide-react";
 import { Alert } from "@meltiply/ui/alert";
 import { Button } from "@meltiply/ui/button";
-import {
-  CenterDialog,
-  CenterDialogContent,
-  CenterDialogHeader,
-  CenterDialogTitle,
-  CenterDialogDescription,
-  CenterDialogFooter,
-} from "@meltiply/ui/center-dialog";
 import { useWorkspace } from "@/context/workspace.context";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useQueueCalendarPosts } from "@/lib/queries";
@@ -24,6 +16,8 @@ import { PostCalendarGridView } from "./post-calendar-grid-view";
 import { calendarLabelDate, calendarWindow, type CalendarPeriod } from "./calendar-dates";
 import { toPostRow } from "./post-row";
 import { calendarSlots } from "./calendar-slots";
+import { PostsDrawer } from "./posts-drawer";
+import { usePostDetailSurface } from "./post-detail-surface";
 
 /** Live Queue calendar: bounded, fully paged immutable assignments in the Queue's timezone, independent Channel outcomes and safe removal. A Queue identity key resets its civil anchor and selection. The 30-second clock also refreshes immediately after tab focus/visibility changes, never changing reservation times. */
 export function QueueCalendar({
@@ -33,7 +27,8 @@ export function QueueCalendar({
   queue: PublishingQueue;
   onRemove: (post: Post) => void;
 }) {
-  const { t, tStatus, language } = useI18n();
+  const { t, language } = useI18n();
+  const navigateTo = useNavigate();
   const { integrations, canWriteContent } = useWorkspace();
   const scope = useSessionScope();
   const [now, setNow] = useState(() => new Date());
@@ -95,10 +90,47 @@ export function QueueCalendar({
           ),
       );
   const inspected = posts.find((post) => post.id === inspectedId);
-  const dateLabel = new Intl.DateTimeFormat(language, {
+  const nextDateLabel = new Intl.DateTimeFormat(language, {
     timeZone: queue.timezone,
     dateStyle: "medium",
     timeStyle: "short",
+  });
+  // The Queue inspector is the same Post drawer the Posts page presents, limited
+  // to reading plus the plan actions that belong to this page: safe removal and
+  // a jump to Posts for editing. It opens on the click that selects the Post.
+  const detailSurface = usePostDetailSurface({
+    post: rows.find((row) => row.id === inspectedId) ?? null,
+    canMutate: false,
+    canDelete: false,
+    onClose: () => setInspectedId(null),
+    extraActions: inspected && (
+      <>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-(length:--font-size-control)"
+          onClick={() => navigateTo(`/posts?editPostId=${inspected.id}`)}
+        >
+          {t("Open Post")}
+        </Button>
+        {canWriteContent &&
+          inspected.distributions.every((outcome) =>
+            ["scheduled", "queued", "cancelled"].includes(outcome.status),
+          ) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-(length:--font-size-control)"
+              onClick={() => {
+                setInspectedId(null);
+                onRemove(inspected);
+              }}
+            >
+              {t("Remove from Queue")}
+            </Button>
+          )}
+      </>
+    ),
   });
   /** Changes the civil anchor without adding fixed milliseconds across DST; month arithmetic clamps to the destination month. */
   function navigate(offset: number, unit: "days" | "months") {
@@ -147,7 +179,7 @@ export function QueueCalendar({
               <span className="shrink-0 text-ink-3">{t("Next in this view")} ·</span>
               <span className="truncate">{next.title || next.default_text || t("Media Post")}</span>
               <time className="shrink-0 tabular-nums" dateTime={next.queue_membership!.assigned_at}>
-                · {dateLabel.format(new Date(next.queue_membership!.assigned_at))}
+                · {nextDateLabel.format(new Date(next.queue_membership!.assigned_at))}
               </time>
             </Button>
           ) : (
@@ -189,60 +221,7 @@ export function QueueCalendar({
           slots,
         }}
       />
-      <CenterDialog
-        open={inspected !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setInspectedId(null);
-        }}
-      >
-        <CenterDialogContent>
-          <CenterDialogHeader>
-            <CenterDialogTitle>{t("Queue Post")}</CenterDialogTitle>
-            <CenterDialogDescription>
-              {queue.name} · {queue.timezone}
-            </CenterDialogDescription>
-          </CenterDialogHeader>
-          {inspected && (
-            <>
-              <p className="whitespace-pre-wrap break-words text-sm">
-                {inspected.title || inspected.default_text || t("Media Post")}
-              </p>
-              <time
-                className="text-sm tabular-nums"
-                dateTime={inspected.queue_membership!.assigned_at}
-              >
-                {dateLabel.format(new Date(inspected.queue_membership!.assigned_at))}
-              </time>
-              <ul className="space-y-1 text-xs text-ink-2">
-                {inspected.distributions.map((outcome) => (
-                  <li key={outcome.id}>
-                    {outcome.platform}: {tStatus(outcome.status)}
-                  </li>
-                ))}
-              </ul>
-              <CenterDialogFooter>
-                <Button asChild variant="outline">
-                  <Link to={`/posts?editPostId=${inspected.id}`}>{t("Open Post")}</Link>
-                </Button>
-                {canWriteContent &&
-                  inspected.distributions.every((outcome) =>
-                    ["scheduled", "queued", "cancelled"].includes(outcome.status),
-                  ) && (
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setInspectedId(null);
-                        onRemove(inspected);
-                      }}
-                    >
-                      {t("Remove from Queue")}
-                    </Button>
-                  )}
-              </CenterDialogFooter>
-            </>
-          )}
-        </CenterDialogContent>
-      </CenterDialog>
+      <PostsDrawer detail={detailSurface} composer={null} />
     </section>
   );
 }

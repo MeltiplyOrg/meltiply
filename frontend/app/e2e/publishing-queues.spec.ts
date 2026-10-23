@@ -221,7 +221,7 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
             has: page.locator(`time[datetime="${queuedPosts[1]!.queue_membership!.assigned_at}"]`),
           })
           .click();
-        const phonePost = page.getByRole("dialog", { name: "Queue Post", exact: true });
+        const phonePost = page.getByRole("dialog", { name: "Post details", exact: true });
         await expect(phonePost).toContainText(`Queue acceptance composition 1 ${queueName}`);
         await phonePost.getByRole("button", { name: "Close", exact: true }).click();
         await expect(phonePost).toHaveCount(0);
@@ -240,7 +240,7 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
     })
     .click();
   await page
-    .getByRole("dialog", { name: "Queue Post", exact: true })
+    .getByRole("dialog", { name: "Post details", exact: true })
     .getByRole("button", { name: "Remove from Queue", exact: true })
     .click();
   const confirm = page.getByRole("alertdialog", { name: "Remove from Queue?", exact: true });

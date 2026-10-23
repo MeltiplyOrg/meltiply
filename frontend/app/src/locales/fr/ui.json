@@ -761,6 +761,5 @@
   "Refresh": "Actualiser",
   "Current time: {time}": "Heure actuelle : {time}",
   "Next in this view": "À suivre dans cette vue",
-  "No upcoming Posts in this view.": "Aucun Post à venir dans cette vue.",
-  "Queue Post": "Post de la Queue"
+  "No upcoming Posts in this view.": "Aucun Post à venir dans cette vue."
 }

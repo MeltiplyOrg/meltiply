@@ -63,6 +63,8 @@ Brand Profile is available inside the same Filter builder and scopes every analy
 
 The standard table collapses to stacked Post rows below `lg`, with metric labels beside each value. The chart keeps its documented `role="img"` summary and a visually hidden equivalent table. Loading skeletons preserve the KPI, chart, and table heights, and refreshing keeps prior data mounted.
 
+Analytics Day/Week/Month changes crossfade the plot and axes together over the shared 240ms timing. The segmented control, card geometry, and accessible data table stay mounted; outgoing graphics immediately become inert and hidden from assistive technology. Recharts does not replay a separate draw-in during the handoff. Heatmap metric changes transition cell opacity over 300ms without replacing its grid or scroll position. Native reduced motion makes both updates immediate.
+
 ## Settings
 
 All sections share one layout; Security does not get a separate width rule.

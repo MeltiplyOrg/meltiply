@@ -1,5 +1,13 @@
 import { useState } from "react";
 import {
+  AnimatePresence,
+  LazyMotion,
+  domAnimation,
+  m,
+  useIsPresent,
+  useReducedMotion,
+} from "motion/react";
+import {
   Bar,
   BarChart,
   CartesianGrid,
@@ -16,6 +24,8 @@ import { Button } from "@meltiply/ui/button";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Card, CardContent, CardHeader, CardTitle } from "@meltiply/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@meltiply/ui/table";
+import { effectDurationMs } from "@meltiply/ui/effects";
+import { cn } from "@meltiply/ui/utils";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { platformDisplayName } from "@/lib/platforms";
 import { useI18n } from "@/lib/i18n";
@@ -163,12 +173,64 @@ function GroupingControl({
   );
 }
 
+/**
+ * Retains the outgoing plot only for its crossfade. It becomes inert and hidden
+ * from assistive technology immediately; the incoming plot alone owns hover and
+ * keyboard interaction. Native reduced motion makes the same handoff instant.
+ */
+function ChartViewLayer({ children }: { children: React.ReactNode }) {
+  const isPresent = useIsPresent();
+  const reduceMotion = useReducedMotion();
+  return (
+    <m.div
+      className="col-start-1 row-start-1 h-full min-h-0 min-w-0"
+      inert={!isPresent}
+      aria-hidden={!isPresent || undefined}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{
+        duration: reduceMotion ? 0 : effectDurationMs / 1000,
+        ease: "easeInOut",
+      }}
+    >
+      {children}
+    </m.div>
+  );
+}
+
+/**
+ * Crossfades a chart's marks and axes as one fixed-height view when its grouping
+ * changes. The controls stay mounted outside it. Initial mount is immediate;
+ * interrupted selections retire through the same presence lifecycle, without
+ * queued callbacks or interpolating unrelated day/week/month buckets.
+ */
+function ChartViewTransition({
+  view,
+  children,
+  className,
+}: {
+  view: Grouping;
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <div className={cn("grid min-w-0", className)}>
+      <LazyMotion features={domAnimation}>
+        <AnimatePresence initial={false}>
+          <ChartViewLayer key={view}>{children}</ChartViewLayer>
+        </AnimatePresence>
+      </LazyMotion>
+    </div>
+  );
+}
+
 /** Analytics-capable platforms in the cohort, in the shared display order. */
 function platformRows(dashboard: AnalyticsDashboard) {
   return dashboard.platforms.filter((row) => PLATFORMS.includes(row.platform));
 }
 
-/** Stacked publication counts per time bucket and Platform. */
+/** Stacked publication counts per time bucket and Platform, crossfading on grouping changes. */
 export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const [grouping, setGrouping] = useState<Grouping>("week");
@@ -186,7 +248,7 @@ export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboar
       <div className="mb-2 flex justify-end">
         <GroupingControl grouping={grouping} onChange={setGrouping} />
       </div>
-      <div className="h-64">
+      <ChartViewTransition view={grouping} className="h-64">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={buckets} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" />
@@ -202,11 +264,12 @@ export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboar
                 name={platformDisplayName(platform)}
                 fill={PLATFORM_COLORS[platform]}
                 maxBarSize={42}
+                isAnimationActive={false}
               />
             ))}
           </BarChart>
         </ResponsiveContainer>
-      </div>
+      </ChartViewTransition>
     </InsightCard>
   );
 }
@@ -357,7 +420,8 @@ function TrendTooltip({ active, label, payload }: TooltipProps) {
 /**
  * One trend chart for every stored metric. Cumulative changes are indexed to
  * 100 at the first measured period so views cannot flatten likes, comments, and
- * shares; hovering restores absolute values. No nested panels, no metric mode.
+ * shares; hovering restores absolute values. Grouping changes crossfade the
+ * plot and axes together, rather than morphing unrelated time buckets.
  */
 export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
@@ -375,7 +439,7 @@ export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashb
       <div className="mb-2 flex justify-end">
         <GroupingControl grouping={grouping} onChange={setGrouping} />
       </div>
-      <div className="h-72">
+      <ChartViewTransition view={grouping} className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ bottom: 0, left: 0, right: 12, top: 8 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" />
@@ -398,12 +462,13 @@ export function PerformanceTrendChart({ dashboard }: { dashboard: AnalyticsDashb
                 strokeWidth={2}
                 strokeDasharray={TREND_DASHES[metric]}
                 dot={false}
+                isAnimationActive={false}
                 connectNulls
               />
             ))}
           </LineChart>
         </ResponsiveContainer>
-      </div>
+      </ChartViewTransition>
       {/* A block wrapper keeps the visually hidden table from leaking its caption. */}
       <div className="sr-only">
         <table>
@@ -447,7 +512,7 @@ function bestTimeValue(
   return row[metric];
 }
 
-/** Seven-by-twenty-four heatmap with a minimum sample before recommending a slot. */
+/** Seven-by-twenty-four heatmap; metric changes tween cell intensity without replacing the grid. */
 export function BestTimeHeatmap({ dashboard }: { dashboard: AnalyticsDashboard }) {
   const { t, language } = useI18n();
   const [metric, setMetric] = useState<HeatMetric>("avg_engagement");
@@ -533,7 +598,7 @@ export function BestTimeHeatmap({ dashboard }: { dashboard: AnalyticsDashboard }
                   >
                     {cell && (
                       <span
-                        className={`block size-full rounded-xs bg-accent ${opacityClass}`}
+                        className={`block size-full rounded-xs bg-accent transition-opacity duration-300 ease-in-out ${opacityClass}`}
                         aria-hidden="true"
                       />
                     )}

@@ -308,7 +308,7 @@ describe("analytics view", () => {
       "account=e3000000-0000-4000-8000-000000000002&format=video&platform=instagram&range=7d&metric=likes",
     );
     renderView();
-    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    fireEvent.click(screen.getByTitle("Reset filters"));
     expect(setSelectedBrandProfileId).toHaveBeenCalledWith(null);
     expect(navigate).toHaveBeenCalledOnce();
     const query = new URL(navigate.mock.calls[0]![0], "https://meltiply.local").searchParams;

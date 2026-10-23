@@ -598,6 +598,7 @@
   "Analytics may be behind: the last sync was {time}.": "Analytics may be behind: the last sync was {time}.",
   "Published {range} · measured as of {end}": "Published {range} · measured as of {end}",
   "Metrics are cumulative snapshots for posts published in this range, not activity during it.": "Metrics are cumulative snapshots for posts published in this range, not activity during it.",
+  "Latest stored snapshots from this post's published channels, not live activity.": "Latest stored snapshots from this post's published channels, not live activity.",
   "Platform comparison": "Platform comparison",
   "Top posts": "Top posts",
   "About {metric}": "About {metric}",

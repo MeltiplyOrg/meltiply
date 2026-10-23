@@ -598,6 +598,7 @@
   "Analytics may be behind: the last sync was {time}.": "Les statistiques peuvent être en retard : la dernière synchronisation date de {time}.",
   "Published {range} · measured as of {end}": "Publié {range} · mesuré au {end}",
   "Metrics are cumulative snapshots for posts published in this range, not activity during it.": "Les métriques sont des instantanés cumulés des publications publiées sur cette période, et non l’activité pendant celle-ci.",
+  "Latest stored snapshots from this post's published channels, not live activity.": "Derniers instantanés enregistrés des canaux publiés de cette publication, pas une activité en direct.",
   "Platform comparison": "Comparaison par plateforme",
   "Top posts": "Publications les plus performantes",
   "About {metric}": "À propos de {metric}",

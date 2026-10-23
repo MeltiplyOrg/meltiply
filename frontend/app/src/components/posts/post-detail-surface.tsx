@@ -23,13 +23,16 @@ import { useLatchedValue } from "@meltiply/ui/use-latched-value";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useRetryDistribution, useUpdateScheduledDistribution } from "@/lib/queries";
 import { useI18n } from "@/lib/i18n";
+import { formatAnalyticsInteger } from "@/components/analytics/analytics-helpers";
 import { platformDisplayName } from "@/lib/platforms";
 import {
   isCancellableStatus,
   resolveCancellableDistributionIds,
+  resolvePostAnalytics,
   resolveRowCaption,
   normalizePostStatus,
 } from "./posts-helpers";
+import { postAnalyticsColumns } from "./post-view-options";
 import type { PostDestructiveRequest, PostDetailItem, PostRow } from "./types";
 import type { PostDrawerSurface } from "./posts-drawer";
 
@@ -387,7 +390,7 @@ export function usePostDetailSurface({
   onEdit,
   onRequestDelete,
 }: PostDetailSurfaceProps): PostDrawerSurface | null {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const post = useLatchedValue(livePost);
 
   const surface = useMemo(() => {
@@ -399,6 +402,10 @@ export function usePostDetailSurface({
     const isDraft = post.post?.status === "draft";
     const cancellableIds = resolveCancellableDistributionIds(post);
     const editable = Boolean(isDraft || cancellableIds.length > 0);
+    const analytics = resolvePostAnalytics(post);
+    const analyticsLabels = new Map(
+      postAnalyticsColumns(t).map((column) => [column.id, column.name]),
+    );
 
     const status = normalizePostStatus(post);
 
@@ -549,6 +556,49 @@ export function usePostDetailSurface({
             </section>
           )}
 
+          {analytics.visible && (
+            <section className="mt-6.5">
+              <h3 className="mb-2 text-(length:--font-size-ui) font-semibold">{t("Analytics")}</h3>
+              {analytics.awaiting ? (
+                <p className="text-(length:--font-size-ui) text-ink-2">
+                  {t("Metrics appear after the first provider sync.")}
+                </p>
+              ) : (
+                <>
+                  <dl className="grid grid-cols-2 gap-x-5 gap-y-0.5 sm:grid-cols-3">
+                    {analytics.metrics.map(({ id, value }) => (
+                      <div
+                        key={id}
+                        className="flex items-baseline justify-between gap-2 border-b border-line/60 py-1"
+                      >
+                        <dt className="text-(length:--font-size-control) text-ink-3">
+                          {analyticsLabels.get(id) ?? id}
+                        </dt>
+                        <dd className="font-mono tabular-nums text-(length:--font-size-control) text-ink">
+                          {formatAnalyticsInteger(value, language)}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="mt-2 text-[11px] text-ink-3">
+                    {t(
+                      "Latest stored snapshots from this post's published channels, not live activity.",
+                    )}
+                  </p>
+                  {analytics.untracked.length > 0 && (
+                    <p className="mt-1 text-[11px] text-ink-3">
+                      {t("Not tracked by the connected providers: {metrics}.", {
+                        metrics: analytics.untracked
+                          .map((id) => analyticsLabels.get(id) ?? id)
+                          .join(", "),
+                      })}
+                    </p>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+
           <section className="mt-6.5">
             <h3 className="mb-2 flex items-center gap-2 text-(length:--font-size-ui) font-semibold">
               {t("Channels")}
@@ -576,7 +626,7 @@ export function usePostDetailSurface({
         </>
       ),
     };
-  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, t]);
+  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, language, t]);
 
   return surface;
 }

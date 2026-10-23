@@ -95,6 +95,64 @@ export function summarizeChannelStatuses(statuses: string[], fallback = "draft")
   return statuses[0] ?? fallback;
 }
 
+/** Fixed counter order for a Post's stored analytics, matching the Posts columns. */
+const POST_ANALYTICS_COUNTERS = [
+  "likes",
+  "comments",
+  "shares",
+  "saves",
+  "clicks",
+  "views",
+  "impressions",
+  "reach",
+] as const satisfies readonly (keyof NonNullable<Post["analytics"]>)[];
+
+/** One measured counter of a Post's stored analytics. */
+export interface PostAnalyticsMetric {
+  id: keyof NonNullable<Post["analytics"]>;
+  value: number;
+}
+
+/** What the Post inspector may show about one Post's stored analytics. */
+export interface PostAnalyticsSummary {
+  /** Analytics belongs to a Post only once at least one Channel published. */
+  visible: boolean;
+  /** Published, but no counter has been measured yet (awaiting the first sync). */
+  awaiting: boolean;
+  /** Measured counters in the Posts column order; unmeasured counters are omitted. */
+  metrics: readonly PostAnalyticsMetric[];
+  /** Counters no connected provider measured; named in the inspector footnote. */
+  untracked: readonly PostAnalyticsMetric["id"][];
+}
+
+/**
+ * Resolves the analytics the Post inspector may show.
+ *
+ * A Post's analytics is the sum of each published Channel's latest stored
+ * snapshot, so it is only meaningful after a publication exists: drafts and
+ * pending Posts resolve to `visible: false` even if a stale aggregate is
+ * present. A row without its Post loaded — a calendar event outside the loaded
+ * page — also resolves to `visible: false`, because it cannot report the
+ * aggregate. Measured zeros stay zeros; null counters are reported as untracked
+ * rather than rendered as a measured zero.
+ *
+ * @param row - The inspected Post row.
+ * @returns Visibility, measured counters, and untracked counters.
+ */
+export function resolvePostAnalytics(row: PostRow): PostAnalyticsSummary {
+  const visible =
+    Boolean(row.post) && row.channels.some((channel) => channel.status === "published");
+  const analytics = row.post?.analytics ?? null;
+  const metrics: PostAnalyticsMetric[] = [];
+  const untracked: PostAnalyticsMetric["id"][] = [];
+  for (const id of POST_ANALYTICS_COUNTERS) {
+    const value = analytics?.[id] ?? null;
+    if (value === null) untracked.push(id);
+    else metrics.push({ id, value });
+  }
+  return { awaiting: visible && metrics.length === 0, metrics, untracked, visible };
+}
+
 /**
  * Resolves the single display instant and sort key of a Post row.
  *

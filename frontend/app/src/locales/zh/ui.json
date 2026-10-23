@@ -598,6 +598,7 @@
   "Analytics may be behind: the last sync was {time}.": "分析可能已过期：上次同步时间为 {time}。",
   "Published {range} · measured as of {end}": "发布于 {range} · 截至 {end} 的测量值",
   "Metrics are cumulative snapshots for posts published in this range, not activity during it.": "指标是此范围内已发布帖子的累计快照，而不是该范围内的活动量。",
+  "Latest stored snapshots from this post's published channels, not live activity.": "此帖子已发布渠道的最新存储快照，并非实时活动。",
   "Platform comparison": "平台对比",
   "Top posts": "热门帖子",
   "About {metric}": "关于 {metric}",

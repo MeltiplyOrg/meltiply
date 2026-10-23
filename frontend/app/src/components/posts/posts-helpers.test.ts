@@ -6,6 +6,7 @@ import {
   prunePostSelection,
   resolveChannelMedia,
   resolveChannelText,
+  resolvePostAnalytics,
   resolveRowCaption,
 } from "./posts-helpers";
 import { contractSuccessBody } from "@/test/contract-fixtures";
@@ -368,5 +369,82 @@ describe("isPublishedDistributionStatus", () => {
     ]) {
       expect(isPublishedDistributionStatus(status), status).toBe(false);
     }
+  });
+});
+
+describe("resolvePostAnalytics", () => {
+  const measured = {
+    likes: 12,
+    comments: 0,
+    shares: 3,
+    saves: null,
+    clicks: null,
+    views: 900,
+    impressions: null,
+    reach: null,
+  } as const;
+
+  it("shows measured counters in column order and names untracked ones", () => {
+    const analytics = resolvePostAnalytics(
+      postRow({
+        channels: [channelItem({ status: "published" })],
+        post: { ...basePost, analytics: { ...measured } },
+      }),
+    );
+
+    expect(analytics.visible).toBe(true);
+    expect(analytics.awaiting).toBe(false);
+    expect(analytics.metrics).toEqual([
+      { id: "likes", value: 12 },
+      { id: "comments", value: 0 },
+      { id: "shares", value: 3 },
+      { id: "views", value: 900 },
+    ]);
+    expect(analytics.untracked).toEqual(["saves", "clicks", "impressions", "reach"]);
+  });
+
+  it("hides analytics for drafts and pending Posts even with a stale aggregate", () => {
+    const aggregate = { ...measured };
+    const draft = postRow({
+      status: "draft",
+      channels: [],
+      post: { ...basePost, status: "draft", analytics: aggregate },
+    });
+    const scheduled = postRow({
+      status: "scheduled",
+      channels: [
+        channelItem({
+          status: "scheduled",
+          distribution: { ...baseDistribution, status: "scheduled" },
+        }),
+      ],
+      post: { ...basePost, analytics: aggregate },
+    });
+
+    expect(resolvePostAnalytics(draft).visible).toBe(false);
+    expect(resolvePostAnalytics(scheduled).visible).toBe(false);
+  });
+
+  it("hides analytics for a calendar row whose Post is not loaded", () => {
+    const eventOnly = postRow({
+      channels: [channelItem({ status: "published" })],
+      post: undefined,
+    });
+
+    expect(resolvePostAnalytics(eventOnly).visible).toBe(false);
+  });
+
+  it("awaits the first sync for a published Post without measurements", () => {
+    const awaiting = resolvePostAnalytics(
+      postRow({
+        channels: [channelItem({ status: "published" })],
+        post: { ...basePost, analytics: null },
+      }),
+    );
+
+    expect(awaiting.visible).toBe(true);
+    expect(awaiting.awaiting).toBe(true);
+    expect(awaiting.metrics).toEqual([]);
+    expect(awaiting.untracked).toHaveLength(8);
   });
 });

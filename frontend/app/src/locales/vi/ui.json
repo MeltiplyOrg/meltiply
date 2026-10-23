@@ -598,6 +598,7 @@
   "Analytics may be behind: the last sync was {time}.": "Phân tích có thể bị chậm: lần đồng bộ cuối là {time}.",
   "Published {range} · measured as of {end}": "Đã xuất bản {range} · đo tính đến {end}",
   "Metrics are cumulative snapshots for posts published in this range, not activity during it.": "Các chỉ số là ảnh chụp lũy kế của các bài viết đã xuất bản trong khoảng này, không phải hoạt động trong khoảng đó.",
+  "Latest stored snapshots from this post's published channels, not live activity.": "Ảnh chụp được lưu mới nhất từ các kênh đã đăng của bài viết này, không phải hoạt động trực tiếp.",
   "Platform comparison": "So sánh nền tảng",
   "Top posts": "Bài viết hàng đầu",
   "About {metric}": "Giới thiệu về {metric}",

@@ -280,6 +280,8 @@ export interface FilterSelectProps<Value extends string> {
   ariaLabel: string;
   align?: "start" | "center" | "end";
   contentClassName?: string;
+  /** Disables the trigger and its listbox when no choice can apply. */
+  disabled?: boolean;
 }
 /**
  * Renders a controlled, single-value filter list with a separated aggregate choice.
@@ -300,9 +302,10 @@ export function FilterSelect<Value extends string>({
   ariaLabel,
   align = "start",
   contentClassName,
+  disabled = false,
 }: FilterSelectProps<Value>) {
   return (
-    <Select value={value} onValueChange={onValueChange}>
+    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
       <SelectTrigger asChild aria-label={ariaLabel}>
         {trigger}
       </SelectTrigger>

@@ -2323,7 +2323,10 @@ paths:
         series carry measured counter changes between consecutive snapshots,
         not lifetime totals. Follower series come from account snapshots.
         Metrics a Provider does not expose are returned as null or listed in
-        `unavailable_metrics`; they are never fabricated as zero.
+        `unavailable_metrics`; they are never fabricated as zero. `cohort`
+        carries the same published-cohort summary as `GET /analytics`, so a
+        client can render KPIs, coverage, and the platform comparison from one
+        request.
       parameters:
         - $ref: "#/components/parameters/RequiredStart"
         - $ref: "#/components/parameters/RequiredEnd"
@@ -5349,6 +5352,7 @@ components:
           best_times,
           formats,
           platforms,
+          cohort,
           followers,
           accumulation,
           unavailable_metrics,
@@ -5372,6 +5376,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AnalyticsPlatformBreakdown"
+        cohort:
+          $ref: "#/components/schemas/AnalyticsSummary"
         followers:
           type: array
           items:
@@ -5384,7 +5390,7 @@ components:
           type: array
           items:
             type: string
-            enum: [saves, clicks, followers, account]
+            enum: [saves, clicks, followers]
     AnalyticsMetric:
       type: string
       enum: [views, likes, comments, shares]
@@ -5422,6 +5428,7 @@ components:
           excerpt,
           published_at,
           destination_count,
+          synced_destination_count,
           platforms,
           unsupported_platforms,
           last_synced_at,
@@ -5450,6 +5457,13 @@ components:
           type: integer
           minimum: 0
           description: Number of published Distributions included for this Post.
+        synced_destination_count:
+          type: integer
+          minimum: 0
+          description: |
+            Included Distributions with at least one snapshot at or before the
+            range end. Fewer than `destination_count` means some destinations
+            contribute zero until their first sync.
         platforms:
           type: array
           uniqueItems: true

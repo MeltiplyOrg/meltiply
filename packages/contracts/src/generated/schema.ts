@@ -1687,7 +1687,10 @@ export interface paths {
          *     series carry measured counter changes between consecutive snapshots,
          *     not lifetime totals. Follower series come from account snapshots.
          *     Metrics a Provider does not expose are returned as null or listed in
-         *     `unavailable_metrics`; they are never fabricated as zero.
+         *     `unavailable_metrics`; they are never fabricated as zero. `cohort`
+         *     carries the same published-cohort summary as `GET /analytics`, so a
+         *     client can render KPIs, coverage, and the platform comparison from one
+         *     request.
          */
         get: operations["getAnalyticsDashboard"];
         put?: never;
@@ -2927,9 +2930,10 @@ export interface components {
             best_times: components["schemas"]["AnalyticsBestTime"][];
             formats: components["schemas"]["AnalyticsFormatBreakdown"][];
             platforms: components["schemas"]["AnalyticsPlatformBreakdown"][];
+            cohort: components["schemas"]["AnalyticsSummary"];
             followers: components["schemas"]["AnalyticsFollowerSeries"][];
             accumulation: components["schemas"]["AnalyticsAccumulationPoint"][];
-            unavailable_metrics: ("saves" | "clicks" | "followers" | "account")[];
+            unavailable_metrics: ("saves" | "clicks" | "followers")[];
         };
         /**
          * @description Stored metric that ranks the Post analytics rows.
@@ -2962,6 +2966,12 @@ export interface components {
             published_at: string;
             /** @description Number of published Distributions included for this Post. */
             destination_count: number;
+            /**
+             * @description Included Distributions with at least one snapshot at or before the
+             *     range end. Fewer than `destination_count` means some destinations
+             *     contribute zero until their first sync.
+             */
+            synced_destination_count: number;
             platforms: components["schemas"]["Platform"][];
             unsupported_platforms: components["schemas"]["Platform"][];
             /**

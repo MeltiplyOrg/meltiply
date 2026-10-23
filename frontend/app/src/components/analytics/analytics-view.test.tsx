@@ -72,8 +72,13 @@ vi.mock("@/context/workspace.context", () => ({
 vi.mock("@/lib/queries", () => ({
   usePlatformCapabilities: () => ({ ...state.capabilities, refetch: refetch.capabilities }),
   usePlatforms: () => ({ ...state.accounts, refetch: refetch.accounts }),
-  useAnalyticsDashboard: () => ({ ...state.dashboard, refetch: refetch.dashboard }),
-  useAnalyticsSummary: () => ({ ...state.summary, refetch: refetch.summary }),
+  useAnalyticsDashboard: () => ({
+    ...state.dashboard,
+    data: state.dashboard.data
+      ? { ...(state.dashboard.data as Record<string, unknown>), cohort: state.summary.data }
+      : state.dashboard.data,
+    refetch: refetch.dashboard,
+  }),
   useAnalyticsPosts: () => ({ ...state.posts, refetch: refetch.posts }),
 }));
 
@@ -236,6 +241,7 @@ function posts(overrides: Record<string, unknown> = {}) {
       {
         comments: 1,
         destination_count: 1,
+        synced_destination_count: 1,
         excerpt: "Excerpt",
         last_synced_at: "2026-10-30T12:00:00Z",
         likes: 5,
@@ -473,7 +479,8 @@ describe("analytics view", () => {
   });
 
   it("surfaces a retryable error without hiding the page header", () => {
-    state.summary = {
+    state.summary = { data: undefined, error: null, isFetching: false, isPending: false };
+    state.dashboard = {
       data: undefined,
       error: new Error("Analytics are unavailable."),
       isFetching: false,
@@ -483,7 +490,7 @@ describe("analytics view", () => {
     expect(screen.getByRole("heading", { name: "Analytics" })).toBeInTheDocument();
     expect(screen.getByText("Analytics could not be loaded")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(refetch.summary).toHaveBeenCalledOnce();
+    expect(refetch.dashboard).toHaveBeenCalledOnce();
     expect(refetch.posts).toHaveBeenCalledOnce();
   });
 

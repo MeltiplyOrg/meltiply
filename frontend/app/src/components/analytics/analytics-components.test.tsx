@@ -35,6 +35,7 @@ function postRow(overrides: Partial<AnalyticsPostRow> = {}): AnalyticsPostRow {
   return {
     comments: 2,
     destination_count: 1,
+    synced_destination_count: 1,
     excerpt: "A short excerpt",
     last_synced_at: "2026-10-20T12:00:00Z",
     likes: 10,

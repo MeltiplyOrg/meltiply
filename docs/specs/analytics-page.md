@@ -43,6 +43,20 @@ Contract change: approved in conversation on 2026-10-19
 > removable chips with a Clear all action, and Refresh remains beside the
 > builder. The four always-visible selects are gone, and the row wraps instead
 > of scrolling horizontally.
+> Implementation note (2026-10-23, review alignment): the shipped branch keeps
+> Brand Profile in the filter builder because it is the page's profile selector
+> (the workspace header only displays the active profile), restores stored
+> analytics in the published Post detail surface alongside the existing Posts
+> table columns, and adds Reach, Impressions, and an engagement rate to the
+> dashboard platform breakdown. These supersede the "Metrics", "Posts surface",
+> and "second profile selector" statements below. The toolbar disables its
+> Platform filter when no connected channel reports analytics; the platform
+> breakdown labels a never-synced Platform "Awaiting sync" instead of zero; a
+> partially synced Post carries an Awaiting sync badge; the stacked phone
+> layout exposes the same metric re-ranking control as the table header; and the follower card
+> marks an incomplete baseline as "Not tracked" rather than summing it as zero.
+> The dashboard response carries the same cohort summary as `/analytics`, so
+> the page issues one cohort request instead of two.
 
 ## 1. Summary
 
@@ -321,6 +335,7 @@ Response:
       "excerpt": "The short version of the caption.",
       "published_at": "2026-10-01T12:00:00Z",
       "destination_count": 2,
+      "synced_destination_count": 2,
       "platforms": ["instagram", "threads"],
       "unsupported_platforms": [],
       "last_synced_at": "2026-10-01T12:15:00Z",
@@ -343,6 +358,9 @@ Rules:
   collapsed, possibly empty.
 - `published_at` is the earliest `published_at` among the included Distributions.
 - `destination_count` is the number of included Distributions.
+- `synced_destination_count` is the number of included Distributions with a
+  snapshot at or before `end`. Fewer than `destination_count` means some
+  destinations contributed zero and remain awaiting sync.
 - `platforms` is the sorted distinct platform list.
 - `unsupported_platforms` is the subset of `platforms` whose capability has
   `analytics: false`.

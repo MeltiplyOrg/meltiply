@@ -921,6 +921,22 @@ describeIntegration("core API PostgreSQL query budgets", () => {
         },
       },
       {
+        maxRows: 5,
+        // series, combined breakdowns, follower baseline/daily, accumulation
+        maxStatements: 4,
+        minRows: 1,
+        name: "analytics dashboard",
+        run: async () => {
+          const body = await Effect.runPromise(
+            coreService.dashboardAnalytics(env, queryBudgetClaims, {
+              end,
+              start,
+            }),
+          );
+          return { body, rows: body.platforms.length };
+        },
+      },
+      {
         maxRows: 100,
         maxStatements: 1,
         minRows: 1,

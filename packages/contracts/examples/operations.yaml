@@ -1310,6 +1310,7 @@ operations:
             excerpt: The short version of the caption.
             published_at: 2026-01-01T12:00:00Z
             destination_count: 2
+            synced_destination_count: 2
             platforms: [instagram, threads]
             unsupported_platforms: []
             last_synced_at: 2026-01-01T13:00:00Z
@@ -1322,6 +1323,7 @@ operations:
             excerpt: A text-only Post that has not synced yet.
             published_at: 2026-01-02T12:00:00Z
             destination_count: 1
+            synced_destination_count: 0
             platforms: [tiktok]
             unsupported_platforms: [tiktok]
             last_synced_at: null
@@ -1389,6 +1391,33 @@ operations:
             saves: null
             clicks: null
             last_synced_at: 2026-01-01T01:00:00Z
+        cohort:
+          range:
+            start: 2026-01-01T00:00:00Z
+            end: 2026-01-31T23:59:59Z
+          totals:
+            views: 100
+            likes: 10
+            comments: 1
+            shares: 2
+            watch_time_sec: 0
+            reach: 90
+            impressions: 120
+            post_count: 1
+          by_platform:
+            - platform: tiktok
+              views: 100
+              likes: 10
+              comments: 1
+              shares: 2
+              watch_time_sec: 0
+              reach: 90
+              impressions: 120
+              post_count: 1
+              last_synced_at: 2026-01-01T01:00:00Z
+          last_synced_at: 2026-01-01T01:00:00Z
+          partial: false
+          unsupported_platforms: []
         followers:
           - platform: tiktok
             account_id: 00000000-0000-4000-8000-000000000201

@@ -1,6 +1,7 @@
 import { ArrowDown } from "lucide-react";
 import { Badge } from "@meltiply/ui/badge";
 import { Button } from "@meltiply/ui/button";
+import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@meltiply/ui/table";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { platformDisplayName } from "@/lib/platforms";
@@ -49,6 +50,7 @@ function PlatformSummary({ row }: { row: AnalyticsPostRow }) {
   const { t } = useI18n();
   const partial = analyticsRowMetricState(row) === "partial";
   const unsupported = row.unsupported_platforms.map(platformDisplayName).join(", ");
+  const awaitingSync = row.destination_count - row.synced_destination_count;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1">
       <span className="sr-only">{row.platforms.map(platformDisplayName).join(", ")}. </span>
@@ -62,6 +64,12 @@ function PlatformSummary({ row }: { row: AnalyticsPostRow }) {
         <Badge variant="outline" className="px-1 py-0 text-[10px]" title={unsupported}>
           {t("Partial")}
           <span className="sr-only">{` — ${unsupported}`}</span>
+        </Badge>
+      )}
+      {awaitingSync > 0 && (
+        <Badge variant="outline" className="px-1 py-0 text-[10px]">
+          {t("Awaiting sync")} {formatAnalyticsInteger(awaitingSync)}/
+          {formatAnalyticsInteger(row.destination_count)}
         </Badge>
       )}
     </div>
@@ -203,6 +211,15 @@ export function TopPostsTable({
                 })}
               </TableBody>
             </Table>
+          </div>
+          <div className="flex justify-end px-4 lg:hidden">
+            <SegmentedControl
+              options={ANALYTICS_METRICS}
+              value={metric}
+              onChange={onMetricChange}
+              label={t("Metric")}
+              renderOption={(value) => analyticsMetricLabel(value, t)}
+            />
           </div>
           <ul className="divide-y divide-line lg:hidden">
             {posts.map((row) => {

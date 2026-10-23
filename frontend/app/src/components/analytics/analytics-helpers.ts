@@ -103,8 +103,11 @@ export function nextAnalyticsLimit(current: number): number {
  * Decides what a Post row's metric cells may display.
  *
  * `unsupported` wins over `awaiting-sync` because an unsupported Destination
- * can never produce a measurement; a mixed row reports `partial` with its
- * honest sum. Only a fully supported row with a snapshot is `measured`.
+ * can never produce a measurement; a row mixing supported and unsupported
+ * Destinations reports `partial` with its honest sum, and a row with some
+ * destinations still awaiting their first snapshot keeps its measured sum plus
+ * the table's Awaiting sync badge. Only a fully supported row with a snapshot
+ * is `measured`.
  *
  * @param row - Post row carrying platform coverage and sync state.
  * @returns Display state for every metric cell in the row.

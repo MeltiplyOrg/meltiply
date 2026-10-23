@@ -84,6 +84,7 @@ interface AnalyticsPostRow extends Record<string, unknown> {
   post_id: string;
   published_at: Date | string;
   shares: number | string;
+  synced_destination_count: number | string;
   title: string;
   views: number | string;
 }
@@ -136,6 +137,12 @@ interface AnalyticsPlatformRow extends Record<string, unknown> {
   saves: number | string | null;
   shares: number | string;
   views: number | string;
+  watch_time_sec: number | string;
+}
+interface AnalyticsAggregateRow extends Record<string, unknown> {
+  best_times: AnalyticsBestTimeRow[];
+  formats: AnalyticsFormatRow[];
+  platforms: AnalyticsPlatformRow[];
 }
 
 interface AnalyticsFollowerRow extends Record<string, unknown> {
@@ -832,6 +839,7 @@ export function createCoreApiService(
                  c.post_id,
                  MIN(c.published_at) AS published_at,
                  COUNT(*) AS destination_count,
+                 COUNT(l.distribution_id) AS synced_destination_count,
                  ARRAY_AGG(DISTINCT c.platform ORDER BY c.platform) AS platforms,
                  MAX(l.snapshot_at) AS last_synced_at,
                  COALESCE(SUM(l.views), 0) AS views,
@@ -848,6 +856,7 @@ export function createCoreApiService(
                LEFT(btrim(regexp_replace(p.default_text, '\\s+', ' ', 'g')), 140) AS excerpt,
                pp.published_at,
                pp.destination_count,
+               pp.synced_destination_count,
                pp.platforms,
                pp.last_synced_at,
                pp.views,
@@ -878,6 +887,7 @@ export function createCoreApiService(
             posts: result.rows.slice(0, filters.limit).map((row) => ({
               comments: number(row.comments),
               destination_count: number(row.destination_count),
+              synced_destination_count: number(row.synced_destination_count),
               excerpt: row.excerpt,
               last_synced_at: optionalDateTime(row.last_synced_at),
               likes: number(row.likes),
@@ -913,7 +923,8 @@ export function createCoreApiService(
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
           const candidates = `
-            SELECT d.id, d.platform, d.published_at
+            SELECT d.id, d.platform, d.published_at,
+                   ${analyticsFormatExpression("d")} AS format
             FROM distributions d
             WHERE d.status = 'published'
               AND d.published_at >= $1
@@ -935,7 +946,8 @@ export function createCoreApiService(
             latest AS (
               SELECT DISTINCT ON (s.distribution_id)
                 s.distribution_id, s.views, s.likes, s.comments, s.shares,
-                s.impressions, s.reach, s.saves, s.clicks, s.snapshot_at
+                s.impressions, s.reach, s.watch_time_sec, s.saves, s.clicks,
+                s.snapshot_at
               FROM analytics_snapshots s
               JOIN candidates c ON c.id = s.distribution_id
               WHERE s.snapshot_at <= $2
@@ -1016,91 +1028,130 @@ export function createCoreApiService(
             scope,
           );
 
-          const bestTimeResult = yield* client.query<AnalyticsBestTimeRow>(
+          // One round trip for the three grouped breakdowns. The joined set is
+          // materialized so the latest-snapshot lookup runs once, not once per
+          // aggregate; each subquery then scans the small joined set.
+          const aggregateResult = yield* client.query<AnalyticsAggregateRow>(
             `WITH candidates AS (${candidates}),
-             ${latest}
-             SELECT EXTRACT(DOW FROM c.published_at)::int AS day_of_week,
-                    EXTRACT(HOUR FROM c.published_at)::int AS hour,
-                    COUNT(*)::int AS posts,
-                    AVG(COALESCE(l.views, 0))::float8 AS avg_views,
-                    AVG(COALESCE(l.likes, 0))::float8 AS avg_likes,
-                    AVG(COALESCE(l.comments, 0))::float8 AS avg_comments,
-                    AVG(COALESCE(l.shares, 0))::float8 AS avg_shares,
-                    AVG(COALESCE(l.likes, 0) + COALESCE(l.comments, 0) + COALESCE(l.shares, 0))::float8 AS avg_engagement
-             FROM candidates c
-             LEFT JOIN latest l ON l.distribution_id = c.id
-             GROUP BY 1, 2
-             ORDER BY 1 ASC, 2 ASC`,
+             ${latest},
+             joined AS MATERIALIZED (
+               SELECT c.id, c.platform, c.published_at, c.format,
+                      l.views, l.likes, l.comments, l.shares, l.impressions,
+                      l.reach, l.watch_time_sec, l.saves, l.clicks, l.snapshot_at
+               FROM candidates c
+               LEFT JOIN latest l ON l.distribution_id = c.id
+             )
+             SELECT
+               COALESCE((
+                 SELECT json_agg(platform_row)
+                 FROM (
+                   SELECT c.platform,
+                          COUNT(*)::int AS posts,
+                          COALESCE(SUM(c.views), 0) AS views,
+                          COALESCE(SUM(c.likes), 0) AS likes,
+                          COALESCE(SUM(c.comments), 0) AS comments,
+                          COALESCE(SUM(c.shares), 0) AS shares,
+                          COALESCE(SUM(c.impressions), 0) AS impressions,
+                          COALESCE(SUM(c.reach), 0) AS reach,
+                          COALESCE(SUM(c.watch_time_sec), 0) AS watch_time_sec,
+                          SUM(c.saves) AS saves,
+                          SUM(c.clicks) AS clicks,
+                          CASE WHEN SUM(COALESCE(c.views, 0)) > 0
+                            THEN (SUM(COALESCE(c.likes, 0)) + SUM(COALESCE(c.comments, 0))
+                                  + SUM(COALESCE(c.shares, 0)))::float8
+                                 / SUM(COALESCE(c.views, 0))
+                            ELSE NULL END AS engagement_rate,
+                          MAX(c.snapshot_at) AS last_synced_at
+                   FROM joined c
+                   GROUP BY c.platform
+                   ORDER BY c.platform ASC
+                 ) AS platform_row
+               ), '[]'::json) AS platforms,
+               COALESCE((
+                 SELECT json_agg(format_row)
+                 FROM (
+                   SELECT c.format,
+                          COUNT(*)::int AS posts,
+                          COALESCE(SUM(c.views), 0) AS views,
+                          COALESCE(SUM(c.likes), 0) AS likes,
+                          COALESCE(SUM(c.comments), 0) AS comments,
+                          COALESCE(SUM(c.shares), 0) AS shares,
+                          (SUM(COALESCE(c.likes, 0)) + SUM(COALESCE(c.comments, 0))
+                           + SUM(COALESCE(c.shares, 0))) AS engagement,
+                          MAX(c.snapshot_at) AS last_synced_at
+                   FROM joined c
+                   GROUP BY c.format
+                   ORDER BY posts DESC, c.format ASC
+                 ) AS format_row
+               ), '[]'::json) AS formats,
+               COALESCE((
+                 SELECT json_agg(best_row)
+                 FROM (
+                   SELECT EXTRACT(DOW FROM c.published_at)::int AS day_of_week,
+                          EXTRACT(HOUR FROM c.published_at)::int AS hour,
+                          COUNT(*)::int AS posts,
+                          AVG(COALESCE(c.views, 0))::float8 AS avg_views,
+                          AVG(COALESCE(c.likes, 0))::float8 AS avg_likes,
+                          AVG(COALESCE(c.comments, 0))::float8 AS avg_comments,
+                          AVG(COALESCE(c.shares, 0))::float8 AS avg_shares,
+                          AVG(COALESCE(c.likes, 0) + COALESCE(c.comments, 0)
+                              + COALESCE(c.shares, 0))::float8 AS avg_engagement
+                   FROM joined c
+                   GROUP BY 1, 2
+                   ORDER BY 1 ASC, 2 ASC
+                 ) AS best_row
+               ), '[]'::json) AS best_times`,
             scope,
           );
+          const aggregate = aggregateResult.rows[0] ?? {
+            best_times: [],
+            formats: [],
+            platforms: [],
+          };
 
-          const formatResult = yield* client.query<AnalyticsFormatRow>(
-            `WITH candidates AS (
-               SELECT d.id, ${analyticsFormatExpression("d")} AS format
-               FROM distributions d
-               WHERE d.status = 'published'
-                 AND d.published_at >= $1
-                 AND d.published_at <= $2
-                 AND ($3::text IS NULL OR d.platform = $3)
-                 AND ($4::uuid IS NULL OR d.brand_profile_id = $4)
-                 AND ($5::uuid IS NULL OR d.platform_account_id = $5)
-                 AND ($6::text IS NULL OR ${analyticsFormatExpression("d")} = $6)
-                 AND ${activeBrandProfilePredicate("d.brand_profile_id")}
-             ),
-             ${latest}
-             SELECT c.format,
-                    COUNT(*)::int AS posts,
-                    SUM(COALESCE(l.views, 0)) AS views,
-                    SUM(COALESCE(l.likes, 0)) AS likes,
-                    SUM(COALESCE(l.comments, 0)) AS comments,
-                    SUM(COALESCE(l.shares, 0)) AS shares,
-                    (SUM(COALESCE(l.likes, 0)) + SUM(COALESCE(l.comments, 0)) + SUM(COALESCE(l.shares, 0))) AS engagement,
-                    MAX(l.snapshot_at) AS last_synced_at
-             FROM candidates c
-             LEFT JOIN latest l ON l.distribution_id = c.id
-             GROUP BY c.format
-             ORDER BY posts DESC, c.format ASC`,
-            scope,
-          );
-
-          const platformResult = yield* client.query<AnalyticsPlatformRow>(
-            `WITH candidates AS (${candidates}),
-             ${latest}
-             SELECT c.platform,
-                    COUNT(*)::int AS posts,
-                    SUM(COALESCE(l.views, 0)) AS views,
-                    SUM(COALESCE(l.likes, 0)) AS likes,
-                    SUM(COALESCE(l.comments, 0)) AS comments,
-                    SUM(COALESCE(l.shares, 0)) AS shares,
-                    SUM(COALESCE(l.impressions, 0)) AS impressions,
-                    SUM(COALESCE(l.reach, 0)) AS reach,
-                    SUM(l.saves) AS saves,
-                    SUM(l.clicks) AS clicks,
-                    CASE WHEN SUM(COALESCE(l.views, 0)) > 0
-                      THEN (SUM(COALESCE(l.likes, 0)) + SUM(COALESCE(l.comments, 0)) + SUM(COALESCE(l.shares, 0)))::float8
-                           / SUM(COALESCE(l.views, 0))
-                      ELSE NULL END AS engagement_rate,
-                    MAX(l.snapshot_at) AS last_synced_at
-             FROM candidates c
-             LEFT JOIN latest l ON l.distribution_id = c.id
-             GROUP BY c.platform
-             ORDER BY c.platform ASC`,
-            scope,
-          );
-
+          // One baseline row per account plus one point per captured day in
+          // range. Provider sweeps run several times a day, but every chart
+          // renders daily points, so shipping each raw capture would multiply
+          // the payload without changing the line.
           const followerResult = yield* client.query<AnalyticsFollowerRow>(
-            `SELECT account.id AS account_id, account.platform,
-                    account.display_name AS account_name,
-                    snapshot.followers, snapshot.captured_at
-             FROM platform_account_snapshots snapshot
-             JOIN platform_accounts account ON account.id = snapshot.platform_account_id
-             WHERE snapshot.captured_at >= $1::timestamptz - INTERVAL '400 days'
-               AND snapshot.captured_at <= $2
-               AND ($3::text IS NULL OR account.platform = $3)
-               AND ($4::uuid IS NULL OR account.brand_profile_id = $4)
-               AND ($5::uuid IS NULL OR account.id = $5)
-               AND ${activeBrandProfilePredicate("account.brand_profile_id")}
-             ORDER BY account.platform ASC, account.id ASC, snapshot.captured_at ASC`,
+            `WITH baseline AS (
+               SELECT account.id AS account_id, account.platform,
+                      account.display_name AS account_name,
+                      latest.followers, latest.captured_at
+               FROM platform_accounts account
+               JOIN LATERAL (
+                 SELECT snapshot.followers, snapshot.captured_at
+                 FROM platform_account_snapshots snapshot
+                 WHERE snapshot.platform_account_id = account.id
+                   AND snapshot.captured_at < $1
+                 ORDER BY snapshot.captured_at DESC
+                 LIMIT 1
+               ) latest ON true
+               WHERE ($3::text IS NULL OR account.platform = $3)
+                 AND ($4::uuid IS NULL OR account.brand_profile_id = $4)
+                 AND ($5::uuid IS NULL OR account.id = $5)
+                 AND ${activeBrandProfilePredicate("account.brand_profile_id")}
+             ),
+             daily AS (
+               SELECT DISTINCT ON (account.id, date_trunc('day', snapshot.captured_at))
+                      account.id AS account_id, account.platform,
+                      account.display_name AS account_name,
+                      snapshot.followers, snapshot.captured_at
+               FROM platform_account_snapshots snapshot
+               JOIN platform_accounts account ON account.id = snapshot.platform_account_id
+               WHERE snapshot.captured_at >= $1
+                 AND snapshot.captured_at <= $2
+                 AND ($3::text IS NULL OR account.platform = $3)
+                 AND ($4::uuid IS NULL OR account.brand_profile_id = $4)
+                 AND ($5::uuid IS NULL OR account.id = $5)
+                 AND ${activeBrandProfilePredicate("account.brand_profile_id")}
+               ORDER BY account.id, date_trunc('day', snapshot.captured_at),
+                        snapshot.captured_at DESC
+             )
+             SELECT * FROM baseline
+             UNION ALL
+             SELECT * FROM daily
+             ORDER BY platform ASC, account_id ASC, captured_at ASC`,
             [
               filters.start,
               filters.end,
@@ -1182,7 +1233,7 @@ export function createCoreApiService(
             platformFollowers.set(account.platform, aggregate);
           }
 
-          const platforms = platformResult.rows.map((row) => {
+          const platforms = aggregate.platforms.map((row) => {
             const follower = platformFollowers.get(row.platform);
             return {
               platform: row.platform,
@@ -1212,6 +1263,62 @@ export function createCoreApiService(
           }
           if (followers.length === 0) unavailable.add("followers");
 
+          const unsupportedPlatforms = platforms
+            .map((row) => row.platform)
+            .filter((platform) => !capabilities.get(platform)?.analytics);
+          const watchTimeByPlatform = new Map(
+            aggregate.platforms.map((row) => [row.platform, number(row.watch_time_sec)]),
+          );
+          const cohortByPlatform = platforms.map((row) => ({
+            comments: row.comments,
+            impressions: row.impressions,
+            last_synced_at: row.last_synced_at,
+            likes: row.likes,
+            platform: row.platform,
+            post_count: row.posts,
+            reach: row.reach,
+            shares: row.shares,
+            views: row.views,
+            watch_time_sec: watchTimeByPlatform.get(row.platform) ?? 0,
+          }));
+          const totals = cohortByPlatform.reduce(
+            (acc, row) => ({
+              comments: acc.comments + row.comments,
+              impressions: acc.impressions + row.impressions,
+              likes: acc.likes + row.likes,
+              post_count: acc.post_count + row.post_count,
+              reach: acc.reach + row.reach,
+              shares: acc.shares + row.shares,
+              views: acc.views + row.views,
+              watch_time_sec: acc.watch_time_sec + row.watch_time_sec,
+            }),
+            {
+              comments: 0,
+              impressions: 0,
+              likes: 0,
+              post_count: 0,
+              reach: 0,
+              shares: 0,
+              views: 0,
+              watch_time_sec: 0,
+            },
+          );
+          const lastSyncedAt = platforms.reduce<string | null>((latest, row) => {
+            if (row.last_synced_at === null) return latest;
+            return latest === null || row.last_synced_at > latest ? row.last_synced_at : latest;
+          }, null);
+          const cohort = {
+            by_platform: cohortByPlatform,
+            last_synced_at: lastSyncedAt,
+            partial: unsupportedPlatforms.length > 0,
+            range: {
+              end: filters.end.toISOString(),
+              start: filters.start.toISOString(),
+            },
+            totals,
+            unsupported_platforms: unsupportedPlatforms,
+          };
+
           return {
             range: {
               end: filters.end.toISOString(),
@@ -1229,7 +1336,7 @@ export function createCoreApiService(
               reach: number(row.reach),
               last_synced_at: optionalDateTime(row.last_synced_at),
             })),
-            best_times: bestTimeResult.rows.map((row) => ({
+            best_times: aggregate.best_times.map((row) => ({
               day_of_week: number(row.day_of_week),
               hour: number(row.hour),
               posts: number(row.posts),
@@ -1239,7 +1346,7 @@ export function createCoreApiService(
               avg_shares: Number(row.avg_shares),
               avg_engagement: Number(row.avg_engagement),
             })),
-            formats: formatResult.rows.map((row) => ({
+            formats: aggregate.formats.map((row) => ({
               format: row.format,
               posts: number(row.posts),
               views: number(row.views),
@@ -1252,6 +1359,7 @@ export function createCoreApiService(
               last_synced_at: optionalDateTime(row.last_synced_at),
             })),
             platforms,
+            cohort,
             followers,
             accumulation: accumulationResult.rows.map((row) => ({
               elapsed_hours: number(row.elapsed_hours),

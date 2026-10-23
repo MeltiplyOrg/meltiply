@@ -16,7 +16,6 @@ import { platformDisplayName } from "@/lib/platforms";
 import {
   useAnalyticsPosts,
   useAnalyticsDashboard,
-  useAnalyticsSummary,
   usePlatformCapabilities,
   usePlatforms,
 } from "@/lib/queries";
@@ -143,7 +142,6 @@ export function AnalyticsView(): React.ReactElement {
     platform,
     range,
   } as const;
-  const summaryQuery = useAnalyticsSummary(scope, analyticsFilters);
   const dashboardQuery = useAnalyticsDashboard(scope, analyticsFilters);
   const postsQuery = useAnalyticsPosts(scope, {
     ...analyticsFilters,
@@ -175,12 +173,11 @@ export function AnalyticsView(): React.ReactElement {
   );
   const referencesPending = capabilitiesQuery.isPending || accountsQuery.isPending;
   const referenceError = capabilitiesQuery.error ?? accountsQuery.error;
-  const error = summaryQuery.error ?? dashboardQuery.error ?? postsQuery.error ?? referenceError;
+  const error = dashboardQuery.error ?? postsQuery.error ?? referenceError;
   const refreshing =
-    (summaryQuery.isFetching || dashboardQuery.isFetching || postsQuery.isFetching) &&
-    !summaryQuery.isPending;
+    (dashboardQuery.isFetching || postsQuery.isFetching) && !dashboardQuery.isPending;
   const scopeLabel = selectedBrandProfile?.name ?? t("All Brand Profiles");
-  const summary = summaryQuery.data;
+  const summary = dashboardQuery.data?.cohort;
   const lastSyncedAt = summary?.last_synced_at ?? null;
   const lastSyncLabel =
     lastSyncedAt === null
@@ -208,13 +205,11 @@ export function AnalyticsView(): React.ReactElement {
   const retry = () => {
     void capabilitiesQuery.refetch();
     void accountsQuery.refetch();
-    void summaryQuery.refetch();
     void dashboardQuery.refetch();
     void postsQuery.refetch();
   };
 
-  const loading =
-    referencesPending || summaryQuery.isPending || dashboardQuery.isPending || postsQuery.isPending;
+  const loading = referencesPending || dashboardQuery.isPending || postsQuery.isPending;
   const lastSyncStatus = summary ? (
     <span className="flex items-center gap-1.5 text-xs tabular-nums text-ink-3" aria-live="polite">
       {stale && <TriangleAlert className="size-3.5 text-orange" aria-hidden="true" />}

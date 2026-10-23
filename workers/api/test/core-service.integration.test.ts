@@ -2030,6 +2030,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(byMetric.posts[0]).toEqual({
         comments: 3,
         destination_count: 2,
+        synced_destination_count: 2,
         excerpt: expectedExcerpt,
         last_synced_at: "2026-10-21T13:00:00.000Z",
         likes: 20,
@@ -2049,6 +2050,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       });
       expect(byMetric.posts[2]).toMatchObject({
         destination_count: 1,
+        synced_destination_count: 0,
         last_synced_at: null,
         platforms: ["instagram"],
         title: "",
@@ -2262,6 +2264,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(ranked.posts).toHaveLength(1);
       expect(ranked.posts[0]).toMatchObject({
         destination_count: 5,
+        synced_destination_count: 5,
         platforms: [...platforms],
         unsupported_platforms: [],
         views: 50,

@@ -806,7 +806,10 @@ export function BestTimeHeatmap({ dashboard }: { dashboard: AnalyticsDashboard }
         </p>
       </div>
       <div className="overflow-x-auto">
-        <div className="mx-auto grid min-w-[640px] max-w-[1100px] grid-cols-[40px_repeat(24,minmax(16px,1fr))] gap-1">
+        <div
+          aria-hidden="true"
+          className="mx-auto grid min-w-[640px] max-w-[1100px] grid-cols-[40px_repeat(24,minmax(16px,1fr))] gap-1"
+        >
           <span />
           {HOURS.map((hour) => (
             <span key={hour} className="text-center text-[10px] text-ink-3">
@@ -858,6 +861,20 @@ export function BestTimeHeatmap({ dashboard }: { dashboard: AnalyticsDashboard }
           ))}
         </div>
       </div>
+      <ul className="sr-only">
+        {[...cells.values()]
+          .sort((left, right) => left.day_of_week - right.day_of_week || left.hour - right.hour)
+          .map((cell) => (
+            <li key={`${cell.day_of_week}:${cell.hour}`}>
+              {t("{day} {hour}:00 · {posts} posts · {value} average", {
+                day: weekdayLabel(cell.day_of_week),
+                hour: String(cell.hour).padStart(2, "0"),
+                posts: formatAnalyticsInteger(cell.posts, language),
+                value: formatAverage(bestTimeValue(cell, metric), language),
+              })}
+            </li>
+          ))}
+      </ul>
     </InsightCard>
   );
 }
@@ -880,13 +897,17 @@ export function FollowerEvolutionChart({ dashboard }: { dashboard: AnalyticsDash
   if (accountsByPlatform.size === 0) {
     return <EmptyInsight message={t("Follower history is not available yet.")} />;
   }
+  const startDay = dashboard.range.start.slice(0, 10);
+  const endDay = dashboard.range.end.slice(0, 10);
   const dates = [
     ...new Set(
       [...accountsByPlatform.values()].flatMap((accounts) =>
         accounts.flatMap((account) => [...account.points.keys()]),
       ),
     ),
-  ].sort();
+  ]
+    .filter((date) => date >= startDay && date <= endDay)
+    .sort();
   const data = dates.map((date) => {
     const row: Record<string, number | string> = {
       label: new Intl.DateTimeFormat(language, {
@@ -909,17 +930,21 @@ export function FollowerEvolutionChart({ dashboard }: { dashboard: AnalyticsDash
     }
     return row;
   });
-  const comparableRows = platformRows(dashboard);
+  const comparableRows = platformRows(dashboard).filter((row) => row.followers !== null);
   const current = comparableRows.reduce((sum, row) => sum + (row.followers ?? 0), 0);
+  const gainComplete = comparableRows.every((row) => row.follower_gain !== null);
   const gain = comparableRows.reduce((sum, row) => sum + (row.follower_gain ?? 0), 0);
-  return (
-    <InsightCard
-      title={t("Follower evolution")}
-      description={t("Current {current} · net {gain} in this range", {
+  const description = gainComplete
+    ? t("Current {current} · net {gain} in this range", {
         current: formatAnalyticsInteger(current, language),
         gain: `${gain >= 0 ? "+" : ""}${formatAnalyticsInteger(gain, language)}`,
-      })}
-    >
+      })
+    : `${t("Current {current} · net {gain} in this range", {
+        current: formatAnalyticsInteger(current, language),
+        gain: "—",
+      })} (${t("Not tracked")})`;
+  return (
+    <InsightCard title={t("Follower evolution")} description={description}>
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ bottom: 0, left: 0, right: 8, top: 8 }}>
@@ -1033,6 +1058,17 @@ type PlatformSortKey =
   | "followers"
   | "follower_gain";
 
+/** Metrics that only exist after a content snapshot; Posts and follower data do not. */
+const CONTENT_METRIC_KEYS: ReadonlySet<PlatformSortKey> = new Set([
+  "views",
+  "likes",
+  "comments",
+  "shares",
+  "reach",
+  "impressions",
+  "engagement_rate",
+]);
+
 /**
  * Sorts platform metrics with honest null cells. Native column sizing fills the
  * available width using only visible metrics; narrow viewports scroll locally.
@@ -1064,9 +1100,10 @@ export function PlatformBreakdownTable({ dashboard }: { dashboard: AnalyticsDash
   ];
   const showSaves = sorted.some((row) => row.saves !== null);
   const showClicks = sorted.some((row) => row.clicks !== null);
-  const untracked = [!showSaves ? t("Saves") : null, !showClicks ? t("Clicks") : null].filter(
-    (value): value is string => value !== null,
-  );
+  const untracked = [
+    dashboard.unavailable_metrics.includes("saves") ? t("Saves") : null,
+    dashboard.unavailable_metrics.includes("clicks") ? t("Clicks") : null,
+  ].filter((value): value is string => value !== null);
   const sortBy = (key: PlatformSortKey) =>
     setSort((current) => ({
       direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
@@ -1110,38 +1147,47 @@ export function PlatformBreakdownTable({ dashboard }: { dashboard: AnalyticsDash
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sorted.map((row) => (
-              <TableRow key={row.platform}>
-                <TableCell>
-                  <span className="flex items-center gap-2">
-                    <PlatformIcon provider={row.platform} className="size-4" />
-                    {platformDisplayName(row.platform)}
-                  </span>
-                </TableCell>
-                {columns.map((column) => (
-                  <TableCell
-                    key={column.key}
-                    className="whitespace-nowrap text-right font-mono tabular-nums"
-                  >
-                    {value(row, column.key)}
+            {sorted.map((row) => {
+              const awaitingSync = row.last_synced_at === null;
+              return (
+                <TableRow key={row.platform}>
+                  <TableCell>
+                    <span className="flex items-center gap-2">
+                      <PlatformIcon provider={row.platform} className="size-4" />
+                      {platformDisplayName(row.platform)}
+                    </span>
                   </TableCell>
-                ))}
-                {showSaves && (
-                  <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
-                    {row.saves === null
-                      ? t("Not tracked")
-                      : formatAnalyticsInteger(row.saves, language)}
-                  </TableCell>
-                )}
-                {showClicks && (
-                  <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
-                    {row.clicks === null
-                      ? t("Not tracked")
-                      : formatAnalyticsInteger(row.clicks, language)}
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
+                  {columns.map((column) => (
+                    <TableCell
+                      key={column.key}
+                      className="whitespace-nowrap text-right font-mono tabular-nums"
+                    >
+                      {awaitingSync && CONTENT_METRIC_KEYS.has(column.key)
+                        ? t("Awaiting sync")
+                        : value(row, column.key)}
+                    </TableCell>
+                  ))}
+                  {showSaves && (
+                    <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
+                      {awaitingSync
+                        ? t("Awaiting sync")
+                        : row.saves === null
+                          ? t("Not tracked")
+                          : formatAnalyticsInteger(row.saves, language)}
+                    </TableCell>
+                  )}
+                  {showClicks && (
+                    <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
+                      {awaitingSync
+                        ? t("Awaiting sync")
+                        : row.clicks === null
+                          ? t("Not tracked")
+                          : formatAnalyticsInteger(row.clicks, language)}
+                    </TableCell>
+                  )}
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

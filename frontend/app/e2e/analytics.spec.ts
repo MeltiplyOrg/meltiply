@@ -82,7 +82,7 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await page.getByRole("button", { name: "Load more" }).click();
   await expect(table.locator("tbody tr")).toHaveCount(12);
   await expect(table.getByText("Not supported")).toHaveCount(4);
-  await expect(table.getByText("Awaiting sync")).toHaveCount(4);
+  await expect(table.getByText("Awaiting sync", { exact: true })).toHaveCount(4);
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
   // Metric headers re-rank. Shares tie between the launch and older Posts, and

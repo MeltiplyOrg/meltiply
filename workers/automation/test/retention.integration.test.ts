@@ -199,6 +199,18 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       await client.query("DELETE FROM analytics_snapshots WHERE id = ANY($1::uuid[])", [
         [...analyticsSnapshotIds, unscheduledSnapshotId],
       ]);
+      // Retention selects eligible analytics snapshots across every tenant.
+      // Seeded history would otherwise consume this suite's bounded batch
+      // before the fixture pair is reached.
+      await client.query(
+        `DELETE FROM analytics_snapshots AS snapshot
+         WHERE snapshot.snapshot_at < now() - INTERVAL '90 days'
+           AND EXISTS (
+             SELECT 1 FROM analytics_snapshots AS newer
+             WHERE newer.distribution_id = snapshot.distribution_id
+               AND newer.snapshot_at > snapshot.snapshot_at
+           )`,
+      );
       await client.query("DELETE FROM distributions WHERE id = ANY($1::uuid[])", [
         [distributionId, unscheduledDistributionId],
       ]);

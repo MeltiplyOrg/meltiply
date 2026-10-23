@@ -205,6 +205,7 @@ export function AnalyticsToolbar({
                     label: platformDisplayName(platform),
                   }))}
                   ariaLabel={t("Platform")}
+                  disabled={platforms.length === 0}
                   trigger={
                     <TopToolbarButton
                       label={

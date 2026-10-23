@@ -108,6 +108,36 @@ const fixture: AnalyticsDashboard = {
       views: 600,
     },
   ],
+  cohort: {
+    by_platform: [
+      {
+        comments: 6,
+        impressions: 800,
+        last_synced_at: "2026-10-22T12:00:00Z",
+        likes: 60,
+        platform: "facebook",
+        post_count: 3,
+        reach: 500,
+        shares: 9,
+        views: 600,
+        watch_time_sec: 0,
+      },
+    ],
+    last_synced_at: "2026-10-22T12:00:00Z",
+    partial: false,
+    range: { end: "2026-10-22T23:59:59Z", start: "2026-10-01T00:00:00Z" },
+    totals: {
+      comments: 6,
+      impressions: 800,
+      likes: 60,
+      post_count: 3,
+      reach: 500,
+      shares: 9,
+      views: 600,
+      watch_time_sec: 0,
+    },
+    unsupported_platforms: [],
+  },
   range: { end: "2026-10-22T23:59:59Z", start: "2026-10-01T00:00:00Z" },
   series: [
     {

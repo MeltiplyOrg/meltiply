@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `GET /analytics/dashboard` (`getAnalyticsDashboard`) with daily series,
+  best-time cells, format and platform breakdowns, follower history, and
+  engagement accumulation. Its required `cohort` field carries the same
+  published-cohort `AnalyticsSummary` as `GET /analytics`, so a client renders
+  KPIs, coverage, and the platform comparison from one request. Add required
+  `AnalyticsPostRow.synced_destination_count` so a partially synced Post is
+  distinguishable from a fully measured one. `unavailable_metrics` enumerates
+  only the metrics a Provider does not expose (`saves`, `clicks`, `followers`).
+
 - Add `GET /analytics/posts` (`getAnalyticsPosts`), the documented per-Post
   analytics read ranked by `views`, `likes`, `comments`, or `shares` with stable
   `limit`/`offset` pagination. Add nullable `PlatformMetrics.last_synced_at` so

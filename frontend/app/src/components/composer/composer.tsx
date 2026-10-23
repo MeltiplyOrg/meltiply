@@ -622,9 +622,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     brandProfiles,
     integrations,
     selectedChannelIds,
-    selectedBrandProfileId,
+    selectedBrandProfileId: collectionProfileId,
     setSelectedChannelIds,
-    setSelectedBrandProfileId,
     refreshWorkspace,
   } = useWorkspace();
   const scope = useSessionScope();
@@ -666,8 +665,17 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [hydratedPostId, setHydratedPostId] = useState<string | null>(null);
+  /**
+   * Brand Profile that owns this composition. Seeded once from the opened Post
+   * or the collection selection and then held here, so the composer's picker is
+   * independent of the Posts list filter: changing either must not re-scope the
+   * other, and opening this panel must not reload the collection behind it.
+   */
+  const [ownerProfileId, setOwnerProfileId] = useState<string | null>(() =>
+    initialPostId === undefined ? collectionProfileId : null,
+  );
   const [selectedProfileIds, setSelectedProfileIds] = useState<string[]>(() =>
-    selectedBrandProfileId ? [selectedBrandProfileId] : [],
+    ownerProfileId ? [ownerProfileId] : [],
   );
   const [profileProgress, setProfileProgress] = useState<ProfileCopyProgress[]>([]);
   const profileCopiesRef = useRef(new Map<string, ProfileCopy>());
@@ -712,12 +720,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   // Session identity stays stable when the first single-Post save learns its id,
   // but subsequent edits must recover under that Post's durable identity. A new
   // batch keeps its copy ids in one new-composition record instead.
-  const composerIdentity = `${scope.workspaceId ?? "personal"}::${selectedBrandProfileId ?? "all"}::${initialPostId ?? "new"}`;
-  const recoveryNamespace = `${scope.workspaceId ?? "personal"}::${selectedBrandProfileId ?? "all"}::${postId ?? "new"}`;
+  const composerIdentity = `${scope.workspaceId ?? "personal"}::${ownerProfileId ?? "all"}::${initialPostId ?? "new"}`;
+  const recoveryNamespace = `${scope.workspaceId ?? "personal"}::${ownerProfileId ?? "all"}::${postId ?? "new"}`;
   const [previousComposerIdentity, setPreviousComposerIdentity] = useState(composerIdentity);
   if (previousComposerIdentity !== composerIdentity) {
     setPreviousComposerIdentity(composerIdentity);
-    setSelectedProfileIds(selectedBrandProfileId ? [selectedBrandProfileId] : []);
+    setSelectedProfileIds(ownerProfileId ? [ownerProfileId] : []);
     setProfileProgress([]);
   }
   // Async upload callbacks need the *current* identity without re-subscribing,
@@ -740,31 +748,18 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const postQuery = usePost(scope, postId ?? "", postId !== null);
   const capabilitiesQuery = usePlatformCapabilities(scope);
 
-  // Adopt a default owner once per mounted composer session, after an existing
-  // Post has loaded. Later aggregate selections belong to the collection filter
-  // and must not be replaced by this initialization.
-  const hasAdoptedOwnerRef = useRef(false);
-  useEffect(() => {
-    if (!scope.isSignedIn || hasAdoptedOwnerRef.current) return;
-    if (initialPostId !== undefined && !postQuery.data) return;
-    if (selectedBrandProfileId !== null) {
-      hasAdoptedOwnerRef.current = true;
-      return;
-    }
-    const profileId =
-      initialPostId !== undefined ? postQuery.data?.brand_profile_id : brandProfiles[0]?.id;
-    if (profileId) {
-      hasAdoptedOwnerRef.current = true;
-      setSelectedBrandProfileId(profileId);
-    }
-  }, [
-    brandProfiles,
-    initialPostId,
-    postQuery.data,
-    scope.isSignedIn,
-    selectedBrandProfileId,
-    setSelectedBrandProfileId,
-  ]);
+  // Adopt the composition's owner once, as soon as it can be resolved: an
+  // opened Post supplies its own owner, and a new composition starts from the
+  // current collection selection (the first profile when the collection is
+  // aggregate). Deriving it during render keeps the value local instead of
+  // calling `setSelectedBrandProfileId`, which would re-filter and reload the
+  // Posts collection behind the open drawer. Once adopted, the owner never
+  // follows later collection changes.
+  const candidateOwnerId =
+    initialPostId !== undefined
+      ? postQuery.data?.brand_profile_id
+      : (collectionProfileId ?? brandProfiles[0]?.id);
+  if (ownerProfileId === null && candidateOwnerId) setOwnerProfileId(candidateOwnerId);
   const createPost = useCreatePost(scope);
   const updatePost = useUpdatePost(scope);
   const schedulePost = useSchedulePost(scope);
@@ -843,7 +838,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     // Back to the eligible defaults rather than an empty set: abandoning a
     // composition (or finishing one) must not leave the next one with no
     // destinations, which is what the previous explicit [] produced after a
-    // Brand Profile switch.
+    // composition identity switch.
     setSelectedChannelIds(null);
     setSavedAt(null);
     setHydratedPostId(null);
@@ -856,13 +851,14 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setIsDirty(false);
   }, [setSelectedChannelIds]);
 
-  // Opening a different Post or switching Brand Profile abandons in-flight
-  // composer state so nothing from the previous identity can leak into it —
-  // including the upload tasks the detached rows still own; without the abort
-  // their callbacks keep running (guarded off by composerIdentityRef) and the
-  // ref's stale value would make every later switch a no-op. This runs before
-  // the hydration and recovery effects below, so the new identity's
-  // authoritative state is what lands last.
+  // Opening a different Post — or a composition whose owner was adopted for a
+  // different Profile — abandons in-flight composer state so nothing from the
+  // previous identity can leak into it — including the upload tasks the
+  // detached rows still own; without the abort their callbacks keep running
+  // (guarded off by composerIdentityRef) and the ref's stale value would make
+  // every later switch a no-op. Changing the collection Brand Profile filter is
+  // not an identity switch. This runs before the hydration and recovery effects
+  // below, so the new identity's authoritative state is what lands last.
   const cancelledIdentityRef = useRef<string | null>(null);
   useEffect(() => {
     if (cancelledIdentityRef.current === null) {
@@ -973,14 +969,14 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   ]);
 
   // Hydrate shared text, Channel selection, settings, attachments, and schedule
-  // only after sign-in and profile selection settle. Aggregate-scope hydration
-  // could otherwise commit just before the owner switch clears composer state.
+  // only after sign-in and the composition's owner settle. Hydrating before the
+  // owner is known could commit a Post's content into an unscoped composer.
   // Each Post hydrates once so later polling never overwrites creator input.
   useEffect(() => {
     const post = postQuery.data;
     if (
       !scope.isSignedIn ||
-      selectedBrandProfileId === null ||
+      ownerProfileId === null ||
       !post ||
       !postId ||
       hydratedPostId === postId
@@ -1024,7 +1020,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     postId,
     postQuery.data,
     scope.isSignedIn,
-    selectedBrandProfileId,
+    ownerProfileId,
     setSelectedChannelIds,
   ]);
 
@@ -1180,7 +1176,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   useEffect(() => {
     const assetIds = pendingOwnershipAssetIds;
     if (!postId || !assetIds || assetIds.length === 0) return;
-    const profileId = selectedBrandProfileId;
+    const profileId = ownerProfileId;
     if (profileId === null || !selectedProfileIds.includes(profileId)) return;
     // Ids already handed to a PATCH are not resent; the effect re-runs when the
     // ordered rows change so a freshly known id still lands in the same patch.
@@ -1211,7 +1207,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     orderedAssetIds,
     pendingOwnershipAssetIds,
     postId,
-    selectedBrandProfileId,
+    ownerProfileId,
     selectedProfileIds,
     updatePost,
   ]);
@@ -1413,7 +1409,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * Starts the composer-owned upload pipeline for one local file.
    *
    * Uploads run only while the identity that started them is still active, so a
-   * Brand Profile switch can never attach a file to another profile's Post.
+   * changed composition identity can never attach a file to another profile's
+   * Post.
    * `onSessionStart` records the durable Asset id, which both enables saving a
    * draft mid-upload and persists ownership on an already-saved Post.
    *
@@ -1425,7 +1422,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    */
   const startUpload = useCallback(
     (file: File, key: string, index: number | null, replaced: ReplacedSelections | null) => {
-      const brandProfileId = selectedBrandProfileId;
+      const brandProfileId = ownerProfileId;
       if (!scope.isSignedIn || brandProfileId === null) return;
       const identityAtStart = composerIdentityRef.current;
       let previewUrl = "";
@@ -1558,7 +1555,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           );
         });
     },
-    [language, markDirty, scope.isSignedIn, scope.workspaceId, selectedBrandProfileId],
+    [language, markDirty, scope.isSignedIn, scope.workspaceId, ownerProfileId],
   );
 
   /**
@@ -1684,7 +1681,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       setDragActive(false);
-      const brandProfileId = selectedBrandProfileId;
+      const brandProfileId = ownerProfileId;
       if (!scope.isSignedIn || brandProfileId === null) {
         toast(t("Upload failed"), {
           variant: "error",
@@ -1698,7 +1695,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         startUpload(file, key, null, null);
       });
     },
-    [scope.isSignedIn, selectedBrandProfileId, startUpload, t],
+    [scope.isSignedIn, ownerProfileId, startUpload, t],
   );
 
   /**
@@ -1824,7 +1821,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       const errors: string[] = [];
       const starting = attachments.filter((attachment) => attachment.assetId === null);
 
-      if (selectedProfileIds.length === 0 || selectedBrandProfileId === null) {
+      if (selectedProfileIds.length === 0 || ownerProfileId === null) {
         errors.push(t("Select a Brand Profile before publishing."));
       }
       if (type !== "draft" && selectedChannels.length === 0) {
@@ -1859,7 +1856,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         type === "queue" &&
         (!hasSelectedQueue ||
           selectedProfileIds.length !== 1 ||
-          selectedProfileIds[0] !== selectedBrandProfileId ||
+          selectedProfileIds[0] !== ownerProfileId ||
           profileCopiesRef.current.size > 0)
       ) {
         errors.push(t("Choose a Queue in this Post's single Brand Profile before submitting."));
@@ -1994,7 +1991,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       resolvedContentFor,
       scheduleDate,
       hasSelectedQueue,
-      selectedBrandProfileId,
+      ownerProfileId,
       selectedProfileIds,
       profileNames,
       selectedChannels,
@@ -2063,8 +2060,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       if (errors.length > 0) return false;
       // validateSubmission already reported the aggregate view as an error, so a
       // null selection cannot reach the scoped mutations.
-      if (selectedBrandProfileId === null) return false;
-      const brandProfileId = selectedBrandProfileId;
+      if (ownerProfileId === null) return false;
+      const brandProfileId = ownerProfileId;
       // Async completion must affect only the composition that submitted it.
       const recoveryNamespaceAtSubmit = recoveryNamespaceRef.current;
       const composerIdentityAtSubmit = composerIdentityRef.current;
@@ -2241,7 +2238,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       scheduleDate,
       schedulePost,
       selectedQueueId,
-      selectedBrandProfileId,
+      ownerProfileId,
       selectedProfileIds,
       selectedChannels,
       attachments,
@@ -2308,8 +2305,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const isPostLoading = postId !== null && !postQuery.data && !postLoadError;
   const profileMismatch =
     postQuery.data !== undefined &&
-    selectedBrandProfileId !== null &&
-    postQuery.data.brand_profile_id !== selectedBrandProfileId;
+    ownerProfileId !== null &&
+    postQuery.data.brand_profile_id !== ownerProfileId;
   // Recovery is optional consent-gated storage: without functional consent the
   // read effect never opens and the namespace stays unread, so that gate only
   // blocks initialization while consent is active (including when consent
@@ -2326,7 +2323,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     isInitializing ||
     Boolean(postLoadError) ||
     !scope.isSignedIn ||
-    selectedBrandProfileId === null ||
+    ownerProfileId === null ||
     profileMismatch;
 
   return (
@@ -2336,7 +2333,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       className="@container flex min-h-0 min-w-0 grow flex-col gap-5 @4xl:overflow-hidden"
     >
       <div className="flex flex-col gap-3 empty:hidden">
-        {selectedBrandProfileId === null && (
+        {ownerProfileId === null && (
           <Alert variant="info" className="items-center">
             <AlertCircle className="size-4 shrink-0" />
             <div className="flex-1">
@@ -2462,7 +2459,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         Destinations block shows the accounts as unavailable. */}
                 <div className="flex flex-wrap items-center justify-between gap-2 text-(length:--font-size-micro) text-ink-3">
                   <span>
-                    {selectedBrandProfileId !== null && (
+                    {ownerProfileId !== null && (
                       <Trans
                         message="Targeting {count} channel(s)"
                         values={{ count: <RollingCount value={selectedChannels.length} /> }}
@@ -2496,7 +2493,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                         replaceTargetRef.current = null;
                         fileInputRef.current?.click();
                       }}
-                      disabled={selectedBrandProfileId === null || !scope.isSignedIn}
+                      disabled={ownerProfileId === null || !scope.isSignedIn}
                       className="h-7 gap-1.5 px-2 text-(length:--font-size-control)"
                     >
                       <ImageIcon className="size-3.5" />
@@ -2645,7 +2642,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                                 aria-label={t("Replace attachment {index}", {
                                   index: index + 1,
                                 })}
-                                disabled={selectedBrandProfileId === null}
+                                disabled={ownerProfileId === null}
                                 onClick={() => {
                                   replaceTargetRef.current = attachment.key;
                                   fileInputRef.current?.click();
@@ -2742,7 +2739,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                           replaceTargetRef.current = null;
                           fileInputRef.current?.click();
                         }}
-                        disabled={selectedBrandProfileId === null || !scope.isSignedIn}
+                        disabled={ownerProfileId === null || !scope.isSignedIn}
                         className="aspect-square h-auto w-full flex-col gap-1.5 rounded-control border-dashed font-normal text-ink-3 hover:text-ink"
                       >
                         <Plus className="size-4" />

@@ -106,8 +106,10 @@ The [cookie policy](https://meltiply.com/docs/cookies) governs optional
 functional preferences and browser-local draft/upload recovery. Until functional
 consent is accepted, these convenience values are neither read nor persisted;
 authentication and server-backed Posts and uploads remain available. Declining
-consent must not block composer initialization. Switching Brand Profile or Post
-abandons the previous composition and cancels its in-flight uploads. A theme
+consent must not block composer initialization. Switching the collection's Brand
+Profile filter leaves an open composition untouched; opening a different Post —
+or a composition whose owner changes — abandons the previous composition and
+cancels its in-flight uploads. A theme
 selected on the landing page or docs follows links into the app without granting
 storage consent. The app loads palette CSS before first paint and preserves
 transferred intent through hydration and an initial cookie rejection. Actual

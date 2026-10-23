@@ -38,9 +38,12 @@ Seeded local accounts all use `MeltiplyLocal1!` and share the single Workspace:
 
 The seed also includes a pending invitation for `pending.invitee@meltiply.local` and
 sample Audit entries, so the Members, Workspace, and Audit tabs are populated on
-first sign-in. These credentials are for local development only. Production
-installations create their own owner through the protected first-run setup described
-in [self-hosting](docs/self-hosting.md#authentication-invitations-and-owner-recovery).
+first sign-in. These credentials are for local development only. While the app runs
+in Vite development mode (`make dev` or `make frontend-boot`), the sign-in form
+prefills the Installation Owner's email and password; production and preview builds
+never do. Production installations create their own owner through the protected
+first-run setup described in
+[self-hosting](docs/self-hosting.md#authentication-invitations-and-owner-recovery).
 
 ## Deployment targets
 

@@ -85,28 +85,42 @@ function canonicalFrontendOriginPlugin(frontendUrl: string | undefined): Plugin 
 }
 
 /**
- * Vite plugin that stubs the DevBox module out of production builds.
+ * Dev-only modules replaced with inert source in every build. Keys match the
+ * resolved absolute module path suffix; values are the stub module source.
  *
- * `main.tsx` and `providers.tsx` gate the dock behind `isDevMode()`, which is
- * a runtime check — bundlers cannot fold it, so the lazy chunk (and its heavy
- * dev dependencies: react-scan, axe-core, query devtools, agentation) would
- * still be emitted to `dist`. Resolving the module to an empty stub at build
- * time removes the entire subtree from the production artifact while leaving
- * development mode untouched.
- *
- * @returns Vite `Plugin` that no-ops the devbox entry during `vite build`.
+ * `isDevMode()` is a runtime check — bundlers cannot fold the branches around
+ * it, so dev tooling (react-scan, axe-core, query devtools, agentation) and the
+ * local sign-in fixture would otherwise still be emitted to `dist`. The stubs
+ * remove both from deployed artifacts while leaving development mode untouched.
+ * Keeping the credentials here as a separate module makes one entry enough to
+ * prove they cannot ship; `sign-in-form.test.tsx` and the Vite config test pin
+ * both halves.
  */
-function devBoxStubPlugin(): Plugin {
+const devOnlyStubModules: Readonly<Record<string, string>> = {
+  "components/devbox/dev-box":
+    "export const DevBox = () => null; export const DevBoxClientBridge = () => null;",
+  "lib/dev-sign-in": 'export const localDevOwnerSignIn = { email: "", password: "" };',
+};
+
+/**
+ * Vite plugin that resolves every `devOnlyStubModules` entry to its stub for
+ * `vite build`, so production artifacts contain no dev tooling or local
+ * credentials regardless of minifier behavior.
+ *
+ * @returns Vite `Plugin` that no-ops the listed development entries.
+ */
+function devOnlyStubPlugin(): Plugin {
   return {
-    name: "devbox-stub",
+    name: "dev-only-stub",
     apply: "build" as const,
     // The `@/` alias resolves the specifier before `resolveId` hooks run, so
     // match the resolved absolute path in `load` instead.
     load(id: string) {
       const normalized = id.replace(/\\/g, "/").replace(/\.(tsx?|jsx?)$/, "");
-      return normalized.endsWith("components/devbox/dev-box")
-        ? "export const DevBox = () => null; export const DevBoxClientBridge = () => null;"
-        : null;
+      const stub = Object.entries(devOnlyStubModules).find(([suffix]) =>
+        normalized.endsWith(suffix),
+      )?.[1];
+      return stub ?? null;
     },
   };
 }
@@ -138,7 +152,7 @@ export default defineConfig(() => {
       cloudflare(),
       rootEnvReloadPlugin(),
       canonicalFrontendOriginPlugin(frontendUrl),
-      devBoxStubPlugin(),
+      devOnlyStubPlugin(),
     ]),
     server: {
       host: process.env.FRONTEND_DEV_HOST ?? "127.0.0.1",

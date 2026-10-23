@@ -496,16 +496,16 @@ function oauthStateStub(env: ApiWorkerEnv, routingKey: string): OAuthStateStub {
  *
  * Enforces HTTPS scheme unless running in local development mode against localhost.
  *
- * @param env - Worker environment bindings containing `PUBLIC_API_URL`.
+ * @param env - Worker environment bindings containing `APP_URL`.
  * @param provider - Social platform identifier (e.g. `'tiktok'`, `'youtube'`).
  * @returns Fully qualified OAuth redirect URI.
- * @throws {CoreApiError} 503 `service_unavailable` if `PUBLIC_API_URL` is missing or insecure.
+ * @throws {CoreApiError} 503 `service_unavailable` if `APP_URL` is missing or insecure.
  */
 function oauthCallbackUrl(env: ApiWorkerEnv, provider: Platform): string {
-  if (!env.PUBLIC_API_URL) {
+  if (!env.APP_URL) {
     throw new CoreApiError(503, "service_unavailable", "The public API URL is unavailable.");
   }
-  const target = new URL(oauthCallbackPath(provider), env.PUBLIC_API_URL);
+  const target = new URL(oauthCallbackPath(provider), env.APP_URL);
   if (
     target.protocol !== "https:" &&
     !(env.ENVIRONMENT !== "staging" && target.hostname === "localhost")
@@ -571,9 +571,9 @@ async function pkceChallenge(verifier: string): Promise<string> {
  * exact same prefix instead of duplicating the literal; the Automation Worker keeps
  * its own byte-identical copy in `workers/automation/src/provider-media.ts` because
  * separate worker bundles cannot share source modules. The Automation Worker signs
- * `<PUBLIC_API_URL>/api/v1/provider-media/<key>?expires=<unix>&signature=<b64url>` URLs;
+ * `<APP_URL>/api/v1/provider-media/<key>?expires=<unix>&signature=<b64url>` URLs;
  * this route verifies the HMAC before streaming the private R2 object. The provider
- * registry derives TikTok's media prefix from this route on PUBLIC_API_URL by default;
+ * registry derives TikTok's media prefix from this route on APP_URL by default;
  * any explicit TIKTOK_MEDIA_URL_PREFIX must still cover emitted URLs.
  */
 export const providerMediaRoutePrefix = "/api/v1/provider-media/";
@@ -695,11 +695,11 @@ function providerMediaKey(pathname: string): string | undefined {
  *
  * Appends `oauth` status code and `provider` query parameters.
  *
- * @param env - Worker environment bindings containing `FRONTEND_URL`.
+ * @param env - Worker environment bindings containing `APP_URL`.
  * @param provider - Social platform provider identifier.
  * @param outcome - Result status code string (e.g. `'success'` or error code).
  * @returns Fully qualified frontend redirection URL string.
- * @throws {CoreApiError} 503 `service_unavailable` if `FRONTEND_URL` is missing.
+ * @throws {CoreApiError} 503 `service_unavailable` if `APP_URL` is missing.
  */
 function frontendRedirect(
   env: ApiWorkerEnv,
@@ -708,14 +708,14 @@ function frontendRedirect(
   extraParams?: Record<string, string>,
   pathname = "/channels",
 ): string {
-  if (!env.FRONTEND_URL) {
+  if (!env.APP_URL) {
     throw new CoreApiError(
       503,
       "service_unavailable",
       "The frontend redirect target is unavailable.",
     );
   }
-  const target = new URL(pathname, env.FRONTEND_URL);
+  const target = new URL(pathname, env.APP_URL);
   target.searchParams.set("oauth", outcome);
   target.searchParams.set("provider", provider);
   if (extraParams) {
@@ -1500,7 +1500,7 @@ export function registerCoreRoutes(
       c,
       Effect.gen(function* () {
         const selected = yield* fromPromise(() => platformParam(c.req.param("platform")));
-        // Redirect targets are built inside fromPromise so a missing FRONTEND_URL
+        // Redirect targets are built inside fromPromise so a missing APP_URL
         // surfaces as a typed 503 service unavailable failure.
         const redirectTo = (outcome: string) =>
           fromPromise(() => Response.redirect(frontendRedirect(c.env, selected, outcome), 302));

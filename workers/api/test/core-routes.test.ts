@@ -37,8 +37,7 @@ afterEach(() => {
 const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   ENVIRONMENT: "test",
-  FRONTEND_URL: "http://localhost:3000",
-  PUBLIC_API_URL: "http://localhost:8787",
+  APP_URL: "http://localhost:3000",
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
@@ -1519,7 +1518,7 @@ describe("core API routes", () => {
     expect(location.origin).toBe("https://www.tiktok.com");
     expect(location.searchParams.get("client_key")).toBe("tiktok-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "http://localhost:8787/api/v1/platforms/tiktok/callback",
+      "http://localhost:3000/api/v1/platforms/tiktok/callback",
     );
     expect(location.searchParams.get("scope")).toBe("user.info.basic,video.publish");
     expect(create).toHaveBeenCalledOnce();
@@ -1567,7 +1566,7 @@ describe("core API routes", () => {
     expect(location.origin).toBe("https://threads.com");
     expect(location.searchParams.get("client_id")).toBe("threads-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "http://localhost:8787/api/v1/platforms/threads/callback",
+      "http://localhost:3000/api/v1/platforms/threads/callback",
     );
     expect(create).toHaveBeenCalledOnce();
   });
@@ -1614,7 +1613,7 @@ describe("core API routes", () => {
     expect(location.origin).toBe("https://www.facebook.com");
     expect(location.searchParams.get("client_id")).toBe("facebook-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "http://localhost:8787/api/v1/platforms/facebook/callback",
+      "http://localhost:3000/api/v1/platforms/facebook/callback",
     );
     expect(create).toHaveBeenCalledOnce();
   });
@@ -1661,7 +1660,7 @@ describe("core API routes", () => {
     expect(location.origin).toBe("https://accounts.google.com");
     expect(location.searchParams.get("client_id")).toBe("youtube-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "http://localhost:8787/api/v1/platforms/youtube/callback",
+      "http://localhost:3000/api/v1/platforms/youtube/callback",
     );
     expect(location.searchParams.get("code_challenge_method")).toBe("S256");
     expect(create).toHaveBeenCalledOnce();
@@ -2184,7 +2183,7 @@ describe("core API routes", () => {
     expect(record.expires_at).toBeGreaterThan(Date.now());
     expect(authorizationUrl).toHaveBeenCalledWith({
       codeChallenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
-      redirectUri: "http://localhost:8787/api/v1/platforms/threads/callback",
+      redirectUri: "http://localhost:3000/api/v1/platforms/threads/callback",
       state,
     });
   });
@@ -2266,7 +2265,7 @@ describe("core API routes", () => {
       {
         code: "provider-code",
         codeVerifier: "pkce-verifier",
-        redirectUri: "http://localhost:8787/api/v1/platforms/threads/callback",
+        redirectUri: "http://localhost:3000/api/v1/platforms/threads/callback",
       },
     );
     expect(saveOAuthConnection).not.toHaveBeenCalled();
@@ -2301,7 +2300,7 @@ describe("core API routes", () => {
       undefined,
       {
         ...env,
-        PUBLIC_API_URL: undefined,
+        APP_URL: undefined,
         OAUTH_STATE: {
           getByName: () => ({
             consume: async () => ({

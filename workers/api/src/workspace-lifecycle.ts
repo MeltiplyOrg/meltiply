@@ -480,13 +480,13 @@ function renderInvitationMessage(message: {
 /**
  * Builds the frontend acceptance URL for an invitation token.
  *
- * @param env - Worker environment bindings containing FRONTEND_URL.
+ * @param env - Worker environment bindings containing APP_URL.
  * @param token - Opaque invitation token (never stored server-side).
  * @returns Absolute acceptance link for the invitation email.
- * @throws {CoreApiError} 503 `service_unavailable` when FRONTEND_URL is unset.
+ * @throws {CoreApiError} 503 `service_unavailable` when APP_URL is unset.
  */
 function invitationLink(env: ApiWorkerEnv, token: string): string {
-  const base = env.FRONTEND_URL?.trim();
+  const base = env.APP_URL?.trim();
   if (!base) {
     throw new CoreApiError(503, "service_unavailable", "The frontend URL is unavailable.");
   }

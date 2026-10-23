@@ -179,9 +179,9 @@ export function prepareR2AcceptanceOptions(parsed, { iac, spec }, repoRoot = REP
     throw new Error(`--apply requires --confirm ${JSON.stringify(expectedConfirmation)}`);
   }
   return Object.freeze({
-    apiOrigin: spec.api_base_url,
+    apiOrigin: spec.app_url,
     apply: parsed.apply,
-    browserOrigin: spec.frontend_url,
+    browserOrigin: spec.app_url,
     bucketName: iac.assets_bucket,
     gitSha: spec.git_sha,
     iacOutputsSha256: sha256(JSON.stringify(iac)),

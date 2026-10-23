@@ -33,7 +33,7 @@ describe("frontend Worker telemetry boundary", () => {
     const response = await worker.fetch(
       telemetryRequest({
         code: "provider/internal",
-        configurationKey: "API_BASE_URL",
+        configurationKey: "APP_URL",
         configurationSource: "vite_public_env",
         configurationState: "invalid",
         diagnosticCode: "api_base_url_invalid",
@@ -54,7 +54,7 @@ describe("frontend Worker telemetry boundary", () => {
     const event = JSON.parse(logger.mock.calls[0]?.[0] as string) as Record<string, unknown>;
     expect(event).toMatchObject({
       context: expect.objectContaining({
-        configuration_key: "API_BASE_URL",
+        configuration_key: "APP_URL",
         configuration_source: "vite_public_env",
         configuration_state: "invalid",
         diagnostic_code: "api_base_url_invalid",

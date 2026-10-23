@@ -56,7 +56,7 @@ function rootEnvReloadPlugin(): Plugin {
 
 /**
  * Vite plugin redirecting non-canonical host requests (such as raw IP or localhost) to the canonical
- * `FRONTEND_URL` origin (e.g. MagicDNS domain) with a 308 Permanent Redirect for HTML requests.
+ * `APP_URL` origin (e.g. MagicDNS domain) with a 308 Permanent Redirect for HTML requests.
  *
  * @param frontendUrl Configured public frontend URL origin, if any.
  * @returns Vite `Plugin` object with Connect middleware.
@@ -114,15 +114,18 @@ function devBoxStubPlugin(): Plugin {
 export default defineConfig(() => {
   const rootFileEnv = parseEnvFile(rootEnvFile);
   const publicEnv = Object.fromEntries(
-    ["API_BASE_URL"]
+    ["APP_URL"]
       .map((key) => {
         const value = process.env[key]?.trim() || rootFileEnv[key]?.trim();
         return [key, value || undefined];
       })
       .filter(([, value]) => value !== undefined),
   );
-  const frontendUrl =
-    process.env.FRONTEND_URL?.trim() || rootFileEnv.FRONTEND_URL?.trim() || undefined;
+  const frontendUrl = process.env.APP_URL?.trim() || rootFileEnv.APP_URL?.trim() || undefined;
+  const localApiPort = process.env.WRANGLER_DEV_PORT || rootFileEnv.WRANGLER_DEV_PORT || "8787";
+  const localApp =
+    frontendUrl !== undefined &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(new URL(frontendUrl).hostname);
   return {
     // Statically substitute the whitelisted root .env values into import.meta.env.
     // Launcher-provided values override the file so detected MagicDNS origins
@@ -135,7 +138,19 @@ export default defineConfig(() => {
     ),
     plugins: lazyPlugins(() => [
       react(),
-      cloudflare(),
+      cloudflare({
+        config: (config) => ({
+          ...(localApp
+            ? { services: config.services?.filter(({ binding }) => binding !== "API") }
+            : {}),
+          vars: {
+            ...config.vars,
+            ...(localApp || !config.services?.some(({ binding }) => binding === "API")
+              ? { API_ORIGIN: `http://127.0.0.1:${localApiPort}` }
+              : {}),
+          },
+        }),
+      }),
       rootEnvReloadPlugin(),
       canonicalFrontendOriginPlugin(frontendUrl),
       devBoxStubPlugin(),

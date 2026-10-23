@@ -44,12 +44,11 @@ const stagingEnv = {
   DB_AUTHENTICATED: {} as Hyperdrive,
   DB_SYSTEM: {} as Hyperdrive,
   ENVIRONMENT: "staging",
-  FRONTEND_URL: "https://staging.example.com",
+  APP_URL: "https://staging.example.com",
   MAIL: { send: vi.fn(async () => ({ messageId: "test-message" })) },
   MAIL_FROM_ADDRESS: "no-reply@staging.example.com",
   MAIL_FROM_NAME: "Meltiply Staging",
   OAUTH_STATE: {} as DurableObjectNamespace<OAuthStateStub>,
-  PUBLIC_API_URL: "https://api.staging.example.com",
   R2_ACCESS_KEY_ID: "r2-access-key",
   R2_ACCOUNT_ID: "r2-account",
   R2_BUCKET_NAME: "assets",
@@ -715,9 +714,10 @@ describe("API Worker foundation", () => {
     );
   });
 
-  it("retains CORS headers for preflight and normal cross-origin responses", async () => {
+  it("trusts the app origin for preflight and normal responses without a CORS override", async () => {
     const app = createApiApp();
-    const origin = stagingEnv.ALLOWED_ORIGINS;
+    const origin = stagingEnv.APP_URL;
+    const env = { ...stagingEnv, ALLOWED_ORIGINS: undefined };
 
     const preflight = await app.fetch(
       new Request("http://example.test/api/v1/health", {
@@ -727,7 +727,7 @@ describe("API Worker foundation", () => {
         },
         method: "OPTIONS",
       }),
-      stagingEnv,
+      env,
     );
     expect(preflight.status).toBe(204);
     expect(preflight.headers.get("Access-Control-Allow-Origin")).toBe(origin);
@@ -737,7 +737,7 @@ describe("API Worker foundation", () => {
       new Request("http://example.test/api/v1/health", {
         headers: { Origin: origin },
       }),
-      stagingEnv,
+      env,
     );
     expect(normal.status).toBe(200);
     expect(normal.headers.get("Access-Control-Allow-Origin")).toBe(origin);
@@ -848,7 +848,8 @@ describe("API Worker foundation", () => {
     const app = createApiApp();
     const env = {
       ...stagingEnv,
-      ALLOWED_ORIGINS: "https://first.example.com",
+      APP_URL: "https://first.example.com",
+      ALLOWED_ORIGINS: undefined,
     } satisfies ApiWorkerEnv;
 
     const first = await app.fetch(
@@ -859,7 +860,7 @@ describe("API Worker foundation", () => {
     );
     expect(first.status).toBe(200);
 
-    env.ALLOWED_ORIGINS = "https://second.example.com";
+    env.APP_URL = "https://second.example.com";
     const stale = await app.fetch(
       new Request("http://example.test/api/v1/health", {
         headers: { Origin: "https://first.example.com" },

@@ -13,7 +13,7 @@ type Middleware = (
 ) => void;
 
 function canonicalMiddleware(frontendUrl: string): Middleware {
-  vi.stubEnv("FRONTEND_URL", frontendUrl);
+  vi.stubEnv("APP_URL", frontendUrl);
   const config = viteConfig({ command: "serve", mode: "test" });
   const plugin = config.plugins?.find(
     (candidate) =>

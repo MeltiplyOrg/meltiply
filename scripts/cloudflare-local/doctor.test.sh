@@ -151,7 +151,7 @@ case "$url" in
     ;;
   */src/main.tsx)
     if [[ "$state" == *"frontend-up"* ]]; then
-      printf 'import.meta.env = {"API_BASE_URL": "%s"}' "${STUB_BAKED_ORIGIN:-http://127.0.0.1:8787}"
+      printf 'import.meta.env = {"APP_URL": "%s"}' "${STUB_BAKED_ORIGIN:-http://127.0.0.1:3000}"
     else
       exit 7
     fi
@@ -206,12 +206,9 @@ cp "$repo_root/scripts/cloudflare-local/dev-tunnel.sh" \
   "$fixture/scripts/cloudflare-local/dev-tunnel.sh"
 cat >"$fixture/.env" <<'EOF'
 BETTER_AUTH_SECRET=test-auth-secret
-BETTER_AUTH_URL=http://127.0.0.1:8787
 MAIL_FROM_ADDRESS=auth@example.test
 TOKEN_ENCRYPTION_KEY=test-key
-API_BASE_URL=http://127.0.0.1:8787
-FRONTEND_URL=http://127.0.0.1:3000
-PUBLIC_API_URL=http://127.0.0.1:8787
+APP_URL=http://127.0.0.1:3000
 EOF
 mkdir -p "$fixture/node_modules"
 

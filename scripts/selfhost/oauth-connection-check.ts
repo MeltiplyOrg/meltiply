@@ -219,9 +219,7 @@ const env = {
   ...bindings,
   ENVIRONMENT: "test",
   VERSION: "oauth-connection-smoke",
-  ALLOWED_ORIGINS: "http://localhost:3000",
-  FRONTEND_URL: "http://localhost:3000",
-  PUBLIC_API_URL: origin,
+  APP_URL: origin,
   TOKEN_ENCRYPTION_KEY: randomBytes(32).toString("base64url"),
   FACEBOOK_CLIENT_ID: "facebook-client",
   FACEBOOK_CLIENT_SECRET: "facebook-smoke-secret",
@@ -264,6 +262,7 @@ async function request(path: string, method = "GET", body?: unknown, key = rando
       method,
       headers: {
         Authorization: "Bearer oauth-smoke.jwt",
+        Origin: origin,
         Accept: "application/json",
         "Content-Type": "application/json",
         "Idempotency-Key": key,
@@ -299,6 +298,7 @@ async function authorize(platform: Platform) {
   const result = await request(callback);
   assert.equal(result.status, 302);
   const location = new URL(z.string().parse(result.headers.get("Location")));
+  assert.equal(location.origin, origin);
   assert.equal(location.pathname, "/channels/connect");
   assert.equal(location.searchParams.get("oauth"), "select_account");
   assert.equal(location.searchParams.get("provider"), platform);

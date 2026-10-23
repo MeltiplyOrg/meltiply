@@ -97,10 +97,8 @@ EOF
 # those; the runs below pass them on the command line instead.
 cat >"$fixture/.env" <<'EOF'
 ALLOWED_ORIGINS=
-FRONTEND_URL=
+APP_URL=
 PUBLIC_SITE_URL=
-PUBLIC_API_URL=
-API_BASE_URL=
 MELTIPLY_DEV_TUNNEL=1
 MELTIPLY_TUNNEL_DOMAIN=meltiply.com
 TUNNEL_TRANSPORT_PROTOCOL=auto
@@ -219,8 +217,7 @@ cat >"$fixture/scripts/cloudflare-local/dev-backend.sh" <<'EOF'
 set -euo pipefail
 {
   printf 'backend WRANGLER_DEV_ALLOWED_ORIGINS=%s\n' "${WRANGLER_DEV_ALLOWED_ORIGINS:-}"
-  printf 'backend WRANGLER_DEV_FRONTEND_URL=%s\n' "${WRANGLER_DEV_FRONTEND_URL:-}"
-  printf 'backend WRANGLER_DEV_PUBLIC_API_URL=%s\n' "${WRANGLER_DEV_PUBLIC_API_URL:-}"
+  printf 'backend WRANGLER_DEV_APP_URL=%s\n' "${WRANGLER_DEV_APP_URL:-}"
 } >"$MELTIPLY_DEV_FIXTURE/backend.env"
 for service in frontend public; do
   for _ in $(seq 1 200); do
@@ -244,9 +241,7 @@ fi
 case "$PWD" in
   "$MELTIPLY_DEV_FIXTURE/frontend/app")
     service=frontend
-    printf 'frontend API_BASE_URL=%s\n' "${API_BASE_URL:-}" \
-      >>"$MELTIPLY_DEV_FIXTURE/frontend.env"
-    printf 'frontend FRONTEND_URL=%s\n' "${FRONTEND_URL:-}" \
+    printf 'frontend APP_URL=%s\n' "${APP_URL:-}" \
       >>"$MELTIPLY_DEV_FIXTURE/frontend.env"
     printf 'frontend FRONTEND_DEV_HOST=%s\n' "${FRONTEND_DEV_HOST:-}" \
       >>"$MELTIPLY_DEV_FIXTURE/frontend.env"
@@ -357,9 +352,7 @@ expect_contains "$log_file" "deletes this tunnel and its DNS record" cleanup-pro
 # Vite receives the tunnel origin as both canonical host and API base, which is
 # what puts the tunnel hostname on the server's allowedHosts list.
 expect_contains "$fixture/frontend.env" \
-  "frontend API_BASE_URL=$app_tunnel" vite-api-base
-expect_contains "$fixture/frontend.env" \
-  "frontend FRONTEND_URL=$app_tunnel" vite-canonical-origin
+  "frontend APP_URL=$app_tunnel" vite-canonical-origin
 expect_contains "$fixture/frontend.env" \
   "public PUBLIC_SITE_URL=$public_tunnel" astro-canonical-origin
 
@@ -368,9 +361,7 @@ expect_contains "$fixture/backend.env" \
   "backend WRANGLER_DEV_ALLOWED_ORIGINS=http://127.0.0.1:9912,$app_tunnel" \
   worker-allowed-origins
 expect_contains "$fixture/backend.env" \
-  "backend WRANGLER_DEV_FRONTEND_URL=$app_tunnel" worker-frontend-url
-expect_contains "$fixture/backend.env" \
-  "backend WRANGLER_DEV_PUBLIC_API_URL=$app_tunnel" worker-public-api-url
+  "backend WRANGLER_DEV_APP_URL=$app_tunnel" worker-frontend-url
 
 # Every session this run owns, tunnels included, must be gone afterwards.
 for service in frontend public; do
@@ -427,7 +418,7 @@ expect_contains "$log_file" "Creating tunnel meltiply-dev-dev-tunnel" tunnel-cre
 expect_contains "$log_file" "app + api  https://dev-tunnel.meltiply.com" named-app-url
 # Quick tunnels must be skipped entirely once a named tunnel is usable.
 expect_contains "$fixture/frontend.env" \
-  "frontend API_BASE_URL=https://dev-tunnel.meltiply.com" named-api-base
+  "frontend APP_URL=https://dev-tunnel.meltiply.com" named-api-base
 expect_contains "$fixture/backend.env" \
   "backend WRANGLER_DEV_ALLOWED_ORIGINS=http://127.0.0.1:9912,https://dev-tunnel.meltiply.com" \
   named-allowed-origins
@@ -517,7 +508,7 @@ set -e
 expect_contains "$log_file" "Dev tunnel disabled" opt-out-notice
 # Local origins must survive untouched when no tunnel is published.
 expect_contains "$fixture/frontend.env" \
-  "frontend API_BASE_URL=http://127.0.0.1:9911" local-api-base
+  "frontend APP_URL=http://127.0.0.1:9912" local-app-origin
 expect_contains "$fixture/backend.env" \
   "backend WRANGLER_DEV_ALLOWED_ORIGINS=http://127.0.0.1:9912" local-allowed-origins
 

@@ -119,7 +119,23 @@ services:
       runtime:
         condition: service_healthy
     environment:
-      SELFHOST_APP_DOMAIN: ${SELFHOST_APP_DOMAIN:-localhost}
+      APP_URL: ${APP_URL:-http://localhost:8080}
+    # Derive Caddy's hostname from the same origin used by the application.
+    # Keep commands overridable so `gateway caddy validate ...` uses this path too.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        app_host="$${APP_URL#*://}"
+        app_host="$${app_host%%/*}"
+        case "$$app_host" in
+          \[*\]*) app_host="$${app_host%%]*}]" ;;
+          *) app_host="$${app_host%%:*}" ;;
+        esac
+        export APP_HOST="$$app_host"
+        exec "$$@"
+      - --
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
     ports:
       - "80:80"
       - "443:443"
@@ -148,6 +164,6 @@ volumes:
 configs:
   ingress:
     content: |
-      {$$SELFHOST_APP_DOMAIN} {
+      https://{$$APP_HOST} {
       	reverse_proxy runtime:8080
       }

@@ -12,7 +12,7 @@ export default defineConfig({
     // (`clearMocks` defaults to true). Keep v4's behavior of retaining call
     // history across a file so setup-level mocks stay assertable.
     clearMocks: false,
-    env: { API_BASE_URL: "http://localhost:8787" },
+    env: { APP_URL: "http://localhost:8787" },
     include: ["**/*.test.{ts,tsx}"],
     // CI enables coverage on the command line; keep its v8 provider explicit
     // so dependency analysis sees the provider without enabling local coverage.

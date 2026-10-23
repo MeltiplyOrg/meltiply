@@ -27,10 +27,8 @@ function releaseInput(overrides = {}) {
     neon_project_id: "project-staging-123",
     release_id: `staging-${gitSha.slice(0, 12)}`,
     restore_point_expires_at: "2026-08-05T12:00:00.000Z",
-    api_base_url: "https://api.staging.meltiply.com",
     api_workers_dev_url: "https://meltiply-api.example.workers.dev",
-    frontend_url: "https://staging.meltiply.com",
-    frontend_origins: ["https://staging.meltiply.com"],
+    app_url: "https://staging.meltiply.com",
     automation_guard: { consumers_paused: true, cron_safe: true },
     provider_acceptance: {
       facebook: false,
@@ -163,7 +161,7 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
     await assert.rejects(
       fetchHealth({
         fetchImpl: healthFetch(origin),
-        origin: spec.api_base_url,
+        origin: spec.app_url,
         requestBudgetMs: 5000,
       }),
       /staging contract|outside the release traffic set/,
@@ -175,7 +173,7 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
   await assert.rejects(
     fetchHealth({
       fetchImpl: healthFetch(failing),
-      origin: spec.api_base_url,
+      origin: spec.app_url,
       requestBudgetMs: 5000,
     }),
     /status 503/,

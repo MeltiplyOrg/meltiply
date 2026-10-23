@@ -69,9 +69,7 @@ describe("verifier cache", () => {
       ),
     );
     try {
-      const verify = jwtVerifierFor(
-        env({ BETTER_AUTH_URL: origin, BETTER_AUTH_JWKS_URL: jwksUrl }),
-      );
+      const verify = jwtVerifierFor(env({ APP_URL: origin, BETTER_AUTH_JWKS_URL: jwksUrl }));
       for (const overrides of [{}, { iss: "https://other.example.test" }, { aud: "other" }]) {
         const header = Buffer.from(JSON.stringify({ alg: "EdDSA", kid: "internal-key" })).toString(
           "base64url",

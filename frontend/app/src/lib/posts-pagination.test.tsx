@@ -142,7 +142,13 @@ describe("Post pagination and browser cache", () => {
       });
     });
     const { result } = renderHook(() => usePosts(scope), { wrapper: Wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    // Read data before advancing, as PostsView does: TanStack only notifies
+    // React when a property already observed by the consumer changes.
+    await waitFor(() =>
+      expect(result.current.data?.map((post) => post.id)).toEqual(
+        posts(0, 60).map((post) => post.id),
+      ),
+    );
     await act(async () => {
       await result.current.fetchNextPage();
     });

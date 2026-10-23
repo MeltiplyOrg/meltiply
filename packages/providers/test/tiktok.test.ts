@@ -253,7 +253,7 @@ describe("createTikTokAdapter", () => {
   });
 
   it.each(["user.info.basic", "video.publish"])(
-    "rejects a partial TikTok grant containing only %s before reading a profile",
+    "names the scope missing from a partial TikTok grant of only %s",
     async (scope) => {
       const providerCalls = sequence(() =>
         json({
@@ -265,16 +265,65 @@ describe("createTikTokAdapter", () => {
           token_type: "Bearer",
         }),
       );
-      await expect(
-        adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
-          code: "authorization-code",
-          codeVerifier: "unused-by-tiktok-web",
-          redirectUri,
-        }),
-      ).rejects.toBeInstanceOf(ProviderAdapterError);
+      const error = await adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+        code: "authorization-code",
+        codeVerifier: "unused-by-tiktok-web",
+        redirectUri,
+      }).catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(ProviderAdapterError);
+      expect(error).toMatchObject({
+        failure: { code: "tiktok_scope_not_granted", retryable: false },
+        missingScopes: [scope === "user.info.basic" ? "video.publish" : "user.info.basic"],
+      });
       expect(providerCalls.calls.map(({ url }) => url.pathname)).toEqual(["/v2/oauth/token/"]);
     },
   );
+
+  it("retains an opaque open_id that begins with a punctuation character", async () => {
+    const providerCalls = sequence(
+      () =>
+        json({
+          access_token: "access-secret",
+          expires_in: 86_400,
+          open_id: "-9f2c-open",
+          refresh_token: "refresh-secret",
+          scope: "user.info.basic,video.publish",
+          token_type: "Bearer",
+        }),
+      () =>
+        success({
+          user: { display_name: "Opaque Creator", open_id: "-9f2c-open" },
+        }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+        code: "authorization-code",
+        codeVerifier: "unused-by-tiktok-web",
+        redirectUri,
+      }),
+    ).resolves.toMatchObject({ account: { id: "-9f2c-open", displayName: "Opaque Creator" } });
+  });
+
+  it("rejects a contradictory token type as an invalid token response", async () => {
+    const providerCalls = sequence(() =>
+      json({
+        access_token: "access-secret",
+        expires_in: 86_400,
+        open_id: "open-id-1",
+        refresh_token: "refresh-secret",
+        scope: "user.info.basic,video.publish",
+        token_type: "MAC",
+      }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+        code: "authorization-code",
+        codeVerifier: "unused-by-tiktok-web",
+        redirectUri,
+      }),
+    ).rejects.toMatchObject({ failure: { code: "tiktok_token_response_invalid" } });
+    expect(providerCalls.calls).toHaveLength(1);
+  });
 
   it("normalizes current creator publication requirements", async () => {
     const providerCalls = sequence(() =>
@@ -639,6 +688,23 @@ describe("createTikTokAdapter", () => {
       failure: { classification: "ambiguous" },
       outcome: "unknown",
       providerOperationId: "publish:v_pub_url~v2.123",
+    });
+  });
+
+  it("refreshes credentials without renegotiating the granted scope list", async () => {
+    const providerCalls = sequence(() =>
+      json({
+        access_token: "access-rotated",
+        expires_in: 86_400,
+        open_id: "-9f2c-open",
+        refresh_token: "refresh-rotated",
+      }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).refreshAccessToken!(context, "refresh-original"),
+    ).resolves.toMatchObject({
+      accessToken: "access-rotated",
+      refreshToken: "refresh-rotated",
     });
   });
 

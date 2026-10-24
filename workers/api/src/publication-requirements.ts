@@ -1,6 +1,6 @@
 import type { SessionClaims } from "@meltiply/auth";
 import type { DatabaseError, Platform } from "@meltiply/domain";
-import { Deferred, Effect, Exit } from "effect";
+import { Effect, Exit } from "effect";
 import {
   ProviderAdapterError,
   ProviderService,
@@ -87,7 +87,8 @@ const maxPendingRequirementReads = 32;
 type RequirementReadExit = Exit.Exit<ProviderPublicationRequirements, CoreApiError>;
 
 interface PendingRequirementRead {
-  readonly deferred: Deferred.Deferred<RequirementReadExit>;
+  readonly promise: Promise<RequirementReadExit>;
+  readonly settle: (exit: RequirementReadExit) => void;
 }
 
 /**
@@ -105,8 +106,7 @@ interface RequirementReadOwner {
   readonly pending: Map<string, PendingRequirementRead>;
 }
 
-interface RequirementReadFlight {
-  readonly deferred: Deferred.Deferred<RequirementReadExit>;
+interface RequirementReadFlight extends PendingRequirementRead {
   readonly leader: boolean;
   readonly release: () => void;
 }
@@ -240,12 +240,16 @@ function acquireRequirementRead(
     requirementReadOwner = owner;
   }
   const existing = owner.pending.get(key);
-  if (existing) return { deferred: existing.deferred, leader: false, release: () => undefined };
+  if (existing) return { ...existing, leader: false, release: () => undefined };
   if (owner.pending.size >= maxPendingRequirementReads) return undefined;
-  const entry: PendingRequirementRead = { deferred: Deferred.makeUnsafe<RequirementReadExit>() };
+  let settle!: PendingRequirementRead["settle"];
+  const promise = new Promise<RequirementReadExit>((resolve) => {
+    settle = resolve;
+  });
+  const entry: PendingRequirementRead = { promise, settle };
   owner.pending.set(key, entry);
   return {
-    deferred: entry.deferred,
+    ...entry,
     leader: true,
     release: () => {
       if (owner.pending.get(key) === entry) owner.pending.delete(key);
@@ -256,15 +260,16 @@ function acquireRequirementRead(
 /**
  * Executes the leader's Provider read once and publishes its outcome to joiners.
  *
- * The read, entry removal, and Deferred settlement run uninterruptibly so one
- * caller's cancellation cannot abort work another caller is waiting for, and
- * cannot leave a settled entry or an unsettled waiter. The Provider adapter's
- * own HTTP deadline still bounds hung upstream work; nothing is detached, and
- * the shared value is domain data only (never an HTTP response, database
- * client, transaction, or request-owned resource).
+ * The read, entry removal, and native Promise settlement run uninterruptibly so
+ * one caller's cancellation cannot abort work another caller is waiting for.
+ * A native Promise schedules each waiter's continuation in its own Worker request
+ * context; an Effect Deferred would invoke request-bound callbacks from the
+ * leader's context. The Provider adapter's HTTP deadline bounds hung upstream work.
+ * Nothing is detached, and the shared value is domain data only (never an HTTP
+ * response, database client, transaction, or request-owned resource).
  *
- * @param flight - Leader flight whose Deferred joiners await.
- * @param providerRead - Cold Provider Effect already bound to this leader's service.
+ * @param flight - Leader flight whose Promise joiners await.
+ * @param providerRead - Cold Provider Effect bound to this leader's service.
  * @returns Leader's own result after joiners have been settled.
  */
 function leadRequirementRead(
@@ -276,7 +281,7 @@ function leadRequirementRead(
       const exit = yield* Effect.exit(providerRead);
       yield* Effect.sync(() => {
         flight.release();
-        Deferred.doneUnsafe(flight.deferred, Effect.succeed<RequirementReadExit>(exit));
+        flight.settle(exit);
       });
       return yield* Exit.isSuccess(exit)
         ? Effect.succeed(exit.value)
@@ -426,16 +431,26 @@ export function getPublicationRequirementsEffect(
       try: () => tokenCipherFor(env).decrypt(account.access_token),
     });
     const providerRead = providerRequirementsEffect(account, accessToken, requestId);
-    const flight = yield* Effect.sync(() =>
-      acquireRequirementRead(
-        requirementReadNamespace(env, registry),
-        requirementReadKey(session, accountId, account),
-        env.DB_AUTHENTICATED?.connectionString,
-      ),
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        // Acquisition and leader settlement share one interruption mask, so an
+        // abort between them cannot strand a published pending entry.
+        const flight = acquireRequirementRead(
+          requirementReadNamespace(env, registry),
+          requirementReadKey(session, accountId, account),
+          env.DB_AUTHENTICATED?.connectionString,
+        );
+        if (!flight) return restore(providerRead);
+        if (flight.leader) return leadRequirementRead(flight, providerRead);
+        return restore(
+          Effect.gen(function* () {
+            const exit = yield* Effect.promise(() => flight.promise);
+            return yield* Exit.isSuccess(exit)
+              ? Effect.succeed(exit.value)
+              : Effect.failCause(exit.cause);
+          }),
+        );
+      }),
     );
-    if (!flight) return yield* providerRead;
-    if (flight.leader) return yield* leadRequirementRead(flight, providerRead);
-    const exit = yield* Deferred.await(flight.deferred);
-    return yield* Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause);
   });
 }

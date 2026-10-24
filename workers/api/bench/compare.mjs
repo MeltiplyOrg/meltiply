@@ -244,9 +244,7 @@ markdown.push(
   "| Workflow | Aggregates/op B | Aggregates/op C | Aggregate DB ms/op B | Aggregate DB ms/op C | Upstream reads/op B | Upstream reads/op C | Request p95 B | Request p95 C |",
 );
 markdown.push("|---|---:|---:|---:|---:|---:|---:|---:|---:|");
-for (const row of rows.filter((value) =>
-  /^(analytics\\.summary|requirements\\.)/.test(value.name),
-)) {
+for (const row of rows.filter((value) => /^(analytics\.summary|requirements\.)/.test(value.name))) {
   if (row.unavailable) {
     markdown.push(`| ${row.name} | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |`);
     continue;

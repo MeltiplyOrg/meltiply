@@ -3,6 +3,12 @@ name: Backend benchmark
 on:
   workflow_dispatch:
     inputs:
+      profile:
+        description: Read-cache comparison or historical complete workload
+        required: true
+        default: read-cache
+        type: choice
+        options: [read-cache, all]
       repetitions:
         description: Alternating run blocks per revision
         required: true
@@ -28,6 +34,7 @@ env:
   WRANGLER_SEND_METRICS: "false"
   BENCHMARK_DATABASE_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5432/postgres?sslmode=disable
   BENCHMARK_SAMPLES: ${{ inputs.samples || '30' }}
+  BENCHMARK_PROFILE: ${{ inputs.profile || 'read-cache' }}
   BENCHMARK_WARMUP: "3"
   BENCHMARK_DELETE_SAMPLES: "5"
   BENCHMARK_DELETE_WARMUP: "1"

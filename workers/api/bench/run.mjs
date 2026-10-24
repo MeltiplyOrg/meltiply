@@ -49,6 +49,8 @@ const outputFile = resolve(
   process.env.BENCHMARK_OUTPUT_FILE ?? "benchmark-results/benchmark.json",
 );
 const label = process.env.BENCHMARK_LABEL ?? "benchmark";
+const profile = process.env.BENCHMARK_PROFILE ?? "all";
+if (!["all", "read-cache"].includes(profile)) throw new TypeError("Unknown BENCHMARK_PROFILE");
 const warmupSamples = integerEnv("BENCHMARK_WARMUP", 3, 0, 100);
 const measuredSamples = integerEnv("BENCHMARK_SAMPLES", 20, 1, 1_000);
 if (warmupSamples + measuredSamples > dataset.schedulePosts) {
@@ -658,7 +660,13 @@ function scenarios() {
       }),
     );
   }
-  return scenarios;
+  return profile === "read-cache"
+    ? scenarios.filter((scenario) =>
+        /^(posts\.list|posts\.detail|distributions\.list|calendar\.|analytics\.summary|requirements\.|inbox\.list|assets\.detail|assets\.upload-session\.detail)/.test(
+          scenario.name,
+        ),
+      )
+    : scenarios;
 }
 
 const sampleIndex = { schedule: 0 };
@@ -823,6 +831,7 @@ try {
 const result = {
   completed_at: new Date().toISOString(),
   config: {
+    profile,
     batch_sizes: batchSizes,
     delete_concurrency: deleteConcurrency,
     delete_samples: deleteSamples,

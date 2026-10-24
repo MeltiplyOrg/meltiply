@@ -109,7 +109,7 @@ try {
       host: "127.0.0.1",
       cf: {},
       telemetry: { enabled: false },
-      log: new Log(LogLevel.ERROR),
+      log: new Log(LogLevel.INFO),
       workers: [
         {
           name: "requirements-network-smoke",
@@ -163,7 +163,11 @@ try {
           : AbortSignal.timeout(20_000),
       },
     );
-    assert.equal(response.status, expected, `Requirements HTTP status for ${id}`);
+    assert.equal(
+      response.status,
+      expected,
+      `Requirements HTTP status for ${id}: ${response.status === expected ? "" : (await response.text()).slice(0, 1000)}`,
+    );
     assert.equal(response.headers.get("X-Request-ID"), id);
     const body: unknown = await response.json();
     return { ms: performance.now() - start, body };

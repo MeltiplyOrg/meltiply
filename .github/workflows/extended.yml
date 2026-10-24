@@ -16,6 +16,7 @@ on:
           - object-storage
           - publishing-queues
           - portable-caching
+          - portable-caching-smoke
 
 permissions:
   contents: read
@@ -40,7 +41,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
       - name: Prepare full gate database
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Exercise every provider connection through real state and persistence
         if: inputs.lane == 'cloudflare-full'
@@ -56,7 +57,7 @@ jobs:
         if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
         run: bun run cloudflare:check
       - name: Observe cold, warm, concurrent, and lifecycle cache behavior in workerd
-        if: inputs.lane == 'portable-caching'
+        if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         env:
           API_BASE_URL: http://127.0.0.1:8787
           FRONTEND_URL: http://127.0.0.1:3000
@@ -73,10 +74,10 @@ jobs:
           REQUIREMENTS_SMOKE_BUNDLE=artifacts/cache-provider-worker/requirements-smoke.js node scripts/selfhost/.requirements-cache-check.mjs
           node scripts/benchmarks/backend/cache-runtime-check.mjs
       - name: Verify managed review guidance
-        if: inputs.lane == 'portable-caching'
+        if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run skills:check
       - name: Check changed React code diagnostics
-        if: inputs.lane == 'portable-caching'
+        if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: npx react-doctor@latest frontend/app --verbose --scope changed
       - name: Exercise navigation focus and reconnect assignment in the browser
         if: inputs.lane == 'cloudflare-full'

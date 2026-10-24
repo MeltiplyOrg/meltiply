@@ -104,6 +104,13 @@ jobs:
           node scripts/selfhost/configure.mjs --ci
       - name: Validate durable broker behavior
         run: docker run --rm -v "$PWD/scripts/selfhost/jobs.test.mjs:/app/scripts/selfhost/jobs.test.mjs:ro" --entrypoint node "${SELFHOST_IMAGE_PREFIX}-runtime:ci" --test scripts/selfhost/jobs.test.mjs
+      - name: Enable test-only aggregate observation
+        run: |
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml up -d --wait postgres
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T postgres psql -U postgres -d meltiply -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements'"
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml restart postgres
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml up -d --wait postgres
+          docker compose --env-file .env.selfhost -f compose.selfhost.yml exec -T postgres psql -U postgres -d meltiply -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"
       - name: Start complete production deployment
         run: |
           docker compose --env-file .env.selfhost -f compose.selfhost.yml --profile verification config --quiet
@@ -112,14 +119,21 @@ jobs:
       - name: Install Chromium for real owner journeys
         working-directory: frontend/app
         run: bun run --no-install playwright install --with-deps chromium
+      - name: Build disposable network Provider acceptance artifacts
+        run: |
+          bunx --no-install tsc --project scripts/selfhost/tsconfig.json
+          bunx --no-install wrangler deploy workers/api/test-support/requirements-smoke.ts --config workers/api/wrangler.test.jsonc --dry-run --outdir artifacts/cache-provider-worker
+          bun build scripts/selfhost/requirements-cache-check.ts --target=node --external miniflare --external pg --outfile=scripts/selfhost/.requirements-cache-check.mjs
       - name: Exercise application, email, storage, jobs, workflows, and crash recovery
         run: node scripts/selfhost/smoke.mjs
-      - name: Preserve credential-free login screenshots
+      - name: Preserve credential-free browser and cache observations
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
           name: owner-login-${{ matrix.platform.arch }}
-          path: artifacts/selfhost/*.png
+          path: |
+            artifacts/selfhost/*.png
+            artifacts/cache/
           if-no-files-found: ignore
           retention-days: 7
       - name: Validate and exercise optional TLS ingress

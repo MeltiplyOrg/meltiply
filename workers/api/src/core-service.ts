@@ -1,8 +1,16 @@
 import { Effect } from "effect";
 import type { components } from "@meltiply/contracts/schema";
-import { isoDateTime, rateLimitBudgetFreshSeconds } from "@meltiply/domain";
+import type { SessionClaims } from "@meltiply/auth";
+import type { EffectTransactionClient } from "@meltiply/database";
+import {
+  AccessDenied,
+  type DatabaseError,
+  isoDateTime,
+  rateLimitBudgetFreshSeconds,
+} from "@meltiply/domain";
 import { ProviderRegistry } from "@meltiply/providers";
 
+import { AnalyticsSummaryCache } from "./analytics-summary-cache";
 import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
@@ -10,6 +18,7 @@ import {
 import { disconnectPlatformAccountEffect } from "./brand-profile-service";
 import { CoreApiError, type CoreApiService } from "./core-types";
 import { activeOrganizationIdEffect, withTenantTransactionEffect } from "./database";
+import type { ApiWorkerEnv } from "./env";
 import {
   completeIdempotencyEffect,
   hashIdempotencyRequestEffect,
@@ -20,6 +29,9 @@ import { createDistributionMethods } from "./distribution-service";
 
 type Schemas = components["schemas"];
 type AnalyticsSnapshot = Schemas["AnalyticsSnapshot"];
+type AnalyticsSummary = Schemas["AnalyticsSummary"];
+/** Effective filters accepted by the public analytics summary operation. */
+type AnalyticsSummaryFilters = Parameters<CoreApiService["summaryAnalytics"]>[2];
 type InboxComment = Schemas["InboxComment"];
 type Platform = Schemas["Platform"];
 type PlatformAccount = Schemas["PlatformAccount"];
@@ -291,6 +303,190 @@ function capabilityMap(
   );
 }
 
+/** Freshly authorized tenant scope and Brand Profile lifecycle identity. */
+interface AnalyticsAccess {
+  organizationId: string;
+  role: string | null;
+  visibility: string;
+}
+
+/**
+ * Establishes current tenant authorization and Brand Profile visibility inside
+ * the caller's authenticated transaction with one statement.
+ *
+ * `auth_active_org_id()` proves the claimed Workspace still has an active
+ * membership, so suspension, membership removal, and RLS apply even before a
+ * cache lookup. The same statement reads the persisted ids and lifecycle
+ * timestamps available under those claims: an explicit selector includes its
+ * row (including a deleted row an admin may see) while the All Brand Profiles
+ * scope includes only active rows. Persisted `updated_at` values act as the
+ * lifecycle generation, so a delete or restore performed by another API
+ * instance changes the identity instead of leaving a warm cache authoritative.
+ * PostgreSQL hashes that canonical persisted identity before returning it, so
+ * retained keys stay fixed-size even when a Workspace has many Brand Profiles.
+ * Keeping authorization and visibility in one aggregate read also preserves
+ * the existing analytics statement budget: a cache hit issues no analytics
+ * aggregation and a cold read issues exactly one more statement.
+ *
+ * @param client - Tenant-authenticated transaction client.
+ * @param brandProfileId - Optional explicit Brand Profile selector.
+ * @returns Current organization, database membership role, and canonical
+ *   visibility identity.
+ * @throws {AccessDenied} When the caller has no active membership in the claimed Workspace.
+ */
+function analyticsAccessEffect(
+  client: EffectTransactionClient,
+  brandProfileId: string | undefined,
+): Effect.Effect<AnalyticsAccess, DatabaseError | AccessDenied> {
+  return Effect.gen(function* () {
+    const result = yield* client.query<{
+      organization_id: string | null;
+      role: string | null;
+      visibility: string | null;
+    }>(
+      `SELECT
+         access_scope.organization_id,
+         access_scope.role,
+         encode(sha256(convert_to(COALESCE(
+           (
+             SELECT string_agg(
+               bp.id::text
+                 || ':' || extract(epoch FROM bp.updated_at)::text
+                 || ':' || COALESCE(extract(epoch FROM bp.deleted_at)::text, ''),
+               '|' ORDER BY bp.id
+             )
+             FROM brand_profiles bp
+             WHERE ($1::uuid IS NULL OR bp.id = $1)
+               AND ($1::uuid IS NOT NULL OR bp.deleted_at IS NULL)
+           ),
+           ''
+         ), 'UTF8')), 'hex') AS visibility
+       FROM (
+         SELECT
+           public.auth_active_org_id()::text AS organization_id,
+           public.auth_active_org_role() AS role
+       ) AS access_scope`,
+      [brandProfileId ?? null],
+    );
+    const row = result.rows[0];
+    if (!row || !row.organization_id) {
+      return yield* Effect.fail(
+        new AccessDenied("The authenticated identity is not an active organization member."),
+      );
+    }
+    return {
+      organizationId: row.organization_id,
+      role: row.role ?? null,
+      visibility: row.visibility ?? "",
+    };
+  });
+}
+
+/**
+ * Builds the capability configuration component of the analytics cache scope.
+ *
+ * The summary response depends on which Platforms declare analytics support, so
+ * this sorted signature identifies the effective configuration. Using only the
+ * behavior-relevant flag keeps the namespace small while a changed flag selects
+ * a fresh cache rather than retaining a namespace per full capability object.
+ *
+ * @param capabilities - Effective capability map for this service instance.
+ * @returns Deterministically ordered analytics capability signature.
+ */
+function analyticsCapabilityNamespace(
+  capabilities: ReadonlyMap<Platform, PlatformCapability>,
+): string {
+  return [...capabilities.values()]
+    .map((capability) => `${capability.platform}:${capability.analytics ? "1" : "0"}`)
+    .sort()
+    .join(",");
+}
+
+/**
+ * Builds the deployment and authoritative data-source component of the cache scope.
+ *
+ * `ENVIRONMENT` and `VERSION` separate deployment configurations. The parsed
+ * PostgreSQL host and database separate data sources without retaining
+ * credentials or query parameters from the connection string. An unparseable
+ * binding falls back to a stable checksum of the string, so changing bindings
+ * still cannot reuse an earlier namespace's results.
+ *
+ * @param env - Worker environment bindings.
+ * @returns Stable, non-secret deployment/data-source namespace component.
+ */
+function analyticsDeploymentNamespace(env: ApiWorkerEnv): string {
+  const connectionString = env.DB_AUTHENTICATED?.connectionString ?? "";
+  let dataSource = "unbound";
+  if (connectionString) {
+    try {
+      const url = new URL(connectionString);
+      dataSource = `${url.host}${url.pathname}`;
+    } catch {
+      dataSource = `unparsed:${connectionString.length}:${stableStringChecksum(connectionString)}`;
+    }
+  }
+  return `${env.ENVIRONMENT}|${env.VERSION}|${dataSource}`;
+}
+
+/**
+ * Computes an unsigned 32-bit FNV-1a checksum for a cache namespace component.
+ *
+ * Only distinguishes unparseable connection strings without retaining their
+ * contents. Tenant scope remains a separate key component, so a checksum
+ * collision can only merge cache entries within one deployment configuration;
+ * every request still re-authorizes and re-reads visibility before a hit.
+ *
+ * @param value - Namespace input string.
+ * @returns Eight-character lowercase hexadecimal checksum.
+ */
+function stableStringChecksum(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * Builds a canonical key covering every effective analytics cache dimension.
+ *
+ * The key includes the deployment/data-source and capability namespace, the
+ * freshly authorized Workspace, subject and database role, the explicit Brand
+ * Profile selector (or its absence for All Brand Profiles), persisted Brand
+ * Profile visibility generations, every public analytics filter, and exact
+ * start/end instants. UUID casing normalizes because PostgreSQL treats it
+ * equivalently; date instants are not rounded and inclusive bounds remain
+ * exactly those the caller supplied.
+ *
+ * @param access - Fresh authorization and visibility identity for this request.
+ * @param filters - Effective analytics filters.
+ * @param namespace - Deployment/data-source and capability configuration scope.
+ * @param session - Authenticated session claims.
+ * @returns Deterministic serialized cache key.
+ */
+function analyticsSummaryCacheKey(
+  access: AnalyticsAccess,
+  filters: AnalyticsSummaryFilters,
+  namespace: string,
+  session: SessionClaims,
+): string {
+  return JSON.stringify([
+    namespace,
+    access.organizationId,
+    session.subject,
+    session.userId ?? null,
+    access.role,
+    filters.brandProfileId?.toLowerCase() ?? null,
+    access.visibility,
+    filters.platform ?? null,
+    filters.accountId?.toLowerCase() ?? null,
+    filters.format ?? null,
+    filters.start.getTime(),
+    filters.end.getTime(),
+  ]);
+}
+
 /**
  * Evaluates the effective connection status of a platform account based on tokens and revocations.
  *
@@ -469,18 +665,148 @@ function mapInboxComment(row: InboxRow): InboxComment {
 }
 
 /**
+ * Computes the canonical analytics summary inside an established transaction.
+ *
+ * Cohorts on `published_at` (never the calendar's scheduled `event_at`) and
+ * derives coverage from the Platforms actually published in scope. One bounded
+ * CTE selects the window's published distributions, then a LATERAL lookup reads
+ * the newest snapshot of each distribution as of the range end. Keeping the
+ * lookup correlated per candidate prevents the planner from materializing a
+ * latest set it then re-executes once per candidate row when row estimates are
+ * small; the index on `(distribution_id, snapshot_at DESC)` serves each probe.
+ * The result is derived only from persisted rows, so uncached and cold reads
+ * share this exact path; the caller may retain the returned successful value.
+ *
+ * @param client - Tenant-authenticated transaction client.
+ * @param capabilities - Effective capability map deciding unsupported coverage.
+ * @param filters - Analytics filters including dates, platform, and optional Brand Profile scope.
+ * @returns Effect resolving to the canonical summary response.
+ */
+function computeAnalyticsSummaryEffect(
+  client: EffectTransactionClient,
+  capabilities: ReadonlyMap<Platform, PlatformCapability>,
+  filters: AnalyticsSummaryFilters,
+): Effect.Effect<AnalyticsSummary, DatabaseError> {
+  return Effect.gen(function* () {
+    const result = yield* client.query<AnalyticsRow>(
+      `WITH candidates AS (
+         SELECT id, platform
+         FROM distributions
+         WHERE status = 'published'
+           AND published_at >= $1
+           AND published_at <= $2
+           AND ($3::text IS NULL OR platform = $3)
+           AND ($4::uuid IS NULL OR brand_profile_id = $4)
+           AND ($5::uuid IS NULL OR platform_account_id = $5)
+           AND ($6::text IS NULL OR ${analyticsFormatExpression("distributions")} = $6)
+           AND ${activeBrandProfilePredicate("brand_profile_id")}
+       )
+       SELECT
+         c.platform,
+         COALESCE(SUM(latest.views), 0) AS views,
+         COALESCE(SUM(latest.likes), 0) AS likes,
+         COALESCE(SUM(latest.comments), 0) AS comments,
+         COALESCE(SUM(latest.shares), 0) AS shares,
+         COALESCE(SUM(latest.watch_time_sec), 0) AS watch_time_sec,
+         COALESCE(SUM(latest.reach), 0) AS reach,
+         COALESCE(SUM(latest.impressions), 0) AS impressions,
+         COUNT(*) AS post_count,
+         MAX(latest.snapshot_at) AS last_synced_at
+       FROM candidates c
+       LEFT JOIN LATERAL (
+         SELECT
+           s.views, s.likes, s.comments, s.shares,
+           s.watch_time_sec, s.reach, s.impressions, s.snapshot_at
+         FROM analytics_snapshots s
+         WHERE s.distribution_id = c.id
+           AND s.snapshot_at <= $2
+         ORDER BY s.snapshot_at DESC, s.id DESC
+         LIMIT 1
+       ) latest ON true
+       GROUP BY c.platform
+       ORDER BY c.platform ASC`,
+      [
+        filters.start,
+        filters.end,
+        filters.platform ?? null,
+        filters.brandProfileId ?? null,
+        filters.accountId ?? null,
+        filters.format ?? null,
+      ],
+    );
+    const unsupportedPlatforms = result.rows
+      .map((row) => row.platform)
+      .filter((platform) => !capabilities.get(platform)?.analytics);
+    const lastSynced = result.rows.reduce<number | null>((latest, row) => {
+      if (!row.last_synced_at) return latest;
+      const timestamp = new Date(row.last_synced_at).getTime();
+      return latest === null || timestamp > latest ? timestamp : latest;
+    }, null);
+    const byPlatform = result.rows.map((row) => ({
+      comments: number(row.comments),
+      impressions: number(row.impressions),
+      last_synced_at: optionalDateTime(row.last_synced_at),
+      likes: number(row.likes),
+      platform: row.platform,
+      post_count: number(row.post_count),
+      reach: number(row.reach),
+      shares: number(row.shares),
+      views: number(row.views),
+      watch_time_sec: number(row.watch_time_sec),
+    }));
+    return {
+      by_platform: byPlatform,
+      last_synced_at: lastSynced === null ? null : new Date(lastSynced).toISOString(),
+      partial: unsupportedPlatforms.length > 0,
+      range: {
+        end: filters.end.toISOString(),
+        start: filters.start.toISOString(),
+      },
+      totals: byPlatform.reduce(
+        (totals, row) => ({
+          comments: totals.comments + row.comments,
+          impressions: totals.impressions + row.impressions,
+          likes: totals.likes + row.likes,
+          post_count: totals.post_count + row.post_count,
+          reach: totals.reach + row.reach,
+          shares: totals.shares + row.shares,
+          views: totals.views + row.views,
+          watch_time_sec: totals.watch_time_sec + row.watch_time_sec,
+        }),
+        {
+          comments: 0,
+          impressions: 0,
+          likes: 0,
+          post_count: 0,
+          reach: 0,
+          shares: 0,
+          views: 0,
+          watch_time_sec: 0,
+        },
+      ),
+      unsupported_platforms: unsupportedPlatforms,
+    };
+  });
+}
+
+/**
  * Factory creating the unified core API service instance for Meltiply.
  *
  * Combines distribution management, social platform account management,
  * content calendar queries, cross-platform analytics aggregation, and inbox comments.
  *
  * @param configuredCapabilities - Optional platform capability list (defaults to `ProviderRegistry`).
+ * @param options - Optional clock override for deterministic analytics cache expiry; defaults to `Date`.
  * @returns Configured `CoreApiService` instance implementing all core business operations via Effect.
  */
 export function createCoreApiService(
   configuredCapabilities = new ProviderRegistry().capabilities(),
+  options: { now?: () => Date } = {},
 ): CoreApiService {
   const capabilities = capabilityMap(configuredCapabilities);
+  const capabilityNamespace = analyticsCapabilityNamespace(capabilities);
+  const summaryCache = new AnalyticsSummaryCache();
+  const now = options.now ?? (() => new Date());
   const distributionMethods = createDistributionMethods();
 
   return {
@@ -671,124 +997,39 @@ export function createCoreApiService(
     },
 
     /**
-     * Aggregates platform-level performance analytics for Distributions
-     * published inside a date range via Effect.
+     * Returns the platform-level performance summary for Distributions
+     * published inside a date range, reusing a successful result for at most
+     * 30 seconds.
      *
-     * Cohorts on `published_at` (never the calendar's scheduled `event_at`)
-     * and derives coverage from the Platforms actually published in scope.
-     * One bounded CTE selects the window's published distributions, then a
-     * LATERAL lookup reads the newest snapshot of each distribution as of the
-     * range end. Keeping the lookup correlated per candidate prevents the
-     * planner from materializing a latest set it then re-executes once per
-     * candidate row when row estimates are small; the index on
-     * `(distribution_id, snapshot_at DESC)` serves each probe.
+     * Every request first runs inside an authenticated tenant transaction: it
+     * proves an active membership and reads the persisted Brand Profile ids and
+     * lifecycle generations that shape cache identity. Suspension, membership
+     * removal, RLS, and Brand Profile delete/restore therefore apply before any
+     * hit. A hit returns an isolated copy without moving the absolute
+     * expiration, advancing timestamps, or inventing measurements; a miss
+     * computes the canonical aggregation in the same established transaction.
+     * Filters, explicit versus All Brand Profile scope, identity, deployment,
+     * and capability configuration all partition the cache. Expired, evicted,
+     * oversized, or cold entries simply recompute, and errors are never
+     * retained.
      *
      * @param env - Worker environment bindings.
      * @param session - Authenticated user session claims.
      * @param filters - Analytics filters including dates, platform, and optional Brand Profile scope.
-     * @returns Effect resolving to summary analytics response with platform breakdowns, totals, and sync status.
+     * @returns Effect resolving to canonical summary analytics with platform breakdowns, totals, and sync status.
      */
     summaryAnalytics(env, session, filters) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
-          const result = yield* client.query<AnalyticsRow>(
-            `WITH candidates AS (
-               SELECT id, platform
-               FROM distributions
-               WHERE status = 'published'
-                 AND published_at >= $1
-                 AND published_at <= $2
-                 AND ($3::text IS NULL OR platform = $3)
-                 AND ($4::uuid IS NULL OR brand_profile_id = $4)
-                 AND ($5::uuid IS NULL OR platform_account_id = $5)
-                 AND ($6::text IS NULL OR ${analyticsFormatExpression("distributions")} = $6)
-                 AND ${activeBrandProfilePredicate("brand_profile_id")}
-             )
-             SELECT
-               c.platform,
-               COALESCE(SUM(latest.views), 0) AS views,
-               COALESCE(SUM(latest.likes), 0) AS likes,
-               COALESCE(SUM(latest.comments), 0) AS comments,
-               COALESCE(SUM(latest.shares), 0) AS shares,
-               COALESCE(SUM(latest.watch_time_sec), 0) AS watch_time_sec,
-               COALESCE(SUM(latest.reach), 0) AS reach,
-               COALESCE(SUM(latest.impressions), 0) AS impressions,
-               COUNT(*) AS post_count,
-               MAX(latest.snapshot_at) AS last_synced_at
-             FROM candidates c
-             LEFT JOIN LATERAL (
-               SELECT
-                 s.views, s.likes, s.comments, s.shares,
-                 s.watch_time_sec, s.reach, s.impressions, s.snapshot_at
-               FROM analytics_snapshots s
-               WHERE s.distribution_id = c.id
-                 AND s.snapshot_at <= $2
-               ORDER BY s.snapshot_at DESC, s.id DESC
-               LIMIT 1
-             ) latest ON true
-             GROUP BY c.platform
-             ORDER BY c.platform ASC`,
-            [
-              filters.start,
-              filters.end,
-              filters.platform ?? null,
-              filters.brandProfileId ?? null,
-              filters.accountId ?? null,
-              filters.format ?? null,
-            ],
-          );
-          const unsupportedPlatforms = result.rows
-            .map((row) => row.platform)
-            .filter((platform) => !capabilities.get(platform)?.analytics);
-          const lastSynced = result.rows.reduce<number | null>((latest, row) => {
-            if (!row.last_synced_at) return latest;
-            const timestamp = new Date(row.last_synced_at).getTime();
-            return latest === null || timestamp > latest ? timestamp : latest;
-          }, null);
-          const byPlatform = result.rows.map((row) => ({
-            comments: number(row.comments),
-            impressions: number(row.impressions),
-            last_synced_at: optionalDateTime(row.last_synced_at),
-            likes: number(row.likes),
-            platform: row.platform,
-            post_count: number(row.post_count),
-            reach: number(row.reach),
-            shares: number(row.shares),
-            views: number(row.views),
-            watch_time_sec: number(row.watch_time_sec),
-          }));
-          return {
-            by_platform: byPlatform,
-            last_synced_at: lastSynced === null ? null : new Date(lastSynced).toISOString(),
-            partial: unsupportedPlatforms.length > 0,
-            range: {
-              end: filters.end.toISOString(),
-              start: filters.start.toISOString(),
-            },
-            totals: byPlatform.reduce(
-              (totals, row) => ({
-                comments: totals.comments + row.comments,
-                impressions: totals.impressions + row.impressions,
-                likes: totals.likes + row.likes,
-                post_count: totals.post_count + row.post_count,
-                reach: totals.reach + row.reach,
-                shares: totals.shares + row.shares,
-                views: totals.views + row.views,
-                watch_time_sec: totals.watch_time_sec + row.watch_time_sec,
-              }),
-              {
-                comments: 0,
-                impressions: 0,
-                likes: 0,
-                post_count: 0,
-                reach: 0,
-                shares: 0,
-                views: 0,
-                watch_time_sec: 0,
-              },
-            ),
-            unsupported_platforms: unsupportedPlatforms,
-          };
+          const access = yield* analyticsAccessEffect(client, filters.brandProfileId);
+          const namespace = `${analyticsDeploymentNamespace(env)}|${capabilityNamespace}`;
+          summaryCache.useNamespace(namespace);
+          const key = analyticsSummaryCacheKey(access, filters, namespace, session);
+          const cached = summaryCache.get(key, now().getTime());
+          if (cached !== undefined) return cached;
+          const summary = yield* computeAnalyticsSummaryEffect(client, capabilities, filters);
+          summaryCache.set(key, summary, now().getTime());
+          return summary;
         }),
       );
     },

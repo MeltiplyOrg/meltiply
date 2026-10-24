@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { parseEnv } from "node:util";
 import { ownerBrowserSession } from "../../frontend/app/e2e/selfhost-auth-smoke.mjs";
+import { cacheSmoke } from "../benchmarks/backend/cache-smoke.mjs";
 
 const composeArgs = [
   "compose",
@@ -89,6 +90,108 @@ const profile = await api(
   "/api/v1/brand-profiles",
   { name: "Selfhost smoke", description: "Production image acceptance", color: "#1d4ed8" },
   201,
+);
+// Test-only privileged observation runs outside workerd; the public API still authenticates normally.
+await cacheSmoke({
+  origin,
+  cookie,
+  label: `compose-${process.arch}`,
+  observeMemory: async () => {
+    const containerId = compose("ps", "-q", "runtime").toString().trim();
+    return {
+      container_working_set: execFileSync(
+        "docker",
+        ["stats", "--no-stream", "--format", "{{.MemUsage}}", containerId],
+        { encoding: "utf8" },
+      ).trim(),
+    };
+  },
+  query: async (text, values = []) =>
+    JSON.parse(
+      execFileSync(
+        "docker",
+        [
+          ...composeArgs,
+          "exec",
+          "-T",
+          "runtime",
+          "node",
+          "--input-type=module",
+          "-e",
+          `import pg from './scripts/selfhost/node_modules/pg/lib/index.js';
+           import { readFileSync } from 'node:fs';
+           const { text, values } = JSON.parse(readFileSync(0, 'utf8'));
+           const pool = new pg.Pool({host:'postgres',user:'postgres',database:'meltiply',password:process.env.SELFHOST_DB_PASSWORD});
+           try { const result = await pool.query(text, values); console.log(JSON.stringify({rows: result.rows})); }
+           finally { await pool.end(); }`,
+        ],
+        { input: JSON.stringify({ text, values }), encoding: "utf8", maxBuffer: 1024 * 1024 },
+      ),
+    ),
+});
+// Run independently dispatched Provider reads inside the exact production runtime image.
+// Only the disposable Worker/driver are copied to writable tmpfs; production routes stay unchanged.
+execFileSync(
+  "docker",
+  [
+    ...composeArgs,
+    "exec",
+    "-T",
+    "runtime",
+    "node",
+    "--input-type=module",
+    "-e",
+    `import { mkdir, writeFile, symlink } from 'node:fs/promises';
+     import { readFileSync } from 'node:fs';
+     const payload = JSON.parse(readFileSync(0, 'utf8'));
+     await mkdir('/tmp/cache-proof', {recursive:true});
+     await symlink('/app/scripts/selfhost/node_modules', '/tmp/cache-proof/node_modules');
+     await writeFile('/tmp/cache-proof/worker.js', payload.worker);
+     await writeFile('/tmp/cache-proof/check.mjs', payload.driver);`,
+  ],
+  {
+    input: JSON.stringify({
+      worker: await readFile("artifacts/cache-provider-worker/requirements-smoke.js", "utf8"),
+      driver: await readFile("scripts/selfhost/.requirements-cache-check.mjs", "utf8"),
+    }),
+    maxBuffer: 1024 * 1024,
+  },
+);
+compose(
+  "exec",
+  "-T",
+  "-e",
+  "REQUIREMENTS_SMOKE_BUNDLE=/tmp/cache-proof/worker.js",
+  "-e",
+  "REQUIREMENTS_SMOKE_OUTPUT=/tmp/cache-proof/artifacts",
+  "runtime",
+  "node",
+  "/tmp/cache-proof/check.mjs",
+);
+const requirementsEvidence = JSON.parse(
+  compose(
+    "exec",
+    "-T",
+    "runtime",
+    "node",
+    "--input-type=module",
+    "-e",
+    `import {readFileSync} from 'node:fs'; process.stdout.write(readFileSync('/tmp/cache-proof/artifacts/compose-${process.arch}-requirements.json'));`,
+  ).toString(),
+);
+await writeFile(
+  `artifacts/cache/compose-${process.arch}-requirements.json`,
+  JSON.stringify(requirementsEvidence, null, 2),
+);
+console.log(JSON.stringify(requirementsEvidence));
+compose(
+  "exec",
+  "-T",
+  "runtime",
+  "node",
+  "--input-type=module",
+  "-e",
+  "import {rm} from 'node:fs/promises'; await rm('/tmp/cache-proof',{recursive:true});",
 );
 const png = compose(
   "exec",

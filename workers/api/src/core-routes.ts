@@ -1409,8 +1409,14 @@ export function registerCoreRoutes(
     ),
   );
 
-  app.get("/api/v1/platforms/:accountId/publishing-requirements", (c) =>
-    runRouteEffect(
+  /**
+   * Reads current requirements with per-caller validation and response correlation.
+   * Keep the bounded request operation alive after a client disconnect so an
+   * initiating request cannot terminate Provider I/O needed by another waiter.
+   * The execution context stays at this boundary and is never retained by the flight owner.
+   */
+  app.get("/api/v1/platforms/:accountId/publishing-requirements", (c) => {
+    const response = runRouteEffect(
       c,
       Effect.gen(function* () {
         const accountId = yield* fromPromise(() =>
@@ -1425,8 +1431,19 @@ export function registerCoreRoutes(
         );
         return jsonResponse(publishingRequirementsBody(requirements), 200, requestId(c));
       }).pipe(Effect.provide(createProviderServiceLive(registry()))),
-    ),
-  );
+    );
+    try {
+      c.executionCtx.waitUntil(
+        response.then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+    } catch {
+      // Synthetic app requests have no execution context; their caller still awaits the operation.
+    }
+    return response;
+  });
 
   app.get("/api/v1/platforms/:platform/connect", (c) =>
     runRouteEffect(

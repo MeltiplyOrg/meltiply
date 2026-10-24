@@ -15,7 +15,12 @@
       "entry": ["src/app/globals.css", "e2e/support/invitation-db.mjs"]
     },
     "workers/api": {
-      "entry": ["test-support/index.ts", "bench/run.mjs", "bench/compare.mjs"],
+      "entry": [
+        "test-support/index.ts",
+        "test-support/requirements-smoke.ts",
+        "bench/run.mjs",
+        "bench/compare.mjs"
+      ],
       "vitest": {
         "config": ["vitest*.config.ts"]
       }
@@ -44,6 +49,7 @@
         "s3-check.ts",
         "storage-pipeline-check.ts",
         "oauth-connection-check.ts",
+        "requirements-cache-check.ts",
         "admin.mjs"
       ],
       "project": ["*.ts", "*.mjs"]

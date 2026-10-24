@@ -28,7 +28,7 @@ export const dataset = {
   distributionLimit: 100,
   pageSize: 100,
   posts: 300,
-  scheduleChannels: 20,
+  scheduleChannels: process.env.BENCHMARK_PROFILE === "read-cache" ? 1 : 20,
   schedulePosts: 42,
 };
 
@@ -83,8 +83,8 @@ export async function seed(client) {
        $1::uuid, $2::uuid, 'youtube', 'benchmark-youtube-' || item,
        'Benchmark YouTube ' || item, 'benchmark-token-youtube-' || item,
        ARRAY['upload'], '{"fixture": true}'::jsonb
-     FROM generate_series(1, 20) AS item`,
-    [ids.org, ids.brandProfile],
+     FROM generate_series(1, $3::integer) AS item`,
+    [ids.org, ids.brandProfile, dataset.scheduleChannels],
   );
   await client.query(
     `INSERT INTO platform_accounts
@@ -95,8 +95,8 @@ export async function seed(client) {
        $1::uuid, $2::uuid, 'threads', 'benchmark-threads-' || item,
        'Benchmark Threads ' || item, 'benchmark-token-threads-' || item,
        ARRAY['upload'], '{"fixture": true}'::jsonb
-     FROM generate_series(1, 20) AS item`,
-    [ids.org, ids.brandProfile],
+     FROM generate_series(1, $3::integer) AS item`,
+    [ids.org, ids.brandProfile, dataset.scheduleChannels],
   );
   await client.query(
     `INSERT INTO assets
@@ -162,8 +162,8 @@ export async function seed(client) {
        $1::uuid, $2::uuid,
        ('c0000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
        CASE WHEN item % 2 = 0
-         THEN ('b5000000-0000-4000-8000-' || lpad(((item % 20) + 1)::text, 12, '0'))::uuid
-         ELSE ('b6000000-0000-4000-8000-' || lpad(((item % 20) + 1)::text, 12, '0'))::uuid
+         THEN ('b5000000-0000-4000-8000-' || lpad(((item % $4::integer) + 1)::text, 12, '0'))::uuid
+         ELSE ('b6000000-0000-4000-8000-' || lpad(((item % $4::integer) + 1)::text, 12, '0'))::uuid
        END,
        CASE WHEN item % 2 = 0 THEN 'youtube' ELSE 'threads' END,
        'published',
@@ -173,7 +173,7 @@ export async function seed(client) {
        'Benchmark publication ' || item,
        TIMESTAMP '2026-07-01 00:00:00+00' + item * INTERVAL '1 hour'
      FROM generate_series(1, $3::integer) AS item`,
-    [ids.org, ids.brandProfile, dataset.posts],
+    [ids.org, ids.brandProfile, dataset.posts, dataset.scheduleChannels],
   );
   await client.query(
     `INSERT INTO analytics_snapshots

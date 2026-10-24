@@ -57,6 +57,24 @@ against R2 and MinIO. They run on GitHub-hosted machines without deployment
 secrets. A passing automatic `ci-gate` does not imply that a manual lane ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
+`portable-caching` runs the complete application gate and the portable read-cache
+acceptance journey; `portable-caching-smoke` repeats only that journey when the
+application gate's code/configuration is unchanged. The journey records real HTTP
+cold/warm/concurrent summary requests, PostgreSQL aggregate counts/time, independent
+Brand Profile lifecycle writes, expiry, capacity eviction, and browser capability
+retention across navigation/focus/reconnect/reload. It captures desktop/phone
+screenshots in both palettes. A disposable Worker uses the production route,
+actor resolution, RLS, credential decryption, and bounded Provider HTTP client;
+only JWT verification and external Provider responses are controlled. Native TCP
+dispatch exercises separate Worker request contexts, not just `app.request`.
+Network disconnects are observations: SQL completion does not acknowledge flight
+membership, and a client abort does not acknowledge server-side interruption.
+Deterministic join/cancellation guarantees remain covered at the controlled service
+and authenticated route seams. Exact production-image Compose smoke runs the same
+summary/browser journey and disposable Provider driver on amd64 and ARM64.
+Credential-free measurements and screenshots are retained in `artifacts/cache/`;
+they do not certify a deployed Cloudflare isolate or live Provider acceptance.
+
 `cloudflare-full` first runs the [provider connection smoke](../scripts/selfhost/oauth-connection-check.ts)
 against its disposable seeded database and the built SQLite OAuth state Worker.
 All five implemented Providers exercise real authorization-state consumption,
@@ -122,6 +140,16 @@ schedule fan-out and target removal, and bulk Post deletion at batch sizes
 1/5/10/25/50 under sequential and bounded concurrency. The results and methodology
 behind the current optimizations are in
 the [backend comparison report](benchmarks/backend-optimization.md).
+
+The default `read-cache` benchmark profile compares warm, cold exact-range and
+20-request concurrent summaries, sequential/concurrent controlled Provider
+requirements, and seven unchanged read endpoints. It preserves current Channel
+uniqueness constraints and records exact aggregate/upstream work counts per
+request. The `all` choice preserves the historical mutation fixture for compatible
+older revisions; it is not accepted by current one-Channel-per-Provider migrations.
+PR #65's [master comparison](benchmarks/backend-optimization.md#pr-65-versus-master)
+commits all six raw runs and the generated report, including cold-read overhead
+and unchanged-endpoint tail regressions rather than claiming a uniform speedup.
 
 ## Self-hosted release images
 

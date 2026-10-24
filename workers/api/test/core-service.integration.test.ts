@@ -2417,9 +2417,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     try {
       await seedAnalyticsCacheFixture();
       const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
-      const first = await Effect.runPromise(
-        analyticsService.summaryAnalytics(env, alpha, range),
-      );
+      const first = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
       expect(first.totals).toMatchObject({
         comments: 1,
         likes: 10,
@@ -2469,9 +2467,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     try {
       await seedAnalyticsCacheFixture();
       const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
-      const base = await Effect.runPromise(
-        analyticsService.summaryAnalytics(env, alpha, range),
-      );
+      const base = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
       expect(base.totals.views).toBe(100);
 
       await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
@@ -2553,9 +2549,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     try {
       await seedAnalyticsCacheFixture();
       const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
-      const warm = await Effect.runPromise(
-        analyticsService.summaryAnalytics(env, alpha, range),
-      );
+      const warm = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
       expect(warm.totals.views).toBe(100);
       await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
 
@@ -2582,9 +2576,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
     try {
       await seedAnalyticsCacheFixture();
-      const warmAll = await Effect.runPromise(
-        firstInstance.summaryAnalytics(env, alpha, range),
-      );
+      const warmAll = await Effect.runPromise(firstInstance.summaryAnalytics(env, alpha, range));
       const warmExplicit = await Effect.runPromise(
         firstInstance.summaryAnalytics(env, alpha, {
           ...range,
@@ -2608,9 +2600,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         ),
       );
       try {
-        const hidden = await Effect.runPromise(
-          firstInstance.summaryAnalytics(env, alpha, range),
-        );
+        const hidden = await Effect.runPromise(firstInstance.summaryAnalytics(env, alpha, range));
         expect(hidden.by_platform).toEqual([]);
         expect(hidden.totals.views).toBe(0);
         const hiddenExplicit = await Effect.runPromise(
@@ -2637,9 +2627,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         );
       }
 
-      const restored = await Effect.runPromise(
-        firstInstance.summaryAnalytics(env, alpha, range),
-      );
+      const restored = await Effect.runPromise(firstInstance.summaryAnalytics(env, alpha, range));
       const restoredExplicit = await Effect.runPromise(
         firstInstance.summaryAnalytics(env, alpha, {
           ...range,
@@ -2707,9 +2695,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     try {
       await seedAnalyticsCacheFixture();
       const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
-      const warm = await Effect.runPromise(
-        analyticsService.summaryAnalytics(env, alpha, range),
-      );
+      const warm = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
       expect(warm.totals.views).toBe(100);
       await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
 
@@ -2717,9 +2703,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       for (let index = 0; index < 64; index += 1) {
         const start = new Date(emptyStart + index * 24 * 60 * 60 * 1_000);
         const end = new Date(start.getTime() + 60 * 60 * 1_000);
-        await Effect.runPromise(
-          analyticsService.summaryAnalytics(env, alpha, { end, start }),
-        );
+        await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, { end, start }));
       }
 
       // The 65th distinct entry evicted the warm fixture key, so the next read
@@ -2739,9 +2723,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     try {
       await seedAnalyticsCacheFixture();
       const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
-      const warm = await Effect.runPromise(
-        analyticsService.summaryAnalytics(env, alpha, range),
-      );
+      const warm = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
       expect(warm.totals.views).toBe(100);
       await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
 

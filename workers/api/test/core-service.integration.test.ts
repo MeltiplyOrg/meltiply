@@ -2746,6 +2746,54 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
+  it("blocks a suspended member before a warm analytics cache can be reused", async () => {
+    const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
+    const analyticsService = createCoreApiService(undefined, { now: () => clock.current });
+    try {
+      await seedAnalyticsCacheFixture();
+      const app = createApiApp({
+        coreService: analyticsService,
+        resolveActor,
+        verifyJwtToken: async () => alphaIdentity,
+      });
+      const query = `start=${encodeURIComponent(analyticsCacheStart.toISOString())}&end=${encodeURIComponent(analyticsCacheEnd.toISOString())}`;
+      const request = () =>
+        app.request(
+          `/api/v1/analytics?${query}`,
+          { headers: { Authorization: bearerAuthorization } },
+          env,
+        );
+
+      const warm = await request();
+      expect(warm.status).toBe(200);
+      expect(await warm.json()).toMatchObject({ totals: { views: 100 } });
+
+      // Actor resolution runs on every request, so a warm cache cannot be
+      // reached while the account is suspended.
+      await systemTransaction(env, (client) =>
+        client.query("UPDATE users SET suspended_at = now() WHERE id = $1", [alpha.userId]),
+      );
+      try {
+        const blocked = await request();
+        expect(blocked.status).toBe(403);
+        expect(errorCodeFrom(await blocked.json())).toBe("account_suspended");
+      } finally {
+        await systemTransaction(env, (client) =>
+          client.query("UPDATE users SET suspended_at = NULL WHERE id = $1", [alpha.userId]),
+        );
+      }
+
+      const resumed = await request();
+      expect(resumed.status).toBe(200);
+      expect(await resumed.json()).toMatchObject({ totals: { views: 100 } });
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query("UPDATE users SET suspended_at = NULL WHERE id = $1", [alpha.userId]),
+      );
+      await removeAnalyticsCacheFixture();
+    }
+  });
+
   it("keeps request identity independent between cached analytics responses", async () => {
     const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
     const analyticsService = createCoreApiService(undefined, { now: () => clock.current });

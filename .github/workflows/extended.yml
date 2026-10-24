@@ -66,10 +66,18 @@ jobs:
           ./scripts/cloudflare-local/compose.sh up -d --wait postgres
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
           bun run --cwd frontend/app build:production
+          bunx --no-install tsc --project scripts/selfhost/tsconfig.json
+          bunx --no-install wrangler deploy workers/api/test-support/requirements-smoke.ts --config workers/api/wrangler.test.jsonc --dry-run --outdir artifacts/cache-provider-worker
+          trap 'rm -f scripts/selfhost/.requirements-cache-check.mjs' EXIT
+          bun build scripts/selfhost/requirements-cache-check.ts --target=node --external miniflare --external pg --outfile=scripts/selfhost/.requirements-cache-check.mjs
+          REQUIREMENTS_SMOKE_BUNDLE=artifacts/cache-provider-worker/requirements-smoke.js node scripts/selfhost/.requirements-cache-check.mjs
           node scripts/benchmarks/backend/cache-runtime-check.mjs
       - name: Verify managed review guidance
         if: inputs.lane == 'portable-caching'
         run: bun run skills:check
+      - name: Check changed React code diagnostics
+        if: inputs.lane == 'portable-caching'
+        run: npx react-doctor@latest frontend/app --verbose --scope changed
       - name: Exercise navigation focus and reconnect assignment in the browser
         if: inputs.lane == 'cloudflare-full'
         env:

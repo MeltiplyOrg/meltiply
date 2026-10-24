@@ -18,6 +18,7 @@ import {
 import { disconnectPlatformAccountEffect } from "./brand-profile-service";
 import { CoreApiError, type CoreApiService } from "./core-types";
 import { activeOrganizationIdEffect, withTenantTransactionEffect } from "./database";
+import type { ApiWorkerEnv } from "./env";
 import {
   completeIdempotencyEffect,
   hashIdempotencyRequestEffect,
@@ -321,6 +322,8 @@ interface AnalyticsAccess {
  * scope includes only active rows. Persisted `updated_at` values act as the
  * lifecycle generation, so a delete or restore performed by another API
  * instance changes the identity instead of leaving a warm cache authoritative.
+ * PostgreSQL hashes that canonical persisted identity before returning it, so
+ * retained keys stay fixed-size even when a Workspace has many Brand Profiles.
  * Keeping authorization and visibility in one aggregate read also preserves
  * the existing analytics statement budget: a cache hit issues no analytics
  * aggregation and a cold read issues exactly one more statement.
@@ -344,7 +347,7 @@ function analyticsAccessEffect(
       `SELECT
          access_scope.organization_id,
          access_scope.role,
-         COALESCE(
+         encode(sha256(convert_to(COALESCE(
            (
              SELECT string_agg(
                bp.id::text
@@ -357,7 +360,7 @@ function analyticsAccessEffect(
                AND ($1::uuid IS NOT NULL OR bp.deleted_at IS NULL)
            ),
            ''
-         ) AS visibility
+         ), 'UTF8')), 'hex') AS visibility
        FROM (
          SELECT
            public.auth_active_org_id()::text AS organization_id,

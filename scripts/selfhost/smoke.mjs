@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { parseEnv } from "node:util";
 import { ownerBrowserSession } from "../../frontend/app/e2e/selfhost-auth-smoke.mjs";
 import { cacheSmoke } from "../benchmarks/backend/cache-smoke.mjs";
@@ -129,6 +129,61 @@ await cacheSmoke({
       ),
     ),
 });
+// Run independently dispatched Provider reads inside the exact production runtime image.
+// Only the disposable Worker/driver are copied to writable tmpfs; production routes stay unchanged.
+execFileSync(
+  "docker",
+  [
+    ...composeArgs,
+    "exec",
+    "-T",
+    "runtime",
+    "node",
+    "--input-type=module",
+    "-e",
+    `import { mkdir, writeFile, symlink } from 'node:fs/promises';
+     import { readFileSync } from 'node:fs';
+     const payload = JSON.parse(readFileSync(0, 'utf8'));
+     await mkdir('/tmp/cache-proof', {recursive:true});
+     await symlink('/app/scripts/selfhost/node_modules', '/tmp/cache-proof/node_modules');
+     await writeFile('/tmp/cache-proof/worker.js', payload.worker);
+     await writeFile('/tmp/cache-proof/check.mjs', payload.driver);`,
+  ],
+  {
+    input: JSON.stringify({
+      worker: await readFile("artifacts/cache-provider-worker/requirements-smoke.js", "utf8"),
+      driver: await readFile("scripts/selfhost/.requirements-cache-check.mjs", "utf8"),
+    }),
+    maxBuffer: 1024 * 1024,
+  },
+);
+const requirementsEvidence = JSON.parse(
+  compose(
+    "exec",
+    "-T",
+    "-e",
+    "REQUIREMENTS_SMOKE_BUNDLE=/tmp/cache-proof/worker.js",
+    "-e",
+    "REQUIREMENTS_SMOKE_OUTPUT=/tmp/cache-proof/artifacts",
+    "runtime",
+    "node",
+    "/tmp/cache-proof/check.mjs",
+  ).toString(),
+);
+await writeFile(
+  `artifacts/cache/compose-${process.arch}-requirements.json`,
+  JSON.stringify(requirementsEvidence, null, 2),
+);
+console.log(JSON.stringify(requirementsEvidence));
+compose(
+  "exec",
+  "-T",
+  "runtime",
+  "node",
+  "--input-type=module",
+  "-e",
+  "import {rm} from 'node:fs/promises'; await rm('/tmp/cache-proof',{recursive:true});",
+);
 const png = compose(
   "exec",
   "-T",

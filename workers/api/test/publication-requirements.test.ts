@@ -308,7 +308,9 @@ describe("getPublicationRequirementsEffect", () => {
   it("coalesces concurrent equivalent reads into one Provider call", async () => {
     await setupMockAccount();
     const gate = pendingGate();
-    const getRequirements = vi.fn(() => gate.promise);
+    const getRequirements = vi.fn<NonNullable<ProviderAdapter["getPublicationRequirements"]>>(
+      () => gate.promise,
+    );
     const customRegistry = registry(adapter({ getPublicationRequirements: getRequirements }));
     const first = runRequirements(
       getPublicationRequirementsEffect(env, session, accountId, "req-first", customRegistry, now),
@@ -456,34 +458,54 @@ describe("getPublicationRequirementsEffect", () => {
     expect(getRequirements).toHaveBeenCalledTimes(2);
   });
 
-  it("does not share reads across credential generations", async () => {
-    await setupMockAccount();
-    const gates: RequirementGate[] = [];
-    const getRequirements = vi.fn(() => {
-      const gate = pendingGate();
-      gates.push(gate);
-      return gate.promise;
-    });
-    const customRegistry = registry(adapter({ getPublicationRequirements: getRequirements }));
-    const first = runRequirements(
-      getPublicationRequirementsEffect(env, session, accountId, "req-before", customRegistry, now),
-      customRegistry,
-    );
-    await waitForDecryption(0);
-    const rotated = await tokenCipherFor(env).encrypt("rotated-token");
-    await setupMockAccount({ access_token: rotated });
-    const second = runRequirements(
-      getPublicationRequirementsEffect(env, session, accountId, "req-after", customRegistry, now),
-      customRegistry,
-    );
-    await waitForDecryption(1);
-    gates[0]?.resolve({ ...defaultRequirements, creatorDisplayName: "Before rotation" });
-    gates[1]?.resolve({ ...defaultRequirements, creatorDisplayName: "After rotation" });
+  it.each(["credential", "connection"])(
+    "does not share reads across %s generations",
+    async (generation) => {
+      const originalToken = await tokenCipherFor(env).encrypt("original-token");
+      await setupMockAccount({
+        access_token: originalToken,
+        updated_at: "2026-07-01T00:00:00.000001Z",
+      });
+      const gates: RequirementGate[] = [];
+      const getRequirements = vi.fn(() => {
+        const gate = pendingGate();
+        gates.push(gate);
+        return gate.promise;
+      });
+      const customRegistry = registry(adapter({ getPublicationRequirements: getRequirements }));
+      const first = runRequirements(
+        getPublicationRequirementsEffect(
+          env,
+          session,
+          accountId,
+          "req-before",
+          customRegistry,
+          now,
+        ),
+        customRegistry,
+      );
+      await waitForDecryption(0);
+      const rotated = await tokenCipherFor(env).encrypt("rotated-token");
+      await setupMockAccount({
+        access_token: generation === "credential" ? rotated : originalToken,
+        updated_at:
+          generation === "connection"
+            ? "2026-07-01T00:00:00.000002Z"
+            : "2026-07-01T00:00:00.000001Z",
+      });
+      const second = runRequirements(
+        getPublicationRequirementsEffect(env, session, accountId, "req-after", customRegistry, now),
+        customRegistry,
+      );
+      await waitForDecryption(1);
+      gates[0]?.resolve({ ...defaultRequirements, creatorDisplayName: "Before rotation" });
+      gates[1]?.resolve({ ...defaultRequirements, creatorDisplayName: "After rotation" });
 
-    await expect(first).resolves.toMatchObject({ creatorDisplayName: "Before rotation" });
-    await expect(second).resolves.toMatchObject({ creatorDisplayName: "After rotation" });
-    expect(getRequirements).toHaveBeenCalledTimes(2);
-  });
+      await expect(first).resolves.toMatchObject({ creatorDisplayName: "Before rotation" });
+      await expect(second).resolves.toMatchObject({ creatorDisplayName: "After rotation" });
+      expect(getRequirements).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("does not share reads across Provider registries", async () => {
     await setupMockAccount();

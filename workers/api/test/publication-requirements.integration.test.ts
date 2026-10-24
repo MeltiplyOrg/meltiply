@@ -136,7 +136,6 @@ function registryFor(read: RequirementRead) {
 function appFor(actor: ResolvedActor, registry: ProviderRegistry) {
   const identity: JwtIdentity = {
     email: actor.email,
-    name: actor.displayName,
     subject: actor.claims.subject,
   };
   return createApiApp({
@@ -146,8 +145,12 @@ function appFor(actor: ResolvedActor, registry: ProviderRegistry) {
   });
 }
 
-/** Issues one authenticated publishing-requirements read with explicit correlation. */
-function requirementsRequest(app: Hono<ApiWorkerEnvironment>, requestId: string) {
+/** Issues a correlated authenticated read; defaults to the seeded database but permits configuration-transition scenarios. */
+function requirementsRequest(
+  app: Hono<ApiWorkerEnvironment>,
+  requestId: string,
+  bindings: ApiWorkerEnv = env,
+) {
   return app.request(
     `/api/v1/platforms/${accountId}/publishing-requirements`,
     {
@@ -156,7 +159,7 @@ function requirementsRequest(app: Hono<ApiWorkerEnvironment>, requestId: string)
         "X-Request-ID": requestId,
       },
     },
-    env,
+    bindings,
   );
 }
 
@@ -259,6 +262,46 @@ describe("publishing-requirement coalescing with PostgreSQL RLS", () => {
     expect(second.headers.get("X-Request-ID")).toBe("integration-requirements-second");
     expect(await first.json()).toMatchObject({ creator: { display_name: "Read 1" } });
     expect(await second.json()).toMatchObject({ creator: { display_name: "Read 2" } });
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not join pending work after the authoritative connection configuration changes", async () => {
+    const firstStarted = signalGate();
+    const secondStarted = signalGate();
+    const firstGate = pendingGate();
+    const secondGate = pendingGate();
+    let attempts = 0;
+    const read = vi.fn(() => {
+      attempts += 1;
+      if (attempts === 1) {
+        firstStarted.resolve();
+        return firstGate.promise;
+      }
+      secondStarted.resolve();
+      return secondGate.promise;
+    });
+    const app = appFor(actorFor(alpha), registryFor(read));
+    const first = requirementsRequest(app, "source-before");
+    await firstStarted.promise;
+    // Same persisted rows and registry deliberately maximize equivalence; only binding configuration differs.
+    const replacement = {
+      ...env,
+      DB_AUTHENTICATED: {
+        ...env.DB_AUTHENTICATED,
+        connectionString: `${connectionString}&application_name=requirements-replacement`,
+      },
+    };
+    const second = requirementsRequest(app, "source-after", replacement);
+    await secondStarted.promise;
+    firstGate.resolve({ ...defaultRequirements, creatorDisplayName: "Original source" });
+    secondGate.resolve({ ...defaultRequirements, creatorDisplayName: "Replacement source" });
+    const responses = await Promise.all([first, second]);
+    expect(await responses[0]!.json()).toMatchObject({
+      creator: { display_name: "Original source" },
+    });
+    expect(await responses[1]!.json()).toMatchObject({
+      creator: { display_name: "Replacement source" },
+    });
     expect(read).toHaveBeenCalledTimes(2);
   });
 

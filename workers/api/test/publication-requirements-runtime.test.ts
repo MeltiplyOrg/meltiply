@@ -189,7 +189,6 @@ function runtimeApp(read: RequirementRead) {
     resolveActor: async () => actor,
     verifyJwtToken: async () => ({
       email: actor.email,
-      name: actor.displayName,
       subject: actor.claims.subject,
     }),
   });
@@ -250,7 +249,7 @@ describe("publishing-requirement coalescing in the workerd runtime", () => {
   it("shares one pending Provider read across concurrent requests with independent response IDs", async () => {
     mockAccountRead(accountRow());
     const gate = pendingGate();
-    const read = vi.fn(() => gate.promise);
+    const read = vi.fn<RequirementRead>(() => gate.promise);
     const app = runtimeApp(read);
 
     const first = app.request(requirementsRequest("req-runtime-first"), undefined, env);

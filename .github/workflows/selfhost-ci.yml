@@ -119,6 +119,11 @@ jobs:
       - name: Install Chromium for real owner journeys
         working-directory: frontend/app
         run: bun run --no-install playwright install --with-deps chromium
+      - name: Build disposable network Provider acceptance artifacts
+        run: |
+          bunx --no-install tsc --project scripts/selfhost/tsconfig.json
+          bunx --no-install wrangler deploy workers/api/test-support/requirements-smoke.ts --config workers/api/wrangler.test.jsonc --dry-run --outdir artifacts/cache-provider-worker
+          bun build scripts/selfhost/requirements-cache-check.ts --target=node --external miniflare --external pg --outfile=scripts/selfhost/.requirements-cache-check.mjs
       - name: Exercise application, email, storage, jobs, workflows, and crash recovery
         run: node scripts/selfhost/smoke.mjs
       - name: Preserve credential-free browser and cache observations

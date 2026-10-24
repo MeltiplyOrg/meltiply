@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { chromium } from "../../../frontend/app/node_modules/@playwright/test/index.mjs";
@@ -35,6 +35,30 @@ async function ready(url, child) {
     await delay(1000);
   }
   throw new Error(`Runtime did not become ready: ${url}`);
+}
+/**
+ * Samples only descendants of the process roots this fixture launched.
+ * Detached Wrangler children remain descendants of their launcher; unrelated
+ * workerd processes are never enumerated. A failed process probe blocks evidence.
+ */
+function observeOwnedMemory() {
+  const pending = children.filter((child) => child.exitCode === null).map((child) => child.pid);
+  let bytes = 0;
+  while (pending.length > 0) {
+    const parent = pending.pop();
+    if (parent === undefined) continue;
+    const result = spawnSync("ps", ["--ppid", String(parent), "-o", "pid=,rss=,comm="], {
+      encoding: "utf8",
+    });
+    if (result.status === 1 && result.stdout.trim() === "") continue;
+    assert.equal(result.status, 0, "Fixture-owned process observation failed");
+    for (const line of result.stdout.trim().split("\n")) {
+      const [pid, rss, name] = line.trim().split(/\s+/);
+      pending.push(Number(pid));
+      if (name === "workerd") bytes += Number(rss) * 1024;
+    }
+  }
+  return { owned_workerd_rss_bytes: bytes };
 }
 try {
   await pool.query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
@@ -80,15 +104,7 @@ try {
     cookie,
     query: pool.query.bind(pool),
     label: "managed-local-workerd",
-    observeMemory: async () => ({
-      workerd_rss_bytes: execFileSync("ps", ["-eo", "rss=,comm="], { encoding: "utf8" })
-        .trim()
-        .split("\n")
-        .reduce((total, line) => {
-          const [rss, name] = line.trim().split(/\s+/);
-          return name === "workerd" ? total + Number(rss) * 1024 : total;
-        }, 0),
-    }),
+    observeMemory: async () => observeOwnedMemory(),
   });
 } finally {
   for (const child of children) {

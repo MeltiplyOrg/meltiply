@@ -100,6 +100,8 @@ interface PendingRequirementRead {
  */
 interface RequirementReadOwner {
   readonly namespace: string;
+  /** Private configuration comparison only; never serialized into keys, responses or diagnostics. */
+  readonly dataSource: string | undefined;
   readonly pending: Map<string, PendingRequirementRead>;
 }
 
@@ -183,6 +185,8 @@ function timestampKey(value: Date | string | null): string {
  * freshness, and a ciphertext fingerprint. Credential contents never appear in
  * the key, and the caller's request ID is deliberately excluded because each
  * caller keeps its own response correlation.
+ * Production row generations use exact PostgreSQL epoch text, preserving
+ * microsecond updates that a JavaScript Date would collapse into one millisecond.
  *
  * @param session - Authenticated session claims used for tenant scoping.
  * @param accountId - Requested Platform account UUID.
@@ -203,7 +207,7 @@ function requirementReadKey(
     account.platform,
     account.platform_user_id,
     account.connection_status,
-    timestampKey(account.updated_at),
+    account.updated_at instanceof Date ? account.updated_at.toISOString() : account.updated_at,
     timestampKey(account.token_expires_at),
     timestampKey(account.revoked_at),
     nonSecretFingerprint(account.access_token),
@@ -221,12 +225,18 @@ function requirementReadKey(
  *
  * @param namespace - Current deployment/configuration namespace.
  * @param key - Equivalence key built from freshly validated persisted state.
+ * @param dataSource - Private connection configuration, compared exactly but never used as key material.
  * @returns Flight handle, or undefined when this caller must bypass coalescing.
  */
-function acquireRequirementRead(namespace: string, key: string): RequirementReadFlight | undefined {
+function acquireRequirementRead(
+  namespace: string,
+  key: string,
+  dataSource: string | undefined,
+): RequirementReadFlight | undefined {
   let owner = requirementReadOwner;
-  if (owner?.namespace !== namespace) {
-    owner = { namespace, pending: new Map() };
+  if (owner?.namespace !== namespace || owner.dataSource !== dataSource) {
+    owner?.pending.clear();
+    owner = { namespace, dataSource, pending: new Map() };
     requirementReadOwner = owner;
   }
   const existing = owner.pending.get(key);
@@ -375,7 +385,7 @@ export function getPublicationRequirementsEffect(
       Effect.gen(function* () {
         const result = yield* client.query<PublicationAccountRow>(
           `SELECT platform, platform_user_id, access_token, connection_status,
-                    token_expires_at, revoked_at, updated_at
+                    token_expires_at, revoked_at, extract(epoch FROM updated_at)::text AS updated_at
                FROM platform_accounts
                WHERE id = $1
                LIMIT 1`,
@@ -420,6 +430,7 @@ export function getPublicationRequirementsEffect(
       acquireRequirementRead(
         requirementReadNamespace(env, registry),
         requirementReadKey(session, accountId, account),
+        env.DB_AUTHENTICATED?.connectionString,
       ),
     );
     if (!flight) return yield* providerRead;

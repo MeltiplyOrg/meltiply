@@ -106,6 +106,7 @@ try {
   runtime = new Miniflare(
     convertV4MiniflareOptions({
       port: 0,
+      host: "127.0.0.1",
       cf: {},
       telemetry: { enabled: false },
       log: new Log(LogLevel.ERROR),

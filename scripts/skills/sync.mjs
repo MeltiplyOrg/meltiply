@@ -153,7 +153,7 @@ function installPack(directory) {
 
 /**
  * Installs the pack into a temporary directory and applies this repository's
- * context naming.
+ * context naming and cache-safety review guidance.
  *
  * @returns {Promise<{staging: string, skills: string}>} Staged install
  */

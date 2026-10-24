@@ -60,8 +60,13 @@ function PlatformLegend({ platforms }: { platforms: readonly Platform[] }) {
     <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1 pt-2 text-xs text-ink-2">
       {platforms.map((platform) => (
         <li key={platform} className="flex items-center gap-1.5">
+          <span
+            aria-hidden="true"
+            className="size-2 shrink-0 rounded-xs bg-(--series-color)"
+            style={{ "--series-color": PLATFORM_COLORS[platform] } as React.CSSProperties}
+          />
           <PlatformIcon provider={platform} className="size-3.5" />
-          <span style={{ color: PLATFORM_COLORS[platform] }}>{platformDisplayName(platform)}</span>
+          <span>{platformDisplayName(platform)}</span>
         </li>
       ))}
     </ul>

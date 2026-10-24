@@ -121,19 +121,6 @@ function sameOrigin(request: Request, url: URL): boolean {
 }
 
 /**
- * Proxies an `/api/*` request to the Meltiply API Worker, keeping the browser
- * strictly same-origin so the HttpOnly Better Auth session cookie flows without
- * CORS. A defined `API_ORIGIN` (local development and preview builds) is used
- * first; deployed environments omit it and route through the `API` service
- * binding instead. Method, headers, and body are preserved, and the original
- * `Origin` header is forwarded untouched so the API's own origin checks still apply.
- *
- * @param request Inbound HTTP request targeting `/api/*`.
- * @param env Worker environment bindings (`API_ORIGIN` local upstream or `API` service binding).
- * @param url Parsed inbound request URL.
- * @returns The API Worker's response, or 502 when the upstream is unreachable.
- */
-/**
  * Reports whether a request path belongs to the bearer-authenticated public API.
  * Only these paths must have the Better Auth session cookie stripped before
  * proxying, so the API Worker never receives it.
@@ -165,6 +152,21 @@ function stripBetterAuthCookies(cookieHeader: string | null): string | null {
   return kept.length > 0 ? kept.join("; ") : null;
 }
 
+/**
+ * Proxies an `/api/*` request to the Meltiply API Worker, keeping the browser
+ * strictly same-origin so the HttpOnly Better Auth session cookie flows without
+ * CORS. A defined `API_ORIGIN` (local development and preview builds) is used
+ * first; deployed environments omit it and route through the `API` service
+ * binding instead. Method, headers, and body are preserved, and the original
+ * `Origin` header is forwarded untouched so the API's own origin checks still
+ * apply. `/api/v1` requests carry their Better Auth cookies only as far as this
+ * Worker: `isPublicApiPath` scopes the stripping so `/api/auth` keeps its session.
+ *
+ * @param request Inbound HTTP request targeting `/api/*`.
+ * @param env Worker environment bindings (`API_ORIGIN` local upstream or `API` service binding).
+ * @param url Parsed inbound request URL.
+ * @returns The API Worker's response; the caller maps a missing upstream to 502.
+ */
 async function proxyApiRequest(request: Request, env: Env, url: URL): Promise<Response> {
   const headers = new Headers(request.headers);
   if (isPublicApiPath(url.pathname)) {

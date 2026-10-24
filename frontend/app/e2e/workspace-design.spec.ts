@@ -932,6 +932,72 @@ test("keeps navigation focus and reconnect assignment correct in both palettes",
 });
 
 /**
+ * Completes the real browser return: the callback ticket is controlled, while
+ * the assignment surface, navigation, and outcome consumption are production
+ * code. The confirm response stands in for provider persistence, which the API
+ * suites exercise against real state and PostgreSQL.
+ */
+test("returns to Channels with connected feedback after assignment", async ({ page }) => {
+  test.setTimeout(120_000);
+  const workspace = await openIsolatedOwnerWorkspace(page);
+  const accountId = controlledProviderAccountId("threads");
+  const ticket = "return-success-1234567890";
+  await page.route(`**/api/v1/oauth-selections/${ticket}`, (route) =>
+    route.fulfill({
+      json: {
+        id: ticket,
+        platform: "threads",
+        expires_at: new Date(Date.now() + 600_000).toISOString(),
+        accounts: [
+          { id: accountId, display_name: "Return Threads", avatar_url: null, username: null },
+        ],
+      },
+    }),
+  );
+  await page.route(`**/api/v1/oauth-selections/${ticket}/confirm`, (route) =>
+    route.fulfill({ status: 204 }),
+  );
+
+  await page.goto(`/channels/connect?oauth=select_account&provider=threads&selection_id=${ticket}`);
+  await expect(page.getByText("Return Threads", { exact: true })).toBeVisible();
+  await page.getByText(workspace.profileName, { exact: true }).click();
+  const confirmed = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      request.url().endsWith(`/api/v1/oauth-selections/${ticket}/confirm`),
+  );
+  await page.getByRole("button", { name: "Connect Channel", exact: true }).click();
+  await confirmed;
+
+  await page.waitForURL((url) => url.pathname === "/channels" && !url.searchParams.has("oauth"), {
+    timeout: 30_000,
+  });
+  await expect(page.locator("[data-sileo-title]")).toContainText("Threads connected successfully.");
+});
+
+/**
+ * Representative failures return to Channels with an accuracy-preserving
+ * banner; unknown OAuth outcomes never masquerade as a successful connection.
+ */
+test("returns OAuth failures to Channels as actionable feedback", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openIsolatedOwnerWorkspace(page);
+
+  await page.goto("/channels?oauth=provider_error&provider=threads");
+  await expect(page.getByRole("alert")).toContainText(
+    "Threads connection could not be completed because the provider rejected the exchange.",
+  );
+
+  await page.goto("/channels?oauth=state_invalid&provider=threads");
+  await expect(page.getByRole("alert")).toContainText(
+    "Threads connection expired or could not be verified. Start again when the provider is available.",
+  );
+  await expect(
+    page.locator("[data-sileo-title]", { hasText: "connected successfully" }),
+  ).toHaveCount(0);
+});
+
+/**
  * Keeps username presence from changing directory density and copies the actual
  * identity text through the browser clipboard, without selecting its Channel.
  * Only username metadata is controlled; auth, ownership, and Channels use real fixtures.

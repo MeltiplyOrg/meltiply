@@ -27,7 +27,7 @@ export interface ChannelAssignmentProps {
   /** Returns to the workspace without connecting a Channel. */
   onClose: () => void;
   /** Fired after the Channel is persisted under the chosen Brand Profile. */
-  onSuccess: (accountName: string | null) => void;
+  onSuccess: () => void;
 }
 
 /**
@@ -96,10 +96,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
       },
       {
         onSuccess: () => {
-          const accountName =
-            selection?.accounts.find((account) => account.id === effectiveAccountId)
-              ?.display_name ?? null;
-          onSuccess(accountName);
+          onSuccess();
         },
         onError: (err) => {
           setActionError(
@@ -115,7 +112,6 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
     isSubmitting,
     confirmMutation,
     selectionId,
-    selection,
     onSuccess,
     t,
   ]);

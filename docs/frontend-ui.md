@@ -47,10 +47,10 @@ Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. I
 
 The phone navigation panel is `MobileNavigationSidebar`: the same `SidebarNav` as the desktop rail, positioned as a fixed left-edge layer over the workspace with a fading scrim, sliding in from the left. It renders `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
 
-The sidebar imports unstyled `FocusScope` from the shared `@meltiply/ui/center-dialog`
-owner. It loops Tab/Shift+Tab while open and shares Radix's focus stack with the
-portalled account menu, so nested menus can take focus without fighting the
-navigation trap. The shell's background `inert` state is separate from containment.
+The sidebar composes `CenterDialog` and `NavigationDialogContent` from the shared
+`@meltiply/ui/center-dialog` owner. Radix owns focus looping and nested-menu
+Escape arbitration; there is no feature-local document listener or focus trap.
+The shell's background `inert` state is separate from containment.
 
 `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`) owns the rail's hover background: every `data-sidebar-item` row is a target, and one pill springs to the hovered row instead of rows painting their own hover fill. The Settings section rail reuses the same component with its own container and a tighter snap radius. Rows keep `relative z-10` so labels and the selected surface read above it, keyboard focus rings are unchanged, and the public docs rail reuses the same component with its nested Radix viewport.
 
@@ -94,13 +94,21 @@ Connection cards stack platform identity above saved-account status and connecti
 
 `WorkspaceSettings` is a full route with Appearance, Language, Account, Security, and — for administrators — Administration. Every section shares the same background; the preference and security sections use the bounded form column while Administration follows the directory composition. Compact theme cards offer Light/Dark/System; System follows live OS palette changes. Current-page preferences work without optional storage; persistence follows the shared consent-aware owners. Account identity is read-only. Security controls are inline and retain password verification, authenticator enrollment, and recovery-code requirements. Administration reuses the shared spreadsheet `Table` (grid columns) for members and invitations; rows carry a lifecycle `Switch`, the Installation Owner wears a crown tooltip, and row actions sit behind a three-dot menu. Workspace is a label/value settings form with compact seat counts, not a table. `AuditLogTable` owns the filtered, paginated log and defers filtering and paging to the route's query; its search and filter controls keep fixed widths so selecting a value cannot reflow the toolbar, and Refresh re-reads the current page. The Administration surface is height-locked to the content pane so only the lists scroll, and the tab strip is content-width rather than stretched across the surface.
 
-| Task                        | Primitive           |
-| --------------------------- | ------------------- |
-| Focused form or jump search | `CenterDialog`      |
-| Destructive confirmation    | `CenterAlertDialog` |
-| Large Post inspection       | `SideDialog`        |
+| Task                        | Primitive                                  |
+| --------------------------- | ------------------------------------------ |
+| Focused form or jump search | `CenterDialog`                             |
+| Destructive confirmation    | `CenterAlertDialog`                        |
+| Large Post inspection       | `SideDialog`                               |
+| Modal phone navigation      | `CenterDialog` + `NavigationDialogContent` |
 
 `SideDialog` owns the edge/phone drawer geometry, the compact record toolbar, its Close control, native body scrolling, opener restoration, and the optional body-class hook a pinned action bar needs. Features supply breadcrumb/context, supported header actions, and real content. Post inspection shows properties, caption, ordered attachments, and independent Channel outcomes; composing and editing a Post open the same drawer with the composer body, so no separate composer surface exists. It has no duplicated footer or reference-only task fields/comments.
+
+`NavigationDialogContent` extends the shared Radix dialog owner for the left-edge
+phone rail: it owns modal focus, nested Escape arbitration, scrim/Close dismissal,
+opener restoration without scrolling, and the 300ms panel/scrim motion in shared
+`motion.css`. `MobileNavigationSidebar` supplies the existing `SidebarNav`, labels,
+destinations and desktop-breakpoint closure. It does not reimplement keyboard or
+focus handling, and the non-modal Post inspection `SideDialog` remains unchanged.
 
 The shared `FilterChecklist` in `@meltiply/ui/dropdown-menu` owns checkbox toggling, optional aggregate clearing, stay-open selection, and Radix keyboard/dismissal behavior. Posts status and `BrandProfileFilterSelect` use it alongside the canonical platform filter. Composition reuses `BrandProfileFilterSelect` without an aggregate row: empty means no selected profiles. `BrandProfileSelect` remains single-value for Channels scope; both modes share one resolved/unknown option roster. Inspector focus restoration uses `preventScroll` rather than scrolling the live collection back to its opener.
 

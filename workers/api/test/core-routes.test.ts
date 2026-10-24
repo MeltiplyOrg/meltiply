@@ -2294,6 +2294,51 @@ describe("core API routes", () => {
     expect(finalizeSelection).toHaveBeenCalledWith(savedId);
   });
 
+  it("returns a staging failure to Channels as connection_failed", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { registry } = oauthRegistry();
+    const consume = vi.fn(async () => ({
+      expires_at: Date.now() + 60_000,
+      organization_id: actor.workspace.id,
+      pkce_verifier: "pkce-verifier",
+      provider: "threads",
+      redirect_path: "/channels",
+      user_id: actor.userId,
+    }));
+    const createSelection = vi.fn(async () => {
+      throw new Error("state storage unavailable");
+    });
+    const oauthEnv = {
+      ...env,
+      TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      OAUTH_STATE: {
+        getByName: () => ({ consume, createSelection }),
+      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+    };
+    const app = authenticatedApp(service(), { providerRegistry: registry });
+
+    const response = await app.request(
+      `/api/v1/platforms/threads/callback?state=${"A".repeat(22)}.state-with-enough-length&code=provider-code`,
+      undefined,
+      oauthEnv,
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "http://localhost:3000/channels?oauth=connection_failed&provider=threads",
+    );
+    expect(logRecords(error)).toContainEqual(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          error_code: "oauth_staging_failed",
+          event: "oauth_staging_failed",
+          outcome: "connection_failed",
+          provider: "threads",
+        }),
+      }),
+    );
+  });
+
   it("logs a safe diagnostic when an OAuth provider exchange fails", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { exchangeAuthorizationCode, registry } = oauthRegistry();
@@ -2445,6 +2490,42 @@ describe("core API routes", () => {
     },
   );
 
+  it.each([
+    { expectedOutcome: "consent_denied", providerError: "access_denied" },
+    { expectedOutcome: "provider_error", providerError: "server_error" },
+  ])(
+    "returns provider error $providerError as oauth=$expectedOutcome without exchanging",
+    async ({ expectedOutcome, providerError }) => {
+      const { exchangeAuthorizationCode, registry } = oauthRegistry();
+      const app = authenticatedApp(service(), { providerRegistry: registry });
+      const response = await app.request(
+        `/api/v1/platforms/threads/callback?state=${"A".repeat(22)}.state-with-enough-length&error=${providerError}`,
+        undefined,
+        {
+          ...env,
+          OAUTH_STATE: {
+            getByName: () => ({
+              consume: async () => ({
+                expires_at: Date.now() + 60_000,
+                organization_id: actor.workspace.id,
+                pkce_verifier: "pkce-verifier",
+                provider: "threads",
+                redirect_path: "/channels",
+                user_id: actor.userId,
+              }),
+            }),
+          } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        },
+      );
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe(
+        `http://localhost:3000/channels?oauth=${expectedOutcome}&provider=threads`,
+      );
+      expect(exchangeAuthorizationCode).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["routing-key", "A".repeat(21), "A".repeat(23), `${"A".repeat(21)}!`])(
     "redirects malformed OAuth routing key %s without Durable Object access",
     async (routingKey) => {
@@ -2471,7 +2552,7 @@ describe("core API routes", () => {
       expect(getByName).not.toHaveBeenCalled();
     },
   );
-  it("rejects short OAuth state with 400 invalid_request without Durable Object access", async () => {
+  it("returns short OAuth state to Channels as state_invalid without Durable Object access", async () => {
     const { registry } = oauthRegistry();
     const getByName = vi.fn(() => ({ consume: vi.fn() }));
     const app = authenticatedApp(service(), {
@@ -2488,10 +2569,10 @@ describe("core API routes", () => {
       },
     );
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "invalid_request" },
-    });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "http://localhost:3000/channels?oauth=state_invalid&provider=threads",
+    );
     expect(getByName).not.toHaveBeenCalled();
   });
 

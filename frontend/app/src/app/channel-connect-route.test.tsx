@@ -17,11 +17,11 @@ vi.mock("@/components/channels/channel-assignment", () => ({
     selectionId,
   }: {
     onClose: () => void;
-    onSuccess: (accountName: string | null) => void;
+    onSuccess: () => void;
     selectionId: string;
   }) => (
     <div data-testid="channel-assignment" data-selection-id={selectionId}>
-      <button onClick={() => onSuccess("Acme Studio")}>Assign channel</button>
+      <button onClick={() => onSuccess()}>Assign channel</button>
       <button onClick={onClose}>Cancel</button>
     </div>
   ),

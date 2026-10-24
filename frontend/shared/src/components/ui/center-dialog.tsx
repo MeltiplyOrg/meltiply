@@ -3,13 +3,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 import { useCenterDialogMorph } from "./center-dialog-motion";
-
-/**
- * Unstyled focus containment for modal layers that own their own geometry.
- * Shares Radix's focus stack with dialogs and portalled menus; callers control
- * trapping/looping and autofocus to match their open/close lifecycle.
- */
-export { FocusScope } from "@radix-ui/react-focus-scope";
+import { Button } from "./button";
 
 /**
  * Root of the centered dialog type: a compact modal in the middle of the
@@ -30,11 +24,6 @@ export const CenterDialogTrigger = DialogPrimitive.Trigger;
  * Direct alias for Radix Dialog `Portal`.
  */
 const DialogPortal = DialogPrimitive.Portal;
-
-/**
- * Element that closes the dialog when triggered.
- * Direct alias for Radix Dialog `Close`.
- */
 
 /**
  * Fullscreen backdrop overlay behind the active modal dialog.
@@ -105,6 +94,70 @@ export const CenterDialogContent = React.forwardRef<
   );
 });
 CenterDialogContent.displayName = DialogPrimitive.Content.displayName;
+
+/**
+ * Left-edge modal navigation frame using the same Radix dialog stack as centered
+ * forms. Owns the scrim, close control, focus trap, nested Escape arbitration,
+ * scroll locking and opener restoration without scrolling the workspace.
+ * Labels and navigation content belong to the caller; shared CSS retains both
+ * panel and scrim through their 300ms exit before Radix unmounts the portal.
+ */
+export function NavigationDialogContent({
+  children,
+  title,
+  closeLabel,
+  id,
+}: {
+  children: React.ReactNode;
+  title: string;
+  closeLabel: string;
+  id?: string;
+}): React.ReactElement {
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const openerRef = React.useRef<HTMLElement | null>(null);
+  return (
+    <DialogPortal>
+      <DialogPrimitive.Overlay
+        data-navigation-scrim=""
+        className="fixed inset-0 z-50 bg-overlay/60 lg:hidden"
+      />
+      <DialogPrimitive.Content
+        ref={contentRef}
+        id={id}
+        aria-describedby={undefined}
+        data-navigation-panel=""
+        data-lenis-prevent=""
+        className="fixed inset-y-0 left-0 z-50 flex w-80 max-w-full flex-col overflow-hidden border-r border-line bg-canvas pt-(--safe-area-top) pb-(--safe-area-bottom) shadow-overlay outline-none lg:hidden"
+        onOpenAutoFocus={(event) => {
+          const active = document.activeElement;
+          openerRef.current = active instanceof HTMLElement ? active : null;
+          event.preventDefault();
+          contentRef.current?.focus({ preventScroll: true });
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const opener = openerRef.current;
+          openerRef.current = null;
+          if (opener?.isConnected) opener.focus({ preventScroll: true });
+        }}
+      >
+        <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>
+        <DialogPrimitive.Close asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="absolute right-2 top-[calc(var(--safe-area-top)+0.5rem)] z-10 size-8"
+            aria-label={closeLabel}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+        </DialogPrimitive.Close>
+        {children}
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  );
+}
 
 /**
  * Header section of a dialog containing title and description elements with responsive alignment.

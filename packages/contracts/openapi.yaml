@@ -1475,18 +1475,17 @@ paths:
       responses:
         "302":
           description: |
-            Redirect to the configured frontend result route or to the Page selection
-            route (/channels?oauth=select_account&provider={platform}&selection_id={selection_id})
-            before persistence when multiple candidate accounts are discovered.
+            Redirect to the Channel assignment view
+            (/channels/connect?oauth=select_account&provider={platform}&selection_id={selection_id})
+            with the provider outcome appended. No Channel is persisted before the
+            user confirms the account and its owning Brand Profile.
           headers:
             Location:
               schema:
                 type: string
                 format: uri
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "502":
-          $ref: "#/components/responses/UpstreamError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /oauth-selections/{selection_id}:
     parameters:
       - $ref: "#/components/parameters/SelectionId"

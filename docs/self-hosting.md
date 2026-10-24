@@ -292,9 +292,12 @@ compatible backup if schema compatibility requires it.
 
 The Channel-return branch originally numbered its one-Channel-per-Provider
 migration `012_one_channel_per_provider.sql`. Integration with the shared-Workspace
-migrations moves it to `016_one_channel_per_provider.sql` without changing its SQL.
-For a database that already applied the former filename, verify its recorded
-checksum is `4f3093462c43460f9b629d984fc5cefd2fade838b5d6f01d1ce5a13969d60e41`
+migrations moves it to `016_one_channel_per_provider.sql`. The original file
+installed the unique index directly; the integrated expand file reports legacy
+duplicates and enforces the invariant with a trigger so no existing Channel is
+rewritten, and a later contract migration can add the index once the extras are
+disconnected. For a database that already applied the former filename, verify its
+recorded checksum is `4f3093462c43460f9b629d984fc5cefd2fade838b5d6f01d1ce5a13969d60e41`
 and that `platform_accounts_brand_profile_platform_unique` exists, then rename
 only that ledger entry before upgrading:
 

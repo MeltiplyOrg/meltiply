@@ -259,7 +259,7 @@ const fixturePostIds = {
  * exactly as `post-service` does when it writes a schedule.
  *
  * @param client - Transaction client shared with the calling fixture block.
- * @param input - Post identity plus the optional attachment and Channel to pin.
+ * @param input - Post identity, optional attachment/Channel, and an optional owner pair; defaults to Alpha's RLS fixture scope.
  * @returns Effect inserting the Post and, when supplied, its children.
  */
 function insertFixturePost(
@@ -267,22 +267,25 @@ function insertFixturePost(
   input: {
     accountId?: string;
     assetId?: string;
+    owner?: { organizationId: string; brandProfileId: string };
     postId: string;
     title: string;
   },
 ): Effect.Effect<void, DatabaseError> {
   return Effect.gen(function* () {
+    const organizationId = input.owner?.organizationId ?? alpha.organizationId;
+    const brandProfileId = input.owner?.brandProfileId ?? alphaBrandProfileId;
     yield* client.query(
       `INSERT INTO posts (id, org_id, brand_profile_id, title, status)
-       VALUES ($1, '${alpha.organizationId}', '${alphaBrandProfileId}', $2, 'active')`,
-      [input.postId, input.title],
+       VALUES ($1, $3, $4, $2, 'active')`,
+      [input.postId, input.title, organizationId, brandProfileId],
     );
     if (input.assetId !== undefined) {
       yield* client.query(
         `INSERT INTO post_attachments
            (post_id, asset_id, org_id, brand_profile_id, position)
-         VALUES ($1, $2, '${alpha.organizationId}', '${alphaBrandProfileId}', 0)`,
-        [input.postId, input.assetId],
+         VALUES ($1, $2, $3, $4, 0)`,
+        [input.postId, input.assetId, organizationId, brandProfileId],
       );
     }
     if (input.accountId !== undefined) {
@@ -290,10 +293,10 @@ function insertFixturePost(
         `INSERT INTO post_targets
            (post_id, platform_account_id, org_id, brand_profile_id,
             attachment_ids)
-         VALUES ($1, $2, '${alpha.organizationId}', '${alphaBrandProfileId}',
+         VALUES ($1, $2, $4, $5,
                  CASE WHEN $3::uuid IS NULL THEN NULL
                       ELSE ARRAY[$3::uuid] END)`,
-        [input.postId, input.accountId, input.assetId ?? null],
+        [input.postId, input.accountId, input.assetId ?? null, organizationId, brandProfileId],
       );
     }
   });
@@ -672,14 +675,18 @@ const analyticsCacheEnd = new Date("2031-05-31T23:59:59Z");
  * cache scenario. The 2031 window is disjoint from seeded and other fixture
  * data, so a warm or expired result can only come from these rows.
  *
+ * @param owner - Owning scope; defaults to Alpha's database-only RLS Workspace, while HTTP tests pass the resolved shared Workspace.
  * @returns Resolves after the Post, Distribution, and snapshot commit.
  */
-async function seedAnalyticsCacheFixture(): Promise<void> {
+async function seedAnalyticsCacheFixture(
+  owner = { organizationId: alpha.organizationId, brandProfileId: alphaBrandProfileId },
+): Promise<void> {
   await systemTransaction(env, (client) =>
     Effect.gen(function* () {
       yield* insertFixturePost(client, {
         postId: analyticsCachePostId,
         title: "Integration cached analytics",
+        owner,
       });
       yield* client.query(
         `INSERT INTO distributions
@@ -689,8 +696,8 @@ async function seedAnalyticsCacheFixture(): Promise<void> {
                  '2031-05-05T12:00:00Z', 'integration-cached-analytics')`,
         [
           analyticsCacheDistributionId,
-          alpha.organizationId,
-          alphaBrandProfileId,
+          owner.organizationId,
+          owner.brandProfileId,
           analyticsCachePostId,
         ],
       );
@@ -698,7 +705,7 @@ async function seedAnalyticsCacheFixture(): Promise<void> {
         `INSERT INTO analytics_snapshots
            (distribution_id, org_id, views, likes, comments, shares, snapshot_at)
          VALUES ($1, $2, 100, 10, 1, 2, '2031-05-06T12:00:00Z')`,
-        [analyticsCacheDistributionId, alpha.organizationId],
+        [analyticsCacheDistributionId, owner.organizationId],
       );
     }),
   );
@@ -2747,14 +2754,30 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   it("blocks a suspended member before a warm analytics cache can be reused", async () => {
     const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
     const analyticsService = createCoreApiService(undefined, { now: () => clock.current });
+    const sharedProfileId = "a0000000-0000-4000-8000-000000000091";
     try {
-      await seedAnalyticsCacheFixture();
+      const actor = await resolveActor(
+        env,
+        alphaIdentity,
+        new Request("https://api.meltiply.test"),
+        "analytics-cache-suspension-setup",
+      );
+      await systemTransaction(env, (client) =>
+        client.query(
+          "INSERT INTO brand_profiles (id, org_id, name, color) VALUES ($1, $2, 'Suspension cache fixture', '#1d4ed8')",
+          [sharedProfileId, actor.workspace.id],
+        ),
+      );
+      await seedAnalyticsCacheFixture({
+        organizationId: actor.workspace.id,
+        brandProfileId: sharedProfileId,
+      });
       const app = createApiApp({
         coreService: analyticsService,
         resolveActor,
         verifyJwtToken: async () => alphaIdentity,
       });
-      const query = `start=${encodeURIComponent(analyticsCacheStart.toISOString())}&end=${encodeURIComponent(analyticsCacheEnd.toISOString())}`;
+      const query = `brand_profile_id=${sharedProfileId}&start=${encodeURIComponent(analyticsCacheStart.toISOString())}&end=${encodeURIComponent(analyticsCacheEnd.toISOString())}`;
       const request = () =>
         app.request(
           `/api/v1/analytics?${query}`,
@@ -2789,6 +2812,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         client.query("UPDATE users SET suspended_at = NULL WHERE id = $1", [alpha.userId]),
       );
       await removeAnalyticsCacheFixture();
+      await systemTransaction(env, (client) =>
+        client.query("DELETE FROM brand_profiles WHERE id = $1", [sharedProfileId]),
+      );
     }
   });
 

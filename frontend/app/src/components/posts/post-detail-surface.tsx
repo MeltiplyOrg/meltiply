@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router";
 import {
   CalendarDays,
+  CalendarClock,
   Edit3,
   Trash2,
   RotateCw,
@@ -80,6 +82,7 @@ function ChannelOutcomeRow({
   item,
   postAttachments,
   canMutate,
+  queueOwned,
   onRequestDelete,
 }: {
   item: PostDetailItem;
@@ -87,6 +90,8 @@ function ChannelOutcomeRow({
   postAttachments: number;
   /** False in the aggregate view: retry/reschedule/cancel stay hidden. */
   canMutate: boolean;
+  /** A recurring Queue owns this Post's shared instant; per-Channel rescheduling is unavailable until removal. */
+  queueOwned: boolean;
   onRequestDelete: (distributionIds: string[]) => void;
 }) {
   const { t } = useI18n();
@@ -279,6 +284,10 @@ function ChannelOutcomeRow({
               <Button
                 variant="outline"
                 size="sm"
+                disabled={queueOwned}
+                title={
+                  queueOwned ? t("Remove this Post from its Queue before rescheduling.") : undefined
+                }
                 onClick={() => {
                   setRescheduleValue(toLocalInputValue(distribution.scheduled_at));
                   setRescheduleOpen((open) => !open);
@@ -357,10 +366,20 @@ export interface PostDetailSurfaceProps {
   /** Whether this Post may be deleted by the current role. */
   canDelete: boolean;
   onClose: () => void;
-  /** Opens the composer for a Post that still has an editable surface. */
-  onEdit: (postId: string) => void;
-  /** Routes a destructive cancel/delete request to the view-level CenterAlertDialog. */
-  onRequestDelete: (request: PostDestructiveRequest) => void;
+  /**
+   * Opens the composer for a Post that still has an editable surface. Pages
+   * that inspect without mutating (the Queue calendar) omit it, and the edit
+   * action is not rendered.
+   */
+  onEdit?: (postId: string) => void;
+  /** Routes a destructive cancel/delete request to the view-level CenterAlertDialog; omitted by read-only inspectors. */
+  onRequestDelete?: (request: PostDestructiveRequest) => void;
+  /**
+   * Plan-owned actions appended after the Post's own actions, such as removing
+   * the Post from its Queue. The owning view supplies them; the Post inspector
+   * stays the single presentation of Post content.
+   */
+  extraActions?: React.ReactNode;
 }
 
 /**
@@ -374,7 +393,9 @@ export interface PostDetailSurfaceProps {
  * rewrites another's result. Compact breadcrumb/action chrome frames flat
  * property rows, the full caption, ordered attachments, and real per-channel
  * outcomes; no task-only properties or editable publication status are copied
- * from the reference.
+ * from the reference. Every property row carries a leading icon in one fixed
+ * column so labels and values share an axis, and queue instants use the same
+ * minute-precision date format as the publish date.
  *
  * @param props - Inspected row, mutation scope, and the view's edit/delete routing.
  * @returns The inspector surface, or null before any row has been inspected.
@@ -386,6 +407,7 @@ export function usePostDetailSurface({
   onClose,
   onEdit,
   onRequestDelete,
+  extraActions,
 }: PostDetailSurfaceProps): PostDrawerSurface | null {
   const { t } = useI18n();
   const post = useLatchedValue(livePost);
@@ -395,6 +417,7 @@ export function usePostDetailSurface({
 
     const caption = resolveRowCaption(post);
     const dateLabel = formatPostDate(post.date);
+    const assignedLabel = formatPostDate(post.post?.queue_membership?.assigned_at);
     const attachments = post.post?.attachments ?? [];
     const isDraft = post.post?.status === "draft";
     const cancellableIds = resolveCancellableDistributionIds(post);
@@ -422,7 +445,7 @@ export function usePostDetailSurface({
         : t("{count} channel(s)", { count: post.channels.length }),
       actions: (
         <>
-          {canMutate && editable && (
+          {canMutate && editable && onEdit && (
             <Button
               variant="ghost"
               size="sm"
@@ -433,7 +456,7 @@ export function usePostDetailSurface({
               {t("Edit post")}
             </Button>
           )}
-          {canMutate && cancellableIds.length > 0 && (
+          {canMutate && cancellableIds.length > 0 && onRequestDelete && (
             <Button
               variant="ghost"
               size="sm"
@@ -454,7 +477,7 @@ export function usePostDetailSurface({
           {/* Delete is the only remaining action, so it is its own control: a menu
               holding one item would only add a step to a destructive intent. The
               confirmation still owns the consequence. */}
-          {canDelete && (
+          {canDelete && onRequestDelete && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -477,6 +500,7 @@ export function usePostDetailSurface({
               <TooltipContent>{isDraft ? t("Delete draft") : t("Delete post")}</TooltipContent>
             </Tooltip>
           )}
+          {extraActions}
         </>
       ),
       onClose,
@@ -487,26 +511,48 @@ export function usePostDetailSurface({
           </h2>
           <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-(length:--font-size-control)">
             <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-              <CircleDot className="size-3.5 text-ink-3" />
+              <CircleDot className="size-3.5 shrink-0 text-ink-3" />
               {t("Status")}
             </dt>
-            <dd>
+            <dd className="flex min-h-control items-center">
               <StatusBadge status={status} compact />
             </dd>
             <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-              <Share2 className="size-3.5 text-ink-3" />
+              <Share2 className="size-3.5 shrink-0 text-ink-3" />
               {t("Channels")}
             </dt>
-            <dd className="text-ink">
+            <dd className="flex min-h-control items-center text-ink">
               <RollingCount value={post.channels.length} />
             </dd>
             {dateLabel && (
               <>
                 <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
-                  <CalendarDays className="size-3.5 text-ink-3" />
+                  <CalendarDays className="size-3.5 shrink-0 text-ink-3" />
                   {isDraft ? t("Created") : t("Publish date")}
                 </dt>
-                <dd className="text-ink">{dateLabel}</dd>
+                <dd className="flex min-h-control items-center text-ink">{dateLabel}</dd>
+              </>
+            )}
+            {post.post?.queue_membership && (
+              <>
+                <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+                  <CalendarClock className="size-3.5 shrink-0 text-ink-3" />
+                  {t("Queue")}
+                </dt>
+                <dd className="flex min-h-control min-w-0 items-center text-ink">
+                  <Link className="min-w-0 break-words text-accent-ink underline" to="/queues">
+                    {post.post.queue_membership.queue_name}
+                  </Link>
+                </dd>
+                <dt className="flex min-h-control items-center gap-1.75 text-ink-2">
+                  <Clock className="size-3.5 shrink-0 text-ink-3" />
+                  {t("Assigned time")}
+                </dt>
+                <dd className="flex min-h-control items-center text-ink">
+                  <time className="tabular-nums" dateTime={post.post.queue_membership.assigned_at}>
+                    {assignedLabel ?? post.post.queue_membership.assigned_at}
+                  </time>
+                </dd>
               </>
             )}
           </dl>
@@ -562,8 +608,9 @@ export function usePostDetailSurface({
                 item={item}
                 postAttachments={attachments.length}
                 canMutate={canMutate}
+                queueOwned={Boolean(post.post?.queue_membership)}
                 onRequestDelete={(ids) =>
-                  onRequestDelete({
+                  onRequestDelete?.({
                     kind: "cancel-channels",
                     postId: post.id,
                     brandProfileId: post.brandProfileId,
@@ -576,7 +623,7 @@ export function usePostDetailSurface({
         </>
       ),
     };
-  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, t]);
+  }, [post, livePost, canMutate, canDelete, onClose, onEdit, onRequestDelete, extraActions, t]);
 
   return surface;
 }

@@ -124,10 +124,11 @@ export function controlledProviderAccountId(platform: ControlledPlatform): strin
  * afterward so subsequent page actions are not obscured by its floating panel.
  *
  * @param page - Playwright page bound to the signed-in `/posts` view.
+ * @param preferredName - Exact known fixture profile; omitted selects the first available profile.
  * @returns The active Brand Profile's display name.
  * @throws {Error} When the workspace exposes no selectable Brand Profile.
  */
-export async function activeBrandProfileName(page: Page): Promise<string> {
+export async function activeBrandProfileName(page: Page, preferredName?: string): Promise<string> {
   const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
   if (!(await disclosure.locator("..").evaluate((element) => element.hasAttribute("open")))) {
     await disclosure.click();
@@ -144,9 +145,12 @@ export async function activeBrandProfileName(page: Page): Promise<string> {
   const options = menu.getByRole("menuitemcheckbox");
   await expect(options.first()).toBeVisible({ timeout: 30_000 });
   const names = (await options.allInnerTexts()).map((value) => value.trim());
-  const name = names.find((value) => value.length > 0 && !/^all brand profiles$/i.test(value));
+  const name =
+    preferredName === undefined
+      ? names.find((value) => value.length > 0 && !/^all brand profiles$/i.test(value))
+      : names.find((value) => value === preferredName);
   if (!name) {
-    throw new Error(`workspace has no selectable Brand Profile; options were ${names.join(", ")}`);
+    throw new Error(`workspace has no matching Brand Profile; options were ${names.join(", ")}`);
   }
   await menu.getByRole("menuitemcheckbox", { name: "All Brand Profiles", exact: true }).click();
   await menu.getByRole("menuitemcheckbox", { name, exact: true }).click();

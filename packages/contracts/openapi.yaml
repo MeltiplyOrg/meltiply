@@ -57,6 +57,8 @@ tags:
       per-Channel target settings, and per-target Distribution outcomes.
       Drafts are Posts, not a separate asset type; scheduling or immediate
       publication keeps the same Post identity.
+  - name: Queues
+    description: Brand Profile-owned recurring publishing plans, distinct from transport queues.
   - name: Distributions
     description: |
       Per-Channel publication outcomes for a Post. Distributions are created
@@ -1640,6 +1642,28 @@ paths:
           schema:
             $ref: "#/components/schemas/PostStatus"
         - $ref: "#/components/parameters/BrandProfileId"
+        - name: queue_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: queue_assigned_from
+          in: query
+          description: |
+            Inclusive Queue assignment instant. Supply with queue_id and
+            queue_assigned_before; the UTC window must not exceed 63 days.
+          schema:
+            type: string
+            format: date-time
+        - name: queue_assigned_before
+          in: query
+          description: |
+            Exclusive Queue assignment instant. Supply with queue_id and
+            queue_assigned_from; filters immutable membership times, not
+            per-Channel delivery or Post creation times.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Paginated Posts in stable identity order.
@@ -1799,6 +1823,148 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/Unprocessable"
+  /queues:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Queues]
+      operationId: listQueues
+      summary: List active publishing Queues in a Brand Profile
+      parameters:
+        - name: brand_profile_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/Limit"
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Queues in stable identity order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueueListResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Queues]
+      operationId: createQueue
+      summary: Create a recurring publishing Queue as a Workspace Admin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateQueueRequest" }
+      responses:
+        "201":
+          description: Queue created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishingQueue" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /queues/{queue_id}:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+      - name: queue_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Queues]
+      operationId: getQueue
+      summary: Inspect an active publishing Queue
+      responses:
+        "200":
+          description: Queue configuration; list its Posts with the queue_id Post filter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishingQueue" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Queues]
+      operationId: updateQueue
+      summary: Edit a Queue without moving existing reservations
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateQueueRequest" }
+      responses:
+        "200":
+          description: Updated configuration; only new allocations use the changed slots.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishingQueue" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    delete:
+      tags: [Queues]
+      operationId: deleteQueue
+      summary: Retire a Queue after all reservations reach terminal outcomes
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeletePostRequest" }
+      responses:
+        "204": { description: Queue retired; historical membership remains readable on Posts. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /queues/{queue_id}/posts/{post_id}:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+      - $ref: "#/components/parameters/PostId"
+      - name: queue_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Queues]
+      operationId: removePostFromQueue
+      summary: Cancel editable pending outcomes and release a Queue reservation
+      description: |
+        Requires Editor or Admin. Refuses in-flight, published, failed, or
+        reconciliation-bound work. Does not move other reservations or delete
+        Post content, Assets, targets, or Provider settings.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeletePostRequest" }
+      responses:
+        "200":
+          description: Post with cancelled pending outcomes and no active Queue membership.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Post" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /posts/{post_id}/schedule:
     parameters:
       - $ref: "#/components/parameters/PostId"
@@ -4295,6 +4461,7 @@ components:
           targets,
           distributions,
           analytics,
+          queue_membership,
           created_at,
           updated_at,
         ]
@@ -4353,6 +4520,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Distribution"
+        queue_membership:
+          oneOf:
+            - $ref: "#/components/schemas/QueueMembership"
+            - type: "null"
         analytics:
           oneOf:
             - $ref: "#/components/schemas/PostAnalytics"
@@ -4419,6 +4590,85 @@ components:
         offset:
           type: integer
           minimum: 0
+    QueueSlot:
+      type: object
+      additionalProperties: false
+      required: [weekday, time]
+      properties:
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Sunday is 0.
+        time:
+          type: string
+          pattern: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+    QueueMembership:
+      type: object
+      additionalProperties: false
+      required: [queue_id, queue_name, assigned_at]
+      properties:
+        queue_id: { type: string, format: uuid }
+        queue_name: { type: string }
+        assigned_at: { type: string, format: date-time }
+    PublishingQueue:
+      type: object
+      additionalProperties: false
+      required: [id, brand_profile_id, name, timezone, slots, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_profile_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        timezone: { type: string, minLength: 1, maxLength: 100 }
+        slots:
+          type: array
+          minItems: 1
+          maxItems: 168
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/QueueSlot" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    QueueListResponse:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/PublishingQueue" }
+        next_cursor: { type: [string, "null"], format: uuid }
+    CreateQueueRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id, name, timezone, slots]
+      properties:
+        brand_profile_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Supported IANA timezone identifier.
+        slots:
+          type: array
+          minItems: 1
+          maxItems: 168
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/QueueSlot" }
+    UpdateQueueRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id]
+      properties:
+        brand_profile_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        timezone: { type: string, minLength: 1, maxLength: 100 }
+        slots:
+          type: array
+          minItems: 1
+          maxItems: 168
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/QueueSlot" }
     PostTargetInput:
       type: object
       additionalProperties: false
@@ -4546,12 +4796,20 @@ components:
     SchedulePostRequest:
       type: object
       additionalProperties: false
-      required: [brand_profile_id, scheduled_at]
+      required: [brand_profile_id]
+      oneOf:
+        - required: [scheduled_at]
+        - required: [queue_id]
       description: |
         Schedules or immediately publishes the Post to its target Channels.
         scheduled_at null means publish now; a timestamp schedules every
-        affected target. When targets is present it replaces the saved
-        target set and defines the pending-Distribution diff; when absent
+        affected target. Alternatively queue_id reserves the next free
+        strictly future weekly slot and applies its instant to every pending
+        target. Existing Queue membership retains its instant on repeat
+        enqueue; remove it before manual scheduling or Publish Now. DST gaps
+        skip nonexistent slots; overlaps use the later standard-time instant.
+        When targets is present it replaces the saved target set and defines
+        the pending-Distribution diff; when absent
         the saved Post targets are used. At least one effective target is
         required, and every affected target must pass Platform capability
         and attachment-readiness validation before any Distribution is
@@ -4566,6 +4824,9 @@ components:
         scheduled_at:
           type: [string, "null"]
           format: date-time
+        queue_id:
+          type: string
+          format: uuid
         targets:
           type: array
           minItems: 1

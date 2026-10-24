@@ -332,6 +332,7 @@ fixtures:
     targets: [*post_target]
     distributions: [*distribution]
     analytics: null
+    queue_membership: null
     created_at: 2026-01-01T00:00:00Z
     updated_at: 2026-01-01T00:00:00Z
   comment: &comment
@@ -1007,6 +1008,63 @@ operations:
     errors:
       - status: 404
         body: *not_found_error
+  listQueues:
+    success:
+      status: 200
+      body:
+        items: []
+        next_cursor: null
+    errors:
+      - status: 401
+        body: *authentication_error
+  createQueue:
+    request: &queue_request
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+      name: Weekly launches
+      timezone: America/New_York
+      slots: [{ weekday: 1, time: "09:30" }]
+    success:
+      status: 201
+      body: &publishing_queue
+        <<: *queue_request
+        id: 00000000-0000-4000-8000-000000000801
+        created_at: 2026-01-01T00:00:00Z
+        updated_at: 2026-01-01T00:00:00Z
+    errors:
+      - status: 422
+        body: *validation_error
+  getQueue:
+    success:
+      status: 200
+      body: *publishing_queue
+    errors:
+      - status: 404
+        body: *not_found_error
+  updateQueue:
+    request: *queue_request
+    success:
+      status: 200
+      body: *publishing_queue
+    errors:
+      - status: 403
+        body: *forbidden_error
+  deleteQueue:
+    request:
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+    success:
+      status: 204
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  removePostFromQueue:
+    request:
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+    success:
+      status: 200
+      body: *post
+    errors:
+      - status: 409
+        body: *invalid_state_error
   listPosts:
     headers: *bearer_authorization
     success:

@@ -33,6 +33,11 @@ import type {
   PostQueryParams,
   PublishingRequirements,
   SchedulePostInput,
+  PublishingQueue,
+  QueueListResponse,
+  CreateQueueInput,
+  UpdateQueueInput,
+  QueueQueryParams,
   SignedUrlResponse,
   UpdateBrandProfileInput,
   UpdateDistributionInput,
@@ -472,6 +477,108 @@ export function listPosts(
       client().GET("/posts", {
         headers: workspaceHeaders(workspaceId),
         params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Lists one bounded page of reusable plans for an explicit Brand Profile; forwards cancellation to the generated client. */
+export function listQueues(
+  workspaceId: string | null,
+  params: QueueQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<QueueListResponse>(
+    (signal) =>
+      client().GET("/queues", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Creates a validated recurring plan; one stable mutation key makes retries return the original Queue. */
+export function createQueue(
+  workspaceId: string | null,
+  input: CreateQueueInput,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<PublishingQueue>(
+    (signal) =>
+      client().POST("/queues", {
+        body: input,
+        headers: workspaceHeaders(workspaceId),
+        params: { header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) } },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Edits future allocation configuration without changing any previously reserved instant. */
+export function updateQueue(
+  workspaceId: string | null,
+  id: string,
+  input: UpdateQueueInput,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<PublishingQueue>(
+    (signal) =>
+      client().PATCH("/queues/{queue_id}", {
+        body: input,
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          path: { queue_id: id },
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Retires an idle Queue; pending or in-flight memberships are a recoverable conflict, never silently moved. */
+export function deleteQueue(
+  workspaceId: string | null,
+  id: string,
+  brandProfileId: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<void>(
+    (signal) =>
+      client().DELETE("/queues/{queue_id}", {
+        body: { brand_profile_id: brandProfileId },
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          path: { queue_id: id },
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Cancels only editable pending Channel intents and releases the reservation while retaining composition and settings. */
+export function removePostFromQueue(
+  workspaceId: string | null,
+  queueId: string,
+  postId: string,
+  brandProfileId: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<Post>(
+    (signal) =>
+      client().DELETE("/queues/{queue_id}/posts/{post_id}", {
+        body: { brand_profile_id: brandProfileId },
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          path: { queue_id: queueId, post_id: postId },
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
         signal,
       }),
     options?.signal,

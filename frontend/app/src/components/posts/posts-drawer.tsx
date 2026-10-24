@@ -36,8 +36,11 @@ export interface PostDrawerSurface {
 export interface PostsDrawerProps {
   /** Inspector surface for the row the view is inspecting, or null with no rows. */
   detail: PostDrawerSurface | null;
-  /** Composer surface for the composition in progress. */
-  composer: PostDrawerSurface;
+  /**
+   * Composer surface for the composition in progress. Pages that only inspect
+   * Posts (the Queue calendar) omit it and open the same drawer for detail alone.
+   */
+  composer?: PostDrawerSurface | null;
   /**
    * Action rendered in the header's action cluster, ahead of the presented
    * surface's own actions. The open panel covers the page's create action, so
@@ -64,9 +67,9 @@ export function PostsDrawer({
   // The latched value is which surface is shown, not the surface object itself:
   // descriptors are rebuilt as their data changes, and latching one would fight
   // that. Each surface keeps latching its own content.
-  const requested = detail?.open ? "detail" : composer.open ? "composer" : null;
+  const requested = detail?.open ? "detail" : composer?.open ? "composer" : null;
   const shown = useLatchedValue(requested);
-  const surface = shown === "composer" ? composer : shown === "detail" ? detail : null;
+  const surface = shown === "composer" ? (composer ?? null) : shown === "detail" ? detail : null;
   if (!surface) return null;
 
   return (
@@ -86,7 +89,7 @@ export function PostsDrawer({
       className={surface.wide ? "sm:max-w-260" : undefined}
       bodyClassName={surface.wide ? "flex flex-col pb-0 sm:pb-0" : undefined}
     >
-      {(composer.open || shown === "composer") && (
+      {composer && (composer.open || shown === "composer") && (
         <div
           key={composer.contentKey}
           data-side-dialog-section=""

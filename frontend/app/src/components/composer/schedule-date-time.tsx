@@ -2,17 +2,11 @@ import { useId, useMemo, useState } from "react";
 import { Popover, PopoverTrigger, PopoverContent } from "@meltiply/ui/popover";
 import { DayPicker, type ClassNames } from "react-day-picker";
 import { enUS, es } from "react-day-picker/locale";
-import { parseTime } from "@internationalized/date";
-import { DateInput, DateSegment, I18nProvider, Label, TimeField } from "react-aria-components";
-import { CalendarDays, ChevronDown, Clock, Globe2 } from "lucide-react";
+import { CalendarDays, ChevronDown, Globe2 } from "lucide-react";
 import { Button, buttonVariants } from "@meltiply/ui/button";
-import { inputVariants } from "@meltiply/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
 import { toLocalDateKey } from "@/components/posts/posts-helpers";
 import { useI18n } from "@/lib/i18n";
-
-const HOURS = Array.from({ length: 24 }, (_, value) => String(value).padStart(2, "0"));
-const MINUTES = Array.from({ length: 60 }, (_, value) => String(value).padStart(2, "0"));
+import { TimeOfDayField } from "@/components/posts/time-of-day-field";
 
 const CALENDAR_CLASSES: Partial<ClassNames> = {
   root: "min-w-0",
@@ -68,7 +62,6 @@ export function ScheduleDateTime({
   const dateKey = value.slice(0, 10);
   const selectedDate = useMemo(() => localDay(dateKey), [dateKey]);
   const [open, setOpen] = useState(false);
-  const [timeOpen, setTimeOpen] = useState(false);
   const [month, setMonth] = useState(() => selectedDate ?? new Date());
   const [previousDateKey, setPreviousDateKey] = useState(dateKey);
   if (dateKey !== previousDateKey) {
@@ -78,7 +71,6 @@ export function ScheduleDateTime({
   const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(value.slice(11, 16))
     ? value.slice(11, 16)
     : "10:00";
-  const timeValue = useMemo(() => parseTime(time), [time]);
   const timeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const dates = useMemo(
     () => ({
@@ -153,132 +145,7 @@ export function ScheduleDateTime({
             </PopoverContent>
           </Popover>
         </div>
-        <I18nProvider locale={language}>
-          <TimeField
-            value={timeValue}
-            hourCycle={24}
-            granularity="minute"
-            shouldForceLeadingZeros
-            className="flex min-w-0 flex-col gap-1.5"
-            onChange={(next) => {
-              if (next) chooseTime(next.toString().slice(0, 5));
-            }}
-          >
-            <Label className="text-(length:--font-size-micro) font-medium text-ink-3">
-              {t("Time")}
-            </Label>
-            <div className="relative">
-              <DateInput
-                className={inputVariants({
-                  className:
-                    "cursor-text items-center pr-8 tabular-nums focus-within:ring-2 focus-within:ring-ring pointer-coarse:pr-11",
-                })}
-                onClick={(event) => {
-                  if (
-                    event.target instanceof Element &&
-                    !event.target.closest('[role="spinbutton"]')
-                  ) {
-                    event.preventDefault();
-                    event.currentTarget.querySelector<HTMLElement>('[data-type="hour"]')?.focus();
-                  }
-                }}
-              >
-                {(segment) => (
-                  <DateSegment
-                    segment={segment}
-                    className="rounded-sm px-0.5 text-ink outline-none caret-accent data-[type=literal]:px-0 data-[placeholder]:text-ink-3 focus:bg-primary focus:text-primary-foreground"
-                  />
-                )}
-              </DateInput>
-              <Popover open={timeOpen} onOpenChange={setTimeOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t("Choose time")}
-                    className="absolute right-0.5 top-1/2 size-6 -translate-y-1/2 pointer-coarse:right-0"
-                  >
-                    <Clock className="size-3.5 text-ink-3" aria-hidden="true" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="end"
-                  aria-label={t("Choose time")}
-                  className="z-50 w-56 max-w-[calc(100vw-2rem)] p-3"
-                >
-                  <p className="mb-3 text-(length:--font-size-ui) font-medium text-ink">
-                    {t("Time (24-hour)")}
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex min-w-0 flex-col gap-1.5">
-                      <label
-                        htmlFor={`${id}-hour`}
-                        className="text-(length:--font-size-micro) text-ink-3"
-                      >
-                        {t("Hour")}
-                      </label>
-                      <Select
-                        value={time.slice(0, 2)}
-                        onValueChange={(hour) => chooseTime(`${hour}:${time.slice(3, 5)}`)}
-                      >
-                        <SelectTrigger
-                          id={`${id}-hour`}
-                          aria-label={t("Hour")}
-                          className="tabular-nums"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-60">
-                          {HOURS.map((hour) => (
-                            <SelectItem key={hour} value={hour}>
-                              {hour}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex min-w-0 flex-col gap-1.5">
-                      <label
-                        htmlFor={`${id}-minute`}
-                        className="text-(length:--font-size-micro) text-ink-3"
-                      >
-                        {t("Minute")}
-                      </label>
-                      <Select
-                        value={time.slice(3, 5)}
-                        onValueChange={(minute) => chooseTime(`${time.slice(0, 2)}:${minute}`)}
-                      >
-                        <SelectTrigger
-                          id={`${id}-minute`}
-                          aria-label={t("Minute")}
-                          className="tabular-nums"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-60">
-                          {MINUTES.map((minute) => (
-                            <SelectItem key={minute} value={minute}>
-                              {minute}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="mt-3 w-full"
-                    onClick={() => setTimeOpen(false)}
-                  >
-                    {t("Done")}
-                  </Button>
-                </PopoverContent>
-              </Popover>
-            </div>
-          </TimeField>
-        </I18nProvider>
+        <TimeOfDayField value={time} onChange={chooseTime} label={t("Time")} />
       </div>
       <p className="flex min-w-0 items-center gap-1.5 text-(length:--font-size-micro) text-ink-3">
         <Globe2 className="size-3 shrink-0" aria-hidden="true" />

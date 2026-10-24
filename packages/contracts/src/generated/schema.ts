@@ -1249,6 +1249,98 @@ export interface paths {
         patch: operations["updatePost"];
         trace?: never;
     };
+    "/queues": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** List active publishing Queues in a Brand Profile */
+        get: operations["listQueues"];
+        put?: never;
+        /** Create a recurring publishing Queue as a Workspace Admin */
+        post: operations["createQueue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/queues/{queue_id}": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        /** Inspect an active publishing Queue */
+        get: operations["getQueue"];
+        put?: never;
+        post?: never;
+        /** Retire a Queue after all reservations reach terminal outcomes */
+        delete: operations["deleteQueue"];
+        options?: never;
+        head?: never;
+        /** Edit a Queue without moving existing reservations */
+        patch: operations["updateQueue"];
+        trace?: never;
+    };
+    "/queues/{queue_id}/posts/{post_id}": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                /** @description Durable Post identifier within the active workspace. */
+                post_id: components["parameters"]["PostId"];
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Cancel editable pending outcomes and release a Queue reservation
+         * @description Requires Editor or Admin. Refuses in-flight, published, failed, or
+         *     reconciliation-bound work. Does not move other reservations or delete
+         *     Post content, Assets, targets, or Provider settings.
+         */
+        delete: operations["removePostFromQueue"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/posts/{post_id}/schedule": {
         parameters: {
             query?: never;
@@ -2459,6 +2551,7 @@ export interface components {
             attachments: components["schemas"]["PostAttachment"][];
             targets: components["schemas"]["PostTarget"][];
             distributions: components["schemas"]["Distribution"][];
+            queue_membership: components["schemas"]["QueueMembership"] | null;
             /**
              * @description Sum of each published Distribution's latest analytics snapshot,
              *     read in the same scoped Post batch. Null when no published Channel
@@ -2492,6 +2585,51 @@ export interface components {
             has_more: boolean;
             limit: number;
             offset: number;
+        };
+        QueueSlot: {
+            /** @description Sunday is 0. */
+            weekday: number;
+            time: string;
+        };
+        QueueMembership: {
+            /** Format: uuid */
+            queue_id: string;
+            queue_name: string;
+            /** Format: date-time */
+            assigned_at: string;
+        };
+        PublishingQueue: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_profile_id: string;
+            name: string;
+            timezone: string;
+            slots: components["schemas"]["QueueSlot"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        QueueListResponse: {
+            items: components["schemas"]["PublishingQueue"][];
+            /** Format: uuid */
+            next_cursor: string | null;
+        };
+        CreateQueueRequest: {
+            /** Format: uuid */
+            brand_profile_id: string;
+            name: string;
+            /** @description Supported IANA timezone identifier. */
+            timezone: string;
+            slots: components["schemas"]["QueueSlot"][];
+        };
+        UpdateQueueRequest: {
+            /** Format: uuid */
+            brand_profile_id: string;
+            name?: string;
+            timezone?: string;
+            slots?: components["schemas"]["QueueSlot"][];
         };
         /**
          * @description Per-Channel settings to persist for one Platform account.
@@ -2560,8 +2698,13 @@ export interface components {
         /**
          * @description Schedules or immediately publishes the Post to its target Channels.
          *     scheduled_at null means publish now; a timestamp schedules every
-         *     affected target. When targets is present it replaces the saved
-         *     target set and defines the pending-Distribution diff; when absent
+         *     affected target. Alternatively queue_id reserves the next free
+         *     strictly future weekly slot and applies its instant to every pending
+         *     target. Existing Queue membership retains its instant on repeat
+         *     enqueue; remove it before manual scheduling or Publish Now. DST gaps
+         *     skip nonexistent slots; overlaps use the later standard-time instant.
+         *     When targets is present it replaces the saved target set and defines
+         *     the pending-Distribution diff; when absent
          *     the saved Post targets are used. At least one effective target is
          *     required, and every affected target must pass Platform capability
          *     and attachment-readiness validation before any Distribution is
@@ -2575,9 +2718,11 @@ export interface components {
              */
             brand_profile_id: string;
             /** Format: date-time */
-            scheduled_at: string | null;
+            scheduled_at?: string | null;
+            /** Format: uuid */
+            queue_id?: string;
             targets?: components["schemas"]["PostTargetInput"][];
-        };
+        } & (unknown | unknown);
         SignedUrlResponse: {
             /** Format: uri */
             url: string;
@@ -4731,6 +4876,18 @@ export interface operations {
                  *     (the read-only All Brand Profiles view).
                  */
                 brand_profile_id?: components["parameters"]["BrandProfileId"];
+                queue_id?: string;
+                /**
+                 * @description Inclusive Queue assignment instant. Supply with queue_id and
+                 *     queue_assigned_before; the UTC window must not exceed 63 days.
+                 */
+                queue_assigned_from?: string;
+                /**
+                 * @description Exclusive Queue assignment instant. Supply with queue_id and
+                 *     queue_assigned_from; filters immutable membership times, not
+                 *     per-Channel delivery or Post creation times.
+                 */
+                queue_assigned_before?: string;
             };
             header?: {
                 /**
@@ -4927,6 +5084,239 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
+        };
+    };
+    listQueues: {
+        parameters: {
+            query: {
+                brand_profile_id: string;
+                limit?: components["parameters"]["Limit"];
+                cursor?: string;
+            };
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queues in stable identity order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateQueueRequest"];
+            };
+        };
+        responses: {
+            /** @description Queue created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+        };
+    };
+    getQueue: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queue configuration; list its Posts with the queue_id Post filter. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingQueue"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletePostRequest"];
+            };
+        };
+        responses: {
+            /** @description Queue retired; historical membership remains readable on Posts. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateQueueRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated configuration; only new allocations use the changed slots. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+        };
+    };
+    removePostFromQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description Durable Post identifier within the active workspace. */
+                post_id: components["parameters"]["PostId"];
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletePostRequest"];
+            };
+        };
+        responses: {
+            /** @description Post with cancelled pending outcomes and no active Queue membership. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Post"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     schedulePost: {

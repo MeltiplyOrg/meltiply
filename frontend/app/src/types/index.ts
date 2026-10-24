@@ -201,6 +201,11 @@ export type PostTargetInput = components["schemas"]["PostTargetInput"];
 export type CreatePostInput = components["schemas"]["CreatePostRequest"];
 export type UpdatePostInput = components["schemas"]["UpdatePostRequest"];
 export type SchedulePostInput = components["schemas"]["SchedulePostRequest"];
+export type PublishingQueue = components["schemas"]["PublishingQueue"];
+export type QueueListResponse = components["schemas"]["QueueListResponse"];
+export type CreateQueueInput = components["schemas"]["CreateQueueRequest"];
+export type UpdateQueueInput = components["schemas"]["UpdateQueueRequest"];
+export type QueueQueryParams = NonNullable<operations["listQueues"]["parameters"]["query"]>;
 export type PostQueryParams = NonNullable<operations["listPosts"]["parameters"]["query"]>;
 
 export type Distribution = components["schemas"]["Distribution"];

@@ -10,6 +10,7 @@ import {
   PenSquare,
   Settings,
   Share2,
+  CalendarClock,
   Sun,
   UserRound,
 } from "lucide-react";
@@ -35,7 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@meltiply/ui/dropdown-menu";
 
-export type WorkspaceView = "posts" | "channels" | "settings";
+export type WorkspaceView = "posts" | "channels" | "queues" | "settings";
 
 /** Canonical real destinations shared by the rail, mobile drawer, and jump search. */
 export interface WorkspaceNavItem {
@@ -49,6 +50,7 @@ export interface WorkspaceNavItem {
 export const WORKSPACE_NAV_ITEMS: readonly WorkspaceNavItem[] = [
   { id: "posts", path: "/posts", label: "Posts", icon: PenSquare },
   { id: "channels", path: "/channels", label: "Channels", icon: Share2 },
+  { id: "queues", path: "/queues", label: "Queues", icon: CalendarClock },
   { id: "settings", path: "/settings", label: "Settings", icon: Settings },
 ];
 

@@ -146,8 +146,10 @@ export async function activeBrandProfileName(page: Page, profileName?: string): 
     .locator("..")
     .locator("button[aria-haspopup]");
   await expect(trigger).toBeVisible({ timeout: 30_000 });
+  // Modal menus hide the trigger's ancestor from role queries once opened.
+  const popupRole = await trigger.getAttribute("aria-haspopup");
   await trigger.click();
-  if ((await trigger.getAttribute("aria-haspopup")) === "menu") {
+  if (popupRole === "menu") {
     const menu = page.getByRole("menu", { name: "Brand Profile", exact: true });
     const option = menu.getByRole("menuitemcheckbox", { name, exact: true });
     await expect(option).toBeVisible({ timeout: 30_000 });

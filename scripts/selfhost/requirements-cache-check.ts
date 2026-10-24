@@ -83,6 +83,7 @@ function record(scenario: string, before: number, samples: { ms: number }[], can
 try {
   const owner = await pool.query<{ org_id: string; auth_user_id: string; email: string }>(
     `SELECT om.org_id, u.auth_user_id, u.email FROM users u JOIN org_members om ON om.user_id = u.id
+     JOIN organizations o ON o.id = om.org_id AND o.is_shared = TRUE
      WHERE u.installation_owner = TRUE AND u.suspended_at IS NULL LIMIT 1`,
   );
   const identity = owner.rows[0];

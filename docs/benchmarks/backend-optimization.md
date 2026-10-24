@@ -483,3 +483,87 @@ authenticated PostgreSQL route regressions own those exact synchronization guara
 The first Deferred implementation passed in-process tests but failed across real
 Worker HTTP contexts; native Promise outcomes now register each waiter's Effect
 continuation in its own request, with leader work protected by the route's lifetime.
+
+## PR #65 versus master
+
+[Hosted run 40107515487](https://github.com/MeltiplyOrg/meltiply/actions/runs/40107515487)
+compared `master@025e1d6e331e` with `6884734be553` from PR #65. Both use exactly
+the same injected benchmark harness, locked dependencies, and separately migrated
+PostgreSQL 18.6 databases on one Linux x64 hosted runner with Bun 1.4.2. The workload
+is in-process Hono/API service execution, not a deployed Worker or Compose comparison.
+The earlier both-runtime acceptance above remains separate evidence.
+
+Three alternating blocks ran baseline/candidate, candidate/baseline, then
+baseline/candidate. Each workload has three warm-ups and 30 measured samples per
+block: 90 sequential requests or 90 bursts of 20 requests per revision. Each run
+recreates one Workspace/Brand Profile, 300 Posts/Distributions/snapshots, 300 Assets,
+100 comments, and one Channel per Provider. Requirements use a separate TikTok
+Channel with real credential decryption and a controlled adapter's fixed 100 ms
+delay. Fixture setup is excluded from measurement. No production schema, cache,
+permission, or Provider policy was changed for the benchmark.
+
+The focused `read-cache` profile avoids the historical full-workload fixture's
+20-Channels-per-Provider assumption, which current master rejects. It measures
+all five cache workloads plus seven unchanged read endpoints as controls; it does
+not claim to benchmark scheduling, deletion, frontend retention, or live Providers.
+All 12 workflows completed without scenario errors in all six runs.
+
+B/C means master/PR. Latencies below are **per request**, including requests within
+concurrent bursts; work counts are pooled across all three repetitions.
+
+| Workload                                                | Requests per revision |    p95 B/C (ms) | Canonical aggregates B/C | Provider reads B/C | Application SQL/request B/C |
+| ------------------------------------------------------- | --------------------: | --------------: | -----------------------: | -----------------: | --------------------------: |
+| Analytics, warm identical year                          |                    90 |     7.79 / 6.44 |                   90 / 0 |                  — |                       1 / 1 |
+| Analytics, cold distinct exact ranges                   |                    90 |     6.85 / 7.91 |                  90 / 90 |                  — |                       1 / 2 |
+| Analytics, concurrent cold (20 requests/burst)          |                 1,800 |  107.17 / 93.43 |              1,800 / 741 |                  — |                    1 / 1.41 |
+| Requirements, sequential                                |                    90 | 107.27 / 106.78 |                        — |            90 / 90 |                       1 / 1 |
+| Requirements, concurrent equivalent (20 requests/burst) |                 1,800 | 184.65 / 181.77 |                        — |         1,800 / 90 |                       1 / 1 |
+
+Warm summaries eliminated repeated canonical aggregation, while still executing
+the authoritative visibility read. Their measured application DB time fell from
+1.66 to 0.72 ms/request. Cold misses incur that extra visibility query: application
+DB time rose from 1.67 to 2.43 ms/request and per-request p95 rose by 1.06 ms.
+This cold-read regression is the explicit authorization/freshness tradeoff, not
+hidden by the warm result. Concurrent summaries are not single-flight; their
+observed aggregate reuse depends on scheduling and completion within a burst.
+
+Equivalent concurrent requirements reduced controlled Provider work by 95% in
+this 20-request workload, but sequential requirements remain fresh (90 reads on
+each revision). The roughly unchanged request p95 reflects the fixed upstream delay
+and per-caller persisted checks; the work reduction is not a 95% latency claim.
+
+The controls do not show uniform improvements:
+
+| Unchanged control (single-request workflow) | Workflow p95 B/C (ms) | Workflow p99 B/C (ms) |
+| ------------------------------------------- | --------------------: | --------------------: |
+| Posts list                                  |         13.82 / 12.81 |         16.41 / 13.59 |
+| Published Post detail                       |           9.67 / 9.73 |         10.27 / 10.74 |
+| Distributions list                          |           7.38 / 7.90 |          8.21 / 77.61 |
+| Calendar                                    |           8.35 / 8.43 |         16.52 / 11.86 |
+| Inbox                                       |           7.49 / 6.49 |           8.72 / 7.60 |
+| Asset detail                                |           5.54 / 5.93 |           6.42 / 6.69 |
+| Upload-session detail                       |           8.07 / 7.13 |           8.76 / 8.28 |
+
+The Distributions tail outlier is retained in the raw results; no uniform
+whole-application speedup is claimed. One runner, fixed execution order within
+blocks, shared database host, process-wide CPU/GC, and small synthetic cohorts
+limit attribution. Client-observed SQL durations include driver/scheduling time;
+they are not PostgreSQL server CPU. RSS/heap is whole-process context, not isolated
+cache memory. No currency or production hit-rate extrapolation is justified.
+
+Reproduce with:
+
+```sh
+gh workflow run backend-benchmark.yml --ref feat/58-portable-read-caching \
+  -f profile=read-cache -f repetitions=3 -f samples=30
+```
+
+Committed evidence: [full generated comparison](results/2026-10-24-portable-cache/comparison.md),
+[machine-readable comparison](results/2026-10-24-portable-cache/comparison.json),
+baseline [1](results/2026-10-24-portable-cache/baseline-1.json) /
+[2](results/2026-10-24-portable-cache/baseline-2.json) /
+[3](results/2026-10-24-portable-cache/baseline-3.json), and candidate
+[1](results/2026-10-24-portable-cache/candidate-1.json) /
+[2](results/2026-10-24-portable-cache/candidate-2.json) /
+[3](results/2026-10-24-portable-cache/candidate-3.json).
+The same files are attached as artifact `backend-benchmark-40107515487`.

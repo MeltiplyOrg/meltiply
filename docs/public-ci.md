@@ -141,6 +141,16 @@ schedule fan-out and target removal, and bulk Post deletion at batch sizes
 behind the current optimizations are in
 the [backend comparison report](benchmarks/backend-optimization.md).
 
+The default `read-cache` benchmark profile compares warm, cold exact-range and
+20-request concurrent summaries, sequential/concurrent controlled Provider
+requirements, and seven unchanged read endpoints. It preserves current Channel
+uniqueness constraints and records exact aggregate/upstream work counts per
+request. The `all` choice preserves the historical mutation fixture for compatible
+older revisions; it is not accepted by current one-Channel-per-Provider migrations.
+PR #65's [master comparison](benchmarks/backend-optimization.md#pr-65-versus-master)
+commits all six raw runs and the generated report, including cold-read overhead
+and unchanged-endpoint tail regressions rather than claiming a uniform speedup.
+
 ## Self-hosted release images
 
 The normal [CI workflow](../.github/workflows/ci.yml) and the

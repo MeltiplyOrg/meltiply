@@ -70,7 +70,7 @@ export interface ProviderRegistryEnvironment {
   INSTAGRAM_CLIENT_SECRET?: string;
   INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED?: string;
   INSTAGRAM_LIVE_ACCEPTED?: string;
-  PUBLIC_API_URL?: string;
+  APP_URL?: string;
   TIKTOK_CLIENT_KEY?: string;
   TIKTOK_CLIENT_SECRET?: string;
   TIKTOK_LIVE_ACCEPTED?: string;
@@ -98,7 +98,7 @@ const registryConfigKeys = [
   "INSTAGRAM_CLIENT_SECRET",
   "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED",
   "INSTAGRAM_LIVE_ACCEPTED",
-  "PUBLIC_API_URL",
+  "APP_URL",
   "TIKTOK_CLIENT_KEY",
   "TIKTOK_CLIENT_SECRET",
   "TIKTOK_LIVE_ACCEPTED",
@@ -298,13 +298,15 @@ function trustedPublicUrl(value: string | undefined): URL {
   if (!value?.trim()) {
     throw new TypeError("accepted provider configuration is incomplete");
   }
-  return assertHttpsOrLoopbackUrl(value.trim(), "PUBLIC_API_URL");
+  return assertHttpsOrLoopbackUrl(value.trim(), "APP_URL");
 }
 
 /**
  * Factory that initializes and populates a ProviderRegistry from environment variables.
  * Checks live acceptance flags (`<PLATFORM>_LIVE_ACCEPTED=true`), verifies credentials,
- * derives canonical redirect URIs, and configures provider adapters with HTTP clients and timeouts.
+ * derives canonical redirect URIs and the default TikTok provider-media prefix from APP_URL,
+ * and configures provider adapters with HTTP clients and timeouts. A nonblank
+ * TIKTOK_MEDIA_URL_PREFIX overrides the derived HTTPS directory; blank values use the default.
  * Returns populated ProviderRegistry. Throws TypeError if accepted provider configurations are incomplete.
  */
 export function createProviderRegistryFromEnvironment(
@@ -371,7 +373,7 @@ export function createProviderRegistryFromEnvironment(
   const tiktokClientKey = environment.TIKTOK_CLIENT_KEY?.trim();
   const tiktokClientSecret = environment.TIKTOK_CLIENT_SECRET?.trim();
   const tiktokMediaUrlPrefix = environment.TIKTOK_MEDIA_URL_PREFIX?.trim();
-  if (tiktokAccepted && (!tiktokClientKey || !tiktokClientSecret || !tiktokMediaUrlPrefix)) {
+  if (tiktokAccepted && (!tiktokClientKey || !tiktokClientSecret)) {
     throw new TypeError("accepted TikTok provider configuration is incomplete");
   }
   const youtubeClientId = environment.YOUTUBE_SHORTS_CLIENT_ID?.trim();
@@ -379,7 +381,7 @@ export function createProviderRegistryFromEnvironment(
   if (youtubeAccepted && (!youtubeClientId || !youtubeClientSecret)) {
     throw new TypeError("accepted YouTube provider configuration is incomplete");
   }
-  const publicUrl = trustedPublicUrl(environment.PUBLIC_API_URL);
+  const publicUrl = trustedPublicUrl(environment.APP_URL);
   const commonOptions = {
     ...(options.fetch ? { fetch: options.fetch } : {}),
     ...(options.now ? { now: options.now } : {}),
@@ -429,7 +431,8 @@ export function createProviderRegistryFromEnvironment(
       createTikTokAdapter({
         clientKey: tiktokClientKey!,
         clientSecret: tiktokClientSecret!,
-        mediaUrlPrefix: tiktokMediaUrlPrefix!,
+        mediaUrlPrefix:
+          tiktokMediaUrlPrefix || new URL("/api/v1/provider-media/", publicUrl).toString(),
         redirectUri: new URL(oauthCallbackPath("tiktok"), publicUrl).toString(),
         ...commonOptions,
       }),

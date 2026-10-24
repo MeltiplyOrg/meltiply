@@ -174,17 +174,6 @@
   translate: var(--dialog-rest-x, -50%) var(--dialog-rest-y, -50%);
 }
 
-/* Phone navigation layer: the rail steps off the left edge on the shared drawer curve. */
-.mobile-navigation-panel {
-  transition-property: translate;
-  transition-duration: 300ms;
-  transition-timing-function: var(--ease-drawer);
-}
-
-/* Phone navigation close control: sits inside the rail header below the safe area. */
-.mobile-navigation-close {
-  top: calc(var(--safe-area-top) + 0.5rem);
-}
 /* Keep bottom-right feedback above the portal-based selection action on mobile. */
 @media (width < 768px) {
   body:has([data-selection-dock]) [data-sileo-viewport][data-position="bottom-right"] {

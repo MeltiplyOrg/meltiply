@@ -3,8 +3,13 @@ variable "account_id" {
   type        = string
 }
 
-variable "api_hostname" {
-  description = "Public API custom hostname."
+variable "app_hostname" {
+  description = "Public dashboard/API custom hostname."
+  type        = string
+}
+
+variable "frontend_worker_name" {
+  description = "Frontend Worker owning the app hostname and forwarding /api/* internally."
   type        = string
 }
 
@@ -14,7 +19,7 @@ variable "api_worker_name" {
 }
 
 variable "attach_custom_domains" {
-  description = "Whether custom domains may be attached to the deployed API Worker."
+  description = "Whether custom domains may be attached to the frontend and operator API Workers."
   type        = bool
 }
 

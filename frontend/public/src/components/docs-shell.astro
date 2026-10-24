@@ -20,7 +20,7 @@ interface Props {
 }
 
 const content = await Astro.slots.render("default");
-const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
+const appUrl = process.env.APP_URL?.trim() || "https://app.meltiply.com";
 ---
 
 <Docs

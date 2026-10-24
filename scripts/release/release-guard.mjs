@@ -326,7 +326,7 @@ export async function authorizeMutation({
 
 /**
  * Expected post-apply activation outputs for each IaC release phase, expressed
- * as [api_custom_domains_attached, queue_consumers_attached,
+ * as [app_custom_domains_attached, queue_consumers_attached,
  * queue_delivery_paused]. Exported so manifest validation can cross-check
  * redacted plan summaries against the same phase contract the guard enforces.
  */
@@ -355,7 +355,7 @@ export function assertIacState(iac, phase, spec) {
   }
   const resources = plainObject(iac.release_resources, "IaC release_resources");
   const actual = [
-    resources.api_custom_domains_attached,
+    resources.app_custom_domains_attached,
     resources.queue_consumers_attached,
     resources.queue_delivery_paused,
   ];

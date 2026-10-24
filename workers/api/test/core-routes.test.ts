@@ -42,8 +42,7 @@ afterEach(() => {
 const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   ENVIRONMENT: "test",
-  FRONTEND_URL: "http://localhost:3000",
-  PUBLIC_API_URL: "http://localhost:8787",
+  APP_URL: "http://localhost:3000",
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 
@@ -1528,10 +1527,16 @@ describe("core API routes", () => {
     expect(location.origin).toBe("https://www.tiktok.com");
     expect(location.searchParams.get("client_key")).toBe("tiktok-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "http://localhost:8787/api/v1/platforms/tiktok/callback",
+      "http://localhost:3000/api/v1/platforms/tiktok/callback",
     );
     expect(new Set(location.searchParams.get("scope")?.split(","))).toEqual(
-      new Set(["user.info.basic", "user.info.stats", "video.publish", "video.list"]),
+      new Set([
+        "user.info.basic",
+        "video.publish",
+        "user.info.profile",
+        "user.info.stats",
+        "video.list",
+      ]),
     );
     expect(create).toHaveBeenCalledOnce();
   });
@@ -1578,7 +1583,7 @@ describe("core API routes", () => {
     expect(location.origin).toBe("https://threads.com");
     expect(location.searchParams.get("client_id")).toBe("threads-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "http://localhost:8787/api/v1/platforms/threads/callback",
+      "http://localhost:3000/api/v1/platforms/threads/callback",
     );
     expect(create).toHaveBeenCalledOnce();
   });
@@ -1625,7 +1630,7 @@ describe("core API routes", () => {
     expect(location.origin).toBe("https://www.facebook.com");
     expect(location.searchParams.get("client_id")).toBe("facebook-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "http://localhost:8787/api/v1/platforms/facebook/callback",
+      "http://localhost:3000/api/v1/platforms/facebook/callback",
     );
     expect(create).toHaveBeenCalledOnce();
   });
@@ -1672,7 +1677,7 @@ describe("core API routes", () => {
     expect(location.origin).toBe("https://accounts.google.com");
     expect(location.searchParams.get("client_id")).toBe("youtube-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "http://localhost:8787/api/v1/platforms/youtube/callback",
+      "http://localhost:3000/api/v1/platforms/youtube/callback",
     );
     expect(location.searchParams.get("code_challenge_method")).toBe("S256");
     expect(create).toHaveBeenCalledOnce();
@@ -2272,7 +2277,7 @@ describe("core API routes", () => {
     expect(record.expires_at).toBeGreaterThan(Date.now());
     expect(authorizationUrl).toHaveBeenCalledWith({
       codeChallenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
-      redirectUri: "http://localhost:8787/api/v1/platforms/threads/callback",
+      redirectUri: "http://localhost:3000/api/v1/platforms/threads/callback",
       state,
     });
   });
@@ -2354,7 +2359,7 @@ describe("core API routes", () => {
       {
         code: "provider-code",
         codeVerifier: "pkce-verifier",
-        redirectUri: "http://localhost:8787/api/v1/platforms/threads/callback",
+        redirectUri: "http://localhost:3000/api/v1/platforms/threads/callback",
       },
     );
     expect(saveOAuthConnection).not.toHaveBeenCalled();
@@ -2381,34 +2386,49 @@ describe("core API routes", () => {
     expect(finalizeSelection).toHaveBeenCalledWith(savedId);
   });
 
-  it("redirects callback URL configuration failures to the frontend provider error", async () => {
-    const { exchangeAuthorizationCode, registry } = oauthRegistry();
+  it("returns a staging failure to Channels as connection_failed", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { registry } = oauthRegistry();
+    const consume = vi.fn(async () => ({
+      expires_at: Date.now() + 60_000,
+      organization_id: actor.workspace.id,
+      pkce_verifier: "pkce-verifier",
+      provider: "threads",
+      redirect_path: "/channels",
+      user_id: actor.userId,
+    }));
+    const createSelection = vi.fn(async () => {
+      throw new Error("state storage unavailable");
+    });
+    const oauthEnv = {
+      ...env,
+      TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      OAUTH_STATE: {
+        getByName: () => ({ consume, createSelection }),
+      } as unknown as DurableObjectNamespace<OAuthStateStub>,
+    };
     const app = authenticatedApp(service(), { providerRegistry: registry });
+
     const response = await app.request(
       `/api/v1/platforms/threads/callback?state=${"A".repeat(22)}.state-with-enough-length&code=provider-code`,
       undefined,
-      {
-        ...env,
-        PUBLIC_API_URL: undefined,
-        OAUTH_STATE: {
-          getByName: () => ({
-            consume: async () => ({
-              expires_at: Date.now() + 60_000,
-              organization_id: actor.workspace.id,
-              pkce_verifier: "pkce-verifier",
-              provider: "threads",
-              redirect_path: "/channels",
-              user_id: actor.userId,
-            }),
-          }),
-        } as unknown as DurableObjectNamespace<OAuthStateStub>,
-      },
+      oauthEnv,
     );
+
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe(
-      "http://localhost:3000/channels?oauth=provider_error&provider=threads",
+      "http://localhost:3000/channels?oauth=connection_failed&provider=threads",
     );
-    expect(exchangeAuthorizationCode).not.toHaveBeenCalled();
+    expect(logRecords(error)).toContainEqual(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          error_code: "oauth_staging_failed",
+          event: "oauth_staging_failed",
+          outcome: "connection_failed",
+          provider: "threads",
+        }),
+      }),
+    );
   });
 
   it("logs a safe diagnostic when an OAuth provider exchange fails", async () => {
@@ -2562,6 +2582,42 @@ describe("core API routes", () => {
     },
   );
 
+  it.each([
+    { expectedOutcome: "consent_denied", providerError: "access_denied" },
+    { expectedOutcome: "provider_error", providerError: "server_error" },
+  ])(
+    "returns provider error $providerError as oauth=$expectedOutcome without exchanging",
+    async ({ expectedOutcome, providerError }) => {
+      const { exchangeAuthorizationCode, registry } = oauthRegistry();
+      const app = authenticatedApp(service(), { providerRegistry: registry });
+      const response = await app.request(
+        `/api/v1/platforms/threads/callback?state=${"A".repeat(22)}.state-with-enough-length&error=${providerError}`,
+        undefined,
+        {
+          ...env,
+          OAUTH_STATE: {
+            getByName: () => ({
+              consume: async () => ({
+                expires_at: Date.now() + 60_000,
+                organization_id: actor.workspace.id,
+                pkce_verifier: "pkce-verifier",
+                provider: "threads",
+                redirect_path: "/channels",
+                user_id: actor.userId,
+              }),
+            }),
+          } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        },
+      );
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe(
+        `http://localhost:3000/channels?oauth=${expectedOutcome}&provider=threads`,
+      );
+      expect(exchangeAuthorizationCode).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["routing-key", "A".repeat(21), "A".repeat(23), `${"A".repeat(21)}!`])(
     "redirects malformed OAuth routing key %s without Durable Object access",
     async (routingKey) => {
@@ -2588,7 +2644,7 @@ describe("core API routes", () => {
       expect(getByName).not.toHaveBeenCalled();
     },
   );
-  it("rejects short OAuth state with 400 invalid_request without Durable Object access", async () => {
+  it("returns short OAuth state to Channels as state_invalid without Durable Object access", async () => {
     const { registry } = oauthRegistry();
     const getByName = vi.fn(() => ({ consume: vi.fn() }));
     const app = authenticatedApp(service(), {
@@ -2605,10 +2661,10 @@ describe("core API routes", () => {
       },
     );
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "invalid_request" },
-    });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "http://localhost:3000/channels?oauth=state_invalid&provider=threads",
+    );
     expect(getByName).not.toHaveBeenCalled();
   });
 

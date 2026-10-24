@@ -7,10 +7,8 @@
   "neon_project_id": "replace-with-neon-project-id",
   "neon_branch_id": "replace-with-neon-branch-id",
   "restore_point_expires_at": "REPLACE_WITH_7_TO_30_DAY_RFC3339",
-  "api_base_url": "https://api.staging.meltiply.com",
   "api_workers_dev_url": "https://meltiply-api.example.workers.dev",
-  "frontend_url": "https://staging.meltiply.com",
-  "frontend_origins": ["https://staging.meltiply.com"],
+  "app_url": "https://staging.meltiply.com",
   "automation_guard": {
     "consumers_paused": true,
     "cron_safe": true

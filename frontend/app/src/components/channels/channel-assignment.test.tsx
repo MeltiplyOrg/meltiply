@@ -152,7 +152,7 @@ describe("Channel assignment", () => {
 
     const [, options] = actions.confirmMutate.mock.calls[0]!;
     options.onSuccess();
-    expect(actions.onSuccess).toHaveBeenCalledWith("Page Two");
+    expect(actions.onSuccess).toHaveBeenCalledWith();
   });
 
   it("allows the existing owner to refresh a reconnected Channel", () => {

@@ -79,9 +79,8 @@
     },
   ],
   "vars": {
-    "ALLOWED_ORIGINS": "http://localhost:3000",
     "ENVIRONMENT": "local",
-    "FRONTEND_URL": "http://localhost:3000",
+    "APP_URL": "http://localhost:3000",
     "MAIL_FROM_ADDRESS": "no-reply@meltiply.local",
     "MAIL_FROM_NAME": "Meltiply Local",
     "VERSION": "1.0.0-target.0",

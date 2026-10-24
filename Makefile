@@ -42,8 +42,8 @@ frontend-boot: ## Start the app using the root environment and strict local port
 		dev_host="$$(node ./$(CLOUDFLARE_LOCAL_DIR)/development-host.mjs)"; \
 		bind_host="127.0.0.1"; [ "$$dev_host" = "127.0.0.1" ] || [ "$$dev_host" = "localhost" ] || bind_host="0.0.0.0"; \
 		export FRONTEND_DEV_HOST="$${FRONTEND_DEV_HOST:-$$bind_host}"; \
-		export FRONTEND_URL="$${FRONTEND_URL:-http://$$dev_host:$$frontend_port}"; \
-		printf 'Frontend using %s\n' "$$FRONTEND_URL"; \
+		export APP_URL="$${APP_URL:-http://$$dev_host:$$frontend_port}"; \
+		printf 'Frontend using %s\n' "$$APP_URL"; \
 		cd $(FRONTEND_DIR) && $(BUN) run --no-install dev --port "$$frontend_port" --strictPort
 
 public-boot: ## Start the public site and docs using the root environment

@@ -27,12 +27,12 @@ export const providerMediaRetrievalLeaseSeconds = 24 * 60 * 60;
 
 /**
  * API route prefix serving verified-domain provider media.
- * The Automation Worker signs URLs under this path on the `PUBLIC_API_URL` origin; the API
+ * The Automation Worker signs URLs under this path on the `APP_URL` origin; the API
  * Worker verifies the signature and streams the private R2 object. The literal is duplicated
  * in `workers/api/src/core-routes.ts` because worker bundles cannot share source modules —
- * both sides must stay byte-identical. Operators point `TIKTOK_MEDIA_URL_PREFIX` at
- * `https://<api-domain>/api/v1/provider-media/` so emitted URLs satisfy the TikTok adapter's
- * verified-domain pathname-prefix check.
+ * both sides must stay byte-identical. The provider registry derives TikTok's
+ * media prefix from this route on APP_URL; any explicit
+ * TIKTOK_MEDIA_URL_PREFIX must still cover emitted URLs.
  */
 const providerMediaRoutePrefix = "/api/v1/provider-media/";
 
@@ -111,13 +111,13 @@ async function providerMediaSignature(
 
 /**
  * Builds the verified-domain remote-ingest URL for an asset object, or undefined when
- * verified delivery is not configured (missing `TOKEN_ENCRYPTION_KEY`, or `PUBLIC_API_URL`
+ * verified delivery is not configured (missing `TOKEN_ENCRYPTION_KEY`, or `APP_URL`
  * absent/not credential-free HTTPS — e.g. local `http://` development).
  * The object key travels in the path so `TIKTOK_MEDIA_URL_PREFIX` pathname-prefix validation
  * applies; `expires` and `signature` ride in the query string. The result is a bearer URL
  * valid for `providerMediaRetrievalLeaseSeconds`.
  *
- * @param env - Automation worker environment with PUBLIC_API_URL and TOKEN_ENCRYPTION_KEY.
+ * @param env - Automation worker environment with APP_URL and TOKEN_ENCRYPTION_KEY.
  * @param key - Validated object key to authorize.
  * @returns Signed verified-domain URL, or undefined when unavailable.
  */
@@ -125,7 +125,7 @@ async function verifiedRemoteIngestUrl(
   env: AutomationEnv,
   key: string,
 ): Promise<string | undefined> {
-  const base = env.PUBLIC_API_URL?.trim();
+  const base = env.APP_URL?.trim();
   const secret = env.TOKEN_ENCRYPTION_KEY;
   if (!base || !secret) return undefined;
   let origin: URL;

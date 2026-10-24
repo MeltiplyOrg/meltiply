@@ -63,6 +63,7 @@ fi
 
 copy_example .env.example
 add_missing_example_keys .env.example
+node ./scripts/cloudflare-local/complete-env.mjs .env
 
 if [[ "$skip_image_pull" == false ]]; then
   # Pull through the shared Compose boundary so a devcontainer resolves the

@@ -18,7 +18,7 @@ interface Props {
 
 const { title, description, markdownPath } = Astro.props;
 const canonicalUrl = new URL(Astro.url.pathname, Astro.site);
-const appUrl = process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com";
+const appUrl = process.env.APP_URL?.trim() || "https://app.meltiply.com";
 ---
 
 <html lang="en" transition:animate="none">

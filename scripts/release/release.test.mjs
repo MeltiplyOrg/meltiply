@@ -32,10 +32,8 @@ function releaseInput(overrides = {}) {
     neon_project_id: "project-staging-123",
     release_id: `staging-${gitSha.slice(0, 12)}`,
     restore_point_expires_at: "2026-08-05T12:00:00.000Z",
-    api_base_url: "https://api.staging.meltiply.com",
     api_workers_dev_url: "https://meltiply-api.example.workers.dev",
-    frontend_url: "https://staging.meltiply.com",
-    frontend_origins: ["https://staging.meltiply.com"],
+    app_url: "https://staging.meltiply.com",
     automation_guard: { consumers_paused: true, cron_safe: true },
     provider_acceptance: {
       facebook: false,
@@ -67,8 +65,8 @@ function queueNames() {
 function iacOutput(overrides = {}) {
   const queues = queueNames();
   const resources = {
-    api_hostname: "api.staging.meltiply.com",
-    api_custom_domains_attached: false,
+    app_hostname: "staging.meltiply.com",
+    app_custom_domains_attached: false,
     assets_bucket_name: "meltiply-assets-staging",
     authenticated_hyperdrive_id: authenticatedHyperdriveId,
     dead_letter_queue_ids: {},
@@ -137,13 +135,13 @@ test("command runner does not open stdin for read-only commands", async () => {
 test("release input is canonicalized and rejects secret-bearing fields", () => {
   const spec = validateReleaseSpec({
     ...releaseInput(),
-    frontend_origins: [
+    allowed_origins: [
       "https://www.staging.meltiply.com",
       "https://staging.meltiply.com",
       "https://staging.meltiply.com",
     ],
   });
-  assert.deepEqual(spec.frontend_origins, [
+  assert.deepEqual(spec.allowed_origins, [
     "https://staging.meltiply.com",
     "https://www.staging.meltiply.com",
   ]);
@@ -340,7 +338,6 @@ test("rendering replaces placeholders with reviewed non-secret bindings", () => 
   assert.equal(configs.api.vars.VERSION, gitSha);
   assert.equal(configs.api.vars.ACCESS_POLICY_AUD, undefined);
   assert.equal(configs.api.vars.UNUSED, undefined);
-  assert.equal(configs.api.vars.BETTER_AUTH_URL, "https://api.staging.meltiply.com");
   assert.equal(configs.api.vars.MAIL_FROM_ADDRESS, "auth@staging.meltiply.com");
   assert.equal(configs.api.vars.MAIL_FROM_NAME, "Meltiply");
   assert.deepEqual(configs.api.send_email, [

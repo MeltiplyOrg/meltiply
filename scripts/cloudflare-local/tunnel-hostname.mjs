@@ -3,7 +3,7 @@
 // the app and public hostnames, and the DNS record(s) each needs.
 //
 // A named tunnel's names are configured rather than discovered, which is the
-// whole point: the dev launcher can set FRONTEND_URL, the Vite allowedHosts
+// whole point: the dev launcher can set APP_URL, the Vite allowedHosts
 // list, and the API CORS allowlist before the connector even starts.
 //
 // Each branch gets its own tunnel, named `<prefix>-<branch>`, and its own

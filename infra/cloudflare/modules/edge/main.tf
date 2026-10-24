@@ -2,8 +2,8 @@ resource "cloudflare_workers_custom_domain" "api" {
   count = var.attach_custom_domains ? 1 : 0
 
   account_id = var.account_id
-  hostname   = var.api_hostname
-  service    = var.api_worker_name
+  hostname   = var.app_hostname
+  service    = var.frontend_worker_name
   zone_id    = var.zone_id
 }
 
@@ -27,7 +27,7 @@ resource "cloudflare_ruleset" "rate_limit" {
     action      = "block"
     description = "Block sustained API request bursts."
     enabled     = true
-    expression  = "(http.host eq \"${var.api_hostname}\" and starts_with(http.request.uri.path, \"/api/\"))"
+    expression  = "(http.host eq \"${var.app_hostname}\" and starts_with(http.request.uri.path, \"/api/\"))"
     ref         = "meltiply-api-per-ip"
     ratelimit = {
       characteristics     = ["cf.colo.id", "ip.src"]
@@ -52,7 +52,7 @@ resource "cloudflare_ruleset" "managed_waf" {
     action      = "execute"
     description = "Execute the approved Cloudflare managed ruleset."
     enabled     = true
-    expression  = "http.host eq \"${var.api_hostname}\""
+    expression  = "http.host eq \"${var.app_hostname}\""
     ref         = "meltiply-managed-waf"
     action_parameters = {
       id = var.managed_waf_ruleset_id

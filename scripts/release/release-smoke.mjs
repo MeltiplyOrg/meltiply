@@ -440,7 +440,7 @@ export async function smokeLiveApi({
   const result = await pollHealth({
     acceptedVersions,
     fetchImpl,
-    origin: spec.api_base_url,
+    origin: spec.app_url,
     pause,
     pollAttempts,
     pollIntervalMs,
@@ -454,7 +454,7 @@ export async function smokeLiveApi({
     health: {
       environment: result.health.environment,
       status: result.health.status,
-      url: `${spec.api_base_url}${healthPath}`,
+      url: `${spec.app_url}${healthPath}`,
       version: result.health.version,
     },
     percentage: spec.deployment_mode === "bootstrap" ? 100 : percentage,

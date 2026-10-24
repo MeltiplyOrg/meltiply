@@ -46,6 +46,7 @@ export interface PostCardProps extends PostActionsProps {
   selected: boolean;
   selectionDisabled?: boolean;
   onToggleSelection: (postId: string) => void;
+  onViewDetails: (postId: string) => void;
 }
 
 /**
@@ -89,7 +90,7 @@ export const PostCard = React.memo(function PostCard({
       <Button
         variant="ghost"
         data-post-details
-        className="h-auto justify-start whitespace-normal p-0 text-left text-(length:--font-size-ui) font-normal leading-snug text-ink after:absolute after:inset-0 after:rounded-card hover:bg-transparent"
+        className="h-auto justify-start whitespace-normal p-0 text-left text-(length:--font-size-ui) font-normal leading-snug text-ink after:absolute after:inset-0 after:z-[1] after:rounded-card hover:bg-transparent"
         title={t("View details")}
         onClick={(event) => {
           event.stopPropagation();

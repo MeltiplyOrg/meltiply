@@ -27,7 +27,7 @@ export interface ChannelAssignmentProps {
   /** Returns to the workspace without connecting a Channel. */
   onClose: () => void;
   /** Fired after the Channel is persisted under the chosen Brand Profile. */
-  onSuccess: (accountName: string | null) => void;
+  onSuccess: () => void;
 }
 
 /**
@@ -96,10 +96,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
       },
       {
         onSuccess: () => {
-          const accountName =
-            selection?.accounts.find((account) => account.id === effectiveAccountId)
-              ?.display_name ?? null;
-          onSuccess(accountName);
+          onSuccess();
         },
         onError: (err) => {
           setActionError(
@@ -115,7 +112,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
     isSubmitting,
     confirmMutation,
     selectionId,
-    selection,
+
     onSuccess,
     t,
   ]);
@@ -147,7 +144,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
   return (
     <section
       aria-labelledby="channel-assignment-title"
-      className="grid w-full min-w-0 max-w-4xl overflow-hidden rounded-window border border-line bg-surface lg:grid-cols-2"
+      className="grid w-full min-w-0 max-w-4xl overflow-hidden rounded-window border border-line bg-surface lg:grid-cols-[0.8fr_1fr]"
     >
       <aside className="flex flex-col justify-between gap-6 border-b border-line bg-canvas p-6 lg:gap-10 lg:border-r lg:border-b-0 lg:p-8">
         <div>
@@ -266,7 +263,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
               <fieldset
                 disabled={isSubmitting}
                 data-lenis-prevent
-                className="max-h-64 min-w-0 space-y-2 overflow-y-auto overscroll-contain pr-1"
+                className="max-h-[32vh] min-w-0 space-y-2 overflow-y-auto overscroll-contain pr-1"
               >
                 <legend className="sr-only">{t("Choose an account")}</legend>
                 {selection.accounts.map((account: OAuthSelectionAccount) => {
@@ -360,7 +357,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
               <fieldset
                 disabled={isSubmitting}
                 data-lenis-prevent
-                className="-m-1 max-h-64 min-w-0 space-y-1 overflow-y-scroll overscroll-contain p-1"
+                className="-m-1 max-h-64 min-w-0 space-y-1 overflow-y-auto overscroll-contain p-1 [scrollbar-gutter:stable]"
               >
                 <legend className="sr-only">{t("Brand Profile")}</legend>
                 {eligibleProfiles.map((profile) => {

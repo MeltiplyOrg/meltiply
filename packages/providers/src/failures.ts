@@ -135,17 +135,24 @@ export interface ProviderRequestDiagnostic {
 /** Internal causes are serialized only through the shared sanitized logger. */
 export interface ProviderAdapterErrorOptions extends ErrorOptions {
   request?: ProviderRequestDiagnostic;
+  /**
+   * Granted-scope names the provider omitted from an otherwise valid response.
+   * Scope identifiers are public OAuth vocabulary, never token material.
+   */
+  missingScopes?: readonly string[];
 }
 
 export class ProviderAdapterError extends Error {
   readonly failure: ProviderFailure;
   readonly request?: ProviderRequestDiagnostic;
+  readonly missingScopes?: readonly string[];
 
   /**
    * Initializes a new ProviderAdapterError wrapping a canonical provider failure descriptor.
    * Normalizes the input failure and assigns the standard classification message to the Error.
    * Retains an optional non-enumerable cause for the shared logger to sanitize,
-   * plus credential-free request metadata; public failure messages stay canonical.
+   * plus credential-free request metadata and any missing public scope names;
+   * public failure messages stay canonical.
    */
   constructor(failure: ProviderFailure, options?: ProviderAdapterErrorOptions) {
     const normalized = normalizeProviderFailure(failure);
@@ -153,5 +160,6 @@ export class ProviderAdapterError extends Error {
     this.name = "ProviderAdapterError";
     this.failure = normalized;
     this.request = options?.request;
+    this.missingScopes = options?.missingScopes;
   }
 }

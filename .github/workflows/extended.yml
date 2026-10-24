@@ -42,6 +42,7 @@ jobs:
         if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Exercise every provider connection through real state and persistence
+
         if: inputs.lane == 'cloudflare-full'
         run: |
           bun run --filter @meltiply/state-worker build
@@ -163,7 +164,7 @@ jobs:
         run: |
           cd frontend/app
           git fetch origin ${{ github.event.repository.default_branch }}:refs/remotes/origin/${{ github.event.repository.default_branch }}
-          npx --yes react-doctor@0.9.14 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+          npx --yes react-doctor@0.9.18 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
           cd ../..
           bun run lint:dead
           bun run --filter frontend-app check

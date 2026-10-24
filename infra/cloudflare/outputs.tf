@@ -1,8 +1,8 @@
 output "release_resources" {
   description = "Non-secret resource identifiers included in each release manifest."
   value = {
-    api_hostname                = module.edge.api_hostname
-    api_custom_domains_attached = module.edge.custom_domains_attached
+    app_hostname                = module.edge.app_hostname
+    app_custom_domains_attached = module.edge.custom_domains_attached
     assets_bucket_name          = module.storage.bucket_name
     authenticated_hyperdrive_id = module.hyperdrive.authenticated_config_id
     dead_letter_queue_ids       = module.queues.dead_letter_queue_ids

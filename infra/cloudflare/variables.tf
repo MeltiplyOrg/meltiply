@@ -19,10 +19,15 @@ variable "environment" {
   }
 }
 
-variable "api_hostname" {
-  description = "Public API custom hostname."
+variable "app_url" {
+  description = "Canonical HTTPS dashboard/API origin; hostname and trusted origin are derived."
   type        = string
-  default     = "api.staging.meltiply.com"
+  default     = "https://staging.meltiply.com"
+
+  validation {
+    condition     = can(regex("^https://[a-z0-9][a-z0-9.-]*[a-z0-9]$", var.app_url))
+    error_message = "app_url must be an HTTPS origin with no port, path, credentials, query, or fragment."
+  }
 }
 
 variable "api_worker_name" {
@@ -31,14 +36,20 @@ variable "api_worker_name" {
   default     = "meltiply-api"
 }
 
+variable "frontend_worker_name" {
+  description = "Frontend Worker serving the app origin and proxying /api/* through its API binding."
+  type        = string
+  default     = "meltiply-frontend-staging"
+}
+
 variable "automation_worker_name" {
   description = "Automation Worker service name owned by Wrangler deployment."
   type        = string
   default     = "meltiply-automation"
 }
 
-variable "attach_api_custom_domains" {
-  description = "Attach API/operator custom domains only after the API Worker exists."
+variable "attach_app_custom_domains" {
+  description = "Attach app/operator domains only after frontend and API Workers exist."
   type        = bool
   default     = false
 }
@@ -61,9 +72,10 @@ variable "assets_bucket_name" {
   default     = "meltiply-assets-staging"
 }
 
-variable "frontend_origins" {
-  description = "Exact HTTPS browser origins accepted by API and R2 CORS."
+variable "allowed_origins" {
+  description = "Optional additional HTTPS browser origins accepted by API and R2 CORS; app_url is included automatically."
   type        = set(string)
+  default     = []
 }
 
 variable "authenticated_hyperdrive_config_id" {

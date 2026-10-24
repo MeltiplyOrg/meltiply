@@ -4,21 +4,19 @@ account_id  = "00000000000000000000000000000000"
 zone_id     = "00000000000000000000000000000000"
 environment = "staging"
 
-api_hostname          = "api.staging.meltiply.com"
+app_url               = "https://staging.meltiply.com"
+frontend_worker_name  = "meltiply-frontend-staging"
 api_worker_name       = "meltiply-api"
 automation_worker_name = "meltiply-automation"
 assets_bucket_name    = "meltiply-assets-staging"
 
 # Safe bootstrap defaults. Attach consumers only after the Automation Worker
-# exists, attach domains only after the API Worker exists, and resume Queue
+# exists, attach domains only after frontend and API Workers exist, and resume Queue
 # delivery only after rollout checks pass.
 attach_queue_consumers    = false
-attach_api_custom_domains = false
+attach_app_custom_domains = false
 queue_delivery_paused     = true
 
-frontend_origins = [
-  "https://staging.meltiply.com",
-]
 
 authenticated_hyperdrive_config_id = "00000000000000000000000000000000"
 system_hyperdrive_config_id        = "11111111111111111111111111111111"

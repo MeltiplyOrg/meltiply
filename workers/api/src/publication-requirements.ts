@@ -223,10 +223,7 @@ function requirementReadKey(
  * @param key - Equivalence key built from freshly validated persisted state.
  * @returns Flight handle, or undefined when this caller must bypass coalescing.
  */
-function acquireRequirementRead(
-  namespace: string,
-  key: string,
-): RequirementReadFlight | undefined {
+function acquireRequirementRead(namespace: string, key: string): RequirementReadFlight | undefined {
   let owner = requirementReadOwner;
   if (owner?.namespace !== namespace) {
     owner = { namespace, pending: new Map() };
@@ -428,8 +425,6 @@ export function getPublicationRequirementsEffect(
     if (!flight) return yield* providerRead;
     if (flight.leader) return yield* leadRequirementRead(flight, providerRead);
     const exit = yield* Deferred.await(flight.deferred);
-    return yield* Exit.isSuccess(exit)
-      ? Effect.succeed(exit.value)
-      : Effect.failCause(exit.cause);
+    return yield* Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause);
   });
 }

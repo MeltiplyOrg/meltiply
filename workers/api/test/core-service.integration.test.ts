@@ -2519,12 +2519,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(betaScoped.totals.views).toBe(0);
 
       const unsupportedService = createCoreApiService(
-        new ProviderRegistry()
-          .capabilities()
-          .map((capability) => ({
-            ...capability,
-            analytics: capability.platform !== "instagram",
-          })),
+        new ProviderRegistry().capabilities().map((capability) => ({
+          ...capability,
+          analytics: capability.platform !== "instagram",
+        })),
         { now: () => clock.current },
       );
       const unsupported = await Effect.runPromise(

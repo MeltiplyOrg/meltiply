@@ -8,10 +8,17 @@ import { cacheSmoke } from "./cache-smoke.mjs";
 const origin = "http://127.0.0.1:8787";
 const frontendOrigin = "http://127.0.0.1:3000";
 const children = [];
-const pool = new pg.Pool({ connectionString: "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable" });
+const pool = new pg.Pool({
+  connectionString:
+    "postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable",
+});
 /** Starts only owned process groups; output stays in the hosted job for diagnostics. */
 function start(command, args, env = {}) {
-  const child = spawn(command, args, { detached: true, stdio: "inherit", env: { ...process.env, ...env } });
+  const child = spawn(command, args, {
+    detached: true,
+    stdio: "inherit",
+    env: { ...process.env, ...env },
+  });
   children.push(child);
   return child;
 }
@@ -19,7 +26,12 @@ function start(command, args, env = {}) {
 async function ready(url, child) {
   for (let attempt = 0; attempt < 120; attempt++) {
     assert.equal(child.exitCode, null, `Runtime exited before ${url}`);
-    if (await fetch(url, { signal: AbortSignal.timeout(1000) }).then((response) => response.ok).catch(() => false)) return;
+    if (
+      await fetch(url, { signal: AbortSignal.timeout(1000) })
+        .then((response) => response.ok)
+        .catch(() => false)
+    )
+      return;
     await delay(1000);
   }
   throw new Error(`Runtime did not become ready: ${url}`);
@@ -32,7 +44,19 @@ try {
     WRANGLER_DEV_PUBLIC_API_URL: origin,
   });
   await ready(`${origin}/api/v1/ready`, backend);
-  const frontend = start("bun", ["run", "--cwd", "frontend/app", "--no-install", "vp", "preview", "--host", "127.0.0.1", "--port", "3000", "--strictPort"]);
+  const frontend = start("bun", [
+    "run",
+    "--cwd",
+    "frontend/app",
+    "--no-install",
+    "vp",
+    "preview",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "3000",
+    "--strictPort",
+  ]);
   await ready(frontendOrigin, frontend);
   const browser = await chromium.launch({ headless: true });
   let cookie;
@@ -51,10 +75,16 @@ try {
     await browser.close();
   }
   await cacheSmoke({
-    origin, frontendOrigin, cookie, query: pool.query.bind(pool), label: "managed-local-workerd",
+    origin,
+    frontendOrigin,
+    cookie,
+    query: pool.query.bind(pool),
+    label: "managed-local-workerd",
     observeMemory: async () => ({
       workerd_rss_bytes: execFileSync("ps", ["-eo", "rss=,comm="], { encoding: "utf8" })
-        .trim().split("\n").reduce((total, line) => {
+        .trim()
+        .split("\n")
+        .reduce((total, line) => {
           const [rss, name] = line.trim().split(/\s+/);
           return name === "workerd" ? total + Number(rss) * 1024 : total;
         }, 0),
@@ -63,14 +93,22 @@ try {
 } finally {
   for (const child of children) {
     if (child.pid) {
-      try { process.kill(-child.pid, "SIGTERM"); } catch { /* Already stopped. */ }
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        /* Already stopped. */
+      }
     }
   }
   await pool.end();
   await delay(2000);
   for (const child of children) {
     if (child.pid) {
-      try { process.kill(-child.pid, "SIGKILL"); } catch { /* Already stopped. */ }
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        /* Already stopped. */
+      }
     }
   }
 }

@@ -580,14 +580,7 @@ describe("getPublicationRequirementsEffect", () => {
     const customRegistry = registry(adapter({ getPublicationRequirements: getRequirements }));
     const controller = new AbortController();
     const leader = runRequirements(
-      getPublicationRequirementsEffect(
-        env,
-        session,
-        accountId,
-        "req-leader",
-        customRegistry,
-        now,
-      ),
+      getPublicationRequirementsEffect(env, session, accountId, "req-leader", customRegistry, now),
       customRegistry,
       { signal: controller.signal },
     );
@@ -618,14 +611,7 @@ describe("getPublicationRequirementsEffect", () => {
     const getRequirements = vi.fn(() => gate.promise);
     const customRegistry = registry(adapter({ getPublicationRequirements: getRequirements }));
     const leader = runRequirements(
-      getPublicationRequirementsEffect(
-        env,
-        session,
-        accountId,
-        "req-leader",
-        customRegistry,
-        now,
-      ),
+      getPublicationRequirementsEffect(env, session, accountId, "req-leader", customRegistry, now),
       customRegistry,
     );
     await waitForDecryption(0);

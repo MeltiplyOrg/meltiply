@@ -10,10 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vite-
 
 import type { ResolvedActor } from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
-import {
-  withSystemTransactionEffect,
-  type EffectTransactionClient,
-} from "../src/database";
+import { withSystemTransactionEffect, type EffectTransactionClient } from "../src/database";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "../src/env";
 import { tokenCipherFor } from "../src/token-credentials";
 

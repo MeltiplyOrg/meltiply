@@ -98,19 +98,33 @@ await cacheSmoke({
   label: `compose-${process.arch}`,
   observeMemory: async () => {
     const containerId = compose("ps", "-q", "runtime").toString().trim();
-    return { container_working_set: execFileSync("docker", ["stats", "--no-stream", "--format", "{{.MemUsage}}", containerId], { encoding: "utf8" }).trim() };
+    return {
+      container_working_set: execFileSync(
+        "docker",
+        ["stats", "--no-stream", "--format", "{{.MemUsage}}", containerId],
+        { encoding: "utf8" },
+      ).trim(),
+    };
   },
   query: async (text, values = []) =>
     JSON.parse(
       execFileSync(
         "docker",
-        [...composeArgs, "exec", "-T", "runtime", "node", "--input-type=module", "-e",
+        [
+          ...composeArgs,
+          "exec",
+          "-T",
+          "runtime",
+          "node",
+          "--input-type=module",
+          "-e",
           `import pg from './scripts/selfhost/node_modules/pg/lib/index.js';
            import { readFileSync } from 'node:fs';
            const { text, values } = JSON.parse(readFileSync(0, 'utf8'));
            const pool = new pg.Pool({host:'postgres',user:'postgres',database:'meltiply',password:process.env.SELFHOST_DB_PASSWORD});
            try { const result = await pool.query(text, values); console.log(JSON.stringify({rows: result.rows})); }
-           finally { await pool.end(); }`],
+           finally { await pool.end(); }`,
+        ],
         { input: JSON.stringify({ text, values }), encoding: "utf8", maxBuffer: 1024 * 1024 },
       ),
     ),

@@ -769,6 +769,16 @@ export function usePlatforms(
 /**
  * TanStack query hook for platform capabilities specifications across all providers.
  *
+ * Deployment-defined capabilities are static for the lifetime of one
+ * identity/Workspace-scoped QueryClient, so this single bounded query alone
+ * keeps successful data fresh and retained indefinitely. Mount, focus,
+ * reconnect, and time-based refetches therefore reuse the successful result
+ * instead of calling the API again; replacing the scoped client (sign-out or
+ * identity/Workspace switch) starts empty and loads fresh. Results stay in
+ * browser memory only, and account mutations intentionally do not invalidate
+ * them. General query defaults and dynamic publishing-requirement freshness
+ * remain unchanged.
+ *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
  * @returns Query result containing array of PlatformCapability records.
  */
@@ -782,6 +792,8 @@ export function usePlatformCapabilities(scope: SessionScope) {
         signal,
       ),
     enabled: scope.isSignedIn,
+    staleTime: Infinity,
+    gcTime: Infinity,
   });
 }
 

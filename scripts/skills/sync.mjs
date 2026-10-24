@@ -95,6 +95,32 @@ async function applyContextNames(directory) {
 }
 
 /**
+ * Keeps Meltiply's cache-safety review criteria reproducible when the pinned pack is installed.
+ * The upstream checklist already discovers caching opportunities; this adds the application's
+ * authorization, portability, freshness and measurement constraints without forking the skill.
+ *
+ * @param {string} directory - Staged `.agents/skills` directory
+ * @returns {Promise<void>} Resolves after the Optimization checklist is adapted
+ */
+async function applyCacheReviewGuidance(directory) {
+  const file = join(directory, "code-review", "SCALING.md");
+  const source = await readFile(file, "utf8");
+  const anchor = "## 2. Caching\n";
+  if (!source.includes(anchor)) throw new Error("Pinned cache review section is missing");
+  const guidance =
+    "\nFor Meltiply, propose caching only with an explicit freshness budget, authoritative " +
+    "per-request authorization and persisted lifecycle visibility, complete Workspace/identity/filter " +
+    "keys, bounded memory and namespace ownership, and cold/eviction/error fallback. Prefer the " +
+    "existing scoped QueryClient or API-local portable workerd owner over a mandatory hosted cache. " +
+    "Check single-flight cancellation, upstream deadlines, request correlation, credential generations, " +
+    "and pending-entry cleanup separately from completed-result freshness. Preserve Provider-specific " +
+    "freshness obligations and publish-time validation. Require cold/warm/concurrent work counts and " +
+    "tail-latency evidence on both deployment paths before claiming savings; report missing measurements " +
+    "instead of implementing a speculative cache during a read-only review.\n";
+  await writeFile(file, source.replace(anchor, anchor + guidance));
+}
+
+/**
  * Installs the pinned pack into a staging directory with the `skills` CLI.
  * The CLI is invoked outside the repository so a failed install cannot leave
  * partial skill directories behind.
@@ -127,7 +153,7 @@ function installPack(directory) {
 
 /**
  * Installs the pack into a temporary directory and applies this repository's
- * context naming.
+ * context naming and cache-safety review guidance.
  *
  * @returns {Promise<{staging: string, skills: string}>} Staged install
  */
@@ -137,6 +163,7 @@ async function stagePack() {
     installPack(staging);
     const skills = join(staging, ".agents", "skills");
     await applyContextNames(skills);
+    await applyCacheReviewGuidance(skills);
     return { staging, skills };
   } catch (error) {
     await rm(staging, { recursive: true, force: true });

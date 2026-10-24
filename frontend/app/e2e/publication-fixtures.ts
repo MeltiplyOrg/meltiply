@@ -144,7 +144,7 @@ export async function activeBrandProfileName(page: Page, profileName?: string): 
   const trigger = page
     .getByRole("button", { name: "Remove Brand Profile filter", exact: true })
     .locator("..")
-    .locator("button[aria-haspopup]");
+    .locator('button[aria-haspopup="menu"], button[role="combobox"]');
   await expect(trigger).toBeVisible({ timeout: 30_000 });
   // Modal menus hide the trigger's ancestor from role queries once opened.
   const popupRole = await trigger.getAttribute("aria-haspopup");

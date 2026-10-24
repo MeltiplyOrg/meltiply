@@ -86,7 +86,7 @@ jobs:
           diff -r candidate/workers/api/bench baseline/workers/api/bench
       - name: Verify benchmark comparison behavior
         working-directory: candidate/workers/api
-        run: bunx --no-install vp test run test/benchmark-cli.node.test.ts
+        run: bunx --no-install vp test run --config vitest.contract.config.ts test/benchmark-cli.node.test.ts
       - name: Prepare one database per revision
         run: |
           (cd baseline && BENCHMARK_DATABASE_NAME=meltiply_bench_baseline bun scripts/benchmarks/backend/prepare-database.mjs)

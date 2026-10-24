@@ -74,6 +74,14 @@ Posts Table and its Columns menu share `postAnalyticsColumns`: Likes, Cmts, Shrs
 
 `usePosts` owns an infinite-query cache of 60-record server pages. Grid slices the filtered loaded collection into pages; Table appends explicitly requested pages. Both reuse the same browser-memory cache across view/route navigation, retain inactive pages for 30 minutes, and share the existing mutation invalidation and active-publication polling. Cached content is not written to persistent browser storage and is discarded with the user/workspace query-provider boundary. A failed next-page read leaves loaded records and selection intact and exposes retry through the same bottom control.
 
+`usePlatformCapabilities` retains its one successful deployment-defined result for
+the lifetime of the current identity/Workspace-scoped QueryClient (`staleTime` and
+`gcTime` are infinite for this query only). Navigation, focus, reconnect, and Channel
+disconnects do not refetch it. Sign-out, scope replacement, and a full application
+reload create fresh query state. Nothing is persisted to browser storage. General
+60-second freshness, dynamic publishing requirements, polling, and Asset preview
+URL policies are unchanged.
+
 The empty Table message and Create post action belong to the visible viewport outside the wide table body, so they do not disappear offscreen with analytics columns. Calendar navigation is outside its independently scrolling date canvas; horizontal or vertical calendar movement cannot carry Today, period navigation, or Month/Week away.
 
 Queues extends `PostCalendarGridView` rather than introducing a second month grid

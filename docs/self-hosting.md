@@ -35,6 +35,24 @@ the PostgreSQL and runtime state. Social Providers and billing remain external
 services and require your own credentials, public callback URLs, and approvals.
 No Cloudflare account or remote Workers are needed by this deployment.
 
+The API uses bounded, disposable Worker-local memory for read optimization, with
+the same implementation on managed Workers and self-hosted workerd. Publishing
+requirements share only overlapping equivalent Provider reads, after every caller's
+fresh account/credential checks; completed results are not retained. At most 32
+pending keys are retained; additional distinct reads bypass coalescing. Analytics
+`GET /api/v1/analytics` summaries retain successful values for an absolute 30 seconds,
+at most 64 entries of 16 KiB each (1 MiB serialized payload, plus keys/bookkeeping).
+Every request still establishes current authorization and active Brand Profile
+lifecycle visibility under PostgreSQL RLS. Snapshot/publication changes can remain
+invisible until expiry; deletion/restoration and access changes are checked on
+each request. The dashboard endpoint is not cached by this optimization.
+
+These caches are neither durable nor shared across isolates or runtime replicas.
+Restart, eviction, capacity bypass, and configuration replacement fall back to
+authoritative reads. No Redis, Valkey, KV, new binding, backup, or operator cache
+configuration is required. Measurements and their runtime limits are recorded in
+the [backend performance report](benchmarks/backend-optimization.md).
+
 ## First start from source
 
 Requirements: Docker Engine with a recent Docker Compose v2 supporting inline

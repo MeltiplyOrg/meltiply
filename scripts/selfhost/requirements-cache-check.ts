@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Miniflare, convertV4MiniflareOptions, Log, LogLevel } from "miniflare";
 import pg from "pg";
@@ -20,6 +21,7 @@ const systemUrl = selfhost
   : "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
 const scriptPath = process.env.REQUIREMENTS_SMOKE_BUNDLE;
 if (!scriptPath) throw new Error("REQUIREMENTS_SMOKE_BUNDLE must name the built disposable Worker");
+const bundlePath = resolve(scriptPath);
 const pool = new pg.Pool({ connectionString: adminUrl });
 const profileId = randomUUID();
 const accountId = randomUUID();
@@ -107,6 +109,7 @@ try {
   runtime = new Miniflare(
     convertV4MiniflareOptions({
       port: 0,
+      rootPath: dirname(bundlePath),
       host: "127.0.0.1",
       cf: {},
       telemetry: { enabled: false },
@@ -115,7 +118,8 @@ try {
         {
           name: "requirements-network-smoke",
           modules: true,
-          scriptPath,
+          modulesRoot: dirname(bundlePath),
+          scriptPath: bundlePath,
           compatibilityDate: "2026-07-18",
           compatibilityFlags: ["nodejs_compat"],
           bindings: {

@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { readFile } from "node:fs/promises";
 import { parseEnv } from "node:util";
 import { ownerBrowserSession } from "../../frontend/app/e2e/selfhost-auth-smoke.mjs";
+import { cacheSmoke } from "../benchmarks/backend/cache-smoke.mjs";
 
 const composeArgs = [
   "compose",
@@ -90,6 +91,26 @@ const profile = await api(
   { name: "Selfhost smoke", description: "Production image acceptance", color: "#1d4ed8" },
   201,
 );
+// Test-only privileged observation runs outside workerd; the public API still authenticates normally.
+await cacheSmoke({
+  origin,
+  cookie,
+  label: `compose-${process.arch}`,
+  query: async (text, values = []) =>
+    JSON.parse(
+      execFileSync(
+        "docker",
+        [...composeArgs, "exec", "-T", "runtime", "node", "--input-type=module", "-e",
+          `import pg from './scripts/selfhost/node_modules/pg/lib/index.js';
+           import { readFileSync } from 'node:fs';
+           const { text, values } = JSON.parse(readFileSync(0, 'utf8'));
+           const pool = new pg.Pool({host:'postgres',user:'postgres',database:'meltiply',password:process.env.SELFHOST_DB_PASSWORD});
+           try { const result = await pool.query(text, values); console.log(JSON.stringify({rows: result.rows})); }
+           finally { await pool.end(); }`],
+        { input: JSON.stringify({ text, values }), encoding: "utf8", maxBuffer: 1024 * 1024 },
+      ),
+    ),
+});
 const png = compose(
   "exec",
   "-T",

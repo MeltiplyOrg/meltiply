@@ -15,6 +15,7 @@ on:
           - cloudflare-full
           - object-storage
           - publishing-queues
+          - portable-caching
 
 permissions:
   contents: read
@@ -39,7 +40,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
       - name: Prepare full gate database
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Exercise every provider connection through real state and persistence
         if: inputs.lane == 'cloudflare-full'
@@ -52,8 +53,23 @@ jobs:
             --outfile=scripts/selfhost/.oauth-connection-check.mjs
           node scripts/selfhost/.oauth-connection-check.mjs
       - name: Validate complete application contract
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
         run: bun run cloudflare:check
+      - name: Observe cold, warm, concurrent, and lifecycle cache behavior in workerd
+        if: inputs.lane == 'portable-caching'
+        env:
+          API_BASE_URL: http://127.0.0.1:8787
+          FRONTEND_URL: http://127.0.0.1:3000
+        run: |
+          ./scripts/cloudflare-local/compose.sh exec -T postgres psql -U postgres -d meltiply -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements'"
+          ./scripts/cloudflare-local/compose.sh restart postgres
+          ./scripts/cloudflare-local/compose.sh up -d --wait postgres
+          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+          bun run --cwd frontend/app build:production
+          node scripts/benchmarks/backend/cache-runtime-check.mjs
+      - name: Verify managed review guidance
+        if: inputs.lane == 'portable-caching'
+        run: bun run skills:check
       - name: Exercise navigation focus and reconnect assignment in the browser
         if: inputs.lane == 'cloudflare-full'
         env:

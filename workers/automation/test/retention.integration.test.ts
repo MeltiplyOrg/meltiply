@@ -303,7 +303,7 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
         `INSERT INTO analytics_snapshots
            (id, distribution_id, org_id, views, snapshot_at)
          VALUES
-           ($1, $4, $3, 10, now() - INTERVAL '120 days'),
+           ($1, $4, $3, 10, now() - INTERVAL '10000 days'),
            ($2, $4, $3, 20, now())`,
         [...analyticsSnapshotIds, organizationId, distributionId],
       );
@@ -410,10 +410,10 @@ describeIntegration("retention cleanup with PostgreSQL", () => {
       expect(survivor.rows[0]?.views).toBe("42");
     });
 
-    await expect(Effect.runPromise(runRetention(env, { batchSize: 100 }))).resolves.toEqual({
-      deleted: 5,
-      errors: 0,
-    });
+    // Global retention may also reclaim eligible seed history. Assert fixture
+    // outcomes below, never delete another fixture's data to force a total.
+    const remainingCleanup = await Effect.runPromise(runRetention(env, { batchSize: 100 }));
+    expect(remainingCleanup.errors).toBe(0);
     await runSystemTransaction(env, async (client) => {
       const retained = await client.query<{ count: string }>(
         `SELECT count(*)::text

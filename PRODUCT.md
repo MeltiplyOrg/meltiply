@@ -34,8 +34,9 @@ implementation detail.
 - Work is organized into multi-tenant workspaces containing Brand Profiles —
   brand-scoped groups of connected provider channels (Facebook, Instagram,
   Threads, TikTok, YouTube).
-- Core app surfaces: Posts (composition, scheduling, and publishing outcomes)
-  and Channels (Platform accounts and Brand Profiles). Removed capabilities and
+- Core app surfaces: Posts (composition, scheduling, and publishing outcomes),
+  Analytics (read-only performance for a published cohort), and Channels
+  (Platform accounts and Brand Profiles). Removed capabilities and
   restoration prerequisites are recorded in the
   [frontend capability inventory](docs/frontend-capabilities.md).
 - Queue messages are at-least-once deliveries; consumers must stay idempotent,
@@ -44,11 +45,12 @@ implementation detail.
 ## Capabilities and Constraints
 
 - Retained creator workflows: Post composition with composer-owned attachments,
-  Platform account connection, Brand Profile organization, and scheduled and
-  monitored publication. Backend analytics and comment APIs do not imply
-  available creator-facing app surfaces. Community deployments have unrestricted
-  resource allowances; their administrators own capacity, consumption, and costs.
-  Quota enforcement is retained for bounded hosted policies.
+  Platform account connection, Brand Profile organization, scheduled and
+  monitored publication, and read-only Analytics over stored provider snapshots.
+  Backend comment APIs do not imply an available creator-facing Inbox surface.
+  Community deployments have unrestricted resource allowances; their
+  administrators own capacity, consumption, and costs. Quota enforcement is
+  retained for bounded hosted policies.
 - Provider-specific logic stays inside `packages/providers` behind the shared
   provider interface; generic pipelines never branch on provider identity.
 - All SQL is parameterized; schema migrations live in

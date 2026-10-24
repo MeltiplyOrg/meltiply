@@ -2,11 +2,48 @@
 
 ## Unreleased
 
+- **Breaking:** `POST /oauth-selections/{selection_id}/confirm`
+  (`OAuthSelectionConfirmRequest`) now requires `brand_profile_id` alongside
+  `account_id`. Clients must send the active Brand Profile UUID that will own
+  the connected Channel; authorization no longer selects that owner in advance.
+
+- Add `GET /analytics/dashboard` (`getAnalyticsDashboard`) with daily series,
+  best-time cells, format and platform breakdowns, follower history, and
+  engagement accumulation. Its required `cohort` field carries the same
+  published-cohort `AnalyticsSummary` as `GET /analytics`, so a client renders
+  KPIs, coverage, and the platform comparison from one request. Add required
+  `AnalyticsPostRow.synced_destination_count` so a partially synced Post is
+  distinguishable from a fully measured one. `unavailable_metrics` enumerates
+  only the metrics a Provider does not expose (`saves`, `clicks`, `followers`).
+
+- Add `GET /analytics/posts` (`getAnalyticsPosts`), the documented per-Post
+  analytics read ranked by `views`, `likes`, `comments`, or `shares` with stable
+  `limit`/`offset` pagination. Add nullable `PlatformMetrics.last_synced_at` so
+  a Platform awaiting its first snapshot is distinguishable from a measured
+  zero. `getAnalyticsSummary` now cohorts on `published_at` and derives
+  `partial`/`unsupported_platforms` from the published Platforms actually in
+  scope rather than every registered Platform. All changes are additive at the
+  contract boundary.
+- Add paired `queue_assigned_from` (inclusive) and `queue_assigned_before`
+  (exclusive) filters to `listPosts`, requiring `queue_id` and a window of at
+  most 63 days. Queue calendars read immutable assignments without scanning
+  unrelated Post history; existing pagination remains unchanged.
+
+- Add Brand Profile-scoped recurring publishing Queues (`listQueues`,
+  `createQueue`, `getQueue`, `updateQueue`, `deleteQueue`), explicit pending
+  membership removal (`removePostFromQueue`), `Post.queue_membership` and the
+  `queue_id` Post filter. Scheduling accepts exactly one of `queue_id` or
+  `scheduled_at`; null still publishes immediately. Queue reservations are
+  immutable across configuration edits; gaps skip and overlaps choose the
+  post-transition instant. Existing delivery and reconciliation remain unchanged.
+
 - Add required nullable `Post.analytics`, with latest-snapshot totals across
   published Channels for likes, comments, shares, views, impressions, and reach.
   Missing snapshots produce null rather than invented zeros; saves and clicks
-  remain null until collected. Calendar reads exclude soft-deleted Posts while
-  preserving their Distribution history.
+  remain null until collected. Add required `Post.distribution_analytics`, the
+  latest measured snapshot per published Distribution, so the Post inspector can
+  compare Channels without a second request. Calendar reads exclude soft-deleted
+  Posts while preserving their Distribution history.
 
 - Add `GET /api/auth/setup-status` and require `X-Setup-Secret` for initial
   `POST /api/auth/sign-up/email`. Registration closes after the installation's

@@ -26,6 +26,7 @@ import {
 export interface PostTableViewProps extends PostSelectionProps {
   posts: PostRow[];
   isLoading: boolean;
+  footer: React.ReactNode;
   sortKey: PostSortKey;
   brandProfiles: BrandProfile[];
   groupBy: PostGroupBy;
@@ -311,10 +312,13 @@ function PostRowSkeleton({
  * collapse in place. They stay mounted, driven by the `data-collapsed` /
  * `--post-row-h` hook in `globals.css`, so expanding and collapsing are one
  * transition in both directions. Rows keep the shared table hover fill.
+ * The owner-supplied Load more footer stays within the viewport's width even
+ * when the metric columns require horizontal table scrolling.
  */
 export const PostTableView = React.memo(function PostTableView({
   posts,
   isLoading,
+  footer,
   sortKey,
   brandProfiles,
   groupBy,
@@ -530,6 +534,7 @@ export const PostTableView = React.memo(function PostTableView({
           )}
         </Empty>
       )}
+      {!isLoading && <div className="sticky left-0 w-full px-4">{footer}</div>}
     </div>
   );
 });

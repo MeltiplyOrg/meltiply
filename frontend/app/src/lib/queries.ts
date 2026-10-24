@@ -1,10 +1,12 @@
 import {
   keepPreviousData,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
   type QueryClient,
   type QueryKey,
+  type InfiniteData,
 } from "@tanstack/react-query";
 import { Cause, Effect, Exit } from "effect";
 
@@ -17,8 +19,11 @@ import {
   type WorkspaceService,
 } from "./effect";
 import { useMutationKeyTracker } from "./mutation-idempotency";
+import { analyticsRangeWindow } from "./analytics-range";
 import { pollingInterval } from "./query-defaults";
 import type {
+  AnalyticsPostScopeParams,
+  AnalyticsScopeParams,
   AuditQueryParams,
   CalendarQueryParams,
   CreateBrandProfileInput,
@@ -28,7 +33,11 @@ import type {
   Platform,
   PlatformQueryParams,
   PostQueryParams,
+  Post,
+  PostListResponse,
   SchedulePostInput,
+  CreateQueueInput,
+  UpdateQueueInput,
   UpdateBrandProfileInput,
   UpdateDistributionInput,
   UpdatePostInput,
@@ -92,6 +101,8 @@ export const queryKeys = {
     params === undefined ? (["posts"] as const) : (["posts", normalizeParams(params)] as const),
   post: (id: string) => ["posts", id] as const,
   assets: () => ["assets"] as const,
+  queues: (brandProfileId?: string) =>
+    brandProfileId === undefined ? (["queues"] as const) : (["queues", brandProfileId] as const),
   brandProfiles: () => ["brand-profiles"] as const,
   deletedBrandProfiles: () => ["brand-profiles", "deleted"] as const,
   asset: (id: string) => ["assets", id] as const,
@@ -113,6 +124,14 @@ export const queryKeys = {
     params === undefined
       ? (["calendar"] as const)
       : (["calendar", normalizeParams(params)] as const),
+  analyticsDashboard: (params?: AnalyticsScopeParams) =>
+    params === undefined
+      ? (["analytics", "dashboard"] as const)
+      : (["analytics", "dashboard", normalizeParams(params)] as const),
+  analyticsPosts: (params?: AnalyticsPostScopeParams) =>
+    params === undefined
+      ? (["analytics", "posts"] as const)
+      : (["analytics", "posts", normalizeParams(params)] as const),
 };
 
 /**
@@ -156,6 +175,7 @@ function brandProfileResourceInvalidations(): QueryKey[] {
     queryKeys.platforms(),
     queryKeys.distributions(),
     queryKeys.calendar(),
+    queryKeys.queues(),
   ];
 }
 
@@ -173,6 +193,8 @@ function postResourceInvalidations(): QueryKey[] {
 }
 
 export const mutationInvalidations = {
+  queueConfiguration: () => [queryKeys.queues()],
+  removePostFromQueue: () => [...postResourceInvalidations(), queryKeys.queues()],
   createPost: () => postResourceInvalidations(),
   updatePost: () => postResourceInvalidations(),
   deletePost: () => postResourceInvalidations(),
@@ -340,24 +362,52 @@ export function useDeleteBrandProfile(scope: SessionScope) {
   );
 }
 
+/** Sixty fills complete rows in the three-, four-, and five-column Post grids. */
+export const POSTS_PAGE_SIZE = 60;
+
 /**
- * TanStack query hook listing Posts in stable identity order with automatic
- * active-state polling. The scope's Brand Profile selection is merged into
- * `brand_profile_id`; `null` (All Brand Profiles) returns the read-only
- * workspace aggregate. Polling covers both embedded Attachment Asset states
- * (uploading/processing) and queued Channel outcomes, so the surface follows
- * attachment readiness and publication progress without a manual refetch.
- *
- * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
- * @param params Optional filters: lifecycle `status` (draft|active), owning
- *   Brand Profile override, and the limit/offset window.
- * @returns Query result with the Post list response.
+ * Flattens fetched pages without duplicating a Post if concurrent publication
+ * or deletion shifted an offset boundary. The earlier page owns an overlapping
+ * identity; refetching refreshes the entire cached page chain.
  */
-export function usePosts(scope: SessionScope, params?: PostQueryParams) {
+function selectPostPages(data: InfiniteData<PostListResponse, number>): Post[] {
+  const posts = new Map<string, Post>();
+  for (const page of data.pages) {
+    for (const post of page.posts) {
+      if (!posts.has(post.id)) posts.set(post.id, post);
+    }
+  }
+  return [...posts.values()];
+}
+
+/**
+ * Caches explicit 60-Post pages in the workspace's browser QueryClient.
+ * Only the first page loads automatically; further reads require fetchNextPage.
+ * Filters have independent caches, inactive pages survive route navigation for
+ * 30 minutes, and stale reads/mutations and active-state polling refresh data.
+ * The workspace/auth provider discards the cache when its identity changes;
+ * Post content is not persisted to localStorage or IndexedDB.
+ *
+ * @param scope Signed-in gate and Workspace/Brand Profile authorization scope.
+ * @param params Lifecycle and owning-profile filters; pagination is owned here.
+ * @returns Infinite-query controls with deduplicated loaded Posts as data.
+ */
+export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "limit" | "offset">) {
   const scopedParams = withBrandProfile(scope, params);
-  return useQuery({
-    queryKey: queryKeys.posts(scopedParams),
-    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.listPosts(scopedParams), signal),
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.posts(scopedParams), "pages", POSTS_PAGE_SIZE],
+    initialPageParam: 0,
+    queryFn: ({ signal, pageParam }) =>
+      runApiQuery(
+        scope,
+        (api) => api.listPosts({ ...scopedParams, limit: POSTS_PAGE_SIZE, offset: pageParam }),
+        signal,
+      ),
+    getNextPageParam: (last) =>
+      last.has_more && last.posts.length > 0 ? last.offset + POSTS_PAGE_SIZE : undefined,
+    select: selectPostPages,
+    gcTime: 30 * 60_000,
+    staleTime: 60_000,
     refetchInterval: (query) => pollingInterval(query.state.data),
     enabled: scope.isSignedIn,
   });
@@ -565,6 +615,84 @@ export function useSchedulePost(scope: SessionScope) {
     (api, variables: { id: string; input: SchedulePostInput }, idempotencyKey) =>
       api.schedulePost(variables.id, variables.input, { idempotencyKey }),
     mutationInvalidations.schedulePost,
+  );
+}
+/** Pages active Queues for one explicit owner. Additional pages are user-driven; disabled consumers perform no reads. */
+export function useQueues(scope: SessionScope, brandProfileId: string | null, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.queues(brandProfileId ?? ""),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      runApiQuery(
+        scope,
+        (api) =>
+          api.listQueues({
+            brand_profile_id: brandProfileId!,
+            limit: 50,
+            ...(pageParam ? { cursor: pageParam } : {}),
+          }),
+        signal,
+      ),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    enabled: scope.isSignedIn && brandProfileId !== null && enabled,
+  });
+}
+
+/** Pages only one Queue's bounded calendar window. Consumers drain pages before declaring the window complete; Post-prefix invalidation refreshes reservations after removal/scheduling, and 30-second polling follows due work even before its first transition. */
+export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryParams) {
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.posts(params), "queue-calendar"],
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) =>
+      runApiQuery(
+        scope,
+        (api) => api.listPosts({ ...params, limit: 100, offset: pageParam }),
+        signal,
+      ),
+    getNextPageParam: (page) => (page.has_more ? page.offset + page.limit : undefined),
+    refetchInterval: 30_000,
+    enabled: scope.isSignedIn,
+  });
+}
+
+/** Creates a recurring plan with the shared stable-key mutation lifecycle. */
+export function useCreateQueue(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: CreateQueueInput, idempotencyKey) => api.createQueue(input, { idempotencyKey }),
+    mutationInvalidations.queueConfiguration,
+  );
+}
+
+/** Edits only future allocations and refreshes the authoritative configuration roster. */
+export function useUpdateQueue(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { id: string; input: UpdateQueueInput }, idempotencyKey) =>
+      api.updateQueue(variables.id, variables.input, { idempotencyKey }),
+    mutationInvalidations.queueConfiguration,
+  );
+}
+
+/** Retires an idle plan, surfacing unresolved membership as a recoverable conflict. */
+export function useDeleteQueue(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { id: string; brandProfileId: string }, idempotencyKey) =>
+      api.deleteQueue(variables.id, variables.brandProfileId, { idempotencyKey }),
+    mutationInvalidations.queueConfiguration,
+  );
+}
+
+/** Releases one safely editable Queue reservation and refreshes Posts, outcomes and timeline together. */
+export function useRemovePostFromQueue(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { queueId: string; postId: string; brandProfileId: string }, idempotencyKey) =>
+      api.removePostFromQueue(variables.queueId, variables.postId, variables.brandProfileId, {
+        idempotencyKey,
+      }),
+    mutationInvalidations.removePostFromQueue,
   );
 }
 
@@ -843,6 +971,57 @@ export function useInstallation(scope: SessionScope, workspaceId: string, enable
 }
 
 /**
+ * Reads the dashboard's daily series, best-time cells, format and platform
+ * breakdowns, follower history, and engagement accumulation for one cohort.
+ *
+ * @param scope Session scope: signed-in gate, Workspace, and Brand Profile.
+ * @param params Range preset plus optional Platform, account, and format filters.
+ * @returns TanStack query carrying the dashboard aggregates.
+ */
+export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScopeParams) {
+  const scopedParams = withBrandProfile(scope, {
+    account_id: params.account_id,
+    format: params.format,
+    platform: params.platform,
+  });
+  const keyParams = { ...scopedParams, range: params.range };
+  return useQuery({
+    queryKey: queryKeys.analyticsDashboard(keyParams),
+    queryFn: ({ signal }) =>
+      runApiQuery(
+        scope,
+        (api) =>
+          api.getAnalyticsDashboard({ ...scopedParams, ...analyticsRangeWindow(params.range) }),
+        signal,
+      ),
+    placeholderData: keepPreviousData,
+    staleTime: 60 * 1_000,
+    enabled: scope.isSignedIn,
+  });
+}
+
+/**
+ * Loads the inspected Post's stored histories with at most four simultaneous
+ * requests. The Post prefix shares mutation invalidation; Workspace and sorted
+ * Distribution identities prevent data leaking between inspectors or tenants.
+ * Any failed Channel rejects the whole read rather than presenting partial totals.
+ */
+export function usePostAnalyticsHistory(scope: SessionScope, distributionIds: readonly string[]) {
+  const ids = [...distributionIds].sort();
+  return useQuery({
+    queryKey: ["posts", "analytics-history", scope.workspaceId, ids],
+    queryFn: ({ signal }) =>
+      runApiQuery(
+        scope,
+        (api) => Effect.forEach(ids, (id) => api.getDistributionAnalytics(id), { concurrency: 4 }),
+        signal,
+      ),
+    staleTime: 60_000,
+    enabled: scope.isSignedIn && ids.length > 0,
+  });
+}
+
+/**
  * Lists Workspace members with role, status, and join date.
  *
  * @param scope Session scope gating execution.
@@ -856,6 +1035,46 @@ export function useWorkspaceMembers(scope: SessionScope, workspaceId: string, en
     queryFn: ({ signal }) =>
       runApiQuery(scope, (api) => api.listWorkspaceMembers(workspaceId), signal),
     enabled: scope.isSignedIn && enabled,
+  });
+}
+
+/**
+ * Reads the ranked per-Post analytics rows for the same cohort.
+ *
+ * Limit, metric, and offset participate in the cache key; the rolling window
+ * is recomputed inside the query function. Keeping previous data avoids
+ * collapsing the table while Load more or a metric switch refetches the top N.
+ *
+ * @param scope Session scope: `isSignedIn` gates execution, `workspaceId`
+ *   selects the Workspace, and `brandProfileId` selects the profile scope.
+ * @param params Range preset, optional Platform filter, ranking metric, and
+ *   the requested top-N window.
+ * @returns Query result with the ranked Posts and pagination metadata.
+ */
+export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScopeParams) {
+  const { range, ...filters } = params;
+  const scopedParams = withBrandProfile(scope, filters);
+  const keyParams: AnalyticsPostScopeParams = {
+    account_id: scopedParams?.account_id,
+    brand_profile_id: scopedParams?.brand_profile_id,
+    format: scopedParams?.format,
+    limit: params.limit,
+    metric: params.metric,
+    offset: params.offset,
+    platform: params.platform,
+    range,
+  };
+  return useQuery({
+    queryKey: queryKeys.analyticsPosts(keyParams),
+    queryFn: ({ signal }) =>
+      runApiQuery(
+        scope,
+        (api) => api.getAnalyticsPosts({ ...scopedParams, ...analyticsRangeWindow(range) }),
+        signal,
+      ),
+    placeholderData: keepPreviousData,
+    staleTime: 60 * 1_000,
+    enabled: scope.isSignedIn,
   });
 }
 

@@ -3,7 +3,9 @@ import type { WorkspaceView } from "@/components/primitives/sidebar-nav";
 /** Route loaders share the router's import targets and the browser's module cache. */
 const dashboardRouteImports: Record<WorkspaceView, () => Promise<unknown>> = {
   posts: () => import("@/app/(dashboard)/posts/page"),
+  analytics: () => import("@/app/(dashboard)/analytics/page"),
   channels: () => import("@/app/(dashboard)/channels/page"),
+  queues: () => import("@/app/(dashboard)/queues/page"),
   settings: () => import("@/components/layout/workspace-settings"),
 };
 

@@ -44,7 +44,9 @@ const localProjects = [
     testIgnore: [
       "**/staging-smoke.spec.ts",
       "**/posts-publication.spec.ts",
+      "**/publishing-queues.spec.ts",
       "**/workspace-design.spec.ts",
+      "**/analytics.spec.ts",
     ],
     grepInvert: controlledComposerPatterns,
     use: { ...devices["Desktop Chrome"] },
@@ -63,7 +65,12 @@ const acceptanceProjects = [
   },
   {
     name: "workspace",
-    testMatch: "**/workspace-design.spec.ts",
+    testMatch: ["**/workspace-design.spec.ts", "**/analytics.spec.ts"],
+    use: { ...devices["Desktop Chrome"] },
+  },
+  {
+    name: "queues",
+    testMatch: "**/publishing-queues.spec.ts",
     use: { ...devices["Desktop Chrome"] },
   },
 ];

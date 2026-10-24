@@ -121,7 +121,7 @@ describe("createTikTokAdapter", () => {
     const provider = adapter(vi.fn<typeof fetch>());
     expect(provider.capability).toMatchObject({
       accepted_mime_types: ["image/jpeg", "image/webp", "video/mp4", "video/quicktime"],
-      analytics: false,
+      analytics: true,
       asset_types: ["image", "video"],
       comments: false,
       connect_available: true,
@@ -137,7 +137,7 @@ describe("createTikTokAdapter", () => {
       reply: false,
     });
     expect(provider.getPublicationRequirements).toBeTypeOf("function");
-    expect(provider.listAnalytics).toBeUndefined();
+    expect(provider.listAnalytics).toBeTypeOf("function");
     expect(provider.listComments).toBeUndefined();
     expect(provider.reply).toBeUndefined();
     expect(() => new ProviderRegistry().register("tiktok", provider)).not.toThrow();
@@ -154,12 +154,21 @@ describe("createTikTokAdapter", () => {
     );
     expect(url.origin).toBe("https://www.tiktok.com");
     expect(url.pathname).toBe("/v2/auth/authorize/");
-    expect(Object.fromEntries(url.searchParams)).toEqual({
+    expect(new Set(url.searchParams.get("scope")?.split(","))).toEqual(
+      new Set([
+        "user.info.basic",
+        "user.info.profile",
+        "user.info.stats",
+        "video.publish",
+        "video.list",
+      ]),
+    );
+    const { scope: _scope, ...parameters } = Object.fromEntries(url.searchParams);
+    expect(parameters).toEqual({
       client_key: "tiktok-client-key",
       disable_auto_auth: "1",
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "user.info.basic,video.publish,user.info.profile",
       state: "oauth-state",
     });
     expect(() =>
@@ -171,7 +180,11 @@ describe("createTikTokAdapter", () => {
     ).toThrow("does not match configuration");
   });
 
-  it("exchanges a code and binds the token open ID to the fetched profile", async () => {
+  it.each([
+    "user.info.basic,user.info.stats,video.publish,video.list",
+    "user.info.basic,video.publish",
+    "user.info.basic,video.publish,video.list",
+  ])("connects with granted scopes %s and binds the token open ID", async (grantedScopes) => {
     const providerCalls = sequence(
       (url, init) => {
         expect(url.toString()).toBe("https://open.tiktokapis.com/v2/oauth/token/");
@@ -189,7 +202,7 @@ describe("createTikTokAdapter", () => {
           open_id: "open-id-1",
           refresh_expires_in: 31_536_000,
           refresh_token: "refresh-secret",
-          scope: "user.info.basic,video.publish",
+          scope: grantedScopes,
           token_type: "Bearer",
         });
       },
@@ -223,7 +236,7 @@ describe("createTikTokAdapter", () => {
       },
       expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-secret",
-      scopes: ["user.info.basic", "video.publish"],
+      scopes: grantedScopes.split(","),
     });
   });
 
@@ -266,7 +279,7 @@ describe("createTikTokAdapter", () => {
           expires_in: 86_400,
           open_id: "open-id-1",
           refresh_token: "refresh-secret",
-          scope: "user.info.basic,video.publish",
+          scope: "user.info.basic,user.info.stats,video.publish,video.list",
           token_type: "Bearer",
         }),
       () =>
@@ -357,7 +370,6 @@ describe("createTikTokAdapter", () => {
     ).rejects.toMatchObject({ failure: { code: "tiktok_token_response_invalid" } });
     expect(providerCalls.calls).toHaveLength(1);
   });
-
   it("normalizes current creator publication requirements", async () => {
     const providerCalls = sequence(() =>
       creator({ duet_disabled: true, max_video_post_duration_sec: 180 }),
@@ -741,7 +753,10 @@ describe("createTikTokAdapter", () => {
     });
   });
 
-  it("persists a rotated refresh token and revokes with app credentials", async () => {
+  it.each([
+    "user.info.basic,user.info.stats,video.publish,video.list",
+    "user.info.basic,video.publish",
+  ])("refreshes and revokes with actual grants %s", async (grantedScopes) => {
     const providerCalls = sequence(
       (_url, init) => {
         const form = new URLSearchParams(String(init.body));
@@ -751,7 +766,7 @@ describe("createTikTokAdapter", () => {
           expires_in: 86_400,
           open_id: "open-id-1",
           refresh_token: "refresh-rotated",
-          scope: "user.info.basic,video.publish",
+          scope: grantedScopes,
           token_type: "Bearer",
         });
       },
@@ -770,7 +785,7 @@ describe("createTikTokAdapter", () => {
       accessToken: "access-rotated",
       expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-rotated",
-      scopes: ["user.info.basic", "video.publish"],
+      scopes: grantedScopes.split(","),
     });
     await expect(provider.revoke!("access-rotated")).resolves.toBeUndefined();
   });
@@ -799,5 +814,76 @@ describe("createTikTokAdapter", () => {
       },
     });
     expect(JSON.stringify(error)).not.toContain("raw provider detail");
+  });
+
+  it("reads the creator's video counters without inventing measurements", async () => {
+    const providerCalls = sequence((url, init) => {
+      expect(url.origin).toBe("https://open.tiktokapis.com");
+      expect(url.pathname).toBe("/v2/video/query/");
+      expect(url.searchParams.get("fields")).toBe(
+        "id,view_count,like_count,comment_count,share_count",
+      );
+      expect(JSON.parse(String(init.body))).toEqual({ filters: { video_ids: ["video-1"] } });
+      expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-secret");
+      return success({
+        videos: [
+          {
+            comment_count: 9,
+            id: "video-1",
+            like_count: 84,
+            share_count: 12,
+            view_count: 1200,
+          },
+        ],
+      });
+    });
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).resolves.toEqual({
+      items: [
+        {
+          comments: 9,
+          impressions: 0,
+          likes: 84,
+          providerPostId: "video-1",
+          recordedAt: "2026-07-19T00:00:00.000Z",
+          reach: 0,
+          shares: 12,
+          views: 1200,
+          watchTimeSeconds: 0,
+        },
+      ],
+    });
+  });
+
+  it("writes no snapshot when TikTok no longer reports the video", async () => {
+    const providerCalls = sequence(() => success({ videos: [] }));
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).resolves.toEqual({ items: [] });
+  });
+
+  it("rejects a metric row that omits a requested counter", async () => {
+    const providerCalls = sequence(() =>
+      success({ videos: [{ id: "video-1", like_count: 1, view_count: 2 }] }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
   });
 });

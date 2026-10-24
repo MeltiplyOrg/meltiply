@@ -214,6 +214,10 @@ export interface AutomationDependencies {
   /** Selects publication adapters; omission uses the environment-configured registry. */
   providerRegistry?: ProviderRegistry;
   assetProcessorFor?: (env: AutomationEnv) => AssetJobProcessor | Promise<AssetJobProcessor>;
+  /** Overrides the bounded hourly follower-history sweep for tests. */
+  sweepAccountAnalytics?: (
+    env: AutomationEnv,
+  ) => Effect.Effect<{ failed: number; recorded: number; scanned: number }, unknown>;
   relay?: (env: AutomationEnv) => Effect.Effect<OutboxRelayResult, unknown>;
   enqueueDue?: (env: AutomationEnv) => Effect.Effect<number, unknown>;
   sweepDue?: (env: AutomationEnv) => Effect.Effect<number, unknown>;
@@ -242,6 +246,7 @@ const SCHEDULED_TIERS: Readonly<Record<ScheduledTier, string>> = {
 };
 
 type ScheduledWorkName =
+  | "account-analytics-sweep"
   | "asset-maintenance"
   | "distribution-sweep"
   | "due-distribution-scan"
@@ -633,6 +638,25 @@ export function createAutomationHandler(
   // never evaluate the Node pg client; Effect-valued overrides are adapted
   // per unit with Effect.suspend + classifyJobError.
   const scheduledWork: readonly ScheduledWorkUnit[] = [
+    {
+      empty: { failed: 0, recorded: 0, scanned: 0 },
+      field: "account_analytics",
+      name: "account-analytics-sweep",
+      run: dependencies.sweepAccountAnalytics
+        ? (env) =>
+            Effect.suspend(() => dependencies.sweepAccountAnalytics!(env)).pipe(
+              Effect.mapError((cause) => classifyJobError(cause)),
+            )
+        : (env) =>
+            Effect.flatMap(
+              Effect.tryPromise({
+                catch: (cause) => classifyJobError(cause),
+                try: () => import("./account-analytics"),
+              }),
+              (module) => module.sweepAccountAnalytics(env),
+            ),
+      tier: "hourly",
+    },
     {
       empty: 0,
       field: "due_distributions",
@@ -1056,6 +1080,7 @@ export function createAutomationHandler(
         relayResult.failed > 0 || relayResult.dead > 0 || (retention?.errors ?? 0) > 0;
       log("info", scheduledContext, {
         event: "automation_scheduled",
+        account_analytics: results.account_analytics,
         distribution_sweep: results.distribution_sweep,
         due_distributions: results.due_distributions,
         job: "scheduled_maintenance",

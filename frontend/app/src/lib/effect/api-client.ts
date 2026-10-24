@@ -3,6 +3,12 @@ import type { components } from "@meltiply/contracts/schema";
 
 import type {
   AccountLifecycle,
+  AnalyticsDashboard,
+  AnalyticsDashboardQueryParams,
+  AnalyticsPostsQueryParams,
+  AnalyticsPostsResponse,
+  AnalyticsSummary,
+  AnalyticsSummaryQueryParams,
   Asset,
   AuditListResponse,
   AuditQueryParams,
@@ -32,6 +38,11 @@ import type {
   PostQueryParams,
   PublishingRequirements,
   SchedulePostInput,
+  PublishingQueue,
+  QueueListResponse,
+  CreateQueueInput,
+  UpdateQueueInput,
+  QueueQueryParams,
   SignedUrlResponse,
   UpdateBrandProfileInput,
   UpdateDistributionInput,
@@ -55,6 +66,11 @@ import {
   completeUploadSession,
   createBrandProfile,
   createPost,
+  listQueues,
+  createQueue,
+  updateQueue,
+  deleteQueue,
+  removePostFromQueue,
   createUploadPartUrls,
   createUploadSession,
   createWorkspaceInvitation,
@@ -65,12 +81,16 @@ import {
   getAsset,
   getAssetDownloadUrl,
   getAssetPreviewUrl,
+  getAnalyticsDashboard,
+  getAnalyticsPosts,
+  getAnalyticsSummary,
   getCalendar,
   getCurrentUser,
   getInstallation,
   getInvitationPreview,
   getOAuthSelection,
   getDistribution,
+  getDistributionAnalytics,
   getPlatformPublishingRequirements,
   getPost,
   getUploadSession,
@@ -201,6 +221,30 @@ export interface ApiClientServiceShape {
     input: SchedulePostInput,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<Post>;
+  readonly listQueues: (
+    params: QueueQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<QueueListResponse>;
+  readonly createQueue: (
+    input: CreateQueueInput,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingQueue>;
+  readonly updateQueue: (
+    id: string,
+    input: UpdateQueueInput,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingQueue>;
+  readonly deleteQueue: (
+    id: string,
+    brandProfileId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<void>;
+  readonly removePostFromQueue: (
+    queueId: string,
+    postId: string,
+    brandProfileId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<Post>;
   readonly createUploadSession: (
     input: CreateUploadSessionInput,
     options?: ApiRequestOptions,
@@ -277,6 +321,22 @@ export interface ApiClientServiceShape {
     params: CalendarQueryParams,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<CalendarResponse>;
+  readonly getAnalyticsDashboard: (
+    params: AnalyticsDashboardQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AnalyticsDashboard>;
+  readonly getAnalyticsSummary: (
+    params: AnalyticsSummaryQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AnalyticsSummary>;
+  readonly getAnalyticsPosts: (
+    params: AnalyticsPostsQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AnalyticsPostsResponse>;
+  readonly getDistributionAnalytics: (
+    id: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<components["schemas"]["AnalyticsSnapshotsResponse"]>;
   readonly listWorkspaceMembers: (
     workspaceId: string,
     options?: ApiRequestOptions,
@@ -389,6 +449,11 @@ export function createApiClientServiceTest(
     Effect.die(new Error(`ApiClientService.${name} is not stubbed in this test`));
 
   const service: ApiClientServiceShape = {
+    listQueues: unstubbed("listQueues"),
+    createQueue: unstubbed("createQueue"),
+    updateQueue: unstubbed("updateQueue"),
+    deleteQueue: unstubbed("deleteQueue"),
+    removePostFromQueue: unstubbed("removePostFromQueue"),
     abortUploadSession: unstubbed("abortUploadSession"),
     acceptWorkspaceInvitation: unstubbed("acceptWorkspaceInvitation"),
     cancelDistribution: unstubbed("cancelDistribution"),
@@ -406,8 +471,12 @@ export function createApiClientServiceTest(
     getAssetDownloadUrl: unstubbed("getAssetDownloadUrl"),
     getAssetPreviewUrl: unstubbed("getAssetPreviewUrl"),
     getCalendar: unstubbed("getCalendar"),
+    getAnalyticsDashboard: unstubbed("getAnalyticsDashboard"),
+    getAnalyticsPosts: unstubbed("getAnalyticsPosts"),
+    getAnalyticsSummary: unstubbed("getAnalyticsSummary"),
     getCurrentUser: unstubbed("getCurrentUser"),
     getDistribution: unstubbed("getDistribution"),
+    getDistributionAnalytics: unstubbed("getDistributionAnalytics"),
     getInstallation: unstubbed("getInstallation"),
     getInvitationPreview: unstubbed("getInvitationPreview"),
     getPlatformPublishingRequirements: unstubbed("getPlatformPublishingRequirements"),
@@ -458,6 +527,18 @@ export function createApiClientServiceTest(
 export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> = Layer.succeed(
   ApiClientService,
   {
+    listQueues: (params, options) =>
+      inWorkspace((workspaceId) => listQueues(workspaceId, params, options)),
+    createQueue: (input, options) =>
+      inWorkspace((workspaceId) => createQueue(workspaceId, input, options)),
+    updateQueue: (id, input, options) =>
+      inWorkspace((workspaceId) => updateQueue(workspaceId, id, input, options)),
+    deleteQueue: (id, brandProfileId, options) =>
+      inWorkspace((workspaceId) => deleteQueue(workspaceId, id, brandProfileId, options)),
+    removePostFromQueue: (queueId, postId, brandProfileId, options) =>
+      inWorkspace((workspaceId) =>
+        removePostFromQueue(workspaceId, queueId, postId, brandProfileId, options),
+      ),
     abortUploadSession: (sessionId, options) =>
       inWorkspace((workspaceId) => abortUploadSession(workspaceId, sessionId, options)),
     acceptWorkspaceInvitation: (token, options) => acceptWorkspaceInvitation(token, options),
@@ -490,9 +571,17 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => getAssetPreviewUrl(workspaceId, id, options)),
     getCalendar: (params, options) =>
       inWorkspace((workspaceId) => getCalendar(workspaceId, params, options)),
+    getAnalyticsDashboard: (params, options) =>
+      inWorkspace((workspaceId) => getAnalyticsDashboard(workspaceId, params, options)),
+    getAnalyticsPosts: (params, options) =>
+      inWorkspace((workspaceId) => getAnalyticsPosts(workspaceId, params, options)),
+    getAnalyticsSummary: (params, options) =>
+      inWorkspace((workspaceId) => getAnalyticsSummary(workspaceId, params, options)),
     getCurrentUser: () => inWorkspace((workspaceId) => getCurrentUser(workspaceId)),
     getDistribution: (id, options) =>
       inWorkspace((workspaceId) => getDistribution(workspaceId, id, options)),
+    getDistributionAnalytics: (id, options) =>
+      inWorkspace((workspaceId) => getDistributionAnalytics(workspaceId, id, options)),
     getInstallation: (workspaceId, options) => getInstallation(workspaceId, options),
     getInvitationPreview: (token, options) => getInvitationPreview(token, options),
     getPlatformPublishingRequirements: (id, options) =>

@@ -67,7 +67,6 @@ and backups accessible only to administrators.
 when exposing the installation. Authentication, OAuth callbacks and return links,
 signed media URLs, browser API requests, and the optional TLS gateway use that
 same origin. There is no separate API or authentication URL to configure.
-
 Mail is optional. When `MAIL_FROM_ADDRESS` and `SELFHOST_SMTP_URL` are both set,
 startup verifies the SMTP connection and email verification remains required. Use
 an authenticated `smtps://` URL or a properly configured STARTTLS SMTP server;
@@ -290,33 +289,19 @@ The migration service runs the existing migration ledger before starting the
 runtime. A runtime rollback does not reverse database migrations; restore a
 compatible backup if schema compatibility requires it.
 
-The Channel-return branch originally numbered its one-Channel-per-Provider
-migration `012_one_channel_per_provider.sql`. Integration with the shared-Workspace
-migrations moves it to `016_one_channel_per_provider.sql`. The original file
-installed the unique index directly; the integrated expand file reports legacy
-duplicates and enforces the invariant with a trigger so no existing Channel is
-rewritten, and a later contract migration can add the index once the extras are
-disconnected. For a database that already applied the former filename, verify its
-recorded checksum is `4f3093462c43460f9b629d984fc5cefd2fade838b5d6f01d1ce5a13969d60e41`
-and that `platform_accounts_brand_profile_platform_unique` exists, then rename
-only that ledger entry before upgrading:
+The published Queue migration retains `016_publishing_queues.sql`. The
+Channel-return and Analytics migrations follow it as `017` through `021`, in
+their original relative order and without SQL changes. Fresh databases and
+databases upgraded only from master use the normal migration ledger.
 
-```sql
-UPDATE public.schema_migrations
-SET name = '016_one_channel_per_provider.sql'
-WHERE name = '012_one_channel_per_provider.sql'
-  AND checksum = '4f3093462c43460f9b629d984fc5cefd2fade838b5d6f01d1ce5a13969d60e41'
-  AND to_regclass('public.platform_accounts_brand_profile_platform_unique') IS NOT NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM public.schema_migrations
-    WHERE name = '016_one_channel_per_provider.sql'
-  );
-```
-
-Expect exactly one updated row when the old entry exists. If its checksum differs
-or the index is absent, stop and investigate rather than rerunning the migration
-or resetting data. Fresh databases and databases upgraded only from master do
-not need this ledger adjustment.
+Databases initialized from earlier development branches may instead record
+`012_one_channel_per_provider.sql`, `016_one_channel_per_provider.sql`, or the
+former Analytics sequence `016` through `020`. Those pre-release ledgers are not
+compatible with this merged sequence.
+Do not rename ledger entries to bypass checksum or ordering checks: that would
+leave the published Queue migration unapplied. Back up any needed data before
+recreating a disposable development database; retain the backup and use a
+reviewed data migration for any non-disposable database.
 
 ## Administration and recovery
 

@@ -12,9 +12,10 @@ Most issues have a safe, self-serve fix. Work through the symptom you're seeing 
 ### The action buttons are disabled in the composer
 
 - Select Brand Profiles in the composer. Several selected profiles receive separate Posts; All Brand Profiles in the collection is still aggregate review.
-- Add text or media. **Save Drafts** needs no channels; Schedule and Publish Now need at least one eligible selected channel for each profile.
+- Add text or media. **Save Drafts** needs no Channels; Queue, Schedule, and Publish Now need eligible selected Channels. Queue mode needs one owning Brand Profile and a Queue from that profile; manual modes support multiple profiles with a Channel per profile.
 - If the Post belongs to another profile, use the profile named by the composer before changing its publishing targets.
 - For a partial multi-profile failure, read each profile's progress. Completed copies are retained. Resolve the reported connection, media, or quota problem, then retry the unchanged composition to finish remaining work without resending completed profiles.
+- If a Queue-owned Post refuses manual scheduling or Channel rescheduling, safely remove it from **Queues → Inspect Posts** first. Removal is refused once a Provider owns any Channel's work; inspect its actual outcome instead of resending.
 
 ### A channel can't be selected in Destinations
 
@@ -81,7 +82,11 @@ For information on comment processing, see [Inbox](/docs/inbox).
 
 ## Performance analytics
 
-Posts **Table** includes stored engagement counters; use **Columns** to show or hide them. A `-` means the Post is not published, has no collected measurement, or that metric is untracked—not a measured zero. Saves and Clicks are currently untracked. Values follow backend synchronization rather than updating live. There is no dedicated analytics dashboard; use native platform reports for unsupported metrics.
+Open **Analytics** in the sidebar to review published-cohort performance. The page uses stored provider snapshots for Posts published in the selected range; it does not show activity that happened during the range for older Posts. See [Analytics](/docs/analytics) for cohort, coverage, and freshness semantics.
+
+Posts **Table** also includes stored engagement counters; use **Columns** to show or hide them. A `-` means the Post is not published, has no collected measurement, or that metric is untracked—not a measured zero. Saves and Clicks are currently untracked. Values follow backend synchronization rather than updating live.
+
+If the Analytics page shows **Partial data**, a published platform in scope does not report analytics; its destinations still count, but their metrics are not included. **Awaiting sync** means the destination is published but no snapshot has arrived yet. If the last sync time is old, wait for the next scheduled sync or use **Refresh** to re-read stored metrics; Refresh does not start a Provider sync. Connect a channel on a platform whose Provider reports analytics, and reconnect it if the analytics scope was added after the original authorization.
 
 For details on how analytics processing operates, see [Analytics](/docs/analytics).
 

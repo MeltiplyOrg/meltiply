@@ -4,6 +4,10 @@ import { Effect } from "effect";
 
 import type {
   AccountLifecycle,
+  AnalyticsPostsQueryParams,
+  AnalyticsPostsResponse,
+  AnalyticsSummary,
+  AnalyticsSummaryQueryParams,
   Asset,
   AuditListResponse,
   AuditQueryParams,
@@ -26,6 +30,8 @@ import type {
   OAuthSelectionConfirmRequest,
   Platform,
   PlatformAccountsResponse,
+  AnalyticsDashboard,
+  AnalyticsDashboardQueryParams,
   PlatformCapabilitiesResponse,
   PlatformQueryParams,
   Post,
@@ -33,6 +39,11 @@ import type {
   PostQueryParams,
   PublishingRequirements,
   SchedulePostInput,
+  PublishingQueue,
+  QueueListResponse,
+  CreateQueueInput,
+  UpdateQueueInput,
+  QueueQueryParams,
   SignedUrlResponse,
   UpdateBrandProfileInput,
   UpdateDistributionInput,
@@ -474,6 +485,108 @@ export function listPosts(
       client().GET("/posts", {
         headers: workspaceHeaders(workspaceId),
         params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Lists one bounded page of reusable plans for an explicit Brand Profile; forwards cancellation to the generated client. */
+export function listQueues(
+  workspaceId: string | null,
+  params: QueueQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<QueueListResponse>(
+    (signal) =>
+      client().GET("/queues", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Creates a validated recurring plan; one stable mutation key makes retries return the original Queue. */
+export function createQueue(
+  workspaceId: string | null,
+  input: CreateQueueInput,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<PublishingQueue>(
+    (signal) =>
+      client().POST("/queues", {
+        body: input,
+        headers: workspaceHeaders(workspaceId),
+        params: { header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) } },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Edits future allocation configuration without changing any previously reserved instant. */
+export function updateQueue(
+  workspaceId: string | null,
+  id: string,
+  input: UpdateQueueInput,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<PublishingQueue>(
+    (signal) =>
+      client().PATCH("/queues/{queue_id}", {
+        body: input,
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          path: { queue_id: id },
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Retires an idle Queue; pending or in-flight memberships are a recoverable conflict, never silently moved. */
+export function deleteQueue(
+  workspaceId: string | null,
+  id: string,
+  brandProfileId: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<void>(
+    (signal) =>
+      client().DELETE("/queues/{queue_id}", {
+        body: { brand_profile_id: brandProfileId },
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          path: { queue_id: id },
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/** Cancels only editable pending Channel intents and releases the reservation while retaining composition and settings. */
+export function removePostFromQueue(
+  workspaceId: string | null,
+  queueId: string,
+  postId: string,
+  brandProfileId: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<Post>(
+    (signal) =>
+      client().DELETE("/queues/{queue_id}/posts/{post_id}", {
+        body: { brand_profile_id: brandProfileId },
+        headers: workspaceHeaders(workspaceId),
+        params: {
+          path: { queue_id: queueId, post_id: postId },
+          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
+        },
         signal,
       }),
     options?.signal,
@@ -1206,6 +1319,34 @@ export function getCalendar(
 }
 
 /**
+ * Reads the workspace's platform-level analytics for a published cohort.
+ *
+ * The window is a rolling pair of UTC instants; `brand_profile_id` omitted is
+ * the read-only All Brand Profiles aggregate. The response carries per-platform
+ * sums, published destination counts, coverage, and sync freshness.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param params Cohort bounds plus optional Platform and Brand Profile scope.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the summary response.
+ */
+export function getAnalyticsSummary(
+  workspaceId: string | null,
+  params: AnalyticsSummaryQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AnalyticsSummary>(
+    (signal) =>
+      client().GET("/analytics", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
  * Lists Workspace members with role, account status, and join date.
  *
  * @param workspaceId Shared Workspace UUID.
@@ -1225,6 +1366,31 @@ export function listWorkspaceMembers(workspaceId: string, options?: ApiRequestOp
 }
 
 /**
+ * Reads the dashboard's daily series, best-time cells, format and platform
+ * breakdowns, follower history, and engagement accumulation.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param params Cohort bounds plus optional Platform, account, format, and Brand Profile scope.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the stored-snapshot dashboard aggregates.
+ */
+export function getAnalyticsDashboard(
+  workspaceId: string | null,
+  params: AnalyticsDashboardQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AnalyticsDashboard>(
+    (signal) =>
+      client().GET("/analytics/dashboard", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
  * Lists pending, unexpired Workspace invitations.
  *
  * @param workspaceId Shared Workspace UUID.
@@ -1237,6 +1403,55 @@ export function listWorkspaceInvitations(workspaceId: string, options?: ApiReque
       client().GET("/workspaces/{workspaceId}/invitations", {
         headers: workspaceHeaders(workspaceId),
         params: { path: { workspaceId } },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the ranked per-Post analytics rows for a published cohort.
+ *
+ * Ranking uses the requested stored metric; each row carries its platforms,
+ * unsupported subset, destination count, and latest sync time so unsupported or
+ * unsynced values are never rendered as measured zero.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param params Cohort bounds, optional Platform/Brand Profile scope, ranking
+ *   metric, and limit/offset pagination.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the ranked Posts and pagination metadata.
+ */
+export function getAnalyticsPosts(
+  workspaceId: string | null,
+  params: AnalyticsPostsQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AnalyticsPostsResponse>(
+    (signal) =>
+      client().GET("/analytics/posts", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads up to 500 chronological stored snapshots for one Distribution.
+ * Workspace authorization and cancellation follow the normal API boundary.
+ */
+export function getDistributionAnalytics(
+  workspaceId: string | null,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<components["schemas"]["AnalyticsSnapshotsResponse"]>(
+    (signal) =>
+      client().GET("/analytics/{distribution_id}", {
+        headers: workspaceHeaders(workspaceId),
+        params: { path: { distribution_id: id }, query: { limit: 500 } },
         signal,
       }),
     options?.signal,

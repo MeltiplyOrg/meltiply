@@ -5,6 +5,7 @@ import { classifyProviderFailure, ProviderAdapterError } from "./failures";
 import type {
   OAuthExchangeInput,
   OAuthExchangeResult,
+  ProviderAccountAnalytics,
   ProviderAdapter,
   ProviderAnalyticsRecord,
   ProviderCommentRecord,
@@ -150,6 +151,19 @@ export function replyEffect(
 ): Effect.Effect<ProviderOperationResult, ProviderAdapterError> {
   if (!adapter.reply) return unsupported("reply");
   return providerCallEffect(context, (child) => adapter.reply!(child, credentials, input));
+}
+
+/**
+ * Reads account-level lifetime counters through the adapter as a typed Effect.
+ * Pure read: retry policy is applied by the caller; no Post identity is needed.
+ */
+export function getAccountAnalyticsEffect(
+  adapter: ProviderAdapter,
+  context: ProviderRequestContext,
+  credentials: ProviderCredentials,
+): Effect.Effect<ProviderAccountAnalytics, ProviderAdapterError> {
+  if (!adapter.getAccountAnalytics) return unsupported("account_analytics");
+  return providerCallEffect(context, (child) => adapter.getAccountAnalytics!(child, credentials));
 }
 
 /**
@@ -370,6 +384,11 @@ export interface ProviderServiceShape {
     context: ProviderRequestContext,
     input: OAuthExchangeInput,
   ) => Effect.Effect<OAuthExchangeResult, ProviderAdapterError>;
+  readonly getAccountAnalytics: (
+    platform: Platform,
+    context: ProviderRequestContext,
+    credentials: ProviderCredentials,
+  ) => Effect.Effect<ProviderAccountAnalytics, ProviderAdapterError>;
   readonly getPublicationRequirements: (
     platform: Platform,
     context: ProviderRequestContext,
@@ -472,6 +491,10 @@ function makeProviderService(source: ProviderAdapterSource): ProviderServiceShap
     exchangeAuthorizationCode: (platform, context, input) =>
       Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
         exchangeAuthorizationCodeEffect(adapter, context, input),
+      ),
+    getAccountAnalytics: (platform, context, credentials) =>
+      Effect.flatMap(resolveAdapter(source, platform), (adapter) =>
+        getAccountAnalyticsEffect(adapter, context, credentials),
       ),
     getPublicationRequirements: (platform, context, credentials) =>
       Effect.flatMap(resolveAdapter(source, platform), (adapter) =>

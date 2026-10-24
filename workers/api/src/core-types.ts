@@ -57,10 +57,18 @@ interface InboxFilters {
 }
 
 interface AnalyticsFilters {
+  accountId?: string;
   brandProfileId?: string;
   end: Date;
+  format?: Schemas["AnalyticsFormat"];
   platform?: Platform;
   start: Date;
+}
+
+interface AnalyticsPostsFilters extends AnalyticsFilters {
+  limit: number;
+  metric: Schemas["AnalyticsMetric"];
+  offset: number;
 }
 
 interface SnapshotFilters {
@@ -85,6 +93,16 @@ export interface CoreApiService {
     env: ApiWorkerEnv,
     session: SessionClaims,
   ): Effect.Effect<string, CoreServiceError>;
+  analyticsPosts(
+    env: ApiWorkerEnv,
+    session: SessionClaims,
+    filters: AnalyticsPostsFilters,
+  ): Effect.Effect<Schemas["AnalyticsPostsResponse"], CoreServiceError>;
+  dashboardAnalytics(
+    env: ApiWorkerEnv,
+    session: SessionClaims,
+    filters: AnalyticsFilters,
+  ): Effect.Effect<Schemas["AnalyticsDashboard"], CoreServiceError>;
   calendar(
     env: ApiWorkerEnv,
     session: SessionClaims,

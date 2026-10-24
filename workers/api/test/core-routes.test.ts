@@ -13,7 +13,12 @@ import {
 } from "@meltiply/providers";
 import { oauthStateRoutingKey } from "../src/core-routes";
 import { tokenCipherFor } from "../src/token-credentials";
-import { AccessDenied, StorageUnavailable, type PlatformCapability } from "@meltiply/domain";
+import {
+  AccessDenied,
+  DatabaseError,
+  StorageUnavailable,
+  type PlatformCapability,
+} from "@meltiply/domain";
 import type { JwtIdentity, SessionClaims } from "@meltiply/auth";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -123,8 +128,10 @@ function service(overrides: Partial<CoreApiService> = {}): CoreApiService {
   const notImplemented = () => Effect.die(new Error("unexpected service call"));
   return {
     activeOrganization: notImplemented,
+    analyticsPosts: notImplemented,
     calendar: notImplemented,
     cancelDistribution: notImplemented,
+    dashboardAnalytics: notImplemented,
     disconnectPlatform: notImplemented,
     distributionAnalytics: notImplemented,
     getDistribution: notImplemented,
@@ -167,6 +174,8 @@ const asset: components["schemas"]["Asset"] = {
 // saved Channel yet, which is the state every composer route must support.
 const post: components["schemas"]["Post"] = {
   analytics: null,
+  distribution_analytics: [],
+  queue_membership: null,
   attachments: [{ asset_id: asset.id, asset, position: 0 }],
   brand_profile_id: brandProfileId,
   created_at: "2026-07-18T00:00:00.000Z",
@@ -1523,6 +1532,15 @@ describe("core API routes", () => {
     expect(location.searchParams.get("scope")).toBe(
       "user.info.basic,video.publish,user.info.profile",
     );
+    expect(new Set(location.searchParams.get("scope")?.split(","))).toEqual(
+      new Set([
+        "user.info.basic",
+        "video.publish",
+        "user.info.profile",
+        "user.info.stats",
+        "video.list",
+      ]),
+    );
     expect(create).toHaveBeenCalledOnce();
   });
 
@@ -1775,6 +1793,83 @@ describe("core API routes", () => {
     );
     expect(excessive.status).toBe(400);
     expect(calendar).toHaveBeenCalledTimes(2);
+  });
+
+  it("validates analytics cohort bounds, metric, and pagination before storage", async () => {
+    const analyticsPosts = vi.fn(() =>
+      Effect.succeed({ has_more: false, limit: 10, offset: 0, posts: [] }),
+    );
+    const app = authenticatedApp(service({ analyticsPosts }));
+    const range = "start=2026-01-01T00:00:00Z&end=2026-01-31T00:00:00Z";
+    for (const query of [
+      "start=2026-02-01T00:00:00Z&end=2026-01-01T00:00:00Z",
+      "start=2025-01-01T00:00:00Z&end=2026-02-01T00:00:00Z",
+      `${range}&metric=reach`,
+      `${range}&limit=0`,
+      `${range}&limit=101`,
+      `${range}&offset=-1`,
+    ]) {
+      const response = await app.request(
+        `/api/v1/analytics/posts?${query}`,
+        { headers: bearerHeaders },
+        env,
+      );
+      expect(response.status, query).toBe(400);
+    }
+    expect(analyticsPosts).not.toHaveBeenCalled();
+  });
+
+  it("forwards the analytics cohort, metric, pagination, and scope filters", async () => {
+    const analyticsPosts = vi.fn(() =>
+      Effect.succeed({
+        has_more: true,
+        limit: 25,
+        offset: 50,
+        posts: [],
+      }),
+    );
+    const app = authenticatedApp(service({ analyticsPosts }));
+    const response = await app.request(
+      `/api/v1/analytics/posts?start=2026-01-01T00:00:00Z&end=2026-01-31T00:00:00Z&platform=threads&brand_profile_id=${brandProfileId}&metric=shares&limit=25&offset=50`,
+      { headers: bearerHeaders },
+      env,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      has_more: true,
+      limit: 25,
+      offset: 50,
+      posts: [],
+    });
+    expect(analyticsPosts).toHaveBeenCalledWith(env, session, {
+      brandProfileId,
+      end: new Date("2026-01-31T00:00:00Z"),
+      limit: 25,
+      metric: "shares",
+      offset: 50,
+      platform: "threads",
+      start: new Date("2026-01-01T00:00:00Z"),
+    });
+  });
+
+  it("defaults the analytics metric and pagination to views, ten, and zero", async () => {
+    const analyticsPosts = vi.fn(() =>
+      Effect.succeed({ has_more: false, limit: 10, offset: 0, posts: [] }),
+    );
+    const app = authenticatedApp(service({ analyticsPosts }));
+    const response = await app.request(
+      "/api/v1/analytics/posts?start=2026-01-01T00:00:00Z&end=2026-01-31T00:00:00Z",
+      { headers: bearerHeaders },
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(analyticsPosts).toHaveBeenCalledWith(env, session, {
+      end: new Date("2026-01-31T00:00:00Z"),
+      limit: 10,
+      metric: "views",
+      offset: 0,
+      start: new Date("2026-01-01T00:00:00Z"),
+    });
   });
 
   it("rejects reversed and over-366-day distribution analytics ranges", async () => {
@@ -3051,6 +3146,81 @@ describe("OAuth Page selection flow", () => {
     });
     expect(releaseSelectionClaim).toHaveBeenCalledWith(selectionId, "claim-token-quota");
   });
+
+  it.each([
+    { code: "23505", release: true },
+    { code: "23503", release: true },
+    { code: "22001", release: true },
+    { code: "08006", release: false },
+    { code: undefined, release: false },
+  ])(
+    "fences ambiguous saves but releases deterministic database rejection $code",
+    async ({ code, release }) => {
+      const routingKey = await oauthStateRoutingKey(actor.workspace.id);
+      const selectionId = `${routingKey}.validnonce1234567890`;
+      const cipher = tokenCipherFor({
+        TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      } as ApiWorkerEnv);
+      const sealed = await cipher.encrypt(
+        JSON.stringify({
+          accessToken: "fb-page-1-token",
+          account: { id: "fb-page-1" },
+          scopes: [],
+        }),
+      );
+      const releaseSelectionClaim = vi.fn(async () => true);
+      const completeSelection = vi.fn(async () => true);
+      const oauthEnv: ApiWorkerEnv = {
+        ...env,
+        TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+        OAUTH_STATE: {
+          getByName: () => ({
+            claimSelection: async () => ({
+              claimToken: "claim-database",
+              encryptedConnection: sealed,
+              organizationId: actor.workspace.id,
+              platform: "facebook",
+              status: "claimed" as const,
+              userId: actor.userId,
+            }),
+            completeSelection,
+            releaseSelectionClaim,
+          }),
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      };
+      const app = authenticatedApp(service(), {
+        brandProfileService: brandProfileService(),
+        saveOAuthConnection: () =>
+          Effect.fail(
+            new DatabaseError({
+              cause: { code },
+              message: "Internal database details must not leak",
+            }),
+          ),
+      });
+      const response = await app.request(
+        `/api/v1/oauth-selections/${selectionId}/confirm`,
+        {
+          body: JSON.stringify({ account_id: "fb-page-1", brand_profile_id: brandProfileId }),
+          headers: {
+            ...bearerHeaders,
+            "Content-Type": "application/json",
+            "Idempotency-Key": "database-save",
+          },
+          method: "POST",
+        },
+        oauthEnv,
+      );
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain("Internal database details");
+      expect(completeSelection).not.toHaveBeenCalled();
+      if (release) {
+        expect(releaseSelectionClaim).toHaveBeenCalledWith(selectionId, "claim-database");
+      } else {
+        expect(releaseSelectionClaim).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("POST /api/v1/oauth-selections/:selectionId/confirm rejects concurrent active claim and account-switch with 409", async () => {
     const routingKey = await oauthStateRoutingKey(actor.workspace.id);

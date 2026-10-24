@@ -14,6 +14,7 @@ on:
           - cloudflare-extended
           - cloudflare-full
           - object-storage
+          - publishing-queues
 
 permissions:
   contents: read
@@ -38,9 +39,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
       - name: Prepare full gate database
-        if: inputs.lane == 'cloudflare-full'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Exercise every provider connection through real state and persistence
+
         if: inputs.lane == 'cloudflare-full'
         run: |
           bun run --filter @meltiply/state-worker build
@@ -51,7 +53,7 @@ jobs:
             --outfile=scripts/selfhost/.oauth-connection-check.mjs
           node scripts/selfhost/.oauth-connection-check.mjs
       - name: Validate complete application contract
-        if: inputs.lane == 'cloudflare-full'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues'
         run: bun run cloudflare:check
       - name: Exercise navigation focus and reconnect assignment in the browser
         if: inputs.lane == 'cloudflare-full'
@@ -173,6 +175,26 @@ jobs:
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Start fresh Queue acceptance database
+        if: inputs.lane == 'publishing-queues'
+        # Integration suites deliberately exercise exhausted quotas. Browser
+        # acceptance starts with fresh seeded data, never relaxed production limits.
+        run: bash scripts/cloudflare-local/database.sh reset
+      - name: Install Queue acceptance browser
+        if: inputs.lane == 'publishing-queues'
+        run: bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Review Queue React changes
+        if: inputs.lane == 'publishing-queues'
+        working-directory: frontend/app
+        run: |
+          git fetch origin ${{ github.event.repository.default_branch }}:refs/remotes/origin/${{ github.event.repository.default_branch }}
+          npx --yes react-doctor@0.9.14 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+      - name: Exercise durable Queue publishing
+        if: inputs.lane == 'publishing-queues'
+        env:
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: bun run --cwd frontend/app test:e2e e2e/publishing-queues.spec.ts --project queues --trace on
       - name: Smoke development stylesheet and self-hosted fonts
         if: inputs.lane == 'frontend-ui'
         run: |
@@ -236,7 +258,7 @@ jobs:
           bun run --cwd frontend/public preview --host 127.0.0.1 --port 4321 &
           public_pid=$!
           trap 'kill "$public_pid" 2>/dev/null || true' EXIT
-          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts --project workspace --trace on
+          bun run --cwd frontend/app test:e2e e2e/workspace-design.spec.ts e2e/analytics.spec.ts --project workspace --trace on
       - name: Inspect UI design mechanics
         if: inputs.lane == 'frontend-ui'
         run: node .agents/skills/impeccable/scripts/detect.mjs --json frontend/app/src/components/layout frontend/app/src/components/primitives/sidebar-nav.tsx frontend/shared/tokens.css frontend/public/src/styles

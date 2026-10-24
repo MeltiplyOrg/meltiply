@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { LayoutGrid, Plus } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Card } from "@meltiply/ui/card";
@@ -20,6 +20,9 @@ export interface PostGridCardViewProps extends PostSelectionProps {
   posts: PostRow[];
   isLoading: boolean;
   gridColumnClass: string;
+  /** Zero-based displayed page; changing it resets only this viewport's scroll. */
+  page: number;
+  footer: React.ReactNode;
   brandProfiles: BrandProfile[];
   canMutate: boolean;
   canDelete: (post: PostRow) => boolean;
@@ -36,11 +39,15 @@ const GRID_VIEWPORT_CLASS = "min-h-0 flex-1 overflow-y-auto px-4 pb-24 pt-3.5 sm
  * Media Grid composed from canonical Post cards with real attachment previews.
  * Selection covers the rendered filtered page and remains owned by PostsView
  * across Table, Grid, and Calendar changes; no reference demo data is used.
+ * The owner supplies one bounded page and its navigation footer. Page changes
+ * return the viewport to its top without remounting the cards or selection.
  */
 export const PostGridCardView = React.memo(function PostGridCardView({
   posts,
   isLoading,
   gridColumnClass,
+  page,
+  footer,
   brandProfiles,
   canMutate,
   canDelete,
@@ -57,6 +64,17 @@ export const PostGridCardView = React.memo(function PostGridCardView({
 }: PostGridCardViewProps) {
   const { t } = useI18n();
   const scrollRef = useSmoothScrollContainer();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const attachViewport = useCallback(
+    (node: HTMLDivElement | null) => {
+      viewportRef.current = node;
+      scrollRef(node);
+    },
+    [scrollRef],
+  );
+  useLayoutEffect(() => {
+    if (viewportRef.current) viewportRef.current.scrollTop = 0;
+  }, [page]);
   const profiles = useMemo(
     () => new Map(brandProfiles.map((profile) => [profile.id, profile.name])),
     [brandProfiles],
@@ -70,7 +88,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
       <div className={GRID_VIEWPORT_CLASS}>
         <div className={cn("grid gap-3", gridColumnClass)}>
           {/* Same anatomy as `post-card.tsx` - profile line, caption, the
-              `h-35` media box, status, and meta row - so resolved cards drop
+              `h-35` media box, status, meta row, and analytics footer - so resolved cards drop
               into these slots without moving anything. */}
           {SKELETON_CARD_KEYS.map((key) => (
             <Card key={key} aria-hidden="true" className="flex min-w-0 flex-col gap-2 px-3 py-2.5">
@@ -82,6 +100,11 @@ export const PostGridCardView = React.memo(function PostGridCardView({
               <div className="flex min-h-4.5 items-center gap-2">
                 <Skeleton className="h-3.5 w-28" />
               </div>
+              <div className="mt-auto grid grid-cols-4 gap-2 border-t border-line pt-2">
+                {["views", "likes", "comments", "shares"].map((metric) => (
+                  <Skeleton key={metric} className="h-3.5 w-full" />
+                ))}
+              </div>
             </Card>
           ))}
         </div>
@@ -89,24 +112,27 @@ export const PostGridCardView = React.memo(function PostGridCardView({
     );
   if (posts.length === 0)
     return (
-      <Empty className="m-auto border-0">
-        <EmptyIcon>
-          <LayoutGrid className="size-5" />
-        </EmptyIcon>
-        <EmptyTitle>{t("No posts match filters")}</EmptyTitle>
-        <EmptyDescription>
-          {t("Try adjusting your search query, status, or date range filters.")}
-        </EmptyDescription>
-        {canCreate && (
-          <Button variant="outline" onClick={onCreatePost} className="mt-3">
-            <Plus className="size-3.5" />
-            {t("Create post")}
-          </Button>
-        )}
-      </Empty>
+      <div ref={attachViewport} className={GRID_VIEWPORT_CLASS}>
+        <Empty className="m-auto border-0">
+          <EmptyIcon>
+            <LayoutGrid className="size-5" />
+          </EmptyIcon>
+          <EmptyTitle>{t("No posts match filters")}</EmptyTitle>
+          <EmptyDescription>
+            {t("Try adjusting your search query, status, or date range filters.")}
+          </EmptyDescription>
+          {canCreate && (
+            <Button variant="outline" onClick={onCreatePost} className="mt-3">
+              <Plus className="size-3.5" />
+              {t("Create post")}
+            </Button>
+          )}
+        </Empty>
+        {footer}
+      </div>
     );
   return (
-    <div ref={scrollRef} className={cn(GRID_VIEWPORT_CLASS, selectedIds.size > 0 && "pb-32")}>
+    <div ref={attachViewport} className={cn(GRID_VIEWPORT_CLASS, selectedIds.size > 0 && "pb-32")}>
       <label className="mb-3 flex items-center gap-2 text-xs text-ink-3">
         <Input
           type="checkbox"
@@ -135,6 +161,7 @@ export const PostGridCardView = React.memo(function PostGridCardView({
           />
         ))}
       </div>
+      {footer}
     </div>
   );
 });

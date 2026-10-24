@@ -1654,8 +1654,40 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         impressions: 320,
         reach: 108,
       });
+      expect(page.posts.find((post) => post.id === postIds[0])?.distribution_analytics).toEqual([
+        {
+          analytics: {
+            likes: 7,
+            comments: 2,
+            shares: 1,
+            saves: null,
+            clicks: null,
+            views: 10,
+            impressions: 20,
+            reach: 8,
+          },
+          distribution_id: distributionIds[1],
+          platform: "tiktok",
+        },
+        {
+          analytics: {
+            likes: 10,
+            comments: 0,
+            shares: 2,
+            saves: null,
+            clicks: null,
+            views: 200,
+            impressions: 300,
+            reach: 100,
+          },
+          distribution_id: distributionIds[0],
+          platform: "youtube",
+        },
+      ]);
       expect(page.posts.find((post) => post.id === postIds[1])?.analytics).toBeNull();
+      expect(page.posts.find((post) => post.id === postIds[1])?.distribution_analytics).toEqual([]);
       expect(page.posts.find((post) => post.id === postIds[2])?.analytics).toBeNull();
+      expect(page.posts.find((post) => post.id === postIds[2])?.distribution_analytics).toEqual([]);
       expect(page.posts.find((post) => post.id === postIds[3])?.analytics).toEqual({
         likes: 0,
         comments: 0,
@@ -1666,6 +1698,22 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         impressions: 0,
         reach: 0,
       });
+      expect(page.posts.find((post) => post.id === postIds[3])?.distribution_analytics).toEqual([
+        {
+          analytics: {
+            likes: 0,
+            comments: 0,
+            shares: 0,
+            saves: null,
+            clicks: null,
+            views: 0,
+            impressions: 0,
+            reach: 0,
+          },
+          distribution_id: distributionIds[4],
+          platform: "youtube",
+        },
+      ]);
       await expect(Effect.runPromise(posts.getPost(env, beta, postIds[0]!))).rejects.toMatchObject({
         status: 404,
       });
@@ -1697,8 +1745,13 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     });
     await expect(Effect.runPromise(service.calendar(env, beta, start, end))).resolves.toEqual([]);
 
+    const analyticsService = createCoreApiService(
+      new ProviderRegistry()
+        .capabilities()
+        .map((capability) => ({ ...capability, analytics: capability.platform !== "youtube" })),
+    );
     const analytics = await Effect.runPromise(
-      service.summaryAnalytics(env, alpha, {
+      analyticsService.summaryAnalytics(env, alpha, {
         end,
         start,
       }),
@@ -1711,7 +1764,18 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       views: 1200,
     });
     expect(analytics.partial).toBe(true);
-    expect(analytics.unsupported_platforms).toHaveLength(5);
+    // Coverage is derived from the Platforms actually published in scope, not
+    // from every registered Platform. Alpha's only in-range publication is on
+    // YouTube, which this fixture deliberately marks analytics-unsupported.
+    expect(analytics.unsupported_platforms).toEqual(["youtube"]);
+    expect(analytics.by_platform).toEqual([
+      expect.objectContaining({
+        last_synced_at: "2026-07-18T13:00:00.000Z",
+        platform: "youtube",
+        post_count: 1,
+        views: 1200,
+      }),
+    ]);
 
     const inbox = await Effect.runPromise(
       service.inbox(env, alpha, {
@@ -1869,6 +1933,409 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         }),
       );
     }
+  });
+
+  it("ranks the analytics Post cohort by stored metrics with honest coverage", async () => {
+    const start = new Date("2026-10-01T00:00:00Z");
+    const end = new Date("2026-10-31T23:59:59Z");
+    // Mark only Instagram analytics-capable so coverage must exclude the
+    // YouTube destination even though the shipped registry declares support.
+    const analyticsService = createCoreApiService(
+      new ProviderRegistry().capabilities().map((capability) => ({
+        ...capability,
+        analytics: capability.platform === "instagram",
+      })),
+    );
+    const postIds = {
+      mixed: "4f000000-0000-4000-8000-000000000070",
+      unsupported: "4f000000-0000-4000-8000-000000000071",
+      outside: "4f000000-0000-4000-8000-000000000072",
+      awaiting: "4f000000-0000-4000-8000-000000000073",
+    };
+    const distributionIds = {
+      mixedFirst: "96000000-0000-4000-8000-000000000070",
+      mixedSecond: "96000000-0000-4000-8000-000000000071",
+      unsupported: "96000000-0000-4000-8000-000000000072",
+      outside: "96000000-0000-4000-8000-000000000073",
+      awaiting: "96000000-0000-4000-8000-000000000074",
+    };
+    const excerptText = `  Launch   notes\n\n${"x".repeat(160)}`;
+    const expectedExcerpt = ("Launch notes " + "x".repeat(160)).slice(0, 140);
+    try {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          for (const [key, postId] of Object.entries(postIds)) {
+            yield* insertFixturePost(client, {
+              postId,
+              title: key === "awaiting" ? "" : `Integration analytics ${key}`,
+            });
+          }
+          yield* client.query("UPDATE posts SET default_text = $2 WHERE id = $1", [
+            postIds.mixed,
+            excerptText,
+          ]);
+          // `event_at` prefers `scheduled_at`, so the mixed and unsupported rows
+          // would fall outside the calendar window while publishing inside it;
+          // the outside row is the inverse. published_at must decide both.
+          yield* client.query(
+            `INSERT INTO distributions
+               (id, org_id, brand_profile_id, post_id, platform, status,
+                published_at, scheduled_at, platform_post_id)
+             VALUES
+               ($1, $6, $7, $8, 'instagram', 'published',
+                '2026-10-05T12:00:00Z', '2026-09-01T12:00:00Z', 'integration-analytics-a'),
+               ($2, $6, $7, $8, 'instagram', 'published',
+                '2026-10-06T12:00:00Z', '2026-09-02T12:00:00Z', 'integration-analytics-b'),
+               ($3, $6, $7, $9, 'youtube', 'published',
+                '2026-10-07T12:00:00Z', '2026-08-01T12:00:00Z', 'integration-analytics-c'),
+               ($4, $6, $7, $10, 'tiktok', 'published',
+                '2026-11-15T12:00:00Z', '2026-10-10T12:00:00Z', 'integration-analytics-d'),
+               ($5, $6, $7, $11, 'instagram', 'published',
+                '2026-10-08T12:00:00Z', NULL, 'integration-analytics-e')`,
+            [
+              distributionIds.mixedFirst,
+              distributionIds.mixedSecond,
+              distributionIds.unsupported,
+              distributionIds.outside,
+              distributionIds.awaiting,
+              alpha.organizationId,
+              alphaBrandProfileId,
+              postIds.mixed,
+              postIds.unsupported,
+              postIds.outside,
+              postIds.awaiting,
+            ],
+          );
+          yield* client.query(
+            `INSERT INTO analytics_snapshots
+               (distribution_id, org_id, views, likes, comments, shares, snapshot_at)
+             VALUES
+               ($1, $5, 100, 20, 2, 1, '2026-10-20T13:00:00Z'),
+               ($2, $5, 50, 0, 1, 0, '2026-10-21T13:00:00Z'),
+               ($3, $5, 5, 20, 0, 0, '2026-10-20T13:00:00Z'),
+               ($4, $5, 777, 777, 777, 777, '2026-11-20T13:00:00Z'),
+               ($1, $5, 9999, 9999, 9999, 9999, '2026-11-05T13:00:00Z')`,
+            [
+              distributionIds.mixedFirst,
+              distributionIds.mixedSecond,
+              distributionIds.unsupported,
+              distributionIds.outside,
+              alpha.organizationId,
+            ],
+          );
+        }),
+      );
+
+      const summary = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { end, start }),
+      );
+      expect(summary.totals).toMatchObject({
+        comments: 3,
+        likes: 40,
+        post_count: 4,
+        shares: 1,
+        views: 155,
+      });
+      expect(summary.last_synced_at).toBe("2026-10-21T13:00:00.000Z");
+      expect(summary.unsupported_platforms).toEqual(["youtube"]);
+      expect(summary.partial).toBe(true);
+      expect(summary.by_platform).toEqual([
+        expect.objectContaining({
+          last_synced_at: "2026-10-21T13:00:00.000Z",
+          platform: "instagram",
+          post_count: 3,
+          views: 150,
+        }),
+        expect.objectContaining({
+          last_synced_at: "2026-10-20T13:00:00.000Z",
+          platform: "youtube",
+          post_count: 1,
+          views: 5,
+        }),
+      ]);
+
+      const instagramSummary = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { end, platform: "instagram", start }),
+      );
+      expect(instagramSummary.partial).toBe(false);
+      expect(instagramSummary.unsupported_platforms).toEqual([]);
+
+      const byMetric = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "views",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(byMetric.has_more).toBe(false);
+      expect(byMetric.posts.map((post) => post.post_id)).toEqual([
+        postIds.mixed,
+        postIds.unsupported,
+        postIds.awaiting,
+      ]);
+      expect(byMetric.posts[0]).toEqual({
+        comments: 3,
+        destination_count: 2,
+        synced_destination_count: 2,
+        excerpt: expectedExcerpt,
+        last_synced_at: "2026-10-21T13:00:00.000Z",
+        likes: 20,
+        platforms: ["instagram"],
+        post_id: postIds.mixed,
+        published_at: "2026-10-05T12:00:00.000Z",
+        shares: 1,
+        title: "Integration analytics mixed",
+        unsupported_platforms: [],
+        views: 150,
+      });
+      expect(byMetric.posts[1]).toMatchObject({
+        last_synced_at: "2026-10-20T13:00:00.000Z",
+        platforms: ["youtube"],
+        unsupported_platforms: ["youtube"],
+        views: 5,
+      });
+      expect(byMetric.posts[2]).toMatchObject({
+        destination_count: 1,
+        synced_destination_count: 0,
+        last_synced_at: null,
+        platforms: ["instagram"],
+        title: "",
+        views: 0,
+      });
+
+      // Equal likes fall back to latest publication first, then Post id.
+      const byLikes = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "likes",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(byLikes.posts.slice(0, 2).map((post) => post.post_id)).toEqual([
+        postIds.unsupported,
+        postIds.mixed,
+      ]);
+
+      const firstPage = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 2,
+          metric: "views",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(firstPage.has_more).toBe(true);
+      expect(firstPage.posts).toHaveLength(2);
+      const secondPage = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 2,
+          metric: "views",
+          offset: 2,
+          start,
+        }),
+      );
+      expect(secondPage.has_more).toBe(false);
+      expect(secondPage.posts.map((post) => post.post_id)).toEqual([postIds.awaiting]);
+
+      const instagramOnly = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "views",
+          offset: 0,
+          platform: "instagram",
+          start,
+        }),
+      );
+      expect(instagramOnly.posts.map((post) => post.post_id)).toEqual([
+        postIds.mixed,
+        postIds.awaiting,
+      ]);
+      expect(instagramOnly.posts.every((post) => post.unsupported_platforms.length === 0)).toBe(
+        true,
+      );
+
+      await expect(
+        Effect.runPromise(
+          analyticsService.analyticsPosts(env, alpha, {
+            brandProfileId: betaBrandProfileId,
+            end,
+            limit: 10,
+            metric: "views",
+            offset: 0,
+            start,
+          }),
+        ),
+      ).resolves.toMatchObject({ has_more: false, posts: [] });
+      await expect(
+        Effect.runPromise(
+          analyticsService.analyticsPosts(env, beta, {
+            end,
+            limit: 10,
+            metric: "views",
+            offset: 0,
+            start,
+          }),
+        ),
+      ).resolves.toMatchObject({ has_more: false, posts: [] });
+
+      await systemTransaction(env, (client) =>
+        client.query("UPDATE posts SET deleted_at = now() WHERE id = $1", [postIds.mixed]),
+      );
+      const afterPostDelete = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "views",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(afterPostDelete.posts.map((post) => post.post_id)).toEqual([
+        postIds.unsupported,
+        postIds.awaiting,
+      ]);
+
+      await systemTransaction(env, (client) =>
+        client.query(
+          `UPDATE brand_profiles
+           SET deleted_at = now(), purge_at = now() + INTERVAL '7 days'
+           WHERE id = $1`,
+          [alphaBrandProfileId],
+        ),
+      );
+      try {
+        const afterProfileDelete = await Effect.runPromise(
+          analyticsService.analyticsPosts(env, alpha, {
+            end,
+            limit: 10,
+            metric: "views",
+            offset: 0,
+            start,
+          }),
+        );
+        expect(afterProfileDelete.posts).toEqual([]);
+      } finally {
+        await systemTransaction(env, (client) =>
+          client.query(
+            "UPDATE brand_profiles SET deleted_at = NULL, purge_at = NULL WHERE id = $1",
+            [alphaBrandProfileId],
+          ),
+        );
+      }
+    } finally {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* client.query("DELETE FROM distributions WHERE post_id = ANY($1::uuid[])", [
+            Object.values(postIds),
+          ]);
+          yield* client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [
+            Object.values(postIds),
+          ]);
+        }),
+      );
+    }
+  });
+
+  it("treats every analytics-capable Provider as supported coverage", async () => {
+    const start = new Date("2026-12-01T00:00:00Z");
+    const end = new Date("2026-12-31T23:59:59Z");
+    const postId = "4f000000-0000-4000-8000-000000000080";
+    const platforms = ["facebook", "instagram", "threads", "tiktok", "youtube"] as const;
+    const distributionIds = platforms.map(
+      (_, index) => `97000000-0000-4000-8000-00000000008${index}`,
+    );
+    const analyticsService = createCoreApiService(
+      new ProviderRegistry()
+        .capabilities()
+        .map((capability) => ({ ...capability, analytics: true })),
+    );
+    try {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* insertFixturePost(client, {
+            postId,
+            title: "Integration all-provider analytics",
+          });
+          for (const [index, platform] of platforms.entries()) {
+            yield* client.query(
+              `INSERT INTO distributions
+                 (id, org_id, brand_profile_id, post_id, platform, status,
+                  published_at, platform_post_id)
+               VALUES ($1, $2, $3, $4, $5, 'published', '2026-12-10T12:00:00Z', $6)`,
+              [
+                distributionIds[index],
+                alpha.organizationId,
+                alphaBrandProfileId,
+                postId,
+                platform,
+                `integration-all-providers-${platform}`,
+              ],
+            );
+            yield* client.query(
+              `INSERT INTO analytics_snapshots
+                 (distribution_id, org_id, views, likes, comments, shares, snapshot_at)
+               VALUES ($1, $2, 10, 1, 2, 3, '2026-12-20T12:00:00Z')`,
+              [distributionIds[index], alpha.organizationId],
+            );
+          }
+        }),
+      );
+      const summary = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { end, start }),
+      );
+      expect(summary.partial).toBe(false);
+      expect(summary.unsupported_platforms).toEqual([]);
+      expect(summary.by_platform.map((row) => row.platform)).toEqual([...platforms]);
+      expect(summary.totals).toMatchObject({
+        comments: 10,
+        likes: 5,
+        post_count: 5,
+        shares: 15,
+        views: 50,
+      });
+      const ranked = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "views",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(ranked.posts).toHaveLength(1);
+      expect(ranked.posts[0]).toMatchObject({
+        destination_count: 5,
+        synced_destination_count: 5,
+        platforms: [...platforms],
+        unsupported_platforms: [],
+        views: 50,
+      });
+    } finally {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* client.query("DELETE FROM distributions WHERE post_id = $1", [postId]);
+          yield* client.query("DELETE FROM posts WHERE id = $1", [postId]);
+        }),
+      );
+    }
+  });
+
+  it("stores a publication instant for every published Distribution", async () => {
+    const rows = await systemTransaction(env, (client) =>
+      client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM distributions
+         WHERE status = 'published' AND published_at IS NULL`,
+      ),
+    );
+    expect(rows.rows[0]?.count).toBe("0");
   });
 
   it("returns not-found instead of exposing another tenant's distribution", async () => {
@@ -6659,9 +7126,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const revoke = vi.fn(async () => undefined);
     const registry = new ProviderRegistry();
     registry.register("youtube", {
-      capability: service
-        .platformCapabilities()
-        .find((capability) => capability.platform === "youtube")!,
+      capability: {
+        ...service.platformCapabilities().find((capability) => capability.platform === "youtube")!,
+        analytics: false,
+      },
       revoke,
       transferModes: [],
     });
@@ -6699,9 +7167,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
     const registry = new ProviderRegistry();
     registry.register("tiktok", {
-      capability: service
-        .platformCapabilities()
-        .find((capability) => capability.platform === "tiktok")!,
+      capability: {
+        ...service.platformCapabilities().find((capability) => capability.platform === "tiktok")!,
+        analytics: false,
+      },
       getPublicationRequirements: readRequirements,
       transferModes: [],
     });
@@ -7242,5 +7711,29 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       ),
     );
     expect(remaining.rows[0]?.count).toBe("0");
+  });
+  it("builds the multi-chart dashboard aggregates with delta series and format breakdowns", async () => {
+    const start = new Date("2026-07-01T00:00:00Z");
+    const end = new Date("2026-07-31T23:59:59Z");
+    const dashboard = await Effect.runPromise(
+      service.dashboardAnalytics(env, alpha, { end, start }),
+    );
+    expect(dashboard.range).toEqual({
+      end: end.toISOString(),
+      start: start.toISOString(),
+    });
+    expect(Array.isArray(dashboard.series)).toBe(true);
+    expect(Array.isArray(dashboard.best_times)).toBe(true);
+    expect(Array.isArray(dashboard.formats)).toBe(true);
+    expect(Array.isArray(dashboard.platforms)).toBe(true);
+    expect(Array.isArray(dashboard.accumulation)).toBe(true);
+    expect(dashboard.unavailable_metrics).toContain("saves");
+    expect(dashboard.unavailable_metrics).toContain("clicks");
+
+    // Format filtering narrows the cohort to matching attachment configurations.
+    const videosOnly = await Effect.runPromise(
+      service.dashboardAnalytics(env, alpha, { end, format: "video", start }),
+    );
+    expect(videosOnly.formats.every((row) => row.format === "video")).toBe(true);
   });
 });

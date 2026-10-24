@@ -12,7 +12,7 @@ import { WorkspaceProvider } from "@/context/workspace.context";
 import { createAssetUpload, type AssetUploadTask } from "@/lib/upload";
 import type { Asset, BrandProfile, PlatformAccount, Post } from "@/types";
 
-import { Composer } from "./composer";
+import { Composer, type ComposerProps } from "./composer";
 import { authClient } from "@/lib/auth-client";
 import { I18nProvider } from "@/lib/i18n";
 import { queryKeys } from "@/lib/queries";
@@ -64,6 +64,8 @@ function renderComposer(
     capabilities?: ReturnType<typeof platformCapability>[];
     /** Ordered real profile records used to exercise default owner selection. */
     brandProfiles?: BrandProfile[];
+    /** Composer-initiated workspace navigation, e.g. Manage Queues. */
+    onNavigate?: ComposerProps["onNavigate"];
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -85,7 +87,7 @@ function renderComposer(
       <I18nProvider>
         <AppAuthProvider>
           <WorkspaceProvider>
-            <Composer initialPostId={options.initialPostId} />
+            <Composer initialPostId={options.initialPostId} onNavigate={options.onNavigate} />
             <ProfileSwitchProbe profileId="profile-b" />
           </WorkspaceProvider>
         </AppAuthProvider>
@@ -114,6 +116,8 @@ afterEach(() => {
 
 const hydratedPost: Post = {
   analytics: null,
+  distribution_analytics: [],
+  queue_membership: null,
   id: "post-hydrated",
   org_id: "org-1",
   brand_profile_id: "profile-a",
@@ -190,33 +194,33 @@ const composerProfiles: BrandProfile[] = ["profile-a", "profile-b"].map((id, ind
 }));
 
 describe("Composer default ownership", () => {
-  it("selects the first profile for a new Post without replacing a later choice", async () => {
+  it("preselects the first profile for a new Post without changing the collection filter", async () => {
     renderComposer({ brandProfiles: composerProfiles });
     fireEvent.pointerDown(await screen.findByRole("button", { name: "Alpha Brand" }));
     expect(await screen.findByRole("menuitemcheckbox", { name: "Alpha Brand" })).toBeChecked();
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    // The composer owns its destination picker: the Posts collection it was
+    // opened over stays aggregate instead of re-filtering behind the drawer.
+    expect(screen.getByLabelText("Collection profile")).toHaveTextContent("all");
 
+    // A later collection switch must not replace the composition's own owner.
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
-    fireEvent.pointerDown(await screen.findByRole("button", { name: "Beta Brand" }));
-    expect(await screen.findByRole("menuitemcheckbox", { name: "Beta Brand" })).toBeChecked();
-    expect(screen.getByRole("menuitemcheckbox", { name: "Alpha Brand" })).not.toBeChecked();
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
-    await waitFor(() => expect(composerTextarea()).toBeEnabled());
-    fireEvent.change(composerTextarea(), { target: { value: "Draft for Beta" } });
-    expect(composerTextarea()).toHaveValue("Draft for Beta");
-    fireEvent.click(screen.getByRole("button", { name: "switch-all" }));
     await waitFor(() =>
-      expect(screen.getByLabelText("Collection profile")).toHaveTextContent("all"),
+      expect(screen.getByLabelText("Collection profile")).toHaveTextContent("profile-b"),
     );
+    fireEvent.pointerDown(await screen.findByRole("button", { name: "Alpha Brand" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Alpha Brand" })).toBeChecked();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Beta Brand" })).not.toBeChecked();
   });
 
-  it("uses a reopened Post's owner rather than assigning the first profile", async () => {
+  it("uses a reopened Post's owner without changing the collection filter", async () => {
     renderComposer({
       brandProfiles: composerProfiles,
       initialPostId: hydratedPost.id,
       post: { ...hydratedPost, brand_profile_id: "profile-b" },
     });
     await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    expect(screen.getByLabelText("Collection profile")).toHaveTextContent("all");
     fireEvent.pointerDown(await screen.findByRole("button", { name: "Beta Brand" }));
     expect(await screen.findByRole("menuitemcheckbox", { name: "Beta Brand" })).toBeChecked();
     expect(screen.getByRole("menuitemcheckbox", { name: "Alpha Brand" })).not.toBeChecked();
@@ -286,40 +290,41 @@ describe("Composer recovery consent", () => {
   });
 });
 
-describe("Composer identity switching", () => {
+describe("Composer and collection scope", () => {
   /**
-   * Regression: returning to the previous identity must run the same abandon
-   * pass as leaving it — the second switch is only skipped when the ref that
-   * tracks the last cancelled identity was never updated, which used to leave
-   * Brand Profile B's draft visible under Brand Profile A.
+   * The composition belongs to the composer, not the Posts collection filter:
+   * re-scoping the list behind an open drawer must neither discard the draft
+   * nor rebuild the composer from the new collection profile.
    */
-  it("clears composer state when switching profiles and back", async () => {
-    renderComposer();
+  it("keeps the composition when the collection profile changes", async () => {
+    renderComposer({ brandProfiles: composerProfiles });
     const textarea = composerTextarea();
     await waitFor(() => expect(textarea).toBeEnabled());
 
     fireEvent.change(textarea, { target: { value: "aggregate draft" } });
     fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
-    await waitFor(() => expect(textarea).toBeEnabled());
-    expect(textarea).toHaveValue("");
+    await waitFor(() =>
+      expect(screen.getByLabelText("Collection profile")).toHaveTextContent("profile-b"),
+    );
+    expect(textarea).toHaveValue("aggregate draft");
 
     fireEvent.change(textarea, { target: { value: "profile b draft" } });
     fireEvent.click(screen.getByRole("button", { name: "switch-all" }));
-    await waitFor(() => expect(textarea).toBeEnabled());
-    expect(textarea).not.toHaveValue("profile b draft");
+    await waitFor(() =>
+      expect(screen.getByLabelText("Collection profile")).toHaveTextContent("all"),
+    );
+    expect(textarea).toHaveValue("profile b draft");
   });
 
   /**
-   * Regression: leaving an identity abandons its in-flight uploads too — the
-   * transfer's cancel handle must be invoked and its row must not survive into
-   * the identity the composer returns to.
+   * A collection switch is not a composition identity switch, so it must not
+   * abandon the upload tasks the composer owns.
    */
-  it("cancels in-flight uploads when switching profiles and back", async () => {
-    renderComposer();
+  it("keeps an in-flight upload when the collection profile changes", async () => {
+    renderComposer({ brandProfiles: composerProfiles });
     await waitFor(() => expect(composerTextarea()).toBeEnabled());
-
-    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
-    await waitFor(() => expect(composerTextarea()).toBeEnabled());
+    // Wait for owner adoption: uploads need the composer's own Brand Profile.
+    await screen.findByRole("button", { name: "Alpha Brand" });
 
     fireEvent.change(screen.getByLabelText("Add Media"), {
       target: { files: [new File(["bytes"], "clip.mp4", { type: "video/mp4" })] },
@@ -327,9 +332,12 @@ describe("Composer identity switching", () => {
     expect(await screen.findByText(/clip\.mp4/)).toBeInTheDocument();
     const task = vi.mocked(createAssetUpload).mock.results[0].value as AssetUploadTask;
 
-    fireEvent.click(screen.getByRole("button", { name: "switch-all" }));
-    await waitFor(() => expect(task.cancel).toHaveBeenCalled());
-    expect(screen.queryByText(/clip\.mp4/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "switch-profile" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Collection profile")).toHaveTextContent("profile-b"),
+    );
+    expect(task.cancel).not.toHaveBeenCalled();
+    expect(screen.getByText(/clip\.mp4/)).toBeInTheDocument();
   });
 });
 
@@ -422,5 +430,68 @@ describe("Composer caption bound", () => {
 
     fireEvent.change(textarea, { target: { value: "x".repeat(20) } });
     expect(textarea).toHaveValue("x".repeat(20));
+  });
+});
+
+/**
+ * Navigation out of the composer unmounts it. Without functional-storage
+ * consent the recovery record is never written, so leaving from an in-composer
+ * link must not silently discard the creator's composition.
+ */
+describe("Composer leave guard", () => {
+  it("asks before leaving unsaved work that recovery cannot restore", async () => {
+    const onNavigate = vi.fn();
+    renderComposer({ onNavigate });
+
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.change(textarea, { target: { value: "Unsaved without functional storage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
+
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.getByText("Save this Post before leaving?")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard and continue" }));
+    expect(onNavigate).toHaveBeenCalledWith("queues", undefined);
+  });
+
+  it("keeps the composer open when the draft cannot be saved", async () => {
+    const onNavigate = vi.fn();
+    renderComposer({ onNavigate });
+
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.change(textarea, { target: { value: "draft" } });
+    fireEvent.change(textarea, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save draft and continue" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("Post must contain text content or at least one media item."),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves directly when functional recovery can restore the composition", async () => {
+    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    const onNavigate = vi.fn();
+    renderComposer({ onNavigate });
+
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.change(textarea, { target: { value: "Recoverable draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
+
+    expect(onNavigate).toHaveBeenCalledWith("queues", undefined);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 });

@@ -513,6 +513,25 @@ export default defineConfig({
         },
       },
       {
+        // EvilCharts registry source is vendored third-party implementation
+        // (recorded in THIRD_PARTY_NOTICES) and is reviewed as code, not
+        // rewritten into Meltiply's authored-style contract. Its SVG geometry,
+        // tooltip internals, and loading chrome legitimately need raw SVG
+        // colors and computed inline positions; authored feature code keeps
+        // the design-system rules. The analytics page still supplies the
+        // series token (var(--accent)) and translated labels.
+        files: ["frontend/app/src/components/evilcharts/**/*.{ts,tsx}"],
+        rules: {
+          "shadcn/no-arbitrary-values": "off",
+          "shadcn/no-inline-styles": "off",
+          "shadcn/no-raw-colors": "off",
+          "shadcn/no-unknown-classes": "off",
+          "shadcn/require-static-classes": "off",
+          "react-hooks-js/exhaustive-deps": "off",
+          "react-hooks-js/set-state-in-effect": "off",
+        },
+      },
+      {
         // Custom boundary policies (ported 1:1 into lint/boundaries-plugin.mjs):
         // adapter-only env/fetch/Effect.run access and shared UI control/color contracts.
         files: ["frontend/app/src/**/*.{ts,tsx}", "frontend/shared/**/*.{ts,tsx}"],

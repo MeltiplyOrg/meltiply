@@ -50,7 +50,11 @@
       "project": ["*.ts", "*.mjs"]
     }
   },
-  "ignore": [".agents/**", "scripts/cloudflare-local/k6/**"],
+  "ignore": [
+    ".agents/**",
+    "scripts/cloudflare-local/k6/**",
+    "frontend/app/src/components/evilcharts/**"
+  ],
   "ignoreDependencies": ["cloudflare", "typescript-language-server", "wrangler"],
   "ignoreBinaries": ["tofu"]
 }

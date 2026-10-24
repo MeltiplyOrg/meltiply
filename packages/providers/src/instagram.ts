@@ -597,6 +597,31 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
       };
     },
 
+    /**
+     * Reads the professional account's lifetime follower and media counters.
+     * Uses the same long-lived token as publishing; no Post identity is needed.
+     */
+    async getAccountAnalytics(context, credentials) {
+      const url = new URL(`/${apiVersion}/me`, apiOrigin);
+      url.searchParams.set("fields", "followers_count,follows_count,media_count");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const body = record(response.body);
+      const followers = metricValue(body?.followers_count);
+      const following = metricValue(body?.follows_count);
+      const posts = metricValue(body?.media_count);
+      if (followers === undefined) throw malformed();
+      return {
+        followers,
+        ...(following === undefined ? {} : { following }),
+        ...(posts === undefined ? {} : { posts }),
+        recordedAt: now().toISOString(),
+      };
+    },
+
     async listAnalytics(context, credentials, lookup, page) {
       validatePageInput("instagram", page);
       if (page.cursor) {

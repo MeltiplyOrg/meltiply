@@ -112,6 +112,7 @@ function ChannelAssignmentContent({ selectionId, onClose, onSuccess }: ChannelAs
     isSubmitting,
     confirmMutation,
     selectionId,
+
     onSuccess,
     t,
   ]);

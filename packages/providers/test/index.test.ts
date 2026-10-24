@@ -93,6 +93,40 @@ describe("ProviderRegistry", () => {
     expect(capabilities.every((capability) => !capability.publish)).toBe(true);
   });
 
+  it("keeps declared analytics support for stored snapshots while providers are unconfigured", () => {
+    const capabilities = new ProviderRegistry().capabilities();
+    expect(capabilities.every((capability) => capability.analytics)).toBe(true);
+  });
+
+  it("fails analytics coverage closed once any adapter is configured", () => {
+    const registry = new ProviderRegistry();
+    registry.register("instagram", {
+      capability: {
+        accepted_mime_types: [],
+        analytics: true,
+        asset_types: [],
+        comments: false,
+        connect_available: false,
+        max_caption_length: 2200,
+        max_file_size: null,
+        max_hashtags: 30,
+        max_media_count: null,
+        max_video_duration_sec: null,
+        min_media_count: 0,
+        multi_asset_types: [],
+        notes: [],
+        platform: "instagram",
+        publish: false,
+        reply: false,
+      },
+      listAnalytics: async () => ({ items: [] }),
+      transferModes: [],
+    });
+    const capabilities = registry.capabilities();
+    expect(capabilities.find(({ platform }) => platform === "instagram")?.analytics).toBe(true);
+    expect(capabilities.find(({ platform }) => platform === "tiktok")?.analytics).toBe(false);
+  });
+
   it("checks the declared caption boundary before a provider is activated", () => {
     const threads = new ProviderRegistry()
       .capabilities()
@@ -348,14 +382,14 @@ describe("ProviderRegistry", () => {
       APP_URL: "https://api.example.com/base",
     }).get("facebook")!;
     expect(facebook.capability).toMatchObject({
-      analytics: false,
+      analytics: true,
       asset_types: ["video"],
       comments: false,
       connect_available: true,
       publish: true,
       reply: false,
     });
-    expect(facebook.listAnalytics).toBeUndefined();
+    expect(facebook.listAnalytics).toBeTypeOf("function");
     expect(facebook.listComments).toBeUndefined();
     expect(facebook.reply).toBeUndefined();
     const authorizationUrl = new URL(
@@ -367,6 +401,9 @@ describe("ProviderRegistry", () => {
     );
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/api/v1/platforms/facebook/callback",
+    );
+    expect(authorizationUrl.searchParams.get("scope")).toBe(
+      "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights,business_management",
     );
   });
 
@@ -425,7 +462,7 @@ describe("ProviderRegistry", () => {
       TIKTOK_MEDIA_URL_PREFIX: "https://account.r2.cloudflarestorage.com/assets/",
     }).get("tiktok")!;
     expect(tiktok.capability).toMatchObject({
-      analytics: false,
+      analytics: true,
       asset_types: ["image", "video"],
       comments: false,
       connect_available: true,
@@ -433,7 +470,7 @@ describe("ProviderRegistry", () => {
       reply: false,
     });
     expect(tiktok.getPublicationRequirements).toBeTypeOf("function");
-    expect(tiktok.listAnalytics).toBeUndefined();
+    expect(tiktok.listAnalytics).toBeTypeOf("function");
     expect(tiktok.listComments).toBeUndefined();
     expect(tiktok.reply).toBeUndefined();
     const authorizationUrl = new URL(
@@ -446,8 +483,14 @@ describe("ProviderRegistry", () => {
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/api/v1/platforms/tiktok/callback",
     );
-    expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "user.info.basic,video.publish,user.info.profile",
+    expect(new Set(authorizationUrl.searchParams.get("scope")?.split(","))).toEqual(
+      new Set([
+        "user.info.basic",
+        "video.publish",
+        "user.info.profile",
+        "user.info.stats",
+        "video.list",
+      ]),
     );
   });
 
@@ -466,14 +509,14 @@ describe("ProviderRegistry", () => {
       YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-secret",
     }).get("youtube")!;
     expect(youtube.capability).toMatchObject({
-      analytics: false,
+      analytics: true,
       asset_types: ["video"],
       comments: false,
       connect_available: true,
       publish: true,
       reply: false,
     });
-    expect(youtube.listAnalytics).toBeUndefined();
+    expect(youtube.listAnalytics).toBeTypeOf("function");
     expect(youtube.listComments).toBeUndefined();
     expect(youtube.reply).toBeUndefined();
     const authorizationUrl = new URL(
@@ -487,7 +530,7 @@ describe("ProviderRegistry", () => {
       "https://api.example.com/api/v1/platforms/youtube/callback",
     );
     expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+      "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
     );
   });
 

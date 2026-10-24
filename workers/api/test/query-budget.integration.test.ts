@@ -269,7 +269,12 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       redirectUri: "https://query-budget.invalid/oauth/youtube/callback",
     }),
   );
-  const configuredCapabilities = providerRegistry.capabilities();
+  // Keep unsupported coverage inside the measured analytics summary path.
+  const configuredCapabilities = providerRegistry
+    .capabilities()
+    .map((capability) =>
+      capability.platform === "tiktok" ? { ...capability, analytics: false } : capability,
+    );
   const coreService = createCoreApiService(configuredCapabilities);
   const postService = createPostApiService(configuredCapabilities);
   const app = createApiApp({
@@ -935,6 +940,22 @@ describeIntegration("core API PostgreSQL query budgets", () => {
         },
       },
       {
+        maxRows: 5,
+        // series, combined breakdowns, follower baseline/daily, accumulation
+        maxStatements: 4,
+        minRows: 1,
+        name: "analytics dashboard",
+        run: async () => {
+          const body = await Effect.runPromise(
+            coreService.dashboardAnalytics(env, queryBudgetClaims, {
+              end,
+              start,
+            }),
+          );
+          return { body, rows: body.platforms.length };
+        },
+      },
+      {
         maxRows: 100,
         maxStatements: 1,
         minRows: 1,
@@ -1059,9 +1080,23 @@ describeIntegration("core API PostgreSQL query budgets", () => {
     // Maximum permitted span: exactly 366 days.
     const rangeEnd = new Date(rangeStart.getTime() + 366 * 24 * 60 * 60 * 1_000);
     const publishedCount = 400;
-    const zeroBucket = () => ({
+    /** Per-platform analytics bucket plus its latest snapshot instant. */
+    interface AnalyticsBucket {
+      comments: number;
+      impressions: number;
+      last_synced_at: string | null;
+      likes: number;
+      post_count: number;
+      reach: number;
+      shares: number;
+      views: number;
+      watch_time_sec: number;
+    }
+    type MetricTotals = Omit<AnalyticsBucket, "last_synced_at">;
+    const zeroBucket = (): AnalyticsBucket => ({
       comments: 0,
       impressions: 0,
+      last_synced_at: null as string | null,
       likes: 0,
       post_count: 0,
       reach: 0,
@@ -1313,6 +1348,12 @@ describeIntegration("core API PostgreSQL query budgets", () => {
           bucket.shares += item * 2;
           bucket.views += item * 2;
           bucket.watch_time_sec += item * 2;
+          const snapshotAt = new Date(
+            rangeStart.getTime() + item * 21 * 60 * 60 * 1_000 - 60 * 60 * 1_000,
+          ).toISOString();
+          if (bucket.last_synced_at === null || snapshotAt > bucket.last_synced_at) {
+            bucket.last_synced_at = snapshotAt;
+          }
         }
         expected.set(platform, bucket);
       }
@@ -1339,16 +1380,28 @@ describeIntegration("core API PostgreSQL query budgets", () => {
           ...expected.get(row.platform),
         });
       }
-      const totals = [...expected.values()].reduce((left, right) => ({
-        comments: left.comments + right.comments,
-        impressions: left.impressions + right.impressions,
-        likes: left.likes + right.likes,
-        post_count: left.post_count + right.post_count,
-        reach: left.reach + right.reach,
-        shares: left.shares + right.shares,
-        views: left.views + right.views,
-        watch_time_sec: left.watch_time_sec + right.watch_time_sec,
-      }));
+      const totals = [...expected.values()].reduce<MetricTotals>(
+        (left, right) => ({
+          comments: left.comments + right.comments,
+          impressions: left.impressions + right.impressions,
+          likes: left.likes + right.likes,
+          post_count: left.post_count + right.post_count,
+          reach: left.reach + right.reach,
+          shares: left.shares + right.shares,
+          views: left.views + right.views,
+          watch_time_sec: left.watch_time_sec + right.watch_time_sec,
+        }),
+        {
+          comments: 0,
+          impressions: 0,
+          likes: 0,
+          post_count: 0,
+          reach: 0,
+          shares: 0,
+          views: 0,
+          watch_time_sec: 0,
+        },
+      );
       expect(summary.totals).toEqual(totals);
       expect(summary.last_synced_at).toBe(
         new Date(rangeStart.getTime() + 8_378 * 60 * 60 * 1_000).toISOString(),

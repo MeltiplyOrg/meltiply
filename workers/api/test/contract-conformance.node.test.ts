@@ -1,4 +1,6 @@
 import type { JwtIdentity } from "@meltiply/auth";
+import type { components } from "@meltiply/contracts/schema";
+import type { PublishingQueueApiService } from "../src/publishing-queue-service";
 import { TokenCipher } from "@meltiply/secrets";
 import { ContractValidator } from "@meltiply/contracts/test-support";
 import { ProviderRegistry } from "@meltiply/providers";
@@ -389,6 +391,16 @@ const cases: ConformanceCase[] = [
   },
   {
     method: "GET",
+    operationId: "getAnalyticsDashboard",
+    path: "/api/v1/analytics/dashboard?start=2026-01-01T00%3A00%3A00Z&end=2026-01-31T00%3A00%3A00Z",
+  },
+  {
+    method: "GET",
+    operationId: "getAnalyticsPosts",
+    path: "/api/v1/analytics/posts?start=2026-01-01T00%3A00%3A00Z&end=2026-01-31T00%3A00%3A00Z",
+  },
+  {
+    method: "GET",
     operationId: "getDistributionAnalytics",
     path: "/api/v1/analytics/00000000-0000-4000-8000-000000000301",
   },
@@ -398,6 +410,32 @@ const cases: ConformanceCase[] = [
     operationId: "replyToComment",
     path: "/api/v1/inbox/00000000-0000-4000-8000-000000000401/reply",
   },
+  {
+    method: "GET",
+    operationId: "listQueues",
+    path: "/api/v1/queues?brand_profile_id=00000000-0000-4000-8000-000000000111",
+  },
+  { method: "POST", operationId: "createQueue", path: "/api/v1/queues" },
+  {
+    method: "GET",
+    operationId: "getQueue",
+    path: "/api/v1/queues/00000000-0000-4000-8000-000000000801",
+  },
+  {
+    method: "PATCH",
+    operationId: "updateQueue",
+    path: "/api/v1/queues/00000000-0000-4000-8000-000000000801",
+  },
+  {
+    method: "DELETE",
+    operationId: "deleteQueue",
+    path: "/api/v1/queues/00000000-0000-4000-8000-000000000801",
+  },
+  {
+    method: "DELETE",
+    operationId: "removePostFromQueue",
+    path: "/api/v1/queues/00000000-0000-4000-8000-000000000801/posts/00000000-0000-4000-8000-000000000701",
+  },
 ];
 
 function body<T>(operationId: string): T {
@@ -406,6 +444,8 @@ function body<T>(operationId: string): T {
 
 const coreService = {
   activeOrganization: () => Effect.succeed("20000000-0000-4000-8000-000000000001"),
+  analyticsPosts: () => Effect.succeed(body("getAnalyticsPosts")),
+  dashboardAnalytics: () => Effect.succeed(body("getAnalyticsDashboard")),
   calendar: () => Effect.succeed(body<{ events: unknown[] }>("listCalendarEvents").events),
   cancelDistribution: () =>
     Effect.succeed({
@@ -488,6 +528,28 @@ const postService = {
       value: body("updatePost"),
     }),
 } as PostApiService;
+
+// Schema-only responses isolate the public contract from the real PostgreSQL
+// behavior exercised by publishing-queues.integration.test.ts.
+const publishingQueueService: PublishingQueueApiService = {
+  list: () => Effect.succeed(body<components["schemas"]["QueueListResponse"]>("listQueues")),
+  get: () => Effect.succeed(body<components["schemas"]["PublishingQueue"]>("getQueue")),
+  mutate: (_env, _session, action) =>
+    Effect.succeed({
+      replayed: false,
+      value:
+        action === "delete"
+          ? null
+          : body<components["schemas"]["PublishingQueue"]>(
+              action === "create" ? "createQueue" : "updateQueue",
+            ),
+    }),
+  removePost: () =>
+    Effect.succeed({
+      replayed: false,
+      value: body<components["schemas"]["Post"]>("removePostFromQueue"),
+    }),
+};
 
 // Brand Profile conformance double: every lifecycle method returns the golden
 // fixture for its operation so route responses match the shared catalog.
@@ -834,6 +896,7 @@ const app = createApiApp({
       stitchAllowed: true,
     }),
   postService,
+  publishingQueueService,
   resolveActor: async () => actorFixture,
   revokeOAuthConnection: () => Effect.succeed(undefined),
   saveOAuthConnection: () => Effect.succeed(undefined),
@@ -905,6 +968,12 @@ function errorApp(status: number) {
     providerRegistry: new ProviderRegistry(),
     publicationRequirements: effectFailure,
     postService: throwingPosts,
+    publishingQueueService: {
+      list: effectFailure,
+      get: effectFailure,
+      mutate: effectFailure,
+      removePost: effectFailure,
+    },
     resolveActor: async () => actorFixture,
     revokeOAuthConnection: () => Effect.succeed(undefined),
     saveOAuthConnection: () => Effect.succeed(undefined),
@@ -915,6 +984,8 @@ function errorApp(status: number) {
 const errorPathOverrides: Record<string, string> = {
   getAnalyticsSummary:
     "/api/v1/analytics?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",
+  getAnalyticsPosts:
+    "/api/v1/analytics/posts?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",
   getReadiness: "/api/v1/ready",
   listCalendarEvents:
     "/api/v1/calendar?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",

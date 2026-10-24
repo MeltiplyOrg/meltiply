@@ -339,6 +339,8 @@ fixtures:
     targets: [*post_target]
     distributions: [*distribution]
     analytics: null
+    distribution_analytics: []
+    queue_membership: null
     created_at: 2026-01-01T00:00:00Z
     updated_at: 2026-01-01T00:00:00Z
   comment: &comment
@@ -1014,6 +1016,63 @@ operations:
     errors:
       - status: 404
         body: *not_found_error
+  listQueues:
+    success:
+      status: 200
+      body:
+        items: []
+        next_cursor: null
+    errors:
+      - status: 401
+        body: *authentication_error
+  createQueue:
+    request: &queue_request
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+      name: Weekly launches
+      timezone: America/New_York
+      slots: [{ weekday: 1, time: "09:30" }]
+    success:
+      status: 201
+      body: &publishing_queue
+        <<: *queue_request
+        id: 00000000-0000-4000-8000-000000000801
+        created_at: 2026-01-01T00:00:00Z
+        updated_at: 2026-01-01T00:00:00Z
+    errors:
+      - status: 422
+        body: *validation_error
+  getQueue:
+    success:
+      status: 200
+      body: *publishing_queue
+    errors:
+      - status: 404
+        body: *not_found_error
+  updateQueue:
+    request: *queue_request
+    success:
+      status: 200
+      body: *publishing_queue
+    errors:
+      - status: 403
+        body: *forbidden_error
+  deleteQueue:
+    request:
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+    success:
+      status: 204
+    errors:
+      - status: 409
+        body: *invalid_state_error
+  removePostFromQueue:
+    request:
+      brand_profile_id: 00000000-0000-4000-8000-000000000111
+    success:
+      status: 200
+      body: *post
+    errors:
+      - status: 409
+        body: *invalid_state_error
   listPosts:
     headers: *bearer_authorization
     success:
@@ -1299,9 +1358,144 @@ operations:
         by_platform:
           - <<: *metric_totals
             platform: tiktok
+            last_synced_at: 2026-01-01T01:00:00Z
         last_synced_at: 2026-01-01T01:00:00Z
         partial: false
         unsupported_platforms: []
+    errors:
+      - status: 400
+        body: *invalid_request_error
+  getAnalyticsPosts:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        posts:
+          - post_id: 00000000-0000-4000-8000-000000000701
+            title: Launch note
+            excerpt: The short version of the caption.
+            published_at: 2026-01-01T12:00:00Z
+            destination_count: 2
+            synced_destination_count: 2
+            platforms: [instagram, threads]
+            unsupported_platforms: []
+            last_synced_at: 2026-01-01T13:00:00Z
+            views: 1200
+            likes: 84
+            comments: 12
+            shares: 9
+          - post_id: 00000000-0000-4000-8000-000000000702
+            title: ""
+            excerpt: A text-only Post that has not synced yet.
+            published_at: 2026-01-02T12:00:00Z
+            destination_count: 1
+            synced_destination_count: 0
+            platforms: [tiktok]
+            unsupported_platforms: [tiktok]
+            last_synced_at: null
+            views: 0
+            likes: 0
+            comments: 0
+            shares: 0
+        has_more: false
+        limit: 10
+        offset: 0
+    errors:
+      - status: 400
+        body: *invalid_request_error
+  getAnalyticsDashboard:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body:
+        range:
+          start: 2026-01-01T00:00:00Z
+          end: 2026-01-31T23:59:59Z
+        series:
+          - date: 2026-01-01
+            platform: tiktok
+            posts: 1
+            views: 100
+            likes: 10
+            comments: 1
+            shares: 2
+            impressions: 120
+            reach: 90
+            last_synced_at: 2026-01-01T01:00:00Z
+        best_times:
+          - day_of_week: 1
+            hour: 14
+            posts: 1
+            avg_views: 100
+            avg_likes: 10
+            avg_comments: 1
+            avg_shares: 2
+            avg_engagement: 13
+        formats:
+          - format: video
+            posts: 1
+            views: 100
+            likes: 10
+            comments: 1
+            shares: 2
+            engagement: 13
+            avg_views: 100
+            avg_engagement: 13
+            last_synced_at: 2026-01-01T01:00:00Z
+        platforms:
+          - platform: tiktok
+            posts: 1
+            views: 100
+            likes: 10
+            comments: 1
+            shares: 2
+            impressions: 120
+            reach: 90
+            engagement_rate: 0.13
+            followers: 5000
+            follower_gain: 120
+            saves: null
+            clicks: null
+            last_synced_at: 2026-01-01T01:00:00Z
+        cohort:
+          range:
+            start: 2026-01-01T00:00:00Z
+            end: 2026-01-31T23:59:59Z
+          totals:
+            views: 100
+            likes: 10
+            comments: 1
+            shares: 2
+            watch_time_sec: 0
+            reach: 90
+            impressions: 120
+            post_count: 1
+          by_platform:
+            - platform: tiktok
+              views: 100
+              likes: 10
+              comments: 1
+              shares: 2
+              watch_time_sec: 0
+              reach: 90
+              impressions: 120
+              post_count: 1
+              last_synced_at: 2026-01-01T01:00:00Z
+          last_synced_at: 2026-01-01T01:00:00Z
+          partial: false
+          unsupported_platforms: []
+        followers:
+          - platform: tiktok
+            account_id: 00000000-0000-4000-8000-000000000201
+            account_name: Creator
+            points:
+              - captured_at: 2026-01-01T01:00:00Z
+                followers: 5000
+        accumulation:
+          - elapsed_hours: 1
+            avg_engagement: 13
+            observations: 1
+        unavailable_metrics: [saves, clicks]
     errors:
       - status: 400
         body: *invalid_request_error

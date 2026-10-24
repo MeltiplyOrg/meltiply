@@ -80,6 +80,10 @@ const queryResults = vi.hoisted(() => ({
     data: { posts: [] as Post[], has_more: false, limit: 100, offset: 0 },
     error: null,
     isLoading: false,
+    isFetching: false,
+    isFetchingNextPage: false,
+    isFetchNextPageError: false,
+    fetchNextPage: vi.fn().mockResolvedValue({ isError: false }),
     refetch: vi.fn(),
   },
   calendar: { data: [] as CalendarEvent[], error: null, isLoading: false, refetch: vi.fn() },
@@ -127,6 +131,7 @@ vi.mock("@/lib/theme", () => ({
   }),
 }));
 vi.mock("@/lib/queries", () => ({
+  POSTS_PAGE_SIZE: 60,
   useCreateBrandProfile: () => queryMutations.create,
   useDeleteBrandProfile: () => queryMutations.delete,
   useDisconnectPlatform: () => queryMutations.disconnect,
@@ -140,7 +145,11 @@ vi.mock("@/lib/queries", () => ({
   useDeletePost: () => queryMutations.deletePost,
   useDeletePostsBatch: () => queryMutations.deletePostsBatch,
   usePost: () => ({ data: undefined as Post | undefined, error: null, isLoading: false }),
-  usePosts: () => queryResults.posts,
+  usePosts: () => ({
+    ...queryResults.posts,
+    data: queryResults.posts.data.posts,
+    hasNextPage: queryResults.posts.data.has_more,
+  }),
   useRetryDistribution: () => queryMutations.retryDistribution,
   useUpdateScheduledDistribution: () => queryMutations.updateScheduledDistribution,
 }));
@@ -275,6 +284,10 @@ function resetScope() {
   queryMutations.retryDistribution.mutateAsync.mockReset();
   queryMutations.updateScheduledDistribution.mutateAsync.mockReset();
   queryResults.posts.data = { posts: [], has_more: false, limit: 100, offset: 0 };
+  queryResults.posts.isFetching = false;
+  queryResults.posts.isFetchingNextPage = false;
+  queryResults.posts.isFetchNextPageError = false;
+  queryResults.posts.fetchNextPage.mockReset().mockResolvedValue({ isError: false });
   queryResults.calendar.data = [];
 }
 
@@ -1219,22 +1232,90 @@ describe("Posts surfaces", () => {
     }
   });
 
-  /**
-   * Guards the published Post card in grid view: caption, status, and the
-   * row-level edit/delete affordances stay while no metric tile renders.
-   */
-  it("renders the published Post card without metric tiles in grid view", () => {
+  /** Grid counters preserve measured zero and never expose stale draft or absent measurements. */
+  it("distinguishes measured, untracked, and unpublished counters in grid cards", () => {
     seedPublishedPost();
+    const source = queryResults.posts.data.posts[0]!;
+    const measured: Post = {
+      ...source,
+      default_text: "Measured card",
+      distributions: source.distributions.map((distribution) => ({
+        ...distribution,
+        publication: null,
+      })),
+      analytics: {
+        likes: 0,
+        comments: null,
+        shares: 3,
+        views: 12_500,
+        saves: null,
+        clicks: null,
+        impressions: null,
+        reach: null,
+      },
+    };
+    queryResults.posts.data.posts = [
+      measured,
+      { ...measured, id: "unmeasured-card", default_text: "Unmeasured card", analytics: null },
+      {
+        ...measured,
+        id: "draft-card",
+        default_text: "Draft card",
+        status: "draft",
+        distributions: [],
+      },
+    ];
     renderPosts("grid");
 
-    expect(screen.getByText("Launch note")).toBeVisible();
-    expect(screen.getByText("published")).toBeVisible();
-    for (const label of METRIC_LABELS) {
-      expect(screen.queryByText(label), `${label} must not render`).not.toBeInTheDocument();
+    const cards = screen.getAllByRole("article");
+    const published = cards.find((card) => within(card).queryByText("Measured card"))!;
+    expect(within(published).getByTitle("Views: 12,500")).toHaveTextContent("12.5K");
+    expect(within(published).getByTitle("Likes: 0")).toHaveTextContent("0");
+    expect(within(published).getByTitle("Comments: Not measured")).toHaveTextContent("—");
+    expect(within(published).getByTitle("Shares: 3")).toHaveTextContent("3");
+    for (const caption of ["Unmeasured card", "Draft card"]) {
+      const card = cards.find((item) => within(item).queryByText(caption))!;
+      for (const label of ["Views", "Likes", "Comments", "Shares"]) {
+        expect(within(card).getByTitle(`${label}: Not measured`)).toHaveTextContent("—");
+      }
     }
-    expect(screen.getByRole("button", { name: "Edit post" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Delete post" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Create post" })).toBeVisible();
+  });
+
+  /** Cached pages preserve selection, while each Grid page stays bounded to 60 cards. */
+  it("pages the cached grid without refetching and resets the page when filters change", () => {
+    seedPublishedPost();
+    const source = queryResults.posts.data.posts[0]!;
+    queryResults.posts.data.posts = Array.from({ length: 61 }, (_, index) => ({
+      ...source,
+      id: `grid-post-${index}`,
+      default_text: `Grid item ${index}`,
+      status: "draft",
+      distributions: [],
+      targets: [],
+      attachments: [],
+    }));
+    renderPosts("grid");
+    expect(screen.getAllByRole("article")).toHaveLength(60);
+    const checkbox = within(screen.getAllByRole("article")[0]!).getByRole("checkbox", {
+      name: "Select post",
+    });
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(screen.getByText("Grid item 60")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+    expect(
+      within(screen.getAllByRole("article")[0]!).getByRole("checkbox", { name: "Select post" }),
+    ).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search posts..." }), {
+      target: { value: "Grid item 0" },
+    });
+    expect(screen.getByText("Page 1")).toBeVisible();
+    expect(screen.getByText("Grid item 0")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
+    expect(queryResults.posts.fetchNextPage).not.toHaveBeenCalled();
   });
 
   /**

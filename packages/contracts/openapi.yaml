@@ -57,6 +57,8 @@ tags:
       per-Channel target settings, and per-target Distribution outcomes.
       Drafts are Posts, not a separate asset type; scheduling or immediate
       publication keeps the same Post identity.
+  - name: Queues
+    description: Brand Profile-owned recurring publishing plans, distinct from transport queues.
   - name: Distributions
     description: |
       Per-Channel publication outcomes for a Post. Distributions are created
@@ -1632,6 +1634,28 @@ paths:
           schema:
             $ref: "#/components/schemas/PostStatus"
         - $ref: "#/components/parameters/BrandProfileId"
+        - name: queue_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: queue_assigned_from
+          in: query
+          description: |
+            Inclusive Queue assignment instant. Supply with queue_id and
+            queue_assigned_before; the UTC window must not exceed 63 days.
+          schema:
+            type: string
+            format: date-time
+        - name: queue_assigned_before
+          in: query
+          description: |
+            Exclusive Queue assignment instant. Supply with queue_id and
+            queue_assigned_from; filters immutable membership times, not
+            per-Channel delivery or Post creation times.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Paginated Posts in stable identity order.
@@ -1791,6 +1815,148 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/Unprocessable"
+  /queues:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Queues]
+      operationId: listQueues
+      summary: List active publishing Queues in a Brand Profile
+      parameters:
+        - name: brand_profile_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/Limit"
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Queues in stable identity order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueueListResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Queues]
+      operationId: createQueue
+      summary: Create a recurring publishing Queue as a Workspace Admin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateQueueRequest" }
+      responses:
+        "201":
+          description: Queue created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishingQueue" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /queues/{queue_id}:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+      - name: queue_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Queues]
+      operationId: getQueue
+      summary: Inspect an active publishing Queue
+      responses:
+        "200":
+          description: Queue configuration; list its Posts with the queue_id Post filter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishingQueue" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Queues]
+      operationId: updateQueue
+      summary: Edit a Queue without moving existing reservations
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateQueueRequest" }
+      responses:
+        "200":
+          description: Updated configuration; only new allocations use the changed slots.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishingQueue" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    delete:
+      tags: [Queues]
+      operationId: deleteQueue
+      summary: Retire a Queue after all reservations reach terminal outcomes
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeletePostRequest" }
+      responses:
+        "204": { description: Queue retired; historical membership remains readable on Posts. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /queues/{queue_id}/posts/{post_id}:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+      - $ref: "#/components/parameters/PostId"
+      - name: queue_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Queues]
+      operationId: removePostFromQueue
+      summary: Cancel editable pending outcomes and release a Queue reservation
+      description: |
+        Requires Editor or Admin. Refuses in-flight, published, failed, or
+        reconciliation-bound work. Does not move other reservations or delete
+        Post content, Assets, targets, or Provider settings.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeletePostRequest" }
+      responses:
+        "200":
+          description: Post with cancelled pending outcomes and no active Queue membership.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Post" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /posts/{post_id}/schedule:
     parameters:
       - $ref: "#/components/parameters/PostId"
@@ -2229,6 +2395,15 @@ paths:
           in: query
           schema:
             $ref: "#/components/schemas/Platform"
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsFormat"
         - $ref: "#/components/parameters/BrandProfileId"
       responses:
         "200":
@@ -2237,6 +2412,110 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnalyticsSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /analytics/posts:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Analytics]
+      operationId: getAnalyticsPosts
+      summary: List Posts ranked by stored analytics in a published cohort
+      description: |
+        Ranks Posts by their selected stored metric for Distributions published
+        inside the requested range. Each Distribution contributes its latest
+        analytics snapshot at or before the range end; a Distribution without a
+        snapshot still counts as a destination and contributes zero. Ordering is
+        the selected metric descending, then publication time descending, then
+        Post id ascending. Soft-deleted Posts and Brand Profiles are excluded.
+      parameters:
+        - $ref: "#/components/parameters/RequiredStart"
+        - $ref: "#/components/parameters/RequiredEnd"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/Platform"
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsFormat"
+        - $ref: "#/components/parameters/BrandProfileId"
+        - name: metric
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsMetric"
+            default: views
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Ranked Posts and pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsPostsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /analytics/dashboard:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Analytics]
+      operationId: getAnalyticsDashboard
+      summary: Read the analytics dashboard series and breakdowns
+      description: |
+        Returns stored-snapshot aggregates for the published cohort. Daily
+        series carry measured counter changes between consecutive snapshots,
+        not lifetime totals. Follower series come from account snapshots.
+        Metrics a Provider does not expose are returned as null or listed in
+        `unavailable_metrics`; they are never fabricated as zero. `cohort`
+        carries the same published-cohort summary as `GET /analytics`, so a
+        client can render KPIs, coverage, and the platform comparison from one
+        request.
+      parameters:
+        - $ref: "#/components/parameters/RequiredStart"
+        - $ref: "#/components/parameters/RequiredEnd"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/Platform"
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsFormat"
+        - $ref: "#/components/parameters/BrandProfileId"
+      responses:
+        "200":
+          description: Dashboard series and breakdowns.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsDashboard"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -4287,6 +4566,8 @@ components:
           targets,
           distributions,
           analytics,
+          distribution_analytics,
+          queue_membership,
           created_at,
           updated_at,
         ]
@@ -4345,6 +4626,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Distribution"
+        queue_membership:
+          oneOf:
+            - $ref: "#/components/schemas/QueueMembership"
+            - type: "null"
         analytics:
           oneOf:
             - $ref: "#/components/schemas/PostAnalytics"
@@ -4354,12 +4639,34 @@ components:
             read in the same scoped Post batch. Null when no published Channel
             has measurements. Missing measurements do not become zero; an
             explicitly measured zero remains zero. Unsupported metrics are null.
+        distribution_analytics:
+          type: array
+          description: |
+            Latest measured snapshot for each published Distribution, ordered
+            by Platform then Distribution id. Empty when no published Channel
+            has a stored snapshot. A Distribution with no snapshot is omitted,
+            so the inspector can distinguish awaiting sync from a measured
+            zero; this is the per-Channel source of `analytics`.
+          items:
+            $ref: "#/components/schemas/PostDistributionAnalytics"
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    PostDistributionAnalytics:
+      type: object
+      additionalProperties: false
+      required: [distribution_id, platform, analytics]
+      properties:
+        distribution_id:
+          type: string
+          format: uuid
+        platform:
+          $ref: "#/components/schemas/Platform"
+        analytics:
+          $ref: "#/components/schemas/PostAnalytics"
     PostAnalytics:
       type: object
       additionalProperties: false
@@ -4411,6 +4718,85 @@ components:
         offset:
           type: integer
           minimum: 0
+    QueueSlot:
+      type: object
+      additionalProperties: false
+      required: [weekday, time]
+      properties:
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Sunday is 0.
+        time:
+          type: string
+          pattern: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+    QueueMembership:
+      type: object
+      additionalProperties: false
+      required: [queue_id, queue_name, assigned_at]
+      properties:
+        queue_id: { type: string, format: uuid }
+        queue_name: { type: string }
+        assigned_at: { type: string, format: date-time }
+    PublishingQueue:
+      type: object
+      additionalProperties: false
+      required: [id, brand_profile_id, name, timezone, slots, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_profile_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        timezone: { type: string, minLength: 1, maxLength: 100 }
+        slots:
+          type: array
+          minItems: 1
+          maxItems: 168
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/QueueSlot" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    QueueListResponse:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/PublishingQueue" }
+        next_cursor: { type: [string, "null"], format: uuid }
+    CreateQueueRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id, name, timezone, slots]
+      properties:
+        brand_profile_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Supported IANA timezone identifier.
+        slots:
+          type: array
+          minItems: 1
+          maxItems: 168
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/QueueSlot" }
+    UpdateQueueRequest:
+      type: object
+      additionalProperties: false
+      required: [brand_profile_id]
+      properties:
+        brand_profile_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        timezone: { type: string, minLength: 1, maxLength: 100 }
+        slots:
+          type: array
+          minItems: 1
+          maxItems: 168
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/QueueSlot" }
     PostTargetInput:
       type: object
       additionalProperties: false
@@ -4538,12 +4924,20 @@ components:
     SchedulePostRequest:
       type: object
       additionalProperties: false
-      required: [brand_profile_id, scheduled_at]
+      required: [brand_profile_id]
+      oneOf:
+        - required: [scheduled_at]
+        - required: [queue_id]
       description: |
         Schedules or immediately publishes the Post to its target Channels.
         scheduled_at null means publish now; a timestamp schedules every
-        affected target. When targets is present it replaces the saved
-        target set and defines the pending-Distribution diff; when absent
+        affected target. Alternatively queue_id reserves the next free
+        strictly future weekly slot and applies its instant to every pending
+        target. Existing Queue membership retains its instant on repeat
+        enqueue; remove it before manual scheduling or Publish Now. DST gaps
+        skip nonexistent slots; overlaps use the later standard-time instant.
+        When targets is present it replaces the saved target set and defines
+        the pending-Distribution diff; when absent
         the saved Post targets are used. At least one effective target is
         required, and every affected target must pass Platform capability
         and attachment-readiness validation before any Distribution is
@@ -4558,6 +4952,9 @@ components:
         scheduled_at:
           type: [string, "null"]
           format: date-time
+        queue_id:
+          type: string
+          format: uuid
         targets:
           type: array
           minItems: 1
@@ -4964,7 +5361,18 @@ components:
       type: object
       additionalProperties: false
       required:
-        [platform, views, likes, comments, shares, watch_time_sec, reach, impressions, post_count]
+        [
+          platform,
+          views,
+          likes,
+          comments,
+          shares,
+          watch_time_sec,
+          reach,
+          impressions,
+          post_count,
+          last_synced_at,
+        ]
       properties:
         platform:
           $ref: "#/components/schemas/Platform"
@@ -4992,6 +5400,284 @@ components:
         post_count:
           type: integer
           minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            Latest snapshot time for this Platform's published Distributions in
+            scope, or null when no snapshot has been stored yet. Null
+            distinguishes an unsynced Platform from a measured zero.
+    AnalyticsFormat:
+      type: string
+      enum: [text, image, video, carousel]
+    AnalyticsDaySeries:
+      type: object
+      additionalProperties: false
+      required:
+        [date, platform, posts, views, likes, comments, shares, impressions, reach, last_synced_at]
+      properties:
+        date:
+          type: string
+          format: date
+        platform:
+          $ref: "#/components/schemas/Platform"
+        posts:
+          type: integer
+          minimum: 0
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        impressions:
+          type: integer
+          minimum: 0
+        reach:
+          type: integer
+          minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+    AnalyticsBestTime:
+      type: object
+      additionalProperties: false
+      required:
+        [day_of_week, hour, posts, avg_views, avg_likes, avg_comments, avg_shares, avg_engagement]
+      properties:
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        posts:
+          type: integer
+          minimum: 0
+        avg_views:
+          type: number
+          minimum: 0
+        avg_likes:
+          type: number
+          minimum: 0
+        avg_comments:
+          type: number
+          minimum: 0
+        avg_shares:
+          type: number
+          minimum: 0
+        avg_engagement:
+          type: number
+          minimum: 0
+    AnalyticsFormatBreakdown:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          format,
+          posts,
+          views,
+          likes,
+          comments,
+          shares,
+          engagement,
+          avg_views,
+          avg_engagement,
+          last_synced_at,
+        ]
+      properties:
+        format:
+          $ref: "#/components/schemas/AnalyticsFormat"
+        posts:
+          type: integer
+          minimum: 0
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        engagement:
+          type: integer
+          minimum: 0
+        avg_views:
+          type: number
+          minimum: 0
+        avg_engagement:
+          type: number
+          minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+    AnalyticsPlatformBreakdown:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          platform,
+          posts,
+          views,
+          likes,
+          comments,
+          shares,
+          impressions,
+          reach,
+          engagement_rate,
+          followers,
+          follower_gain,
+          saves,
+          clicks,
+          last_synced_at,
+        ]
+      properties:
+        platform:
+          $ref: "#/components/schemas/Platform"
+        posts:
+          type: integer
+          minimum: 0
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        impressions:
+          type: integer
+          minimum: 0
+        reach:
+          type: integer
+          minimum: 0
+        engagement_rate:
+          type: [number, "null"]
+          minimum: 0
+        followers:
+          type: [integer, "null"]
+          minimum: 0
+        follower_gain:
+          type: [integer, "null"]
+        saves:
+          type: [integer, "null"]
+          minimum: 0
+        clicks:
+          type: [integer, "null"]
+          minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+    AnalyticsFollowerPoint:
+      type: object
+      additionalProperties: false
+      required: [captured_at, followers]
+      properties:
+        captured_at:
+          type: string
+          format: date-time
+        followers:
+          type: integer
+          minimum: 0
+    AnalyticsFollowerSeries:
+      type: object
+      additionalProperties: false
+      required: [platform, account_id, account_name, points]
+      properties:
+        platform:
+          $ref: "#/components/schemas/Platform"
+        account_id:
+          type: string
+          format: uuid
+        account_name:
+          type: [string, "null"]
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsFollowerPoint"
+    AnalyticsAccumulationPoint:
+      type: object
+      additionalProperties: false
+      required: [elapsed_hours, avg_engagement, observations]
+      properties:
+        elapsed_hours:
+          type: integer
+          minimum: 0
+        avg_engagement:
+          type: number
+          minimum: 0
+        observations:
+          type: integer
+          minimum: 0
+    AnalyticsDashboard:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          range,
+          series,
+          best_times,
+          formats,
+          platforms,
+          cohort,
+          followers,
+          accumulation,
+          unavailable_metrics,
+        ]
+      properties:
+        range:
+          $ref: "#/components/schemas/AnalyticsRange"
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsDaySeries"
+        best_times:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsBestTime"
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsFormatBreakdown"
+        platforms:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsPlatformBreakdown"
+        cohort:
+          $ref: "#/components/schemas/AnalyticsSummary"
+        followers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsFollowerSeries"
+        accumulation:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsAccumulationPoint"
+        unavailable_metrics:
+          type: array
+          items:
+            type: string
+            enum: [saves, clicks, followers]
+    AnalyticsMetric:
+      type: string
+      enum: [views, likes, comments, shares]
+      description: Stored metric that ranks the Post analytics rows.
     AnalyticsSummary:
       type: object
       additionalProperties: false
@@ -5015,6 +5701,98 @@ components:
           uniqueItems: true
           items:
             $ref: "#/components/schemas/Platform"
+    AnalyticsPostRow:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          post_id,
+          title,
+          excerpt,
+          published_at,
+          destination_count,
+          synced_destination_count,
+          platforms,
+          unsupported_platforms,
+          last_synced_at,
+          views,
+          likes,
+          comments,
+          shares,
+        ]
+      properties:
+        post_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          description: Post title; may be empty when the composition has no title.
+        excerpt:
+          type: string
+          description: |
+            First 140 characters of the Post's default text with whitespace
+            collapsed; may be empty.
+        published_at:
+          type: string
+          format: date-time
+          description: Earliest publication time among the included Distributions.
+        destination_count:
+          type: integer
+          minimum: 0
+          description: Number of published Distributions included for this Post.
+        synced_destination_count:
+          type: integer
+          minimum: 0
+          description: |
+            Included Distributions with at least one snapshot at or before the
+            range end. Fewer than `destination_count` means some destinations
+            contribute zero until their first sync.
+        platforms:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Platform"
+        unsupported_platforms:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Platform"
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            Latest snapshot time among the Post's included Distributions, or
+            null when none has been stored yet.
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+    AnalyticsPostsResponse:
+      type: object
+      additionalProperties: false
+      required: [posts, has_more, limit, offset]
+      properties:
+        posts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsPostRow"
+        has_more:
+          type: boolean
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          minimum: 0
     AnalyticsSnapshot:
       type: object
       additionalProperties: false

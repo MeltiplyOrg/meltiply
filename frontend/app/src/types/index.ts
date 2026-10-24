@@ -201,6 +201,11 @@ export type PostTargetInput = components["schemas"]["PostTargetInput"];
 export type CreatePostInput = components["schemas"]["CreatePostRequest"];
 export type UpdatePostInput = components["schemas"]["UpdatePostRequest"];
 export type SchedulePostInput = components["schemas"]["SchedulePostRequest"];
+export type PublishingQueue = components["schemas"]["PublishingQueue"];
+export type QueueListResponse = components["schemas"]["QueueListResponse"];
+export type CreateQueueInput = components["schemas"]["CreateQueueRequest"];
+export type UpdateQueueInput = components["schemas"]["UpdateQueueRequest"];
+export type QueueQueryParams = NonNullable<operations["listQueues"]["parameters"]["query"]>;
 export type PostQueryParams = NonNullable<operations["listPosts"]["parameters"]["query"]>;
 
 export type Distribution = components["schemas"]["Distribution"];
@@ -215,5 +220,51 @@ export type CalendarResponse = components["schemas"]["CalendarResponse"];
 export type CalendarQueryParams = NonNullable<
   operations["listCalendarEvents"]["parameters"]["query"]
 >;
+
+/**
+ * One stored metric the Analytics page may rank and chart. The page never
+ * derives engagement rates or offers metrics the Providers do not report.
+ */
+export type AnalyticsMetric = components["schemas"]["AnalyticsMetric"];
+/** Range presets offered by the Analytics toolbar and URL state. */
+export type AnalyticsRangePreset = "7d" | "30d" | "90d" | "366d";
+export type PlatformMetrics = components["schemas"]["PlatformMetrics"];
+export type AnalyticsSummary = components["schemas"]["AnalyticsSummary"];
+export type AnalyticsPostRow = components["schemas"]["AnalyticsPostRow"];
+export type AnalyticsPostsResponse = components["schemas"]["AnalyticsPostsResponse"];
+export type AnalyticsDashboard = components["schemas"]["AnalyticsDashboard"];
+export type AnalyticsDashboardQueryParams = NonNullable<
+  operations["getAnalyticsDashboard"]["parameters"]["query"]
+>;
+export type AnalyticsDaySeries = components["schemas"]["AnalyticsDaySeries"];
+export type AnalyticsBestTime = components["schemas"]["AnalyticsBestTime"];
+export type AnalyticsFormat = components["schemas"]["AnalyticsFormat"];
+export type AnalyticsPlatformBreakdown = components["schemas"]["AnalyticsPlatformBreakdown"];
+export type AnalyticsSummaryQueryParams = NonNullable<
+  operations["getAnalyticsSummary"]["parameters"]["query"]
+>;
+export type AnalyticsPostsQueryParams = NonNullable<
+  operations["getAnalyticsPosts"]["parameters"]["query"]
+>;
+
+/**
+ * Cache-key inputs shared by both Analytics reads. `range` is part of the key
+ * but never sent to the API; the rolling start/end window is recomputed inside
+ * each query function so the key stays stable between renders.
+ */
+export interface AnalyticsScopeParams {
+  account_id?: string;
+  brand_profile_id?: string;
+  format?: AnalyticsFormat;
+  platform?: Platform;
+  range: AnalyticsRangePreset;
+}
+
+/** Analytics Post read inputs plus the ranking metric and requested page. */
+export interface AnalyticsPostScopeParams extends AnalyticsScopeParams {
+  limit: number;
+  metric: AnalyticsMetric;
+  offset?: number;
+}
 
 export type SignedUrlResponse = components["schemas"]["SignedUrlResponse"];

@@ -312,6 +312,19 @@ SET name = EXCLUDED.name,
     color = EXCLUDED.color,
     updated_at = now();
 
+-- LinkedIn is not a supported Provider — the roster, the API contract, and the
+-- frontend label map carry the five platforms above — so retire the accounts an
+-- earlier seed created with that slug. `platform` is part of the upsert key
+-- below, so a retired row would collide on its primary key instead of
+-- converging. Its Post targets cascade away and its Distributions are re-pointed
+-- by the upserts later in this transaction; both ids are re-inserted on
+-- supported platforms.
+DELETE FROM platform_accounts
+WHERE platform = 'linkedin'
+  AND id IN (
+    'e3000000-0000-4000-8000-000000000002',
+    'e4000000-0000-4000-8000-000000000002'
+  );
 -- Platform accounts. The canonical account (5000…0001) is pinned by the
 -- automation integration tests and stays in Alpha Studio. The e000… accounts
 -- live in the personal workspaces and cover connected/expired states so
@@ -386,6 +399,45 @@ VALUES
     '{"fixture": true}'::jsonb,
     'connected',
     now() - interval '3 days'
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'facebook',
+    'local-facebook-alpha',
+    'Alpha Page',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload', 'analytics'],
+    '{"fixture": true}'::jsonb,
+    'connected',
+    now() - interval '2 hours'
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'instagram',
+    'local-instagram-alpha',
+    NULL,
+    'local-only-not-a-provider-credential',
+    ARRAY['upload', 'analytics'],
+    '{"fixture": true}'::jsonb,
+    'connected',
+    now() - interval '1 day'
+  ),
+  (
+    'e3000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'threads',
+    'local-threads-alpha',
+    '@alpha.threads',
+    'local-only-not-a-provider-credential',
+    ARRAY['upload', 'analytics'],
+    '{"fixture": true}'::jsonb,
+    'expiring',
+    now() - interval '3 hours'
   )
 ON CONFLICT (platform, platform_user_id) DO UPDATE
 SET display_name = EXCLUDED.display_name,
@@ -753,6 +805,22 @@ VALUES
     'Nights campaign key visual',
     'Key visual for the Alpha Nights campaign.',
     'active'
+  ),
+  (
+    '48000000-0000-4000-8000-000000000007',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Analytics cohort launch',
+    'Two supported destinations published in the retained analytics cohort.',
+    'active'
+  ),
+  (
+    '48000000-0000-4000-8000-000000000008',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Analytics Facebook Reel',
+    'A Page Reel with lifetime insights in the analytics cohort.',
+    'active'
   )
 ON CONFLICT (id) DO UPDATE
 SET title = EXCLUDED.title,
@@ -900,6 +968,54 @@ VALUES
     NULL,
     'Provider rejected the publish request: rate limited.',
     1, 1, now() - interval '5 hours', 'provider_rate_limited', TRUE
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000006',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '48000000-0000-4000-8000-000000000007',
+    'e3000000-0000-4000-8000-000000000002',
+    'instagram',
+    'published',
+    NULL,
+    now() - interval '3 days',
+    'local-post-analytics-instagram',
+    'https://example.invalid/instagram/local-post-analytics-instagram',
+    'Analytics cohort launch',
+    NULL,
+    NULL, 0, 1, now() - interval '3 days', NULL, NULL
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000007',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '48000000-0000-4000-8000-000000000007',
+    'e3000000-0000-4000-8000-000000000003',
+    'threads',
+    'published',
+    NULL,
+    now() - interval '4 days',
+    'local-post-analytics-threads',
+    'https://example.invalid/threads/local-post-analytics-threads',
+    'Analytics cohort launch',
+    NULL,
+    NULL, 0, 1, now() - interval '4 days', NULL, NULL
+  ),
+  (
+    'f0000000-0000-4000-8000-000000000008',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    '48000000-0000-4000-8000-000000000008',
+    'e3000000-0000-4000-8000-000000000001',
+    'facebook',
+    'published',
+    NULL,
+    now() - interval '2 days',
+    'local-post-analytics-facebook',
+    'https://example.invalid/facebook/local-post-analytics-facebook',
+    'Analytics Facebook Reel',
+    NULL,
+    NULL, 0, 1, now() - interval '2 days', NULL, NULL
   )
 -- `post_id` and the frozen `attachment_ids` are re-asserted on reseed: a
 -- database seeded before the Post-owned-media cutover holds distribution rows
@@ -932,7 +1048,10 @@ VALUES
   ('aa000000-0000-4000-8000-000000000003', 'f0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 3910, 260, 34, 51, 12400, 3050, 4700, now() - interval '2 days'),
   ('aa000000-0000-4000-8000-000000000004', 'f0000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000005', 4525, 298, 41, 60, 14900, 3520, 5400, now() - interval '12 hours'),
   ('aa000000-0000-4000-8000-000000000005', 'f0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 820, 64, 7, 19, 1500, 700, 980, now() - interval '2 days'),
-  ('aa000000-0000-4000-8000-000000000006', 'f0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 1935, 148, 18, 44, 3900, 1600, 2200, now() - interval '8 hours')
+  ('aa000000-0000-4000-8000-000000000006', 'f0000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000005', 1935, 148, 18, 44, 3900, 1600, 2200, now() - interval '8 hours'),
+  ('aa000000-0000-4000-8000-000000000007', 'f0000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000005', 640, 42, 6, 8, 0, 0, 0, now() - interval '12 hours'),
+  ('aa000000-0000-4000-8000-000000000008', 'f0000000-0000-4000-8000-000000000007', '20000000-0000-4000-8000-000000000005', 310, 19, 4, 3, 0, 0, 0, now() - interval '10 hours'),
+  ('aa000000-0000-4000-8000-000000000009', 'f0000000-0000-4000-8000-000000000008', '20000000-0000-4000-8000-000000000005', 180, 12, 2, 1, 0, 0, 0, now() - interval '9 hours')
 ON CONFLICT (id) DO UPDATE
 SET views = EXCLUDED.views,
     likes = EXCLUDED.likes,
@@ -1135,7 +1254,7 @@ VALUES
     'local-instagram-alpha',
     NULL,
     'local-only-not-a-provider-credential',
-    ARRAY['upload'],
+    ARRAY['upload', 'analytics'],
     '{"fixture": true}'::jsonb,
     'connected',
     now() - interval '1 day',
@@ -1149,7 +1268,7 @@ VALUES
     'local-threads-alpha',
     '@alpha.threads',
     'local-only-not-a-provider-credential',
-    ARRAY['upload'],
+    ARRAY['upload', 'analytics'],
     '{"fixture": true}'::jsonb,
     'expiring',
     now() - interval '3 hours',
@@ -2309,8 +2428,473 @@ WHERE id IN (
   'd8000000-0000-4000-8000-000000000002'
 );
 
+-- Dense analytics campaign history. Only the personal demo workspace is touched;
+-- stable 4f1/f9/ae ids leave canonical integration fixtures and outcome examples
+-- alone. Thirty publications per Channel cover the last 90 days, with six older
+-- campaign checkpoints for the annual range. UTC hours vary across weekdays.
+-- A temporary roster keeps Posts, frozen media, targets, and metrics consistent.
+CREATE TEMP TABLE demo_analytics_campaign ON COMMIT DROP AS
+WITH channels (ordinal, account_id, campaign, multiplier) AS (
+  VALUES
+    (1, 'e3000000-0000-4000-8000-000000000001'::uuid, 'Community dispatch', 3),
+    (2, 'e3000000-0000-4000-8000-000000000002'::uuid, 'Studio journal', 5),
+    (3, 'e3000000-0000-4000-8000-000000000003'::uuid, 'Creator conversation', 2),
+    (4, 'e0000000-0000-4000-8000-000000000001'::uuid, 'Inside the launch', 12),
+    (5, 'e0000000-0000-4000-8000-000000000002'::uuid, 'One-minute workshop', 9),
+    (6, 'e3000000-0000-4000-8000-000000000006'::uuid, 'After-hours sessions', 7),
+    (7, 'e4000000-0000-4000-8000-000000000001'::uuid, 'Build log', 4)
+), publications AS (
+  SELECT channels.*, account.org_id, account.brand_profile_id, account.platform,
+    edition,
+    (ordinal * 100 + edition) AS fixture_number,
+    (date_trunc('day', now() AT TIME ZONE 'UTC')
+      - make_interval(days => CASE WHEN edition <= 30 THEN edition * 3 - 2
+                                  ELSE 90 + (edition - 30) * 30 END)
+      + make_interval(hours => 6 + ((edition * 7 + ordinal * 3) % 17)))
+      AT TIME ZONE 'UTC' AS published_at,
+    media.images, media.videos
+  FROM channels
+  JOIN platform_accounts AS account ON account.id = channels.account_id
+  CROSS JOIN generate_series(1, 36) AS editions(edition)
+  CROSS JOIN LATERAL (
+    SELECT
+      array_agg(asset.id ORDER BY asset.id) FILTER (WHERE asset.asset_type = 'image') AS images,
+      array_agg(asset.id ORDER BY asset.id) FILTER (WHERE asset.asset_type = 'video') AS videos
+    FROM assets AS asset
+    WHERE asset.brand_profile_id = account.brand_profile_id
+      AND asset.status = 'ready'
+  ) AS media
+)
+SELECT *,
+  ('4f100000-0000-4000-8000-' || lpad(fixture_number::text, 12, '0'))::uuid AS post_id,
+  ('f9000000-0000-4000-8000-' || lpad(fixture_number::text, 12, '0'))::uuid AS distribution_id,
+  campaign || ' · ' || lpad(edition::text, 2, '0') AS title,
+  CASE
+    WHEN platform IN ('youtube', 'tiktok') AND videos IS NOT NULL THEN videos[1:1]
+    WHEN edition % 4 = 0 THEN ARRAY[]::uuid[]
+    WHEN edition % 4 = 1 AND cardinality(images) >= 2 THEN images[1:2]
+    WHEN edition % 4 = 2 AND videos IS NOT NULL THEN videos[1:1]
+    ELSE images[1:1]
+  END AS attachment_ids,
+  -- Different campaign shapes: a rising baseline, repeatable weekly variation,
+  -- occasional breakout posts, and quieter releases, never random fixtures.
+  (multiplier * (160 + (37 - edition) * 19 + (edition * 83 % 470))
+    * CASE WHEN edition % 11 = 0 THEN 5 WHEN edition % 7 = 0 THEN 0.35 ELSE 1 END)::bigint
+    AS final_views
+FROM publications;
+
+INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status, created_at)
+SELECT post_id, org_id, brand_profile_id, title,
+  campaign || ': ' || (ARRAY[
+    'A practical look behind the scenes, with the details that made the difference.',
+    'Three lessons from this week. What would you like us to explore next?',
+    'From the first sketch to the finished release — the full story.',
+    'A small experiment, a surprising result, and the next idea to try.'
+  ])[1 + edition % 4], 'active', published_at - interval '2 days'
+FROM demo_analytics_campaign
+ON CONFLICT (id) DO UPDATE
+SET title = EXCLUDED.title, default_text = EXCLUDED.default_text,
+    created_at = EXCLUDED.created_at, updated_at = now();
+
+INSERT INTO post_attachments (post_id, asset_id, org_id, brand_profile_id, position)
+SELECT campaign.post_id, attachment.asset_id, campaign.org_id, campaign.brand_profile_id,
+  (attachment.position - 1)::integer
+FROM demo_analytics_campaign AS campaign
+CROSS JOIN LATERAL unnest(campaign.attachment_ids) WITH ORDINALITY AS attachment(asset_id, position)
+ON CONFLICT (post_id, position) DO UPDATE SET asset_id = EXCLUDED.asset_id;
+
+INSERT INTO post_targets (
+  post_id, platform_account_id, org_id, brand_profile_id, title_override, attachment_ids
+)
+SELECT post_id, account_id, org_id, brand_profile_id, title, attachment_ids
+FROM demo_analytics_campaign
+ON CONFLICT (post_id, platform_account_id) DO UPDATE
+SET title_override = EXCLUDED.title_override, attachment_ids = EXCLUDED.attachment_ids,
+    updated_at = now();
+
+INSERT INTO distributions (
+  id, org_id, brand_profile_id, post_id, platform_account_id, platform, status,
+  published_at, platform_post_id, platform_url, title_override, attachment_ids, created_at
+)
+SELECT distribution_id, org_id, brand_profile_id, post_id, account_id, platform, 'published',
+  published_at, 'local-campaign-' || fixture_number,
+  'https://example.invalid/' || platform || '/local-campaign-' || fixture_number,
+  title, attachment_ids,
+  -- Historical imports must not consume the current period's publishing budget.
+  LEAST(published_at - interval '2 days',
+    date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' - interval '1 second')
+FROM demo_analytics_campaign
+ON CONFLICT (id) DO UPDATE
+SET published_at = EXCLUDED.published_at, attachment_ids = EXCLUDED.attachment_ids,
+    title_override = EXCLUDED.title_override, created_at = EXCLUDED.created_at,
+    updated_at = now();
+
+-- Three cumulative readings per publication show early pickup, growth, and the
+-- latest stored outcome. Saves/clicks remain null: seeded Providers do not track
+-- them. Recent posts compress checkpoints into their elapsed lifetime so even
+-- a reseed just after UTC midnight keeps all three readings after publication.
+INSERT INTO analytics_snapshots (
+  id, distribution_id, org_id, views, likes, comments, shares,
+  watch_time_sec, reach, impressions, snapshot_at
+)
+SELECT
+  ('ae000000-0000-4000-8000-' || lpad((fixture_number * 10 + reading.step)::text, 12, '0'))::uuid,
+  distribution_id, org_id,
+  (final_views * reading.fraction)::bigint,
+  (final_views * reading.fraction * (0.035 + (edition % 5) * 0.009))::bigint,
+  (final_views * reading.fraction * (0.003 + (edition % 3) * 0.002))::bigint,
+  (final_views * reading.fraction * (0.006 + (edition % 4) * 0.003))::bigint,
+  CASE WHEN platform IN ('youtube', 'tiktok') THEN (final_views * reading.fraction * 12)::bigint ELSE 0 END,
+  CASE WHEN platform IN ('youtube', 'tiktok', 'facebook') THEN (final_views * reading.fraction * 0.78)::bigint ELSE 0 END,
+  CASE WHEN platform IN ('youtube', 'tiktok', 'facebook') THEN (final_views * reading.fraction * 1.24)::bigint ELSE 0 END,
+  published_at + LEAST(reading.elapsed, (now() - interval '1 hour' - published_at) * reading.fraction)
+FROM demo_analytics_campaign
+CROSS JOIN (VALUES
+  (1, 0.15, interval '1 hour'),
+  (2, 0.48, interval '6 hours'),
+  (3, 1.0, interval '2 days')
+) AS reading(step, fraction, elapsed)
+ON CONFLICT (id) DO UPDATE
+SET views = EXCLUDED.views, likes = EXCLUDED.likes, comments = EXCLUDED.comments,
+    shares = EXCLUDED.shares, watch_time_sec = EXCLUDED.watch_time_sec,
+    reach = EXCLUDED.reach, impressions = EXCLUDED.impressions,
+    snapshot_at = EXCLUDED.snapshot_at;
+
+-- Daily follower readings in the 90-day window, weekly before it. Stable ids
+-- converge on reseed; history uses UTC midnight and today's reading is current.
+-- Campaign bursts and small dips vary by Channel.
+INSERT INTO platform_account_snapshots
+  (id, platform_account_id, org_id, followers, following, posts, captured_at, raw_data)
+SELECT
+  ('af000000-0000-4000-8000-' || lpad((channel.ordinal * 1000 + day.age)::text, 12, '0'))::uuid,
+  channel.account_id, channel.org_id,
+  (CASE channel.platform
+    WHEN 'instagram' THEN 12400 WHEN 'threads' THEN 8300 WHEN 'facebook' THEN 5100
+    WHEN 'tiktok' THEN 21600 WHEN 'youtube' THEN 34800
+  END + channel.account_rank * 137
+    + (56 - day.age) * channel.weekly_gain / 7.0
+    + sin(day.age / 4.0 + channel.ordinal) * channel.weekly_gain * 0.3
+    + CASE WHEN day.age < 18 THEN (18 - day.age) * channel.weekly_gain * 0.15 ELSE 0 END)::bigint,
+  120 + channel.ordinal * 31,
+  400 + (365 - day.age) / 3,
+  CASE WHEN day.age = 0 THEN now()
+    ELSE (date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => day.age))
+      AT TIME ZONE 'UTC' END,
+  '{"fixture": true, "seed": "analytics-campaign"}'::jsonb
+FROM (
+  SELECT roster.*, row_number() OVER (ORDER BY account_id) AS account_rank,
+    CASE platform WHEN 'instagram' THEN 42 WHEN 'threads' THEN 31
+      WHEN 'facebook' THEN 18 WHEN 'tiktok' THEN 96 WHEN 'youtube' THEN 125 END AS weekly_gain
+  FROM (
+    SELECT DISTINCT ordinal, account_id, org_id, platform
+    FROM demo_analytics_campaign
+  ) AS roster
+) AS channel
+CROSS JOIN (
+  SELECT generate_series(0, 90) AS age
+  UNION ALL
+  SELECT generate_series(97, 363, 7) AS age
+) AS day
+ON CONFLICT (id) DO UPDATE
+SET followers = EXCLUDED.followers, following = EXCLUDED.following,
+    posts = EXCLUDED.posts, captured_at = EXCLUDED.captured_at,
+    raw_data = EXCLUDED.raw_data;
+
 -- Usage meters for the demo workspace are written once, by the `usage_records`
 -- insert above the demo set: an hourly reconciliation recomputes them from the
 -- rows in this file exactly, so the sweep never rewrites the demo counters.
+
+-- ---------------------------------------------------------------------------
+-- Publishing Queue demo set.
+--
+-- Four plans across Alpha's three demo Brand Profiles, each in a different
+-- IANA timezone, so Month and Week show real filled chips next to open plan
+-- slots. Every fourth occurrence of each plan is deliberately left unassigned
+-- (the dashed "open slot" state), the newest past occurrence keeps a failed
+-- Distribution, and four hand-scheduled Posts sit off-plan beside the slots.
+--
+-- Idempotent and self-pruning: the window is rebuilt from `now()` (weeks -2..+2)
+-- and rows that fall outside it are deleted first. Every demo row carries its
+-- own id prefix so cleanup can never touch real or test-fixture rows:
+--   5a… plans, 5c… queued Posts, 5d… memberships, 5e… Distributions,
+--   5f… off-plan Posts. Post/membership/Distribution ids are derived from
+--   (plan, instant), so re-seeding updates rather than duplicates them.
+--
+-- Distribution `created_at` stays in the previous billing period, exactly like
+-- the older half of the demo set, so current-period quota counters do not move
+-- and the workspace stays usable for new publishing.
+-- ---------------------------------------------------------------------------
+
+DELETE FROM publishing_queue_memberships
+WHERE left(id::text, 8) = '5d000000'
+  AND (assigned_at < now() - interval '5 weeks' OR assigned_at > now() + interval '5 weeks');
+
+DELETE FROM posts
+WHERE left(id::text, 8) IN ('5c000000', '5f000000')
+  AND NOT EXISTS (
+    SELECT 1
+    FROM publishing_queue_memberships membership
+    WHERE membership.post_id = posts.id
+      AND membership.released_at IS NULL
+  );
+
+INSERT INTO publishing_queues (id, org_id, brand_profile_id, name, timezone, slots)
+VALUES
+  (
+    '5a000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Morning momentum',
+    'Europe/Berlin',
+    '[{"weekday":1,"time":"09:00"},{"weekday":2,"time":"07:30"},{"weekday":3,"time":"09:00"},
+      {"weekday":4,"time":"07:30"},{"weekday":5,"time":"09:00"},{"weekday":6,"time":"10:00"}]'::jsonb
+  ),
+  (
+    '5a000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000001',
+    'Evening spotlight',
+    'America/New_York',
+    '[{"weekday":1,"time":"18:00"},{"weekday":2,"time":"18:00"},{"weekday":3,"time":"18:00"},
+      {"weekday":4,"time":"18:00"},{"weekday":5,"time":"17:00"},{"weekday":0,"time":"19:30"}]'::jsonb
+  ),
+  (
+    '5a000000-0000-4000-8000-000000000003',
+    '20000000-0000-4000-8000-000000000005',
+    'c4000000-0000-4000-8000-000000000001',
+    'Labs briefings',
+    'Asia/Kathmandu',
+    '[{"weekday":2,"time":"11:15"},{"weekday":4,"time":"11:15"},{"weekday":6,"time":"09:45"}]'::jsonb
+  ),
+  (
+    '5a000000-0000-4000-8000-000000000004',
+    '20000000-0000-4000-8000-000000000005',
+    'c0000000-0000-4000-8000-000000000002',
+    'Nights drops',
+    'Pacific/Auckland',
+    '[{"weekday":1,"time":"20:00"},{"weekday":4,"time":"20:00"},{"weekday":5,"time":"21:15"}]'::jsonb
+  )
+ON CONFLICT (id) DO UPDATE
+SET brand_profile_id = EXCLUDED.brand_profile_id,
+    name = EXCLUDED.name,
+    timezone = EXCLUDED.timezone,
+    slots = EXCLUDED.slots,
+    deleted_at = NULL,
+    updated_at = now();
+
+-- Each plan publishes through one connected account that already exists in the
+-- same Brand Profile; the composer therefore opens a real Channel outcome.
+CREATE TEMP TABLE queue_demo_accounts ON COMMIT DROP AS
+SELECT *
+FROM (
+  VALUES
+    ('5a000000-0000-4000-8000-000000000001'::uuid, 'e3000000-0000-4000-8000-000000000003'::uuid, 'threads'),
+    ('5a000000-0000-4000-8000-000000000002'::uuid, 'e3000000-0000-4000-8000-000000000001'::uuid, 'facebook'),
+    ('5a000000-0000-4000-8000-000000000003'::uuid, 'e4000000-0000-4000-8000-000000000001'::uuid, 'instagram'),
+    ('5a000000-0000-4000-8000-000000000004'::uuid, 'e3000000-0000-4000-8000-000000000005'::uuid, 'youtube')
+) AS accounts(queue_id, platform_account_id, platform);
+
+-- Every configured occurrence in the displayed window. `wall_time` is the civil
+-- wall clock in the plan's timezone; the round-trip predicate drops times that
+-- do not exist (a DST gap), matching allocation's skip rule exactly.
+CREATE TEMP TABLE queue_demo_filled ON COMMIT DROP AS
+SELECT occurrence.*,
+       row_number() OVER (PARTITION BY occurrence.queue_id ORDER BY occurrence.assigned_at) AS seq
+FROM (
+  SELECT plan.id AS queue_id,
+         plan.brand_profile_id,
+         plan.name AS queue_name,
+         plan.timezone,
+         slot.time AS slot_time,
+         wall.wall_time AT TIME ZONE plan.timezone AS assigned_at
+  FROM publishing_queues plan
+  CROSS JOIN LATERAL jsonb_to_recordset(plan.slots) AS slot(weekday integer, time text)
+  CROSS JOIN generate_series(-2, 2) AS weeks(week_offset)
+  CROSS JOIN LATERAL (
+    SELECT date_trunc('week', (now() AT TIME ZONE plan.timezone))::date
+           + ((slot.weekday + 6) % 7)
+           + (slot.time)::time
+           + make_interval(weeks => weeks.week_offset) AS wall_time
+  ) AS wall
+  WHERE left(plan.id::text, 8) = '5a000000'
+    AND ((wall.wall_time AT TIME ZONE plan.timezone) AT TIME ZONE plan.timezone) = wall.wall_time
+) AS occurrence;
+
+INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status, created_at, updated_at)
+SELECT ('5c000000-0000-4000-8000-' || substr(md5(fill.queue_id::text || ':' || fill.assigned_at::text), 1, 12))::uuid,
+       '20000000-0000-4000-8000-000000000005',
+       fill.brand_profile_id,
+       caption.title,
+       caption.title || E'\n\nQueued from ' || fill.queue_name || '.' || E'\n\n#creator #publishing',
+       'active',
+       least(now() - interval '1 hour', fill.assigned_at - interval '3 days'),
+       now()
+FROM queue_demo_filled fill
+CROSS JOIN LATERAL (
+  SELECT (ARRAY[
+    'Studio reset',
+    'Three hooks',
+    'Weekly planning',
+    'Editor sprint notes',
+    'Community Q&A',
+    'One idea, five cuts',
+    'Pre-publish checklist',
+    'Launch recap',
+    'Scheduling notes',
+    'First-month lessons'
+  ])[1 + (abs(hashtext(fill.queue_id::text || fill.assigned_at::text)::bigint) % 10)] AS title
+) AS caption
+WHERE fill.seq % 4 <> 3
+ON CONFLICT (id) DO UPDATE
+SET title = EXCLUDED.title,
+    default_text = EXCLUDED.default_text,
+    status = 'active',
+    deleted_at = NULL,
+    updated_at = now();
+
+INSERT INTO publishing_queue_memberships (
+  id, org_id, brand_profile_id, queue_id, post_id, queue_name, assigned_at
+)
+SELECT ('5d000000-0000-4000-8000-' || substr(md5(fill.queue_id::text || ':' || fill.assigned_at::text), 1, 12))::uuid,
+       '20000000-0000-4000-8000-000000000005',
+       fill.brand_profile_id,
+       fill.queue_id,
+       ('5c000000-0000-4000-8000-' || substr(md5(fill.queue_id::text || ':' || fill.assigned_at::text), 1, 12))::uuid,
+       fill.queue_name,
+       fill.assigned_at
+FROM queue_demo_filled fill
+WHERE fill.seq % 4 <> 3
+ON CONFLICT (id) DO UPDATE
+SET assigned_at = EXCLUDED.assigned_at,
+    queue_name = EXCLUDED.queue_name,
+    released_at = NULL;
+
+INSERT INTO distributions (
+  id, org_id, brand_profile_id, post_id, platform_account_id, platform, status,
+  scheduled_at, published_at, platform_post_id, platform_url, attachment_ids,
+  error_message, retry_count, attempt_count, last_attempt_at, created_at, updated_at
+)
+SELECT ('5e000000-0000-4000-8000-' || substr(md5(fill.queue_id::text || ':' || fill.assigned_at::text), 1, 12))::uuid,
+       '20000000-0000-4000-8000-000000000005',
+       fill.brand_profile_id,
+       ('5c000000-0000-4000-8000-' || substr(md5(fill.queue_id::text || ':' || fill.assigned_at::text), 1, 12))::uuid,
+       account.platform_account_id,
+       account.platform,
+       CASE WHEN fill.assigned_at <= now() THEN 'published' ELSE 'scheduled' END,
+       fill.assigned_at,
+       CASE WHEN fill.assigned_at <= now() THEN fill.assigned_at + interval '2 minutes' END,
+       CASE WHEN fill.assigned_at <= now()
+            THEN 'demo-' || substr(md5(fill.queue_id::text || ':' || fill.assigned_at::text), 1, 10) END,
+       CASE WHEN fill.assigned_at <= now()
+            THEN 'https://example.invalid/demo/' || substr(md5(fill.queue_id::text || ':' || fill.assigned_at::text), 1, 10) END,
+       NULL,
+       NULL,
+       0,
+       CASE WHEN fill.assigned_at <= now() THEN 1 ELSE 0 END,
+       CASE WHEN fill.assigned_at <= now() THEN fill.assigned_at + interval '2 minutes' END,
+       now() - interval '40 days',
+       now()
+FROM queue_demo_filled fill
+JOIN queue_demo_accounts account ON account.queue_id = fill.queue_id
+WHERE fill.seq % 4 <> 3
+ON CONFLICT (id) DO UPDATE
+SET status = EXCLUDED.status,
+    scheduled_at = EXCLUDED.scheduled_at,
+    published_at = EXCLUDED.published_at,
+    platform_post_id = EXCLUDED.platform_post_id,
+    platform_url = EXCLUDED.platform_url,
+    attempt_count = EXCLUDED.attempt_count,
+    last_attempt_at = EXCLUDED.last_attempt_at,
+    updated_at = now();
+
+-- The newest elapsed occurrence of each plan failed at the Provider, so Week
+-- shows the failure treatment beside scheduled and published chips.
+UPDATE distributions AS distribution
+SET status = 'failed',
+    published_at = NULL,
+    platform_post_id = NULL,
+    platform_url = NULL,
+    error_message = 'Provider rejected the publish request: rate limited.',
+    failure_code = 'provider_rate_limited',
+    failure_retryable = TRUE,
+    attempt_count = 2,
+    updated_at = now()
+FROM publishing_queue_memberships AS membership
+WHERE membership.post_id = distribution.post_id
+  AND left(distribution.id::text, 8) = '5e000000'
+  AND distribution.status = 'published'
+  AND membership.released_at IS NULL
+  AND membership.assigned_at = (
+    SELECT max(elapsed.assigned_at)
+    FROM publishing_queue_memberships AS elapsed
+    WHERE elapsed.queue_id = membership.queue_id
+      AND elapsed.released_at IS NULL
+      AND elapsed.assigned_at < now()
+  );
+
+-- Hand-scheduled Posts with no membership: they sit off-plan beside the slots,
+-- which is why Month interleaves them by time rather than hiding them.
+CREATE TEMP TABLE queue_demo_off_plan ON COMMIT DROP AS
+SELECT *
+FROM (
+  VALUES
+    ('01'::text, 'c0000000-0000-4000-8000-000000000001'::uuid,
+     'e3000000-0000-4000-8000-000000000003'::uuid, 'threads'::text,
+     'Off-plan: a midweek teardown'::text, interval '2 days 13 hours 15 minutes'),
+    ('02', 'c0000000-0000-4000-8000-000000000002',
+     'e3000000-0000-4000-8000-000000000006', 'tiktok',
+     'Off-plan: the clip everyone asked for', interval '4 days 21 hours 45 minutes'),
+    ('03', 'c4000000-0000-4000-8000-000000000001',
+     'e4000000-0000-4000-8000-000000000002', 'linkedin',
+     'Off-plan: a short note on craft', interval '6 days 8 hours 15 minutes'),
+    ('04', 'c0000000-0000-4000-8000-000000000001',
+     'e3000000-0000-4000-8000-000000000001', 'facebook',
+     'Off-plan: the long-form recap', interval '9 days 16 hours 45 minutes')
+) AS off_plan(slug, brand_profile_id, platform_account_id, platform, title, scheduled_after);
+
+INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status, created_at, updated_at)
+SELECT ('5f000000-0000-4000-8000-0000000000' || off_plan.slug)::uuid,
+       '20000000-0000-4000-8000-000000000005',
+       off_plan.brand_profile_id,
+       off_plan.title,
+       off_plan.title || E'\n\nScheduled by hand, outside the weekly plan.',
+       'active',
+       now() - interval '40 days',
+       now()
+FROM queue_demo_off_plan off_plan
+ON CONFLICT (id) DO UPDATE
+SET title = EXCLUDED.title,
+    default_text = EXCLUDED.default_text,
+    status = 'active',
+    deleted_at = NULL,
+    updated_at = now();
+
+INSERT INTO distributions (
+  id, org_id, brand_profile_id, post_id, platform_account_id, platform, status,
+  scheduled_at, published_at, attachment_ids, error_message, retry_count,
+  attempt_count, last_attempt_at, created_at, updated_at
+)
+SELECT ('5e000000-0000-4000-8000-0000000000' || off_plan.slug)::uuid,
+       '20000000-0000-4000-8000-000000000005',
+       off_plan.brand_profile_id,
+       ('5f000000-0000-4000-8000-0000000000' || off_plan.slug)::uuid,
+       off_plan.platform_account_id,
+       off_plan.platform,
+       'scheduled',
+       date_trunc('hour', now()) + off_plan.scheduled_after,
+       NULL,
+       NULL,
+       NULL,
+       0,
+       0,
+       NULL,
+       now() - interval '40 days',
+       now()
+FROM queue_demo_off_plan off_plan
+ON CONFLICT (id) DO UPDATE
+SET status = 'scheduled',
+    scheduled_at = EXCLUDED.scheduled_at,
+    published_at = NULL,
+    updated_at = now();
 
 COMMIT;

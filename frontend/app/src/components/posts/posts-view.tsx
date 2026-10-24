@@ -13,6 +13,7 @@ import {
   useDeletePost,
   useDeletePostsBatch,
   usePosts,
+  POSTS_PAGE_SIZE,
 } from "@/lib/queries";
 import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Trans, useI18n } from "@/lib/i18n";
@@ -30,11 +31,12 @@ import {
   CenterAlertDialogAction,
   CenterAlertDialogCancel,
 } from "@meltiply/ui/center-alert-dialog";
-import type { ChannelIntegration, MediaItem } from "@/api/types";
-import type { CalendarEvent, Distribution, Post, PostQueryParams, PostTarget } from "@/types";
+import type { ChannelIntegration } from "@/api/types";
+import type { CalendarEvent, Post, PostQueryParams } from "@/types";
 
 import { PostTableView } from "./post-table-view";
 import { PostCalendarGridView } from "./post-calendar-grid-view";
+import { toPostRow } from "./post-row";
 import { PostGridCardView } from "./post-grid-card-view";
 import type { PostGroupBy } from "./post-groups";
 import { CalendarDateDetailDialog } from "./calendar-date-detail-dialog";
@@ -46,12 +48,8 @@ import {
   filterAndSortPosts,
   isPublishedDistributionStatus,
   prunePostSelection,
-  resolveChannelMedia,
-  resolveChannelText,
   resolveCancellableDistributionIds,
-  resolvePostDisplayDate,
   resolveRowCaption,
-  summarizeChannelStatuses,
   toLocalDateKey,
 } from "./posts-helpers";
 import type {
@@ -60,130 +58,19 @@ import type {
   PostSortKey,
   PostsViewProps,
   CalendarDayCell,
-  PostDetailItem,
   PostRow,
   PostDestructiveRequest,
   PostSelectionEntry,
-  ChannelMediaItem,
 } from "./types";
-
-/** Page size for the Post list, which every view mode projects into rows. */
-const POSTS_PAGE_LIMIT = 100;
 
 /** Workspace channel integrations keyed by Platform account id. */
 type IntegrationById = Map<string, ChannelIntegration>;
-
-/**
- * Resolves the display instant for a distribution: the scheduled slot when set,
- * otherwise the actual publish time, otherwise creation time.
- */
-function distributionDate(d: Distribution): string {
-  return d.scheduled_at ?? d.published_at ?? d.created_at;
-}
 
 /**
  * Resolves the display instant for a calendar event the same way distributions do.
  */
 function calendarEventDate(e: CalendarEvent): string {
   return e.scheduled_at ?? e.published_at ?? e.updated_at;
-}
-
-/**
- * Projects one Channel's resolved media into the preview image list, skipping
- * items with no renderable live attachment — including frozen media detached
- * from the Post, which is never replaced by media the Channel did not publish.
- */
-function toPreviewImages(media: ChannelMediaItem[]): MediaItem[] {
-  const images: MediaItem[] = [];
-  for (const item of media) {
-    const path = item.attachment?.asset.thumbnail_url ?? item.attachment?.asset.download_url;
-    if (path) images.push({ id: item.assetId, path });
-  }
-  return images;
-}
-
-/**
- * Projects one Channel of a Post — a saved per-account target and its
- * independent outcome — into a view-model entry.
- *
- * A Channel with no outcome yet still renders: a saved draft target reads as
- * `draft`, and an active Post's unscheduled target reads as `scheduled` pending
- * work, because the aggregate status must come from outcomes without hiding a
- * destination the creator already chose. Once a Provider attempt claimed the
- * outcome, its caption and media come from the frozen publication, so later
- * Post or target edits never rewrite what this Channel displays as delivered.
- */
-function toChannelEntry(
-  post: Post,
-  target: PostTarget | undefined,
-  distribution: Distribution | undefined,
-  integrationById: IntegrationById,
-): PostDetailItem {
-  const accountId = distribution?.platform_account_id ?? target?.platform_account_id ?? null;
-  const media = resolveChannelMedia(post, target, distribution);
-  const caption = resolveChannelText(post, distribution ?? target ?? {}, distribution?.publication);
-  return {
-    id: distribution?.id ?? `target:${accountId ?? post.id}`,
-    postId: post.id,
-    publishDate: distribution ? distributionDate(distribution) : resolvePostDisplayDate(post),
-    status: distribution?.status ?? (post.status === "draft" ? "draft" : "scheduled"),
-    errorMessage: distribution?.failure?.message ?? null,
-    integration: accountId ? integrationById.get(accountId) : undefined,
-    content: [{ content: caption, image: toPreviewImages(media) }],
-    attachments: media,
-    distribution,
-    target,
-  };
-}
-
-/**
- * Projects a durable Post into one collection row, so Table, Grid, Calendar,
- * and Details agree on identity. Channel entries follow the Post's saved target
- * order first and then any outcome without a target, and the row's display
- * status is aggregated from those outcomes only — never from `Post.status`,
- * which is a lifecycle marker rather than a global success flag.
- *
- * @param post - Durable Post with ordered attachments, targets, and outcomes.
- * @param integrationById - Workspace channel integrations keyed by Platform account id.
- * @returns One Post row whose `id` is `post.id`.
- */
-function toPostRow(post: Post, integrationById: IntegrationById): PostRow {
-  const channels: PostDetailItem[] = [];
-  const seen = new Set<string>();
-  const distributionByAccount = new Map<string, Distribution>();
-  for (const distribution of post.distributions) {
-    const accountId = distribution.platform_account_id;
-    if (accountId && !distributionByAccount.has(accountId)) {
-      distributionByAccount.set(accountId, distribution);
-    }
-  }
-  for (const target of post.targets) {
-    if (seen.has(target.platform_account_id)) continue;
-    seen.add(target.platform_account_id);
-    const distribution = distributionByAccount.get(target.platform_account_id);
-    channels.push(toChannelEntry(post, target, distribution, integrationById));
-  }
-  for (const distribution of post.distributions) {
-    if (distribution.platform_account_id && seen.has(distribution.platform_account_id)) continue;
-    channels.push(toChannelEntry(post, undefined, distribution, integrationById));
-  }
-  return {
-    id: post.id,
-    date: resolvePostDisplayDate(post),
-    // Only real outcomes drive the aggregate: a saved target that has not been
-    // scheduled yet has no outcome to summarize, and an active Post with only
-    // such targets reads as pending work.
-    status:
-      post.status === "draft"
-        ? "draft"
-        : summarizeChannelStatuses(
-            channels.filter((c) => c.distribution !== undefined).map((c) => c.status),
-            "scheduled",
-          ),
-    channels,
-    brandProfileId: post.brand_profile_id,
-    post,
-  };
 }
 
 /**
@@ -244,8 +131,8 @@ function toCalendarRows(
 
 /**
  * Unified Posts page over one durable Post pipeline and three real collection
- * views. `usePosts` supplies each Post, its ordered attachments, targets, and
- * independent Channel outcomes; `useCalendar` folds events by Post identity
+ * views. `usePosts` supplies explicit cached pages of at most 60 Posts with
+ * ordered attachments, targets, and Channel outcomes; `useCalendar` folds events
  * without merging or splitting compositions. Status filters derive from those
  * outcomes; provider status is observed, never locally edited.
  *
@@ -317,6 +204,24 @@ export function PostsView({
   const [columns, setColumns] = useState<number>(4);
   const [groupBy, setGroupBy] = useState<PostGroupBy>("status");
   const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<string>>(new Set());
+  const [requestedGridPage, setRequestedGridPage] = useState(0);
+  // Presentation filters operate on loaded Posts. A changed result set starts
+  // at its first grid page without discarding the cached server pages.
+  const gridCriteria = JSON.stringify([
+    scope.workspaceId,
+    scope.brandProfileId,
+    statusFilter,
+    profileFilter,
+    selectedPlatforms,
+    dateFilter,
+    searchQuery,
+    sortKey,
+  ]);
+  const [previousGridCriteria, setPreviousGridCriteria] = useState(gridCriteria);
+  if (previousGridCriteria !== gridCriteria) {
+    setPreviousGridCriteria(gridCriteria);
+    setRequestedGridPage(0);
+  }
   const [editingPostId, setEditingPostId] = useState<string | undefined>(initialPostId);
   const [schedulingDate, setSchedulingDate] = useState<Date | undefined>(undefined);
   const [composerKey, setComposerKey] = useState<number>(0);
@@ -409,14 +314,13 @@ export function PostsView({
   const isCalendarMode = viewMode === "calendar";
 
   /**
-   * Query params for the Post page. The draft filter is the only bucket the API
-   * can select itself; every other bucket needs the full page because a Post can
-   * hold published, pending, and failed Channels at once and must stay findable
-   * under each of them.
+   * The draft filter is the only lifecycle bucket the API can select itself.
+   * Other outcomes and presentation filters apply to the explicitly loaded
+   * pages, since one Post may have published, pending, and failed Channels.
+   * The query owns fixed-size pagination; Calendar keeps its month event read.
    */
-  const postParams = useMemo<PostQueryParams>(
-    () =>
-      isDraftFilter ? { limit: POSTS_PAGE_LIMIT, status: "draft" } : { limit: POSTS_PAGE_LIMIT },
+  const postParams = useMemo<Omit<PostQueryParams, "limit" | "offset">>(
+    () => (isDraftFilter ? { status: "draft" } : {}),
     [isDraftFilter],
   );
 
@@ -435,7 +339,7 @@ export function PostsView({
     return map;
   }, [integrations]);
 
-  const loadedPosts = useMemo(() => postsQuery.data?.posts ?? [], [postsQuery.data]);
+  const loadedPosts = useMemo(() => postsQuery.data ?? [], [postsQuery.data]);
 
   const postById = useMemo(() => {
     const map = new Map<string, Post>();
@@ -856,6 +760,76 @@ export function PostsView({
     });
   }, [posts, statusFilter, selectedPlatforms, profileFilter, searchQuery, dateFilter, sortKey]);
 
+  const lastGridPage = Math.max(0, Math.ceil(processedPosts.length / POSTS_PAGE_SIZE) - 1);
+  const gridPage = Math.min(requestedGridPage, lastGridPage);
+  const visiblePosts =
+    viewMode === "grid"
+      ? processedPosts.slice(gridPage * POSTS_PAGE_SIZE, (gridPage + 1) * POSTS_PAGE_SIZE)
+      : processedPosts;
+
+  /**
+   * Advances within browser-cached rows first; only the uncached boundary asks
+   * for one more 60-Post page. Failed reads keep the current page and selection.
+   * Filtering may leave fewer than 60 matches, so the displayed index clamps
+   * to the last real page rather than navigating to an invented empty page.
+   */
+  const nextGridPage = async () => {
+    if (gridPage < lastGridPage) {
+      setRequestedGridPage(gridPage + 1);
+      return;
+    }
+    const result = await postsQuery.fetchNextPage({ cancelRefetch: false });
+    if (!result.isError) setRequestedGridPage(gridPage + 1);
+  };
+
+  const pagination = !isLoading && viewMode !== "calendar" && (
+    <div className="flex flex-col items-center gap-2 py-4">
+      {postsQuery.isFetchNextPageError && (
+        <p role="alert" className="text-xs text-red">
+          {t("An error has occurred.")}
+        </p>
+      )}
+      {viewMode === "grid" ? (
+        <nav aria-label={t("Posts")} className="flex flex-wrap items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={gridPage === 0 || postsQuery.isFetching || bulkDeleteBusy}
+            onClick={() => setRequestedGridPage(gridPage - 1)}
+          >
+            {t("Previous page")}
+          </Button>
+          <span className="text-xs tabular-nums text-ink-3" aria-live="polite">
+            {t("Page {page}", { page: gridPage + 1 })}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={
+              (gridPage >= lastGridPage && !postsQuery.hasNextPage) ||
+              postsQuery.isFetching ||
+              bulkDeleteBusy
+            }
+            onClick={() => void nextGridPage()}
+          >
+            {postsQuery.isFetchingNextPage ? t("Loading…") : t("Next page")}
+          </Button>
+        </nav>
+      ) : (
+        (postsQuery.hasNextPage || postsQuery.isFetchNextPageError) && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={postsQuery.isFetching || bulkDeleteBusy}
+            onClick={() => void postsQuery.fetchNextPage({ cancelRefetch: false })}
+          >
+            {postsQuery.isFetchingNextPage ? t("Loading…") : t("Load more")}
+          </Button>
+        )
+      )}
+    </div>
+  );
+
   const rowByPostId = useMemo(() => {
     const map = new Map<string, PostRow>();
     for (const row of posts) map.set(row.id, row);
@@ -1005,9 +979,11 @@ export function PostsView({
       />
     ) : viewMode === "grid" ? (
       <PostGridCardView
-        posts={processedPosts}
+        posts={visiblePosts}
         isLoading={isLoading}
         gridColumnClass={gridColumnClass}
+        page={gridPage}
+        footer={pagination}
         brandProfiles={brandProfiles}
         canMutate={canWriteContent && selectedBrandProfileId !== null}
         canCreate={canWriteContent}
@@ -1026,6 +1002,7 @@ export function PostsView({
       <PostTableView
         posts={processedPosts}
         isLoading={isLoading}
+        footer={pagination}
         sortKey={sortKey}
         brandProfiles={brandProfiles}
         groupBy={groupBy}
@@ -1051,7 +1028,7 @@ export function PostsView({
         ) : (
           <Trans
             message="Showing {count} posts across your Brand Profiles."
-            values={{ count: <RollingCount value={processedPosts.length} /> }}
+            values={{ count: <RollingCount value={visiblePosts.length} /> }}
           />
         )
       }
@@ -1064,7 +1041,7 @@ export function PostsView({
         ) : undefined
       }
     >
-      {queryError && (
+      {queryError && (isCalendarMode || !postsQuery.isFetchNextPageError) && (
         <Alert variant="destructive" className="items-center">
           <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
           <p className="flex-1">{t("An error has occurred.")}</p>

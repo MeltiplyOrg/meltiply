@@ -27,13 +27,19 @@ const intentionalIdenticalValues: Record<string, true> = Object.fromEntries(
 // expressions are reviewed here so a new dynamic callsite cannot bypass the catalog guard.
 const allowedDynamicTranslationExpressions: Record<string, true> = {
   "asset.asset_type": true,
+  "card.definition": true,
+  'grouping === "day" ? "Day" : grouping === "week" ? "Week" : "Month"': true,
+  "FORMAT_LABELS[format]": true,
+  "card.label": true,
   genericErrorMessage: true,
   error: true,
   "item.label": true,
   "action.label": true,
   message: true,
+  "METRIC_LABELS[metric]": true,
   "oauthOutcomes[outcome]": true,
   "publicMessages[code]": true,
+  "RANGE_LABELS[range]": true,
   "status.message": true,
   "titles[status.kind]": true,
 };
@@ -46,6 +52,10 @@ async function sourceFiles(directory: string): Promise<string[]> {
       // The DevBox dock is dev-only chrome — its labels are developer tooling,
       // not user-facing copy, so they are exempt from the translation catalog.
       if (entry.isDirectory() && entry.name === "devbox") return [];
+      // EvilCharts registry source is vendored third-party implementation; its
+      // internal loading chrome is not an authored product surface. The page
+      // passes translated labels into the chart instead of changing the source.
+      if (entry.isDirectory() && entry.name === "evilcharts") return [];
       if (entry.isDirectory()) return sourceFiles(path);
       if (/\.(?:ts|tsx)$/.test(entry.name) && !entry.name.includes(".test.")) return [path];
       return [];

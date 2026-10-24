@@ -1253,6 +1253,98 @@ export interface paths {
         patch: operations["updatePost"];
         trace?: never;
     };
+    "/queues": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** List active publishing Queues in a Brand Profile */
+        get: operations["listQueues"];
+        put?: never;
+        /** Create a recurring publishing Queue as a Workspace Admin */
+        post: operations["createQueue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/queues/{queue_id}": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        /** Inspect an active publishing Queue */
+        get: operations["getQueue"];
+        put?: never;
+        post?: never;
+        /** Retire a Queue after all reservations reach terminal outcomes */
+        delete: operations["deleteQueue"];
+        options?: never;
+        head?: never;
+        /** Edit a Queue without moving existing reservations */
+        patch: operations["updateQueue"];
+        trace?: never;
+    };
+    "/queues/{queue_id}/posts/{post_id}": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                /** @description Durable Post identifier within the active workspace. */
+                post_id: components["parameters"]["PostId"];
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Cancel editable pending outcomes and release a Queue reservation
+         * @description Requires Editor or Admin. Refuses in-flight, published, failed, or
+         *     reconciliation-bound work. Does not move other reservations or delete
+         *     Post content, Assets, targets, or Provider settings.
+         */
+        delete: operations["removePostFromQueue"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/posts/{post_id}/schedule": {
         parameters: {
             query?: never;
@@ -1623,6 +1715,76 @@ export interface paths {
         };
         /** Get aggregate analytics for a date range */
         get: operations["getAnalyticsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/posts": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Posts ranked by stored analytics in a published cohort
+         * @description Ranks Posts by their selected stored metric for Distributions published
+         *     inside the requested range. Each Distribution contributes its latest
+         *     analytics snapshot at or before the range end; a Distribution without a
+         *     snapshot still counts as a destination and contributes zero. Ordering is
+         *     the selected metric descending, then publication time descending, then
+         *     Post id ascending. Soft-deleted Posts and Brand Profiles are excluded.
+         */
+        get: operations["getAnalyticsPosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/dashboard": {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the analytics dashboard series and breakdowns
+         * @description Returns stored-snapshot aggregates for the published cohort. Daily
+         *     series carry measured counter changes between consecutive snapshots,
+         *     not lifetime totals. Follower series come from account snapshots.
+         *     Metrics a Provider does not expose are returned as null or listed in
+         *     `unavailable_metrics`; they are never fabricated as zero. `cohort`
+         *     carries the same published-cohort summary as `GET /analytics`, so a
+         *     client can render KPIs, coverage, and the platform comparison from one
+         *     request.
+         */
+        get: operations["getAnalyticsDashboard"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2463,6 +2625,7 @@ export interface components {
             attachments: components["schemas"]["PostAttachment"][];
             targets: components["schemas"]["PostTarget"][];
             distributions: components["schemas"]["Distribution"][];
+            queue_membership: components["schemas"]["QueueMembership"] | null;
             /**
              * @description Sum of each published Distribution's latest analytics snapshot,
              *     read in the same scoped Post batch. Null when no published Channel
@@ -2470,10 +2633,24 @@ export interface components {
              *     explicitly measured zero remains zero. Unsupported metrics are null.
              */
             analytics: components["schemas"]["PostAnalytics"] | null;
+            /**
+             * @description Latest measured snapshot for each published Distribution, ordered
+             *     by Platform then Distribution id. Empty when no published Channel
+             *     has a stored snapshot. A Distribution with no snapshot is omitted,
+             *     so the inspector can distinguish awaiting sync from a measured
+             *     zero; this is the per-Channel source of `analytics`.
+             */
+            distribution_analytics: components["schemas"]["PostDistributionAnalytics"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        PostDistributionAnalytics: {
+            /** Format: uuid */
+            distribution_id: string;
+            platform: components["schemas"]["Platform"];
+            analytics: components["schemas"]["PostAnalytics"];
         };
         /**
          * @description Latest measured counters summed across a Post's published Channels.
@@ -2496,6 +2673,51 @@ export interface components {
             has_more: boolean;
             limit: number;
             offset: number;
+        };
+        QueueSlot: {
+            /** @description Sunday is 0. */
+            weekday: number;
+            time: string;
+        };
+        QueueMembership: {
+            /** Format: uuid */
+            queue_id: string;
+            queue_name: string;
+            /** Format: date-time */
+            assigned_at: string;
+        };
+        PublishingQueue: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_profile_id: string;
+            name: string;
+            timezone: string;
+            slots: components["schemas"]["QueueSlot"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        QueueListResponse: {
+            items: components["schemas"]["PublishingQueue"][];
+            /** Format: uuid */
+            next_cursor: string | null;
+        };
+        CreateQueueRequest: {
+            /** Format: uuid */
+            brand_profile_id: string;
+            name: string;
+            /** @description Supported IANA timezone identifier. */
+            timezone: string;
+            slots: components["schemas"]["QueueSlot"][];
+        };
+        UpdateQueueRequest: {
+            /** Format: uuid */
+            brand_profile_id: string;
+            name?: string;
+            timezone?: string;
+            slots?: components["schemas"]["QueueSlot"][];
         };
         /**
          * @description Per-Channel settings to persist for one Platform account.
@@ -2564,8 +2786,13 @@ export interface components {
         /**
          * @description Schedules or immediately publishes the Post to its target Channels.
          *     scheduled_at null means publish now; a timestamp schedules every
-         *     affected target. When targets is present it replaces the saved
-         *     target set and defines the pending-Distribution diff; when absent
+         *     affected target. Alternatively queue_id reserves the next free
+         *     strictly future weekly slot and applies its instant to every pending
+         *     target. Existing Queue membership retains its instant on repeat
+         *     enqueue; remove it before manual scheduling or Publish Now. DST gaps
+         *     skip nonexistent slots; overlaps use the later standard-time instant.
+         *     When targets is present it replaces the saved target set and defines
+         *     the pending-Distribution diff; when absent
          *     the saved Post targets are used. At least one effective target is
          *     required, and every affected target must pass Platform capability
          *     and attachment-readiness validation before any Distribution is
@@ -2579,9 +2806,11 @@ export interface components {
              */
             brand_profile_id: string;
             /** Format: date-time */
-            scheduled_at: string | null;
+            scheduled_at?: string | null;
+            /** Format: uuid */
+            queue_id?: string;
             targets?: components["schemas"]["PostTargetInput"][];
-        };
+        } & (unknown | unknown);
         SignedUrlResponse: {
             /** Format: uri */
             url: string;
@@ -2773,7 +3002,103 @@ export interface components {
             reach: number;
             impressions: number;
             post_count: number;
+            /**
+             * Format: date-time
+             * @description Latest snapshot time for this Platform's published Distributions in
+             *     scope, or null when no snapshot has been stored yet. Null
+             *     distinguishes an unsynced Platform from a measured zero.
+             */
+            last_synced_at: string | null;
         };
+        /** @enum {string} */
+        AnalyticsFormat: "text" | "image" | "video" | "carousel";
+        AnalyticsDaySeries: {
+            /** Format: date */
+            date: string;
+            platform: components["schemas"]["Platform"];
+            posts: number;
+            views: number;
+            likes: number;
+            comments: number;
+            shares: number;
+            impressions: number;
+            reach: number;
+            /** Format: date-time */
+            last_synced_at: string | null;
+        };
+        AnalyticsBestTime: {
+            day_of_week: number;
+            hour: number;
+            posts: number;
+            avg_views: number;
+            avg_likes: number;
+            avg_comments: number;
+            avg_shares: number;
+            avg_engagement: number;
+        };
+        AnalyticsFormatBreakdown: {
+            format: components["schemas"]["AnalyticsFormat"];
+            posts: number;
+            views: number;
+            likes: number;
+            comments: number;
+            shares: number;
+            engagement: number;
+            avg_views: number;
+            avg_engagement: number;
+            /** Format: date-time */
+            last_synced_at: string | null;
+        };
+        AnalyticsPlatformBreakdown: {
+            platform: components["schemas"]["Platform"];
+            posts: number;
+            views: number;
+            likes: number;
+            comments: number;
+            shares: number;
+            impressions: number;
+            reach: number;
+            engagement_rate: number | null;
+            followers: number | null;
+            follower_gain: number | null;
+            saves: number | null;
+            clicks: number | null;
+            /** Format: date-time */
+            last_synced_at: string | null;
+        };
+        AnalyticsFollowerPoint: {
+            /** Format: date-time */
+            captured_at: string;
+            followers: number;
+        };
+        AnalyticsFollowerSeries: {
+            platform: components["schemas"]["Platform"];
+            /** Format: uuid */
+            account_id: string;
+            account_name: string | null;
+            points: components["schemas"]["AnalyticsFollowerPoint"][];
+        };
+        AnalyticsAccumulationPoint: {
+            elapsed_hours: number;
+            avg_engagement: number;
+            observations: number;
+        };
+        AnalyticsDashboard: {
+            range: components["schemas"]["AnalyticsRange"];
+            series: components["schemas"]["AnalyticsDaySeries"][];
+            best_times: components["schemas"]["AnalyticsBestTime"][];
+            formats: components["schemas"]["AnalyticsFormatBreakdown"][];
+            platforms: components["schemas"]["AnalyticsPlatformBreakdown"][];
+            cohort: components["schemas"]["AnalyticsSummary"];
+            followers: components["schemas"]["AnalyticsFollowerSeries"][];
+            accumulation: components["schemas"]["AnalyticsAccumulationPoint"][];
+            unavailable_metrics: ("saves" | "clicks" | "followers")[];
+        };
+        /**
+         * @description Stored metric that ranks the Post analytics rows.
+         * @enum {string}
+         */
+        AnalyticsMetric: "views" | "likes" | "comments" | "shares";
         AnalyticsSummary: {
             range: components["schemas"]["AnalyticsRange"];
             totals: components["schemas"]["MetricTotals"];
@@ -2782,6 +3107,48 @@ export interface components {
             last_synced_at: string | null;
             partial: boolean;
             unsupported_platforms: components["schemas"]["Platform"][];
+        };
+        AnalyticsPostRow: {
+            /** Format: uuid */
+            post_id: string;
+            /** @description Post title; may be empty when the composition has no title. */
+            title: string;
+            /**
+             * @description First 140 characters of the Post's default text with whitespace
+             *     collapsed; may be empty.
+             */
+            excerpt: string;
+            /**
+             * Format: date-time
+             * @description Earliest publication time among the included Distributions.
+             */
+            published_at: string;
+            /** @description Number of published Distributions included for this Post. */
+            destination_count: number;
+            /**
+             * @description Included Distributions with at least one snapshot at or before the
+             *     range end. Fewer than `destination_count` means some destinations
+             *     contribute zero until their first sync.
+             */
+            synced_destination_count: number;
+            platforms: components["schemas"]["Platform"][];
+            unsupported_platforms: components["schemas"]["Platform"][];
+            /**
+             * Format: date-time
+             * @description Latest snapshot time among the Post's included Distributions, or
+             *     null when none has been stored yet.
+             */
+            last_synced_at: string | null;
+            views: number;
+            likes: number;
+            comments: number;
+            shares: number;
+        };
+        AnalyticsPostsResponse: {
+            posts: components["schemas"]["AnalyticsPostRow"][];
+            has_more: boolean;
+            limit: number;
+            offset: number;
         };
         AnalyticsSnapshot: {
             /** Format: uuid */
@@ -4728,6 +5095,18 @@ export interface operations {
                  *     (the read-only All Brand Profiles view).
                  */
                 brand_profile_id?: components["parameters"]["BrandProfileId"];
+                queue_id?: string;
+                /**
+                 * @description Inclusive Queue assignment instant. Supply with queue_id and
+                 *     queue_assigned_before; the UTC window must not exceed 63 days.
+                 */
+                queue_assigned_from?: string;
+                /**
+                 * @description Exclusive Queue assignment instant. Supply with queue_id and
+                 *     queue_assigned_from; filters immutable membership times, not
+                 *     per-Channel delivery or Post creation times.
+                 */
+                queue_assigned_before?: string;
             };
             header?: {
                 /**
@@ -4924,6 +5303,239 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
+        };
+    };
+    listQueues: {
+        parameters: {
+            query: {
+                brand_profile_id: string;
+                limit?: components["parameters"]["Limit"];
+                cursor?: string;
+            };
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queues in stable identity order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateQueueRequest"];
+            };
+        };
+        responses: {
+            /** @description Queue created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+        };
+    };
+    getQueue: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queue configuration; list its Posts with the queue_id Post filter. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingQueue"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletePostRequest"];
+            };
+        };
+        responses: {
+            /** @description Queue retired; historical membership remains readable on Posts. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateQueueRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated configuration; only new allocations use the changed slots. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+        };
+    };
+    removePostFromQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description Durable Post identifier within the active workspace. */
+                post_id: components["parameters"]["PostId"];
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletePostRequest"];
+            };
+        };
+        responses: {
+            /** @description Post with cancelled pending outcomes and no active Queue membership. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Post"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     schedulePost: {
@@ -5515,6 +6127,8 @@ export interface operations {
                 start: components["parameters"]["RequiredStart"];
                 end: components["parameters"]["RequiredEnd"];
                 platform?: components["schemas"]["Platform"];
+                account_id?: string;
+                format?: components["schemas"]["AnalyticsFormat"];
                 /**
                  * @description Restricts the result to one Brand Profile. When omitted, the operation
                  *     returns the workspace-wide aggregate across all active Brand Profiles
@@ -5544,6 +6158,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnalyticsSummary"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getAnalyticsPosts: {
+        parameters: {
+            query: {
+                start: components["parameters"]["RequiredStart"];
+                end: components["parameters"]["RequiredEnd"];
+                platform?: components["schemas"]["Platform"];
+                account_id?: string;
+                format?: components["schemas"]["AnalyticsFormat"];
+                /**
+                 * @description Restricts the result to one Brand Profile. When omitted, the operation
+                 *     returns the workspace-wide aggregate across all active Brand Profiles
+                 *     (the read-only All Brand Profiles view).
+                 */
+                brand_profile_id?: components["parameters"]["BrandProfileId"];
+                metric?: components["schemas"]["AnalyticsMetric"];
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ranked Posts and pagination metadata. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsPostsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getAnalyticsDashboard: {
+        parameters: {
+            query: {
+                start: components["parameters"]["RequiredStart"];
+                end: components["parameters"]["RequiredEnd"];
+                platform?: components["schemas"]["Platform"];
+                account_id?: string;
+                format?: components["schemas"]["AnalyticsFormat"];
+                /**
+                 * @description Restricts the result to one Brand Profile. When omitted, the operation
+                 *     returns the workspace-wide aggregate across all active Brand Profiles
+                 *     (the read-only All Brand Profiles view).
+                 */
+                brand_profile_id?: components["parameters"]["BrandProfileId"];
+            };
+            header?: {
+                /**
+                 * @description Optional shared-Workspace selection for the authenticated caller. The
+                 *     server validates the caller's org_members membership before it becomes
+                 *     the actor and RLS claim. An installation has exactly one shared
+                 *     Workspace, so a mismatched UUID fails with 403 `workspace_forbidden`.
+                 *     When absent, the shared Workspace is selected automatically.
+                 */
+                "X-Workspace-ID"?: components["parameters"]["XWorkspaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dashboard series and breakdowns. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsDashboard"];
                 };
             };
             400: components["responses"]["BadRequest"];

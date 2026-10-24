@@ -48,6 +48,10 @@
   --font-size-micro: 11px;
   --icon-stroke: 1.8;
 
+  /* Shared wall-clock calendar geometry; event chips represent instants, not durations. */
+  --calendar-hour-height: 4rem;
+  --calendar-day-height: calc(var(--calendar-hour-height) * 24);
+
   /* Viewport cutouts and home indicators, shared by shell and dialog frames. */
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
@@ -88,6 +92,11 @@
   --green-tint: color-mix(in srgb, var(--green) 11%, transparent);
   --orange-tint: color-mix(in srgb, var(--orange) 12%, transparent);
   --red-tint: color-mix(in srgb, var(--red) 10%, transparent);
+  /* Opaque twins for chips laid over a canvas (the hourly grid): the
+     translucent tints above would let hour rules show through the chip. */
+  --accent-tint-solid: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  --green-tint-solid: color-mix(in srgb, var(--green) 11%, var(--surface));
+  --red-tint-solid: color-mix(in srgb, var(--red) 10%, var(--surface));
   --overlay: #181613;
   --ink-inverse: #ffffff;
 

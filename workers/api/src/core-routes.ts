@@ -30,7 +30,9 @@ import {
 } from "./audit";
 import type { BrandProfileApiService } from "./brand-profile-service";
 import type { AssetApiService } from "./asset-types";
-import type { PostApiService, PostTargetInput } from "./post-types";
+import type { PostApiService, PostTargetInput, SchedulePostInput } from "./post-types";
+import type { PublishingQueueApiService } from "./publishing-queue-service";
+import { registerPublishingQueueRoutes } from "./publishing-queue-routes";
 import type { StorageService } from "./effect/services/storage";
 import { scheduleInboxCommentSync } from "./inbox-comment-sync";
 import type { ApiWorkerEnv, ApiWorkerEnvironment, OAuthStateStub } from "./env";
@@ -41,6 +43,8 @@ import {
 } from "./workspace-lifecycle";
 import { errorResponse, jsonResponse } from "./responses";
 import {
+  analyticsFormatParam,
+  analyticsMetricParam,
   booleanParam,
   brandProfileColorField,
   brandProfileDescriptionField,
@@ -82,6 +86,7 @@ export interface CoreRouteDependencies {
   brandProfileService?: BrandProfileApiService;
   coreService?: CoreApiService;
   postService?: PostApiService;
+  publishingQueueService?: PublishingQueueApiService;
   providerRegistry?: ProviderRegistry;
   publicationRequirements?: PublicationRequirementsReader;
   revokeOAuthConnection?: OAuthConnectionRevoker;
@@ -1931,7 +1936,16 @@ export function registerCoreRoutes(
           Effect.catchCause((cause) =>
             Effect.gen(function* () {
               const failure = Cause.squash(cause);
-              if (failure instanceof CoreApiError) {
+              const databaseCause = failure instanceof DatabaseError ? failure.cause : undefined;
+              // SQL data/constraint rejections cannot commit. Connection loss or a
+              // failed COMMIT is ambiguous: retain its profile fence for a safe retry.
+              const deterministicDatabaseFailure =
+                databaseCause !== null &&
+                typeof databaseCause === "object" &&
+                "code" in databaseCause &&
+                typeof databaseCause.code === "string" &&
+                /^(22|23)[0-9A-Z]{3}$/.test(databaseCause.code);
+              if (failure instanceof CoreApiError || deterministicDatabaseFailure) {
                 yield* fromPromise(() =>
                   oauthStateStub(c.env, routingKey).releaseSelectionClaim(
                     selectionId,
@@ -2058,6 +2072,22 @@ export function registerCoreRoutes(
           enumParam(c.req.query("status"), "status", POST_STATUS_VALUES),
         );
         const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
+        const queueId = c.req.query("queue_id");
+        if (queueId !== undefined) yield* fromPromise(() => uuidParam(queueId, "queue_id"));
+        const from = c.req.query("queue_assigned_from");
+        const before = c.req.query("queue_assigned_before");
+        const queueWindow =
+          from === undefined && before === undefined
+            ? undefined
+            : yield* fromPromise(() => {
+                if (!queueId)
+                  throw new CoreApiError(
+                    400,
+                    "invalid_request",
+                    "Queue assignment windows require queue_id.",
+                  );
+                return dateRange(from, before, 63);
+              });
         const limit = yield* fromPromise(() =>
           integerParam(c.req.query("limit"), "limit", 20, 1, 100),
         );
@@ -2067,6 +2097,8 @@ export function registerCoreRoutes(
         const postService = yield* fromPromise(posts);
         const result = yield* postService.listPosts(c.env, c.get("actor").claims, {
           ...(brandProfileId ? { brandProfileId } : {}),
+          ...(queueId ? { queueId } : {}),
+          ...(queueWindow ? { queueWindow } : {}),
           limit,
           offset,
           ...(status ? { status } : {}),
@@ -2172,13 +2204,24 @@ export function registerCoreRoutes(
       Effect.gen(function* () {
         const postId = yield* fromPromise(() => uuidParam(c.req.param("postId"), "post_id"));
         const body = yield* fromPromise(() => jsonBody(c));
-        yield* fromPromise(() => onlyKeys(body, ["brand_profile_id", "scheduled_at", "targets"]));
-        const input = yield* fromPromise(() => ({
+        yield* fromPromise(() =>
+          onlyKeys(body, ["brand_profile_id", "scheduled_at", "queue_id", "targets"]),
+        );
+        if ("scheduled_at" in body === "queue_id" in body) {
+          return yield* Effect.fail(
+            new CoreApiError(
+              400,
+              "validation_error",
+              "Supply exactly one of scheduled_at or queue_id.",
+            ),
+          );
+        }
+        const input: SchedulePostInput = yield* fromPromise(() => ({
           brandProfileId: uuidParam(stringField(body, "brand_profile_id"), "brand_profile_id"),
-          // `null` means publish immediately, so it must survive parsing as a
-          // real null rather than being coerced to an absent or invalid date.
-          scheduledAt: body.scheduled_at === null ? null : dateField(body, "scheduled_at"),
           targets: postTargets(body),
+          ...(body.queue_id !== undefined
+            ? { queueId: uuidParam(stringField(body, "queue_id"), "queue_id") }
+            : { scheduledAt: body.scheduled_at === null ? null : dateField(body, "scheduled_at") }),
         }));
         const key = yield* fromPromise(() => idempotencyKey(c));
         const postService = yield* fromPromise(posts);
@@ -2419,13 +2462,90 @@ export function registerCoreRoutes(
           ? yield* fromPromise(() => platformParam(platformValue))
           : undefined;
         const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
+        const accountValue = c.req.query("account_id");
+        const accountId = accountValue
+          ? yield* fromPromise(() => uuidParam(accountValue, "account_id"))
+          : undefined;
+        const format = yield* fromPromise(() => analyticsFormatParam(c.req.query("format")));
         const core = yield* fromPromise(service);
         const summary = yield* core.summaryAnalytics(c.env, c.get("actor").claims, {
           ...requested,
           ...(platform ? { platform } : {}),
           ...(brandProfileId ? { brandProfileId } : {}),
+          ...(accountId ? { accountId } : {}),
+          ...(format ? { format } : {}),
         });
         return jsonResponse(summary, 200, requestId(c));
+      }),
+    ),
+  );
+
+  app.get("/api/v1/analytics/posts", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const requested = yield* fromPromise(() =>
+          dateRange(c.req.query("start"), c.req.query("end"), 366),
+        );
+        const platformValue = c.req.query("platform");
+        const platform = platformValue
+          ? yield* fromPromise(() => platformParam(platformValue))
+          : undefined;
+        const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
+        const accountValue = c.req.query("account_id");
+        const accountId = accountValue
+          ? yield* fromPromise(() => uuidParam(accountValue, "account_id"))
+          : undefined;
+        const format = yield* fromPromise(() => analyticsFormatParam(c.req.query("format")));
+        const metric = yield* fromPromise(() => analyticsMetricParam(c.req.query("metric")));
+        const limit = yield* fromPromise(() =>
+          integerParam(c.req.query("limit"), "limit", 10, 1, 100),
+        );
+        const offset = yield* fromPromise(() =>
+          integerParam(c.req.query("offset"), "offset", 0, 0, 2_147_483_647),
+        );
+        const core = yield* fromPromise(service);
+        const posts = yield* core.analyticsPosts(c.env, c.get("actor").claims, {
+          ...requested,
+          limit,
+          metric,
+          offset,
+          ...(platform ? { platform } : {}),
+          ...(brandProfileId ? { brandProfileId } : {}),
+          ...(accountId ? { accountId } : {}),
+          ...(format ? { format } : {}),
+        });
+        return jsonResponse(posts, 200, requestId(c));
+      }),
+    ),
+  );
+
+  app.get("/api/v1/analytics/dashboard", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const requested = yield* fromPromise(() =>
+          dateRange(c.req.query("start"), c.req.query("end"), 366),
+        );
+        const platformValue = c.req.query("platform");
+        const platform = platformValue
+          ? yield* fromPromise(() => platformParam(platformValue))
+          : undefined;
+        const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
+        const accountValue = c.req.query("account_id");
+        const accountId = accountValue
+          ? yield* fromPromise(() => uuidParam(accountValue, "account_id"))
+          : undefined;
+        const format = yield* fromPromise(() => analyticsFormatParam(c.req.query("format")));
+        const core = yield* fromPromise(service);
+        const dashboard = yield* core.dashboardAnalytics(c.env, c.get("actor").claims, {
+          ...requested,
+          ...(platform ? { platform } : {}),
+          ...(brandProfileId ? { brandProfileId } : {}),
+          ...(accountId ? { accountId } : {}),
+          ...(format ? { format } : {}),
+        });
+        return jsonResponse(dashboard, 200, requestId(c));
       }),
     ),
   );
@@ -2547,4 +2667,5 @@ export function registerCoreRoutes(
   );
 
   registerWorkspaceLifecycleRoutes(app, dependencies.workspaceLifecycle);
+  registerPublishingQueueRoutes(app, dependencies.publishingQueueService);
 }

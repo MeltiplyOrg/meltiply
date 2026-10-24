@@ -47,6 +47,7 @@ import type {
   SchedulePostInput,
   UpdatePostInput,
 } from "./post-types";
+import { releaseQueueMembershipEffect, reserveQueueSlotEffect } from "./publishing-queue-store";
 
 type Schemas = components["schemas"];
 type Platform = Schemas["Platform"];
@@ -56,7 +57,11 @@ type PostStatus = Schemas["PostStatus"];
 
 const postColumns = `
   id, org_id, brand_profile_id, title, default_text, status, revision,
-  created_at, updated_at`;
+  created_at, updated_at,
+  (SELECT jsonb_build_object('queue_id', membership.queue_id,
+           'queue_name', membership.queue_name, 'assigned_at', membership.assigned_at)
+     FROM publishing_queue_memberships membership
+    WHERE membership.post_id = posts.id AND membership.released_at IS NULL) AS queue_membership`;
 
 /**
  * Columns selected for every attachment projection. `r2_key` no longer lives on
@@ -78,6 +83,7 @@ interface PostRow extends Record<string, unknown> {
   id: string;
   org_id: string;
   revision: number | string;
+  queue_membership: Schemas["QueueMembership"] | null;
   status: PostStatus;
   title: string;
   updated_at: Date | string;
@@ -171,14 +177,17 @@ interface PendingTargetRow extends ResolvedTargetRow {
 
 interface PostCollections {
   analytics: Map<string, Schemas["PostAnalytics"]>;
+  analyticsByDistribution: Map<string, Schemas["PostDistributionAnalytics"][]>;
   attachments: Map<string, Schemas["PostAttachment"][]>;
   distributions: Map<string, Schemas["Distribution"][]>;
   targets: Map<string, Schemas["PostTarget"][]>;
 }
 
-/** Latest measured counters grouped by Post; PostgreSQL SUM(bigint) returns numeric text. */
+/** One published Distribution's latest measured counters; PostgreSQL bigint columns return text. */
 interface PostAnalyticsRow extends Record<string, unknown> {
   post_id: string;
+  distribution_id: string;
+  platform: Platform;
   likes: number | string;
   comments: number | string;
   shares: number | string;
@@ -265,6 +274,7 @@ function loadPostCollectionsEffect(
   return Effect.gen(function* () {
     const collections: PostCollections = {
       analytics: new Map(),
+      analyticsByDistribution: new Map(),
       attachments: preloads.attachments ?? new Map(),
       distributions: preloads.distributions ?? new Map(),
       targets: preloads.targets ?? new Map(),
@@ -330,14 +340,13 @@ function loadPostCollectionsEffect(
       }
     }
     if (hasPublishedDistribution) {
+      // One latest-snapshot probe per published Distribution, then the Post
+      // totals are summed in memory. Keeping the per-Distribution rows lets
+      // the inspector compare Channels without a second query or endpoint.
       const analyticsRows = yield* client.query<PostAnalyticsRow>(
-        `SELECT d.post_id,
-                SUM(snapshot.likes) AS likes,
-                SUM(snapshot.comments) AS comments,
-                SUM(snapshot.shares) AS shares,
-                SUM(snapshot.views) AS views,
-                SUM(snapshot.impressions) AS impressions,
-                SUM(snapshot.reach) AS reach
+        `SELECT d.post_id, d.id AS distribution_id, d.platform,
+                snapshot.likes, snapshot.comments, snapshot.shares,
+                snapshot.views, snapshot.impressions, snapshot.reach
            FROM distributions d
            JOIN LATERAL (
              SELECT likes, comments, shares, views, impressions, reach
@@ -347,11 +356,11 @@ function loadPostCollectionsEffect(
               LIMIT 1
            ) snapshot ON true
           WHERE d.post_id = ANY($1::uuid[]) AND d.status = 'published'
-          GROUP BY d.post_id`,
+          ORDER BY d.post_id, d.platform, d.id`,
         [postIds],
       );
       for (const row of analyticsRows.rows) {
-        collections.analytics.set(row.post_id, {
+        const analytics: Schemas["PostAnalytics"] = {
           likes: Number(row.likes),
           comments: Number(row.comments),
           shares: Number(row.shares),
@@ -360,6 +369,25 @@ function loadPostCollectionsEffect(
           views: Number(row.views),
           impressions: Number(row.impressions),
           reach: Number(row.reach),
+        };
+        const channelRows = collections.analyticsByDistribution.get(row.post_id) ?? [];
+        channelRows.push({
+          analytics,
+          distribution_id: row.distribution_id,
+          platform: row.platform,
+        });
+        collections.analyticsByDistribution.set(row.post_id, channelRows);
+
+        const totals = collections.analytics.get(row.post_id);
+        collections.analytics.set(row.post_id, {
+          likes: (totals?.likes ?? 0) + (analytics.likes ?? 0),
+          comments: (totals?.comments ?? 0) + (analytics.comments ?? 0),
+          shares: (totals?.shares ?? 0) + (analytics.shares ?? 0),
+          saves: null,
+          clicks: null,
+          views: (totals?.views ?? 0) + (analytics.views ?? 0),
+          impressions: (totals?.impressions ?? 0) + (analytics.impressions ?? 0),
+          reach: (totals?.reach ?? 0) + (analytics.reach ?? 0),
         });
       }
     }
@@ -381,6 +409,7 @@ function loadPostCollectionsEffect(
 function assemblePost(row: PostRow, collections: PostCollections): Post {
   return {
     analytics: collections.analytics.get(row.id) ?? null,
+    distribution_analytics: collections.analyticsByDistribution.get(row.id) ?? [],
     attachments: collections.attachments.get(row.id) ?? [],
     brand_profile_id: row.brand_profile_id,
     created_at: isoDateTime(row.created_at),
@@ -388,6 +417,13 @@ function assemblePost(row: PostRow, collections: PostCollections): Post {
     distributions: collections.distributions.get(row.id) ?? [],
     id: row.id,
     org_id: row.org_id,
+    queue_membership:
+      row.queue_membership === null
+        ? null
+        : {
+            ...row.queue_membership,
+            assigned_at: new Date(row.queue_membership.assigned_at).toISOString(),
+          },
     revision: Number(row.revision),
     status: row.status,
     targets: collections.targets.get(row.id) ?? [],
@@ -429,7 +465,7 @@ function assemblePostsEffect(
  * @param preloads - Collections already loaded in this transaction, keyed by Post id.
  * @returns Effect resolving to the assembled Post read model.
  */
-function assembleSinglePostEffect(
+export function assembleSinglePostEffect(
   client: EffectTransactionClient,
   row: PostRow,
   preloads: PostCollectionPreloads = {},
@@ -452,7 +488,7 @@ function assembleSinglePostEffect(
  * @returns Effect resolving to the locked Post row.
  * @throws {CoreApiError} 404 `post_not_found` when the Post is missing, owned by another workspace, or deleted.
  */
-function lockPostEffect(
+export function lockPostEffect(
   client: EffectTransactionClient,
   postId: string,
 ): Effect.Effect<PostRow, CoreApiError | DatabaseError> {
@@ -1536,6 +1572,7 @@ export function createPostApiService(
       });
     },
 
+    /** Lists retained tenant-visible Posts in stable order; an optional paired Queue window filters immutable active membership instants before pagination and batched projection. */
     listPosts(env: ApiWorkerEnv, session: SessionClaims, filters: PostFilters) {
       return withTenantTransactionEffect(env, session, (client) =>
         Effect.gen(function* () {
@@ -1553,6 +1590,15 @@ export function createPostApiService(
           }
           if (filters.brandProfileId) {
             conditions.push(`posts.brand_profile_id = ${parameter(filters.brandProfileId)}`);
+          }
+          if (filters.queueId) {
+            const window = filters.queueWindow
+              ? `AND membership.assigned_at >= ${parameter(filters.queueWindow.start)}
+                 AND membership.assigned_at < ${parameter(filters.queueWindow.end)}`
+              : "";
+            conditions.push(`EXISTS (SELECT 1 FROM publishing_queue_memberships membership
+              WHERE membership.post_id = posts.id AND membership.queue_id = ${parameter(filters.queueId)}
+                AND membership.released_at IS NULL ${window})`);
           }
           values.push(filters.limit + 1, filters.offset);
           const result = yield* client.query<PostRow>(
@@ -1732,6 +1778,17 @@ export function createPostApiService(
               catch: validationError,
             });
             yield* requireActiveBrandProfileEffect(client, organizationId, post.brand_profile_id);
+            // The locked Post projection already carries membership, avoiding a
+            // second read on every independent manual Schedule/Publish Now.
+            if (!input.queueId && post.queue_membership !== null) {
+              return yield* Effect.fail(
+                new CoreApiError(
+                  409,
+                  "queue_membership_exists",
+                  "Remove this Post from its Queue before manually changing its Schedule.",
+                ),
+              );
+            }
             const saved = input.targets ? undefined : yield* loadSavedTargetsEffect(client, postId);
             const targets = input.targets ?? saved!.inputs;
             // Scheduling the saved set returns exactly the rows already read, and
@@ -1875,10 +1932,33 @@ export function createPostApiService(
             if (created.length > 0) {
               yield* usageGuardEffect(client, organizationId, created.length);
             }
+            if (input.queueId && actionable.length === 0) {
+              return yield* Effect.fail(
+                new CoreApiError(
+                  409,
+                  "invalid_state",
+                  "This Post has no editable publication targets.",
+                ),
+              );
+            }
+            // Allocate against the current clock only after target/quota checks
+            // and locks, rather than reserving a slot that elapsed while waiting.
+            const deliveryAt = input.queueId
+              ? yield* reserveQueueSlotEffect(
+                  client,
+                  organizationId,
+                  post.brand_profile_id,
+                  postId,
+                  input.queueId,
+                  new Date(),
+                )
+              : input.scheduledAt;
             const scheduled =
-              input.scheduledAt !== null && input.scheduledAt.getTime() > now.getTime();
+              deliveryAt !== null &&
+              deliveryAt !== undefined &&
+              deliveryAt.getTime() > now.getTime();
             const status = scheduled ? ("scheduled" as const) : ("queued" as const);
-            const scheduledAt = input.scheduledAt?.toISOString() ?? null;
+            const scheduledAt = deliveryAt?.toISOString() ?? null;
             const rescheduledIds = yield* reschedulePendingDistributionsEffect(
               client,
               postId,
@@ -1897,7 +1977,7 @@ export function createPostApiService(
             );
             const command = {
               now,
-              scheduledAt: scheduled ? input.scheduledAt : null,
+              scheduledAt: scheduled ? deliveryAt : null,
             };
             yield* insertOutboxBatchEffect(client, organizationId, createdIds, command);
             if (rescheduledIds.length > 0) {
@@ -2032,6 +2112,7 @@ export function createPostApiService(
               }
             }
             yield* cancelPendingDistributionsEffect(client, postId);
+            if (post.queue_membership !== null) yield* releaseQueueMembershipEffect(client, postId);
             yield* lockPostAttachmentAssetsEffect(client, postId);
             yield* client.query("DELETE FROM post_attachments WHERE post_id = $1", [postId]);
             yield* client.query("DELETE FROM post_targets WHERE post_id = $1", [postId]);

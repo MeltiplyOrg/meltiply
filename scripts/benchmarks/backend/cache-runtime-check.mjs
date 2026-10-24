@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { chromium } from "../../../frontend/app/node_modules/@playwright/test/index.mjs";
@@ -50,7 +50,16 @@ try {
   } finally {
     await browser.close();
   }
-  await cacheSmoke({ origin, frontendOrigin, cookie, query: pool.query.bind(pool), label: "managed-local-workerd" });
+  await cacheSmoke({
+    origin, frontendOrigin, cookie, query: pool.query.bind(pool), label: "managed-local-workerd",
+    observeMemory: async () => ({
+      workerd_rss_bytes: execFileSync("ps", ["-eo", "rss=,comm="], { encoding: "utf8" })
+        .trim().split("\n").reduce((total, line) => {
+          const [rss, name] = line.trim().split(/\s+/);
+          return name === "workerd" ? total + Number(rss) * 1024 : total;
+        }, 0),
+    }),
+  });
 } finally {
   for (const child of children) {
     if (child.pid) {

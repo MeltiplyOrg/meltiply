@@ -96,6 +96,10 @@ await cacheSmoke({
   origin,
   cookie,
   label: `compose-${process.arch}`,
+  observeMemory: async () => {
+    const containerId = compose("ps", "-q", "runtime").toString().trim();
+    return { container_working_set: execFileSync("docker", ["stats", "--no-stream", "--format", "{{.MemUsage}}", containerId], { encoding: "utf8" }).trim() };
+  },
   query: async (text, values = []) =>
     JSON.parse(
       execFileSync(

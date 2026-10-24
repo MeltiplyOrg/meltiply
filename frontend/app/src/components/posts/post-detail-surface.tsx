@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { Link } from "react-router";
 import {
   CalendarDays,
@@ -25,15 +25,22 @@ import { useLatchedValue } from "@meltiply/ui/use-latched-value";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useRetryDistribution, useUpdateScheduledDistribution } from "@/lib/queries";
 import { useI18n } from "@/lib/i18n";
+import { Skeleton } from "@meltiply/ui/skeleton";
 import { platformDisplayName } from "@/lib/platforms";
 import {
   isCancellableStatus,
   resolveCancellableDistributionIds,
+  resolvePostAnalytics,
   resolveRowCaption,
   normalizePostStatus,
 } from "./posts-helpers";
 import type { PostDestructiveRequest, PostDetailItem, PostRow } from "./types";
 import type { PostDrawerSurface } from "./posts-drawer";
+
+// The history charts load only when the inspector needs published analytics.
+const PostAnalyticsSection = lazy(() =>
+  import("./post-analytics-section").then((module) => ({ default: module.PostAnalyticsSection })),
+);
 
 /**
  * Formats an ISO timestamp into the source views' `en-US` display form
@@ -422,6 +429,7 @@ export function usePostDetailSurface({
     const isDraft = post.post?.status === "draft";
     const cancellableIds = resolveCancellableDistributionIds(post);
     const editable = Boolean(isDraft || cancellableIds.length > 0);
+    const analytics = resolvePostAnalytics(post);
 
     const status = normalizePostStatus(post);
 
@@ -593,6 +601,12 @@ export function usePostDetailSurface({
                 </span>
               </div>
             </section>
+          )}
+
+          {analytics.visible && (
+            <Suspense fallback={<Skeleton className="mt-6 h-64" />}>
+              <PostAnalyticsSection analytics={analytics} />
+            </Suspense>
           )}
 
           <section className="mt-6.5">

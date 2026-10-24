@@ -43,11 +43,13 @@ function expiresAt(value: string | undefined): Date | null {
  * Only encryption crosses Promise boundaries; validation is narrowed before writes.
  * The external (platform, platform_user_id) identity is globally unique: a reconnect to the same
  * Brand Profile refreshes tokens, while an account already attached to another profile or
- * workspace fails 409 until it is locally disconnected.
+ * workspace fails 409 until it is locally disconnected. A Brand Profile owns at most one
+ * Channel per Provider, so a second account of an already-connected Platform is refused
+ * until the existing Channel is disconnected.
  *
  * @param env - Worker environment bindings containing token encryption key.
  * @param platform - Target social provider platform identifier (e.g. `"instagram"`, `"youtube"`).
- * @param owner - Identifiers of the connecting organization, user, and pinned Brand Profile.
+ * @param owner - Identifiers of the connecting organization, user, and chosen Brand Profile.
  * @param connection - Normalized OAuth credentials and account profile returned by the provider.
  * @returns Effect resolving undefined on upsert, e.g. `Effect<void, CoreApiError | DatabaseError>`.
  */
@@ -164,9 +166,9 @@ export function saveOAuthConnectionEffect(
           );
         }
 
-        // The Brand Profile pinned at OAuth initiation must still exist and be
-        // active in the recorded workspace at persistence time: a profile
-        // deleted mid-handoff must not receive the new Channel.
+        // The Brand Profile chosen at assignment time must still exist and be
+        // active in the workspace at persistence time: a profile deleted
+        // mid-handoff must not receive the new Channel.
         yield* requireActiveBrandProfileEffect(client, organizationRow.id, owner.brandProfileId);
 
         // The external (platform, platform_user_id) identity is globally
@@ -190,6 +192,28 @@ export function saveOAuthConnectionEffect(
               "This platform account is already connected. Disconnect it before connecting it to another brand profile.",
             ),
           );
+        }
+        if (!existingRow) {
+          // One Brand Profile owns at most one Channel per Provider: the
+          // profile-scoped index from `017_one_channel_per_provider.sql` is the
+          // final arbiter, and this read turns the expected conflict into the
+          // same actionable 409 instead of a constraint error.
+          const profileChannel = yield* client.query<{ id: string }>(
+            `SELECT id
+         FROM platform_accounts
+         WHERE brand_profile_id = $1 AND platform = $2
+         LIMIT 1`,
+            [owner.brandProfileId, platform],
+          );
+          if (profileChannel.rows.length > 0) {
+            return yield* Effect.fail(
+              new CoreApiError(
+                409,
+                "invalid_state",
+                `This Brand Profile is already connected to a ${platform} Channel. Disconnect it before connecting another.`,
+              ),
+            );
+          }
         }
         if (!existingRow) {
           const limit = COMMUNITY_LIMITS.max_platforms;

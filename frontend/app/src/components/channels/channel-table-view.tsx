@@ -9,7 +9,7 @@ import { ChannelAvatar } from "@/components/channels/channel-avatar";
 import { brandProfileColorClass, type BrandProfile, type PlatformAccount } from "@/types";
 import { cn } from "@meltiply/ui/utils";
 import {
-  ChannelCopyRows,
+  ChannelCopyValues,
   ChannelHealthControl,
   ChannelSelectionCheckbox,
   ChannelSettingsAction,
@@ -128,7 +128,7 @@ export function ChannelTableView({
                         >
                           {channelName}
                         </div>
-                        <ChannelCopyRows account={account} />
+                        <ChannelCopyValues account={account} />
                       </div>
                     </div>
                   </TableCell>

@@ -25,6 +25,7 @@ type ReplyStatus = Schemas["ReplyStatus"];
 type AssetStatus = Schemas["AssetStatus"];
 type BrandProfileColor = Schemas["BrandProfileColor"];
 type PostStatus = Schemas["PostStatus"];
+type AnalyticsMetric = Schemas["AnalyticsMetric"];
 
 /** Strict Queue creation input: a trimmed name, supported named timezone and 1–168 unique Sunday-zero weekday/wall-time slots. Offset-only zones and unknown fields are rejected before persistence. */
 export const queueConfigurationSchema = z.strictObject({
@@ -179,6 +180,57 @@ export const ASSET_STATUS_VALUES: ReadonlySet<AssetStatus> = new Set<AssetStatus
   "deleting",
   "deleted",
 ]);
+
+/**
+ * Metrics the analytics Post ranking accepts, with their default. The table
+ * mirrors the contract enum so an unknown metric fails the request instead of
+ * silently ranking by another column.
+ */
+const ANALYTICS_FORMATS: Record<Schemas["AnalyticsFormat"], true> = {
+  carousel: true,
+  image: true,
+  text: true,
+  video: true,
+};
+
+const ANALYTICS_METRICS: Record<AnalyticsMetric, true> = {
+  comments: true,
+  likes: true,
+  shares: true,
+  views: true,
+};
+
+/**
+ * Parses the optional analytics ranking metric, defaulting to `views`.
+ *
+ * @param value - Raw `metric` query value or undefined.
+ * @returns The requested metric, or `views` when omitted or empty.
+ * @throws {CoreApiError} 400 when the value is not a supported metric.
+ */
+export function analyticsMetricParam(value: string | undefined): AnalyticsMetric {
+  if (value === undefined || value === "") return "views";
+  if (!Object.hasOwn(ANALYTICS_METRICS, value)) {
+    throw new CoreApiError(400, "invalid_request", "metric is invalid.");
+  }
+  return value as AnalyticsMetric;
+}
+
+/**
+ * Parses the optional content-format filter.
+ *
+ * @param value - Raw `format` query value or undefined.
+ * @returns The requested format, or undefined when omitted.
+ * @throws {CoreApiError} 400 when the value is not a supported format.
+ */
+export function analyticsFormatParam(
+  value: string | undefined,
+): Schemas["AnalyticsFormat"] | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (!Object.hasOwn(ANALYTICS_FORMATS, value)) {
+    throw new CoreApiError(400, "invalid_request", "format is invalid.");
+  }
+  return value as Schemas["AnalyticsFormat"];
+}
 
 const BRAND_PROFILE_COLOR_VALUES: ReadonlySet<BrandProfileColor> = new Set<BrandProfileColor>([
   "#b91c1c",

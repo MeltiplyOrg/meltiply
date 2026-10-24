@@ -13,6 +13,7 @@ import {
   useDeletePost,
   useDeletePostsBatch,
   usePosts,
+  POSTS_PAGE_SIZE,
 } from "@/lib/queries";
 import { RollingCount } from "@meltiply/ui/rolling-count";
 import { Trans, useI18n } from "@/lib/i18n";
@@ -61,9 +62,6 @@ import type {
   PostDestructiveRequest,
   PostSelectionEntry,
 } from "./types";
-
-/** Page size for the Post list, which every view mode projects into rows. */
-const POSTS_PAGE_LIMIT = 100;
 
 /** Workspace channel integrations keyed by Platform account id. */
 type IntegrationById = Map<string, ChannelIntegration>;
@@ -133,8 +131,8 @@ function toCalendarRows(
 
 /**
  * Unified Posts page over one durable Post pipeline and three real collection
- * views. `usePosts` supplies each Post, its ordered attachments, targets, and
- * independent Channel outcomes; `useCalendar` folds events by Post identity
+ * views. `usePosts` supplies explicit cached pages of at most 60 Posts with
+ * ordered attachments, targets, and Channel outcomes; `useCalendar` folds events
  * without merging or splitting compositions. Status filters derive from those
  * outcomes; provider status is observed, never locally edited.
  *
@@ -206,6 +204,24 @@ export function PostsView({
   const [columns, setColumns] = useState<number>(4);
   const [groupBy, setGroupBy] = useState<PostGroupBy>("status");
   const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<string>>(new Set());
+  const [requestedGridPage, setRequestedGridPage] = useState(0);
+  // Presentation filters operate on loaded Posts. A changed result set starts
+  // at its first grid page without discarding the cached server pages.
+  const gridCriteria = JSON.stringify([
+    scope.workspaceId,
+    scope.brandProfileId,
+    statusFilter,
+    profileFilter,
+    selectedPlatforms,
+    dateFilter,
+    searchQuery,
+    sortKey,
+  ]);
+  const [previousGridCriteria, setPreviousGridCriteria] = useState(gridCriteria);
+  if (previousGridCriteria !== gridCriteria) {
+    setPreviousGridCriteria(gridCriteria);
+    setRequestedGridPage(0);
+  }
   const [editingPostId, setEditingPostId] = useState<string | undefined>(initialPostId);
   const [schedulingDate, setSchedulingDate] = useState<Date | undefined>(undefined);
   const [composerKey, setComposerKey] = useState<number>(0);
@@ -298,14 +314,13 @@ export function PostsView({
   const isCalendarMode = viewMode === "calendar";
 
   /**
-   * Query params for the Post page. The draft filter is the only bucket the API
-   * can select itself; every other bucket needs the full page because a Post can
-   * hold published, pending, and failed Channels at once and must stay findable
-   * under each of them.
+   * The draft filter is the only lifecycle bucket the API can select itself.
+   * Other outcomes and presentation filters apply to the explicitly loaded
+   * pages, since one Post may have published, pending, and failed Channels.
+   * The query owns fixed-size pagination; Calendar keeps its month event read.
    */
-  const postParams = useMemo<PostQueryParams>(
-    () =>
-      isDraftFilter ? { limit: POSTS_PAGE_LIMIT, status: "draft" } : { limit: POSTS_PAGE_LIMIT },
+  const postParams = useMemo<Omit<PostQueryParams, "limit" | "offset">>(
+    () => (isDraftFilter ? { status: "draft" } : {}),
     [isDraftFilter],
   );
 
@@ -324,7 +339,7 @@ export function PostsView({
     return map;
   }, [integrations]);
 
-  const loadedPosts = useMemo(() => postsQuery.data?.posts ?? [], [postsQuery.data]);
+  const loadedPosts = useMemo(() => postsQuery.data ?? [], [postsQuery.data]);
 
   const postById = useMemo(() => {
     const map = new Map<string, Post>();
@@ -745,6 +760,76 @@ export function PostsView({
     });
   }, [posts, statusFilter, selectedPlatforms, profileFilter, searchQuery, dateFilter, sortKey]);
 
+  const lastGridPage = Math.max(0, Math.ceil(processedPosts.length / POSTS_PAGE_SIZE) - 1);
+  const gridPage = Math.min(requestedGridPage, lastGridPage);
+  const visiblePosts =
+    viewMode === "grid"
+      ? processedPosts.slice(gridPage * POSTS_PAGE_SIZE, (gridPage + 1) * POSTS_PAGE_SIZE)
+      : processedPosts;
+
+  /**
+   * Advances within browser-cached rows first; only the uncached boundary asks
+   * for one more 60-Post page. Failed reads keep the current page and selection.
+   * Filtering may leave fewer than 60 matches, so the displayed index clamps
+   * to the last real page rather than navigating to an invented empty page.
+   */
+  const nextGridPage = async () => {
+    if (gridPage < lastGridPage) {
+      setRequestedGridPage(gridPage + 1);
+      return;
+    }
+    const result = await postsQuery.fetchNextPage({ cancelRefetch: false });
+    if (!result.isError) setRequestedGridPage(gridPage + 1);
+  };
+
+  const pagination = !isLoading && viewMode !== "calendar" && (
+    <div className="flex flex-col items-center gap-2 py-4">
+      {postsQuery.isFetchNextPageError && (
+        <p role="alert" className="text-xs text-red">
+          {t("An error has occurred.")}
+        </p>
+      )}
+      {viewMode === "grid" ? (
+        <nav aria-label={t("Posts")} className="flex flex-wrap items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={gridPage === 0 || postsQuery.isFetching || bulkDeleteBusy}
+            onClick={() => setRequestedGridPage(gridPage - 1)}
+          >
+            {t("Previous page")}
+          </Button>
+          <span className="text-xs tabular-nums text-ink-3" aria-live="polite">
+            {t("Page {page}", { page: gridPage + 1 })}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={
+              (gridPage >= lastGridPage && !postsQuery.hasNextPage) ||
+              postsQuery.isFetching ||
+              bulkDeleteBusy
+            }
+            onClick={() => void nextGridPage()}
+          >
+            {postsQuery.isFetchingNextPage ? t("Loading…") : t("Next page")}
+          </Button>
+        </nav>
+      ) : (
+        (postsQuery.hasNextPage || postsQuery.isFetchNextPageError) && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={postsQuery.isFetching || bulkDeleteBusy}
+            onClick={() => void postsQuery.fetchNextPage({ cancelRefetch: false })}
+          >
+            {postsQuery.isFetchingNextPage ? t("Loading…") : t("Load more")}
+          </Button>
+        )
+      )}
+    </div>
+  );
+
   const rowByPostId = useMemo(() => {
     const map = new Map<string, PostRow>();
     for (const row of posts) map.set(row.id, row);
@@ -894,9 +979,11 @@ export function PostsView({
       />
     ) : viewMode === "grid" ? (
       <PostGridCardView
-        posts={processedPosts}
+        posts={visiblePosts}
         isLoading={isLoading}
         gridColumnClass={gridColumnClass}
+        page={gridPage}
+        footer={pagination}
         brandProfiles={brandProfiles}
         canMutate={canWriteContent && selectedBrandProfileId !== null}
         canCreate={canWriteContent}
@@ -915,6 +1002,7 @@ export function PostsView({
       <PostTableView
         posts={processedPosts}
         isLoading={isLoading}
+        footer={pagination}
         sortKey={sortKey}
         brandProfiles={brandProfiles}
         groupBy={groupBy}
@@ -940,7 +1028,7 @@ export function PostsView({
         ) : (
           <Trans
             message="Showing {count} posts across your Brand Profiles."
-            values={{ count: <RollingCount value={processedPosts.length} /> }}
+            values={{ count: <RollingCount value={visiblePosts.length} /> }}
           />
         )
       }
@@ -953,7 +1041,7 @@ export function PostsView({
         ) : undefined
       }
     >
-      {queryError && (
+      {queryError && (isCalendarMode || !postsQuery.isFetchNextPageError) && (
         <Alert variant="destructive" className="items-center">
           <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
           <p className="flex-1">{t("An error has occurred.")}</p>

@@ -128,7 +128,7 @@ export const ASSET_UPLOAD_POLICY = {
   signedUrlTtlSeconds: 15 * 60,
 } as const;
 
-/** Resource ceilings enforced atomically for each community Workspace. */
+/** Optional resource ceilings; `null` leaves that resource unrestricted. */
 export interface CommunityLimits {
   readonly max_distributions: number | null;
   readonly max_platforms: number | null;
@@ -137,15 +137,15 @@ export interface CommunityLimits {
 }
 
 /**
- * Community resource policy, independent of payment or subscription state.
- * Monthly uploads/distributions and resident storage remain bounded; readers
- * share one frozen scalar record rather than allocating per request.
+ * Community deployments impose no resource quotas: operators own capacity and
+ * costs. Keep the nullable policy and enforcement machinery for bounded hosted
+ * policies; `null` disables only the corresponding resource allowance.
  */
 export const COMMUNITY_LIMITS: CommunityLimits = Object.freeze({
-  max_distributions: 30,
-  max_platforms: 2,
-  max_storage_bytes: 1024 * 1024 * 1024,
-  max_uploads: 10,
+  max_distributions: null,
+  max_platforms: null,
+  max_storage_bytes: null,
+  max_uploads: null,
 });
 
 /**

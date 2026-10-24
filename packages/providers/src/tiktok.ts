@@ -1,7 +1,7 @@
 import type { PlatformCapability } from "@meltiply/domain";
 import { extractRateLimitBudget } from "./rate-limit";
 
-import { addSeconds, malformed, unknownResult } from "./adapter-helpers";
+import { addSeconds, malformed, requiredIdentifier, unknownResult } from "./adapter-helpers";
 import { classifyProviderFailure, ProviderAdapterError } from "./failures";
 import { ProviderHttpClient } from "./http";
 import {
@@ -10,9 +10,11 @@ import {
   boundedString,
   boundedText,
   exactRedirectUri,
+  metricValue,
   record,
   required,
   secureUrl,
+  validatePageInput,
 } from "./meta-common";
 import type {
   OAuthConnection,
@@ -35,7 +37,10 @@ const authorizationOrigin = "https://www.tiktok.com";
 const imageMaximumBytes = 20 * 1024 * 1024;
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 2 * 24 * 60 * 60;
-const configuredScopes = ["user.info.basic", "video.publish"] as const;
+/** Identity and Direct Post permission are required; analytics grants are optional. */
+const publishingScopes = ["user.info.basic", "video.publish"] as const;
+const analyticsScopes = ["user.info.stats", "video.list"] as const;
+const configuredScopes = [...publishingScopes, ...analyticsScopes] as const;
 const privacyLevels = new Set<TikTokPrivacyLevel>([
   "PUBLIC_TO_EVERYONE",
   "MUTUAL_FOLLOW_FRIENDS",
@@ -48,7 +53,7 @@ export const TIKTOK_MAX_CAPTION_LENGTH = 2_200;
 
 const capability: PlatformCapability = {
   accepted_mime_types: ["image/jpeg", "image/webp", "video/mp4", "video/quicktime"],
-  analytics: false,
+  analytics: true,
   asset_types: ["image", "video"],
   comments: false,
   connect_available: true,
@@ -65,7 +70,8 @@ const capability: PlatformCapability = {
     "Privacy, interaction, commercial-content, AI, and music-usage choices are explicit per target.",
     "Media uses PULL_FROM_URL from an HTTPS URL prefix verified in the TikTok developer portal.",
     "Creator eligibility and current account limits are queried immediately before publication.",
-    "Analytics, comments, and replies are not claimed.",
+    "Analytics reads the creator's own view, like, comment, and share counters; comments and replies are not claimed.",
+    "Existing connections must reconnect to grant the video.list analytics scope.",
     "TikTok app audit and approved live-account acceptance remain required.",
   ],
   platform: "tiktok",
@@ -91,6 +97,7 @@ interface TikTokTokenBody {
   expiresAt: string;
   openId: string;
   refreshToken: string;
+  scopes: string[];
 }
 
 /**
@@ -195,8 +202,8 @@ function scopeSet(value: unknown): Set<string> | undefined {
 
 /**
  * Parses and verifies an OAuth token exchange or refresh response from TikTok.
- * Asserts bearer token type, presence of all required configured scopes, and extracts access/refresh tokens.
- * Returns typed TikTokTokenBody record. Throws ProviderAdapterError if malformed or scopes missing.
+ * Requires bearer tokens and publishing scopes, without requiring analytics consent.
+ * Returns tokens plus the actual grant; malformed responses or missing publishing scopes fail.
  */
 function tokenBody(value: unknown, now: Date): TikTokTokenBody {
   const body = record(value);
@@ -213,7 +220,7 @@ function tokenBody(value: unknown, now: Date): TikTokTokenBody {
     !openId ||
     tokenType !== "bearer" ||
     !scopes ||
-    configuredScopes.some((scope) => !scopes.has(scope))
+    publishingScopes.some((scope) => !scopes.has(scope))
   ) {
     throw malformed();
   }
@@ -222,6 +229,7 @@ function tokenBody(value: unknown, now: Date): TikTokTokenBody {
     expiresAt: addSeconds(now, body?.expires_in, tokenLifetimeMaximumSeconds),
     openId,
     refreshToken,
+    scopes: [...scopes],
   };
 }
 
@@ -472,13 +480,15 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
     extractRateLimitBudget: (headers) => extractRateLimitBudget("tiktok", headers),
     /**
      * Builds the TikTok v2 authorize URL for the configured client key, redirect URI,
-     * scopes, and caller-supplied state. Throws TypeError when the attempted redirect
-     * URI does not match the adapter configuration.
+     * scopes, and caller-supplied state. Forces the authorization page so another
+     * account can be connected instead of silently reusing a prior grant. Throws
+     * TypeError when the redirect URI does not match the adapter configuration.
      */
     authorizationUrl(input) {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
       const url = new URL("/v2/auth/authorize/", authorizationOrigin);
       url.searchParams.set("client_key", clientKey);
+      url.searchParams.set("disable_auto_auth", "1");
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", configuredScopes.join(","));
@@ -573,11 +583,105 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         },
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes,
       };
     },
 
     getPublicationRequirements: getRequirements,
+
+    /**
+     * Reads the creator's current view, like, comment, and share counters for
+     * one published TikTok video. The query endpoint belongs to the Display API
+     * and requires the `video.list` scope; an empty result means TikTok no
+     * longer reports the video, so no snapshot is written.
+     *
+     * @param context - Provider request context carrying cancellation.
+     * @param credentials - Connected creator token and account identity.
+     * @param lookup - Publication whose providerPostId names the TikTok video.
+     * @param page - Single-page query input; TikTok returns one video.
+     * @returns One analytics record, or an empty page when TikTok omits the video.
+     * @throws {ProviderAdapterError} On a rejected scope, malformed payload, or
+     *   missing counter, so a sync failure is recorded instead of a false zero.
+     */
+    /** Reads the creator's lifetime follower, following, and video counters. */
+    async getAccountAnalytics(context, credentials) {
+      const url = new URL("/v2/user/info/", apiOrigin);
+      url.searchParams.set("fields", "open_id,follower_count,following_count,video_count");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const user = record(envelope(response.body).user);
+      const followers = metricValue(user?.follower_count);
+      const following = metricValue(user?.following_count);
+      const posts = metricValue(user?.video_count);
+      if (followers === undefined) throw malformed();
+      return {
+        followers,
+        ...(following === undefined ? {} : { following }),
+        ...(posts === undefined ? {} : { posts }),
+        recordedAt: now().toISOString(),
+      };
+    },
+
+    async listAnalytics(context, credentials, lookup, page) {
+      validatePageInput("tiktok", page);
+      if (page.cursor) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "tiktok_analytics_not_paginated",
+            status: 400,
+          }),
+        );
+      }
+      const providerPostId = requiredIdentifier(lookup.providerPostId, "tiktok_video_id_required");
+      const url = new URL("/v2/video/query/", apiOrigin);
+      url.searchParams.set("fields", "id,view_count,like_count,comment_count,share_count");
+      const response = await http.request<unknown>(context, {
+        body: JSON.stringify({ filters: { video_ids: [providerPostId] } }),
+        headers: {
+          ...bearer(credentials.accessToken),
+          "Content-Type": "application/json; charset=UTF-8",
+        },
+        method: "POST",
+        url: url.toString(),
+      });
+      const data = envelope(response.body);
+      const videos = data.videos;
+      if (!Array.isArray(videos) || videos.length > 1) throw malformed();
+      if (videos.length === 0) return { items: [] };
+      const video = record(videos[0]);
+      const id = tiktokIdentifier(video?.id);
+      const views = metricValue(video?.view_count);
+      const likes = metricValue(video?.like_count);
+      const comments = metricValue(video?.comment_count);
+      const shares = metricValue(video?.share_count);
+      if (
+        id !== providerPostId ||
+        views === undefined ||
+        likes === undefined ||
+        comments === undefined ||
+        shares === undefined
+      ) {
+        throw malformed();
+      }
+      return {
+        items: [
+          {
+            comments,
+            impressions: 0,
+            likes,
+            providerPostId,
+            recordedAt: now().toISOString(),
+            reach: 0,
+            shares,
+            views,
+            watchTimeSeconds: 0,
+          },
+        ],
+      };
+    },
 
     /**
      * Reconciles a Direct Post operation through TikTok's status/fetch endpoint.
@@ -862,6 +966,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       }
     },
 
+    /** Rotates tokens with the actual publishing-capable grant; analytics consent stays optional. */
     async refreshAccessToken(context, refreshToken): Promise<ProviderTokenSet> {
       const form = new URLSearchParams({
         client_key: clientKey,
@@ -880,7 +985,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         accessToken: tokens.accessToken,
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes,
       };
     },
 

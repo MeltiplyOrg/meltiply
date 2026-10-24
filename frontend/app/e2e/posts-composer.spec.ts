@@ -1295,7 +1295,7 @@ test("reopens one Post with its ordered attachments and channel targets", async 
   const secondPage = await second.newPage();
   await signIn(secondPage, credentials);
   await waitForWorkspace(secondPage);
-  await activeBrandProfileName(secondPage);
+  await activeBrandProfileName(secondPage, profileName);
   await editPostFromRow(secondPage, secondPage.getByRole("row").filter({ hasText: savedPreview }));
   await expect(composerTextarea(secondPage)).toHaveValue(caption);
   await expectAttachmentPhases(secondPage, [

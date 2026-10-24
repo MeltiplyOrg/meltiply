@@ -42,8 +42,8 @@ import type {
   PublishInput,
 } from "./types";
 
-const apiOrigin = "https://graph.threads.net";
-const authorizationOrigin = "https://threads.net";
+const apiOrigin = "https://graph.threads.com";
+const authorizationOrigin = "https://threads.com";
 const imageMaximumBytes = 8 * 1024 * 1024;
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 90 * 24 * 60 * 60;
@@ -542,8 +542,11 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
     /**
      * Exchanges the authorization code for a short-lived token, upgrades it via
      * th_exchange_token to a long-lived token, then binds the connection to the Threads
-     * profile returned by /me. Throws TypeError on redirect URI mismatch; returns the
-     * OAuthConnection with the long-lived token as its own refresh token.
+     * profile returned by /me. The profile's string ID is authoritative; numeric
+     * user_id values in the token response can exceed JavaScript's safe integer range.
+     * Uses Meta's required access_token query parameter for token exchange.
+     * Throws on malformed responses or redirect mismatch; retains the long-lived
+     * token as its own refresh token.
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthConnection> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -569,8 +572,8 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       const longUrl = new URL("/access_token", apiOrigin);
       longUrl.searchParams.set("grant_type", "th_exchange_token");
       longUrl.searchParams.set("client_secret", clientSecret);
+      longUrl.searchParams.set("access_token", shortToken);
       const longResponse = await http.request<unknown>(context, {
-        headers: bearer(shortToken),
         method: "GET",
         url: longUrl.toString(),
       });
@@ -615,6 +618,35 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
         refreshToken: accessToken,
         scopes: [...configuredScopes],
       };
+    },
+
+    /**
+     * Reads lifetime follower count from the Threads user insights edge.
+     * Threads returns the total under `total_value` (or a values array).
+     */
+    async getAccountAnalytics(context, credentials) {
+      const providerAccountId = requiredIdentifier(
+        credentials.accountId,
+        "threads_account_id_required",
+      );
+      const url = new URL(`/${encodeURIComponent(providerAccountId)}/threads_insights`, apiOrigin);
+      url.searchParams.set("metric", "followers_count");
+      url.searchParams.set("period", "lifetime");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const data = record(response.body)?.data;
+      if (!Array.isArray(data)) throw malformed();
+      const metric = data.map(record).find((item) => item?.name === "followers_count");
+      const values = metric?.values;
+      const total = record(metric?.total_value)?.value;
+      const followers = Array.isArray(values)
+        ? metricValue(record(values[0])?.value)
+        : metricValue(total);
+      if (followers === undefined) throw malformed();
+      return { followers, recordedAt: now().toISOString() };
     },
 
     async listAnalytics(context, credentials, lookup, page) {
@@ -837,12 +869,17 @@ export function createThreadsAdapter(options: ThreadsAdapterOptions): ProviderAd
       };
     },
 
+    /**
+     * Refreshes an unexpired, at-least-24-hour-old Threads long-lived token through
+     * Meta's documented query parameters; returns the rotated token and expiry.
+     * Provider errors propagate so expired grants require authorization again.
+     */
     async refreshAccessToken(context, refreshToken): Promise<ProviderTokenSet> {
       const currentToken = required("refreshToken", refreshToken);
       const url = new URL("/refresh_access_token", apiOrigin);
       url.searchParams.set("grant_type", "th_refresh_token");
+      url.searchParams.set("access_token", currentToken);
       const response = await http.request<unknown>(context, {
-        headers: bearer(currentToken),
         method: "GET",
         url: url.toString(),
       });

@@ -265,7 +265,7 @@ const cases: ConformanceCase[] = [
   {
     method: "GET",
     operationId: "startPlatformOAuth",
-    path: "/api/v1/platforms/threads/connect?brand_profile_id=00000000-0000-4000-8000-000000000111",
+    path: "/api/v1/platforms/threads/connect",
   },
   {
     method: "GET",
@@ -391,6 +391,16 @@ const cases: ConformanceCase[] = [
   },
   {
     method: "GET",
+    operationId: "getAnalyticsDashboard",
+    path: "/api/v1/analytics/dashboard?start=2026-01-01T00%3A00%3A00Z&end=2026-01-31T00%3A00%3A00Z",
+  },
+  {
+    method: "GET",
+    operationId: "getAnalyticsPosts",
+    path: "/api/v1/analytics/posts?start=2026-01-01T00%3A00%3A00Z&end=2026-01-31T00%3A00%3A00Z",
+  },
+  {
+    method: "GET",
     operationId: "getDistributionAnalytics",
     path: "/api/v1/analytics/00000000-0000-4000-8000-000000000301",
   },
@@ -434,6 +444,8 @@ function body<T>(operationId: string): T {
 
 const coreService = {
   activeOrganization: () => Effect.succeed("20000000-0000-4000-8000-000000000001"),
+  analyticsPosts: () => Effect.succeed(body("getAnalyticsPosts")),
+  dashboardAnalytics: () => Effect.succeed(body("getAnalyticsDashboard")),
   calendar: () => Effect.succeed(body<{ events: unknown[] }>("listCalendarEvents").events),
   cancelDistribution: () =>
     Effect.succeed({
@@ -598,7 +610,6 @@ const conformanceTestKey = "0123456789abcdef0123456789abcdef";
 const oauthState = {
   create: async () => undefined,
   consume: async () => ({
-    brand_profile_id: "00000000-0000-4000-8000-000000000111",
     expires_at: Date.now() + 60_000,
     organization_id: "00000000-0000-4000-8000-000000000001",
     pkce_verifier: "pkce-verifier",
@@ -629,7 +640,6 @@ const oauthState = {
       }),
     );
     return {
-      brandProfileId: "00000000-0000-4000-8000-000000000111",
       claimToken: "test-claim-token",
       encryptedConnection: sealed,
       organizationId: "00000000-0000-4000-8000-000000000001",
@@ -976,6 +986,8 @@ const errorPathOverrides: Record<string, string> = {
   completePlatformOAuth: "/api/v1/platforms/threads/callback?state=short-state",
   getAnalyticsSummary:
     "/api/v1/analytics?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",
+  getAnalyticsPosts:
+    "/api/v1/analytics/posts?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",
   getReadiness: "/api/v1/ready",
   listCalendarEvents:
     "/api/v1/calendar?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",

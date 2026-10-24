@@ -44,7 +44,20 @@ import {
 } from "@meltiply/storage";
 import { Effect, Exit } from "effect";
 import type { Hono } from "hono";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import type * as Domain from "@meltiply/domain";
+
+// Finite allowances are a test policy, not the unrestricted community default.
+// Preserve transactional quota and accounting regressions for bounded policies.
+vi.mock("@meltiply/domain", async (importOriginal) => ({
+  ...(await importOriginal<typeof Domain>()),
+  COMMUNITY_LIMITS: {
+    max_distributions: 30,
+    max_platforms: 2,
+    max_storage_bytes: 1024 * 1024 * 1024,
+    max_uploads: 10,
+  },
+}));
 
 import { createApiApp } from "../src/app";
 import { createAssetApiService } from "../src/asset-service";
@@ -71,20 +84,14 @@ const describeIntegration = describe;
 const seededUserId = "10000000-0000-4000-8000-000000000001";
 
 /**
- * The plan limit every case here is measured against. `free` is the smallest
- * Entitlement set the product defines, and the fixture workspaces run on that
- * plan with an active billing status, so the enforced numbers are the plan's
- * own rather than an invented quota.
- *
- * The plan exposes a nullable cap: `null` means unmetered. The boundary cases
- * only mean anything against a finite limit, so this module declares the
- * prerequisite it actually needs and fails the suite loudly rather than
- * measuring against a cap that does not exist.
+ * Finite storage allowance injected by this suite to exercise quota boundaries.
+ * Community deployments use `null`; these cases intentionally retain a bounded
+ * policy so quota enforcement remains covered for future hosted deployments.
  */
 const storageCap = (() => {
   const cap = COMMUNITY_LIMITS.max_storage_bytes;
   if (cap === null || !Number.isFinite(cap) || cap <= 0) {
-    throw new Error("the free plan must define a finite storage cap for the quota boundary cases");
+    throw new Error("The bounded-policy fixture requires a finite storage allowance.");
   }
   return cap;
 })();
@@ -2300,5 +2307,46 @@ describeIntegration("workspace storage Entitlements with PostgreSQL", () => {
     await runMaintenance();
     const afterRollover = await recordedUsage(lifecycleStudio);
     expect(afterRollover).toBe(storageCap - probeBytes);
+  });
+  it("accepts community uploads and processing beyond finite-policy allowances", async () => {
+    const boundedPolicy = { ...COMMUNITY_LIMITS };
+    try {
+      const community = await vi.importActual<typeof Domain>("@meltiply/domain");
+      Object.assign(COMMUNITY_LIMITS, community.COMMUNITY_LIMITS);
+      const residentBytes = 2 * 1024 * 1024 * 1024;
+      await resetStudio(reservationStudio, residentBytes);
+      await systemTransaction(async (client) => {
+        await client.query(
+          `INSERT INTO usage_records (org_id, period, uploads)
+           VALUES ($1, to_char(now(), 'YYYY-MM'), 1000)
+           ON CONFLICT (org_id, period) DO UPDATE SET uploads = EXCLUDED.uploads`,
+          [reservationStudio.organizationId],
+        );
+      });
+      const uploads = await Promise.all(
+        Array.from({ length: 12 }, (_, index) =>
+          beginUpload(reservationStudio, {
+            fileSize: probeBytes,
+            title: `Community upload ${index}`,
+          }),
+        ),
+      );
+      expect(await chargedBytes(reservationStudio.organizationId)).toBe(
+        BigInt(residentBytes + 12 * probeBytes),
+      );
+      expect(await liveReservations(reservationStudio.organizationId)).toHaveLength(12);
+
+      const first = uploads[0]!;
+      landBytes(first, pngPayload(probeBytes));
+      expect((await finalizeUpload(reservationStudio, first)).status).toBe(202);
+      expect(await deliverProcessing(reservationStudio, first.assetId)).toBe("processed");
+      expect((await assetState(first.assetId)).status).toBe("ready");
+      expect(await liveReservations(reservationStudio.organizationId)).toHaveLength(11);
+      expect(await chargedBytes(reservationStudio.organizationId)).toBe(
+        BigInt(residentBytes + 13 * probeBytes + imageCeilingBytes),
+      );
+    } finally {
+      Object.assign(COMMUNITY_LIMITS, boundedPolicy);
+    }
   });
 });

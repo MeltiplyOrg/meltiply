@@ -18,6 +18,14 @@ const metadata = JSON.parse(await readFile(resolve(dist, "metadata.json"), "utf8
 const objectStorageProvider = z
   .enum(["r2", "s3"])
   .parse(process.env.OBJECT_STORAGE_PROVIDER || "r2");
+const optionalEmail = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.email().optional(),
+);
+const optionalUrl = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.url().optional(),
+);
 const config = z
   .object({
     SELFHOST_DATA: z.string().default("/data"),
@@ -29,8 +37,9 @@ const config = z
     TOKEN_ENCRYPTION_KEY: z.string().min(32),
     SELFHOST_OPERATOR_SECRET: z.string().min(32),
     PROCESSOR_JOB_TOKEN: z.string().min(32),
-    MAIL_FROM_ADDRESS: z.email(),
-    SELFHOST_SMTP_URL: z.string().url(),
+    MAIL_FROM_ADDRESS: optionalEmail,
+    SELFHOST_SMTP_URL: optionalUrl,
+    SELFHOST_REQUIRE_EMAIL_VERIFICATION: z.enum(["true", "false"]).optional(),
   })
   .parse(process.env);
 /** Credentials for the bundled R2 binding; absent when an operator selected S3. */
@@ -58,8 +67,26 @@ for (const name of ["schedule-hourly", "schedule-daily"]) {
   queues[`${name}-dlq`] = { deadLetter: true, source: name };
 }
 const jobs = new JobStore(resolve(config.SELFHOST_DATA, "jobs.sqlite"), queues);
-const mail = nodemailer.createTransport(config.SELFHOST_SMTP_URL);
-await mail.verify();
+const mailConfigured =
+  config.MAIL_FROM_ADDRESS !== undefined && config.SELFHOST_SMTP_URL !== undefined;
+const requireEmailVerification = config.SELFHOST_REQUIRE_EMAIL_VERIFICATION
+  ? config.SELFHOST_REQUIRE_EMAIL_VERIFICATION === "true"
+  : mailConfigured;
+if (requireEmailVerification && !mailConfigured) {
+  throw new TypeError(
+    "SELFHOST_REQUIRE_EMAIL_VERIFICATION=true requires MAIL_FROM_ADDRESS and SELFHOST_SMTP_URL",
+  );
+}
+const mail = mailConfigured ? nodemailer.createTransport(config.SELFHOST_SMTP_URL) : undefined;
+if (mail) await mail.verify();
+if (!mailConfigured) {
+  console.log(
+    JSON.stringify({
+      event: "selfhost_mail_unconfigured",
+      email_verification: requireEmailVerification ? "required" : "disabled",
+    }),
+  );
+}
 const address = z.union([
   z.email(),
   z.object({ email: z.email(), name: z.string().max(200).optional() }),
@@ -91,6 +118,7 @@ async function host(request) {
       return Response.json({ committed: true });
     }
     if (path === "/mail") {
+      if (!mail) return new Response(null, { status: 503 });
       const message = mailSchema.parse(payload);
       const from = typeof message.from === "string" ? message.from : message.from.email;
       if (from !== config.MAIL_FROM_ADDRESS) return new Response(null, { status: 403 });
@@ -122,6 +150,9 @@ const bindings = {
   FRONTEND_URL: new URL(config.SELFHOST_ORIGIN).origin,
   PUBLIC_API_URL: new URL(config.SELFHOST_ORIGIN).origin,
   BETTER_AUTH_URL: new URL(config.SELFHOST_ORIGIN).origin,
+  // The public origin may sit behind an authenticating reverse proxy, so the
+  // Worker fetches its own JWKS over loopback instead of the browser URL.
+  BETTER_AUTH_JWKS_URL: "http://127.0.0.1:8080/api/auth/jwks",
   ALLOWED_ORIGINS: new URL(config.SELFHOST_ORIGIN).origin,
   OPERATOR_HOSTNAME: new URL(config.SELFHOST_ORIGIN).hostname,
   BETTER_AUTH_SECRET: config.BETTER_AUTH_SECRET,
@@ -134,8 +165,13 @@ const bindings = {
   R2_BUCKET_NAME: "meltiply-assets",
   R2_ENDPOINT: new URL(config.SELFHOST_ORIGIN).origin,
   R2_ENDPOINT_PATH_PREFIX: "/cdn-cgi/local/r2/s3",
-  MAIL_FROM_ADDRESS: config.MAIL_FROM_ADDRESS,
-  MAIL_FROM_NAME: process.env.MAIL_FROM_NAME || "Meltiply",
+  ...(mailConfigured
+    ? {
+        MAIL_FROM_ADDRESS: config.MAIL_FROM_ADDRESS,
+        MAIL_FROM_NAME: process.env.MAIL_FROM_NAME || "Meltiply",
+      }
+    : {}),
+  REQUIRE_EMAIL_VERIFICATION: requireEmailVerification ? "true" : "false",
 };
 for (const name of [
   "FACEBOOK_CLIENT_ID",
@@ -281,6 +317,11 @@ const runtime = new Miniflare(
     workers: [
       {
         ...worker("frontend"),
+        // Miniflare's loopback entry validates Host and Origin against fetch
+        // triggers. The configured public origin is the authority the reverse
+        // proxy presents, so reserve a never-used path on that hostname to
+        // allowlist it without shadowing app, API, or signed R2 paths.
+        routes: [`${new URL(config.SELFHOST_ORIGIN).hostname}/__selfhost_origin_allow__/*`],
         serviceBindings: { API: "api" },
         assets: {
           directory: resolve(dist, "app"),
@@ -301,7 +342,7 @@ const runtime = new Miniflare(
         },
         serviceBindings: {
           AUTOMATION: "automation",
-          MAIL: { name: "bindings", entrypoint: "MailSender" },
+          ...(mailConfigured ? { MAIL: { name: "bindings", entrypoint: "MailSender" } } : {}),
         },
       },
       {
@@ -501,7 +542,7 @@ async function shutdown(code = 0) {
   await dispatching.catch(() => {});
   await runtime.dispose();
   jobs.close();
-  mail.close();
+  mail?.close();
   process.exitCode = code;
 }
 process.once("SIGTERM", () => {

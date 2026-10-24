@@ -20,7 +20,7 @@ let accessVerifier:
 
 let allowedOrigins: { raw: string; values: ReadonlySet<string> } | undefined;
 
-let jwtVerifier: { origin: string; value: JwtVerifier } | undefined;
+let jwtVerifier: { origin: string; jwksUrl: string; value: JwtVerifier } | undefined;
 
 /**
  * Splits a comma-separated configuration string into a trimmed, non-empty list of tokens.
@@ -87,14 +87,12 @@ export function accessVerifierFor(env: ApiWorkerEnv): AccessTokenVerifier {
 }
 
 /**
- * Returns a cached Better Auth JWT verifier keyed by the configured auth origin.
+ * Returns a cached Better Auth JWT verifier keyed by issuer and signing-key URL.
  *
- * The Better Auth JWT plugin signs tenant access tokens with `iss`/`aud` pinned
- * to the normalized baseURL origin, so the verifier derives that origin from
- * `BETTER_AUTH_URL` (falling back to `PUBLIC_API_URL`) and resolves signing keys
- * from the plugin-managed `${origin}/api/auth/jwks` endpoint. The remote JWKS
- * verifier is reused across requests in the same isolate and rebuilt only when
- * the configured origin changes.
+ * Issuer and audience remain pinned to the public auth origin. An optional
+ * BETTER_AUTH_JWKS_URL routes key retrieval through trusted internal ingress,
+ * avoiding browser-only Access challenges on protected development tunnels.
+ * Without the override, keys come from the public origin's /api/auth/jwks.
  *
  * @param env - Worker environment bindings containing Better Auth URL configuration.
  * @returns Configured `JwtVerifier` validating signature, issuer, audience, and identity claims.
@@ -106,13 +104,11 @@ export function jwtVerifierFor(env: ApiWorkerEnv): JwtVerifier {
     throw new Error("Better Auth JWT verifier configuration is unavailable");
   }
   const origin = new URL(configured).origin;
-  if (jwtVerifier && jwtVerifier.origin === origin) {
+  const jwksUrl = new URL(env.BETTER_AUTH_JWKS_URL?.trim() || `${origin}/api/auth/jwks`).href;
+  if (jwtVerifier && jwtVerifier.origin === origin && jwtVerifier.jwksUrl === jwksUrl) {
     return jwtVerifier.value;
   }
-  const verifier = createRemoteJwtVerifier(
-    { audience: origin, issuer: origin },
-    new URL(`${origin}/api/auth/jwks`),
-  );
-  jwtVerifier = { origin, value: verifier };
+  const verifier = createRemoteJwtVerifier({ audience: origin, issuer: origin }, new URL(jwksUrl));
+  jwtVerifier = { origin, jwksUrl, value: verifier };
   return verifier;
 }

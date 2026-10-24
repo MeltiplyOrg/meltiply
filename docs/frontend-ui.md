@@ -43,9 +43,14 @@ Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. I
 
 ## Navigation, search, and filters
 
-`SidebarNav` and `NavigationShell` own the rail, header, mobile navigation, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations. Posts and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
+`SidebarNav`, `MobileNavigationSidebar`, and `NavigationShell` own the rail, header, mobile navigation layer, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations in Posts → Analytics → Channels order. Posts, Analytics, and Channels are single entries; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
 
-The phone navigation panel renders `SidebarNav` with `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
+The phone navigation panel is `MobileNavigationSidebar`: the same `SidebarNav` as the desktop rail, positioned as a fixed left-edge layer over the workspace with a fading scrim, sliding in from the left. It renders `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
+
+The sidebar imports unstyled `FocusScope` from the shared `@meltiply/ui/center-dialog`
+owner. It loops Tab/Shift+Tab while open and shares Radix's focus stack with the
+portalled account menu, so nested menus can take focus without fighting the
+navigation trap. The shell's background `inert` state is separate from containment.
 
 `SidebarGlideHighlight` (`@meltiply/ui/sidebar-glide-highlight`) owns the rail's hover background: every `data-sidebar-item` row is a target, and one pill springs to the hovered row instead of rows painting their own hover fill. The Settings section rail reuses the same component with its own container and a tighter snap radius. Rows keep `relative z-10` so labels and the selected surface read above it, keyboard focus rings are unchanged, and the public docs rail reuses the same component with its nested Radix viewport.
 
@@ -66,6 +71,8 @@ Shared tooltips use the reference-derived compact inverse treatment and timing. 
 Posts orders **Table → Calendar → Grid**, with Table as default. All three share Post identity, owning Brand Profile, real outcomes, filtering, and supported actions. Table grouping/column visibility is presentation, not a different data model. Its rows open Details and have no trailing actions column; rows use the table's own shared hover fill, a grouped row stays mounted while its group is collapsed, and the group toggle animates that height transition in both directions rather than unmounting rows. Calendar Month/Week uses actual dates, day lists, overflow, and explicit compose entry that opens the composer drawer; it does not imply drag-rescheduling. Grid uses `PostCard` and real attachments; its column stepper morphs in (one WAAPI effect grows its box from nothing so the view switcher beside it is pushed over, and shrinks it again on the way out), and every count the workspace shows — the surface descriptions ("Showing {count} posts…", "{count} connected accounts…"), the stepper's column count, the section tabs' counts, a Post's channel and attachment totals, a table group's size, a profile card's connected accounts — is one `RollingCount`, whose one-line window clips so a change rolls the new value in from the side the count moved while the previous value leaves the other way.
 
 Posts Table and its Columns menu share `postAnalyticsColumns`: Likes, Cmts, Shrs, Saves, Clicks, Views, Impr., and Reach. The existing spreadsheet Table retains horizontal scrolling, including on phones, and full metric names label abbreviated headers accessibly. `Post.analytics` carries one batched sum of each published Channel's latest stored snapshot, not the sum of historical snapshots or a request per row. Real zeros render as zero; drafts, non-published Posts, absent snapshots, and null/untracked counters render `-`. Saves/Clicks currently stay null. Refresh follows the normal Post query lifecycle rather than pretending measurements are live or audience-deduplicated.
+
+`usePosts` owns an infinite-query cache of 60-record server pages. Grid slices the filtered loaded collection into pages; Table appends explicitly requested pages. Both reuse the same browser-memory cache across view/route navigation, retain inactive pages for 30 minutes, and share the existing mutation invalidation and active-publication polling. Cached content is not written to persistent browser storage and is discarded with the user/workspace query-provider boundary. A failed next-page read leaves loaded records and selection intact and exposes retry through the same bottom control.
 
 The empty Table message and Create post action belong to the visible viewport outside the wide table body, so they do not disappear offscreen with analytics columns. Calendar navigation is outside its independently scrolling date canvas; horizontal or vertical calendar movement cannot carry Today, period navigation, or Month/Week away.
 
@@ -129,6 +136,14 @@ Post deletion soft-deletes composition and stops only pending delivery; it does 
 
 Channels follows the Members directory composition: Accounts/Brand Profiles tabs, account search, status segments, field-row filters, identity table, and real profile cards. The section tabs' accent rule and the status segments' surface pill are each one travelling `SlidingHighlight`, so switching a section or a status slides the selection instead of repainting two controls. Connection cells contain one accessible health icon; recovery remains available without duplicate status text. Its background and controls match Posts.
 
+Channel identity uses a saved-name line followed by one compact metadata line
+containing the available username and provider ID. `ChannelCopyValues` composes
+shared link-style `Button` controls: the values themselves copy their raw text,
+without separate icon buttons, through the existing clipboard helper and
+success/error toast. Values truncate without wrapping, so detecting a username
+does not add another row or change directory density. Keyboard focus and the
+shared coarse-pointer targets remain intact.
+
 Connection cards stack platform identity above saved-account status and connection actions on phones. The connection dialog uses one outer native scroller at narrow widths; its platform list gets its own bounded scroller only when the panel has room.
 
 `BulkSelectionBar` owns the inverse-ink floating pill, separators, count, action icon/label, and icon-only Deselect. Callers own selection, confirmation, and mutations. Select-all is visually checked only when the entire visible collection is selected. Partial selection stays unchecked while the pill reports the real count. Confirm a stable batch; remove successful targets and retain failures for retry.
@@ -143,7 +158,9 @@ Connection cards stack platform identity above saved-account status and connecti
 | Destructive confirmation    | `CenterAlertDialog` |
 | Large Post inspection       | `SideDialog`        |
 
-`SideDialog` owns the edge/phone drawer geometry, the compact record toolbar, its Close control, native body scrolling, opener restoration, and the optional body-class hook a pinned action bar needs. Features supply breadcrumb/context, supported header actions, and real content. Post inspection shows properties, caption, ordered attachments, and independent Channel outcomes; composing and editing a Post open the same drawer with the composer body, so no separate composer surface exists. It has no duplicated footer or reference-only task fields/comments.
+`SideDialog` owns the edge/phone drawer geometry, the compact record toolbar, its Close control, native body scrolling, opener restoration, and the optional body-class hook a pinned action bar needs. Features supply breadcrumb/context, supported header actions, and real content. Post inspection shows properties, caption, ordered attachments, the Post's stored analytics once at least one Channel has published — totals plus separate Engagement over time and Reach & impressions over time line charts — and independent Channel outcomes; composing and editing a Post open the same drawer with the composer body, so no separate composer surface exists. The charts load lazily and read chronological stored snapshots, carrying each Channel's latest measured counters forward rather than summing historical snapshots. The first 500 measurements per Channel are shown with an explicit notice when that limit is reached. It has no duplicated footer or reference-only task fields/comments.
+
+The Post inspector's Reach & impressions over time chart includes a third, separately styled Views line. All three series use the same latest-per-Channel snapshot aggregation and expose exact values in the tooltip and accessible table; media views remain available when Reach or Impressions are untracked.
 
 The shared `FilterChecklist` in `@meltiply/ui/dropdown-menu` owns checkbox toggling, optional aggregate clearing, stay-open selection, and Radix keyboard/dismissal behavior. Posts status and `BrandProfileFilterSelect` use it alongside the canonical platform filter. Composition reuses `BrandProfileFilterSelect` without an aggregate row: empty means no selected profiles. `BrandProfileSelect` remains single-value for Channels scope; both modes share one resolved/unknown option roster. Inspector focus restoration uses `preventScroll` rather than scrolling the live collection back to its opener.
 

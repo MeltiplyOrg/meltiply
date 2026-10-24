@@ -42,6 +42,10 @@ const defaultGrantedPermissions: Responder = () =>
       { permission: "pages_show_list", status: "granted" },
       { permission: "pages_read_engagement", status: "granted" },
       { permission: "pages_manage_posts", status: "granted" },
+
+      { permission: "pages_manage_engagement", status: "granted" },
+
+      { permission: "read_insights", status: "granted" },
     ],
   });
 
@@ -101,10 +105,23 @@ function reelStatus(
 }
 
 describe("createFacebookAdapter", () => {
+  it("measures followers without misreporting Page likes as following", async () => {
+    const providerCalls = sequence((url) => {
+      expect(url.searchParams.get("fields")).toBe("followers_count");
+      return json({ followers_count: 420, fan_count: 350 });
+    });
+    await expect(
+      adapter(providerCalls.fetcher).getAccountAnalytics!(context, credentials),
+    ).resolves.toEqual({
+      followers: 420,
+      recordedAt: "2026-07-19T00:00:00.000Z",
+    });
+  });
+
   it("advertises only the implemented Page Reels subset", () => {
     const provider = adapter(vi.fn<typeof fetch>());
     expect(provider.capability).toMatchObject({
-      analytics: false,
+      analytics: true,
       asset_types: ["video"],
       comments: false,
       connect_available: true,
@@ -120,7 +137,7 @@ describe("createFacebookAdapter", () => {
       reply: false,
     });
     expect(provider.transferModes).toEqual(["remote_ingest"]);
-    expect(provider.listAnalytics).toBeUndefined();
+    expect(provider.listAnalytics).toBeTypeOf("function");
     expect(provider.listComments).toBeUndefined();
     expect(provider.reply).toBeUndefined();
     expect(provider.cancelPublication).toBeUndefined();
@@ -143,7 +160,8 @@ describe("createFacebookAdapter", () => {
       client_id: "facebook-client",
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "pages_show_list,pages_read_engagement,pages_manage_posts",
+      scope:
+        "pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,read_insights,business_management",
       state: "oauth-state",
     });
     expect(() =>
@@ -205,7 +223,13 @@ describe("createFacebookAdapter", () => {
           account: { displayName: "Meltiply Page", id: "page-1" },
           expiresAt: "2026-09-17T00:00:00.000Z",
           refreshToken: '{"pageId":"page-1","userAccessToken":"long-user-secret"}',
-          scopes: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"],
+          scopes: [
+            "pages_show_list",
+            "pages_read_engagement",
+            "pages_manage_posts",
+            "pages_manage_engagement",
+            "read_insights",
+          ],
         },
       ],
     });
@@ -384,6 +408,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
           ],
         },
         { data: null },
@@ -403,6 +431,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
           ],
         },
         {
@@ -430,6 +462,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
           ],
         },
         {
@@ -458,6 +494,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
           ],
         },
         {
@@ -552,6 +592,160 @@ describe("createFacebookAdapter", () => {
       refreshToken: '{"pageId":"page-2","userAccessToken":"long"}',
     });
     expect(result.accounts[1]!.account.username).toBeUndefined();
+  });
+
+  it("includes business-assigned Pages across pagination and deduplicates shared Pages", async () => {
+    const page = (id: string) => ({
+      id,
+      name: `Page ${id}`,
+      access_token: `page-token-${id}`,
+      tasks: ["CREATE_CONTENT"],
+    });
+    const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
+      const url = new URL(input.toString());
+      if (url.pathname.endsWith("/oauth/access_token")) {
+        const form = new URLSearchParams(String(init.body));
+        return json({
+          access_token: form.get("grant_type") === "fb_exchange_token" ? "long" : "short",
+          expires_in: 3_600,
+          token_type: "bearer",
+        });
+      }
+      if (url.pathname.endsWith("/me/permissions")) {
+        return json({
+          data: [
+            { permission: "pages_show_list", status: "granted" },
+            { permission: "pages_read_engagement", status: "granted" },
+            { permission: "pages_manage_posts", status: "granted" },
+            { permission: "business_management", status: "granted" },
+          ],
+        });
+      }
+      if (url.pathname.endsWith("/me/accounts")) return json({ data: [page("direct")] });
+      if (url.pathname.endsWith("/me/business_users")) {
+        return url.searchParams.has("after")
+          ? json({ data: [{ id: "business-user-2" }] })
+          : json({
+              data: [{ id: "business-user-1" }],
+              paging: {
+                cursors: { after: "next" },
+                next: "https://graph.facebook.com/v25.0/me/business_users?after=next",
+              },
+            });
+      }
+      if (url.pathname.endsWith("/business-user-1/assigned_pages")) {
+        return url.searchParams.has("after")
+          ? json({ data: [page("business-2")] })
+          : json({
+              data: [page("direct"), page("business-1")],
+              paging: {
+                cursors: { after: "next" },
+                next: "https://graph.facebook.com/v25.0/business-user-1/assigned_pages?after=next",
+              },
+            });
+      }
+      if (url.pathname.endsWith("/business-user-2/assigned_pages")) {
+        return json({ data: [page("business-2"), page("business-3")] });
+      }
+      throw new Error(`Unexpected discovery endpoint: ${url.pathname}`);
+    });
+    const result = await adapter(fetcher).exchangeAuthorizationCode!(context, {
+      code: "code",
+      codeVerifier: "unused",
+      redirectUri,
+    });
+    if (!("accounts" in result)) throw new Error("Expected account selection");
+    expect(result.accounts.map((connection) => connection.account.id)).toEqual([
+      "direct",
+      "business-1",
+      "business-2",
+      "business-3",
+    ]);
+    expect(result.accounts.map((connection) => connection.accessToken)).toEqual([
+      "page-token-direct",
+      "page-token-business-1",
+      "page-token-business-2",
+      "page-token-business-3",
+    ]);
+  });
+
+  /** Independent business edges overlap, stay bounded, and retain discovery order despite response order. */
+  it("discovers independent business Page edges concurrently without unbounded fan-out", async () => {
+    let release!: () => void;
+    let started!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const overlapping = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let active = 0;
+    let peak = 0;
+    const users = Array.from({ length: 8 }, (_, index) => ({ id: `business-${index}` }));
+    const fetcher = vi.fn<typeof fetch>(async (input, init = {}) => {
+      const url = new URL(input.toString());
+      if (url.pathname.endsWith("/oauth/access_token")) {
+        return json({
+          access_token: new URLSearchParams(String(init.body)).has("fb_exchange_token")
+            ? "long"
+            : "short",
+          expires_in: 3_600,
+          token_type: "bearer",
+        });
+      }
+      if (url.pathname.endsWith("/me/permissions")) {
+        return json({
+          data: [
+            { permission: "pages_show_list", status: "granted" },
+            { permission: "pages_read_engagement", status: "granted" },
+            { permission: "pages_manage_posts", status: "granted" },
+            { permission: "business_management", status: "granted" },
+          ],
+        });
+      }
+      if (url.pathname.endsWith("/me/accounts")) return json({ data: [] });
+      if (url.pathname.endsWith("/me/business_users")) return json({ data: users });
+      const id = url.pathname.split("/")[2];
+      if (!users.some((user) => user.id === id) || !url.pathname.endsWith("/assigned_pages")) {
+        throw new Error(`Unexpected discovery endpoint: ${url.pathname}`);
+      }
+      active++;
+      peak = Math.max(peak, active);
+      if (active >= 2) started();
+      try {
+        await held;
+        return json({
+          data: [
+            {
+              id: `page-${id}`,
+              name: `Page ${id}`,
+              access_token: `token-${id}`,
+              tasks: ["CREATE_CONTENT"],
+            },
+          ],
+        });
+      } finally {
+        active--;
+      }
+    });
+    const exchange = adapter(fetcher).exchangeAuthorizationCode!(context, {
+      code: "code",
+      codeVerifier: "unused",
+      redirectUri,
+    });
+    try {
+      await Promise.race([overlapping, exchange]);
+      expect(peak).toBeGreaterThan(1);
+      expect(peak).toBeLessThanOrEqual(4);
+    } finally {
+      release();
+    }
+    const result = await exchange;
+    if (!("accounts" in result)) throw new Error("Expected account selection");
+    expect(result.accounts.map((connection) => connection.account.id)).toEqual(
+      users.map((user) => `page-${user.id}`),
+    );
+    expect(peak).toBeLessThanOrEqual(4);
   });
 
   it("traverses Graph API pagination safely using validated cursors and Graph origin", async () => {
@@ -903,6 +1097,10 @@ describe("createFacebookAdapter", () => {
             { permission: "pages_show_list", status: "granted" },
             { permission: "pages_read_engagement", status: "granted" },
             { permission: "pages_manage_posts", status: "granted" },
+
+            { permission: "pages_manage_engagement", status: "granted" },
+
+            { permission: "read_insights", status: "granted" },
             { permission: "email", status: "declined" },
           ],
         }),
@@ -931,6 +1129,8 @@ describe("createFacebookAdapter", () => {
       "pages_show_list",
       "pages_read_engagement",
       "pages_manage_posts",
+      "pages_manage_engagement",
+      "read_insights",
     ]);
   });
 
@@ -1200,7 +1400,13 @@ describe("createFacebookAdapter", () => {
       accessToken: "new-page-secret",
       expiresAt: "2026-09-17T00:00:00.000Z",
       refreshToken: '{"pageId":"page-1","userAccessToken":"new-user-secret"}',
-      scopes: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"],
+      scopes: [
+        "pages_show_list",
+        "pages_read_engagement",
+        "pages_manage_posts",
+        "pages_manage_engagement",
+        "read_insights",
+      ],
     });
 
     await expect(
@@ -1208,5 +1414,154 @@ describe("createFacebookAdapter", () => {
     ).rejects.toMatchObject({
       failure: { code: "facebook_refresh_secret_invalid" },
     });
+  });
+
+  it("keeps a publishing-only grant connectable while analytics scopes stay ungranted", async () => {
+    const providerCalls = sequence(
+      () => json({ access_token: "short" }),
+      () => json({ access_token: "long", expires_in: 3_600, token_type: "bearer" }),
+      () =>
+        json({
+          data: [
+            { permission: "pages_show_list", status: "granted" },
+            { permission: "pages_read_engagement", status: "granted" },
+            { permission: "pages_manage_posts", status: "granted" },
+            { permission: "pages_manage_engagement", status: "granted" },
+            { permission: "read_insights", status: "declined" },
+          ],
+        }),
+      () =>
+        json({
+          data: [
+            {
+              access_token: "page-access-secret",
+              id: "page-1",
+              name: "Meltiply Page",
+              tasks: ["CREATE_CONTENT"],
+            },
+          ],
+        }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {
+        code: "code",
+        codeVerifier: "unused",
+        redirectUri,
+      }),
+    ).resolves.toMatchObject({
+      accounts: [
+        {
+          account: { displayName: "Meltiply Page", id: "page-1" },
+          scopes: [
+            "pages_show_list",
+            "pages_read_engagement",
+            "pages_manage_posts",
+            "pages_manage_engagement",
+          ],
+        },
+      ],
+    });
+  });
+
+  it("reads Reel plays, likes, comments, and derived shares from the video identity", async () => {
+    const providerCalls = sequence(
+      (url, init) => {
+        expect(url.origin).toBe("https://graph.facebook.com");
+        expect(url.pathname).toBe("/v25.0/video-1/video_insights");
+        expect(url.searchParams.get("metric")).toBe(
+          "blue_reels_play_count,post_video_social_actions",
+        );
+        expect(url.searchParams.get("period")).toBe("lifetime");
+        expect(new Headers(init.headers).get("Authorization")).toBe("Bearer page-access-secret");
+        return json({
+          data: [
+            {
+              name: "blue_reels_play_count",
+              period: "lifetime",
+              values: [{ value: 1200 }],
+            },
+            {
+              name: "post_video_social_actions",
+              period: "lifetime",
+              values: [{ value: 21 }],
+            },
+          ],
+        });
+      },
+      (url) => {
+        expect(url.pathname).toBe("/v25.0/video-1");
+        expect(url.searchParams.get("fields")).toBe(
+          "likes.summary(true).limit(0),comments.summary(true).limit(0)",
+        );
+        return json({
+          likes: { summary: { total_count: 84 } },
+          comments: { summary: { total_count: 9 } },
+        });
+      },
+    );
+    await expect(
+      adapter(providerCalls.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).resolves.toEqual({
+      items: [
+        {
+          comments: 9,
+          impressions: 0,
+          likes: 84,
+          providerPostId: "video-1",
+          recordedAt: "2026-07-19T00:00:00.000Z",
+          reach: 0,
+          shares: 12,
+          views: 1200,
+          watchTimeSeconds: 0,
+        },
+      ],
+    });
+  });
+
+  it("rejects social actions below comments and missing Reel metrics", async () => {
+    const inconsistent = sequence(
+      () =>
+        json({
+          data: [
+            { name: "blue_reels_play_count", values: [{ value: 1200 }] },
+            { name: "post_video_social_actions", values: [{ value: 4 }] },
+          ],
+        }),
+      () =>
+        json({
+          likes: { summary: { total_count: 84 } },
+          comments: { summary: { total_count: 9 } },
+        }),
+    );
+    await expect(
+      adapter(inconsistent.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
+
+    const missingPlays = sequence(
+      () => json({ data: [{ name: "post_video_social_actions", values: [{ value: 0 }] }] }),
+      () =>
+        json({
+          likes: { summary: { total_count: 0 } },
+          comments: { summary: { total_count: 0 } },
+        }),
+    );
+    await expect(
+      adapter(missingPlays.fetcher).listAnalytics!(
+        context,
+        credentials,
+        { providerPostId: "video-1" },
+        { limit: 100 },
+      ),
+    ).rejects.toBeInstanceOf(ProviderAdapterError);
   });
 });

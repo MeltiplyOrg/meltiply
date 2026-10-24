@@ -115,20 +115,25 @@ export function controlledProviderAccountId(platform: ControlledPlatform): strin
   return `controlled-${platform}-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 }
 
+/** Retains each browser page's fixture scope across full application reloads. */
+const fixtureBrandProfileNames = new WeakMap<Page, string>();
+
 /**
- * Selects the workspace's active Brand Profile and reports its display name.
+ * Selects a named fixture Brand Profile, or restores this page's previous selection.
  *
- * Opens the Posts Filter disclosure and selects a real Brand Profile. Choosing
- * the profile scopes the composer; its name lets controlled fixture provisioning
- * attach Channels without introducing another API shape. The disclosure closes
- * afterward so subsequent page actions are not obscured by its floating panel.
+ * Never falls back to the first seeded profile: the shared Workspace contains
+ * unrelated seeded Channels and other tests' profiles. A new page must provide
+ * its fixture name explicitly. The disclosure closes after selection so later
+ * page actions are not obscured by its floating panel.
  *
  * @param page - Playwright page bound to the signed-in `/posts` view.
- * @param preferredName - Exact known fixture profile; omitted selects the first available profile.
+ * @param profileName - Fixture name; defaults to the last name selected on this page.
  * @returns The active Brand Profile's display name.
- * @throws {Error} When the workspace exposes no selectable Brand Profile.
+ * @throws {Error} When no fixture name is known or the named profile is unavailable.
  */
-export async function activeBrandProfileName(page: Page, preferredName?: string): Promise<string> {
+export async function activeBrandProfileName(page: Page, profileName?: string): Promise<string> {
+  const name = profileName ?? fixtureBrandProfileNames.get(page);
+  if (!name) throw new Error("A new browser page must select its named fixture Brand Profile.");
   const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
   if (!(await disclosure.locator("..").evaluate((element) => element.hasAttribute("open")))) {
     await disclosure.click();
@@ -142,18 +147,12 @@ export async function activeBrandProfileName(page: Page, preferredName?: string)
   await expect(trigger).toBeVisible({ timeout: 30_000 });
   await trigger.click();
   const menu = page.getByRole("menu", { name: "Brand Profile", exact: true });
-  const options = menu.getByRole("menuitemcheckbox");
-  await expect(options.first()).toBeVisible({ timeout: 30_000 });
-  const names = (await options.allInnerTexts()).map((value) => value.trim());
-  const name =
-    preferredName === undefined
-      ? names.find((value) => value.length > 0 && !/^all brand profiles$/i.test(value))
-      : names.find((value) => value === preferredName);
-  if (!name) {
-    throw new Error(`workspace has no matching Brand Profile; options were ${names.join(", ")}`);
-  }
+  const option = menu.getByRole("menuitemcheckbox", { name, exact: true });
+  await expect(option).toBeVisible({ timeout: 30_000 });
   await menu.getByRole("menuitemcheckbox", { name: "All Brand Profiles", exact: true }).click();
-  await menu.getByRole("menuitemcheckbox", { name, exact: true }).click();
+  await option.click();
+  await expect(option).toBeChecked();
+  fixtureBrandProfileNames.set(page, name);
   await page.keyboard.press("Escape");
   await disclosure.click();
   await expect(page.getByRole("group", { name: "Filters", exact: true })).toBeHidden();
@@ -212,9 +211,10 @@ export async function provisionControlledChannels(
       profile_name: profileName,
     },
   });
+  const failureDetail = response.status() === 201 ? "" : await response.text();
   expect(
     response.status(),
-    `provisioning ${channels.length} controlled channel(s) for "${profileName}"`,
+    `provisioning ${channels.length} controlled channel(s) for "${profileName}": ${failureDetail}`,
   ).toBe(201);
   return Schema.decodeUnknownSync(provisionedChannelsSchema)(await response.json());
 }

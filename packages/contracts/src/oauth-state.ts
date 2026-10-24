@@ -8,7 +8,6 @@ export type Platform = components["schemas"]["Platform"];
  * Context persisted for an initial OAuth authorization handoff.
  */
 export interface OAuthStateRecord {
-  brand_profile_id: string;
   expires_at: number;
   organization_id: string;
   pkce_verifier?: string;
@@ -27,10 +26,9 @@ export interface OAuthSelectionCandidate {
 }
 
 /**
- * Initial metadata supplied when initiating a multi-account OAuth selection session.
+ * Initial metadata supplied when initiating a pending OAuth assignment session.
  */
 export interface OAuthSelectionInit {
-  readonly brand_profile_id: string;
   readonly expires_at: number;
   readonly id: string;
   readonly organization_id: string;
@@ -39,19 +37,20 @@ export interface OAuthSelectionInit {
 }
 
 /**
- * Master lifecycle record for a pending multi-account OAuth selection.
+ * Master lifecycle record for a pending OAuth account assignment.
  * Stores bounded metadata, account IDs, and lifecycle state only.
  */
 export interface OAuthSelectionRecord {
   readonly account_ids: ReadonlyArray<string>;
-  readonly brand_profile_id: string;
   claim?: {
+    readonly brand_profile_id: string;
     readonly claimed_at: number;
     readonly expires_at: number;
     readonly idempotency_key: string;
     readonly token: string;
   };
   completed_account_id?: string;
+  completed_brand_profile_id?: string;
   completed_idempotency_key?: string;
   cancelled_idempotency_key?: string;
   /**
@@ -75,7 +74,6 @@ export interface OAuthSelectionRecord {
  */
 export type ClaimSelectionResult =
   | {
-      readonly brandProfileId: string;
       readonly claimToken: string;
       readonly encryptedConnection: string;
       readonly organizationId: string;
@@ -90,7 +88,11 @@ export type ClaimSelectionResult =
       readonly status: "not_found";
     }
   | {
-      readonly code: "already_completed" | "pinned_account_mismatch" | "claim_active";
+      readonly code:
+        | "already_completed"
+        | "pinned_account_mismatch"
+        | "pinned_profile_mismatch"
+        | "claim_active";
       readonly message: string;
       readonly status: "conflict";
     }
@@ -126,7 +128,7 @@ export interface OAuthStateCoordinatorStub {
   claimSelection(
     selectionId: string,
     accountId: string,
-    actor: { organizationId: string; userId: string },
+    actor: { brandProfileId: string; organizationId: string; userId: string },
     idempotencyKey: string,
     leaseMs?: number,
   ): Promise<ClaimSelectionResult>;

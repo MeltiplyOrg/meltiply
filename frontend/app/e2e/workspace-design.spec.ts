@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { Schema } from "effect";
 import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 import {
   activeBrandProfileName,
@@ -74,7 +75,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
       }),
     )
     .toBe(true);
-  const railGlide = page.locator("[data-glide-highlight]");
+  const railGlide = page.locator("aside:visible [data-glide-highlight]");
   const postsRow = page.locator("aside").getByRole("button", { name: "Posts", exact: true });
   const channelsRow = page.locator("aside").getByRole("button", { name: "Channels", exact: true });
   await page.mouse.move(1200, 500);
@@ -400,17 +401,17 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     name: "All platforms",
     exact: true,
   });
+  // The modal menu hides its trigger from the accessibility tree while open.
+  const platformTriggerBox = await platformFilterTrigger.boundingBox();
   await platformFilterTrigger.click();
   const platformMenuSurface = page.locator(
     "[data-radix-popper-content-wrapper] [data-menu-surface]",
   );
-  const [platformTriggerBox, platformMenuBox] = await Promise.all([
-    platformFilterTrigger.boundingBox(),
-    platformMenuSurface.boundingBox(),
-  ]);
   // The list must span the full-width filter control that opened it instead of
   // collapsing to the shared surface floor.
-  expect(platformMenuBox?.width ?? 0).toBeGreaterThanOrEqual((platformTriggerBox?.width ?? 0) - 1);
+  await expect
+    .poll(async () => (await platformMenuSurface.boundingBox())?.width ?? 0)
+    .toBeGreaterThanOrEqual((platformTriggerBox?.width ?? 0) - 1);
   expect(
     await platformMenuSurface.evaluate((element) => getComputedStyle(element).animationName),
   ).toBe("menu-surface-in");
@@ -441,7 +442,6 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.getByRole("heading", { name: "Channels", exact: true }).hover();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("tab", { name: /Brand Profiles/ }).click();
-  await expect(page.getByRole("button", { name: "View channels" })).toBeVisible();
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("brand-profiles-desktop.png"),
@@ -577,14 +577,13 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     .locator('button[aria-haspopup="menu"]');
   expect(await postsFilterPanel.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   await expect(postsFilterPanel).toHaveAttribute("data-state", "open");
+  const statusControlBox = await statusControl.boundingBox();
   await statusControl.click();
   const openMenuSurface = page.getByRole("menu", { name: "Post status", exact: true });
   await expect(openMenuSurface).toBeVisible();
-  const [statusControlBox, statusMenuBox] = await Promise.all([
-    statusControl.boundingBox(),
-    openMenuSurface.boundingBox(),
-  ]);
-  expect(statusMenuBox?.width ?? 0).toBeGreaterThanOrEqual((statusControlBox?.width ?? 0) - 1);
+  await expect
+    .poll(async () => (await openMenuSurface.boundingBox())?.width ?? 0)
+    .toBeGreaterThanOrEqual((statusControlBox?.width ?? 0) - 1);
   expect(await openMenuSurface.evaluate(menuSurfaceChrome)).toEqual(accountMenuSurface);
   expect(
     await openMenuSurface.locator("[data-menu-item]").first().evaluate(menuItemChrome),
@@ -832,6 +831,183 @@ test("keeps publishing work reachable through the redesigned workspace", async (
           )
           .toBe(true);
       }
+    }
+  }
+});
+
+/**
+ * Uses real owner/profile/Channel state and controlled selection metadata to check
+ * reconnect eligibility and modal keyboard containment, including the portalled menu.
+ * Both palettes and desktop/phone assignment layouts use the production app surface.
+ */
+test("keeps navigation focus and reconnect assignment correct in both palettes", async ({
+  page,
+  request,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const workspace = await openIsolatedOwnerWorkspace(page);
+  const accountId = controlledProviderAccountId("threads");
+  await provisionControlledChannels(request, workspace.profileName, [
+    {
+      platform: "threads",
+      displayName: "Existing Threads",
+      providerUserId: accountId,
+    },
+  ]);
+  await page.goto("/channels");
+  await page.getByRole("button", { name: "Create Brand Profile", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Create Brand Profile", exact: true });
+  await editor.getByLabel("Profile name", { exact: true }).fill("Empty destination");
+  await editor.getByRole("button", { name: "Create profile", exact: true }).click();
+  await expect(editor).toBeHidden();
+  const ticket = "review-assignment-1234567890";
+  await page.route(`**/api/v1/oauth-selections/${ticket}`, (route) =>
+    route.fulfill({
+      json: {
+        id: ticket,
+        platform: "threads",
+        expires_at: new Date(Date.now() + 600_000).toISOString(),
+        accounts: [
+          { id: accountId, display_name: "Existing Threads", avatar_url: null, username: null },
+          {
+            id: "new-threads-account",
+            display_name: "New Threads",
+            avatar_url: null,
+            username: null,
+          },
+        ],
+      },
+    }),
+  );
+  for (const palette of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: palette });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/channels");
+    const opener = page.getByRole("button", { name: "Open navigation menu", exact: true });
+    await opener.click();
+    const navigation = page.getByRole("dialog", { name: "Workspace navigation", exact: true });
+    const close = navigation.getByRole("button", { name: "Close navigation menu", exact: true });
+    const account = navigation.getByRole("button", { name: "Account menu", exact: true });
+    await close.focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(account).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(close).toBeFocused();
+    await account.click();
+    await expect(page.getByRole("menu", { name: "Account menu", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(account).toBeFocused();
+    await expect(navigation).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath(`navigation-focus-${palette}.png`),
+      animations: "disabled",
+    });
+    await page.keyboard.press("Escape");
+    await expect(opener).toBeFocused();
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(
+        `/channels/connect?oauth=select_account&provider=threads&selection_id=${ticket}`,
+      );
+      await page.getByText("Existing Threads", { exact: true }).click();
+      await expect(page.getByRole("radio", { name: /Existing Threads/ })).toBeChecked();
+      await expect(page.getByRole("radio", { name: /Empty destination/ })).toHaveCount(0);
+      await page.getByText(workspace.profileName, { exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "Connect Channel", exact: true }),
+      ).toBeEnabled();
+      await page.screenshot({
+        path: testInfo.outputPath(`reconnect-assignment-${palette}-${width}.png`),
+        animations: "disabled",
+        fullPage: true,
+      });
+      await page.getByText("New Threads", { exact: true }).click();
+      await expect(page.getByRole("radio", { name: /New Threads/ })).toBeChecked();
+      await expect(page.getByText("Empty destination", { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Connect Channel", exact: true }),
+      ).toBeDisabled();
+    }
+  }
+});
+
+/**
+ * Keeps username presence from changing directory density and copies the actual
+ * identity text through the browser clipboard, without selecting its Channel.
+ * Only username metadata is controlled; auth, ownership, and Channels use real fixtures.
+ */
+test("keeps Channel identity rows compact and copies their text directly", async ({
+  page,
+  context,
+  request,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const workspace = await openIsolatedOwnerWorkspace(page);
+  const username = "studio.handle.with.a.long.identity";
+  const withUsernameId = controlledProviderAccountId("threads");
+  const withoutUsernameId = controlledProviderAccountId("instagram");
+  const provisioned = await provisionControlledChannels(request, workspace.profileName, [
+    { platform: "threads", displayName: "Studio Threads", providerUserId: withUsernameId },
+    { platform: "instagram", displayName: "Studio Instagram", providerUserId: withoutUsernameId },
+  ]);
+  const withUsername = provisioned.channels.find((channel) => channel.platform === "threads");
+  const withoutUsername = provisioned.channels.find((channel) => channel.platform === "instagram");
+  if (!withUsername || !withoutUsername) throw new Error("Expected both fixture Channels");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.route(/\/api\/v1\/platforms(?:\?.*)?$/, async (route) => {
+    const response = await route.fetch();
+    const payload = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(
+      await response.json(),
+    );
+    const accounts = Schema.decodeUnknownSync(
+      Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+    )(payload.accounts);
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        accounts: accounts.map((account) => ({
+          ...account,
+          username: account.id === withUsername.id ? username : null,
+        })),
+      },
+    });
+  });
+  for (const palette of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: palette });
+    for (const width of [1808, 390]) {
+      await page.setViewportSize({ width, height: 984 });
+      await page.goto("/channels");
+      const namedRow = page.getByTestId(`channel-row-${withUsername.id}`);
+      const unnamedRow = page.getByTestId(`channel-row-${withoutUsername.id}`);
+      await expect(namedRow).toBeVisible();
+      await expect(unnamedRow).toBeVisible();
+      const namedBox = await namedRow.boundingBox();
+      const unnamedBox = await unnamedRow.boundingBox();
+      if (!namedBox || !unnamedBox) throw new Error("Channel rows must be measurable");
+      expect(namedBox.height).toBeCloseTo(unnamedBox.height, 1);
+      const handle = namedRow.getByRole("button", { name: "Copy username", exact: true });
+      const identifier = namedRow.getByRole("button", { name: "Copy channel ID", exact: true });
+      await expect(handle).toHaveText(`@${username}`);
+      const handleBox = await handle.boundingBox();
+      const identifierBox = await identifier.boundingBox();
+      if (!handleBox || !identifierBox) throw new Error("Identity values must be measurable");
+      expect(handleBox.y).toBeCloseTo(identifierBox.y, 1);
+      await handle.click();
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(username);
+      await expect(page.getByText("Username copied", { exact: true })).toBeVisible();
+      await identifier.focus();
+      await page.keyboard.press("Enter");
+      await expect
+        .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+        .toBe(withUsernameId);
+      await expect(page.getByText("Channel ID copied", { exact: true })).toBeVisible();
+      await expect(namedRow.getByRole("checkbox", { name: "Select channel" })).not.toBeChecked();
+      await page.screenshot({
+        path: testInfo.outputPath(`channel-identities-${palette}-${width}.png`),
+        animations: "disabled",
+        fullPage: true,
+      });
     }
   }
 });

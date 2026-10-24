@@ -56,6 +56,7 @@ export function DestinationSelector({
   const {
     brandProfiles,
     integrations,
+
     selectedChannelIds,
     channelStatuses,
     toggleChannelSelection,

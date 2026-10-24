@@ -82,7 +82,11 @@ For information on comment processing, see [Inbox](/docs/inbox).
 
 ## Performance analytics
 
-Posts **Table** includes stored engagement counters; use **Columns** to show or hide them. A `-` means the Post is not published, has no collected measurement, or that metric is untracked—not a measured zero. Saves and Clicks are currently untracked. Values follow backend synchronization rather than updating live. There is no dedicated analytics dashboard; use native platform reports for unsupported metrics.
+Open **Analytics** in the sidebar to review published-cohort performance. The page uses stored provider snapshots for Posts published in the selected range; it does not show activity that happened during the range for older Posts. See [Analytics](/docs/analytics) for cohort, coverage, and freshness semantics.
+
+Posts **Table** also includes stored engagement counters; use **Columns** to show or hide them. A `-` means the Post is not published, has no collected measurement, or that metric is untracked—not a measured zero. Saves and Clicks are currently untracked. Values follow backend synchronization rather than updating live.
+
+If the Analytics page shows **Partial data**, a published platform in scope does not report analytics; its destinations still count, but their metrics are not included. **Awaiting sync** means the destination is published but no snapshot has arrived yet. If the last sync time is old, wait for the next scheduled sync or use **Refresh** to re-read stored metrics; Refresh does not start a Provider sync. Connect a channel on a platform whose Provider reports analytics, and reconnect it if the analytics scope was added after the original authorization.
 
 For details on how analytics processing operates, see [Analytics](/docs/analytics).
 
@@ -102,7 +106,7 @@ Banners and errors you'll see anywhere in the app:
 - **"An error has occurred."** — a generic failure; retry the action.
 - **"Too many requests. Wait a moment and try again."** — rate limiting; pause briefly and retry.
 - **"This changed while you were working. Refresh and try again."** — something was edited elsewhere (another tab or teammate); reload the screen and redo your change.
-- **"Your storage or upload quota has been reached."** — check [Resource limits](/docs/resource-limits) for workspace quotas.
+- **Resource or capacity failures** — community allowances are unrestricted; inspect your infrastructure's capacity, service quotas, and provider responses. See [Resource usage](/docs/resource-limits).
 - **"That item is no longer available."** — the post, draft, or asset was deleted since you opened it; go back to the list.
 - **"Choose an active workspace to continue."** — the app does not offer an in-app workspace switcher; reload the page, then sign out and back in so your session can resolve a workspace again.
 

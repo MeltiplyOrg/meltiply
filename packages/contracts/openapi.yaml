@@ -1410,21 +1410,11 @@ paths:
       operationId: startPlatformOAuth
       summary: Start provider OAuth
       description: |
-        Begins the provider authorization handoff for the Brand Profile named
-        by brand_profile_id. The selection is pinned in durable OAuth state so
-        the callback attaches the connected Channel to the same Brand Profile
-        even if the caller's UI state changed meanwhile.
-      parameters:
-        - name: brand_profile_id
-          in: query
-          required: true
-          description: |
-            Active Brand Profile that will own the connected Channel. Connect
-            fails when the profile is missing, soft-deleted, or outside the
-            active workspace.
-          schema:
-            type: string
-            format: uuid
+        Begins the provider authorization handoff. No Brand Profile is selected
+        yet: the callback discovers the authorized account(s), stages a
+        short-lived pending assignment session, and returns the browser to the
+        Channel assignment view. The chosen Brand Profile is supplied when the
+        assignment is confirmed, immediately before the Channel is persisted.
       responses:
         "200":
           description: Provider authorization URL for authenticated browser clients.
@@ -1460,12 +1450,13 @@ paths:
       security: []
       summary: Complete provider OAuth with consume-once state
       description: |
-        Completes the provider OAuth exchange using consume-once state. For single-account
-        providers, the connection is persisted immediately and redirects to the frontend
-        result route. For multi-account providers such as Facebook Pages, the callback
-        discovers selectable Pages, stages a short-lived pending selection session, and
-        redirects (302) to the Page selection view (/channels?oauth=select_account&provider={platform}&selection_id={selection_id})
-        before any connection is persisted.
+        Completes the provider OAuth exchange using consume-once state. The
+        authorized account or accounts are staged in a short-lived pending
+        assignment session; no Channel is persisted until the user selects an
+        account (when the provider returns more than one) and the Brand Profile
+        that should own it. Redirects (302) to the Channel assignment view
+        (/channels/connect?selection_id={selection_id}) with the provider
+        outcome query appended.
       parameters:
         - name: state
           in: query
@@ -1505,11 +1496,11 @@ paths:
     get:
       tags: [Platforms]
       operationId: getOAuthSelection
-      summary: Get pending OAuth account selection session
+      summary: Get pending OAuth account assignment session
       description: |
         Retrieves the public candidate accounts discovered during OAuth authorization
-        for explicit user selection. Only metadata is returned; external credentials
-        remain encrypted server-side in durable state.
+        for explicit account and Brand Profile selection. Only metadata is returned;
+        external credentials remain encrypted server-side in durable state.
       responses:
         "200":
           description: Pending OAuth account selection session.
@@ -1549,8 +1540,10 @@ paths:
       operationId: confirmOAuthSelection
       summary: Confirm and connect chosen platform account
       description: |
-        Completes the pending OAuth selection session by connecting exactly one
-        chosen candidate account to the pinned Brand Profile.
+        Completes the pending OAuth assignment session by persisting exactly one
+        chosen candidate account under the requested Brand Profile. The profile
+        must be active in the workspace and must not already own a Channel of
+        the same Platform.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2403,6 +2396,15 @@ paths:
           in: query
           schema:
             $ref: "#/components/schemas/Platform"
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsFormat"
         - $ref: "#/components/parameters/BrandProfileId"
       responses:
         "200":
@@ -2411,6 +2413,110 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnalyticsSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /analytics/posts:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Analytics]
+      operationId: getAnalyticsPosts
+      summary: List Posts ranked by stored analytics in a published cohort
+      description: |
+        Ranks Posts by their selected stored metric for Distributions published
+        inside the requested range. Each Distribution contributes its latest
+        analytics snapshot at or before the range end; a Distribution without a
+        snapshot still counts as a destination and contributes zero. Ordering is
+        the selected metric descending, then publication time descending, then
+        Post id ascending. Soft-deleted Posts and Brand Profiles are excluded.
+      parameters:
+        - $ref: "#/components/parameters/RequiredStart"
+        - $ref: "#/components/parameters/RequiredEnd"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/Platform"
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsFormat"
+        - $ref: "#/components/parameters/BrandProfileId"
+        - name: metric
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsMetric"
+            default: views
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Ranked Posts and pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsPostsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /analytics/dashboard:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Analytics]
+      operationId: getAnalyticsDashboard
+      summary: Read the analytics dashboard series and breakdowns
+      description: |
+        Returns stored-snapshot aggregates for the published cohort. Daily
+        series carry measured counter changes between consecutive snapshots,
+        not lifetime totals. Follower series come from account snapshots.
+        Metrics a Provider does not expose are returned as null or listed in
+        `unavailable_metrics`; they are never fabricated as zero. `cohort`
+        carries the same published-cohort summary as `GET /analytics`, so a
+        client can render KPIs, coverage, and the platform comparison from one
+        request.
+      parameters:
+        - $ref: "#/components/parameters/RequiredStart"
+        - $ref: "#/components/parameters/RequiredEnd"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/Platform"
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            $ref: "#/components/schemas/AnalyticsFormat"
+        - $ref: "#/components/parameters/BrandProfileId"
+      responses:
+        "200":
+          description: Dashboard series and breakdowns.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsDashboard"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -3898,7 +4004,6 @@ components:
       required:
         - id
         - platform
-        - brand_profile_id
         - expires_at
         - accounts
       properties:
@@ -3909,10 +4014,6 @@ components:
           description: Opaque OAuth selection session identifier.
         platform:
           $ref: "#/components/schemas/Platform"
-        brand_profile_id:
-          type: string
-          format: uuid
-          description: Brand Profile that will own the selected account.
         expires_at:
           type: string
           format: date-time
@@ -3928,12 +4029,17 @@ components:
       additionalProperties: false
       required:
         - account_id
+        - brand_profile_id
       properties:
         account_id:
           type: string
           minLength: 1
           maxLength: 255
           description: External provider account or Page identifier to connect.
+        brand_profile_id:
+          type: string
+          format: uuid
+          description: Active Brand Profile that will own the connected Channel.
     PlatformAccount:
       type: object
       additionalProperties: false
@@ -4461,6 +4567,7 @@ components:
           targets,
           distributions,
           analytics,
+          distribution_analytics,
           queue_membership,
           created_at,
           updated_at,
@@ -4533,12 +4640,34 @@ components:
             read in the same scoped Post batch. Null when no published Channel
             has measurements. Missing measurements do not become zero; an
             explicitly measured zero remains zero. Unsupported metrics are null.
+        distribution_analytics:
+          type: array
+          description: |
+            Latest measured snapshot for each published Distribution, ordered
+            by Platform then Distribution id. Empty when no published Channel
+            has a stored snapshot. A Distribution with no snapshot is omitted,
+            so the inspector can distinguish awaiting sync from a measured
+            zero; this is the per-Channel source of `analytics`.
+          items:
+            $ref: "#/components/schemas/PostDistributionAnalytics"
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    PostDistributionAnalytics:
+      type: object
+      additionalProperties: false
+      required: [distribution_id, platform, analytics]
+      properties:
+        distribution_id:
+          type: string
+          format: uuid
+        platform:
+          $ref: "#/components/schemas/Platform"
+        analytics:
+          $ref: "#/components/schemas/PostAnalytics"
     PostAnalytics:
       type: object
       additionalProperties: false
@@ -5233,7 +5362,18 @@ components:
       type: object
       additionalProperties: false
       required:
-        [platform, views, likes, comments, shares, watch_time_sec, reach, impressions, post_count]
+        [
+          platform,
+          views,
+          likes,
+          comments,
+          shares,
+          watch_time_sec,
+          reach,
+          impressions,
+          post_count,
+          last_synced_at,
+        ]
       properties:
         platform:
           $ref: "#/components/schemas/Platform"
@@ -5261,6 +5401,284 @@ components:
         post_count:
           type: integer
           minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            Latest snapshot time for this Platform's published Distributions in
+            scope, or null when no snapshot has been stored yet. Null
+            distinguishes an unsynced Platform from a measured zero.
+    AnalyticsFormat:
+      type: string
+      enum: [text, image, video, carousel]
+    AnalyticsDaySeries:
+      type: object
+      additionalProperties: false
+      required:
+        [date, platform, posts, views, likes, comments, shares, impressions, reach, last_synced_at]
+      properties:
+        date:
+          type: string
+          format: date
+        platform:
+          $ref: "#/components/schemas/Platform"
+        posts:
+          type: integer
+          minimum: 0
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        impressions:
+          type: integer
+          minimum: 0
+        reach:
+          type: integer
+          minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+    AnalyticsBestTime:
+      type: object
+      additionalProperties: false
+      required:
+        [day_of_week, hour, posts, avg_views, avg_likes, avg_comments, avg_shares, avg_engagement]
+      properties:
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        posts:
+          type: integer
+          minimum: 0
+        avg_views:
+          type: number
+          minimum: 0
+        avg_likes:
+          type: number
+          minimum: 0
+        avg_comments:
+          type: number
+          minimum: 0
+        avg_shares:
+          type: number
+          minimum: 0
+        avg_engagement:
+          type: number
+          minimum: 0
+    AnalyticsFormatBreakdown:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          format,
+          posts,
+          views,
+          likes,
+          comments,
+          shares,
+          engagement,
+          avg_views,
+          avg_engagement,
+          last_synced_at,
+        ]
+      properties:
+        format:
+          $ref: "#/components/schemas/AnalyticsFormat"
+        posts:
+          type: integer
+          minimum: 0
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        engagement:
+          type: integer
+          minimum: 0
+        avg_views:
+          type: number
+          minimum: 0
+        avg_engagement:
+          type: number
+          minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+    AnalyticsPlatformBreakdown:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          platform,
+          posts,
+          views,
+          likes,
+          comments,
+          shares,
+          impressions,
+          reach,
+          engagement_rate,
+          followers,
+          follower_gain,
+          saves,
+          clicks,
+          last_synced_at,
+        ]
+      properties:
+        platform:
+          $ref: "#/components/schemas/Platform"
+        posts:
+          type: integer
+          minimum: 0
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+        impressions:
+          type: integer
+          minimum: 0
+        reach:
+          type: integer
+          minimum: 0
+        engagement_rate:
+          type: [number, "null"]
+          minimum: 0
+        followers:
+          type: [integer, "null"]
+          minimum: 0
+        follower_gain:
+          type: [integer, "null"]
+        saves:
+          type: [integer, "null"]
+          minimum: 0
+        clicks:
+          type: [integer, "null"]
+          minimum: 0
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+    AnalyticsFollowerPoint:
+      type: object
+      additionalProperties: false
+      required: [captured_at, followers]
+      properties:
+        captured_at:
+          type: string
+          format: date-time
+        followers:
+          type: integer
+          minimum: 0
+    AnalyticsFollowerSeries:
+      type: object
+      additionalProperties: false
+      required: [platform, account_id, account_name, points]
+      properties:
+        platform:
+          $ref: "#/components/schemas/Platform"
+        account_id:
+          type: string
+          format: uuid
+        account_name:
+          type: [string, "null"]
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsFollowerPoint"
+    AnalyticsAccumulationPoint:
+      type: object
+      additionalProperties: false
+      required: [elapsed_hours, avg_engagement, observations]
+      properties:
+        elapsed_hours:
+          type: integer
+          minimum: 0
+        avg_engagement:
+          type: number
+          minimum: 0
+        observations:
+          type: integer
+          minimum: 0
+    AnalyticsDashboard:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          range,
+          series,
+          best_times,
+          formats,
+          platforms,
+          cohort,
+          followers,
+          accumulation,
+          unavailable_metrics,
+        ]
+      properties:
+        range:
+          $ref: "#/components/schemas/AnalyticsRange"
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsDaySeries"
+        best_times:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsBestTime"
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsFormatBreakdown"
+        platforms:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsPlatformBreakdown"
+        cohort:
+          $ref: "#/components/schemas/AnalyticsSummary"
+        followers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsFollowerSeries"
+        accumulation:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsAccumulationPoint"
+        unavailable_metrics:
+          type: array
+          items:
+            type: string
+            enum: [saves, clicks, followers]
+    AnalyticsMetric:
+      type: string
+      enum: [views, likes, comments, shares]
+      description: Stored metric that ranks the Post analytics rows.
     AnalyticsSummary:
       type: object
       additionalProperties: false
@@ -5284,6 +5702,98 @@ components:
           uniqueItems: true
           items:
             $ref: "#/components/schemas/Platform"
+    AnalyticsPostRow:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          post_id,
+          title,
+          excerpt,
+          published_at,
+          destination_count,
+          synced_destination_count,
+          platforms,
+          unsupported_platforms,
+          last_synced_at,
+          views,
+          likes,
+          comments,
+          shares,
+        ]
+      properties:
+        post_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          description: Post title; may be empty when the composition has no title.
+        excerpt:
+          type: string
+          description: |
+            First 140 characters of the Post's default text with whitespace
+            collapsed; may be empty.
+        published_at:
+          type: string
+          format: date-time
+          description: Earliest publication time among the included Distributions.
+        destination_count:
+          type: integer
+          minimum: 0
+          description: Number of published Distributions included for this Post.
+        synced_destination_count:
+          type: integer
+          minimum: 0
+          description: |
+            Included Distributions with at least one snapshot at or before the
+            range end. Fewer than `destination_count` means some destinations
+            contribute zero until their first sync.
+        platforms:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Platform"
+        unsupported_platforms:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Platform"
+        last_synced_at:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            Latest snapshot time among the Post's included Distributions, or
+            null when none has been stored yet.
+        views:
+          type: integer
+          minimum: 0
+        likes:
+          type: integer
+          minimum: 0
+        comments:
+          type: integer
+          minimum: 0
+        shares:
+          type: integer
+          minimum: 0
+    AnalyticsPostsResponse:
+      type: object
+      additionalProperties: false
+      required: [posts, has_more, limit, offset]
+      properties:
+        posts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsPostRow"
+        has_more:
+          type: boolean
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          minimum: 0
     AnalyticsSnapshot:
       type: object
       additionalProperties: false

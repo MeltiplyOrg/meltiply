@@ -296,7 +296,11 @@
     },
     "getAnalyticsSummary": {
       "state": "specified",
-      "evidenceAndGate": "Worker aggregate/RLS tests and partial semantics pass; preview measurement remains."
+      "evidenceAndGate": "Worker published_at cohort, latest-snapshot aggregation, and published-platform coverage tests pass; preview measurement remains."
+    },
+    "getAnalyticsPosts": {
+      "state": "specified",
+      "evidenceAndGate": "Worker cohort ranking, pagination, and tenant/RLS tests pass; preview measurement remains."
     },
     "getDistributionAnalytics": {
       "state": "specified",
@@ -321,6 +325,10 @@
     "cancelOAuthSelection": {
       "state": "specified",
       "evidenceAndGate": "Worker idempotent selection cancellation and ticket discard pass local tests; preview remains."
+    },
+    "getAnalyticsDashboard": {
+      "state": "specified",
+      "evidenceAndGate": "Worker series/heatmap/format/platform/follower aggregation tests pass; preview measurement remains."
     }
   }
 }

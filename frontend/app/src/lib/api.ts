@@ -4,6 +4,10 @@ import { Effect } from "effect";
 
 import type {
   AccountLifecycle,
+  AnalyticsPostsQueryParams,
+  AnalyticsPostsResponse,
+  AnalyticsSummary,
+  AnalyticsSummaryQueryParams,
   Asset,
   AuditListResponse,
   AuditQueryParams,
@@ -26,6 +30,8 @@ import type {
   OAuthSelectionConfirmRequest,
   Platform,
   PlatformAccountsResponse,
+  AnalyticsDashboard,
+  AnalyticsDashboardQueryParams,
   PlatformCapabilitiesResponse,
   PlatformQueryParams,
   Post,
@@ -75,15 +81,17 @@ let cachedClient: { baseUrl: string; value: MeltiplyClient } | undefined;
  * Fetch implementation bound to the generated OpenAPI client.
  * Merges caller-supplied headers (whether carried on a `Request` input or via
  * `init`), stamps `Authorization: Bearer <jwt>` from the in-memory holder when
- * one is held, and forces `credentials: "omit"` so the Better Auth session
- * cookie never reaches `/api/v1` — the bearer JWT is the only credential the
- * public API accepts. Callers cannot upgrade credential mode.
+ * one is held, and uses `credentials: "same-origin"` so Cloudflare Access on
+ * protected dev tunnels can see the visitor's session cookie. The Better Auth
+ * session cookie is never allowed to reach the API Worker: the frontend Worker
+ * strips it from `/api/v1/*` proxy requests before forwarding them. Callers
+ * cannot override the credential mode.
  */
 const runtimeFetch: typeof globalThis.fetch = (input, init) => {
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
   applyAuthJwt(headers);
-  return globalThis.fetch(input, { ...init, credentials: "omit", headers });
+  return globalThis.fetch(input, { ...init, credentials: "same-origin", headers });
 };
 
 export type ApiPath = string;
@@ -1007,27 +1015,25 @@ export function listPlatformCapabilities(workspaceId: string | null, options?: A
 /**
  * Initiates the OAuth authorization handshake for a social media provider.
  *
- * The `brandProfileId` is pinned into durable OAuth state at initiation so the
- * callback can verify the profile still belongs to the active workspace; the
- * new channel is owned by this Brand Profile.
+ * No Brand Profile is chosen here: the callback stages the authorized
+ * account(s), and the assignment view selects the owning profile immediately
+ * before persistence.
  *
  * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
  * @param platform Target social platform to connect.
- * @param brandProfileId Active Brand Profile UUID that will own the connected channel.
  * @param options Request options including optional abort signal.
  * @returns Effect resolving to the response containing the external provider OAuth authorization URL.
  */
 export function startPlatformOAuth(
   workspaceId: string | null,
   platform: Platform,
-  brandProfileId: string,
   options?: ApiRequestOptions,
 ) {
   return unwrap<OAuthStartResponse>(
     (signal) =>
       client().GET("/platforms/{platform}/connect", {
         headers: { ...workspaceHeaders(workspaceId), Accept: "application/json" },
-        params: { path: { platform }, query: { brand_profile_id: brandProfileId } },
+        params: { path: { platform } },
         signal,
       }),
     options?.signal,
@@ -1313,6 +1319,34 @@ export function getCalendar(
 }
 
 /**
+ * Reads the workspace's platform-level analytics for a published cohort.
+ *
+ * The window is a rolling pair of UTC instants; `brand_profile_id` omitted is
+ * the read-only All Brand Profiles aggregate. The response carries per-platform
+ * sums, published destination counts, coverage, and sync freshness.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param params Cohort bounds plus optional Platform and Brand Profile scope.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the summary response.
+ */
+export function getAnalyticsSummary(
+  workspaceId: string | null,
+  params: AnalyticsSummaryQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AnalyticsSummary>(
+    (signal) =>
+      client().GET("/analytics", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
  * Lists Workspace members with role, account status, and join date.
  *
  * @param workspaceId Shared Workspace UUID.
@@ -1332,6 +1366,31 @@ export function listWorkspaceMembers(workspaceId: string, options?: ApiRequestOp
 }
 
 /**
+ * Reads the dashboard's daily series, best-time cells, format and platform
+ * breakdowns, follower history, and engagement accumulation.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param params Cohort bounds plus optional Platform, account, format, and Brand Profile scope.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the stored-snapshot dashboard aggregates.
+ */
+export function getAnalyticsDashboard(
+  workspaceId: string | null,
+  params: AnalyticsDashboardQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AnalyticsDashboard>(
+    (signal) =>
+      client().GET("/analytics/dashboard", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
  * Lists pending, unexpired Workspace invitations.
  *
  * @param workspaceId Shared Workspace UUID.
@@ -1344,6 +1403,55 @@ export function listWorkspaceInvitations(workspaceId: string, options?: ApiReque
       client().GET("/workspaces/{workspaceId}/invitations", {
         headers: workspaceHeaders(workspaceId),
         params: { path: { workspaceId } },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads the ranked per-Post analytics rows for a published cohort.
+ *
+ * Ranking uses the requested stored metric; each row carries its platforms,
+ * unsupported subset, destination count, and latest sync time so unsupported or
+ * unsynced values are never rendered as measured zero.
+ *
+ * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
+ * @param params Cohort bounds, optional Platform/Brand Profile scope, ranking
+ *   metric, and limit/offset pagination.
+ * @param options Request options including optional abort signal.
+ * @returns Effect resolving to the ranked Posts and pagination metadata.
+ */
+export function getAnalyticsPosts(
+  workspaceId: string | null,
+  params: AnalyticsPostsQueryParams,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<AnalyticsPostsResponse>(
+    (signal) =>
+      client().GET("/analytics/posts", {
+        headers: workspaceHeaders(workspaceId),
+        params: { query: params },
+        signal,
+      }),
+    options?.signal,
+  );
+}
+
+/**
+ * Reads up to 500 chronological stored snapshots for one Distribution.
+ * Workspace authorization and cancellation follow the normal API boundary.
+ */
+export function getDistributionAnalytics(
+  workspaceId: string | null,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return unwrap<components["schemas"]["AnalyticsSnapshotsResponse"]>(
+    (signal) =>
+      client().GET("/analytics/{distribution_id}", {
+        headers: workspaceHeaders(workspaceId),
+        params: { path: { distribution_id: id }, query: { limit: 500 } },
         signal,
       }),
     options?.signal,

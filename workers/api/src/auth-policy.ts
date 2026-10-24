@@ -1,7 +1,7 @@
 import type { BetterAuthInstance, JwtIdentity } from "@meltiply/auth";
 import { CoreApiError } from "./core-types";
 import { sha256Hex } from "./crypto";
-import type { ApiWorkerEnv } from "./env";
+import { requiresEmailVerification, type ApiWorkerEnv } from "./env";
 
 /** Reads only the installation's public initialized bit; never returns owner details. */
 async function installationInitialized(env: ApiWorkerEnv): Promise<boolean> {
@@ -259,8 +259,8 @@ export function authPolicyHandler(env: ApiWorkerEnv, auth: BetterAuthInstance): 
 /**
  * Resolves a JWT's live session before any protected work. Reads the current
  * account rather than trusting stale JWT claims. Missing, revoked, expired, or
- * suspended sessions fail closed; deployed sessions also require a verified
- * email. No cookie is accepted on this surface.
+ * suspended sessions fail closed; email verification follows the installation's
+ * configured policy. No cookie is accepted on this surface.
  *
  * The returned `emailVerified` lets actor resolution decide whether a pending
  * invitation may become an active membership.
@@ -297,17 +297,16 @@ export async function activeIdentity(
   if (account.suspended_at !== null) {
     throw new CoreApiError(403, "account_suspended", "This account is suspended.");
   }
-  const localOrTest = env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
-  if (!account.email_verified && !localOrTest) {
+  const verificationBypassed = !requiresEmailVerification(env);
+  if (!account.email_verified && !verificationBypassed) {
     throw new CoreApiError(403, "email_verification_required", "Verify your email to continue.");
   }
   return {
     ...identity,
     email: account.email,
-    // Deployed policy requires a verified mailbox. Local/test explicitly admits
-    // unverified accounts, so report the same effective state to actor
-    // resolution; otherwise a local invited signup never activates membership.
-    emailVerified: account.email_verified || localOrTest,
+    // Explicit verification policy also governs invitation activation; an
+    // unverified account admitted by that policy must resolve consistently.
+    emailVerified: account.email_verified || verificationBypassed,
     name: account.name,
   };
 }

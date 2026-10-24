@@ -22,10 +22,12 @@ import {
   boundedString,
   boundedText,
   exactRedirectUri,
+  metricValue,
   providerIdentifier,
   record,
   required,
   secureUrl,
+  validatePageInput,
 } from "./meta-common";
 import type {
   OAuthConnection,
@@ -42,23 +44,27 @@ import type {
 } from "./types";
 
 const apiOrigin = "https://www.googleapis.com";
+const analyticsOrigin = "https://youtubeanalytics.googleapis.com";
 const tokenOrigin = "https://oauth2.googleapis.com";
 const authorizationOrigin = "https://accounts.google.com";
 const videoOrigin = "https://www.youtube.com";
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 24 * 60 * 60;
 
-const configuredScopes = [
+/** Upload and channel identity are required; Analytics access is optional. */
+const publishingScopes = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
 ] as const;
+const analyticsScopes = ["https://www.googleapis.com/auth/yt-analytics.readonly"] as const;
+const configuredScopes = [...publishingScopes, ...analyticsScopes] as const;
 
 /** YouTube's description ceiling remains known even before live publishing is configured. */
 export const YOUTUBE_MAX_CAPTION_LENGTH = 5_000;
 
 const capability: PlatformCapability = {
   accepted_mime_types: ["video/mp4", "video/quicktime"],
-  analytics: false,
+  analytics: true,
   asset_types: ["video"],
   comments: false,
   connect_available: true,
@@ -74,7 +80,9 @@ const capability: PlatformCapability = {
     "One video publishes one upload; playlists and multi-video posts are not supported.",
     "MP4 or MOV media uses YouTube's resumable upload protocol without Worker buffering.",
     "Meltiply uses the first non-empty caption line as the title and category 22 by default.",
-    "Analytics, comments, replies, and deletion are not claimed.",
+    "Analytics reads lifetime views, likes, comments, and shares from the YouTube Analytics API for the uploaded video.",
+    "Existing connections must reconnect to grant the yt-analytics.readonly scope.",
+    "Comments, replies, and deletion are not claimed.",
     "Google verification, YouTube API audit, quota, and live-channel acceptance remain required.",
   ],
   platform: "youtube",
@@ -137,9 +145,9 @@ function pkce(name: string, value: string): string {
 }
 
 /**
- * Parses a whitespace-delimited OAuth scope string into a validated Set of Google API scope URIs.
- * Bounds total length, validates max 20 unique HTTPS scope URLs, and verifies standard URI syntax.
- * Returns Set of scope URIs, or undefined if absent or malformed.
+ * Parses whitespace-delimited OAuth scope tokens, including Google's non-URL
+ * OpenID grants combined by incremental authorization. Bounds length and unique count.
+ * Returns a Set of scope tokens, or undefined if absent or malformed.
  */
 function scopeSet(value: unknown): Set<string> | undefined {
   const normalized = boundedString(value, 4_096);
@@ -148,7 +156,7 @@ function scopeSet(value: unknown): Set<string> | undefined {
   if (
     scopes.length > 20 ||
     new Set(scopes).size !== scopes.length ||
-    scopes.some((scope) => !/^https:\/\/[A-Za-z0-9./_-]+$/.test(scope))
+    scopes.some((scope) => !/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(scope))
   ) {
     return undefined;
   }
@@ -157,8 +165,9 @@ function scopeSet(value: unknown): Set<string> | undefined {
 
 /**
  * Parses and verifies an OAuth 2.0 token response from Google's token endpoint.
- * Validates bearer token type, presence of required scopes, and expiration bounds (up to 24h).
- * Returns `{ accessToken, expiresAt, refreshToken? }` descriptor. Throws ProviderAdapterError if invalid.
+ * Requires publishing scopes when Google supplies a scope list; Analytics consent is optional.
+ * Preserves explicit grants; omitted scopes remain absent so refresh callers retain stored grants.
+ * Returns tokens and bounded expiry (up to 24h); rejects malformed responses or missing publishing grants.
  */
 function tokenBody(
   value: unknown,
@@ -168,6 +177,7 @@ function tokenBody(
   accessToken: string;
   expiresAt: string;
   refreshToken?: string;
+  scopes?: string[];
 } {
   const body = record(value);
   const accessToken = boundedString(body?.access_token, 16_000);
@@ -179,7 +189,7 @@ function tokenBody(
     tokenType !== "bearer" ||
     (requireRefreshToken && !refreshToken) ||
     (body?.scope !== undefined && !scopes) ||
-    (scopes && configuredScopes.some((scope) => !scopes.has(scope)))
+    (scopes && publishingScopes.some((scope) => !scopes.has(scope)))
   ) {
     throw malformed();
   }
@@ -187,6 +197,7 @@ function tokenBody(
     accessToken,
     expiresAt: addSeconds(now, body?.expires_in, tokenLifetimeMaximumSeconds),
     ...(refreshToken ? { refreshToken } : {}),
+    ...(scopes ? { scopes: [...scopes] } : {}),
   };
 }
 
@@ -474,7 +485,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
     );
   }
   const http = new ProviderHttpClient({
-    allowedOrigins: [apiOrigin, tokenOrigin],
+    allowedOrigins: [apiOrigin, analyticsOrigin, tokenOrigin],
     ...(options.fetch ? { fetch: options.fetch } : {}),
     now,
     rateLimitBudget: (headers) => extractRateLimitBudget("youtube", headers),
@@ -1041,9 +1052,9 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
     extractRateLimitBudget: (headers) => extractRateLimitBudget("youtube", headers),
     /**
      * Builds the Google OAuth v2 authorization URL with offline access, PKCE S256
-     * challenge, incremental scope grants, consent prompt, and the configured redirect
-     * URI, scopes, and state. Throws TypeError when the attempted redirect URI does not
-     * match the adapter configuration.
+     * challenge, incremental grants, account selection and consent prompts, and the
+     * configured redirect URI, scopes, and state. Throws TypeError if the redirect
+     * URI does not match the adapter configuration.
      */
     authorizationUrl(input) {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -1053,7 +1064,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       url.searchParams.set("code_challenge", pkce("codeChallenge", input.codeChallenge));
       url.searchParams.set("code_challenge_method", "S256");
       url.searchParams.set("include_granted_scopes", "true");
-      url.searchParams.set("prompt", "consent");
+      url.searchParams.set("prompt", "consent select_account");
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", configuredScopes.join(" "));
@@ -1067,7 +1078,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
      * Exchanges a PKCE authorization code for Google tokens and binds the
      * connection to exactly one YouTube channel. The redirect URI must match
      * the adapter configuration; the token response must be a bearer grant
-     * carrying the configured scopes and a refresh token; the channels.list
+     * carrying the publishing scopes and a refresh token; the channels.list
      * `mine` lookup must return exactly one channel — zero or several is a
      * deterministic `youtube_channel_selection_required` failure so the
      * account is never bound ambiguously.
@@ -1134,7 +1145,125 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
         },
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken!,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes ?? [...configuredScopes],
+      };
+    },
+
+    /**
+     * Reads lifetime views, likes, comments, and shares for one uploaded video
+     * from the YouTube Analytics API.
+     *
+     * The report filters to the connected channel and the publication's video
+     * id with no time dimension, so the API returns one aggregate row. An empty
+     * report means YouTube has not published analytics for the video yet; no
+     * snapshot is invented. Every requested metric must be present because a
+     * partial row would misstate the video's lifetime totals.
+     *
+     * @param context - Provider request context carrying cancellation.
+     * @param credentials - Connected channel token and channel identity.
+     * @param lookup - Publication whose providerPostId names the video.
+     * @param page - Single-report input; Analytics reports are not paginated here.
+     * @returns One analytics record, or an empty page when the report has no rows.
+     * @throws {ProviderAdapterError} On a rejected scope/quota, malformed report,
+     *   or a missing requested metric.
+     */
+    /**
+     * Reads the authenticated channel's lifetime subscriber and video counters.
+     * Hidden subscriber counts are rejected so the chart never invents a value.
+     */
+    async getAccountAnalytics(context, credentials) {
+      const url = new URL("/youtube/v3/channels", apiOrigin);
+      url.searchParams.set("part", "statistics");
+      url.searchParams.set("mine", "true");
+      const response = await googleRequest<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const body = record(response.body);
+      const items = body?.items;
+      if (!Array.isArray(items) || items.length !== 1) throw malformed();
+      const statistics = record(record(items[0])?.statistics);
+      if (statistics?.hiddenSubscriberCount === true) throw malformed();
+      const followers = Number(statistics?.subscriberCount);
+      const posts = Number(statistics?.videoCount);
+      if (!Number.isSafeInteger(followers) || followers < 0) throw malformed();
+      return {
+        followers,
+        ...(Number.isSafeInteger(posts) && posts >= 0 ? { posts } : {}),
+        recordedAt: now().toISOString(),
+      };
+    },
+
+    async listAnalytics(context, credentials, lookup, page) {
+      validatePageInput("youtube", page);
+      if (page.cursor) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "youtube_analytics_not_paginated",
+            status: 400,
+          }),
+        );
+      }
+      const providerPostId = requiredIdentifier(lookup.providerPostId, "youtube_video_id_required");
+      const channelId = accountId(credentials);
+      const url = new URL("/v2/reports", analyticsOrigin);
+      url.searchParams.set("ids", `channel==${channelId}`);
+      url.searchParams.set("startDate", "2005-02-14");
+      url.searchParams.set("endDate", now().toISOString().slice(0, 10));
+      url.searchParams.set("metrics", "views,likes,comments,shares");
+      url.searchParams.set("filters", `video==${providerPostId}`);
+      const response = await googleRequest<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const body = record(response.body);
+      const columnHeaders = body?.columnHeaders;
+      if (!Array.isArray(columnHeaders)) throw malformed();
+      const rows = body?.rows;
+      // The Analytics API omits `rows` when no data exists for the query but
+      // still returns the requested column metadata.
+      if (rows === undefined) return { items: [] };
+      if (!Array.isArray(rows)) throw malformed();
+      if (rows.length === 0) return { items: [] };
+      const row = rows[0];
+      if (rows.length !== 1 || !Array.isArray(row) || row.length !== columnHeaders.length) {
+        throw malformed();
+      }
+      const metrics = new Map<string, number>();
+      for (const [index, value] of columnHeaders.entries()) {
+        const name = boundedString(record(value)?.name, 64);
+        const metric = metricValue(row[index]);
+        if (!name || metric === undefined || metrics.has(name)) throw malformed();
+        metrics.set(name, metric);
+      }
+      const views = metrics.get("views");
+      const likes = metrics.get("likes");
+      const comments = metrics.get("comments");
+      const shares = metrics.get("shares");
+      if (
+        views === undefined ||
+        likes === undefined ||
+        comments === undefined ||
+        shares === undefined
+      ) {
+        throw malformed();
+      }
+      return {
+        items: [
+          {
+            comments,
+            impressions: 0,
+            likes,
+            providerPostId,
+            recordedAt: now().toISOString(),
+            reach: 0,
+            shares,
+            views,
+            watchTimeSeconds: 0,
+          },
+        ],
       };
     },
 
@@ -1265,6 +1394,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       };
     },
 
+    /** Refreshes publishing grants; an omitted scope list preserves the stored grant in the consumer. */
     async refreshAccessToken(context, refreshToken): Promise<ProviderTokenSet> {
       const currentRefreshToken = required("refreshToken", refreshToken, 16_000);
       const form = new URLSearchParams({
@@ -1284,7 +1414,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
         accessToken: tokens.accessToken,
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken ?? currentRefreshToken,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes ?? [],
       };
     },
 

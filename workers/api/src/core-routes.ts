@@ -26,7 +26,6 @@ import { CoreApiError, type CoreApiService } from "./core-types";
 import {
   auditActorFrom,
   recordWorkspaceAuditBestEffort,
-  recordWorkspaceAuditForUserBestEffort,
   recordWorkspaceAuditOnceBestEffort,
 } from "./audit";
 import type { BrandProfileApiService } from "./brand-profile-service";
@@ -44,6 +43,8 @@ import {
 } from "./workspace-lifecycle";
 import { errorResponse, jsonResponse } from "./responses";
 import {
+  analyticsFormatParam,
+  analyticsMetricParam,
   booleanParam,
   brandProfileColorField,
   brandProfileDescriptionField,
@@ -710,6 +711,7 @@ function frontendRedirect(
   provider: Platform,
   outcome: string,
   extraParams?: Record<string, string>,
+  pathname = "/channels",
 ): string {
   if (!env.FRONTEND_URL) {
     throw new CoreApiError(
@@ -718,7 +720,7 @@ function frontendRedirect(
       "The frontend redirect target is unavailable.",
     );
   }
-  const target = new URL("/channels", env.FRONTEND_URL);
+  const target = new URL(pathname, env.FRONTEND_URL);
   target.searchParams.set("oauth", outcome);
   target.searchParams.set("provider", provider);
   if (extraParams) {
@@ -1455,36 +1457,12 @@ export function registerCoreRoutes(
         // workspace id is the authoritative OAuth state tenant — no
         // client-supplied organization header may substitute for it.
         const organizationId = actor.workspace.id;
-        const brandProfileId = yield* fromPromise(() =>
-          uuidParam(c.req.query("brand_profile_id") ?? "", "brand_profile_id"),
-        );
-        // The selected Brand Profile must exist in this workspace and be
-        // active before any OAuth state is created: the contract pins the
-        // connected Channel to this profile, so a missing or foreign profile
-        // stays not-found while a soft-deleted one (still visible to admins
-        // through RLS) rejects with the documented 409 conflict.
-        const brandProfileService = yield* fromPromise(brandProfiles);
-        const profile = yield* brandProfileService.getBrandProfile(
-          c.env,
-          actor.claims,
-          brandProfileId,
-        );
-        if (profile.deleted_at !== null) {
-          return yield* Effect.fail(
-            new CoreApiError(
-              409,
-              "brand_profile_deleted",
-              "The brand profile is deleted and cannot accept new data.",
-            ),
-          );
-        }
         const routingKey = yield* fromPromise(() => oauthStateRoutingKey(organizationId));
         const state = `${routingKey}.${randomBase64Url(32)}`;
         const verifier = randomBase64Url(32);
         const redirectUri = oauthCallbackUrl(c.env, selected);
         yield* fromPromise(() =>
           oauthStateStub(c.env, routingKey).create(state, {
-            brand_profile_id: brandProfileId,
             expires_at: Date.now() + 10 * 60 * 1_000,
             organization_id: organizationId,
             pkce_verifier: verifier,
@@ -1610,108 +1588,58 @@ export function registerCoreRoutes(
           }),
         );
         if (exchanged instanceof Response) return exchanged;
-        if ("accounts" in exchanged) {
-          const cipher = tokenCipherFor(c.env);
-          const selectionId = `${routingKey}.${randomBase64Url(32)}`;
-          yield* fromPromise(() =>
-            oauthStateStub(c.env, routingKey).createSelection(selectionId, {
-              brand_profile_id: record.brand_profile_id,
-              expires_at: Date.now() + 10 * 60 * 1_000,
-              id: selectionId,
-              organization_id: record.organization_id,
-              platform: selected,
-              user_id: record.user_id,
-            }),
-          );
-          const BATCH_SIZE = 50;
-          for (let i = 0; i < exchanged.accounts.length; i += BATCH_SIZE) {
-            const chunk = exchanged.accounts.slice(i, i + BATCH_SIZE);
-            const candidates: OAuthSelectionCandidate[] = [];
-            for (const account of chunk) {
-              const sealed = yield* Effect.tryPromise({
-                catch: (cause) =>
-                  new DatabaseError({
-                    cause,
-                    message: "Failed to encrypt candidate OAuth connection.",
-                  }),
-                try: () => cipher.encrypt(JSON.stringify(account)),
-              });
-              candidates.push({
-                account: {
-                  avatar_url: account.account.avatarUrl ?? null,
-                  display_name: account.account.displayName ?? null,
-                  id: account.account.id,
-                  username: account.account.username ?? null,
-                },
-                encryptedConnection: sealed,
-              });
-            }
-            yield* fromPromise(() =>
-              oauthStateStub(c.env, routingKey).appendSelectionCandidates(selectionId, candidates),
-            );
+        const discovered = "accounts" in exchanged ? exchanged.accounts : [exchanged];
+        const cipher = tokenCipherFor(c.env);
+        const selectionId = `${routingKey}.${randomBase64Url(32)}`;
+        yield* fromPromise(() =>
+          oauthStateStub(c.env, routingKey).createSelection(selectionId, {
+            expires_at: Date.now() + 10 * 60 * 1_000,
+            id: selectionId,
+            organization_id: record.organization_id,
+            platform: selected,
+            user_id: record.user_id,
+          }),
+        );
+        const BATCH_SIZE = 50;
+        for (let i = 0; i < discovered.length; i += BATCH_SIZE) {
+          const chunk = discovered.slice(i, i + BATCH_SIZE);
+          const candidates: OAuthSelectionCandidate[] = [];
+          for (const account of chunk) {
+            const sealed = yield* Effect.tryPromise({
+              catch: (cause) =>
+                new DatabaseError({
+                  cause,
+                  message: "Failed to encrypt candidate OAuth connection.",
+                }),
+              try: () => cipher.encrypt(JSON.stringify(account)),
+            });
+            candidates.push({
+              account: {
+                avatar_url: account.account.avatarUrl ?? null,
+                display_name: account.account.displayName ?? null,
+                id: account.account.id,
+                username: account.account.username ?? null,
+              },
+              encryptedConnection: sealed,
+            });
           }
           yield* fromPromise(() =>
-            oauthStateStub(c.env, routingKey).finalizeSelection(selectionId),
-          );
-          return yield* fromPromise(() =>
-            Response.redirect(
-              frontendRedirect(c.env, selected, "select_account", {
-                selection_id: selectionId,
-              }),
-              302,
-            ),
+            oauthStateStub(c.env, routingKey).appendSelectionCandidates(selectionId, candidates),
           );
         }
-        const persisted: Response | undefined = yield* saveConnection(
-          c.env,
-          selected,
-          {
-            brandProfileId: record.brand_profile_id,
-            organizationId: record.organization_id,
-            userId: record.user_id,
-          },
-          exchanged,
-        ).pipe(
-          Effect.as(undefined),
-          Effect.catchCause((cause) =>
-            fromPromise(() => {
-              log(
-                "error",
-                {
-                  environment: c.env.ENVIRONMENT,
-                  request_id: requestId(c),
-                  service: "api",
-                  trace_id: c.get("traceId"),
-                  version: c.env.VERSION,
-                },
-                {
-                  error_code: "connection_persist_failed",
-                  event: "oauth_connection_persist_failed",
-                  outcome: "internal_error",
-                  provider: selected,
-                  retry_class: "client_retry",
-                  ...errorDiagnostic(Cause.squash(cause)),
-                },
-              );
-              return Response.redirect(frontendRedirect(c.env, selected, "connection_failed"), 302);
-            }),
+        yield* fromPromise(() => oauthStateStub(c.env, routingKey).finalizeSelection(selectionId));
+        return yield* fromPromise(() =>
+          Response.redirect(
+            frontendRedirect(
+              c.env,
+              selected,
+              "select_account",
+              { selection_id: selectionId },
+              "/channels/connect",
+            ),
+            302,
           ),
         );
-        if (persisted instanceof Response) return persisted;
-        yield* recordWorkspaceAuditForUserBestEffort(c.env, {
-          action: "channel.connected",
-          after: {
-            account_id: exchanged.account.id,
-            brand_profile_id: record.brand_profile_id,
-            platform: selected,
-          },
-          orgId: record.organization_id,
-          requestId: requestId(c),
-          targetId: exchanged.account.id,
-          targetType: "channel",
-          userId: record.user_id,
-        });
-        return yield* redirectTo("connected");
       }).pipe(Effect.provide(createProviderServiceLive(registry()))),
     ),
   );
@@ -1849,7 +1777,7 @@ export function registerCoreRoutes(
         }
         const key = yield* fromPromise(() => idempotencyKey(c));
         const body = yield* fromPromise(() => jsonBody(c));
-        yield* fromPromise(() => onlyKeys(body, ["account_id"]));
+        yield* fromPromise(() => onlyKeys(body, ["account_id", "brand_profile_id"]));
         const rawAccountId = yield* fromPromise(() => stringField(body, "account_id"));
         const accountId = rawAccountId.trim();
         if (!accountId || accountId.length > 255) {
@@ -1861,7 +1789,28 @@ export function registerCoreRoutes(
             ),
           );
         }
+        const brandProfileId = yield* fromPromise(() =>
+          uuidParam(stringField(body, "brand_profile_id"), "brand_profile_id"),
+        );
         const actor = c.get("actor");
+        // The chosen profile is validated at the point of persistence, after
+        // authorization has completed. A deleted profile rejects with 409,
+        // while a missing or foreign profile remains a 404.
+        const brandProfileService = yield* fromPromise(brandProfiles);
+        const profile = yield* brandProfileService.getBrandProfile(
+          c.env,
+          actor.claims,
+          brandProfileId,
+        );
+        if (profile.deleted_at !== null) {
+          return yield* Effect.fail(
+            new CoreApiError(
+              409,
+              "brand_profile_deleted",
+              "The brand profile is deleted and cannot accept new data.",
+            ),
+          );
+        }
         const routingKey = yield* fromPromise(() => oauthStateRoutingKey(actor.workspace.id));
         if (selectionId.includes(".")) {
           const keyPart = selectionId.split(".", 1)[0] ?? "";
@@ -1880,6 +1829,7 @@ export function registerCoreRoutes(
             selectionId,
             accountId,
             {
+              brandProfileId,
               organizationId: actor.workspace.id,
               userId: actor.userId,
             },
@@ -1935,7 +1885,7 @@ export function registerCoreRoutes(
           c.env,
           claim.platform as Platform,
           {
-            brandProfileId: claim.brandProfileId,
+            brandProfileId,
             organizationId: claim.organizationId,
             userId: claim.userId,
           },
@@ -1945,7 +1895,16 @@ export function registerCoreRoutes(
           Effect.catchCause((cause) =>
             Effect.gen(function* () {
               const failure = Cause.squash(cause);
-              if (failure instanceof CoreApiError) {
+              const databaseCause = failure instanceof DatabaseError ? failure.cause : undefined;
+              // SQL data/constraint rejections cannot commit. Connection loss or a
+              // failed COMMIT is ambiguous: retain its profile fence for a safe retry.
+              const deterministicDatabaseFailure =
+                databaseCause !== null &&
+                typeof databaseCause === "object" &&
+                "code" in databaseCause &&
+                typeof databaseCause.code === "string" &&
+                /^(22|23)[0-9A-Z]{3}$/.test(databaseCause.code);
+              if (failure instanceof CoreApiError || deterministicDatabaseFailure) {
                 yield* fromPromise(() =>
                   oauthStateStub(c.env, routingKey).releaseSelectionClaim(
                     selectionId,
@@ -1983,7 +1942,7 @@ export function registerCoreRoutes(
           }),
           after: {
             account_id: accountId,
-            brand_profile_id: claim.brandProfileId,
+            brand_profile_id: brandProfileId,
             platform: claim.platform,
           },
           orgId: actor.workspace.id,
@@ -2462,13 +2421,90 @@ export function registerCoreRoutes(
           ? yield* fromPromise(() => platformParam(platformValue))
           : undefined;
         const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
+        const accountValue = c.req.query("account_id");
+        const accountId = accountValue
+          ? yield* fromPromise(() => uuidParam(accountValue, "account_id"))
+          : undefined;
+        const format = yield* fromPromise(() => analyticsFormatParam(c.req.query("format")));
         const core = yield* fromPromise(service);
         const summary = yield* core.summaryAnalytics(c.env, c.get("actor").claims, {
           ...requested,
           ...(platform ? { platform } : {}),
           ...(brandProfileId ? { brandProfileId } : {}),
+          ...(accountId ? { accountId } : {}),
+          ...(format ? { format } : {}),
         });
         return jsonResponse(summary, 200, requestId(c));
+      }),
+    ),
+  );
+
+  app.get("/api/v1/analytics/posts", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const requested = yield* fromPromise(() =>
+          dateRange(c.req.query("start"), c.req.query("end"), 366),
+        );
+        const platformValue = c.req.query("platform");
+        const platform = platformValue
+          ? yield* fromPromise(() => platformParam(platformValue))
+          : undefined;
+        const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
+        const accountValue = c.req.query("account_id");
+        const accountId = accountValue
+          ? yield* fromPromise(() => uuidParam(accountValue, "account_id"))
+          : undefined;
+        const format = yield* fromPromise(() => analyticsFormatParam(c.req.query("format")));
+        const metric = yield* fromPromise(() => analyticsMetricParam(c.req.query("metric")));
+        const limit = yield* fromPromise(() =>
+          integerParam(c.req.query("limit"), "limit", 10, 1, 100),
+        );
+        const offset = yield* fromPromise(() =>
+          integerParam(c.req.query("offset"), "offset", 0, 0, 2_147_483_647),
+        );
+        const core = yield* fromPromise(service);
+        const posts = yield* core.analyticsPosts(c.env, c.get("actor").claims, {
+          ...requested,
+          limit,
+          metric,
+          offset,
+          ...(platform ? { platform } : {}),
+          ...(brandProfileId ? { brandProfileId } : {}),
+          ...(accountId ? { accountId } : {}),
+          ...(format ? { format } : {}),
+        });
+        return jsonResponse(posts, 200, requestId(c));
+      }),
+    ),
+  );
+
+  app.get("/api/v1/analytics/dashboard", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const requested = yield* fromPromise(() =>
+          dateRange(c.req.query("start"), c.req.query("end"), 366),
+        );
+        const platformValue = c.req.query("platform");
+        const platform = platformValue
+          ? yield* fromPromise(() => platformParam(platformValue))
+          : undefined;
+        const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
+        const accountValue = c.req.query("account_id");
+        const accountId = accountValue
+          ? yield* fromPromise(() => uuidParam(accountValue, "account_id"))
+          : undefined;
+        const format = yield* fromPromise(() => analyticsFormatParam(c.req.query("format")));
+        const core = yield* fromPromise(service);
+        const dashboard = yield* core.dashboardAnalytics(c.env, c.get("actor").claims, {
+          ...requested,
+          ...(platform ? { platform } : {}),
+          ...(brandProfileId ? { brandProfileId } : {}),
+          ...(accountId ? { accountId } : {}),
+          ...(format ? { format } : {}),
+        });
+        return jsonResponse(dashboard, 200, requestId(c));
       }),
     ),
   );

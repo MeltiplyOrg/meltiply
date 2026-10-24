@@ -3,6 +3,12 @@ import type { components } from "@meltiply/contracts/schema";
 
 import type {
   AccountLifecycle,
+  AnalyticsDashboard,
+  AnalyticsDashboardQueryParams,
+  AnalyticsPostsQueryParams,
+  AnalyticsPostsResponse,
+  AnalyticsSummary,
+  AnalyticsSummaryQueryParams,
   Asset,
   AuditListResponse,
   AuditQueryParams,
@@ -75,12 +81,16 @@ import {
   getAsset,
   getAssetDownloadUrl,
   getAssetPreviewUrl,
+  getAnalyticsDashboard,
+  getAnalyticsPosts,
+  getAnalyticsSummary,
   getCalendar,
   getCurrentUser,
   getInstallation,
   getInvitationPreview,
   getOAuthSelection,
   getDistribution,
+  getDistributionAnalytics,
   getPlatformPublishingRequirements,
   getPost,
   getUploadSession,
@@ -266,7 +276,6 @@ export interface ApiClientServiceShape {
   ) => ApiClientEffect<PlatformCapabilitiesResponse>;
   readonly startPlatformOAuth: (
     platform: Platform,
-    brandProfileId: string,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<OAuthStartResponse>;
   readonly getOAuthSelection: (
@@ -312,6 +321,22 @@ export interface ApiClientServiceShape {
     params: CalendarQueryParams,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<CalendarResponse>;
+  readonly getAnalyticsDashboard: (
+    params: AnalyticsDashboardQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AnalyticsDashboard>;
+  readonly getAnalyticsSummary: (
+    params: AnalyticsSummaryQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AnalyticsSummary>;
+  readonly getAnalyticsPosts: (
+    params: AnalyticsPostsQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<AnalyticsPostsResponse>;
+  readonly getDistributionAnalytics: (
+    id: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<components["schemas"]["AnalyticsSnapshotsResponse"]>;
   readonly listWorkspaceMembers: (
     workspaceId: string,
     options?: ApiRequestOptions,
@@ -446,8 +471,12 @@ export function createApiClientServiceTest(
     getAssetDownloadUrl: unstubbed("getAssetDownloadUrl"),
     getAssetPreviewUrl: unstubbed("getAssetPreviewUrl"),
     getCalendar: unstubbed("getCalendar"),
+    getAnalyticsDashboard: unstubbed("getAnalyticsDashboard"),
+    getAnalyticsPosts: unstubbed("getAnalyticsPosts"),
+    getAnalyticsSummary: unstubbed("getAnalyticsSummary"),
     getCurrentUser: unstubbed("getCurrentUser"),
     getDistribution: unstubbed("getDistribution"),
+    getDistributionAnalytics: unstubbed("getDistributionAnalytics"),
     getInstallation: unstubbed("getInstallation"),
     getInvitationPreview: unstubbed("getInvitationPreview"),
     getPlatformPublishingRequirements: unstubbed("getPlatformPublishingRequirements"),
@@ -542,9 +571,17 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => getAssetPreviewUrl(workspaceId, id, options)),
     getCalendar: (params, options) =>
       inWorkspace((workspaceId) => getCalendar(workspaceId, params, options)),
+    getAnalyticsDashboard: (params, options) =>
+      inWorkspace((workspaceId) => getAnalyticsDashboard(workspaceId, params, options)),
+    getAnalyticsPosts: (params, options) =>
+      inWorkspace((workspaceId) => getAnalyticsPosts(workspaceId, params, options)),
+    getAnalyticsSummary: (params, options) =>
+      inWorkspace((workspaceId) => getAnalyticsSummary(workspaceId, params, options)),
     getCurrentUser: () => inWorkspace((workspaceId) => getCurrentUser(workspaceId)),
     getDistribution: (id, options) =>
       inWorkspace((workspaceId) => getDistribution(workspaceId, id, options)),
+    getDistributionAnalytics: (id, options) =>
+      inWorkspace((workspaceId) => getDistributionAnalytics(workspaceId, id, options)),
     getInstallation: (workspaceId, options) => getInstallation(workspaceId, options),
     getInvitationPreview: (token, options) => getInvitationPreview(token, options),
     getPlatformPublishingRequirements: (id, options) =>
@@ -583,10 +620,8 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       revokeWorkspaceInvitation(workspaceId, invitationId, options),
     schedulePost: (id, input, options) =>
       inWorkspace((workspaceId) => schedulePost(workspaceId, id, input, options)),
-    startPlatformOAuth: (platform, brandProfileId, options) =>
-      inWorkspace((workspaceId) =>
-        startPlatformOAuth(workspaceId, platform, brandProfileId, options),
-      ),
+    startPlatformOAuth: (platform, options) =>
+      inWorkspace((workspaceId) => startPlatformOAuth(workspaceId, platform, options)),
     suspendInstallationMember: (workspaceId, memberId, reason, options) =>
       suspendInstallationMember(workspaceId, memberId, reason, options),
     transferInstallationOwnership: (workspaceId, targetUserId, password, options) =>

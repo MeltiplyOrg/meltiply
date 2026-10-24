@@ -99,7 +99,9 @@ const unapprovedDistributionId = "9e000000-0000-4000-8000-000000000007";
 const instagramAccountId = "50000000-0000-4000-8000-000000000002";
 // One Distribution per (Post, Channel): distributions_post_platform_account_unique
 // enforces it, so the partial-selection target and the rejected sibling target
-// in the same Post each need their own connected YouTube account.
+// in the same Post use distinct Providers. The canonical seeded YouTube account
+// owns the Post's YouTube target, leaving Threads for the partial target and
+// Facebook for the rejection.
 const partialChannelId = "50000000-0000-4000-8000-000000000003";
 const rejectedChannelId = "50000000-0000-4000-8000-000000000004";
 const distributionIds = [
@@ -195,6 +197,71 @@ function instagramRegistry(publish: NonNullable<ProviderAdapter["publish"]>): Pr
       multi_asset_types: ["image", "video"],
       notes: [],
       platform: "instagram",
+      publish: true,
+      reply: false,
+    },
+    lookupPublication: async () => ({ state: "not_found" }),
+    publish,
+    retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
+    transferModes: ["remote_ingest"],
+  } as unknown as ProviderAdapter);
+  return registry;
+}
+
+/**
+ * Registers a publish-capable Threads adapter mirroring the production
+ * capability's stills support, so a frozen media object can reach the Provider
+ * and only the Provider's own answer can reject it.
+ */
+function threadsRegistry(publish: NonNullable<ProviderAdapter["publish"]>): ProviderRegistry {
+  const registry = new ProviderRegistry();
+  registry.register("threads", {
+    capability: {
+      accepted_mime_types: ["image/jpeg", "image/png", "image/webp", "video/mp4"],
+      analytics: false,
+      asset_types: ["image", "video"],
+      connect_available: false,
+      max_caption_length: 500,
+      max_file_size: 8 * 1024 * 1024,
+      max_hashtags: 1,
+      max_media_count: 20,
+      max_video_duration_sec: 300,
+      min_media_count: 0,
+      multi_asset_types: ["image", "video"],
+      notes: [],
+      platform: "threads",
+      publish: true,
+      reply: false,
+    },
+    lookupPublication: async () => ({ state: "not_found" }),
+    publish,
+    retryPolicy: { baseDelaySeconds: 15, maxAttempts: 5, maxDelaySeconds: 300 },
+    transferModes: ["remote_ingest"],
+  } as unknown as ProviderAdapter);
+  return registry;
+}
+
+/**
+ * Registers a publish-capable Facebook adapter for the rejection fixture: it
+ * accepts the frozen stills shape so the Provider call is the failure point.
+ */
+function facebookRegistry(publish: NonNullable<ProviderAdapter["publish"]>): ProviderRegistry {
+  const registry = new ProviderRegistry();
+  registry.register("facebook", {
+    capability: {
+      accepted_mime_types: ["image/jpeg", "image/png", "image/webp", "video/mp4"],
+      analytics: false,
+      asset_types: ["image", "video"],
+      connect_available: false,
+      max_caption_length: 63_206,
+      max_file_size: 500 * 1024 * 1024,
+      max_hashtags: 30,
+      max_media_count: 10,
+      max_video_duration_sec: 60,
+      min_media_count: 0,
+      multi_asset_types: [],
+      notes: [],
+      platform: "facebook",
       publish: true,
       reply: false,
     },
@@ -512,19 +579,20 @@ async function seedCompositionFixtures(): Promise<void> {
         unapprovedPostId,
       ],
     );
-    // The two sibling YouTube targets of `postId` need their own connected
-    // Channels: one Distribution per (Post, Channel) is a database constraint,
-    // so a Post can only fan out to accounts it has distinct targets on.
+    // The two sibling targets of `postId` need their own connected Channels: a
+    // Brand Profile owns at most one Channel per Provider, so the siblings
+    // differ by Platform, and one Distribution per (Post, Channel) is a
+    // database constraint anyway.
     await client.query(
       `INSERT INTO platform_accounts
          (id, org_id, brand_profile_id, platform, platform_user_id,
           display_name, access_token, scopes, connection_status)
-       VALUES ($1, $2, $3, 'youtube', 'local-distribution-integration-partial',
+       VALUES ($1, $2, $3, 'threads', 'local-distribution-integration-partial',
                'Alpha Channel (partial)', 'local-only-not-a-provider-credential',
-               ARRAY['upload'], 'connected'),
-              ($4, $2, $3, 'youtube', 'local-distribution-integration-rejected',
+               ARRAY['threads_basic'], 'connected'),
+              ($4, $2, $3, 'facebook', 'local-distribution-integration-rejected',
                'Alpha Channel (rejected)', 'local-only-not-a-provider-credential',
-               ARRAY['upload'], 'connected'),
+               ARRAY['facebook_basic'], 'connected'),
               -- Instagram owns its own connected Channel because its
               -- capability is what makes the smaller WEBP rendition
               -- undeliverable for these Assets.
@@ -598,7 +666,7 @@ async function seedCompositionFixtures(): Promise<void> {
          (id, org_id, brand_profile_id, post_id, platform_account_id, platform,
           status, attachment_ids)
        VALUES ($1, $5, $6, $7, $8, 'youtube', 'queued', NULL),
-              ($2, $5, $6, $7, $9, 'youtube', 'queued', ARRAY[$10]::uuid[]),
+              ($2, $5, $6, $7, $9, 'threads', 'queued', ARRAY[$10]::uuid[]),
               ($3, $5, $6, $11, $8, 'youtube', 'processing', NULL),
               ($4, $5, $6, $12, $8, 'youtube', 'queued', ARRAY[]::uuid[])`,
       [
@@ -949,7 +1017,7 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         processDistributionMessage(env, publishMessage(eventIds[1]!, partialDistributionId), {
           decryptToken: async (stored) => stored,
           mediaFor,
-          providerRegistry: youtubeRegistry(publish),
+          providerRegistry: threadsRegistry(publish),
         }),
       ),
     ).resolves.toBe("processed");
@@ -1027,19 +1095,19 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         processDistributionMessage(env, publishMessage(eventIds[1]!, partialDistributionId), {
           decryptToken: async (stored) => stored,
           mediaFor: mediaResolver(),
-          providerRegistry: youtubeRegistry(succeeded),
+          providerRegistry: threadsRegistry(succeeded),
         }),
       ),
     ).resolves.toBe("processed");
-    // The sibling target is a second Channel of the same Post, so it holds its
-    // own connected account and its own saved target: one Distribution per
-    // (Post, Channel) is all the schema allows.
+    // A second Channel of the same Post on a different Provider: a Brand
+    // Profile owns at most one Channel per Provider, so the sibling differs by
+    // Platform and holds its own saved target.
     await runSystemTransaction(env, async (client) => {
       await client.query(
         `INSERT INTO distributions
            (id, org_id, brand_profile_id, post_id, platform_account_id,
             platform, status, attachment_ids)
-         VALUES ($1, $2, $3, $4, $5, 'youtube', 'queued', ARRAY[$6]::uuid[])`,
+         VALUES ($1, $2, $3, $4, $5, 'facebook', 'queued', ARRAY[$6]::uuid[])`,
         [
           rejectedDistributionId,
           organizationId,
@@ -1073,7 +1141,7 @@ describeIntegration("Distribution publication with PostgreSQL", () => {
         processDistributionMessage(env, publishMessage(eventIds[4]!, rejectedDistributionId), {
           decryptToken: async (stored) => stored,
           mediaFor: mediaResolver(),
-          providerRegistry: youtubeRegistry(rejected),
+          providerRegistry: facebookRegistry(rejected),
         }),
       ),
     ).resolves.toBe("processed");

@@ -2,6 +2,7 @@ import {
   type DatabaseError,
   MailSubmissionError,
   StorageUnavailableError,
+  type Platform,
   type PlatformCapability,
   COMMUNITY_LIMITS,
 } from "@meltiply/domain";
@@ -23,6 +24,20 @@ import {
   type StorageServiceShape,
 } from "@meltiply/storage";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import type * as Domain from "@meltiply/domain";
+
+// Exercise finite-policy boundaries even though community deployments are
+// unrestricted. Individual scenarios also load the real community policy.
+vi.mock("@meltiply/domain", async (importOriginal) => ({
+  ...(await importOriginal<typeof Domain>()),
+  COMMUNITY_LIMITS: {
+    max_distributions: 30,
+    max_platforms: 2,
+    max_storage_bytes: 1024 * 1024 * 1024,
+    max_uploads: 10,
+  },
+}));
+
 import {
   resolveActor as resolveActorWithRequestId,
   type ResolvedActor,
@@ -484,27 +499,28 @@ function lifecycleInvitationHarness(options: {
 }
 
 /**
- * Capability list with one publish-enabled platform for scheduling tests.
+ * Capability list with the requested Platforms opted into publishing.
  *
  * The registry ships every adapter as explicitly unavailable, so a scheduling
- * scenario opts a single platform into publishing with the media limits its
+ * scenario opts one or more Platforms into publishing with the media limits its
  * fixture uses. Both the Post scheduler and the per-Distribution operations
  * validate against the same list, which is why the builder is shared.
  *
- * @param platform - Platform to enable for publishing.
+ * @param platform - Platform(s) to enable for publishing.
  * @param patch - Extra capability fields overriding the defaults.
- @returns Registry capabilities with the requested publish override.
+ * @returns Registry capabilities with the requested publish override.
  */
 function publishableCapabilities(
-  platform: "tiktok" | "youtube",
+  platform: Platform | readonly Platform[],
   patch: Partial<PlatformCapability> = {},
 ) {
+  const platforms = typeof platform === "string" ? [platform] : platform;
   const limits =
-    platform === "youtube"
-      ? { max_file_size: 25 * 1024 * 1024 }
-      : { max_file_size: 20 * 1024 * 1024 };
+    platform === "tiktok"
+      ? { max_file_size: 20 * 1024 * 1024 }
+      : { max_file_size: 25 * 1024 * 1024 };
   return new ProviderRegistry().capabilities().map((capability) =>
-    capability.platform === platform
+    platforms.includes(capability.platform)
       ? {
           ...capability,
           accepted_mime_types: ["image/png"],
@@ -517,24 +533,30 @@ function publishableCapabilities(
   );
 }
 
-/** Core service for per-Distribution operations against publish-enabled YouTube. */
-function distributionServiceWithYoutube(patch: Partial<PlatformCapability> = {}) {
-  return createCoreApiService(publishableCapabilities("youtube", patch));
+/** Core service for per-Distribution operations against publish-enabled Platforms. */
+function distributionServiceWith(
+  platform: Platform | readonly Platform[] = "youtube",
+  patch: Partial<PlatformCapability> = {},
+) {
+  return createCoreApiService(publishableCapabilities(platform, patch));
 }
 
 /**
- * Post composition service for a platform that can publish.
+ * Post composition service for the Platforms that can publish.
  *
  * Scheduling validates the resolved caption, media, and provider options
  * against the platform capability before any Distribution is accepted, so
- * every scheduling scenario must build the service with the platform it
+ * every scheduling scenario must build the service with the platform(s) it
  * intends to publish to.
  *
- * @param platform - Platform the scenario schedules against.
+ * @param platform - Platform(s) the scenario schedules against.
  * @param patch - Extra capability fields overriding the defaults.
- @returns Post service whose scheduler accepts that platform.
+ * @returns Post service whose scheduler accepts those platforms.
  */
-function postServiceWith(platform: "tiktok" | "youtube", patch: Partial<PlatformCapability> = {}) {
+function postServiceWith(
+  platform: Platform | readonly Platform[],
+  patch: Partial<PlatformCapability> = {},
+) {
   return createPostApiService(publishableCapabilities(platform, patch));
 }
 
@@ -994,7 +1016,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const alphaCommentId = "80000000-0000-4000-8000-000000000001";
     const alphaPostId = "48000000-0000-4000-8000-000000000001";
     const asset = assetServiceHarness([]).service;
-    const distribution = distributionServiceWithYoutube();
+    const distribution = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const crossTenantCases: Array<{
       expectedStatus: number;
@@ -1632,8 +1654,40 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         impressions: 320,
         reach: 108,
       });
+      expect(page.posts.find((post) => post.id === postIds[0])?.distribution_analytics).toEqual([
+        {
+          analytics: {
+            likes: 7,
+            comments: 2,
+            shares: 1,
+            saves: null,
+            clicks: null,
+            views: 10,
+            impressions: 20,
+            reach: 8,
+          },
+          distribution_id: distributionIds[1],
+          platform: "tiktok",
+        },
+        {
+          analytics: {
+            likes: 10,
+            comments: 0,
+            shares: 2,
+            saves: null,
+            clicks: null,
+            views: 200,
+            impressions: 300,
+            reach: 100,
+          },
+          distribution_id: distributionIds[0],
+          platform: "youtube",
+        },
+      ]);
       expect(page.posts.find((post) => post.id === postIds[1])?.analytics).toBeNull();
+      expect(page.posts.find((post) => post.id === postIds[1])?.distribution_analytics).toEqual([]);
       expect(page.posts.find((post) => post.id === postIds[2])?.analytics).toBeNull();
+      expect(page.posts.find((post) => post.id === postIds[2])?.distribution_analytics).toEqual([]);
       expect(page.posts.find((post) => post.id === postIds[3])?.analytics).toEqual({
         likes: 0,
         comments: 0,
@@ -1644,6 +1698,22 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         impressions: 0,
         reach: 0,
       });
+      expect(page.posts.find((post) => post.id === postIds[3])?.distribution_analytics).toEqual([
+        {
+          analytics: {
+            likes: 0,
+            comments: 0,
+            shares: 0,
+            saves: null,
+            clicks: null,
+            views: 0,
+            impressions: 0,
+            reach: 0,
+          },
+          distribution_id: distributionIds[4],
+          platform: "youtube",
+        },
+      ]);
       await expect(Effect.runPromise(posts.getPost(env, beta, postIds[0]!))).rejects.toMatchObject({
         status: 404,
       });
@@ -1675,8 +1745,13 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     });
     await expect(Effect.runPromise(service.calendar(env, beta, start, end))).resolves.toEqual([]);
 
+    const analyticsService = createCoreApiService(
+      new ProviderRegistry()
+        .capabilities()
+        .map((capability) => ({ ...capability, analytics: capability.platform !== "youtube" })),
+    );
     const analytics = await Effect.runPromise(
-      service.summaryAnalytics(env, alpha, {
+      analyticsService.summaryAnalytics(env, alpha, {
         end,
         start,
       }),
@@ -1689,7 +1764,18 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       views: 1200,
     });
     expect(analytics.partial).toBe(true);
-    expect(analytics.unsupported_platforms).toHaveLength(5);
+    // Coverage is derived from the Platforms actually published in scope, not
+    // from every registered Platform. Alpha's only in-range publication is on
+    // YouTube, which this fixture deliberately marks analytics-unsupported.
+    expect(analytics.unsupported_platforms).toEqual(["youtube"]);
+    expect(analytics.by_platform).toEqual([
+      expect.objectContaining({
+        last_synced_at: "2026-07-18T13:00:00.000Z",
+        platform: "youtube",
+        post_count: 1,
+        views: 1200,
+      }),
+    ]);
 
     const inbox = await Effect.runPromise(
       service.inbox(env, alpha, {
@@ -1849,6 +1935,409 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
+  it("ranks the analytics Post cohort by stored metrics with honest coverage", async () => {
+    const start = new Date("2026-10-01T00:00:00Z");
+    const end = new Date("2026-10-31T23:59:59Z");
+    // Mark only Instagram analytics-capable so coverage must exclude the
+    // YouTube destination even though the shipped registry declares support.
+    const analyticsService = createCoreApiService(
+      new ProviderRegistry().capabilities().map((capability) => ({
+        ...capability,
+        analytics: capability.platform === "instagram",
+      })),
+    );
+    const postIds = {
+      mixed: "4f000000-0000-4000-8000-000000000070",
+      unsupported: "4f000000-0000-4000-8000-000000000071",
+      outside: "4f000000-0000-4000-8000-000000000072",
+      awaiting: "4f000000-0000-4000-8000-000000000073",
+    };
+    const distributionIds = {
+      mixedFirst: "96000000-0000-4000-8000-000000000070",
+      mixedSecond: "96000000-0000-4000-8000-000000000071",
+      unsupported: "96000000-0000-4000-8000-000000000072",
+      outside: "96000000-0000-4000-8000-000000000073",
+      awaiting: "96000000-0000-4000-8000-000000000074",
+    };
+    const excerptText = `  Launch   notes\n\n${"x".repeat(160)}`;
+    const expectedExcerpt = ("Launch notes " + "x".repeat(160)).slice(0, 140);
+    try {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          for (const [key, postId] of Object.entries(postIds)) {
+            yield* insertFixturePost(client, {
+              postId,
+              title: key === "awaiting" ? "" : `Integration analytics ${key}`,
+            });
+          }
+          yield* client.query("UPDATE posts SET default_text = $2 WHERE id = $1", [
+            postIds.mixed,
+            excerptText,
+          ]);
+          // `event_at` prefers `scheduled_at`, so the mixed and unsupported rows
+          // would fall outside the calendar window while publishing inside it;
+          // the outside row is the inverse. published_at must decide both.
+          yield* client.query(
+            `INSERT INTO distributions
+               (id, org_id, brand_profile_id, post_id, platform, status,
+                published_at, scheduled_at, platform_post_id)
+             VALUES
+               ($1, $6, $7, $8, 'instagram', 'published',
+                '2026-10-05T12:00:00Z', '2026-09-01T12:00:00Z', 'integration-analytics-a'),
+               ($2, $6, $7, $8, 'instagram', 'published',
+                '2026-10-06T12:00:00Z', '2026-09-02T12:00:00Z', 'integration-analytics-b'),
+               ($3, $6, $7, $9, 'youtube', 'published',
+                '2026-10-07T12:00:00Z', '2026-08-01T12:00:00Z', 'integration-analytics-c'),
+               ($4, $6, $7, $10, 'tiktok', 'published',
+                '2026-11-15T12:00:00Z', '2026-10-10T12:00:00Z', 'integration-analytics-d'),
+               ($5, $6, $7, $11, 'instagram', 'published',
+                '2026-10-08T12:00:00Z', NULL, 'integration-analytics-e')`,
+            [
+              distributionIds.mixedFirst,
+              distributionIds.mixedSecond,
+              distributionIds.unsupported,
+              distributionIds.outside,
+              distributionIds.awaiting,
+              alpha.organizationId,
+              alphaBrandProfileId,
+              postIds.mixed,
+              postIds.unsupported,
+              postIds.outside,
+              postIds.awaiting,
+            ],
+          );
+          yield* client.query(
+            `INSERT INTO analytics_snapshots
+               (distribution_id, org_id, views, likes, comments, shares, snapshot_at)
+             VALUES
+               ($1, $5, 100, 20, 2, 1, '2026-10-20T13:00:00Z'),
+               ($2, $5, 50, 0, 1, 0, '2026-10-21T13:00:00Z'),
+               ($3, $5, 5, 20, 0, 0, '2026-10-20T13:00:00Z'),
+               ($4, $5, 777, 777, 777, 777, '2026-11-20T13:00:00Z'),
+               ($1, $5, 9999, 9999, 9999, 9999, '2026-11-05T13:00:00Z')`,
+            [
+              distributionIds.mixedFirst,
+              distributionIds.mixedSecond,
+              distributionIds.unsupported,
+              distributionIds.outside,
+              alpha.organizationId,
+            ],
+          );
+        }),
+      );
+
+      const summary = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { end, start }),
+      );
+      expect(summary.totals).toMatchObject({
+        comments: 3,
+        likes: 40,
+        post_count: 4,
+        shares: 1,
+        views: 155,
+      });
+      expect(summary.last_synced_at).toBe("2026-10-21T13:00:00.000Z");
+      expect(summary.unsupported_platforms).toEqual(["youtube"]);
+      expect(summary.partial).toBe(true);
+      expect(summary.by_platform).toEqual([
+        expect.objectContaining({
+          last_synced_at: "2026-10-21T13:00:00.000Z",
+          platform: "instagram",
+          post_count: 3,
+          views: 150,
+        }),
+        expect.objectContaining({
+          last_synced_at: "2026-10-20T13:00:00.000Z",
+          platform: "youtube",
+          post_count: 1,
+          views: 5,
+        }),
+      ]);
+
+      const instagramSummary = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { end, platform: "instagram", start }),
+      );
+      expect(instagramSummary.partial).toBe(false);
+      expect(instagramSummary.unsupported_platforms).toEqual([]);
+
+      const byMetric = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "views",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(byMetric.has_more).toBe(false);
+      expect(byMetric.posts.map((post) => post.post_id)).toEqual([
+        postIds.mixed,
+        postIds.unsupported,
+        postIds.awaiting,
+      ]);
+      expect(byMetric.posts[0]).toEqual({
+        comments: 3,
+        destination_count: 2,
+        synced_destination_count: 2,
+        excerpt: expectedExcerpt,
+        last_synced_at: "2026-10-21T13:00:00.000Z",
+        likes: 20,
+        platforms: ["instagram"],
+        post_id: postIds.mixed,
+        published_at: "2026-10-05T12:00:00.000Z",
+        shares: 1,
+        title: "Integration analytics mixed",
+        unsupported_platforms: [],
+        views: 150,
+      });
+      expect(byMetric.posts[1]).toMatchObject({
+        last_synced_at: "2026-10-20T13:00:00.000Z",
+        platforms: ["youtube"],
+        unsupported_platforms: ["youtube"],
+        views: 5,
+      });
+      expect(byMetric.posts[2]).toMatchObject({
+        destination_count: 1,
+        synced_destination_count: 0,
+        last_synced_at: null,
+        platforms: ["instagram"],
+        title: "",
+        views: 0,
+      });
+
+      // Equal likes fall back to latest publication first, then Post id.
+      const byLikes = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "likes",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(byLikes.posts.slice(0, 2).map((post) => post.post_id)).toEqual([
+        postIds.unsupported,
+        postIds.mixed,
+      ]);
+
+      const firstPage = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 2,
+          metric: "views",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(firstPage.has_more).toBe(true);
+      expect(firstPage.posts).toHaveLength(2);
+      const secondPage = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 2,
+          metric: "views",
+          offset: 2,
+          start,
+        }),
+      );
+      expect(secondPage.has_more).toBe(false);
+      expect(secondPage.posts.map((post) => post.post_id)).toEqual([postIds.awaiting]);
+
+      const instagramOnly = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "views",
+          offset: 0,
+          platform: "instagram",
+          start,
+        }),
+      );
+      expect(instagramOnly.posts.map((post) => post.post_id)).toEqual([
+        postIds.mixed,
+        postIds.awaiting,
+      ]);
+      expect(instagramOnly.posts.every((post) => post.unsupported_platforms.length === 0)).toBe(
+        true,
+      );
+
+      await expect(
+        Effect.runPromise(
+          analyticsService.analyticsPosts(env, alpha, {
+            brandProfileId: betaBrandProfileId,
+            end,
+            limit: 10,
+            metric: "views",
+            offset: 0,
+            start,
+          }),
+        ),
+      ).resolves.toMatchObject({ has_more: false, posts: [] });
+      await expect(
+        Effect.runPromise(
+          analyticsService.analyticsPosts(env, beta, {
+            end,
+            limit: 10,
+            metric: "views",
+            offset: 0,
+            start,
+          }),
+        ),
+      ).resolves.toMatchObject({ has_more: false, posts: [] });
+
+      await systemTransaction(env, (client) =>
+        client.query("UPDATE posts SET deleted_at = now() WHERE id = $1", [postIds.mixed]),
+      );
+      const afterPostDelete = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "views",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(afterPostDelete.posts.map((post) => post.post_id)).toEqual([
+        postIds.unsupported,
+        postIds.awaiting,
+      ]);
+
+      await systemTransaction(env, (client) =>
+        client.query(
+          `UPDATE brand_profiles
+           SET deleted_at = now(), purge_at = now() + INTERVAL '7 days'
+           WHERE id = $1`,
+          [alphaBrandProfileId],
+        ),
+      );
+      try {
+        const afterProfileDelete = await Effect.runPromise(
+          analyticsService.analyticsPosts(env, alpha, {
+            end,
+            limit: 10,
+            metric: "views",
+            offset: 0,
+            start,
+          }),
+        );
+        expect(afterProfileDelete.posts).toEqual([]);
+      } finally {
+        await systemTransaction(env, (client) =>
+          client.query(
+            "UPDATE brand_profiles SET deleted_at = NULL, purge_at = NULL WHERE id = $1",
+            [alphaBrandProfileId],
+          ),
+        );
+      }
+    } finally {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* client.query("DELETE FROM distributions WHERE post_id = ANY($1::uuid[])", [
+            Object.values(postIds),
+          ]);
+          yield* client.query("DELETE FROM posts WHERE id = ANY($1::uuid[])", [
+            Object.values(postIds),
+          ]);
+        }),
+      );
+    }
+  });
+
+  it("treats every analytics-capable Provider as supported coverage", async () => {
+    const start = new Date("2026-12-01T00:00:00Z");
+    const end = new Date("2026-12-31T23:59:59Z");
+    const postId = "4f000000-0000-4000-8000-000000000080";
+    const platforms = ["facebook", "instagram", "threads", "tiktok", "youtube"] as const;
+    const distributionIds = platforms.map(
+      (_, index) => `97000000-0000-4000-8000-00000000008${index}`,
+    );
+    const analyticsService = createCoreApiService(
+      new ProviderRegistry()
+        .capabilities()
+        .map((capability) => ({ ...capability, analytics: true })),
+    );
+    try {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* insertFixturePost(client, {
+            postId,
+            title: "Integration all-provider analytics",
+          });
+          for (const [index, platform] of platforms.entries()) {
+            yield* client.query(
+              `INSERT INTO distributions
+                 (id, org_id, brand_profile_id, post_id, platform, status,
+                  published_at, platform_post_id)
+               VALUES ($1, $2, $3, $4, $5, 'published', '2026-12-10T12:00:00Z', $6)`,
+              [
+                distributionIds[index],
+                alpha.organizationId,
+                alphaBrandProfileId,
+                postId,
+                platform,
+                `integration-all-providers-${platform}`,
+              ],
+            );
+            yield* client.query(
+              `INSERT INTO analytics_snapshots
+                 (distribution_id, org_id, views, likes, comments, shares, snapshot_at)
+               VALUES ($1, $2, 10, 1, 2, 3, '2026-12-20T12:00:00Z')`,
+              [distributionIds[index], alpha.organizationId],
+            );
+          }
+        }),
+      );
+      const summary = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { end, start }),
+      );
+      expect(summary.partial).toBe(false);
+      expect(summary.unsupported_platforms).toEqual([]);
+      expect(summary.by_platform.map((row) => row.platform)).toEqual([...platforms]);
+      expect(summary.totals).toMatchObject({
+        comments: 10,
+        likes: 5,
+        post_count: 5,
+        shares: 15,
+        views: 50,
+      });
+      const ranked = await Effect.runPromise(
+        analyticsService.analyticsPosts(env, alpha, {
+          end,
+          limit: 10,
+          metric: "views",
+          offset: 0,
+          start,
+        }),
+      );
+      expect(ranked.posts).toHaveLength(1);
+      expect(ranked.posts[0]).toMatchObject({
+        destination_count: 5,
+        synced_destination_count: 5,
+        platforms: [...platforms],
+        unsupported_platforms: [],
+        views: 50,
+      });
+    } finally {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* client.query("DELETE FROM distributions WHERE post_id = $1", [postId]);
+          yield* client.query("DELETE FROM posts WHERE id = $1", [postId]);
+        }),
+      );
+    }
+  });
+
+  it("stores a publication instant for every published Distribution", async () => {
+    const rows = await systemTransaction(env, (client) =>
+      client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM distributions
+         WHERE status = 'published' AND published_at IS NULL`,
+      ),
+    );
+    expect(rows.rows[0]?.count).toBe("0");
+  });
+
   it("returns not-found instead of exposing another tenant's distribution", async () => {
     await expect(
       Effect.runPromise(
@@ -1925,8 +2414,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
    * The fixture state is the precondition each scenario asserts against: one
    * publishable image, one second publishable image for ordered multi-attachment
    * work, one Asset still processing with no verified media, one failed Asset,
-   * two extra connected YouTube Channels beyond the seeded canonical account, and
-   * one connected TikTok Channel. The TikTok Channel exists because scheduling a
+   * two extra connected Channels beyond the seeded canonical YouTube
+   * account — one Instagram and one Facebook, because a Brand Profile owns at
+   * most one Channel per Provider — and one connected TikTok Channel. The
+   * TikTok Channel exists because scheduling a
    * Post that carries TikTok provider options must resolve a real Channel of that
    * platform first; without it the scenario would stop at a 404 account lookup
    * instead of reaching the provider-option validation it is asserting. Inserting
@@ -1981,10 +2472,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
             display_name, access_token, scopes, metadata)
          VALUES
            ($1, '20000000-0000-4000-8000-000000000001', '${alphaBrandProfileId}',
-            'youtube', 'integration-post-secondary', 'Integration Channel 2',
+            'instagram', 'integration-post-secondary', 'Integration Channel 2',
             'integration-post-token-2', ARRAY['upload'], '{"fixture":true}'),
            ($2, '20000000-0000-4000-8000-000000000001', '${alphaBrandProfileId}',
-            'youtube', 'integration-post-tertiary', 'Integration Channel 3',
+            'facebook', 'integration-post-tertiary', 'Integration Channel 3',
             'integration-post-token-3', ARRAY['upload'], '{"fixture":true}'),
            ($3, '20000000-0000-4000-8000-000000000001', '${alphaBrandProfileId}',
             'tiktok', 'integration-post-tiktok', 'Integration TikTok Channel',
@@ -2412,10 +2903,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // One Post identity fans out to one Distribution per Channel, and only the
   // Channels that are still editable are created, updated, or cancelled.
   it("schedules many Channels once with atomic usage and outbox state", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram", "facebook"]);
     const period = currentUsagePeriod;
     const usageBefore = await currentUsageCount();
-    // Exhaust the shared community allowance to prove quota refusal is atomic.
+    // Exhaust a finite test allowance to prove quota refusal remains atomic.
     const distributionAllowance = COMMUNITY_LIMITS.max_distributions ?? 0;
     const draft = await createAlphaPost(
       posts,
@@ -2573,6 +3064,37 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         distributions: String(distributionAllowance),
         idempotency_count: 0,
       });
+
+      const boundedPolicy = { ...COMMUNITY_LIMITS };
+      try {
+        const community = await vi.importActual<typeof Domain>("@meltiply/domain");
+        Object.assign(COMMUNITY_LIMITS, community.COMMUNITY_LIMITS);
+        const accepted = await scheduleAlphaPost(
+          posts,
+          postId,
+          [{ platformAccountId: alphaThirdAccountId }],
+          null,
+          quotaKey,
+        );
+        expect(accepted.value.distributions).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ platform_account_id: alphaThirdAccountId }),
+          ]),
+        );
+        expect(await currentUsageCount()).toBe(distributionAllowance + 1);
+        await expect(
+          scheduleAlphaPost(
+            posts,
+            postId,
+            [{ platformAccountId: alphaThirdAccountId }],
+            null,
+            quotaKey,
+          ),
+        ).resolves.toEqual({ ...accepted, replayed: true });
+        expect(await currentUsageCount()).toBe(distributionAllowance + 1);
+      } finally {
+        Object.assign(COMMUNITY_LIMITS, boundedPolicy);
+      }
     } finally {
       await purgeIntegrationPosts(
         [postId],
@@ -2586,7 +3108,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // claimed, while an outcome a provider already owns keeps its own lifecycle
   // and its published copy is never un-published locally.
   it("edits pending targets in place while leaving published history immutable", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -2747,7 +3269,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // Channel reschedules, instead of the revoked Channel failing the whole
   // schedule.
   it("reschedules pending Channels when a settled Channel's credential lapsed", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -2852,7 +3374,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // read, and both surfaces expose the identical frozen publication.
   it("reads the frozen publication identically on Post and Distribution after edits", async () => {
     const posts = postServiceWith("youtube");
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -2994,7 +3516,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     // The fixture Platform publishes one attachment at a time by default, so
     // the capability is widened to accept a text-only target and a
     // multi-attachment one side by side.
-    const posts = postServiceWith("youtube", {
+    const posts = postServiceWith(["youtube", "instagram"], {
       max_media_count: 3,
       min_media_count: 0,
       multi_asset_types: ["image"],
@@ -3191,7 +3713,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // without revival the request would succeed while publishing nothing. A
   // Channel whose outcome a provider already owns keeps that outcome instead.
   it("revives a dropped Channel instead of succeeding without publishing", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -3502,7 +4024,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // A local deletion never un-publishes a live Platform copy and never
   // releases media another retained Post still holds.
   it("deletes a Post by cancelling only its pending work", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -3634,7 +4156,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // Cancelling one Channel outcome removes only its own unleased command, so a
   // leased command stays with the consumer that already owns the attempt.
   it("accepts an idempotent schedule and removes its unpublished work on cancel", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
@@ -3709,7 +4231,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   });
 
   it("cancel keeps leased publish work for the automation consumer", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
@@ -3775,8 +4297,8 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // editable, in-flight work is only asked to stop, and anything that already
   // published or failed permanently is refused instead of silently rewritten.
   it("keeps per-Channel outcomes editable only while they are pending", async () => {
-    const distributionService = distributionServiceWithYoutube();
-    const posts = postServiceWith("youtube");
+    const distributionService = distributionServiceWith(["youtube", "instagram", "facebook"]);
+    const posts = postServiceWith(["youtube", "instagram", "facebook"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -4010,7 +4532,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // the same Distribution and adds a distinct command rather than reviving the
   // one that already ran.
   it("emits one distinct outbox command for every accepted distribution retry intent", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
@@ -4173,7 +4695,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // the delivery horizon, and cancelling drops every unpublished command so a
   // stale delayed message cannot resurrect the publication.
   it("re-keys deferred commands on reschedule and stops emitting beyond the delivery horizon", async () => {
-    const distributionService = distributionServiceWithYoutube();
+    const distributionService = distributionServiceWith();
     const posts = postServiceWith("youtube");
     const usageBefore = await currentUsageCount();
     const start = Date.now();
@@ -4293,7 +4815,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // Each target of one deferred schedule carries its own command at the shared
   // instant, and a schedule past the horizon is durable without commands.
   it("emits per-target deferred commands inside the horizon and none beyond it", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const inHorizonAt = new Date(Date.now() + 7_200_000);
     const inHorizonDraft = await createAlphaPost(
@@ -4382,7 +4904,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // The monthly allowance is the last contended slot, so exactly one of two
   // simultaneous schedules is admitted and the loser reserves nothing.
   it("admits only one schedule at the final concurrent quota slot", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const period = currentUsagePeriod;
     const initial = await systemTransaction(env, (client) =>
       Effect.gen(function* () {
@@ -4559,7 +5081,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   // the Post retires the identity and cancels what is still pending, but work
   // in flight stays with the consumer that owns the attempt.
   it("keeps claimed publication work alive when its Post is deleted", async () => {
-    const posts = postServiceWith("youtube");
+    const posts = postServiceWith(["youtube", "instagram"]);
     const usageBefore = await currentUsageCount();
     const draft = await createAlphaPost(
       posts,
@@ -6404,11 +6926,17 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       { length: allowance - 1 },
       (_, index) => `integration-quota-baseline-${index}`,
     );
-    const accountIds = ["integration-quota-a", "integration-quota-b"];
-    const connection = (id: string) =>
+    // One Channel per Provider per Brand Profile: the concurrent candidates use
+    // distinct Providers so the quota, not provider uniqueness, decides them.
+    const candidates = [
+      { id: "integration-quota-a", platform: "youtube" as const },
+      { id: "integration-quota-b", platform: "tiktok" as const },
+    ];
+    const accountIds = candidates.map(({ id }) => id);
+    const connection = (id: string, platform: "threads" | "youtube" | "tiktok") =>
       saveOAuthConnection(
         env,
-        "threads",
+        platform,
         {
           brandProfileId: betaBrandProfileId,
           organizationId: beta.organizationId,
@@ -6421,15 +6949,17 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         },
       );
     try {
-      for (const id of baselineIds) await connection(id);
-      const results = await Promise.allSettled(accountIds.map(connection));
+      for (const id of baselineIds) await connection(id, "threads");
+      const results = await Promise.allSettled(
+        candidates.map(({ id, platform }) => connection(id, platform)),
+      );
       expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
       const rejected = results.find(
         (result): result is PromiseRejectedResult => result.status === "rejected",
       );
       expect(rejected?.reason).toMatchObject({ code: "quota_exceeded", status: 403 });
-      const acceptedId = accountIds[results.findIndex((result) => result.status === "fulfilled")]!;
-      await expect(connection(acceptedId)).resolves.toBeUndefined();
+      const accepted = candidates[results.findIndex((result) => result.status === "fulfilled")]!;
+      await expect(connection(accepted.id, accepted.platform)).resolves.toBeUndefined();
       await systemTransaction(env, (client) =>
         Effect.gen(function* () {
           const result = yield* client.query<{ count: string }>(
@@ -6439,6 +6969,24 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           expect(result.rows[0]?.count).toBe(String(allowance));
         }),
       );
+
+      const boundedPolicy = { ...COMMUNITY_LIMITS };
+      try {
+        const community = await vi.importActual<typeof Domain>("@meltiply/domain");
+        Object.assign(COMMUNITY_LIMITS, community.COMMUNITY_LIMITS);
+        await Promise.all(candidates.map(({ id, platform }) => connection(id, platform)));
+        await systemTransaction(env, (client) =>
+          Effect.gen(function* () {
+            const result = yield* client.query<{ count: string }>(
+              "SELECT COUNT(*)::text AS count FROM platform_accounts WHERE org_id = $1",
+              [beta.organizationId],
+            );
+            expect(result.rows[0]?.count).toBe(String(allowance + 1));
+          }),
+        );
+      } finally {
+        Object.assign(COMMUNITY_LIMITS, boundedPolicy);
+      }
     } finally {
       await systemTransaction(env, (client) =>
         client.query(
@@ -6524,13 +7072,64 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
+  it("allows one Channel per Provider per Brand Profile", async () => {
+    const acceptedId = "integration-provider-unique-accepted";
+    const rejectedId = "integration-provider-unique-rejected";
+    const connection = (id: string) =>
+      saveOAuthConnection(
+        env,
+        "threads",
+        {
+          brandProfileId: betaBrandProfileId,
+          organizationId: beta.organizationId,
+          userId: beta.userId,
+        },
+        {
+          accessToken: `access-${id}`,
+          account: { id },
+          scopes: ["threads_basic"],
+        },
+      );
+    try {
+      // The seeded Beta profile owns no Threads Channel yet, so the first
+      // external identity fills the single Provider slot.
+      await expect(connection(acceptedId)).resolves.toBeUndefined();
+      await expect(connection(rejectedId)).rejects.toMatchObject({
+        code: "invalid_state",
+        status: 409,
+      });
+      // Reconnecting the accepted external identity refreshes its own Channel
+      // rather than competing for the slot.
+      await expect(connection(acceptedId)).resolves.toBeUndefined();
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          const result = yield* client.query<{ count: string; platform_user_id: string }>(
+            `SELECT COUNT(*)::text AS count, MIN(platform_user_id) AS platform_user_id
+               FROM platform_accounts
+              WHERE brand_profile_id = $1 AND platform = 'threads'`,
+            [betaBrandProfileId],
+          );
+          expect(result.rows[0]).toEqual({ count: "1", platform_user_id: acceptedId });
+        }),
+      );
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query("DELETE FROM platform_accounts WHERE platform_user_id IN ($1, $2)", [
+          acceptedId,
+          rejectedId,
+        ]),
+      );
+    }
+  });
+
   it("reveals a revocation token only through the owning tenant", async () => {
     const revoke = vi.fn(async () => undefined);
     const registry = new ProviderRegistry();
     registry.register("youtube", {
-      capability: service
-        .platformCapabilities()
-        .find((capability) => capability.platform === "youtube")!,
+      capability: {
+        ...service.platformCapabilities().find((capability) => capability.platform === "youtube")!,
+        analytics: false,
+      },
       revoke,
       transferModes: [],
     });
@@ -6545,6 +7144,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   it("reveals publication credentials only after an owning-tenant read", async () => {
     const accountId = "50000000-0000-4000-8000-000000000008";
+    // A dedicated Brand Profile keeps the TikTok fixture free of the seeded
+    // YouTube Channel and the composition fixtures' Provider slots.
+    const credentialProfileId = "a0000000-0000-4000-8000-0000000000c1";
     const readRequirements = vi.fn(
       async (_context: ProviderRequestContext, providerCredentials: ProviderCredentials) => {
         expect(providerCredentials).toEqual({
@@ -6565,9 +7167,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
     const registry = new ProviderRegistry();
     registry.register("tiktok", {
-      capability: service
-        .platformCapabilities()
-        .find((capability) => capability.platform === "tiktok")!,
+      capability: {
+        ...service.platformCapabilities().find((capability) => capability.platform === "tiktok")!,
+        analytics: false,
+      },
       getPublicationRequirements: readRequirements,
       transferModes: [],
     });
@@ -6575,15 +7178,21 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     await systemTransaction(env, (client) =>
       Effect.gen(function* () {
         yield* client.query(
+          `INSERT INTO brand_profiles (id, org_id, name, color)
+           VALUES ($1, '20000000-0000-4000-8000-000000000001',
+                   'Integration Credential Brand', '#1d4ed8')`,
+          [credentialProfileId],
+        );
+        yield* client.query(
           `INSERT INTO platform_accounts
            (id, org_id, brand_profile_id, platform, platform_user_id,
             access_token, scopes, connection_status, token_expires_at)
          VALUES ($1, '20000000-0000-4000-8000-000000000001',
-                 '${alphaBrandProfileId}', 'tiktok',
-                 'integration-tiktok-creator', $2,
+                 $2, 'tiktok',
+                 'integration-tiktok-creator', $3,
                  ARRAY['user.info.basic', 'video.publish'], 'connected',
                  '2026-08-01T00:00:00Z')`,
-          [accountId, encrypted],
+          [accountId, credentialProfileId, encrypted],
         );
       }),
     );
@@ -6670,7 +7279,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       expect(readRequirements).toHaveBeenCalledTimes(3);
     } finally {
       await systemTransaction(env, (client) =>
-        client.query("DELETE FROM platform_accounts WHERE id = $1", [accountId]),
+        client.query("DELETE FROM brand_profiles WHERE id = $1", [credentialProfileId]),
       );
     }
   });
@@ -7102,5 +7711,29 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       ),
     );
     expect(remaining.rows[0]?.count).toBe("0");
+  });
+  it("builds the multi-chart dashboard aggregates with delta series and format breakdowns", async () => {
+    const start = new Date("2026-07-01T00:00:00Z");
+    const end = new Date("2026-07-31T23:59:59Z");
+    const dashboard = await Effect.runPromise(
+      service.dashboardAnalytics(env, alpha, { end, start }),
+    );
+    expect(dashboard.range).toEqual({
+      end: end.toISOString(),
+      start: start.toISOString(),
+    });
+    expect(Array.isArray(dashboard.series)).toBe(true);
+    expect(Array.isArray(dashboard.best_times)).toBe(true);
+    expect(Array.isArray(dashboard.formats)).toBe(true);
+    expect(Array.isArray(dashboard.platforms)).toBe(true);
+    expect(Array.isArray(dashboard.accumulation)).toBe(true);
+    expect(dashboard.unavailable_metrics).toContain("saves");
+    expect(dashboard.unavailable_metrics).toContain("clicks");
+
+    // Format filtering narrows the cohort to matching attachment configurations.
+    const videosOnly = await Effect.runPromise(
+      service.dashboardAnalytics(env, alpha, { end, format: "video", start }),
+    );
+    expect(videosOnly.formats.every((row) => row.format === "video")).toBe(true);
   });
 });

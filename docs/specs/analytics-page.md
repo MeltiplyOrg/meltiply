@@ -4,11 +4,85 @@ Status: ready for implementation
 Date: 2026-10-19
 Contract change: approved in conversation on 2026-10-19
 
+> Implementation note (2026-10-19): the owner later required analytics for
+> every supported Provider, so Facebook Page Reels, TikTok videos, and YouTube
+> videos now expose stored analytics too. The Instagram/Threads-only coverage
+> and provider out-of-scope statements below describe the initial spec and are
+> superseded by the capability inventory and the shipped Provider adapters.
+> Implementation note (2026-10-22): extended to the full 12-chart Social
+> Media Analytics Dashboard per graph requirements. Adds additive
+> `/analytics/dashboard` endpoint, account-level follower snapshots via
+> `platform_account_snapshots` (migration 019), content format breakdowns from
+> frozen attachments, 7x24 publication heatmaps, time series with period deltas,
+> frequency-vs-engagement scatter, engagement accumulation, and shared filters
+> for account and content format. Saves, clicks, and missing follower histories
+> are labeled "Not tracked" / unavailable rather than fabricated as zero.
+> Implementation note (2026-10-22, feedback revision): the dashboard now fills
+> the available width instead of a centered 1200px column. The toolbar carries
+> filters only (range, platform, account, format) and no longer switches a global
+> metric mode: the platform comparison and time-series cards render one small
+> multiple per stored metric, the engagement trend always shows likes, comments,
+> and shares, and the top-Posts table keeps all metric columns visible with
+> header re-ranking. Chart-local selectors use the shared sliding segmented
+> control. Tables declare explicit column widths so headers and state labels no
+> longer clip.
+> Implementation note (2026-10-22, density revision): the dashboard is reduced
+> from ten chart cards to five single-plot charts. Nested small multiples are
+> gone: the platform comparison is one stacked likes/comments/shares bar chart
+> (views and posts in its tooltip and hidden table), and the time series is one
+> indexed multi-series line chart (cumulative change rebased to 100 at the first
+> measured period, absolute values on hover). The posts-per-platform card, the
+> posting-frequency scatter, and the engagement-accumulation chart are no longer
+> rendered; the dashboard endpoint still returns their data. The content-format
+> card shows posts, per-post averages, and totals together without a metric
+> selector. Saves/clicks columns appear only when a provider reports them,
+> otherwise a footnote names them as untracked.
+> Implementation note (2026-10-22, toolbar revision): the analytics toolbar now
+> uses the shared collection filter builder from Posts. One Filter disclosure
+> holds the range, platform, account, and format fields; active values become
+> removable chips with a Clear all action, and Refresh remains beside the
+> builder. The four always-visible selects are gone, and the row wraps instead
+> of scrolling horizontally.
+> Implementation note (2026-10-23, review alignment): the shipped branch keeps
+> Brand Profile in the filter builder because it is the page's profile selector
+> (the workspace header only displays the active profile), restores stored
+> analytics in the published Post detail surface alongside the existing Posts
+> table columns, including a per-Channel bar comparison for views, likes,
+> comments, or shares, and adds Reach, Impressions, and an engagement rate to the
+> dashboard platform breakdown. These supersede the "Metrics", "Posts surface",
+> and "second profile selector" statements below. The toolbar disables its
+> Platform filter when no connected channel reports analytics; the platform
+> breakdown labels a never-synced Platform "Awaiting sync" instead of zero; a
+> partially synced Post carries an Awaiting sync badge; the stacked phone
+> layout exposes the same metric re-ranking control as the table header; and the follower card
+> marks an incomplete baseline as "Not tracked" rather than summing it as zero.
+> The dashboard response carries the same cohort summary as `/analytics`, so
+> the page issues one cohort request instead of two.
+>
+> Post inspector revision: the owner replaced the per-Channel comparison bars
+> with two chronological line charts: Engagement over time (likes, comments,
+> shares) and Reach & impressions over time (reach, impressions, and media views).
+> These show cumulative reported counters from stored snapshots, not activity
+> deltas or invented live data.
+> Each Channel contributes its latest measured counters at each observed time;
+> reach is not deduplicated across Channels. History reads use the existing
+> Distribution analytics endpoint, bounded to its first 500 measurements per
+> Channel with a visible limit notice.
+>
+> Review hardening (2026-10-24): account follower capture claims up to 25 usable,
+> configured Channels hourly, with four concurrent reads. Migration 021 records
+> attempts before provider I/O; successes, failures, and interrupted attempts wait
+> six hours, with oldest attempts first so denied grants cannot starve later
+> Channels. Expiring accounts wait for token refresh. Publishing does not require
+> optional TikTok or YouTube analytics consent, and stored scopes reflect actual
+> explicit grants. Facebook Page likes are not recorded as following.
+
 ## 1. Summary
 
 Add a dedicated `/analytics` workspace route and sidebar section. The page is a
 read-only, Brand Profile-scoped overview of performance for published Posts:
-KPI totals, a platform comparison chart, and a ranked Post table. It uses the
+KPI totals, a platform comparison chart when at least two supported platforms
+have stored snapshots, and a ranked Post table. It uses the
 existing analytics snapshots already synced by the automation worker; it does not
 add provider sync, new metrics, or fabricated data.
 
@@ -19,19 +93,19 @@ trimmed except each Distribution's latest value.
 
 ## 2. Decisions
 
-| Area                | Decision                                                                                                                                                 |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Primary job         | Answer which platforms and Posts are earning attention, not publishing health or per-Post forensics.                                                     |
-| Scope               | Read-only, single-owner workspace, respects the active Brand Profile; "All Brand Profiles" is the aggregate.                                             |
-| Range semantics     | Cohort: Posts published in the selected range, with each Distribution's latest snapshot at or before the range end. The UI must say so.                  |
-| Metrics             | Views, likes, comments, shares, and published destinations. No reach, impressions, watch time, or derived engagement rate.                               |
-| Surfaces            | KPI totals, platform comparison bar chart, top-Posts table. No trend, demographics, follower growth, link clicks, AI insights, export, or email reports. |
-| Data-honesty states | Show last sync, unsupported platforms, and platforms awaiting first sync. Never render an unsupported metric as zero.                                    |
-| Posts surface       | Analytics lives only on `/analytics`. Do not restore metrics in the Posts list, grid, calendar, or detail dialog.                                        |
-| Contract            | Extend the OpenAPI contract with `getAnalyticsPosts` and additive per-platform/per-row sync timestamps.                                                  |
-| Charting            | EvilCharts Recharts bar chart, vendored from its shadcn registry, colored with existing CSS tokens.                                                      |
-| Navigation          | New top-level item in the order Posts, Analytics, Channels.                                                                                              |
-| URL state           | `?range=7d\|30d\|90d\|366d`, `?platform=<platform>`, `?metric=views\|likes\|comments\|shares`. Brand Profile remains global.                             |
+| Area                | Decision                                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Primary job         | Answer which platforms and Posts are earning attention, not publishing health or per-Post forensics.                                                                                                         |
+| Scope               | Read-only, single-owner workspace, respects the active Brand Profile; "All Brand Profiles" is the aggregate.                                                                                                 |
+| Range semantics     | Cohort: Posts published in the selected range, with each Distribution's latest snapshot at or before the range end. The UI must say so.                                                                      |
+| Metrics             | Views, likes, comments, shares, and published destinations. No reach, impressions, watch time, or derived engagement rate.                                                                                   |
+| Surfaces            | KPI totals, platform comparison bar chart when two or more supported platforms have snapshots, top-Posts table. No trend, demographics, follower growth, link clicks, AI insights, export, or email reports. |
+| Data-honesty states | Show last sync, unsupported platforms, and platforms awaiting first sync. Never render an unsupported metric as zero.                                                                                        |
+| Posts surface       | Analytics lives only on `/analytics`. Do not restore metrics in the Posts list, grid, calendar, or detail dialog.                                                                                            |
+| Contract            | Extend the OpenAPI contract with `getAnalyticsPosts` and additive per-platform/per-row sync timestamps.                                                                                                      |
+| Charting            | EvilCharts Recharts bar chart, vendored from its shadcn registry, colored with existing CSS tokens.                                                                                                          |
+| Navigation          | New top-level item in the order Posts, Analytics, Channels.                                                                                                                                                  |
+| URL state           | `?range=7d\|30d\|90d\|366d`, `?platform=<platform>`, `?metric=views\|likes\|comments\|shares`. Brand Profile remains global.                                                                                 |
 
 ## 3. Non-goals
 
@@ -76,7 +150,9 @@ Below the header:
    control, refresh button.
 2. **KPI row**: Views, Likes, Comments, Shares, Published destinations.
 3. **Platform comparison** card: EvilCharts horizontal bar chart of the selected
-   metric by platform.
+   metric by platform. Omitted for a single Platform filter or when fewer than
+   two supported platforms have a stored snapshot; one platform has nothing to
+   compare.
 4. **Top Posts** card: table of the ten highest Posts for the selected metric,
    with a Load more action when the API reports more rows.
 
@@ -111,7 +187,13 @@ No percentage, delta, or target is shown. Do not compute an engagement rate.
 
 ### 4.5 Platform comparison chart
 
-- EvilCharts Recharts horizontal bar chart.
+- EvilCharts Recharts horizontal bar chart, shown only for the All platforms
+  aggregate with at least two supported platforms holding a snapshot. A single
+  Platform filter or a one-platform cohort omits the card immediately instead of
+  rendering a single bar against empty space.
+- Bars are sorted by the selected metric descending, capped at a slim 28px
+  thickness, and labeled with their exact value. The chart height follows the
+  number of bars instead of reserving a fixed large canvas.
 - One bar per supported platform with at least one published destination and at
   least one snapshot (`last_synced_at !== null`).
 - Value: the selected metric from `by_platform`.
@@ -163,7 +245,7 @@ Columns:
 | Loading                             | First summary or Post query fetch                                                      | Skeleton matching KPI, chart, and table geometry.                                                     |
 | Refreshing                          | A range, platform, metric, or profile change with prior data                           | Keep prior data visible; show a subtle busy state on the refresh control.                             |
 | Error                               | Either query rejects                                                                   | Shared `Alert` with the error message and a Retry button. The page header remains visible.            |
-| No capable channels                 | No connected platform has `analytics: true`                                            | Empty state: `Analytics needs an Instagram or Threads channel.` with a link to Channels.              |
+| No capable channels                 | No connected platform has `analytics: true`                                            | Empty state: `Analytics needs a connected channel that reports analytics.` with a link to Channels.   |
 | No published Posts                  | `totals.post_count === 0`                                                              | Empty state: `No published posts in this range.`                                                      |
 | All published platforms unsupported | `post_count > 0`, `partial`, and every `by_platform` row is unsupported                | Empty state: `No analytics-capable published destinations in this range.`                             |
 | Awaiting first sync                 | Published destinations exist but every included platform has `last_synced_at === null` | Empty state: `Metrics appear after the first provider sync.` with the last-sync label when available. |
@@ -272,6 +354,7 @@ Response:
       "excerpt": "The short version of the caption.",
       "published_at": "2026-10-01T12:00:00Z",
       "destination_count": 2,
+      "synced_destination_count": 2,
       "platforms": ["instagram", "threads"],
       "unsupported_platforms": [],
       "last_synced_at": "2026-10-01T12:15:00Z",
@@ -294,6 +377,9 @@ Rules:
   collapsed, possibly empty.
 - `published_at` is the earliest `published_at` among the included Distributions.
 - `destination_count` is the number of included Distributions.
+- `synced_destination_count` is the number of included Distributions with a
+  snapshot at or before `end`. Fewer than `destination_count` means some
+  destinations contributed zero and remain awaiting sync.
 - `platforms` is the sorted distinct platform list.
 - `unsupported_platforms` is the subset of `platforms` whose capability has
   `analytics: false`.
@@ -419,7 +505,7 @@ metric into SQL.
 
 ### 6.4 Index migration
 
-Add `packages/database/migrations/012_analytics_page_indexes.sql`:
+Add `packages/database/migrations/018_analytics_page_indexes.sql`:
 
 ```sql
 CREATE INDEX IF NOT EXISTS idx_distributions_org_published_at
@@ -590,7 +676,7 @@ Add and translate new keys for:
 - `Last 7 days`, `Last 90 days`, `Last 12 months`
 - `Published destinations`
 - `Metrics are cumulative snapshots for posts published in this range, not activity during it.`
-- `Analytics needs an Instagram or Threads channel.`
+- `Analytics needs a connected channel that reports analytics.`
 - `No analytics-capable published destinations in this range.`
 - `Metrics appear after the first provider sync.`
 - `Awaiting first sync`
@@ -640,10 +726,10 @@ completion:
 
 Browser smoke on the local stack with seeded data:
 
-- Add published Instagram and Threads Distributions with snapshots to the local
-  seed so the page has a supported-platform cohort. Keep at least one published
-  Distribution on an unsupported platform to exercise the partial and
-  not-supported states.
+- Add published Instagram, Threads, Facebook, TikTok, and YouTube Distributions
+  with snapshots to the local seed so the page has a supported-platform cohort.
+  Keep an unaccepted Provider Distribution to exercise partial and not-supported
+  states.
 - Remove `/analytics` from the real-stack end-to-end retired-route list; it is a
   retained route after this change.
 
@@ -652,8 +738,8 @@ Browser smoke on the local stack with seeded data:
    aggregate.
 3. Switch each range, platform, and metric; verify the URL, chart, KPIs, and
    Post ranking update and survive back/forward.
-4. Verify a Post with Instagram and Threads Distributions sums both; a Post with
-   only an unsupported platform shows `Not supported`, not zero.
+4. Verify a Post with several supported Distributions sums them; a Post whose
+   Provider lacks analytics access shows `Not supported`, not zero.
 5. Verify partial, awaiting-sync, no-capable-channel, no-published-Post, loading,
    and error states.
 6. Verify light and dark themes, keyboard navigation, focus visibility, the
@@ -682,9 +768,10 @@ Browser smoke on the local stack with seeded data:
 
 - EvilCharts is vendored source, not a versioned package. Pin Recharts `3.8.0`,
   keep the generated files isolated, and review registry updates as code.
-- Provider coverage is limited to Instagram and Threads, and Threads engagement
-  may be disabled by deployment acceptance flags. The empty states must make this
-  explicit rather than showing an empty dashboard.
+- Every supported Provider reports analytics when its analytics scope is granted;
+  Threads engagement may still be disabled by deployment acceptance flags, and
+  older connections need reauthorization. The empty states must make this explicit
+  rather than showing an empty dashboard.
 - Cohorts can be mistaken for activity in the range. The range and KPI captions
   are mandatory, not optional copy.
 - The summary semantic fix changes existing API behavior. No current frontend

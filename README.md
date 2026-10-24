@@ -10,7 +10,7 @@ Compose social posts, organize connected accounts, schedule publishing, and trac
 - Organize accounts into Brand Profiles.
 - Monitor publishing outcomes and retry eligible failures.
 
-The current app focuses on **Posts**, **Channels**, and named weekly **Queues**. Analytics, inbox, and a standalone media library are not available app surfaces. See the [capability inventory](docs/frontend-capabilities.md) for current scope and restoration prerequisites. Provider features depend on each platform's APIs and account permissions.
+The current app focuses on **Posts**, **Analytics**, **Channels**, and named weekly **Queues**. Inbox and a standalone media library are not available app surfaces. See the [capability inventory](docs/frontend-capabilities.md) for current scope and restoration prerequisites. Provider features depend on each platform's APIs and account permissions.
 
 ## Get started
 
@@ -44,6 +44,16 @@ prefills the Installation Owner's email and password; production and preview bui
 never do. Production installations create their own owner through the protected
 first-run setup described in
 [self-hosting](docs/self-hosting.md#authentication-invitations-and-owner-recovery).
+
+For visual Analytics development, the personal demo workspace includes 252 campaign
+publications across all three Brand Profiles and all five Platforms, with text,
+image, carousel, and video formats. Ninety days of dense publication history,
+older campaign checkpoints, three cumulative metric readings per publication,
+and daily/weekly follower history populate every range and filter without
+replacing the existing failure or awaiting-sync examples. Run `bun run db:seed`
+to refresh these deterministic fixtures in an existing local database; it does
+not reset the database. These historical imports do not consume the current
+period's publishing budget.
 
 ## Deployment targets
 

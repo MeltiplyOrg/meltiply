@@ -33,9 +33,8 @@ interface DialogSurface {
 const surfaces: DialogSurface[] = [];
 
 /**
- * Two boxes only morph when their centers agree within measurement noise. The
- * mobile navigation panel rests against the top edge, so it hands off to and
- * from centered dialogs as a pop instead of sliding across the viewport.
+ * Two boxes only morph when their centers agree within measurement noise, so
+ * differently placed surfaces pop instead of sliding across the viewport.
  */
 const CENTER_EPSILON_PX = 1;
 

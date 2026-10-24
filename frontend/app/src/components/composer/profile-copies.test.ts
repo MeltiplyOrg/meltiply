@@ -14,6 +14,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 const saved: Post = {
   analytics: null,
+  distribution_analytics: [],
   queue_membership: null,
   id: "post-a",
   org_id: "org-a",

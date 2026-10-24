@@ -74,6 +74,91 @@ interface AnalyticsRow extends Record<string, unknown> {
   watch_time_sec: number | string;
 }
 
+interface AnalyticsPostRow extends Record<string, unknown> {
+  comments: number | string;
+  destination_count: number | string;
+  excerpt: string;
+  last_synced_at: Date | string | null;
+  likes: number | string;
+  platforms: Platform[];
+  post_id: string;
+  published_at: Date | string;
+  shares: number | string;
+  synced_destination_count: number | string;
+  title: string;
+  views: number | string;
+}
+
+interface AnalyticsSeriesRow extends Record<string, unknown> {
+  comments: number | string;
+  date: Date | string;
+  impressions: number | string;
+  last_synced_at: Date | string | null;
+  likes: number | string;
+  platform: Platform;
+  posts: number | string;
+  reach: number | string;
+  shares: number | string;
+  views: number | string;
+}
+
+interface AnalyticsBestTimeRow extends Record<string, unknown> {
+  avg_comments: number | string;
+  avg_engagement: number | string;
+  avg_likes: number | string;
+  avg_shares: number | string;
+  avg_views: number | string;
+  day_of_week: number | string;
+  hour: number | string;
+  posts: number | string;
+}
+
+interface AnalyticsFormatRow extends Record<string, unknown> {
+  comments: number | string;
+  engagement: number | string;
+  format: Schemas["AnalyticsFormat"];
+  last_synced_at: Date | string | null;
+  likes: number | string;
+  posts: number | string;
+  shares: number | string;
+  views: number | string;
+}
+
+interface AnalyticsPlatformRow extends Record<string, unknown> {
+  clicks: number | string | null;
+  comments: number | string;
+  engagement_rate: number | string | null;
+  impressions: number | string;
+  last_synced_at: Date | string | null;
+  likes: number | string;
+  platform: Platform;
+  posts: number | string;
+  reach: number | string;
+  saves: number | string | null;
+  shares: number | string;
+  views: number | string;
+  watch_time_sec: number | string;
+}
+interface AnalyticsAggregateRow extends Record<string, unknown> {
+  best_times: AnalyticsBestTimeRow[];
+  formats: AnalyticsFormatRow[];
+  platforms: AnalyticsPlatformRow[];
+}
+
+interface AnalyticsFollowerRow extends Record<string, unknown> {
+  account_id: string;
+  account_name: string | null;
+  captured_at: Date | string;
+  followers: number | string;
+  platform: Platform;
+}
+
+interface AnalyticsAccumulationRow extends Record<string, unknown> {
+  avg_engagement: number | string;
+  elapsed_hours: number | string;
+  observations: number | string;
+}
+
 interface AnalyticsSnapshotRow extends Record<string, unknown> {
   comments: number | string;
   distribution_id: string;
@@ -152,6 +237,43 @@ function number(value: number | string | null): number {
 function optionalDateTime(value: Date | string | null): string | null {
   return value === null ? null : isoDateTime(value);
 }
+
+/** Formats a database date as the contract's date-only string. */
+function dateOnly(value: Date | string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? String(value) : date.toISOString().slice(0, 10);
+}
+
+/**
+ * Maps each contract analytics metric to its already-aggregated `per_post`
+ * column. A typed whitelist keeps the ranking column out of interpolated SQL;
+ * the service never accepts a caller-provided column name.
+ */
+/**
+ * Classifies one Distribution's frozen attachment set as a content format.
+ * Empty attachments mean text-only, multiple attachments mean carousel, and a
+ * single video asset means video; every other single attachment is an image.
+ * The alias is a compile-time constant owned by this module, never user input.
+ */
+function analyticsFormatExpression(alias: string): string {
+  return `CASE
+    WHEN COALESCE(array_length(${alias}.attachment_ids, 1), 0) = 0 THEN 'text'
+    WHEN array_length(${alias}.attachment_ids, 1) > 1 THEN 'carousel'
+    WHEN EXISTS (
+      SELECT 1 FROM assets AS format_asset
+      WHERE format_asset.id = ${alias}.attachment_ids[1]
+        AND format_asset.asset_type = 'video'
+    ) THEN 'video'
+    ELSE 'image'
+  END`;
+}
+
+const ANALYTICS_POST_SORT_COLUMNS = {
+  comments: "pp.comments",
+  likes: "pp.likes",
+  shares: "pp.shares",
+  views: "pp.views",
+} as const satisfies Record<Schemas["AnalyticsMetric"], string>;
 
 /**
  * Builds an immutable lookup map from social platform identifier to capability descriptor.
@@ -549,8 +671,11 @@ export function createCoreApiService(
     },
 
     /**
-     * Aggregates platform-level performance analytics for published distributions over a date range via Effect.
+     * Aggregates platform-level performance analytics for Distributions
+     * published inside a date range via Effect.
      *
+     * Cohorts on `published_at` (never the calendar's scheduled `event_at`)
+     * and derives coverage from the Platforms actually published in scope.
      * One bounded CTE selects the window's published distributions, then a
      * LATERAL lookup reads the newest snapshot of each distribution as of the
      * range end. Keeping the lookup correlated per candidate prevents the
@@ -571,10 +696,12 @@ export function createCoreApiService(
                SELECT id, platform
                FROM distributions
                WHERE status = 'published'
-                 AND event_at >= $1
-                 AND event_at <= $2
+                 AND published_at >= $1
+                 AND published_at <= $2
                  AND ($3::text IS NULL OR platform = $3)
                  AND ($4::uuid IS NULL OR brand_profile_id = $4)
+                 AND ($5::uuid IS NULL OR platform_account_id = $5)
+                 AND ($6::text IS NULL OR ${analyticsFormatExpression("distributions")} = $6)
                  AND ${activeBrandProfilePredicate("brand_profile_id")}
              )
              SELECT
@@ -601,13 +728,18 @@ export function createCoreApiService(
              ) latest ON true
              GROUP BY c.platform
              ORDER BY c.platform ASC`,
-            [filters.start, filters.end, filters.platform ?? null, filters.brandProfileId ?? null],
+            [
+              filters.start,
+              filters.end,
+              filters.platform ?? null,
+              filters.brandProfileId ?? null,
+              filters.accountId ?? null,
+              filters.format ?? null,
+            ],
           );
-          const unsupportedPlatforms = platforms.filter(
-            (platform) =>
-              (!filters.platform || platform === filters.platform) &&
-              !capabilities.get(platform)?.analytics,
-          );
+          const unsupportedPlatforms = result.rows
+            .map((row) => row.platform)
+            .filter((platform) => !capabilities.get(platform)?.analytics);
           const lastSynced = result.rows.reduce<number | null>((latest, row) => {
             if (!row.last_synced_at) return latest;
             const timestamp = new Date(row.last_synced_at).getTime();
@@ -616,6 +748,7 @@ export function createCoreApiService(
           const byPlatform = result.rows.map((row) => ({
             comments: number(row.comments),
             impressions: number(row.impressions),
+            last_synced_at: optionalDateTime(row.last_synced_at),
             likes: number(row.likes),
             platform: row.platform,
             post_count: number(row.post_count),
@@ -655,6 +788,585 @@ export function createCoreApiService(
               },
             ),
             unsupported_platforms: unsupportedPlatforms,
+          };
+        }),
+      );
+    },
+
+    /**
+     * Ranks Posts by one stored metric over Distributions published inside the
+     * requested cohort.
+     *
+     * Each included Distribution contributes its latest snapshot at or before
+     * the range end; an unsynced Distribution still counts as a destination and
+     * contributes zero. Rows exclude soft-deleted Posts and Brand Profiles,
+     * order by the selected metric, publication time, then Post id, and fetch
+     * one extra row to report `has_more` without a second count query.
+     *
+     * @param env - Worker environment bindings.
+     * @param session - Authenticated user session claims.
+     * @param filters - Cohort dates, optional Platform/Brand Profile scope,
+     *   ranking metric, and limit/offset pagination.
+     * @returns Effect resolving to the ranked Post rows and pagination metadata.
+     */
+    analyticsPosts(env, session, filters) {
+      return withTenantTransactionEffect(env, session, (client) =>
+        Effect.gen(function* () {
+          const result = yield* client.query<AnalyticsPostRow>(
+            `WITH candidates AS (
+               SELECT d.id AS distribution_id, d.post_id, d.platform, d.published_at
+               FROM distributions d
+               WHERE d.status = 'published'
+                 AND d.published_at >= $1
+                 AND d.published_at <= $2
+                 AND ($3::text IS NULL OR d.platform = $3)
+                 AND ($4::uuid IS NULL OR d.brand_profile_id = $4)
+                 AND ($5::uuid IS NULL OR d.platform_account_id = $5)
+                 AND ($6::text IS NULL OR ${analyticsFormatExpression("d")} = $6)
+                 AND ${activeBrandProfilePredicate("d.brand_profile_id")}
+             ),
+             latest AS (
+               SELECT DISTINCT ON (s.distribution_id)
+                 s.distribution_id,
+                 s.views, s.likes, s.comments, s.shares, s.snapshot_at
+               FROM analytics_snapshots s
+               JOIN candidates c ON c.distribution_id = s.distribution_id
+               WHERE s.snapshot_at <= $2
+               ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC
+             ),
+             per_post AS (
+               SELECT
+                 c.post_id,
+                 MIN(c.published_at) AS published_at,
+                 COUNT(*) AS destination_count,
+                 COUNT(l.distribution_id) AS synced_destination_count,
+                 ARRAY_AGG(DISTINCT c.platform ORDER BY c.platform) AS platforms,
+                 MAX(l.snapshot_at) AS last_synced_at,
+                 COALESCE(SUM(l.views), 0) AS views,
+                 COALESCE(SUM(l.likes), 0) AS likes,
+                 COALESCE(SUM(l.comments), 0) AS comments,
+                 COALESCE(SUM(l.shares), 0) AS shares
+               FROM candidates c
+               LEFT JOIN latest l ON l.distribution_id = c.distribution_id
+               GROUP BY c.post_id
+             )
+             SELECT
+               p.id AS post_id,
+               p.title,
+               LEFT(btrim(regexp_replace(p.default_text, '\\s+', ' ', 'g')), 140) AS excerpt,
+               pp.published_at,
+               pp.destination_count,
+               pp.synced_destination_count,
+               pp.platforms,
+               pp.last_synced_at,
+               pp.views,
+               pp.likes,
+               pp.comments,
+               pp.shares
+             FROM per_post pp
+             JOIN posts p ON p.id = pp.post_id AND p.deleted_at IS NULL
+             ORDER BY ${ANALYTICS_POST_SORT_COLUMNS[filters.metric]} DESC,
+                      pp.published_at DESC,
+                      pp.post_id ASC
+             LIMIT $7 OFFSET $8`,
+            [
+              filters.start,
+              filters.end,
+              filters.platform ?? null,
+              filters.brandProfileId ?? null,
+              filters.accountId ?? null,
+              filters.format ?? null,
+              filters.limit + 1,
+              filters.offset,
+            ],
+          );
+          return {
+            has_more: result.rows.length > filters.limit,
+            limit: filters.limit,
+            offset: filters.offset,
+            posts: result.rows.slice(0, filters.limit).map((row) => ({
+              comments: number(row.comments),
+              destination_count: number(row.destination_count),
+              synced_destination_count: number(row.synced_destination_count),
+              excerpt: row.excerpt,
+              last_synced_at: optionalDateTime(row.last_synced_at),
+              likes: number(row.likes),
+              platforms: row.platforms,
+              post_id: row.post_id,
+              published_at: isoDateTime(row.published_at),
+              shares: number(row.shares),
+              title: row.title,
+              unsupported_platforms: row.platforms.filter(
+                (platform) => !capabilities.get(platform)?.analytics,
+              ),
+              views: number(row.views),
+            })),
+          };
+        }),
+      );
+    },
+
+    /**
+     * Builds the dashboard's multi-chart aggregates from stored snapshots.
+     *
+     * Daily series report measured changes between consecutive snapshots, not
+     * lifetime totals; a day with no sync contributes no fabricated zero.
+     * Followers come from account snapshots, and counters a Provider does not
+     * expose stay null and are named in `unavailable_metrics`.
+     *
+     * @param env - Worker environment bindings.
+     * @param session - Authenticated user session claims.
+     * @param filters - Cohort dates plus optional Platform, account, format, and profile scope.
+     * @returns Effect resolving to dashboard series and breakdowns.
+     */
+    dashboardAnalytics(env, session, filters) {
+      return withTenantTransactionEffect(env, session, (client) =>
+        Effect.gen(function* () {
+          const candidates = `
+            SELECT d.id, d.platform, d.published_at,
+                   ${analyticsFormatExpression("d")} AS format
+            FROM distributions d
+            WHERE d.status = 'published'
+              AND d.published_at >= $1
+              AND d.published_at <= $2
+              AND ($3::text IS NULL OR d.platform = $3)
+              AND ($4::uuid IS NULL OR d.brand_profile_id = $4)
+              AND ($5::uuid IS NULL OR d.platform_account_id = $5)
+              AND ($6::text IS NULL OR ${analyticsFormatExpression("d")} = $6)
+              AND ${activeBrandProfilePredicate("d.brand_profile_id")}`;
+          const scope = [
+            filters.start,
+            filters.end,
+            filters.platform ?? null,
+            filters.brandProfileId ?? null,
+            filters.accountId ?? null,
+            filters.format ?? null,
+          ];
+          const latest = `
+            latest AS (
+              SELECT DISTINCT ON (s.distribution_id)
+                s.distribution_id, s.views, s.likes, s.comments, s.shares,
+                s.impressions, s.reach, s.watch_time_sec, s.saves, s.clicks,
+                s.snapshot_at
+              FROM analytics_snapshots s
+              JOIN candidates c ON c.id = s.distribution_id
+              WHERE s.snapshot_at <= $2
+              ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC
+            )`;
+
+          const seriesResult = yield* client.query<AnalyticsSeriesRow>(
+            `WITH candidates AS (${candidates}),
+             baseline AS (
+               SELECT DISTINCT ON (s.distribution_id)
+                 s.distribution_id, s.views, s.likes, s.comments, s.shares,
+                 s.impressions, s.reach, s.snapshot_at, s.id, 1 AS is_baseline
+               FROM analytics_snapshots s
+               JOIN candidates c ON c.id = s.distribution_id
+               WHERE s.snapshot_at < $1
+               ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC
+             ),
+             events AS (
+               SELECT s.distribution_id, s.views, s.likes, s.comments, s.shares,
+                      s.impressions, s.reach, s.snapshot_at, s.id, 0 AS is_baseline
+               FROM analytics_snapshots s
+               JOIN candidates c ON c.id = s.distribution_id
+               WHERE s.snapshot_at >= $1 AND s.snapshot_at <= $2
+               UNION ALL
+               SELECT distribution_id, views, likes, comments, shares,
+                      impressions, reach, snapshot_at, id, is_baseline
+               FROM baseline
+             ),
+             deltas AS (
+               SELECT e.distribution_id, c.platform, e.snapshot_at, e.is_baseline,
+                 CASE WHEN e.is_baseline = 1 THEN 0
+                   ELSE GREATEST(e.views - COALESCE(lag(e.views) OVER w, 0), 0) END AS views,
+                 CASE WHEN e.is_baseline = 1 THEN 0
+                   ELSE GREATEST(e.likes - COALESCE(lag(e.likes) OVER w, 0), 0) END AS likes,
+                 CASE WHEN e.is_baseline = 1 THEN 0
+                   ELSE GREATEST(e.comments - COALESCE(lag(e.comments) OVER w, 0), 0) END AS comments,
+                 CASE WHEN e.is_baseline = 1 THEN 0
+                   ELSE GREATEST(e.shares - COALESCE(lag(e.shares) OVER w, 0), 0) END AS shares,
+                 CASE WHEN e.is_baseline = 1 THEN 0
+                   ELSE GREATEST(e.impressions - COALESCE(lag(e.impressions) OVER w, 0), 0) END AS impressions,
+                 CASE WHEN e.is_baseline = 1 THEN 0
+                   ELSE GREATEST(e.reach - COALESCE(lag(e.reach) OVER w, 0), 0) END AS reach
+               FROM events e
+               JOIN candidates c ON c.id = e.distribution_id
+               WINDOW w AS (PARTITION BY e.distribution_id ORDER BY e.snapshot_at, e.id)
+             ),
+             snapshot_days AS (
+               SELECT date_trunc('day', snapshot_at)::date AS date, platform,
+                      SUM(views) AS views, SUM(likes) AS likes,
+                      SUM(comments) AS comments, SUM(shares) AS shares,
+                      SUM(impressions) AS impressions, SUM(reach) AS reach,
+                      MAX(snapshot_at) AS last_synced_at
+               FROM deltas
+               GROUP BY 1, 2
+             ),
+             published_days AS (
+               SELECT date_trunc('day', published_at)::date AS date, platform,
+                      COUNT(*) AS posts
+               FROM candidates
+               GROUP BY 1, 2
+             )
+             SELECT date, platform,
+                    SUM(posts)::int AS posts,
+                    SUM(views) AS views, SUM(likes) AS likes,
+                    SUM(comments) AS comments, SUM(shares) AS shares,
+                    SUM(impressions) AS impressions, SUM(reach) AS reach,
+                    MAX(last_synced_at) AS last_synced_at
+             FROM (
+               SELECT date, platform, 0::bigint AS posts, views, likes, comments,
+                      shares, impressions, reach, last_synced_at
+               FROM snapshot_days
+               UNION ALL
+               SELECT date, platform, posts, 0, 0, 0, 0, 0, 0, NULL
+               FROM published_days
+             ) parts
+             GROUP BY date, platform
+             ORDER BY date ASC, platform ASC`,
+            scope,
+          );
+
+          // One round trip for the three grouped breakdowns. The joined set is
+          // materialized so the latest-snapshot lookup runs once, not once per
+          // aggregate; each subquery then scans the small joined set.
+          const aggregateResult = yield* client.query<AnalyticsAggregateRow>(
+            `WITH candidates AS (${candidates}),
+             ${latest},
+             joined AS MATERIALIZED (
+               SELECT c.id, c.platform, c.published_at, c.format,
+                      l.views, l.likes, l.comments, l.shares, l.impressions,
+                      l.reach, l.watch_time_sec, l.saves, l.clicks, l.snapshot_at
+               FROM candidates c
+               LEFT JOIN latest l ON l.distribution_id = c.id
+             )
+             SELECT
+               COALESCE((
+                 SELECT json_agg(platform_row)
+                 FROM (
+                   SELECT c.platform,
+                          COUNT(*)::int AS posts,
+                          COALESCE(SUM(c.views), 0) AS views,
+                          COALESCE(SUM(c.likes), 0) AS likes,
+                          COALESCE(SUM(c.comments), 0) AS comments,
+                          COALESCE(SUM(c.shares), 0) AS shares,
+                          COALESCE(SUM(c.impressions), 0) AS impressions,
+                          COALESCE(SUM(c.reach), 0) AS reach,
+                          COALESCE(SUM(c.watch_time_sec), 0) AS watch_time_sec,
+                          SUM(c.saves) AS saves,
+                          SUM(c.clicks) AS clicks,
+                          CASE WHEN SUM(COALESCE(c.views, 0)) > 0
+                            THEN (SUM(COALESCE(c.likes, 0)) + SUM(COALESCE(c.comments, 0))
+                                  + SUM(COALESCE(c.shares, 0)))::float8
+                                 / SUM(COALESCE(c.views, 0))
+                            ELSE NULL END AS engagement_rate,
+                          MAX(c.snapshot_at) AS last_synced_at
+                   FROM joined c
+                   GROUP BY c.platform
+                   ORDER BY c.platform ASC
+                 ) AS platform_row
+               ), '[]'::json) AS platforms,
+               COALESCE((
+                 SELECT json_agg(format_row)
+                 FROM (
+                   SELECT c.format,
+                          COUNT(*)::int AS posts,
+                          COALESCE(SUM(c.views), 0) AS views,
+                          COALESCE(SUM(c.likes), 0) AS likes,
+                          COALESCE(SUM(c.comments), 0) AS comments,
+                          COALESCE(SUM(c.shares), 0) AS shares,
+                          (SUM(COALESCE(c.likes, 0)) + SUM(COALESCE(c.comments, 0))
+                           + SUM(COALESCE(c.shares, 0))) AS engagement,
+                          MAX(c.snapshot_at) AS last_synced_at
+                   FROM joined c
+                   GROUP BY c.format
+                   ORDER BY posts DESC, c.format ASC
+                 ) AS format_row
+               ), '[]'::json) AS formats,
+               COALESCE((
+                 SELECT json_agg(best_row)
+                 FROM (
+                   SELECT EXTRACT(DOW FROM c.published_at)::int AS day_of_week,
+                          EXTRACT(HOUR FROM c.published_at)::int AS hour,
+                          COUNT(*)::int AS posts,
+                          AVG(COALESCE(c.views, 0))::float8 AS avg_views,
+                          AVG(COALESCE(c.likes, 0))::float8 AS avg_likes,
+                          AVG(COALESCE(c.comments, 0))::float8 AS avg_comments,
+                          AVG(COALESCE(c.shares, 0))::float8 AS avg_shares,
+                          AVG(COALESCE(c.likes, 0) + COALESCE(c.comments, 0)
+                              + COALESCE(c.shares, 0))::float8 AS avg_engagement
+                   FROM joined c
+                   GROUP BY 1, 2
+                   ORDER BY 1 ASC, 2 ASC
+                 ) AS best_row
+               ), '[]'::json) AS best_times`,
+            scope,
+          );
+          const aggregate = aggregateResult.rows[0] ?? {
+            best_times: [],
+            formats: [],
+            platforms: [],
+          };
+
+          // One baseline row per account plus one point per captured day in
+          // range. Provider sweeps run several times a day, but every chart
+          // renders daily points, so shipping each raw capture would multiply
+          // the payload without changing the line.
+          const followerResult = yield* client.query<AnalyticsFollowerRow>(
+            `WITH baseline AS (
+               SELECT account.id AS account_id, account.platform,
+                      account.display_name AS account_name,
+                      latest.followers, latest.captured_at
+               FROM platform_accounts account
+               JOIN LATERAL (
+                 SELECT snapshot.followers, snapshot.captured_at
+                 FROM platform_account_snapshots snapshot
+                 WHERE snapshot.platform_account_id = account.id
+                   AND snapshot.captured_at < $1
+                 ORDER BY snapshot.captured_at DESC
+                 LIMIT 1
+               ) latest ON true
+               WHERE ($3::text IS NULL OR account.platform = $3)
+                 AND ($4::uuid IS NULL OR account.brand_profile_id = $4)
+                 AND ($5::uuid IS NULL OR account.id = $5)
+                 AND ${activeBrandProfilePredicate("account.brand_profile_id")}
+             ),
+             daily AS (
+               SELECT DISTINCT ON (account.id, date_trunc('day', snapshot.captured_at))
+                      account.id AS account_id, account.platform,
+                      account.display_name AS account_name,
+                      snapshot.followers, snapshot.captured_at
+               FROM platform_account_snapshots snapshot
+               JOIN platform_accounts account ON account.id = snapshot.platform_account_id
+               WHERE snapshot.captured_at >= $1
+                 AND snapshot.captured_at <= $2
+                 AND ($3::text IS NULL OR account.platform = $3)
+                 AND ($4::uuid IS NULL OR account.brand_profile_id = $4)
+                 AND ($5::uuid IS NULL OR account.id = $5)
+                 AND ${activeBrandProfilePredicate("account.brand_profile_id")}
+               ORDER BY account.id, date_trunc('day', snapshot.captured_at),
+                        snapshot.captured_at DESC
+             )
+             SELECT * FROM baseline
+             UNION ALL
+             SELECT * FROM daily
+             ORDER BY platform ASC, account_id ASC, captured_at ASC`,
+            [
+              filters.start,
+              filters.end,
+              filters.platform ?? null,
+              filters.brandProfileId ?? null,
+              filters.accountId ?? null,
+            ],
+          );
+
+          const accumulationResult = yield* client.query<AnalyticsAccumulationRow>(
+            `WITH candidates AS (${candidates}),
+             snapshots AS (
+               SELECT c.id AS distribution_id, c.published_at, s.snapshot_at,
+                      EXTRACT(EPOCH FROM (s.snapshot_at - c.published_at)) / 3600 AS elapsed_hours,
+                      (s.likes + s.comments + s.shares) AS engagement
+               FROM candidates c
+               JOIN analytics_snapshots s ON s.distribution_id = c.id
+               WHERE s.snapshot_at >= c.published_at AND s.snapshot_at <= $2
+             ),
+             buckets(hours) AS (VALUES (1), (6), (24), (72), (168), (720)),
+             per_bucket AS (
+               SELECT buckets.hours, snapshots.distribution_id,
+                      MAX(snapshots.engagement) AS engagement
+               FROM buckets
+               JOIN snapshots ON snapshots.elapsed_hours <= buckets.hours
+               GROUP BY buckets.hours, snapshots.distribution_id
+             )
+             SELECT hours::int AS elapsed_hours,
+                    AVG(engagement)::float8 AS avg_engagement,
+                    COUNT(*)::int AS observations
+             FROM per_bucket
+             GROUP BY hours
+             ORDER BY hours ASC`,
+            scope,
+          );
+
+          const followerGroups = new Map<
+            string,
+            {
+              account_id: string;
+              account_name: string | null;
+              platform: Platform;
+              points: { captured_at: string; followers: number }[];
+            }
+          >();
+          for (const row of followerResult.rows) {
+            const key = `${row.platform}:${row.account_id}`;
+            const existing = followerGroups.get(key) ?? {
+              account_id: row.account_id,
+              account_name: row.account_name,
+              platform: row.platform,
+              points: [] as { captured_at: string; followers: number }[],
+            };
+            existing.points.push({
+              captured_at: isoDateTime(row.captured_at),
+              followers: number(row.followers),
+            });
+            followerGroups.set(key, existing);
+          }
+          const followers = [...followerGroups.values()];
+          const startTime = filters.start.getTime();
+          const platformFollowers = new Map<
+            Platform,
+            { followers: number; gain: number; complete: boolean }
+          >();
+          for (const account of followers) {
+            const baseline = [...account.points]
+              .reverse()
+              .find((point) => new Date(point.captured_at).getTime() <= startTime);
+            const current = account.points.at(-1)!;
+            const aggregate = platformFollowers.get(account.platform) ?? {
+              complete: true,
+              followers: 0,
+              gain: 0,
+            };
+            aggregate.followers += current.followers;
+            if (baseline) aggregate.gain += current.followers - baseline.followers;
+            else aggregate.complete = false;
+            platformFollowers.set(account.platform, aggregate);
+          }
+
+          const platforms = aggregate.platforms.map((row) => {
+            const follower = platformFollowers.get(row.platform);
+            return {
+              platform: row.platform,
+              posts: number(row.posts),
+              views: number(row.views),
+              likes: number(row.likes),
+              comments: number(row.comments),
+              shares: number(row.shares),
+              impressions: number(row.impressions),
+              reach: number(row.reach),
+              engagement_rate: row.engagement_rate === null ? null : Number(row.engagement_rate),
+              followers: follower?.followers ?? null,
+              follower_gain: follower && follower.complete ? follower.gain : null,
+              saves: row.saves === null ? null : number(row.saves),
+              clicks: row.clicks === null ? null : number(row.clicks),
+              last_synced_at: optionalDateTime(row.last_synced_at),
+            };
+          });
+          const unavailable = new Set<
+            Schemas["AnalyticsDashboard"]["unavailable_metrics"][number]
+          >();
+          if (platforms.length === 0 || platforms.every((row) => row.saves === null)) {
+            unavailable.add("saves");
+          }
+          if (platforms.length === 0 || platforms.every((row) => row.clicks === null)) {
+            unavailable.add("clicks");
+          }
+          if (followers.length === 0) unavailable.add("followers");
+
+          const unsupportedPlatforms = platforms
+            .map((row) => row.platform)
+            .filter((platform) => !capabilities.get(platform)?.analytics);
+          const watchTimeByPlatform = new Map(
+            aggregate.platforms.map((row) => [row.platform, number(row.watch_time_sec)]),
+          );
+          const cohortByPlatform = platforms.map((row) => ({
+            comments: row.comments,
+            impressions: row.impressions,
+            last_synced_at: row.last_synced_at,
+            likes: row.likes,
+            platform: row.platform,
+            post_count: row.posts,
+            reach: row.reach,
+            shares: row.shares,
+            views: row.views,
+            watch_time_sec: watchTimeByPlatform.get(row.platform) ?? 0,
+          }));
+          const totals = cohortByPlatform.reduce(
+            (acc, row) => ({
+              comments: acc.comments + row.comments,
+              impressions: acc.impressions + row.impressions,
+              likes: acc.likes + row.likes,
+              post_count: acc.post_count + row.post_count,
+              reach: acc.reach + row.reach,
+              shares: acc.shares + row.shares,
+              views: acc.views + row.views,
+              watch_time_sec: acc.watch_time_sec + row.watch_time_sec,
+            }),
+            {
+              comments: 0,
+              impressions: 0,
+              likes: 0,
+              post_count: 0,
+              reach: 0,
+              shares: 0,
+              views: 0,
+              watch_time_sec: 0,
+            },
+          );
+          const lastSyncedAt = platforms.reduce<string | null>((latest, row) => {
+            if (row.last_synced_at === null) return latest;
+            return latest === null || row.last_synced_at > latest ? row.last_synced_at : latest;
+          }, null);
+          const cohort = {
+            by_platform: cohortByPlatform,
+            last_synced_at: lastSyncedAt,
+            partial: unsupportedPlatforms.length > 0,
+            range: {
+              end: filters.end.toISOString(),
+              start: filters.start.toISOString(),
+            },
+            totals,
+            unsupported_platforms: unsupportedPlatforms,
+          };
+
+          return {
+            range: {
+              end: filters.end.toISOString(),
+              start: filters.start.toISOString(),
+            },
+            series: seriesResult.rows.map((row) => ({
+              date: dateOnly(row.date),
+              platform: row.platform,
+              posts: number(row.posts),
+              views: number(row.views),
+              likes: number(row.likes),
+              comments: number(row.comments),
+              shares: number(row.shares),
+              impressions: number(row.impressions),
+              reach: number(row.reach),
+              last_synced_at: optionalDateTime(row.last_synced_at),
+            })),
+            best_times: aggregate.best_times.map((row) => ({
+              day_of_week: number(row.day_of_week),
+              hour: number(row.hour),
+              posts: number(row.posts),
+              avg_views: Number(row.avg_views),
+              avg_likes: Number(row.avg_likes),
+              avg_comments: Number(row.avg_comments),
+              avg_shares: Number(row.avg_shares),
+              avg_engagement: Number(row.avg_engagement),
+            })),
+            formats: aggregate.formats.map((row) => ({
+              format: row.format,
+              posts: number(row.posts),
+              views: number(row.views),
+              likes: number(row.likes),
+              comments: number(row.comments),
+              shares: number(row.shares),
+              engagement: number(row.engagement),
+              avg_views: number(row.views) / number(row.posts),
+              avg_engagement: number(row.engagement) / number(row.posts),
+              last_synced_at: optionalDateTime(row.last_synced_at),
+            })),
+            platforms,
+            cohort,
+            followers,
+            accumulation: accumulationResult.rows.map((row) => ({
+              elapsed_hours: number(row.elapsed_hours),
+              avg_engagement: Number(row.avg_engagement),
+              observations: number(row.observations),
+            })),
+            unavailable_metrics: [...unavailable],
           };
         }),
       );

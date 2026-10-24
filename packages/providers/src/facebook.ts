@@ -18,10 +18,12 @@ import {
   boundedString,
   boundedText,
   exactRedirectUri,
+  metricValue,
   providerIdentifier,
   record,
   required,
   secureUrl,
+  validatePageInput,
 } from "./meta-common";
 import type {
   OAuthConnection,
@@ -41,18 +43,23 @@ const apiVersion = "v25.0";
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 90 * 24 * 60 * 60;
 
+/** Permissions required to publish and read Page engagement. */
 const publishingScopes = [
   "pages_show_list",
   "pages_read_engagement",
   "pages_manage_posts",
 ] as const;
+/** Additional permissions required by Reels analytics; requested but not required to connect. */
+const analyticsScopes = ["pages_manage_engagement", "read_insights"] as const;
+const configuredScopes = [...publishingScopes, ...analyticsScopes] as const;
+const businessDiscoveryScope = "business_management";
 
 /** Facebook's caption ceiling remains known even before live publishing is configured. */
 export const FACEBOOK_MAX_CAPTION_LENGTH = 2_200;
 
 const capability: PlatformCapability = {
   accepted_mime_types: ["video/mp4", "video/quicktime"],
-  analytics: false,
+  analytics: true,
   asset_types: ["video"],
   comments: false,
   connect_available: true,
@@ -68,6 +75,8 @@ const capability: PlatformCapability = {
     "Page Reels use a hosted HTTPS video and the documented remote-ingest flow.",
     "One video publishes one Reel; carousels and photo posts are not supported.",
     "Reels are limited to 500 MiB and 60 seconds.",
+    "Analytics reads Reel plays from Video Insights and likes/comments from the Video edges; shares come from the documented comments-plus-shares social-actions metric.",
+    "Video Insights requires read_insights and pages_manage_engagement; old connections must reconnect to grant them.",
   ],
   platform: "facebook",
   publish: true,
@@ -299,6 +308,8 @@ function statusPublished(status: ReelStatus): boolean {
 function oauthMalformed(
   field:
     | "authorization_token"
+    | "business_user_identity"
+    | "business_user_list"
     | "long_lived_token"
     | "token_type"
     | "token_expiry"
@@ -560,9 +571,9 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
   return {
     extractRateLimitBudget: (headers) => extractRateLimitBudget("facebook", headers),
     /**
-     * Builds the Facebook OAuth dialog URL for Page Reels using only the documented
-     * Page permissions; unsupported legacy video scopes would block authorization.
-     * Preserves caller state and rejects callbacks that differ from configuration.
+     * Builds the state-bound Facebook dialog URL for Page publishing and discovery.
+     * business_management enables business-user Page assignments in addition to
+     * directly managed Pages. Rejects callbacks that differ from configuration.
      */
     authorizationUrl(input) {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -570,7 +581,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
       url.searchParams.set("client_id", clientId);
       url.searchParams.set("redirect_uri", configuredRedirectUri);
       url.searchParams.set("response_type", "code");
-      url.searchParams.set("scope", publishingScopes.join(","));
+      url.searchParams.set("scope", [...configuredScopes, businessDiscoveryScope].join(","));
       url.searchParams.set("state", required("state", input.state, 1_024));
       return url.toString();
     },
@@ -578,10 +589,11 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
     capability,
 
     /**
-     * Exchanges the code for a user token and discovers every publishable Page as a choice.
-     * Bounds both Page count and requests to 1,000, including empty continuation pages.
-     * Candidates retain true identity, Page credentials, and inspected zero-expiry semantics;
-     * neither a single eligible Page nor multiple Pages are automatically connected.
+     * Exchanges the code and discovers publishable direct and business-assigned Pages.
+     * With business_management consent, enumerates business users and their assigned_pages.
+     * Every edge is paginated with independent cursor tracking. Up to four business-user
+     * edges run concurrently; results keep discovery order and Page ids are deduplicated.
+     * Bounds Page records and requests to 1,000; failures drain in-flight work before rejecting.
      */
     async exchangeAuthorizationCode(context, input): Promise<OAuthExchangeResult> {
       assertConfiguredRedirectUri(input.redirectUri, configuredRedirectUri);
@@ -632,159 +644,338 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
         return { accounts: [] };
       }
 
-      const eligible: OAuthConnection[] = [];
-      const identifiers = new Set<string>();
-      const seenCursors = new Set<string>();
+      const businessUsers = new Set<string>();
+      const businessPaths: string[] = [];
       let discoveredCount = 0;
       let requestCount = 0;
-      let nextCursor: string | undefined = undefined;
+      let failed = false;
 
-      while (true) {
-        if (requestCount >= 1_000) throw oauthMalformed("page_pagination");
-        requestCount += 1;
-        const pagesUrl = new URL(`/${apiVersion}/me/accounts`, graphOrigin);
-        pagesUrl.searchParams.set("fields", "id,name,access_token,tasks,picture,link");
-        pagesUrl.searchParams.set("limit", "100");
-        if (nextCursor !== undefined) {
-          pagesUrl.searchParams.set("after", nextCursor);
-        }
-
-        const pagesResponse = await http.request<unknown>(context, {
-          headers: bearer(longToken.accessToken),
-          method: "GET",
-          url: pagesUrl.toString(),
-        });
-        const pagesBody = record(pagesResponse.body);
-        if (!Array.isArray(pagesBody?.data) || pagesBody.data.length > 100) {
-          throw oauthMalformed("page_list");
-        }
-
-        discoveredCount += pagesBody.data.length;
-        if (discoveredCount > 1_000) {
-          throw oauthMalformed("page_list");
-        }
-
-        for (const value of pagesBody.data) {
-          const page = record(value);
-          const id = providerIdentifier(page?.id);
-          const displayName = boundedText(page?.name, 500);
-          const accessToken = boundedString(page?.access_token, 16_000);
-          const tasks = page?.tasks;
-          if (!id || !displayName) {
-            throw oauthMalformed("page_identity");
+      /**
+       * Traverses one edge sequentially, validating cursors before each next request.
+       * Shared counters bound all workers; business-user discovery queues independent edges.
+       * Returns candidates in edge order without cross-edge deduplication, so response timing
+       * cannot change the retained Page token or the user's account ordering.
+       */
+      const discover = async (discoveryPath: string): Promise<OAuthConnection[]> => {
+        const candidates: OAuthConnection[] = [];
+        const pageIds = new Set<string>();
+        const isBusinessUserList = discoveryPath === "me/business_users";
+        const seenCursors = new Set<string>();
+        let nextCursor: string | undefined;
+        while (!failed) {
+          if (requestCount >= 1_000) throw oauthMalformed("page_pagination");
+          requestCount += 1;
+          const pagesUrl = new URL(`/${apiVersion}/${discoveryPath}`, graphOrigin);
+          pagesUrl.searchParams.set(
+            "fields",
+            isBusinessUserList ? "id" : "id,name,access_token,tasks,picture,link",
+          );
+          pagesUrl.searchParams.set("limit", "100");
+          if (nextCursor !== undefined) {
+            pagesUrl.searchParams.set("after", nextCursor);
           }
-          if (!accessToken) throw oauthMalformed("page_access_token");
-          if (
-            !Array.isArray(tasks) ||
-            tasks.length > 32 ||
-            tasks.some((task) => typeof task !== "string" || !/^[A-Z][A-Z0-9_]{0,127}$/.test(task))
-          ) {
-            throw oauthMalformed("page_tasks");
+
+          const pagesResponse = await http.request<unknown>(context, {
+            headers: bearer(longToken.accessToken),
+            method: "GET",
+            url: pagesUrl.toString(),
+          });
+          const pagesBody = record(pagesResponse.body);
+          if (!Array.isArray(pagesBody?.data) || pagesBody.data.length > 100) {
+            throw oauthMalformed("page_list");
           }
-          if (identifiers.has(id)) {
-            continue;
+
+          if (!isBusinessUserList) {
+            discoveredCount += pagesBody.data.length;
+            if (discoveredCount > 1_000) {
+              throw oauthMalformed("page_list");
+            }
           }
-          identifiers.add(id);
 
-          const picture = record(page?.picture);
-          const pictureData = record(picture?.data);
-          const rawAvatar =
-            pictureData?.url ?? (typeof page?.picture === "string" ? page.picture : undefined);
-          const avatarUrl = secureUrl(rawAvatar);
-          const username = facebookVanityHandle(page?.link);
+          for (const value of pagesBody.data) {
+            if (isBusinessUserList) {
+              const id = providerIdentifier(record(value)?.id);
+              if (!id) throw oauthMalformed("business_user_identity");
+              if (!businessUsers.has(id)) {
+                businessUsers.add(id);
+                if (businessUsers.size > 1_000) throw oauthMalformed("business_user_list");
+                businessPaths.push(`${id}/assigned_pages`);
+              }
+              continue;
+            }
+            const page = record(value);
+            const id = providerIdentifier(page?.id);
+            const displayName = boundedText(page?.name, 500);
+            const accessToken = boundedString(page?.access_token, 16_000);
+            const tasks = page?.tasks;
+            if (!id || !displayName) {
+              throw oauthMalformed("page_identity");
+            }
+            if (!accessToken) throw oauthMalformed("page_access_token");
+            if (
+              !Array.isArray(tasks) ||
+              tasks.length > 32 ||
+              tasks.some(
+                (task) => typeof task !== "string" || !/^[A-Z][A-Z0-9_]{0,127}$/.test(task),
+              )
+            ) {
+              throw oauthMalformed("page_tasks");
+            }
+            if (pageIds.has(id)) continue;
 
-          if (tasks.includes("CREATE_CONTENT") || tasks.includes("PROFILE_PLUS_CREATE_CONTENT")) {
-            eligible.push({
-              accessToken,
-              account: {
-                ...(avatarUrl ? { avatarUrl } : {}),
-                displayName,
-                id,
-                ...(username ? { username } : {}),
-              },
-              ...(longToken.expiresAt === undefined ? {} : { expiresAt: longToken.expiresAt }),
-              refreshToken: encodeRefreshSecret({
-                pageId: id,
-                userAccessToken: longToken.accessToken,
-              }),
-              scopes: [...grantedScopes],
-            });
+            const picture = record(page?.picture);
+            const pictureData = record(picture?.data);
+            const rawAvatar =
+              pictureData?.url ?? (typeof page?.picture === "string" ? page.picture : undefined);
+            const avatarUrl = secureUrl(rawAvatar);
+            const username = facebookVanityHandle(page?.link);
+
+            if (tasks.includes("CREATE_CONTENT") || tasks.includes("PROFILE_PLUS_CREATE_CONTENT")) {
+              pageIds.add(id);
+              candidates.push({
+                accessToken,
+                account: {
+                  ...(avatarUrl ? { avatarUrl } : {}),
+                  displayName,
+                  id,
+                  ...(username ? { username } : {}),
+                },
+                ...(longToken.expiresAt === undefined ? {} : { expiresAt: longToken.expiresAt }),
+                refreshToken: encodeRefreshSecret({
+                  pageId: id,
+                  userAccessToken: longToken.accessToken,
+                }),
+                scopes: [...grantedScopes],
+              });
+            }
           }
-        }
 
-        if (pagesBody.paging === undefined) {
-          break;
-        }
-        const paging = record(pagesBody.paging);
-        if (!paging) {
-          throw oauthMalformed("page_pagination");
-        }
-
-        let rawCursorFromPaging: string | undefined;
-        if (paging.cursors !== undefined) {
-          const cursors = record(paging.cursors);
-          if (!cursors) {
+          if (pagesBody.paging === undefined) {
+            break;
+          }
+          const paging = record(pagesBody.paging);
+          if (!paging) {
             throw oauthMalformed("page_pagination");
           }
-          if (cursors.after !== undefined) {
-            const validated = boundedCursor(cursors.after);
-            if (!validated) {
+
+          let rawCursorFromPaging: string | undefined;
+          if (paging.cursors !== undefined) {
+            const cursors = record(paging.cursors);
+            if (!cursors) {
               throw oauthMalformed("page_pagination");
             }
-            rawCursorFromPaging = validated;
+            if (cursors.after !== undefined) {
+              const validated = boundedCursor(cursors.after);
+              if (!validated) {
+                throw oauthMalformed("page_pagination");
+              }
+              rawCursorFromPaging = validated;
+            }
           }
-        }
 
-        if (paging.next === undefined) {
-          break;
-        }
+          if (paging.next === undefined) {
+            break;
+          }
 
-        if (typeof paging.next !== "string") {
-          throw oauthMalformed("page_pagination");
-        }
-
-        let nextUrl: URL;
-        try {
-          nextUrl = new URL(paging.next);
-        } catch {
-          throw oauthMalformed("page_pagination");
-        }
-
-        if (nextUrl.origin !== new URL(graphOrigin).origin) {
-          throw oauthMalformed("page_pagination");
-        }
-
-        const rawAfterParam = nextUrl.searchParams.get("after");
-        let validatedAfterParam: string | undefined;
-        if (rawAfterParam !== null) {
-          validatedAfterParam = boundedCursor(rawAfterParam);
-          if (!validatedAfterParam) {
+          if (typeof paging.next !== "string") {
             throw oauthMalformed("page_pagination");
           }
-        }
 
-        if (
-          rawCursorFromPaging !== undefined &&
-          validatedAfterParam !== undefined &&
-          rawCursorFromPaging !== validatedAfterParam
-        ) {
-          throw oauthMalformed("page_pagination");
-        }
+          let nextUrl: URL;
+          try {
+            nextUrl = new URL(paging.next);
+          } catch {
+            throw oauthMalformed("page_pagination");
+          }
 
-        const resolvedCursor = rawCursorFromPaging ?? validatedAfterParam;
-        if (!resolvedCursor) {
-          throw oauthMalformed("page_pagination");
-        }
+          if (nextUrl.origin !== new URL(graphOrigin).origin) {
+            throw oauthMalformed("page_pagination");
+          }
 
-        if (seenCursors.has(resolvedCursor)) {
-          throw oauthMalformed("page_pagination");
-        }
+          const rawAfterParam = nextUrl.searchParams.get("after");
+          let validatedAfterParam: string | undefined;
+          if (rawAfterParam !== null) {
+            validatedAfterParam = boundedCursor(rawAfterParam);
+            if (!validatedAfterParam) {
+              throw oauthMalformed("page_pagination");
+            }
+          }
 
-        seenCursors.add(resolvedCursor);
-        nextCursor = resolvedCursor;
+          if (
+            rawCursorFromPaging !== undefined &&
+            validatedAfterParam !== undefined &&
+            rawCursorFromPaging !== validatedAfterParam
+          ) {
+            throw oauthMalformed("page_pagination");
+          }
+
+          const resolvedCursor = rawCursorFromPaging ?? validatedAfterParam;
+          if (!resolvedCursor) {
+            throw oauthMalformed("page_pagination");
+          }
+
+          if (seenCursors.has(resolvedCursor)) {
+            throw oauthMalformed("page_pagination");
+          }
+
+          seenCursors.add(resolvedCursor);
+          nextCursor = resolvedCursor;
+        }
+        return candidates;
+      };
+
+      const eligible = await discover("me/accounts");
+      if (grantedScopes.includes(businessDiscoveryScope)) {
+        await discover("me/business_users");
+      }
+      const businessResults: OAuthConnection[][] = new Array(businessPaths.length);
+      let nextEdge = 0;
+      // Each worker takes one independent edge at a time. A failed edge stops new
+      // work; all workers settle before the callback can return or reject.
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: Math.min(4, businessPaths.length) }, async () => {
+          while (!failed && nextEdge < businessPaths.length) {
+            const index = nextEdge++;
+            try {
+              businessResults[index] = await discover(businessPaths[index]!);
+            } catch (cause) {
+              failed = true;
+              throw cause;
+            }
+          }
+        }),
+      );
+      for (const outcome of outcomes) {
+        if (outcome.status === "rejected") throw outcome.reason;
+      }
+      const identifiers = new Set(eligible.map((connection) => connection.account.id));
+      for (const candidates of businessResults) {
+        for (const candidate of candidates) {
+          if (identifiers.has(candidate.account.id)) continue;
+          identifiers.add(candidate.account.id);
+          eligible.push(candidate);
+        }
+      }
+      return { accounts: eligible };
+    },
+
+    /** Reads Page followers only; Page likes (`fan_count`) are not accounts the Page follows. */
+    async getAccountAnalytics(context, credentials) {
+      const url = new URL(
+        `/${apiVersion}/${encodeURIComponent(accountId(credentials))}`,
+        graphOrigin,
+      );
+      url.searchParams.set("fields", "followers_count");
+      const response = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: url.toString(),
+      });
+      const body = record(response.body);
+      const followers = metricValue(body?.followers_count);
+      if (followers === undefined) throw malformed();
+      return {
+        followers,
+        recordedAt: now().toISOString(),
+      };
+    },
+
+    /**
+     * Reads lifetime engagement for one published Page Reel.
+     *
+     * Video Insights supplies the Reels play count and the documented
+     * comments-plus-shares social-actions total with `period=lifetime`. The
+     * Video object supplies like and comment summaries; shares are the
+     * social-actions total minus the separately measured comments. A missing
+     * metric or a social-actions total below the comment count is an error, so a
+     * failed measurement is never stored as zero. Video Insights require
+     * `read_insights` and `pages_manage_engagement`.
+     *
+     * @param context - Provider request context carrying cancellation.
+     * @param credentials - Page access token and Page identity.
+     * @param lookup - Publication whose providerPostId names the Reel video.
+     * @param page - Single-page input; Video Insights are not paginated here.
+     * @returns One analytics record for the Reel.
+     * @throws {ProviderAdapterError} On a rejected permission, malformed
+     *   Insights response, or missing requested counter.
+     */
+    async listAnalytics(context, credentials, lookup, page) {
+      validatePageInput("facebook", page);
+      if (page.cursor) {
+        throw new ProviderAdapterError(
+          classifyProviderFailure({
+            code: "facebook_analytics_not_paginated",
+            status: 400,
+          }),
+        );
+      }
+      const providerPostId = requiredIdentifier(
+        lookup.providerPostId,
+        "facebook_video_id_required",
+      );
+      const insightsUrl = new URL(
+        `/${apiVersion}/${encodeURIComponent(providerPostId)}/video_insights`,
+        graphOrigin,
+      );
+      insightsUrl.searchParams.set("metric", "blue_reels_play_count,post_video_social_actions");
+      insightsUrl.searchParams.set("period", "lifetime");
+      const insightsResponse = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: insightsUrl.toString(),
+      });
+      const insights = record(insightsResponse.body)?.data;
+      if (!Array.isArray(insights) || insights.length > 20) throw malformed();
+      const metrics = new Map<string, number>();
+      for (const value of insights) {
+        const metric = record(value);
+        const name = boundedString(metric?.name, 64);
+        const values = metric?.values;
+        if (!Array.isArray(values) || values.length !== 1) throw malformed();
+        const result = metricValue(record(values[0])?.value);
+        if (!name || result === undefined || metrics.has(name)) throw malformed();
+        metrics.set(name, result);
       }
 
-      return { accounts: eligible };
+      const videoUrl = new URL(`/${apiVersion}/${encodeURIComponent(providerPostId)}`, graphOrigin);
+      videoUrl.searchParams.set(
+        "fields",
+        "likes.summary(true).limit(0),comments.summary(true).limit(0)",
+      );
+      const videoResponse = await http.request<unknown>(context, {
+        headers: bearer(credentials.accessToken),
+        method: "GET",
+        url: videoUrl.toString(),
+      });
+      const video = record(videoResponse.body);
+      const likes = metricValue(record(record(video?.likes)?.summary)?.total_count);
+      const comments = metricValue(record(record(video?.comments)?.summary)?.total_count);
+      const views = metrics.get("blue_reels_play_count");
+      const socialActions = metrics.get("post_video_social_actions");
+      if (
+        comments === undefined ||
+        likes === undefined ||
+        views === undefined ||
+        socialActions === undefined ||
+        socialActions < comments
+      ) {
+        throw malformed();
+      }
+      return {
+        items: [
+          {
+            comments,
+            impressions: 0,
+            likes,
+            providerPostId,
+            recordedAt: now().toISOString(),
+            reach: 0,
+            shares: socialActions - comments,
+            views,
+            watchTimeSeconds: 0,
+          },
+        ],
+      };
     },
 
     async lookupPublication(context, credentials, lookup) {
@@ -909,7 +1100,7 @@ export function createFacebookAdapter(options: FacebookAdapterOptions): Provider
           pageId: current.pageId,
           userAccessToken: longToken.accessToken,
         }),
-        scopes: [...publishingScopes],
+        scopes: [...configuredScopes],
       };
     },
 

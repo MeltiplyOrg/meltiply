@@ -168,18 +168,23 @@
 
 /* Shared motion and centered-dialog surface states live in @meltiply/ui/motion.css. */
 
-/* Centered modals and the mobile nav panel share vertical motion, not geometry. */
+/* Centered modals rest at their measured center; shared keyframes own entry and exit translation. */
 .dialog-bottom-popup {
   transform: none !important;
   translate: var(--dialog-rest-x, -50%) var(--dialog-rest-y, -50%);
 }
 
-.dialog-edge-panel {
-  --dialog-rest-x: 0%;
-  --dialog-rest-y: 0%;
-  --dialog-start-y: calc(100dvh + 40px);
+/* Phone navigation layer: the rail steps off the left edge on the shared drawer curve. */
+.mobile-navigation-panel {
+  transition-property: translate;
+  transition-duration: 300ms;
+  transition-timing-function: var(--ease-drawer);
 }
 
+/* Phone navigation close control: sits inside the rail header below the safe area. */
+.mobile-navigation-close {
+  top: calc(var(--safe-area-top) + 0.5rem);
+}
 /* Keep bottom-right feedback above the portal-based selection action on mobile. */
 @media (width < 768px) {
   body:has([data-selection-dock]) [data-sileo-viewport][data-position="bottom-right"] {

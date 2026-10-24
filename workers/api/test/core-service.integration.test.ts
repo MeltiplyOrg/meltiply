@@ -2760,7 +2760,6 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         env,
         alphaIdentity,
         new Request("https://api.meltiply.test"),
-        "analytics-cache-suspension-setup",
       );
       await systemTransaction(env, (client) =>
         client.query(

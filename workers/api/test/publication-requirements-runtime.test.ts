@@ -124,7 +124,7 @@ function accountRow(overrides: Partial<RuntimeAccountRow> = {}): RuntimeAccountR
     platform: "tiktok",
     platform_user_id: "runtime-tiktok-creator",
     revoked_at: null,
-    token_expires_at: "2026-08-01T00:00:00.000Z",
+    token_expires_at: null,
     updated_at: "2026-07-01T00:00:00.000Z",
     ...overrides,
   };
@@ -190,7 +190,7 @@ function runtimeApp(read: RequirementRead) {
     verifyJwtToken: async () => ({
       email: actor.email,
       name: actor.displayName,
-      subject: actor.subject,
+      subject: actor.claims.subject,
     }),
   });
 }

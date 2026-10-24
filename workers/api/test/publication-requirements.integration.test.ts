@@ -1,4 +1,5 @@
 import type { JwtIdentity } from "@meltiply/auth";
+import type { EffectTransactionClient } from "@meltiply/database";
 import {
   ProviderRegistry,
   type ProviderAdapter,
@@ -10,7 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vite-
 
 import type { ResolvedActor } from "../src/actor-resolution";
 import { createApiApp } from "../src/app";
-import { withSystemTransactionEffect, type EffectTransactionClient } from "../src/database";
+import { withSystemTransactionEffect } from "../src/database";
 import type { ApiWorkerEnv, ApiWorkerEnvironment } from "../src/env";
 import { tokenCipherFor } from "../src/token-credentials";
 
@@ -82,8 +83,8 @@ function actorFor(claims: typeof alpha): ResolvedActor {
 }
 
 /** Runs one system-pool transaction at the integration-test boundary. */
-function systemTransaction<A>(
-  operation: (client: EffectTransactionClient) => Effect.Effect<A>,
+function systemTransaction<A, E>(
+  operation: (client: EffectTransactionClient) => Effect.Effect<A, E>,
 ): Promise<A> {
   return Effect.runPromise(withSystemTransactionEffect(env, operation));
 }
@@ -136,7 +137,7 @@ function appFor(actor: ResolvedActor, registry: ProviderRegistry) {
   const identity: JwtIdentity = {
     email: actor.email,
     name: actor.displayName,
-    subject: actor.subject,
+    subject: actor.claims.subject,
   };
   return createApiApp({
     providerRegistry: registry,
@@ -227,7 +228,7 @@ describe("publishing-requirement coalescing with PostgreSQL RLS", () => {
          SET access_token = $2,
              connection_status = 'connected',
              revoked_at = NULL,
-             token_expires_at = '2026-08-01T00:00:00Z',
+             token_expires_at = NULL,
              updated_at = '2026-07-01T00:00:00Z'
          WHERE id = $1`,
         [accountId, baseAccessToken],

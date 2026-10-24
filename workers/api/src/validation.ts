@@ -14,6 +14,7 @@ import type { components } from "@meltiply/contracts/schema";
 import type { TikTokPrivacyLevel } from "@meltiply/providers";
 import { PLATFORM_IDS, type Platform } from "@meltiply/domain";
 import type { Context } from "hono";
+import { z } from "zod";
 
 import { CoreApiError } from "./core-types";
 import { RFC4122_UUID_PATTERN as uuid } from "./crypto";
@@ -25,6 +26,46 @@ type AssetStatus = Schemas["AssetStatus"];
 type BrandProfileColor = Schemas["BrandProfileColor"];
 type PostStatus = Schemas["PostStatus"];
 type AnalyticsMetric = Schemas["AnalyticsMetric"];
+
+/** Strict Queue creation input: a trimmed name, supported named timezone and 1–168 unique Sunday-zero weekday/wall-time slots. Offset-only zones and unknown fields are rejected before persistence. */
+export const queueConfigurationSchema = z.strictObject({
+  brand_profile_id: z.uuid(),
+  name: z.string().trim().min(1).max(100),
+  timezone: z
+    .string()
+    .min(1)
+    .max(100)
+    .refine((value) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: value });
+        return !/^[+-]/.test(value);
+      } catch {
+        return false;
+      }
+    }, "Use a supported IANA timezone"),
+  slots: z
+    .array(
+      z.strictObject({
+        weekday: z.number().int().min(0).max(6),
+        time: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/),
+      }),
+    )
+    .min(1)
+    .max(168)
+    .refine(
+      (slots) => new Set(slots.map((slot) => `${slot.weekday}/${slot.time}`)).size === slots.length,
+      "Slots must be unique",
+    ),
+});
+/** Queue updates retain the required Brand Profile scope while allowing any configuration field to remain unchanged. */
+export const queuePatchSchema = queueConfigurationSchema.partial({
+  name: true,
+  timezone: true,
+  slots: true,
+});
+/** Retirement and membership removal accept only the owning Brand Profile scope. */
+export const queueScopeSchema = z.strictObject({ brand_profile_id: z.uuid() });
+export type QueueConfiguration = z.infer<typeof queueConfigurationSchema>;
 
 /**
  * Post lifecycle values accepted by the Post list selector. A Post is `draft`

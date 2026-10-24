@@ -2,6 +2,30 @@
   "schemaVersion": 1,
   "contractVersion": "1.0.0-target.0",
   "operations": {
+    "listQueues": {
+      "state": "specified",
+      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+    },
+    "createQueue": {
+      "state": "specified",
+      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+    },
+    "getQueue": {
+      "state": "specified",
+      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+    },
+    "updateQueue": {
+      "state": "specified",
+      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+    },
+    "deleteQueue": {
+      "state": "specified",
+      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+    },
+    "removePostFromQueue": {
+      "state": "specified",
+      "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."
+    },
     "getSetupStatus": {
       "state": "specified",
       "evidenceAndGate": "Single-owner bootstrap implementation; hosted database and browser acceptance required."

@@ -130,3 +130,40 @@ export function morphHeightEffect(element: HTMLElement, previousHeight?: number)
 export function riseEffect(element: Element, delay = 0): Animation | null {
   return playEffect(element, [{ transform: "scaleY(0.85)" }, { transform: "scaleY(1)" }], delay);
 }
+
+/** Minimal native View Transition surface; kept structural so supported browsers gain it without a lib-version type dependency. */
+interface ViewTransitionLike {
+  finished: Promise<void>;
+  skipTransition: () => void;
+}
+
+let activeViewTransition: ViewTransitionLike | undefined;
+
+/**
+ * Commits one synchronous view change with native snapshot/geometry
+ * interpolation. Repeated choices skip the previous visual transition, never
+ * its state commit. Unsupported browsers and native reduced motion commit
+ * immediately; a rejected transition still releases its tracking. Callers name
+ * only the elements that should morph; shared CSS keeps the rest still.
+ */
+export function transitionViewEffect(commit: () => void): void {
+  activeViewTransition?.skipTransition();
+  const start = (
+    document as Document & {
+      startViewTransition?: (callback: () => void) => ViewTransitionLike;
+    }
+  ).startViewTransition;
+  if (
+    typeof start !== "function" ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
+    commit();
+    return;
+  }
+  const transition = start.call(document, commit);
+  activeViewTransition = transition;
+  const release = () => {
+    if (activeViewTransition === transition) activeViewTransition = undefined;
+  };
+  transition.finished.then(release, release);
+}

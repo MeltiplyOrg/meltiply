@@ -37,14 +37,13 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
     onNavigate(view, options);
     setMobileMenuOpen(false);
   };
-  const pageTitle =
-    currentView === "posts"
-      ? t("Posts")
-      : currentView === "channels"
-        ? t("Channels")
-        : currentView === "analytics"
-          ? t("Analytics")
-          : t("Settings");
+  const pageTitles: Record<WorkspaceView, string> = {
+    posts: t("Posts"),
+    analytics: t("Analytics"),
+    channels: t("Channels"),
+    queues: t("Queues"),
+    settings: t("Settings"),
+  };
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-page pt-(--safe-area-top) pr-(--safe-area-right) pl-(--safe-area-left) text-ink antialiased">
       <a
@@ -81,7 +80,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
               </span>
             )}
             <ChevronRight className="hidden size-3 shrink-0 text-ink-3 sm:block" />
-            <span className="font-medium">{pageTitle}</span>
+            <span className="font-medium">{pageTitles[currentView]}</span>
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <Button

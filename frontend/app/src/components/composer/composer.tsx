@@ -18,8 +18,18 @@ import { Button } from "@meltiply/ui/button";
 import { Textarea } from "@meltiply/ui/textarea";
 import { Switch } from "@meltiply/ui/switch";
 import { Input } from "@meltiply/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { Alert } from "@meltiply/ui/alert";
+import {
+  CenterAlertDialog,
+  CenterAlertDialogCancel,
+  CenterAlertDialogContent,
+  CenterAlertDialogDescription,
+  CenterAlertDialogFooter,
+  CenterAlertDialogHeader,
+  CenterAlertDialogTitle,
+} from "@meltiply/ui/center-alert-dialog";
 
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { cn } from "@meltiply/ui/utils";
@@ -61,6 +71,7 @@ import {
   usePost,
   useSchedulePost,
   useUpdatePost,
+  useQueues,
 } from "@/lib/queries";
 import { createAssetUpload, type AssetUploadStatus, type AssetUploadTask } from "@/lib/upload";
 import { RollingCount } from "@meltiply/ui/rolling-count";
@@ -82,7 +93,7 @@ interface ChannelOverride {
 }
 
 /** Publishing intents the composer submits; the pinned bar acts on the chosen one. */
-const PUBLISH_MODES = ["draft", "schedule", "now"] as const;
+const PUBLISH_MODES = ["draft", "queue", "schedule", "now"] as const;
 type PublishMode = (typeof PUBLISH_MODES)[number];
 
 /**
@@ -97,6 +108,8 @@ function publishModeOption(mode: PublishMode, t: (message: string) => string): s
   switch (mode) {
     case "draft":
       return t("Draft");
+    case "queue":
+      return t("Queue");
     case "schedule":
       return t("Schedule");
     case "now":
@@ -120,11 +133,12 @@ function publishModeAction(
 ): string {
   if (mode === "draft") return postId === null ? t("Save Draft") : t("Save");
   if (mode === "schedule") return t("Schedule Post");
+  if (mode === "queue") return t("Add to Queue");
   return t("Publish Now");
 }
 
 /** Icon per publishing mode, matching the action the pinned bar performs. */
-const PUBLISH_MODE_ICONS = { draft: Save, schedule: Calendar, now: Send } as const;
+const PUBLISH_MODE_ICONS = { draft: Save, queue: Layers, schedule: Calendar, now: Send } as const;
 
 /**
  * Number of characters a platform counts a caption by: code points, matching
@@ -637,6 +651,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [publishMode, setPublishMode] = useState<PublishMode>(
     initialDate !== undefined ? "schedule" : "draft",
   );
+  const [selectedQueueId, setSelectedQueueId] = useState("");
   const [scheduleDate, setScheduleDate] = useState<string>(() => {
     const seeded = initialDate ? formatInitialScheduleDate(initialDate) : "";
     if (seeded) return seeded;
@@ -677,6 +692,16 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const tiktokRequirementsRef = useRef<Record<string, TikTokPublishingRequirements | null>>({});
   const [pendingOwnershipAssetIds, setPendingOwnershipAssetIds] = useState<string[] | null>(null);
   const [isDragActive, setDragActive] = useState(false);
+  /**
+   * Destination a composer-initiated navigation asked for while its unsaved
+   * work could not survive the unmount. The dialog stays until the creator
+   * saves a draft or explicitly discards; `null` means no departure is waiting.
+   */
+  const [pendingNavigation, setPendingNavigation] = useState<{
+    view: WorkspaceView;
+    options?: { search?: string };
+  } | null>(null);
+  const [isSavingBeforeLeave, setIsSavingBeforeLeave] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceTargetRef = useRef<string | null>(null);
@@ -738,6 +763,14 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const createPost = useCreatePost(scope);
   const updatePost = useUpdatePost(scope);
   const schedulePost = useSchedulePost(scope);
+  const queueQuery = useQueues(
+    scope,
+    selectedProfileIds.length === 1 ? selectedProfileIds[0]! : null,
+    publishMode === "queue",
+  );
+  const publishingQueues = queueQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const selectedQueue = publishingQueues.find((queue) => queue.id === selectedQueueId);
+  const hasSelectedQueue = selectedQueue !== undefined;
 
   // A saved target that has never been scheduled names no platform of its own,
   // so the Channel list is where its provider settings are resolved from. The
@@ -801,6 +834,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     setAttachments([]);
     setChannelOverrides({});
     setAttachmentOverrides({});
+    setSelectedQueueId("");
     // Back to the eligible defaults rather than an empty set: abandoning a
     // composition (or finishing one) must not leave the next one with no
     // destinations, which is what the previous explicit [] produced after a
@@ -969,6 +1003,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setAttachmentOverrides(attachmentOverridesFromPost(post));
       setSelectedChannelIds([...channelIds]);
       if (scheduledAt) setScheduleDate(formatInitialScheduleDate(scheduledAt));
+      if (post.queue_membership) {
+        setSelectedQueueId(post.queue_membership.queue_id);
+        setPublishMode("queue");
+      }
       setSavedAt(post.updated_at);
       setIsDirty(false);
       dirtyRef.current = false;
@@ -1775,11 +1813,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * because letting it through would bypass every local rule and surface the
    * API's masked generic error for violations the composer could have named.
    *
-   * @param type - Submission mode: `'draft'`, `'schedule'`, or `'now'`.
+   * @param type - Draft, Queue, manual Schedule, or Publish Now mode.
    * @returns Localized violation messages; empty when submission may proceed.
    */
   const validateSubmission = useCallback(
-    (type: "draft" | "schedule" | "now"): string[] => {
+    (type: PublishMode): string[] => {
       const errors: string[] = [];
       const starting = attachments.filter((attachment) => attachment.assetId === null);
 
@@ -1813,6 +1851,15 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       }
       if (type === "schedule" && Number.isNaN(new Date(scheduleDate).getTime())) {
         errors.push(t("Please provide a valid schedule date and time."));
+      }
+      if (
+        type === "queue" &&
+        (!hasSelectedQueue ||
+          selectedProfileIds.length !== 1 ||
+          selectedProfileIds[0] !== ownerProfileId ||
+          profileCopiesRef.current.size > 0)
+      ) {
+        errors.push(t("Choose a Queue in this Post's single Brand Profile before submitting."));
       }
       if (type === "draft") return errors;
 
@@ -1943,6 +1990,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       channelOverrides,
       resolvedContentFor,
       scheduleDate,
+      hasSelectedQueue,
       ownerProfileId,
       selectedProfileIds,
       profileNames,
@@ -2001,16 +2049,18 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * names its constraint.
    *
    * @param type - Submission mode: `'draft'`, `'schedule'`, or `'now'`.
+   * @returns True when the requested save/schedule/publish was accepted; false
+   *   on validation, identity change, or request failure, with every input kept.
    */
   const handleSubmit = useCallback(
-    async (type: "draft" | "schedule" | "now") => {
+    async (type: PublishMode): Promise<boolean> => {
       setErrorMessage(null);
       const errors = validateSubmission(type);
       setValidationErrors(errors);
-      if (errors.length > 0) return;
+      if (errors.length > 0) return false;
       // validateSubmission already reported the aggregate view as an error, so a
       // null selection cannot reach the scoped mutations.
-      if (ownerProfileId === null) return;
+      if (ownerProfileId === null) return false;
       const brandProfileId = ownerProfileId;
       // Async completion must affect only the composition that submitted it.
       const recoveryNamespaceAtSubmit = recoveryNamespaceRef.current;
@@ -2019,9 +2069,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setIsSubmitting(true);
       try {
         if (
-          selectedProfileIds.length !== 1 ||
-          selectedProfileIds[0] !== brandProfileId ||
-          profileCopiesRef.current.size > 0
+          type !== "queue" &&
+          (selectedProfileIds.length !== 1 ||
+            selectedProfileIds[0] !== brandProfileId ||
+            profileCopiesRef.current.size > 0)
         ) {
           const targetsByProfile = new Map<string, PostTargetDraft[]>();
           const channelsById = new Map(selectedChannels.map((channel) => [channel.id, channel]));
@@ -2070,7 +2121,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             },
           });
           if (controller.signal.aborted || composerIdentityRef.current !== composerIdentityAtSubmit)
-            return;
+            return false;
           const anchor = profileCopiesRef.current.get(brandProfileId);
           await refreshWorkspace();
           if (!succeeded) {
@@ -2080,7 +2131,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                 "Some profiles could not be completed. Completed profiles are kept; retry to finish the remaining work.",
               ),
             );
-            return;
+            return false;
           }
           clearRecoveryAfterSave(recoveryNamespaceAtSubmit);
           dirtyRef.current = false;
@@ -2100,7 +2151,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             resetComposer();
             onPostSuccess?.();
           }
-          return;
+          return true;
         }
         const saved = await persistPost(brandProfileId);
         setCreatedPostId(saved.id);
@@ -2119,35 +2170,47 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             variant: "success",
             description: t("Your post text, attachments, and channel settings are stored."),
           });
-          return;
+          return true;
         }
 
         await schedulePost.mutateAsync({
           id: saved.id,
           input: {
             brand_profile_id: brandProfileId,
-            scheduled_at: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
+            ...(type === "queue"
+              ? { queue_id: selectedQueueId }
+              : {
+                  scheduled_at: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
+                }),
             targets: buildTargets(),
           },
         });
         clearRecoveryAfterSave(recoveryNamespaceAtSubmit);
         setCreatedPostId(null);
         resetComposer();
-        toast(type === "now" ? t("Post published") : t("Post scheduled"), {
-          variant: "success",
-          description:
-            type === "now"
-              ? t("Distribution to {count} channel(s) has been queued.", {
-                  count: selectedChannels.length,
-                })
-              : t("Distribution to {count} channel(s) is scheduled.", {
-                  count: selectedChannels.length,
-                }),
-        });
+        toast(
+          type === "queue"
+            ? t("Post added to Queue")
+            : type === "now"
+              ? t("Publication queued")
+              : t("Post scheduled"),
+          {
+            variant: "success",
+            description:
+              type === "now"
+                ? t("Distribution to {count} channel(s) has been queued.", {
+                    count: selectedChannels.length,
+                  })
+                : t("Distribution to {count} channel(s) is scheduled.", {
+                    count: selectedChannels.length,
+                  }),
+          },
+        );
         await refreshWorkspace();
         onPostSuccess?.();
+        return true;
       } catch (error) {
-        if (composerIdentityRef.current !== composerIdentityAtSubmit) return;
+        if (composerIdentityRef.current !== composerIdentityAtSubmit) return false;
         // A rejected mutation that carried structured per-field violations names
         // each one in the fix-list; anything else falls back to the masked
         // user-facing message so internals never surface.
@@ -2159,6 +2222,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             : [];
         if (details.length > 0) setValidationErrors(details);
         else setErrorMessage(userFacingErrorMessage(error, language));
+        return false;
       } finally {
         setIsSubmitting(false);
       }
@@ -2173,6 +2237,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       resetComposer,
       scheduleDate,
       schedulePost,
+      selectedQueueId,
       ownerProfileId,
       selectedProfileIds,
       selectedChannels,
@@ -2187,6 +2252,54 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       validateSubmission,
     ],
   );
+
+  /**
+   * Leaves for the waiting destination after the creator accepted the loss or
+   * the draft was saved; the guard is not re-evaluated because that decision
+   * already happened.
+   */
+  const continuePendingNavigation = useCallback(() => {
+    if (!pendingNavigation) return;
+    const { view, options } = pendingNavigation;
+    setPendingNavigation(null);
+    onNavigate?.(view, options);
+  }, [onNavigate, pendingNavigation]);
+
+  /**
+   * Routes composer-initiated navigation (Manage Queues, Add Channel) through
+   * an explicit decision when unmounting would destroy work that recovery
+   * cannot restore: without functional-storage consent nothing is persisted,
+   * so an unsaved composition survives only while this mount stays alive.
+   * Recoverable work leaves immediately and restores when the composer reopens.
+   *
+   * @param view - Workspace destination requested from inside the composer.
+   * @param options - Optional query deep link forwarded to the destination page.
+   */
+  const requestNavigate = useCallback(
+    (view: WorkspaceView, options?: { search?: string }) => {
+      if (!onNavigate) return;
+      if (isDirty && !functionalConsent) {
+        setPendingNavigation({ view, options });
+        return;
+      }
+      onNavigate(view, options);
+    },
+    [functionalConsent, isDirty, onNavigate],
+  );
+
+  /**
+   * Saves the composition as a draft, then leaves only when the server accepted
+   * it. Validation or request failures keep the creator in the composer with
+   * the existing inline errors instead of navigating away from unsaved work.
+   */
+  const saveDraftAndContinue = useCallback(async () => {
+    if (isSavingBeforeLeave) return;
+    setIsSavingBeforeLeave(true);
+    const saved = await handleSubmit("draft");
+    setIsSavingBeforeLeave(false);
+    if (saved) continuePendingNavigation();
+    else setPendingNavigation(null);
+  }, [continuePendingNavigation, handleSubmit, isSavingBeforeLeave]);
 
   const postLoadError = postQuery.error;
   const isPostLoading = postId !== null && !postQuery.data && !postLoadError;
@@ -2825,7 +2938,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             stretching to half the composer. Mobile retains the same DOM order. */}
         <div className="flex min-w-0 flex-col gap-6 @4xl:-my-1 @4xl:min-h-0 @4xl:w-85 @4xl:shrink-0 @4xl:overflow-y-auto @4xl:border-l @4xl:border-line @4xl:py-1 @4xl:pr-1 @4xl:pl-6">
           <DestinationSelector
-            onNavigate={onNavigate}
+            onNavigate={requestNavigate}
             selectedProfileIds={selectedProfileIds}
             onProfilesChange={(ids) => {
               setSelectedProfileIds(ids);
@@ -2861,19 +2974,77 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                 }}
               />
             )}
+            {publishMode === "queue" && (
+              <div className="space-y-2">
+                <Select
+                  value={selectedQueue?.id ?? ""}
+                  onValueChange={(value) => {
+                    setSelectedQueueId(value);
+                    markDirty();
+                  }}
+                >
+                  <SelectTrigger
+                    aria-label={t("Publishing Queue")}
+                    disabled={queueQuery.isPending || selectedProfileIds.length !== 1}
+                  >
+                    <SelectValue placeholder={t("Choose a Queue")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {publishingQueues.map((queue) => (
+                      <SelectItem key={queue.id} value={queue.id}>
+                        {queue.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedQueue && <p className="text-xs text-ink-3">{selectedQueue.timezone}</p>}
+                {queueQuery.error && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {userFacingErrorMessage(queueQuery.error, language)}
+                  </p>
+                )}
+                {queueQuery.hasNextPage && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      void queueQuery.fetchNextPage();
+                    }}
+                    disabled={queueQuery.isFetchingNextPage}
+                  >
+                    {t("Load more Queues")}
+                  </Button>
+                )}
+                <Button variant="link" onClick={() => requestNavigate("queues")}>
+                  {t("Manage Queues")}
+                </Button>
+                {postQuery.data?.queue_membership && (
+                  <p className="text-xs text-ink-2">
+                    {t("Assigned: {time}", {
+                      time: new Date(postQuery.data.queue_membership.assigned_at).toLocaleString(
+                        language,
+                      ),
+                    })}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* What the selected mode will do, in the mode's own words: the
                 action bar names the commit, this line names its effect. */}
             <p className="text-(length:--font-size-micro) text-ink-3">
               {publishMode === "draft"
                 ? t("Saves this post's text, attachments, and channel settings without publishing")
-                : publishMode === "schedule"
-                  ? t("Queues this post to {count} channel(s) at the selected time.", {
-                      count: selectedChannels.length,
-                    })
-                  : t("Queues this post to {count} channel(s) right away.", {
-                      count: selectedChannels.length,
-                    })}
+                : publishMode === "queue"
+                  ? t(
+                      "Assigns the next free future slot without changing your content or Channel settings.",
+                    )
+                  : publishMode === "schedule"
+                    ? t("Queues this post to {count} channel(s) at the selected time.", {
+                        count: selectedChannels.length,
+                      })
+                    : t("Queues this post to {count} channel(s) right away.", {
+                        count: selectedChannels.length,
+                      })}
             </p>
           </ComposerSection>
         </div>
@@ -2922,6 +3093,48 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             : publishModeAction(publishMode, postId, t)}
         </Button>
       </div>
+
+      {/* Navigation out of the composer unmounts it. With functional-storage
+          consent the recovery record restores the composition on return; without
+          it, leaving would silently destroy the creator's work, so the departure
+          waits for an explicit save-or-discard decision. */}
+      <CenterAlertDialog
+        open={pendingNavigation !== null}
+        onOpenChange={(open) => {
+          if (!open && !isSavingBeforeLeave) setPendingNavigation(null);
+        }}
+      >
+        <CenterAlertDialogContent>
+          <CenterAlertDialogHeader>
+            <CenterAlertDialogTitle>{t("Save this Post before leaving?")}</CenterAlertDialogTitle>
+            <CenterAlertDialogDescription>
+              {t(
+                "This composition has unsaved changes that cannot be restored after you leave. Save it as a draft, discard it, or keep editing.",
+              )}
+            </CenterAlertDialogDescription>
+          </CenterAlertDialogHeader>
+          <CenterAlertDialogFooter>
+            <CenterAlertDialogCancel disabled={isSavingBeforeLeave}>
+              {t("Keep editing")}
+            </CenterAlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isSavingBeforeLeave}
+              onClick={continuePendingNavigation}
+            >
+              {t("Discard and continue")}
+            </Button>
+            <Button
+              type="button"
+              disabled={isSavingBeforeLeave}
+              onClick={() => void saveDraftAndContinue()}
+            >
+              {isSavingBeforeLeave ? t("Saving…") : t("Save draft and continue")}
+            </Button>
+          </CenterAlertDialogFooter>
+        </CenterAlertDialogContent>
+      </CenterAlertDialog>
     </fieldset>
   );
 }

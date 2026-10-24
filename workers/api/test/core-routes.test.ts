@@ -176,6 +176,7 @@ const asset: components["schemas"]["Asset"] = {
 const post: components["schemas"]["Post"] = {
   analytics: null,
   distribution_analytics: [],
+  queue_membership: null,
   attachments: [{ asset_id: asset.id, asset, position: 0 }],
   brand_profile_id: brandProfileId,
   created_at: "2026-07-18T00:00:00.000Z",

@@ -67,20 +67,78 @@ With functional cookie consent, browser-local recovery retains text, attachments
 
 Inspecting another Post does not discard your open composition: its text, settings, and active uploads stay in memory while Details is shown. Close Details or choose **New Post** in its header to resume that composition. This does not require cookie consent; closing the composer or leaving the Posts route still releases its live state.
 
-## Draft, schedule, or publish now
+## Draft, Queue, Schedule, or Publish Now
 
 - **Save Draft** — stores the post text without sending it anywhere. No channel selection is needed. Drafts appear in the **Drafts** status filter in Posts and can be edited, scheduled, or deleted later. Saving a draft for a post that was scheduled cancels its pending deliveries.
+- **Queue** — assigns the next free future slot from a named weekly plan in the Post's single owning Brand Profile. Select a Queue, not a date and time. Text, media, selected Channels, and their settings remain part of the same Post.
 - **Schedule** — queues the post for the date and time in the picker.
 - **Publish Now** — queues the post for immediate delivery to every selected channel.
 
-"Queued" means Meltiply accepted the post for each channel; delivery to each platform then proceeds per channel and is reported individually — one channel can publish while another is still processing or has failed.
+"Queued" is a Channel delivery state, not membership in a named **Queue**. It means Meltiply accepted delivery for that Channel; Platform outcomes are reported individually — one Channel can publish while another is still processing or has failed.
 
 For several profiles, all drafts are saved before any are queued. Per-profile progress identifies successes and failures. A failed save leaves completed drafts intact and queues nothing new. If queuing partially succeeds, retry the unchanged composition to finish the remaining profiles without sending completed copies again. Repeated draft saves update the same copies rather than creating duplicates. After closing the composition, manage each saved Post independently.
 Choose **Schedule**, then select the **Date** button to open the compact calendar. Use the month arrows to browse; keyboard users can move with arrow keys, Home/End, or Page Up/Down and select with Enter. Selecting a day closes the calendar; Escape dismisses it without changing the schedule or closing the composer. For **Time**, click the clock button to choose an hour and exact minute, then **Done**. Choices apply immediately. To type instead, click the field's left padding or hour digits and enter a 24-hour time such as `14:30`; click minute digits to edit only minutes. Up/Down adjusts the focused segment and Left/Right moves between segments. Your browser's local time zone stays visible underneath. Changing the date preserves the time, changing time preserves the date, and browsing the calendar does not change the selected schedule. Calendar entry points retain their pre-filled date and 10:00 local time.
 
 Wide composers give destinations and publishing a compact column, leaving more room for writing. On phones, the same sections stack; date and time remain together, and the calendar opens only when needed. Destination cards use compact rounded-square account portraits, with the name and platform together above the username and ID. The composer keeps its save explanation and primary action in a pinned bar; scroll the body to reach destinations, provider settings, and scheduling without losing that action.
 
-Every post gets its own individual date and time — Meltiply does not currently offer recurring weekly time-slot Queues, and the composer has no Queue mode that auto-assigns publication times from a named schedule.
+## Weekly Queues
+
+Open **Queues** and select **Create Queue**. The first available Brand Profile is selected automatically when you have not chosen one; use the profile selector to change its owner. Give the plan a name, a supported IANA timezone such as `America/New_York`, and one or more weekday/time slots. Choose the timezone from a searchable list: type any part of the name or its initials (`ktm` finds Asia/Katmandu, `yk` finds Reykjavik or Yakutsk). Type hours and minutes in the segmented 24-hour field, or use its clock button to open the styled hour/minute chooser. Duplicate slots are refused. Admins manage configuration, Editors and Admins can enqueue or remove Posts, and Viewers can inspect plans and outcomes.
+
+Select a Queue's name in the desktop list, or use the compact Queue selector on a phone. Its three-dot menu holds **Edit Queue** and **Delete Queue** for administrators. In the composer, keep exactly one Brand Profile selected, choose **Queue**, select its plan, and use **Add to Queue**. Queue mode does not make independent copies across several profiles; use Draft, Schedule, or Now for those workflows. Reopen the Queue to see assigned times and per-Channel outcomes after reload. Post Details also retains membership and its assigned instant.
+
+The Queue calendar opens in **Week**. Switch between **Month** and **Week**,
+use the arrows to browse, or choose **Today** to return to the current date in
+the Queue's timezone. Selecting a month date opens its containing Week; the date
+labels carry across so Month and Week feel like one surface changing shape.
+Calendar chips show actual assigned Posts, not speculative future slot events.
+Choose a Post to inspect its assigned time and independent Channel outcomes in
+the same Post drawer the Posts page uses — it opens on that click, without a hop
+through a summary. From there you can open the full Post to edit it, or request
+safe removal.
+
+The calendar also shows the plan itself. A **filled** slot is an occurrence that
+holds a real assigned Post and appears as that Post's chip. An **open** slot is a
+configured occurrence with nothing assigned yet and appears with a dashed outline;
+once its time has passed it is muted and labeled as unfilled. Slots follow the same
+rules as allocation: times skipped by a daylight-saving change are not shown, and a
+repeated hour uses the later occurrence. Posts reserved before a plan edit stay on
+their original instants and appear as ordinary chips rather than moving into a slot.
+
+Week has a **red current-time line** drawn only inside today's column when that
+column is visible. It advances every 30 seconds and refreshes when you return to
+the tab. The calendar initially scrolls near now, but clock updates do not move your
+scroll position. Month highlights today and shows filled/unfilled counts per date
+instead of drawing an hourly line across cells. **Next in this view** identifies the
+next pending assignment in the displayed window; it does not imply that other dates
+are empty. All dates, the clock, and the time line use the selected Queue's named
+timezone, not your device's timezone. Repeated DST-hour Posts retain distinct offset
+labels; the timeline represents wall-clock time, not event durations or rescheduling.
+
+On phones, Month shows all seven weekday columns and compact filled/unfilled counts;
+tap a date or count to open its Week. Swipe the Week timeline sideways to reach
+other dates and vertically to reach other hours. Today is initially brought into
+view, and the time labels stay fixed at the left while you swipe. Profile, Queue,
+period and Today controls remain outside the calendar's scrolling area.
+
+### Allocation and timezones
+
+- The earliest free occurrence strictly after allocation time wins. A slot exactly at the current instant, a past occurrence, or an occupied reservation is skipped. When the week's remaining slots are full or past, allocation rolls into the following week.
+- Sequential submissions reserve successive available slots in accepted transaction order. Concurrent submissions are serialized by the existing Workspace scheduling lock; the database also enforces one active membership per Post and one reservation per Queue/instant. Concurrent arrival order is not a promise about browser click order.
+- A replay of the same request returns its saved result without reserving or publishing again. Enqueuing the same Post into the same Queue with another key keeps its still-future reservation and existing Channel delivery identities. Remove it before choosing another Queue or reusing an elapsed reservation.
+- Weekly slots are interpreted in the Queue's timezone, not the browser's timezone. Assigned instants are stored in UTC. DST spring-forward gaps skip that week's nonexistent local time; fall-back overlaps use the later, post-transition occurrence, once. For example, New York `02:30` on March 8, 2026 is skipped, and `01:30` on November 1, 2026 reserves `06:30Z`, not `05:30Z`.
+
+### Changes, removal, and deletion
+
+Editing a name, timezone, or slot plan affects only new allocations. Existing memberships retain their original name snapshot and UTC instant; editing a plan never silently moves or republishes a Post.
+
+**Remove from Queue** cancels only safely unclaimed pending Channel deliveries, releases that slot, and retains the Post's text, Assets, targets, and settings. Other reservations do not shift forward. Once a Provider attempt, active lease, published copy, cancellation request, or uncertain outcome owns any Channel, removal is refused; inspect and resolve those outcomes instead. Removing a Post that was already locally cancelled is safe only if no Provider ever owned its work.
+
+Cancelling an individual Channel or saving a Queue-owned Post as a draft does not release its reservation. Use explicit removal before switching to manual Schedule or Publish Now, or before independently rescheduling a Channel. Deleting the stored Post releases membership while retaining normal delivery history. No action unpublishes an existing Platform copy.
+
+**Delete Queue** retires a plan only after its Posts have resolved or been safely removed. Pending, in-flight, and uncertain work prevents deletion. Retired plans disappear from selection; historical membership and Platform outcomes remain unchanged on their Posts. Remove a safely cancelled Post before retirement if you want to reuse that composition with a different schedule.
+
+Queue-assigned work uses the same durable Schedule, Due work, Outbox, and Provider delivery path as manual publishing. Failure, eligible retry, cancellation, Ambiguous outcomes, and Reconciliation retain their existing meanings. The assigned time is a target, not a guarantee of Platform delivery.
 
 ## Post statuses
 
@@ -107,7 +165,7 @@ Table has no trailing actions column. Open Details and choose **Edit post** for 
 Available actions depend on the channel's state:
 
 - **Retry** — re-queues delivery for a **Failed** channel. Not every failure is retryable; when it isn't, the retry is refused with an error toast and the failure stays on the post.
-- **Reschedule** — picks a new date and time for a delivery that hasn't published yet (also offered for unconfirmed deliveries).
+- **Reschedule** — picks a new date and time for eligible delivery (also offered for unconfirmed deliveries). A Queue-owned Post must first be safely removed from its Queue.
 - **Cancel** / **Cancel all pending** — stops pending deliveries. For a channel already in flight, this sends a cancellation request rather than a guaranteed stop — watch the status and check the platform. A confirmation dialog explains that only pending channels are cancelled; channels that already published are unaffected and the post stays live there. Cancelling never unpublishes a post that already went out.
 - **Edit post** — opens a draft or a Post with eligible pending channels in the composer. Removing a channel removes its pending delivery. Published Channel outcomes remain observed results and cannot be manually rewritten.
 - **Delete post / Delete draft** — removes the stored Post and stops its pending channels after confirmation. Anything already published remains on its platform; remove that copy on the platform itself.

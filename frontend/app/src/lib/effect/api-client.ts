@@ -38,6 +38,11 @@ import type {
   PostQueryParams,
   PublishingRequirements,
   SchedulePostInput,
+  PublishingQueue,
+  QueueListResponse,
+  CreateQueueInput,
+  UpdateQueueInput,
+  QueueQueryParams,
   SignedUrlResponse,
   UpdateBrandProfileInput,
   UpdateDistributionInput,
@@ -61,6 +66,11 @@ import {
   completeUploadSession,
   createBrandProfile,
   createPost,
+  listQueues,
+  createQueue,
+  updateQueue,
+  deleteQueue,
+  removePostFromQueue,
   createUploadPartUrls,
   createUploadSession,
   createWorkspaceInvitation,
@@ -209,6 +219,30 @@ export interface ApiClientServiceShape {
   readonly schedulePost: (
     id: string,
     input: SchedulePostInput,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<Post>;
+  readonly listQueues: (
+    params: QueueQueryParams,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<QueueListResponse>;
+  readonly createQueue: (
+    input: CreateQueueInput,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingQueue>;
+  readonly updateQueue: (
+    id: string,
+    input: UpdateQueueInput,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<PublishingQueue>;
+  readonly deleteQueue: (
+    id: string,
+    brandProfileId: string,
+    options?: ApiRequestOptions,
+  ) => ApiClientEffect<void>;
+  readonly removePostFromQueue: (
+    queueId: string,
+    postId: string,
+    brandProfileId: string,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<Post>;
   readonly createUploadSession: (
@@ -415,6 +449,11 @@ export function createApiClientServiceTest(
     Effect.die(new Error(`ApiClientService.${name} is not stubbed in this test`));
 
   const service: ApiClientServiceShape = {
+    listQueues: unstubbed("listQueues"),
+    createQueue: unstubbed("createQueue"),
+    updateQueue: unstubbed("updateQueue"),
+    deleteQueue: unstubbed("deleteQueue"),
+    removePostFromQueue: unstubbed("removePostFromQueue"),
     abortUploadSession: unstubbed("abortUploadSession"),
     acceptWorkspaceInvitation: unstubbed("acceptWorkspaceInvitation"),
     cancelDistribution: unstubbed("cancelDistribution"),
@@ -488,6 +527,18 @@ export function createApiClientServiceTest(
 export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> = Layer.succeed(
   ApiClientService,
   {
+    listQueues: (params, options) =>
+      inWorkspace((workspaceId) => listQueues(workspaceId, params, options)),
+    createQueue: (input, options) =>
+      inWorkspace((workspaceId) => createQueue(workspaceId, input, options)),
+    updateQueue: (id, input, options) =>
+      inWorkspace((workspaceId) => updateQueue(workspaceId, id, input, options)),
+    deleteQueue: (id, brandProfileId, options) =>
+      inWorkspace((workspaceId) => deleteQueue(workspaceId, id, brandProfileId, options)),
+    removePostFromQueue: (queueId, postId, brandProfileId, options) =>
+      inWorkspace((workspaceId) =>
+        removePostFromQueue(workspaceId, queueId, postId, brandProfileId, options),
+      ),
     abortUploadSession: (sessionId, options) =>
       inWorkspace((workspaceId) => abortUploadSession(workspaceId, sessionId, options)),
     acceptWorkspaceInvitation: (token, options) => acceptWorkspaceInvitation(token, options),

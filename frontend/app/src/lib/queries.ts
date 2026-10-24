@@ -2,6 +2,7 @@ import {
   keepPreviousData,
   useInfiniteQuery,
   useMutation,
+  useInfiniteQuery,
   useQuery,
   useQueryClient,
   type QueryClient,
@@ -36,6 +37,8 @@ import type {
   Post,
   PostListResponse,
   SchedulePostInput,
+  CreateQueueInput,
+  UpdateQueueInput,
   UpdateBrandProfileInput,
   UpdateDistributionInput,
   UpdatePostInput,
@@ -99,6 +102,8 @@ export const queryKeys = {
     params === undefined ? (["posts"] as const) : (["posts", normalizeParams(params)] as const),
   post: (id: string) => ["posts", id] as const,
   assets: () => ["assets"] as const,
+  queues: (brandProfileId?: string) =>
+    brandProfileId === undefined ? (["queues"] as const) : (["queues", brandProfileId] as const),
   brandProfiles: () => ["brand-profiles"] as const,
   deletedBrandProfiles: () => ["brand-profiles", "deleted"] as const,
   asset: (id: string) => ["assets", id] as const,
@@ -171,6 +176,7 @@ function brandProfileResourceInvalidations(): QueryKey[] {
     queryKeys.platforms(),
     queryKeys.distributions(),
     queryKeys.calendar(),
+    queryKeys.queues(),
   ];
 }
 
@@ -188,6 +194,8 @@ function postResourceInvalidations(): QueryKey[] {
 }
 
 export const mutationInvalidations = {
+  queueConfiguration: () => [queryKeys.queues()],
+  removePostFromQueue: () => [...postResourceInvalidations(), queryKeys.queues()],
   createPost: () => postResourceInvalidations(),
   updatePost: () => postResourceInvalidations(),
   deletePost: () => postResourceInvalidations(),
@@ -608,6 +616,84 @@ export function useSchedulePost(scope: SessionScope) {
     (api, variables: { id: string; input: SchedulePostInput }, idempotencyKey) =>
       api.schedulePost(variables.id, variables.input, { idempotencyKey }),
     mutationInvalidations.schedulePost,
+  );
+}
+/** Pages active Queues for one explicit owner. Additional pages are user-driven; disabled consumers perform no reads. */
+export function useQueues(scope: SessionScope, brandProfileId: string | null, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.queues(brandProfileId ?? ""),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      runApiQuery(
+        scope,
+        (api) =>
+          api.listQueues({
+            brand_profile_id: brandProfileId!,
+            limit: 50,
+            ...(pageParam ? { cursor: pageParam } : {}),
+          }),
+        signal,
+      ),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    enabled: scope.isSignedIn && brandProfileId !== null && enabled,
+  });
+}
+
+/** Pages only one Queue's bounded calendar window. Consumers drain pages before declaring the window complete; Post-prefix invalidation refreshes reservations after removal/scheduling, and 30-second polling follows due work even before its first transition. */
+export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryParams) {
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.posts(params), "queue-calendar"],
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) =>
+      runApiQuery(
+        scope,
+        (api) => api.listPosts({ ...params, limit: 100, offset: pageParam }),
+        signal,
+      ),
+    getNextPageParam: (page) => (page.has_more ? page.offset + page.limit : undefined),
+    refetchInterval: 30_000,
+    enabled: scope.isSignedIn,
+  });
+}
+
+/** Creates a recurring plan with the shared stable-key mutation lifecycle. */
+export function useCreateQueue(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: CreateQueueInput, idempotencyKey) => api.createQueue(input, { idempotencyKey }),
+    mutationInvalidations.queueConfiguration,
+  );
+}
+
+/** Edits only future allocations and refreshes the authoritative configuration roster. */
+export function useUpdateQueue(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { id: string; input: UpdateQueueInput }, idempotencyKey) =>
+      api.updateQueue(variables.id, variables.input, { idempotencyKey }),
+    mutationInvalidations.queueConfiguration,
+  );
+}
+
+/** Retires an idle plan, surfacing unresolved membership as a recoverable conflict. */
+export function useDeleteQueue(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { id: string; brandProfileId: string }, idempotencyKey) =>
+      api.deleteQueue(variables.id, variables.brandProfileId, { idempotencyKey }),
+    mutationInvalidations.queueConfiguration,
+  );
+}
+
+/** Releases one safely editable Queue reservation and refreshes Posts, outcomes and timeline together. */
+export function useRemovePostFromQueue(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, variables: { queueId: string; postId: string; brandProfileId: string }, idempotencyKey) =>
+      api.removePostFromQueue(variables.queueId, variables.postId, variables.brandProfileId, {
+        idempotencyKey,
+      }),
+    mutationInvalidations.removePostFromQueue,
   );
 }
 

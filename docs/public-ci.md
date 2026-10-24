@@ -47,8 +47,10 @@ The [extended workflow](../.github/workflows/extended.yml) exposes manually
 selected lanes: `frontend-full` for full browser/Lighthouse journeys,
 `frontend-ui` for focused UI verification, `cloudflare-full` for
 `bun run cloudflare:check`, `cloudflare-integration` for live-local topology/load,
-`cloudflare-extended` for release/staging/IaC checks, and `object-storage` for
-provider switching. The storage lane builds a pinned MinIO release from source,
+`cloudflare-extended` for release/staging/IaC checks, `publishing-queues` for the
+complete application gate, changed-scope React review, and real Queue browser/
+API/PostgreSQL/background delivery journey, and `object-storage` for provider
+switching. The storage lane builds a pinned MinIO release from source,
 checks live S3 operations, runs `bun run cloudflare:check`, then exercises
 application uploads, native media processing, private delivery, and retention
 against R2 and MinIO. They run on GitHub-hosted machines without deployment
@@ -87,6 +89,19 @@ phone, and reported-user-width captures plus failure traces.
 The React Doctor invocation is pinned in the workflow and receives no GitHub token.
 Its changed-scope comparison fetches the public base branch without credentials.
 The topology lane owns a separate backend process for load checks after smoke exits.
+
+The browser phase recreates its disposable database after the integration gate,
+so quota-boundary fixtures cannot exhaust browser uploads. Production limits are
+unchanged.
+
+The Queue lane exercises two real future reservations, reload, media processing,
+safe removal, a controlled Provider failure and retry, and retained history after
+retirement. Desktop/phone screenshots cover both palettes. Local Wrangler does
+not run Cron automatically, so the journey dispatches the real scheduled handler
+at wall-clock time through its local explorer API; it never changes stored due
+times or injects a future clock. This controlled external Provider evidence is
+not credentialed live-Platform acceptance, and never promotes endpoint readiness
+without that separate evidence.
 
 The existing self-hosted image smoke includes Chromium owner journeys: first-run
 creation, SMTP-captured verification/reset links, closed registration, password

@@ -25,6 +25,8 @@ import {
   hashIdempotencyRequestEffect,
   reserveIdempotencyEffect,
 } from "./idempotency";
+import { lockOrganizationEffect } from "./organization-lock";
+import { requireNoQueueMembershipEffect } from "./publishing-queue-store";
 
 type Schemas = components["schemas"];
 type Distribution = Schemas["Distribution"];
@@ -718,6 +720,17 @@ export function createDistributionMethods() {
               catch: (cause) => cause as CoreApiError,
             });
             yield* requireActiveDistributionProfileEffect(client, organizationId, id);
+            // A Queue owns the shared instant; serialize against enqueue/removal
+            // before checking membership so per-Channel edits cannot split it.
+            if (patch.scheduledAt !== undefined) {
+              yield* lockOrganizationEffect(client, organizationId);
+              const owner = yield* client.query<{ post_id: string }>(
+                "SELECT post_id FROM distributions WHERE id = $1",
+                [id],
+              );
+              if (owner.rows[0])
+                yield* requireNoQueueMembershipEffect(client, owner.rows[0].post_id);
+            }
             const result = yield* client.query<DistributionRow>(
               `UPDATE distributions SET
                  scheduled_at = COALESCE($3, scheduled_at),

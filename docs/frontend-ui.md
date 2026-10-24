@@ -76,6 +76,62 @@ Posts Table and its Columns menu share `postAnalyticsColumns`: Likes, Cmts, Shrs
 
 The empty Table message and Create post action belong to the visible viewport outside the wide table body, so they do not disappear offscreen with analytics columns. Calendar navigation is outside its independently scrolling date canvas; horizontal or vertical calendar movement cannot carry Today, period navigation, or Month/Week away.
 
+Queues extends `PostCalendarGridView` rather than introducing a second month grid
+or period toolbar. `CalendarTimeGrid` owns hourly Week geometry and current-time
+paint; `QueueCalendar` owns Queue timezone, bounded fully paged reads, its live
+clock, upcoming assignment selection and focused reservation actions. `post-row.ts`
+projects real Post/Channel data for both routes, including frozen Provider content.
+The existing shared Button, SegmentedControl, Tooltip and centered dialog owners
+retain focus, selection, animation and destructive confirmation behavior.
+Desktop Queue navigation uses neutral shared Buttons and `SidebarGlideHighlight`;
+phones use a compact Select, with the same administrator actions in DropdownMenu.
+The Week canvas initially reveals today and keeps its time axis visible during
+horizontal swipes. Phone Month fits all seven dates and uses assignment counts
+instead of unreadably narrow Post chips; selecting a date/count opens its Week.
+
+`QueueTimezonePicker` owns Queue timezone selection: the finite browser IANA
+catalog plus `UTC` and the saved alias, ranked by substring then ordered
+character gaps, so `ktm` finds Asia/Katmandu and `yk` finds Reykjavik or Yakutsk.
+The panel renders **inline** under its trigger, not in a portal: a portalled list
+inside a modal dialog has its wheel events cancelled by the dialog's scroll lock
+and cannot scroll. It composes the shared menu surface, Input, Button and React
+Aria's keyboard listbox, holds a fixed 240px list that scrolls inside the dialog,
+and centers the saved zone when it opens. Search never commits (Enter in the
+search field must not submit the Queue form), choosing an identifier closes the
+panel, and Escape belongs to the panel while it is open — the dialog declines the
+same keypress so one layer closes at a time.
+
+Week chips paint over the hourly canvas, so they use the opaque
+`--accent-tint-solid`/`--green-tint-solid`/`--red-tint-solid` twins rather than the
+translucent tints; otherwise the hour rules show through the chip.
+
+The Queue editor bounds its Weekly slots list (`max-h-72`, its own scroll) so a
+plan with many slots scrolls inside the dialog instead of stretching it; `Add
+slot` sits below the scroller and stays reachable.
+
+`calendarSlots` projects the validated weekly plan onto the visible civil days
+for display only, applying the allocator's rules: nonexistent DST occurrences are
+skipped and repeated hours use the later instant. An exact-instant membership
+renders a **filled** slot using the real Post chip; every other projected
+occurrence renders a dashed **open** slot, muted once elapsed. Off-plan immutable
+reservations remain ordinary Post chips rather than being folded into a slot. The
+projection is bounded by the visible window (at most 42 days) and the plan's
+slots; it never allocates, moves, or mutates work. Month interleaves slots and
+off-plan Posts in time order and summarizes filled/unfilled counts; the first
+three chips are the earliest entries. Date buttons include those counts in their
+accessible names whenever the loaded Month summary is shown. Week places both
+on the hourly canvas.
+
+The red current-time rule is painted only inside today's column, with its clock
+label anchored there, and never spans the week or other dates. Month↔Week changes
+commit through `transitionViewEffect` (native View Transitions): only the seven
+date labels that survive into Week keep a `view-transition-name`, they morph while
+the rest of the calendar crossfades, the toolbar stays still, and unsupported
+browsers or native reduced motion commit immediately.
+Repeated choices skip the previous transition without skipping its state commit.
+The Queue page body never installs a second smooth-scroll controller on phones;
+only the calendar viewport owns it.
+
 Post deletion soft-deletes composition and stops only pending delivery; it does not delete platform copies or retained publication history. Both Post and Calendar collection reads exclude soft-deleted Posts, so view switching and reloads cannot reconstruct them from retained Distributions.
 
 Channels follows the Members directory composition: Accounts/Brand Profiles tabs, account search, status segments, field-row filters, identity table, and real profile cards. The section tabs' accent rule and the status segments' surface pill are each one travelling `SlidingHighlight`, so switching a section or a status slides the selection instead of repainting two controls. Connection cells contain one accessible health icon; recovery remains available without duplicate status text. Its background and controls match Posts.
@@ -110,7 +166,7 @@ The shared `FilterChecklist` in `@meltiply/ui/dropdown-menu` owns checkbox toggl
 
 `PostsDrawer` keeps an interrupted composition mounted in a hidden, inert section while inspection takes presentation priority. Closing inspection or choosing the drawer's New Post control resumes that live composition, including uploads, without functional-storage consent. Explicit composition dismissal releases it after the exit. Editing/scheduling dependencies load lazily under a drawer-local Suspense fallback; browsing does not import them eagerly. Composer URL intent synchronizes in both directions on navigation and history changes.
 
-The composer uses `ComposerSection` for titled sections and `DestinationSelector` for targeting. **Shared Content** leads the editor, followed by attached media and each selected Channel's named region containing caption overrides, attachment selection, and provider settings; no composer tabs hide these controls. Wide panels give destinations/publishing a 340px column and the editor the remaining width. The editor scrolls independently with its scrollbar hidden by the existing `hide-scrollbar` utility; shrinkable ancestors and non-shrinking sections preserve scrolling. Narrow panels stack in DOM order inside the drawer's native scrolling body. The pinned action bar carries the real save state and the single action resolved by the publishing mode. Once per mounted composer session, initialization preserves a concrete Brand Profile choice or selects the first available profile; reopening from aggregate scope waits for the Post and adopts its actual owner. Later aggregate selections remain unchanged. That owner is composer-local: opening the composer never writes the collection's Brand Profile selection, so the Posts list and its filter stay exactly as the creator left them behind the drawer.
+The composer uses `ComposerSection` for titled sections and `DestinationSelector` for targeting. **Shared Content** leads the editor, followed by attached media and each selected Channel's named region containing caption overrides, attachment selection, and provider settings; no composer tabs hide these controls. Wide panels give destinations/publishing a 340px column and the editor the remaining width. The editor scrolls independently with its scrollbar hidden by the existing `hide-scrollbar` utility; shrinkable ancestors and non-shrinking sections preserve scrolling. Narrow panels stack in DOM order inside the drawer's native scrolling body. The pinned action bar carries the real save state and the single action resolved by the publishing mode. Once per mounted composer session, initialization preserves a concrete Brand Profile choice or selects the first available profile; reopening from aggregate scope waits for the Post and adopts its actual owner. Later aggregate selections remain unchanged. That owner is composer-local: opening the composer never writes the collection's Brand Profile selection, so the Posts list and its filter stay exactly as the creator left them behind the drawer. Composer-initiated navigation — **Manage Queues** and **Add Channel** — asks for an explicit save-draft, discard, or keep-editing decision when unsaved changes could not be restored after leaving (no functional-storage consent); with consent, the recovery record restores the composition when the composer reopens.
 
 `DestinationSelector` keeps composition profile selection local, groups accounts by provider, and identifies each account's owning profile. Selecting profiles never changes the composition's anchor/identity or discards its inputs. `profile-copies.ts` coordinates existing Post and upload mutations: one stable Post and separately owned media per selected profile, target attachment remapping, all-drafts-before-scheduling, per-profile progress, and unchanged-intent retry without rescheduling completed copies. Browser recovery validates and retains these identities only with functional consent. A single anchor profile preserves the existing single-Post path.
 
@@ -121,13 +177,15 @@ Recovered original-media copies reconstruct a valid filename extension from the 
 
 Every account uses the same `ChannelAvatar` owner as the Channels directory (`frontend/app/src/components/channels/channel-avatar.tsx`): an account photo when supplied, account initials when missing or failed, and a separate small provider badge. Account names, platform labels, and unavailable connection states remain visible. Eligible destinations start selected; explicit empty selection remains empty. The publishing selector uses `SegmentedControl fill`. The shared caption uses bounded `Textarea autoGrow`, shows used/maximum code-point characters from the tightest selected platform capability, and clamps new typing at that limit without truncating restored drafts. Unknown limits display an em dash with an unavailable explanation rather than an invented maximum; Channel overrides use their own platform limits.
 
+Queue mode uses that same selector and the canonical Select for a named plan; feature-owned queries enforce one owning Brand Profile. The Queues route composes `WorkspaceSurface`, `CenterDialog`, `CenterAlertDialog`, Input, Select, and Button rather than adding another control family. Its editor owns configuration and stable slot-row identities; the feature owns roles, tenant scope, pagination, async outcomes, and confirmations. Configuration writes stay open on validation errors and refuse dismissal while pending. Membership inspection keeps immutable assigned instants and Channel statuses separate from configuration.
+
 Provider editor headings use the canonical `PlatformIcon`; account-name and provider tags are absent. Channel caption fields are always available, inherit shared content until first edited, and preserve intentional blanks independently of later shared edits. Only an active override exposes **Remove Custom Override** to restore live inheritance. `ChannelAvatar` owns an explicit flex positioning box so its small provider badge stays anchored to the account photo or initials. Its `card` size supplies a compact 48px rounded-square portrait for destination cards; the directory retains the compact circular default.
 
 Destination cards use 8px padding and gaps, with the display name and platform sharing the first line. Separate **Username: @handle** and **ID: provider-assigned identifier** lines follow, including for unavailable accounts. `ChannelIntegration.username` preserves the contract's optional `username`, and `platformUserId` preserves `platform_user_id`; Meltiply's internal account id remains the selection key. The existing `formatUsername` helper adds only the display @ prefix. Missing/blank usernames explicitly say **Username not provided** and are never inferred from a display name or either id. Both identity values wrap within the card so the full values remain readable on phones.
 
 Each Channel's attachment mode uses the canonical `Switch`: off persists a text-only target, on restores inheritance of all current/future Post attachments, and an explicit non-empty attachment subset keeps the switch on. Individual attachment choices remain available. `ProviderPanel` supplies an inline-size container so all six TikTok interaction/disclosure switches share one flat grid: two columns when the panel has room, one on narrow panels, with full-row labels and unchanged creator-availability gates. Provider capability metadata keeps the adapters' canonical caption ceilings even when credentials/live acceptance are absent; publish/connect flags remain false, and the composer does not invent a fallback limit.
 
-`ScheduleDateTime` (`frontend/app/src/components/composer/schedule-date-time.tsx`) shows a compact date button beside one React Aria segmented 24-hour time field, with the browser's time zone underneath. The date button opens a 280px Radix popover containing React DayPicker; coarse pointers get a 328px panel and 44px day targets. The calendar uses only the weeks its month needs. Canonical `Button`/`buttonVariants` and `Input`/`inputVariants` own control styling; the popover reuses the shared menu surface and motion hooks. Keep the popover's Radix release aligned with the drawer's dismissal/focus primitives so Escape closes only the top layer. Libraries own calendar geometry, localization, focus, and hour/minute typing and arrow-key editing. Selecting a date closes the popover and returns focus to its button. Browsing does not commit a date; choosing one preserves time, and changing time preserves the local date. The composer still owns seed/hydration/recovery, local-to-ISO conversion, and submit validation.
+`ScheduleDateTime` (`frontend/app/src/components/composer/schedule-date-time.tsx`) shows a compact date button beside `TimeOfDayField` (`frontend/app/src/components/posts/time-of-day-field.tsx`), with the browser's time zone underneath. The same publishing-feature wall-time editor serves recurring Queue slots; it accepts complete `HH:mm` values without converting timezones and composes React Aria segments with the canonical Input, Popover and Select owners. Disabled slots disable both segmented editing and chooser controls. The date button opens a 280px Radix popover containing React DayPicker; coarse pointers get a 328px panel and 44px day targets. The calendar uses only the weeks its month needs. Canonical `Button`/`buttonVariants` and `Input`/`inputVariants` own control styling; the popover reuses the shared menu surface and motion hooks. Keep the popover's Radix release aligned with the drawer's dismissal/focus primitives so Escape closes only the top layer. Libraries own calendar geometry, localization, focus, and hour/minute typing and arrow-key editing. Selecting a date closes the popover and returns focus to its button. Browsing does not commit a date; choosing one preserves time, and changing time preserves the local date. The composer still owns seed/hydration/recovery, local-to-ISO conversion, and submit validation.
 
 `@meltiply/ui/popover` owns anchored, non-menu form panels, including both scheduler pickers. It portals Radix content with the shared surface/motion hooks, a 6px offset, and 16px collision padding; feature callers own labels, dimensions, and form state rather than importing Radix directly.
 

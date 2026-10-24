@@ -30,7 +30,9 @@ import {
 } from "./audit";
 import type { BrandProfileApiService } from "./brand-profile-service";
 import type { AssetApiService } from "./asset-types";
-import type { PostApiService, PostTargetInput } from "./post-types";
+import type { PostApiService, PostTargetInput, SchedulePostInput } from "./post-types";
+import type { PublishingQueueApiService } from "./publishing-queue-service";
+import { registerPublishingQueueRoutes } from "./publishing-queue-routes";
 import type { StorageService } from "./effect/services/storage";
 import { scheduleInboxCommentSync } from "./inbox-comment-sync";
 import type { ApiWorkerEnv, ApiWorkerEnvironment, OAuthStateStub } from "./env";
@@ -84,6 +86,7 @@ export interface CoreRouteDependencies {
   brandProfileService?: BrandProfileApiService;
   coreService?: CoreApiService;
   postService?: PostApiService;
+  publishingQueueService?: PublishingQueueApiService;
   providerRegistry?: ProviderRegistry;
   publicationRequirements?: PublicationRequirementsReader;
   revokeOAuthConnection?: OAuthConnectionRevoker;
@@ -2028,6 +2031,22 @@ export function registerCoreRoutes(
           enumParam(c.req.query("status"), "status", POST_STATUS_VALUES),
         );
         const brandProfileId = yield* fromPromise(() => optionalBrandProfileParam(c));
+        const queueId = c.req.query("queue_id");
+        if (queueId !== undefined) yield* fromPromise(() => uuidParam(queueId, "queue_id"));
+        const from = c.req.query("queue_assigned_from");
+        const before = c.req.query("queue_assigned_before");
+        const queueWindow =
+          from === undefined && before === undefined
+            ? undefined
+            : yield* fromPromise(() => {
+                if (!queueId)
+                  throw new CoreApiError(
+                    400,
+                    "invalid_request",
+                    "Queue assignment windows require queue_id.",
+                  );
+                return dateRange(from, before, 63);
+              });
         const limit = yield* fromPromise(() =>
           integerParam(c.req.query("limit"), "limit", 20, 1, 100),
         );
@@ -2037,6 +2056,8 @@ export function registerCoreRoutes(
         const postService = yield* fromPromise(posts);
         const result = yield* postService.listPosts(c.env, c.get("actor").claims, {
           ...(brandProfileId ? { brandProfileId } : {}),
+          ...(queueId ? { queueId } : {}),
+          ...(queueWindow ? { queueWindow } : {}),
           limit,
           offset,
           ...(status ? { status } : {}),
@@ -2142,13 +2163,24 @@ export function registerCoreRoutes(
       Effect.gen(function* () {
         const postId = yield* fromPromise(() => uuidParam(c.req.param("postId"), "post_id"));
         const body = yield* fromPromise(() => jsonBody(c));
-        yield* fromPromise(() => onlyKeys(body, ["brand_profile_id", "scheduled_at", "targets"]));
-        const input = yield* fromPromise(() => ({
+        yield* fromPromise(() =>
+          onlyKeys(body, ["brand_profile_id", "scheduled_at", "queue_id", "targets"]),
+        );
+        if ("scheduled_at" in body === "queue_id" in body) {
+          return yield* Effect.fail(
+            new CoreApiError(
+              400,
+              "validation_error",
+              "Supply exactly one of scheduled_at or queue_id.",
+            ),
+          );
+        }
+        const input: SchedulePostInput = yield* fromPromise(() => ({
           brandProfileId: uuidParam(stringField(body, "brand_profile_id"), "brand_profile_id"),
-          // `null` means publish immediately, so it must survive parsing as a
-          // real null rather than being coerced to an absent or invalid date.
-          scheduledAt: body.scheduled_at === null ? null : dateField(body, "scheduled_at"),
           targets: postTargets(body),
+          ...(body.queue_id !== undefined
+            ? { queueId: uuidParam(stringField(body, "queue_id"), "queue_id") }
+            : { scheduledAt: body.scheduled_at === null ? null : dateField(body, "scheduled_at") }),
         }));
         const key = yield* fromPromise(() => idempotencyKey(c));
         const postService = yield* fromPromise(posts);
@@ -2594,4 +2626,5 @@ export function registerCoreRoutes(
   );
 
   registerWorkspaceLifecycleRoutes(app, dependencies.workspaceLifecycle);
+  registerPublishingQueueRoutes(app, dependencies.publishingQueueService);
 }

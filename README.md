@@ -10,7 +10,7 @@ Compose social posts, organize connected accounts, schedule publishing, and trac
 - Organize accounts into Brand Profiles.
 - Monitor publishing outcomes and retry eligible failures.
 
-The current app focuses on **Posts**, **Analytics**, and **Channels**. Inbox, team administration, and a standalone media library are not available app surfaces. See the [capability inventory](docs/frontend-capabilities.md) for current scope and restoration prerequisites. Provider features depend on each platform's APIs and account permissions.
+The current app focuses on **Posts**, **Analytics**, **Channels**, and named weekly **Queues**. Inbox and a standalone media library are not available app surfaces. See the [capability inventory](docs/frontend-capabilities.md) for current scope and restoration prerequisites. Provider features depend on each platform's APIs and account permissions.
 
 ## Get started
 

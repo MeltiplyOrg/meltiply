@@ -69,12 +69,15 @@
   /* Source brand + semantic ramps */
   --color-accent-ink: var(--accent-ink);
   --color-accent-tint: var(--accent-tint);
+  --color-accent-tint-solid: var(--accent-tint-solid);
   --color-green: var(--green);
   --color-green-tint: var(--green-tint);
+  --color-green-tint-solid: var(--green-tint-solid);
   --color-orange: var(--orange);
   --color-orange-tint: var(--orange-tint);
   --color-red: var(--red);
   --color-red-tint: var(--red-tint);
+  --color-red-tint-solid: var(--red-tint-solid);
 
   /* Provider colors identify external Platform brands; product state stays semantic. */
   --color-platform-facebook: var(--platform-facebook);

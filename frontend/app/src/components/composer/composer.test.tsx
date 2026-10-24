@@ -12,7 +12,7 @@ import { WorkspaceProvider } from "@/context/workspace.context";
 import { createAssetUpload, type AssetUploadTask } from "@/lib/upload";
 import type { Asset, BrandProfile, PlatformAccount, Post } from "@/types";
 
-import { Composer } from "./composer";
+import { Composer, type ComposerProps } from "./composer";
 import { authClient } from "@/lib/auth-client";
 import { I18nProvider } from "@/lib/i18n";
 import { queryKeys } from "@/lib/queries";
@@ -64,6 +64,8 @@ function renderComposer(
     capabilities?: ReturnType<typeof platformCapability>[];
     /** Ordered real profile records used to exercise default owner selection. */
     brandProfiles?: BrandProfile[];
+    /** Composer-initiated workspace navigation, e.g. Manage Queues. */
+    onNavigate?: ComposerProps["onNavigate"];
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -85,7 +87,7 @@ function renderComposer(
       <I18nProvider>
         <AppAuthProvider>
           <WorkspaceProvider>
-            <Composer initialPostId={options.initialPostId} />
+            <Composer initialPostId={options.initialPostId} onNavigate={options.onNavigate} />
             <ProfileSwitchProbe profileId="profile-b" />
           </WorkspaceProvider>
         </AppAuthProvider>
@@ -115,6 +117,7 @@ afterEach(() => {
 const hydratedPost: Post = {
   analytics: null,
   distribution_analytics: [],
+  queue_membership: null,
   id: "post-hydrated",
   org_id: "org-1",
   brand_profile_id: "profile-a",
@@ -427,5 +430,68 @@ describe("Composer caption bound", () => {
 
     fireEvent.change(textarea, { target: { value: "x".repeat(20) } });
     expect(textarea).toHaveValue("x".repeat(20));
+  });
+});
+
+/**
+ * Navigation out of the composer unmounts it. Without functional-storage
+ * consent the recovery record is never written, so leaving from an in-composer
+ * link must not silently discard the creator's composition.
+ */
+describe("Composer leave guard", () => {
+  it("asks before leaving unsaved work that recovery cannot restore", async () => {
+    const onNavigate = vi.fn();
+    renderComposer({ onNavigate });
+
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.change(textarea, { target: { value: "Unsaved without functional storage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
+
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.getByText("Save this Post before leaving?")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard and continue" }));
+    expect(onNavigate).toHaveBeenCalledWith("queues", undefined);
+  });
+
+  it("keeps the composer open when the draft cannot be saved", async () => {
+    const onNavigate = vi.fn();
+    renderComposer({ onNavigate });
+
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.change(textarea, { target: { value: "draft" } });
+    fireEvent.change(textarea, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save draft and continue" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("Post must contain text content or at least one media item."),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves directly when functional recovery can restore the composition", async () => {
+    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    const onNavigate = vi.fn();
+    renderComposer({ onNavigate });
+
+    const textarea = composerTextarea();
+    await waitFor(() => expect(textarea).toBeEnabled());
+    fireEvent.change(textarea, { target: { value: "Recoverable draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
+
+    expect(onNavigate).toHaveBeenCalledWith("queues", undefined);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 });

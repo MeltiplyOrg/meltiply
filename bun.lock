@@ -276,6 +276,7 @@
         "@meltiply/storage": "workspace:*",
         "effect": "4.0.5",
         "hono": "4.13.7",
+        "zod": "4.6.5",
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "catalog:",

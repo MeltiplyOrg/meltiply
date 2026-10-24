@@ -12,7 +12,7 @@ Contract change: approved in conversation on 2026-10-19
 > Implementation note (2026-10-22): extended to the full 12-chart Social
 > Media Analytics Dashboard per graph requirements. Adds additive
 > `/analytics/dashboard` endpoint, account-level follower snapshots via
-> `platform_account_snapshots` (migration 018), content format breakdowns from
+> `platform_account_snapshots` (migration 019), content format breakdowns from
 > frozen attachments, 7x24 publication heatmaps, time series with period deltas,
 > frequency-vs-engagement scatter, engagement accumulation, and shared filters
 > for account and content format. Saves, clicks, and missing follower histories
@@ -70,7 +70,7 @@ Contract change: approved in conversation on 2026-10-19
 > Channel with a visible limit notice.
 >
 > Review hardening (2026-10-24): account follower capture claims up to 25 usable,
-> configured Channels hourly, with four concurrent reads. Migration 020 records
+> configured Channels hourly, with four concurrent reads. Migration 021 records
 > attempts before provider I/O; successes, failures, and interrupted attempts wait
 > six hours, with oldest attempts first so denied grants cannot starve later
 > Channels. Expiring accounts wait for token refresh. Publishing does not require
@@ -505,7 +505,7 @@ metric into SQL.
 
 ### 6.4 Index migration
 
-Add `packages/database/migrations/017_analytics_page_indexes.sql`:
+Add `packages/database/migrations/018_analytics_page_indexes.sql`:
 
 ```sql
 CREATE INDEX IF NOT EXISTS idx_distributions_org_published_at

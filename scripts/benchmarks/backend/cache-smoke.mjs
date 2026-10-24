@@ -149,13 +149,15 @@ export async function cacheSmoke({
       true,
     );
     // Persisted lifecycle changes bypass any local invalidation: a second DB client writes directly.
-    await query("UPDATE brand_profiles SET deleted_at = now(), updated_at = now() WHERE id = $1", [
-      profile.id,
-    ]);
+    await query(
+      "UPDATE brand_profiles SET deleted_at = now(), purge_at = now() + interval '30 days', updated_at = now() WHERE id = $1",
+      [profile.id],
+    );
     assert.equal((await api(warmPath)).data.totals.post_count, 0);
-    await query("UPDATE brand_profiles SET deleted_at = NULL, updated_at = now() WHERE id = $1", [
-      profile.id,
-    ]);
+    await query(
+      "UPDATE brand_profiles SET deleted_at = NULL, purge_at = NULL, updated_at = now() WHERE id = $1",
+      [profile.id],
+    );
     assert.equal((await api(warmPath)).data.totals.views, 1280);
     // More than 64 meaningful identities: oldest completed entry must be eligible for recomputation.
     const overflow = Array.from(

@@ -48,7 +48,14 @@ export default {
         fetch: (input, init) => env.REQUIREMENTS_UPSTREAM.fetch(input, init),
       });
       registry.register("tiktok", {
-        capability,
+        capability: {
+          ...capability,
+          analytics: false,
+          comments: false,
+          reply: false,
+          publish: false,
+          connect_available: false,
+        },
         transferModes: [],
         getPublicationRequirements: async (context) => {
           const response = await http.request<unknown>(context, {

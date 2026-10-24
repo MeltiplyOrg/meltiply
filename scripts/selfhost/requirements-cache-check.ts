@@ -109,7 +109,7 @@ try {
       host: "127.0.0.1",
       cf: {},
       telemetry: { enabled: false },
-      log: new Log(LogLevel.INFO),
+      log: new Log(LogLevel.ERROR),
       workers: [
         {
           name: "requirements-network-smoke",

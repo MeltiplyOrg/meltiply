@@ -110,8 +110,10 @@ occurrence renders a dashed **open** slot, muted once elapsed. Off-plan immutabl
 reservations remain ordinary Post chips rather than being folded into a slot. The
 projection is bounded by the visible window (at most 42 days) and the plan's
 slots; it never allocates, moves, or mutates work. Month interleaves slots and
-off-plan Posts in time order and summarizes filled/unfilled counts; Week places
-both on the hourly canvas.
+off-plan Posts in time order and summarizes filled/unfilled counts; the first
+three chips are the earliest entries. Date buttons include those counts in their
+accessible names whenever the loaded Month summary is shown. Week places both
+on the hourly canvas.
 
 The red current-time rule is painted only inside today's column, with its clock
 label anchored there, and never spans the week or other dates. Month↔Week changes

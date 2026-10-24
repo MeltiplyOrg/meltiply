@@ -401,17 +401,27 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                       mode === "month" && timeline
                         ? [
                             ...daySlots.flatMap((slot) => {
-                              if (!slot.postId) return [renderSlotChip(slot)];
+                              if (!slot.postId)
+                                return [{ instant: slot.instant, chip: renderSlotChip(slot) }];
                               const row = postById.get(slot.postId);
-                              return row ? [renderPostChip(row)] : [];
+                              return row
+                                ? [{ instant: slot.instant, chip: renderPostChip(row) }]
+                                : [];
                             }),
                             ...dayPosts
                               .filter((row) => !daySlots.some((slot) => slot.postId === row.id))
-                              .map((row) => renderPostChip(row)),
+                              .map((row) => ({ instant: row.date, chip: renderPostChip(row) })),
                           ]
+                            .sort((a, b) => Date.parse(a.instant) - Date.parse(b.instant))
+                            .map((entry) => entry.chip)
                         : [];
                     const isToday = key === today;
                     const fullDate = dateLabel.format(cell.date);
+                    const showMonthSummary =
+                      timeline &&
+                      mode === "month" &&
+                      !isLoading &&
+                      (daySlots.length > 0 || dayPosts.length > 0);
                     return (
                       <div
                         key={key}
@@ -436,7 +446,14 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                           <Button
                             variant="ghost"
                             size="icon"
-                            aria-label={t("View posts on {date}", { date: fullDate })}
+                            aria-label={
+                              showMonthSummary
+                                ? `${t("View posts on {date}", { date: fullDate })} · ${t(
+                                    "{filled} filled · {empty} unfilled",
+                                    { filled: filledSlots, empty: emptySlots.length },
+                                  )}`
+                                : t("View posts on {date}", { date: fullDate })
+                            }
                             aria-current={isToday ? "date" : undefined}
                             onClick={() => onCellClick(cell.date)}
                             data-calendar-date={timeline && morphKeys.has(key) ? "" : undefined}
@@ -462,29 +479,26 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                             )}
                           >
                             {cell.dayNumber}
-                            {timeline &&
-                              mode === "month" &&
-                              !isLoading &&
-                              (daySlots.length > 0 || dayPosts.length > 0) && (
+                            {showMonthSummary && (
+                              <span
+                                className="inline-flex items-center gap-1 text-(length:--font-size-micro) sm:hidden"
+                                aria-label={t("{filled} filled · {empty} unfilled", {
+                                  filled: filledSlots,
+                                  empty: emptySlots.length,
+                                })}
+                              >
                                 <span
-                                  className="inline-flex items-center gap-1 text-(length:--font-size-micro) sm:hidden"
-                                  aria-label={t("{filled} filled · {empty} unfilled", {
-                                    filled: filledSlots,
-                                    empty: emptySlots.length,
-                                  })}
-                                >
-                                  <span
-                                    className="size-1.5 rounded-full bg-current"
-                                    aria-hidden="true"
-                                  />
-                                  {filledSlots}
-                                  <span
-                                    className="size-1.5 rounded-full border border-current"
-                                    aria-hidden="true"
-                                  />
-                                  {emptySlots.length}
-                                </span>
-                              )}
+                                  className="size-1.5 rounded-full bg-current"
+                                  aria-hidden="true"
+                                />
+                                {filledSlots}
+                                <span
+                                  className="size-1.5 rounded-full border border-current"
+                                  aria-hidden="true"
+                                />
+                                {emptySlots.length}
+                              </span>
+                            )}
                           </Button>
                           {mode === "week" && (
                             <span className="text-xs text-ink-3">

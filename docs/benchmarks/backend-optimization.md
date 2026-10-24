@@ -385,3 +385,101 @@ uniform latency improvements: target removal's p50 rose 5.2%, and its tail
 latencies and upload creation's tail latencies worsened. No latency win is
 claimed for those cases; the measured regressions remain explicit rather than
 being inferred away from the smaller SQL counts.
+
+## Portable read-cache acceptance (2026-10-24)
+
+This is a new fixed-dataset observation for issue #58, not a reuse of the historical
+baseline above. The application implementation is shared by both deployment paths.
+Node 24.18.0/Bun 1.4.2 hosted runners use PostgreSQL, 128 published Threads
+Distributions with 128 stored snapshots, and authenticated production API routes.
+Each scenario below contains 20 requests. Fixture creation and forced lifecycle
+generation writes are excluded from request latency. Database time is the measured
+canonical aggregate's execution time from `pg_stat_statements`, not total database
+time: warm requests still perform authorization/visibility work.
+
+The managed-path [workerd journey](https://github.com/MeltiplyOrg/meltiply/actions/runs/40103706049)
+passed. The exact-image [Compose run](https://github.com/MeltiplyOrg/meltiply/actions/runs/40104311932)
+passed the complete native amd64/ARM64 deployment smoke, including the disposable
+Provider driver, crash recovery, storage/media processing, email, and optional TLS.
+The table uses the managed run above and this passing Compose run.
+
+| Runtime               | Summary workload                                         | Aggregate executions | Aggregate DB ms | Mean ms | p95 ms |
+| --------------------- | -------------------------------------------------------- | -------------------: | --------------: | ------: | -----: |
+| Managed local workerd | Cold, distinct exact ranges                              |                   20 |           28.38 |   82.05 |  86.44 |
+| Managed local workerd | Uncached, identical range / changed lifecycle generation |                   20 |           28.08 |   79.89 |  84.00 |
+| Managed local workerd | Warm, identical range                                    |                    0 |               0 |   66.92 |  71.55 |
+| Managed local workerd | Concurrent cold, identical range                         |                    1 |            1.99 |  512.34 | 736.11 |
+| Compose amd64         | Cold, distinct exact ranges                              |                   20 |           19.37 |   54.84 |  56.63 |
+| Compose amd64         | Uncached, identical range / changed lifecycle generation |                   20 |           20.00 |   57.57 |  73.23 |
+| Compose amd64         | Warm, identical range                                    |                    0 |               0 |   46.03 |  52.36 |
+| Compose amd64         | Concurrent cold, identical range                         |                    2 |           13.85 |  383.19 | 524.74 |
+| Compose ARM64         | Cold, distinct exact ranges                              |                   20 |           14.57 |   39.98 |  41.34 |
+| Compose ARM64         | Uncached, identical range / changed lifecycle generation |                   20 |           15.22 |   42.41 |  50.40 |
+| Compose ARM64         | Warm, identical range                                    |                    0 |               0 |   34.51 |  37.37 |
+| Compose ARM64         | Concurrent cold, identical range                         |                    1 |            0.78 |  207.26 | 282.45 |
+
+Warm reads avoided the canonical aggregate in every measured request. Concurrent
+cold requests had substantially higher latency than sequential requests; reduced
+work is not a claim of a concurrency latency win. Analytics misses are not
+single-flight: the one/two aggregate observations depend on request scheduling,
+not a guaranteed cross-request computation count. Synthetic local timing does not
+establish production percentages, cross-architecture superiority, or currency savings.
+
+Each journey observed a warm explicit Brand Profile become empty after an independent
+persisted deletion and recover after restoration. A stored snapshot change remained
+hidden before the absolute TTL and became visible after 31 wall-clock seconds.
+Sixty-five distinct exact ranges produced 65 canonical computations; requesting an
+evicted older range recomputed once. All measured summary payloads were 486 bytes.
+The browser visited Posts, Channels, Analytics, and Channels again, dispatched
+focus/reconnect events, and observed one capabilities request; a full reload made
+the second request. Desktop/phone screenshots cover both palettes.
+
+Memory observations are whole-runtime context, not cache-retained heap attribution:
+
+| Runtime               |  Cold measurement | After 65 distinct ranges | Measurement boundary                                 |
+| --------------------- | ----------------: | -----------------------: | ---------------------------------------------------- |
+| Managed local workerd | 521,101,312 bytes |        594,509,824 bytes | RSS sum of workerd descendants owned by the launcher |
+| Compose amd64         |         544.4 MiB |                580.4 MiB | Runtime container working set                        |
+| Compose ARM64         |           503 MiB |                  555 MiB | Runtime container working set                        |
+
+The implementation's 64 × 16 KiB admission limits bound retained serialized summary
+payload to 1 MiB, with bounded key/entry bookkeeping. That is a contractual upper
+bound, **not a measured isolated cache heap**. Runtime memory includes unrelated
+Workers, connections, compiled code, transient allocations, and garbage collection;
+the different observation boundaries must not be compared as cache overhead.
+Provider pending entries are separately bounded to 32, with no completed result
+retention. No shared cache, durable state, new hosted dependency, or cache backup
+is involved.
+
+Credential-free JSON and screenshots are workflow artifacts:
+`extended-portable-caching-smoke/artifacts/cache/managed-local-workerd*.json` and
+`owner-login-{amd64,arm64}/cache/compose-*.json`. The managed-path observation is
+local workerd, not a deployed Cloudflare isolate. Provider evidence uses a
+disposable controlled upstream and never publishes real content; it does not
+certify live Provider permissions or freshness.
+
+The independently dispatched Provider journey measured the following controlled
+upstream counts. Each workload contains 20 API requests; the upstream deliberately
+holds concurrent work while fresh account SQL completes. Its held duration is
+included in latency, so these p95 values are not a sequential-versus-concurrent
+performance comparison.
+
+| Runtime               | Workload                              | Upstream reads | Mean ms | p95 ms |
+| --------------------- | ------------------------------------- | -------------: | ------: | -----: |
+| Managed local workerd | Sequential, cold and after settlement |             20 |   52.75 |  63.27 |
+| Managed local workerd | Concurrent equivalent                 |              1 |  536.92 | 540.62 |
+| Compose amd64         | Sequential, cold and after settlement |             20 |   48.58 |  54.79 |
+| Compose amd64         | Concurrent equivalent                 |              1 |  531.79 | 535.56 |
+| Compose ARM64         | Sequential, cold and after settlement |             20 |   33.14 |  38.45 |
+| Compose ARM64         | Concurrent equivalent                 |              1 |  321.14 | 323.80 |
+
+Each runtime also observed one successful survivor and one upstream read after
+canceling either the initiating network request or its joiner. Two persisted
+credential generations produced two distinguishable upstream reads; a newly
+revoked caller was rejected while the prior valid read finished. HTTP responses
+kept independent request IDs. These are observed network outcomes, not deterministic
+flight-membership or server-interruption acknowledgments; controlled Effect and
+authenticated PostgreSQL route regressions own those exact synchronization guarantees.
+The first Deferred implementation passed in-process tests but failed across real
+Worker HTTP contexts; native Promise outcomes now register each waiter's Effect
+continuation in its own request, with leader work protected by the route's lifetime.

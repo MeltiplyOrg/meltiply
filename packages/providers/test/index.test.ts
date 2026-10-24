@@ -483,8 +483,8 @@ describe("ProviderRegistry", () => {
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/api/v1/platforms/tiktok/callback",
     );
-    expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "user.info.basic,user.info.stats,video.publish,video.list",
+    expect(new Set(authorizationUrl.searchParams.get("scope")?.split(","))).toEqual(
+      new Set(["user.info.basic", "user.info.stats", "video.publish", "video.list"]),
     );
   });
 

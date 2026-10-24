@@ -178,11 +178,11 @@ async function capabilityNavigation({ origin, cookie, label }) {
     await page.getByRole("button", { name: "Analytics", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Analytics", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Channels", exact: true }).click();
-    await page.evaluate(() => { window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("online")); });
+    await page.evaluate(() => { globalThis.dispatchEvent(new Event("focus")); globalThis.dispatchEvent(new Event("online")); });
     for (const dark of [false, true]) {
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-        await page.evaluate((enabled) => document.documentElement.classList.toggle("dark", enabled), dark);
+        await page.evaluate((enabled) => globalThis.document.documentElement.classList.toggle("dark", enabled), dark);
         await page.screenshot({ path: `artifacts/cache/${label}-${dark ? "dark" : "light"}-${width}.png`, fullPage: true });
       }
     }

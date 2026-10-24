@@ -209,7 +209,7 @@ describe("scoped Platform capabilities retention", () => {
       onlineManager.setOnline(false);
       onlineManager.setOnline(true);
     });
-    await waitFor(() => expect(listPlatforms.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(vi.mocked(listPlatforms).mock.calls.length).toBeGreaterThanOrEqual(2));
     now.mockRestore();
 
     expect(screen.getByLabelText("capabilities")).toHaveTextContent(

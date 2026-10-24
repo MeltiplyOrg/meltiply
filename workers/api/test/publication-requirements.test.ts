@@ -60,6 +60,17 @@ interface RequirementGate {
   resolve(value: ProviderPublicationRequirements): void;
 }
 
+/** Creates a settlement gate; ES2023 has no `Promise.withResolvers`. */
+function pendingGate(): RequirementGate {
+  let resolve!: RequirementGate["resolve"];
+  let reject!: RequirementGate["reject"];
+  const promise = new Promise<ProviderPublicationRequirements>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, reject, resolve };
+}
+
 /**
  * Waits until the caller at `index` has passed credential decryption.
  *
@@ -296,7 +307,7 @@ describe("getPublicationRequirementsEffect", () => {
 
   it("coalesces concurrent equivalent reads into one Provider call", async () => {
     await setupMockAccount();
-    const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const gate = pendingGate();
     const getRequirements = vi.fn(() => gate.promise);
     const customRegistry = registry(adapter({ getPublicationRequirements: getRequirements }));
     const first = runRequirements(
@@ -346,7 +357,7 @@ describe("getPublicationRequirementsEffect", () => {
 
   it("releases pending work after a shared Provider failure", async () => {
     await setupMockAccount();
-    const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const gate = pendingGate();
     let attempts = 0;
     const getRequirements = vi.fn(() => {
       attempts += 1;
@@ -417,7 +428,7 @@ describe("getPublicationRequirementsEffect", () => {
     await setupMockAccount();
     const gates: RequirementGate[] = [];
     const getRequirements = vi.fn(() => {
-      const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+      const gate = pendingGate();
       gates.push(gate);
       return gate.promise;
     });
@@ -449,7 +460,7 @@ describe("getPublicationRequirementsEffect", () => {
     await setupMockAccount();
     const gates: RequirementGate[] = [];
     const getRequirements = vi.fn(() => {
-      const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+      const gate = pendingGate();
       gates.push(gate);
       return gate.promise;
     });
@@ -476,7 +487,7 @@ describe("getPublicationRequirementsEffect", () => {
 
   it("does not share reads across Provider registries", async () => {
     await setupMockAccount();
-    const firstGate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const firstGate = pendingGate();
     const firstRead = vi.fn(() => firstGate.promise);
     const secondRead = vi.fn(async () => defaultRequirements);
     const firstRegistry = registry(adapter({ getPublicationRequirements: firstRead }));
@@ -503,7 +514,7 @@ describe("getPublicationRequirementsEffect", () => {
     await setupMockAccount();
     const gates: RequirementGate[] = [];
     const getRequirements = vi.fn(() => {
-      const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+      const gate = pendingGate();
       gates.push(gate);
       return gate.promise;
     });
@@ -564,7 +575,7 @@ describe("getPublicationRequirementsEffect", () => {
 
   it("keeps a shared read available when its initiating caller is interrupted", async () => {
     await setupMockAccount();
-    const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const gate = pendingGate();
     const getRequirements = vi.fn(() => gate.promise);
     const customRegistry = registry(adapter({ getPublicationRequirements: getRequirements }));
     const controller = new AbortController();
@@ -603,7 +614,7 @@ describe("getPublicationRequirementsEffect", () => {
 
   it("removes a canceled waiter without disturbing the shared read", async () => {
     await setupMockAccount();
-    const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const gate = pendingGate();
     const getRequirements = vi.fn(() => gate.promise);
     const customRegistry = registry(adapter({ getPublicationRequirements: getRequirements }));
     const leader = runRequirements(

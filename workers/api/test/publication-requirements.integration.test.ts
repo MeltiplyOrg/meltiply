@@ -169,6 +169,31 @@ interface RequirementGate {
   resolve(value: ProviderPublicationRequirements): void;
 }
 
+interface SignalGate {
+  readonly promise: Promise<void>;
+  resolve(): void;
+}
+
+/** Creates a settlement gate; ES2023 has no `Promise.withResolvers`. */
+function pendingGate(): RequirementGate {
+  let resolve!: RequirementGate["resolve"];
+  let reject!: RequirementGate["reject"];
+  const promise = new Promise<ProviderPublicationRequirements>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, reject, resolve };
+}
+
+/** Creates a one-shot void signal; ES2023 has no `Promise.withResolvers`. */
+function signalGate(): SignalGate {
+  let resolve!: () => void;
+  const promise = new Promise<void>((onResolve) => {
+    resolve = () => onResolve(undefined);
+  });
+  return { promise, resolve };
+}
+
 let baseAccessToken: string;
 
 describe("publishing-requirement coalescing with PostgreSQL RLS", () => {
@@ -240,8 +265,8 @@ describe("publishing-requirement coalescing with PostgreSQL RLS", () => {
   });
 
   it("rejects another Workspace while an equivalent read is pending", async () => {
-    const started = Promise.withResolvers<void>();
-    const gate: RequirementGate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const started = signalGate();
+    const gate: RequirementGate = pendingGate();
     const read = vi.fn(() => {
       started.resolve();
       return gate.promise;
@@ -261,8 +286,8 @@ describe("publishing-requirement coalescing with PostgreSQL RLS", () => {
   });
 
   it("rejects a revoked account while an equivalent read is pending", async () => {
-    const started = Promise.withResolvers<void>();
-    const gate: RequirementGate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const started = signalGate();
+    const gate: RequirementGate = pendingGate();
     const read = vi.fn(() => {
       started.resolve();
       return gate.promise;
@@ -288,10 +313,10 @@ describe("publishing-requirement coalescing with PostgreSQL RLS", () => {
   });
 
   it("starts a separate read for a rotated credential generation", async () => {
-    const firstStarted = Promise.withResolvers<void>();
-    const secondStarted = Promise.withResolvers<void>();
-    const firstGate: RequirementGate = Promise.withResolvers<ProviderPublicationRequirements>();
-    const secondGate: RequirementGate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const firstStarted = signalGate();
+    const secondStarted = signalGate();
+    const firstGate: RequirementGate = pendingGate();
+    const secondGate: RequirementGate = pendingGate();
     let attempts = 0;
     const read = vi.fn(() => {
       attempts += 1;

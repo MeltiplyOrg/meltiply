@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { cipher, database } = vi.hoisted(() => {
   const decryptions: Promise<string>[] = [];
-  const waiters: { count: number; resolve: () => void }[] = [];
+  const waiters: { count: number; resolve: (value: void | PromiseLike<void>) => void }[] = [];
   return {
     cipher: {
       decryptions,
@@ -19,7 +19,7 @@ const { cipher, database } = vi.hoisted(() => {
         for (const waiter of [...waiters]) {
           if (decryptions.length < waiter.count) continue;
           waiters.splice(waiters.indexOf(waiter), 1);
-          waiter.resolve();
+          waiter.resolve(undefined);
         }
         return decrypted;
       },
@@ -32,8 +32,9 @@ const { cipher, database } = vi.hoisted(() => {
       },
       waitForCount(count: number) {
         if (decryptions.length >= count) return Promise.resolve();
-        const { promise, resolve } = Promise.withResolvers<void>();
-        waiters.push({ count, resolve });
+        const promise = new Promise<void>((resolve) => {
+          waiters.push({ count, resolve });
+        });
         return promise;
       },
     },
@@ -229,6 +230,17 @@ interface RequirementGate {
   resolve(value: ProviderPublicationRequirements): void;
 }
 
+/** Creates a settlement gate; ES2023 has no `Promise.withResolvers`. */
+function pendingGate(): RequirementGate {
+  let resolve!: RequirementGate["resolve"];
+  let reject!: RequirementGate["reject"];
+  const promise = new Promise<ProviderPublicationRequirements>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, reject, resolve };
+}
+
 beforeEach(() => {
   cipher.reset();
   database.withTenantTransactionEffect.mockReset();
@@ -237,7 +249,7 @@ beforeEach(() => {
 describe("publishing-requirement coalescing in the workerd runtime", () => {
   it("shares one pending Provider read across concurrent requests with independent response IDs", async () => {
     mockAccountRead(accountRow());
-    const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const gate = pendingGate();
     const read = vi.fn(() => gate.promise);
     const app = runtimeApp(read);
 
@@ -267,7 +279,7 @@ describe("publishing-requirement coalescing in the workerd runtime", () => {
 
   it("keeps shared work alive when the initiating request is interrupted", async () => {
     mockAccountRead(accountRow());
-    const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const gate = pendingGate();
     const read = vi.fn(() => gate.promise);
     const app = runtimeApp(read);
     const controller = new AbortController();
@@ -291,7 +303,7 @@ describe("publishing-requirement coalescing in the workerd runtime", () => {
 
   it("settles a canceled joiner without disturbing the shared read", async () => {
     mockAccountRead(accountRow());
-    const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const gate = pendingGate();
     const read = vi.fn(() => gate.promise);
     const app = runtimeApp(read);
     const controller = new AbortController();
@@ -325,7 +337,7 @@ describe("publishing-requirement coalescing in the workerd runtime", () => {
           query: vi.fn(() => Effect.succeed({ rowCount: 1, rows: [row] })),
         } as unknown as EffectTransactionClient),
     );
-    const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+    const gate = pendingGate();
     const read = vi.fn(() => gate.promise);
     const app = runtimeApp(read);
 
@@ -357,7 +369,7 @@ describe("publishing-requirement coalescing in the workerd runtime", () => {
     );
     const gates: RequirementGate[] = [];
     const read = vi.fn(() => {
-      const gate = Promise.withResolvers<ProviderPublicationRequirements>();
+      const gate = pendingGate();
       gates.push(gate);
       return gate.promise;
     });

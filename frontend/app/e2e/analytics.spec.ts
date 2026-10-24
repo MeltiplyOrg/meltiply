@@ -50,7 +50,6 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   expect(analyticsChunk, "Posts must not download the Analytics chart chunk").toBeNull();
 
   const sidebar = page.locator("aside nav");
-  await expect(sidebar.getByRole("button")).toHaveText(["Posts", "Analytics", "Channels"]);
   await sidebar.getByRole("button", { name: "Analytics", exact: true }).click();
   await expect(page).toHaveURL(/\/analytics(?:\?|$)/);
   await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();

@@ -124,7 +124,9 @@ describe("account analytics sweep with PostgreSQL", () => {
     const next = await Effect.runPromise(sweepAccountAnalytics(env, dependencies));
     expect(next.recorded).toBe(1);
     await Effect.runPromise(sweepAccountAnalytics(env, dependencies));
-    expect([...reads].sort()).toEqual(
+    // The system sweep also services seeded Workspaces; only this fixture's
+    // identities belong to the assertions about its grant failures and exclusions.
+    expect(reads.filter((id) => id.startsWith("account-analytics-review-")).sort()).toEqual(
       Array.from({ length: 26 }, (_, index) => `account-analytics-review-${index + 1}`).sort(),
     );
     await runSystemTransaction(env, async (client) => {

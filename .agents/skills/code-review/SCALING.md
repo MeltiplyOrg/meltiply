@@ -99,6 +99,8 @@ SELECT * FROM customers WHERE id IN (<customer ids>);
 
 ## 2. Caching
 
+For Meltiply, propose caching only with an explicit freshness budget, authoritative per-request authorization and persisted lifecycle visibility, complete Workspace/identity/filter keys, bounded memory and namespace ownership, and cold/eviction/error fallback. Prefer the existing scoped QueryClient or API-local portable workerd owner over a mandatory hosted cache. Check single-flight cancellation, upstream deadlines, request correlation, credential generations, and pending-entry cleanup separately from completed-result freshness. Preserve Provider-specific freshness obligations and publish-time validation. Require cold/warm/concurrent work counts and tail-latency evidence on both deployment paths before claiming savings; report missing measurements instead of implementing a speculative cache during a read-only review.
+
 - **Cache-aside:** read the cache, fall back to the source on a miss, populate with a TTL, and invalidate or version on writes. Cache data that is expensive to produce and read often.
 - **Stampede protection:** when a hot key expires, many requests can hit the source at once. Use single-flight/mutex, probabilistic early refresh, or `stale-while-revalidate` so one caller refreshes while others get a usable stale value.
 - **Keys and scope:** include tenant, user, locale, and schema version where they change the result. Never put per-user secrets in a shared cache.

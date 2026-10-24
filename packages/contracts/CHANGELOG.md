@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking:** `POST /oauth-selections/{selection_id}/confirm`
+  (`OAuthSelectionConfirmRequest`) now requires `brand_profile_id` alongside
+  `account_id`. Clients must send the active Brand Profile UUID that will own
+  the connected Channel; authorization no longer selects that owner in advance.
+
 - Add `GET /analytics/dashboard` (`getAnalyticsDashboard`) with daily series,
   best-time cells, format and platform breakdowns, follower history, and
   engagement accumulation. Its required `cohort` field carries the same

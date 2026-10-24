@@ -1892,7 +1892,16 @@ export function registerCoreRoutes(
           Effect.catchCause((cause) =>
             Effect.gen(function* () {
               const failure = Cause.squash(cause);
-              if (failure instanceof CoreApiError) {
+              const databaseCause = failure instanceof DatabaseError ? failure.cause : undefined;
+              // SQL data/constraint rejections cannot commit. Connection loss or a
+              // failed COMMIT is ambiguous: retain its profile fence for a safe retry.
+              const deterministicDatabaseFailure =
+                databaseCause !== null &&
+                typeof databaseCause === "object" &&
+                "code" in databaseCause &&
+                typeof databaseCause.code === "string" &&
+                /^(22|23)[0-9A-Z]{3}$/.test(databaseCause.code);
+              if (failure instanceof CoreApiError || deterministicDatabaseFailure) {
                 yield* fromPromise(() =>
                   oauthStateStub(c.env, routingKey).releaseSelectionClaim(
                     selectionId,

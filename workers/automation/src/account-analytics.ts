@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { PLATFORM_IDS, type Platform } from "@meltiply/domain";
 import {
   cachedProviderRegistryFromEnvironment,
   createProviderServiceLive,
@@ -17,12 +18,10 @@ interface AccountRow extends Record<string, unknown> {
   connection_status: string;
   id: string;
   org_id: string;
-  platform: AccountPlatform;
+  platform: Platform;
   platform_user_id: string;
   token_expires_at: Date | string | null;
 }
-
-type AccountPlatform = "facebook" | "instagram" | "threads" | "tiktok" | "youtube";
 
 export interface AccountAnalyticsSweepResult {
   failed: number;
@@ -32,14 +31,14 @@ export interface AccountAnalyticsSweepResult {
 
 /** Twenty-five accounts per hourly sweep keeps provider reads bounded. */
 const sweepBatchSize = 25;
-/** Skip accounts captured within this window so a manual sweep cannot spam providers. */
+/** Captures and failed attempts both wait six hours before another provider read. */
 const sweepIntervalHours = 6;
 
 /**
- * Captures follower history for connected accounts whose last snapshot is older
- * than the sweep interval. This is a low-frequency read: it runs from the hourly
- * scheduled maintenance path, bounded to 25 accounts and four concurrent reads,
- * and never blocks other scheduled work on a single provider failure.
+ * Captures follower history for usable, configured accounts due for measurement.
+ * Claims the oldest attempts atomically before provider I/O, so failures and crashes
+ * back off for six hours instead of starving later accounts. Expiring credentials
+ * wait for the token refresh path. Bounds each sweep to 25 accounts and four reads.
  *
  * @param env - Automation bindings containing the database and provider credentials.
  * @param dependencies - Optional registry override for tests.
@@ -52,24 +51,42 @@ export function sweepAccountAnalytics(
   return Effect.gen(function* () {
     const registry = dependencies.providerRegistry ?? cachedProviderRegistryFromEnvironment(env);
     const decryptToken = decryptStoredToken(env);
+    const platforms = PLATFORM_IDS.filter(
+      (platform) => registry.get(platform)?.getAccountAnalytics,
+    );
+    if (platforms.length === 0) return { failed: 0, recorded: 0, scanned: 0 };
     const rows = yield* withSystemTransactionEffect(env, (client) =>
       Effect.map(
         client.query<AccountRow>(
-          `SELECT account.id, account.org_id, account.platform,
-                  account.platform_user_id, account.access_token,
-                  account.connection_status, account.token_expires_at
-           FROM platform_accounts AS account
-           WHERE account.connection_status IN ('connected', 'expiring')
-             AND (account.token_expires_at IS NULL OR account.token_expires_at > now())
-             AND NOT EXISTS (
-               SELECT 1
-               FROM platform_account_snapshots AS snapshot
-               WHERE snapshot.platform_account_id = account.id
-                 AND snapshot.captured_at > now() - ($1 * INTERVAL '1 hour')
-             )
-           ORDER BY account.id
-           LIMIT $2`,
-          [sweepIntervalHours, sweepBatchSize],
+          `WITH candidates AS (
+             SELECT account.id
+             FROM platform_accounts AS account
+             JOIN brand_profiles AS profile ON profile.id = account.brand_profile_id
+             WHERE account.connection_status = 'connected'
+               AND account.platform = ANY($3::text[])
+               AND account.access_token IS NOT NULL AND account.access_token <> ''
+               AND profile.deleted_at IS NULL
+               AND (account.token_expires_at IS NULL OR account.token_expires_at > now())
+               AND (account.account_analytics_attempted_at IS NULL
+                    OR account.account_analytics_attempted_at <= now() - ($1 * INTERVAL '1 hour'))
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM platform_account_snapshots AS snapshot
+                 WHERE snapshot.platform_account_id = account.id
+                   AND snapshot.captured_at > now() - ($1 * INTERVAL '1 hour')
+               )
+             ORDER BY account.account_analytics_attempted_at NULLS FIRST, account.id
+             LIMIT $2
+             FOR UPDATE OF account SKIP LOCKED
+           )
+           UPDATE platform_accounts AS account
+           SET account_analytics_attempted_at = now()
+           FROM candidates
+           WHERE account.id = candidates.id
+           RETURNING account.id, account.org_id, account.platform,
+                     account.platform_user_id, account.access_token,
+                     account.connection_status, account.token_expires_at`,
+          [sweepIntervalHours, sweepBatchSize, platforms],
         ),
         (result) => result.rows,
       ),

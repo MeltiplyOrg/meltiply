@@ -105,6 +105,19 @@ function reelStatus(
 }
 
 describe("createFacebookAdapter", () => {
+  it("measures followers without misreporting Page likes as following", async () => {
+    const providerCalls = sequence((url) => {
+      expect(url.searchParams.get("fields")).toBe("followers_count");
+      return json({ followers_count: 420, fan_count: 350 });
+    });
+    await expect(
+      adapter(providerCalls.fetcher).getAccountAnalytics!(context, credentials),
+    ).resolves.toEqual({
+      followers: 420,
+      recordedAt: "2026-07-19T00:00:00.000Z",
+    });
+  });
+
   it("advertises only the implemented Page Reels subset", () => {
     const provider = adapter(vi.fn<typeof fetch>());
     expect(provider.capability).toMatchObject({

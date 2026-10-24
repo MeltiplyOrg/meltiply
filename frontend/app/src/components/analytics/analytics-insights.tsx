@@ -45,14 +45,28 @@ type Grouping = (typeof GROUPINGS)[number];
 const CHART_MORPH_MS = 360;
 
 const PLATFORM_COLORS: Record<Platform, string> = {
-  facebook: "var(--platform-facebook)",
-  instagram: "var(--platform-instagram)",
-  threads: "var(--ink)",
-  tiktok: "var(--ink-2)",
-  youtube: "var(--platform-youtube)",
+  facebook: "var(--accent)",
+  instagram: "var(--ink)",
+  threads: "var(--ink-2)",
+  tiktok: "var(--ink-3)",
+  youtube: "var(--gray)",
 };
 
 const PLATFORMS: readonly Platform[] = ["facebook", "instagram", "threads", "tiktok", "youtube"];
+
+/** Shared provider identity legend; series paint never carries provider-brand or status meaning. */
+function PlatformLegend({ platforms }: { platforms: readonly Platform[] }) {
+  return (
+    <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1 pt-2 text-xs text-ink-2">
+      {platforms.map((platform) => (
+        <li key={platform} className="flex items-center gap-1.5">
+          <PlatformIcon provider={platform} className="size-3.5" />
+          <span style={{ color: PLATFORM_COLORS[platform] }}>{platformDisplayName(platform)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 interface TooltipEntry {
   color?: string;
@@ -480,7 +494,7 @@ export function PostsOverTimeChart({ dashboard }: { dashboard: AnalyticsDashboar
             <XAxis dataKey="label" tickLine={false} axisLine={false} />
             <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} />
             <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--hover)" }} />
-            <Legend />
+            <Legend content={<PlatformLegend platforms={platforms} />} />
             {platforms.map((platform) => (
               <Bar
                 key={platform}
@@ -555,9 +569,9 @@ function groupSeries(
 
 const TREND_COLORS: Record<AnalyticsMetric, string> = {
   views: "var(--accent)",
-  likes: "var(--green)",
-  comments: "var(--orange)",
-  shares: "var(--teal)",
+  likes: "var(--ink)",
+  comments: "var(--ink-2)",
+  shares: "var(--ink-3)",
 };
 
 /** Dash patterns keep overlapping indexed lines distinguishable without more charts. */
@@ -957,7 +971,7 @@ export function FollowerEvolutionChart({ dashboard }: { dashboard: AnalyticsDash
               tickFormatter={(value: number) => formatAnalyticsInteger(value, language)}
             />
             <Tooltip content={<ChartTooltip />} />
-            <Legend />
+            <Legend content={<PlatformLegend platforms={[...accountsByPlatform.keys()]} />} />
             {[...accountsByPlatform.keys()].map((platform) => (
               <Line
                 key={platform}

@@ -37,12 +37,10 @@ const authorizationOrigin = "https://www.tiktok.com";
 const imageMaximumBytes = 20 * 1024 * 1024;
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 2 * 24 * 60 * 60;
-const configuredScopes = [
-  "user.info.basic",
-  "user.info.stats",
-  "video.publish",
-  "video.list",
-] as const;
+/** Identity and Direct Post permission are required; analytics grants are optional. */
+const publishingScopes = ["user.info.basic", "video.publish"] as const;
+const analyticsScopes = ["user.info.stats", "video.list"] as const;
+const configuredScopes = [...publishingScopes, ...analyticsScopes] as const;
 const privacyLevels = new Set<TikTokPrivacyLevel>([
   "PUBLIC_TO_EVERYONE",
   "MUTUAL_FOLLOW_FRIENDS",
@@ -99,6 +97,7 @@ interface TikTokTokenBody {
   expiresAt: string;
   openId: string;
   refreshToken: string;
+  scopes: string[];
 }
 
 /**
@@ -203,8 +202,8 @@ function scopeSet(value: unknown): Set<string> | undefined {
 
 /**
  * Parses and verifies an OAuth token exchange or refresh response from TikTok.
- * Asserts bearer token type, presence of all required configured scopes, and extracts access/refresh tokens.
- * Returns typed TikTokTokenBody record. Throws ProviderAdapterError if malformed or scopes missing.
+ * Requires bearer tokens and publishing scopes, without requiring analytics consent.
+ * Returns tokens plus the actual grant; malformed responses or missing publishing scopes fail.
  */
 function tokenBody(value: unknown, now: Date): TikTokTokenBody {
   const body = record(value);
@@ -221,7 +220,7 @@ function tokenBody(value: unknown, now: Date): TikTokTokenBody {
     !openId ||
     tokenType !== "bearer" ||
     !scopes ||
-    configuredScopes.some((scope) => !scopes.has(scope))
+    publishingScopes.some((scope) => !scopes.has(scope))
   ) {
     throw malformed();
   }
@@ -230,6 +229,7 @@ function tokenBody(value: unknown, now: Date): TikTokTokenBody {
     expiresAt: addSeconds(now, body?.expires_in, tokenLifetimeMaximumSeconds),
     openId,
     refreshToken,
+    scopes: [...scopes],
   };
 }
 
@@ -583,7 +583,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         },
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes,
       };
     },
 
@@ -966,6 +966,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       }
     },
 
+    /** Rotates tokens with the actual publishing-capable grant; analytics consent stays optional. */
     async refreshAccessToken(context, refreshToken): Promise<ProviderTokenSet> {
       const form = new URLSearchParams({
         client_key: clientKey,
@@ -984,7 +985,7 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
         accessToken: tokens.accessToken,
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes,
       };
     },
 

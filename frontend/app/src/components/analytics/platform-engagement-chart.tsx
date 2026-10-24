@@ -15,8 +15,8 @@ const ENGAGEMENT_METRICS = ["likes", "comments", "shares"] as const;
 type EngagementMetric = (typeof ENGAGEMENT_METRICS)[number];
 
 const ENGAGEMENT_COLORS: Record<EngagementMetric, string> = {
-  likes: "var(--green)",
-  comments: "var(--orange)",
+  likes: "var(--accent)",
+  comments: "var(--ink-2)",
   shares: "var(--teal)",
 };
 

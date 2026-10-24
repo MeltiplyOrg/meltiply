@@ -13,7 +13,12 @@ import {
 } from "@meltiply/providers";
 import { oauthStateRoutingKey } from "../src/core-routes";
 import { tokenCipherFor } from "../src/token-credentials";
-import { AccessDenied, StorageUnavailable, type PlatformCapability } from "@meltiply/domain";
+import {
+  AccessDenied,
+  DatabaseError,
+  StorageUnavailable,
+  type PlatformCapability,
+} from "@meltiply/domain";
 import type { JwtIdentity, SessionClaims } from "@meltiply/auth";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -1524,8 +1529,8 @@ describe("core API routes", () => {
     expect(location.searchParams.get("redirect_uri")).toBe(
       "http://localhost:8787/api/v1/platforms/tiktok/callback",
     );
-    expect(location.searchParams.get("scope")).toBe(
-      "user.info.basic,user.info.stats,video.publish,video.list",
+    expect(new Set(location.searchParams.get("scope")?.split(","))).toEqual(
+      new Set(["user.info.basic", "user.info.stats", "video.publish", "video.list"]),
     );
     expect(create).toHaveBeenCalledOnce();
   });
@@ -3081,6 +3086,81 @@ describe("OAuth Page selection flow", () => {
     });
     expect(releaseSelectionClaim).toHaveBeenCalledWith(selectionId, "claim-token-quota");
   });
+
+  it.each([
+    { code: "23505", release: true },
+    { code: "23503", release: true },
+    { code: "22001", release: true },
+    { code: "08006", release: false },
+    { code: undefined, release: false },
+  ])(
+    "fences ambiguous saves but releases deterministic database rejection $code",
+    async ({ code, release }) => {
+      const routingKey = await oauthStateRoutingKey(actor.workspace.id);
+      const selectionId = `${routingKey}.validnonce1234567890`;
+      const cipher = tokenCipherFor({
+        TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      } as ApiWorkerEnv);
+      const sealed = await cipher.encrypt(
+        JSON.stringify({
+          accessToken: "fb-page-1-token",
+          account: { id: "fb-page-1" },
+          scopes: [],
+        }),
+      );
+      const releaseSelectionClaim = vi.fn(async () => true);
+      const completeSelection = vi.fn(async () => true);
+      const oauthEnv: ApiWorkerEnv = {
+        ...env,
+        TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+        OAUTH_STATE: {
+          getByName: () => ({
+            claimSelection: async () => ({
+              claimToken: "claim-database",
+              encryptedConnection: sealed,
+              organizationId: actor.workspace.id,
+              platform: "facebook",
+              status: "claimed" as const,
+              userId: actor.userId,
+            }),
+            completeSelection,
+            releaseSelectionClaim,
+          }),
+        } as unknown as DurableObjectNamespace<OAuthStateStub>,
+      };
+      const app = authenticatedApp(service(), {
+        brandProfileService: brandProfileService(),
+        saveOAuthConnection: () =>
+          Effect.fail(
+            new DatabaseError({
+              cause: { code },
+              message: "Internal database details must not leak",
+            }),
+          ),
+      });
+      const response = await app.request(
+        `/api/v1/oauth-selections/${selectionId}/confirm`,
+        {
+          body: JSON.stringify({ account_id: "fb-page-1", brand_profile_id: brandProfileId }),
+          headers: {
+            ...bearerHeaders,
+            "Content-Type": "application/json",
+            "Idempotency-Key": "database-save",
+          },
+          method: "POST",
+        },
+        oauthEnv,
+      );
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain("Internal database details");
+      expect(completeSelection).not.toHaveBeenCalled();
+      if (release) {
+        expect(releaseSelectionClaim).toHaveBeenCalledWith(selectionId, "claim-database");
+      } else {
+        expect(releaseSelectionClaim).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("POST /api/v1/oauth-selections/:selectionId/confirm rejects concurrent active claim and account-switch with 409", async () => {
     const routingKey = await oauthStateRoutingKey(actor.workspace.id);

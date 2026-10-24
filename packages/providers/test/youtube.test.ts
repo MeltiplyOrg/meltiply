@@ -191,9 +191,13 @@ describe("createYouTubeAdapter", () => {
     ).toThrow("does not match configuration");
   });
 
-  it.each(["", "openid email profile"])(
-    "exchanges a code with additional granted scopes %j and binds one YouTube channel",
-    async (additionalScopes) => {
+  it.each([
+    "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
+    "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly openid email profile",
+    "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+  ])(
+    "connects with the actual Google grant %s and binds one YouTube channel",
+    async (grantedScopes) => {
       const providerCalls = sequence(
         (url, init) => {
           expect(url.toString()).toBe("https://oauth2.googleapis.com/token");
@@ -203,8 +207,7 @@ describe("createYouTubeAdapter", () => {
             access_token: "access-secret",
             expires_in: 3_600,
             refresh_token: "refresh-secret",
-            scope:
-              `https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly ${additionalScopes}`.trim(),
+            scope: grantedScopes,
             token_type: "Bearer",
           });
         },
@@ -249,11 +252,7 @@ describe("createYouTubeAdapter", () => {
         },
         expiresAt: "2026-07-19T01:00:00.000Z",
         refreshToken: "refresh-secret",
-        scopes: [
-          "https://www.googleapis.com/auth/youtube.upload",
-          "https://www.googleapis.com/auth/youtube.readonly",
-          "https://www.googleapis.com/auth/yt-analytics.readonly",
-        ],
+        scopes: grantedScopes.split(" "),
       });
     },
   );
@@ -817,6 +816,29 @@ describe("createYouTubeAdapter", () => {
     await expect(provider.refreshAccessToken!(context, "refresh-original")).resolves.toMatchObject({
       accessToken: "access-3",
       refreshToken: "refresh-rotated",
+    });
+  });
+
+  it("refreshes a publishing-only grant without inventing Analytics permission", async () => {
+    const grantedScopes = [
+      "https://www.googleapis.com/auth/youtube.upload",
+      "https://www.googleapis.com/auth/youtube.readonly",
+    ];
+    const providerCalls = sequence(() =>
+      json({
+        access_token: "access-publishing-only",
+        expires_in: 3_600,
+        scope: grantedScopes.join(" "),
+        token_type: "Bearer",
+      }),
+    );
+    await expect(
+      adapter(providerCalls.fetcher).refreshAccessToken!(context, "refresh-original"),
+    ).resolves.toEqual({
+      accessToken: "access-publishing-only",
+      expiresAt: "2026-07-19T01:00:00.000Z",
+      refreshToken: "refresh-original",
+      scopes: grantedScopes,
     });
   });
 

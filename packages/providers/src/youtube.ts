@@ -51,11 +51,13 @@ const videoOrigin = "https://www.youtube.com";
 const videoMaximumBytes = 500 * 1024 * 1024;
 const tokenLifetimeMaximumSeconds = 24 * 60 * 60;
 
-const configuredScopes = [
+/** Upload and channel identity are required; Analytics access is optional. */
+const publishingScopes = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
-  "https://www.googleapis.com/auth/yt-analytics.readonly",
 ] as const;
+const analyticsScopes = ["https://www.googleapis.com/auth/yt-analytics.readonly"] as const;
+const configuredScopes = [...publishingScopes, ...analyticsScopes] as const;
 
 /** YouTube's description ceiling remains known even before live publishing is configured. */
 export const YOUTUBE_MAX_CAPTION_LENGTH = 5_000;
@@ -163,8 +165,9 @@ function scopeSet(value: unknown): Set<string> | undefined {
 
 /**
  * Parses and verifies an OAuth 2.0 token response from Google's token endpoint.
- * Validates bearer token type, presence of required scopes, and expiration bounds (up to 24h).
- * Returns `{ accessToken, expiresAt, refreshToken? }` descriptor. Throws ProviderAdapterError if invalid.
+ * Requires publishing scopes when Google supplies a scope list; Analytics consent is optional.
+ * Preserves explicit grants; omitted scopes remain absent so refresh callers retain stored grants.
+ * Returns tokens and bounded expiry (up to 24h); rejects malformed responses or missing publishing grants.
  */
 function tokenBody(
   value: unknown,
@@ -174,6 +177,7 @@ function tokenBody(
   accessToken: string;
   expiresAt: string;
   refreshToken?: string;
+  scopes?: string[];
 } {
   const body = record(value);
   const accessToken = boundedString(body?.access_token, 16_000);
@@ -185,7 +189,7 @@ function tokenBody(
     tokenType !== "bearer" ||
     (requireRefreshToken && !refreshToken) ||
     (body?.scope !== undefined && !scopes) ||
-    (scopes && configuredScopes.some((scope) => !scopes.has(scope)))
+    (scopes && publishingScopes.some((scope) => !scopes.has(scope)))
   ) {
     throw malformed();
   }
@@ -193,6 +197,7 @@ function tokenBody(
     accessToken,
     expiresAt: addSeconds(now, body?.expires_in, tokenLifetimeMaximumSeconds),
     ...(refreshToken ? { refreshToken } : {}),
+    ...(scopes ? { scopes: [...scopes] } : {}),
   };
 }
 
@@ -1073,7 +1078,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
      * Exchanges a PKCE authorization code for Google tokens and binds the
      * connection to exactly one YouTube channel. The redirect URI must match
      * the adapter configuration; the token response must be a bearer grant
-     * carrying the configured scopes and a refresh token; the channels.list
+     * carrying the publishing scopes and a refresh token; the channels.list
      * `mine` lookup must return exactly one channel — zero or several is a
      * deterministic `youtube_channel_selection_required` failure so the
      * account is never bound ambiguously.
@@ -1140,7 +1145,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
         },
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken!,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes ?? [...configuredScopes],
       };
     },
 
@@ -1389,6 +1394,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
       };
     },
 
+    /** Refreshes publishing grants; an omitted scope list preserves the stored grant in the consumer. */
     async refreshAccessToken(context, refreshToken): Promise<ProviderTokenSet> {
       const currentRefreshToken = required("refreshToken", refreshToken, 16_000);
       const form = new URLSearchParams({
@@ -1408,7 +1414,7 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
         accessToken: tokens.accessToken,
         expiresAt: tokens.expiresAt,
         refreshToken: tokens.refreshToken ?? currentRefreshToken,
-        scopes: [...configuredScopes],
+        scopes: tokens.scopes ?? [],
       };
     },
 

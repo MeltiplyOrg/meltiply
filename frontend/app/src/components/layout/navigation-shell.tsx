@@ -42,7 +42,9 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
       ? t("Posts")
       : currentView === "channels"
         ? t("Channels")
-        : t("Settings");
+        : currentView === "analytics"
+          ? t("Analytics")
+          : t("Settings");
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-page pt-(--safe-area-top) pr-(--safe-area-right) pl-(--safe-area-left) text-ink antialiased">
       <a

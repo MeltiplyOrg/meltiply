@@ -678,7 +678,7 @@
   "Metrics over time": "Kennzahlen im Zeitverlauf",
   "Measured change between stored snapshots, one scale per metric.": "Gemessene Änderung zwischen gespeicherten Snapshots, eine Skala pro Kennzahl.",
   "Performance trend": "Leistungstrend",
-  "Cumulative measured change indexed to 100 at the first measured period. Hover for absolute values.": "Kumulierte gemessene Veränderung, indexiert auf 100 in der ersten gemessenen Periode. Für absolute Werte hover.",
+  "Cumulative measured change indexed to 100 at the first measured period. Hover for absolute values.": "Kumulierte gemessene Veränderung, indexiert auf 100 in der ersten gemessenen Periode. Bewegen Sie den Mauszeiger über das Diagramm, um absolute Werte anzuzeigen.",
   "Engagement by platform": "Interaktion nach Plattform",
   "Likes, comments, and shares by platform for {range}": "Likes, Kommentare und Shares nach Plattform für {range}",
   "Posts, per-post averages, and totals stay separate.": "Beiträge, Durchschnitte pro Beitrag und Summen bleiben getrennt.",

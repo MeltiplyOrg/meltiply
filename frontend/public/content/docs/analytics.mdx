@@ -24,8 +24,8 @@ destination contributes its latest stored snapshot at or before the range end.
   Post may contribute several destinations.
 - Analytics sync stops after 366 days. An older Distribution keeps contributing
   its latest retained snapshot.
-- Range boundaries are rolling UTC instants. The page does not bucket by day,
-  so there is no workspace timezone setting.
+- Range boundaries and chart buckets use UTC; there is no workspace timezone
+  setting.
 
 The page states this under the totals. The range presets are the last 7, 30,
 90, and 366 days; the default is 30 days. Range, platform, and metric are kept
@@ -41,8 +41,15 @@ in the URL so a view can be bookmarked and restored with browser back/forward.
 | Shares                 | Shares, reposts, and quotes reported for the cohort.                             |
 | Published destinations | Published Distributions in the cohort; each Post-to-Channel outcome counts once. |
 
-Reach, impressions, watch time, saves, clicks, and a derived engagement rate are
-not shown. All five supported Providers report stored analytics when their
+The **Platform breakdown** also shows Reach, Impressions, Engagement rate,
+Followers, and Follower gain. Engagement rate is likes, comments, and shares
+divided by views; it is unavailable when there are no measured views.
+Followers are account-level measurements, not a sum of Post audiences; follower
+gain needs a complete baseline. Saves and Clicks columns appear only when a
+Provider reports them; otherwise a footnote identifies them as **Not tracked**.
+Watch time is not displayed.
+
+All five supported Providers report stored analytics when their
 analytics scope is granted: Instagram and Threads media insights, Facebook Page
 Reel insights, TikTok video counters, and YouTube Analytics. Threads engagement
 reporting can still be disabled by the deployment's acceptance configuration.
@@ -55,6 +62,9 @@ derived from Meta's combined comments-and-shares metric. YouTube Analytics
 reports lifetime aggregates for the uploaded video and shares Google's quota.
 TikTok reports the creator's current video counters. After an analytics scope is
 added, reconnect the Channel so the Provider issues a token that can read it.
+TikTok and YouTube analytics permissions are optional: declining them does not
+prevent a publishing-capable Channel from connecting, refreshing, or publishing.
+Reconnect to add those permissions when analytics are needed.
 
 ## Inspect one Post
 
@@ -108,9 +118,30 @@ not trigger a Provider sync.
 
 ## Chart and table
 
-**Platform comparison** is a horizontal bar chart for the selected metric. The
-same values are available in the chart's table for screen readers, and each bar
-tooltip shows the platform, metric, and published-destination count.
+**Engagement by platform** stacks likes, comments, and shares in one horizontal
+bar per measured platform. Its tooltip and screen-reader table include the
+total engagement, views, and published-destination count.
+
+**Performance trend** shows cumulative measured changes in views, likes,
+comments, and shares, indexed to 100 at each metric's first measured period.
+Hover for absolute cumulative values; the index is not a percentage growth rate.
+**Posts over time** stacks publication counts by platform. Both charts offer
+Day, Week, and Month grouping.
+
+**Follower evolution** shows stored account follower histories by platform and
+net gain when the baseline is complete. **Content format breakdown** compares
+posts, per-post averages, and totals for formats derived from published
+Distributions' frozen attachments.
+
+**Best time to post** is a weekday-by-hour UTC heatmap of average engagement,
+likes, or views by publication time. A recommendation requires at least two
+measured Posts in a slot; it is historical evidence, not a forecast.
+
+**Platform breakdown** includes Posts, Views, Likes, Comments, Shares, Reach,
+Impressions, Engagement rate, Followers, Follower gain, and conditional
+Saves/Clicks columns. Supported platforms with no content snapshot show
+**Awaiting sync** rather than measured zeros; missing follower values remain
+unavailable. Its wide table scrolls within its own card on phones.
 
 **Top posts** ranks the cohort by the selected metric, then publication time,
 then Post identity. Each row shows the Post title or excerpt, platforms and
@@ -124,13 +155,16 @@ whole page sideways.
 The same read model is available to API clients:
 
 - `GET /api/v1/analytics` — platform-level totals for a published cohort.
+- `GET /api/v1/analytics/dashboard` — cohort summary, time series, platform and
+  format breakdowns, follower history, and best-time cells.
 - `GET /api/v1/analytics/posts` — ranked Posts with stable `limit`/`offset`
   pagination.
 - `GET /api/v1/analytics/{distribution_id}` — retained snapshots for one
   Distribution.
 
-All three are scoped to the authenticated Workspace and respect the optional
-`brand_profile_id` filter.
+All four are scoped to the authenticated Workspace. The aggregate endpoints
+respect the optional `brand_profile_id` filter; Distribution history checks
+ownership of the requested Distribution.
 
 ## Related
 

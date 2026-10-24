@@ -154,12 +154,15 @@ describe("createTikTokAdapter", () => {
     );
     expect(url.origin).toBe("https://www.tiktok.com");
     expect(url.pathname).toBe("/v2/auth/authorize/");
-    expect(Object.fromEntries(url.searchParams)).toEqual({
+    expect(new Set(url.searchParams.get("scope")?.split(","))).toEqual(
+      new Set(["user.info.basic", "user.info.stats", "video.publish", "video.list"]),
+    );
+    const { scope: _scope, ...parameters } = Object.fromEntries(url.searchParams);
+    expect(parameters).toEqual({
       client_key: "tiktok-client-key",
       disable_auto_auth: "1",
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "user.info.basic,user.info.stats,video.publish,video.list",
       state: "oauth-state",
     });
     expect(() =>
@@ -171,7 +174,11 @@ describe("createTikTokAdapter", () => {
     ).toThrow("does not match configuration");
   });
 
-  it("exchanges a code and binds the token open ID to the fetched profile", async () => {
+  it.each([
+    "user.info.basic,user.info.stats,video.publish,video.list",
+    "user.info.basic,video.publish",
+    "user.info.basic,video.publish,video.list",
+  ])("connects with granted scopes %s and binds the token open ID", async (grantedScopes) => {
     const providerCalls = sequence(
       (url, init) => {
         expect(url.toString()).toBe("https://open.tiktokapis.com/v2/oauth/token/");
@@ -189,7 +196,7 @@ describe("createTikTokAdapter", () => {
           open_id: "open-id-1",
           refresh_expires_in: 31_536_000,
           refresh_token: "refresh-secret",
-          scope: "user.info.basic,user.info.stats,video.publish,video.list",
+          scope: grantedScopes,
           token_type: "Bearer",
         });
       },
@@ -221,7 +228,7 @@ describe("createTikTokAdapter", () => {
       },
       expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-secret",
-      scopes: ["user.info.basic", "user.info.stats", "video.publish", "video.list"],
+      scopes: grantedScopes.split(","),
     });
   });
 
@@ -642,7 +649,10 @@ describe("createTikTokAdapter", () => {
     });
   });
 
-  it("persists a rotated refresh token and revokes with app credentials", async () => {
+  it.each([
+    "user.info.basic,user.info.stats,video.publish,video.list",
+    "user.info.basic,video.publish",
+  ])("refreshes and revokes with actual grants %s", async (grantedScopes) => {
     const providerCalls = sequence(
       (_url, init) => {
         const form = new URLSearchParams(String(init.body));
@@ -652,7 +662,7 @@ describe("createTikTokAdapter", () => {
           expires_in: 86_400,
           open_id: "open-id-1",
           refresh_token: "refresh-rotated",
-          scope: "user.info.basic,user.info.stats,video.publish,video.list",
+          scope: grantedScopes,
           token_type: "Bearer",
         });
       },
@@ -671,7 +681,7 @@ describe("createTikTokAdapter", () => {
       accessToken: "access-rotated",
       expiresAt: "2026-07-20T00:00:00.000Z",
       refreshToken: "refresh-rotated",
-      scopes: ["user.info.basic", "user.info.stats", "video.publish", "video.list"],
+      scopes: grantedScopes.split(","),
     });
     await expect(provider.revoke!("access-rotated")).resolves.toBeUndefined();
   });

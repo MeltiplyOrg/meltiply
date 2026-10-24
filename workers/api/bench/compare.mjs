@@ -105,6 +105,9 @@ function aggregate(runs) {
         statementTimeMs: 0,
         cpuMs: 0,
         setupMs: 0,
+        aggregates: 0,
+        aggregateTimeMs: 0,
+        upstreamReads: 0,
       };
       if (workflow.error) {
         bucket.errors.push(workflow.error);
@@ -120,6 +123,9 @@ function aggregate(runs) {
       bucket.statementTimeMs += metrics.db.time_ms_total;
       bucket.cpuMs += metrics.cpu_ms.user_total + metrics.cpu_ms.system_total;
       bucket.setupMs += metrics.setup_ms_total ?? 0;
+      bucket.aggregates += metrics.db.aggregate_executions ?? 0;
+      bucket.aggregateTimeMs += metrics.db.aggregate_time_ms_total ?? 0;
+      bucket.upstreamReads += metrics.upstream_reads ?? 0;
       workflows.set(workflow.name, bucket);
     }
   }
@@ -151,6 +157,9 @@ function comparisonRow(name) {
     statementsPerOp: bucket.statements / bucket.operations,
     throughput:
       bucket.operations / (bucket.samples.reduce((total, value) => total + value, 0) / 1_000),
+    aggregatesPerOp: bucket.aggregates / bucket.operations,
+    aggregateDbMsPerOp: bucket.aggregateTimeMs / bucket.operations,
+    upstreamReadsPerOp: bucket.upstreamReads / bucket.operations,
   });
   return {
     baseline: metrics(left),
@@ -230,6 +239,24 @@ for (const row of rows) {
   );
 }
 markdown.push("");
+markdown.push("## Repeated-read work", "");
+markdown.push(
+  "| Workflow | Aggregates/op B | Aggregates/op C | Aggregate DB ms/op B | Aggregate DB ms/op C | Upstream reads/op B | Upstream reads/op C | Request p95 B | Request p95 C |",
+);
+markdown.push("|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+for (const row of rows.filter((value) =>
+  /^(analytics\\.summary|requirements\\.)/.test(value.name),
+)) {
+  if (row.unavailable) {
+    markdown.push(`| ${row.name} | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |`);
+    continue;
+  }
+  const { baseline: b, candidate: c } = row;
+  markdown.push(
+    `| ${row.name} | ${fixed(b.aggregatesPerOp)} | ${fixed(c.aggregatesPerOp)} | ${fixed(b.aggregateDbMsPerOp)} | ${fixed(c.aggregateDbMsPerOp)} | ${fixed(b.upstreamReadsPerOp)} | ${fixed(c.upstreamReadsPerOp)} | ${fixed(b.reqP95)} | ${fixed(c.reqP95)} |`,
+  );
+}
+markdown.push("");
 markdown.push("## Limitations", "");
 markdown.push(
   "- The benchmark calls the API app in-process instead of deploying a Worker; Cloudflare CPU-time metrics, Queue latency, and network/provider time are unavailable.",
@@ -244,7 +271,7 @@ markdown.push(
   "- p99 for deletion batches is computed from pooled batch samples, not individual requests; per-request p95 is reported in the raw JSON.",
 );
 markdown.push(
-  "- Publishing Provider HTTP calls, Queues delivery, and Durable Object work are outside this harness; schedule fan-out and outbox writes are measured.",
+  "- Provider requirements use a controlled adapter with a fixed synthetic delay; its counted reads and latency are not live Provider or network measurements. Publishing, Queue delivery, and Durable Objects remain outside this harness.",
 );
 if (failed.length > 0) {
   markdown.push("");

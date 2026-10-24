@@ -21,11 +21,17 @@ interface BenchmarkRun {
     name: string;
     metrics: {
       cpu_ms: { system_total: number; user_total: number };
-      db: { statements_total: number; time_ms_total: number };
+      db: {
+        statements_total: number;
+        time_ms_total: number;
+        aggregate_executions?: number;
+        aggregate_time_ms_total?: number;
+      };
       operations: number;
       response_bytes_samples: number[];
       samples_ms: number[];
       setup_ms_total: number;
+      upstream_reads?: number;
     };
   }[];
 }
@@ -268,6 +274,53 @@ describe("benchmark workload compatibility", () => {
           candidate: expect.objectContaining({ p50: 10, statementsPerOp: 1, throughput: 100 }),
         }),
       ]),
+    });
+  });
+
+  it("weights aggregate and upstream counts by requests rather than concurrent batches", () => {
+    const baseline = benchmarkRun();
+    const candidate = benchmarkRun();
+    for (const [run, aggregateCount, upstreamCount] of [
+      [baseline, 40, 40],
+      [candidate, 2, 2],
+    ] as const) {
+      run.workflows = [
+        {
+          name: "requirements.concurrent20",
+          metrics: {
+            ...run.workflows[0]!.metrics,
+            operations: 40,
+            samples_ms: [100, 120],
+            db: {
+              statements_total: 80,
+              time_ms_total: 200,
+              aggregate_executions: aggregateCount,
+              aggregate_time_ms_total: aggregateCount * 3,
+            },
+            upstream_reads: upstreamCount,
+          },
+        },
+      ];
+    }
+    const json = join(directory, "comparison.json");
+    const result = runCli(compareScript, [
+      "--baseline",
+      writeRun("baseline", baseline),
+      "--candidate",
+      writeRun("candidate", candidate),
+      "--out",
+      join(directory, "comparison.md"),
+      "--json",
+      json,
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(readFileSync(json, "utf8"))).toMatchObject({
+      rows: [
+        {
+          baseline: { aggregatesPerOp: 1, aggregateDbMsPerOp: 3, upstreamReadsPerOp: 1 },
+          candidate: { aggregatesPerOp: 0.05, aggregateDbMsPerOp: 0.15, upstreamReadsPerOp: 0.05 },
+        },
+      ],
     });
   });
 });

@@ -15,10 +15,13 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { configureLogSampling } from "@meltiply/observability";
 import { createStorageServiceTest } from "@meltiply/storage";
 import { createThreadsAdapter, ProviderRegistry } from "@meltiply/providers";
+import { TokenCipher } from "@meltiply/secrets";
 import { Effect } from "effect";
 import pg from "pg";
 
@@ -196,6 +199,42 @@ providerRegistry.register(
   }),
 );
 const capabilities = providerRegistry.capabilities();
+const providerDelayMs = 100;
+const readConcurrency = 20;
+const requirementAccountId = "b7000000-0000-4000-8000-000000000001";
+let upstreamReads = 0;
+const requirementData = {
+  commentAllowed: true,
+  creatorDisplayName: "Benchmark Creator",
+  creatorUsername: "benchmark.creator",
+  duetAllowed: false,
+  maxVideoDurationSeconds: 180,
+  platform: "tiktok",
+  privacyLevels: ["PUBLIC_TO_EVERYONE"],
+  stitchAllowed: false,
+};
+const tiktokCapability = providerRegistry
+  .capabilities()
+  .find((value) => value.platform === "tiktok");
+assert.ok(tiktokCapability);
+providerRegistry.register("tiktok", {
+  capability: {
+    ...tiktokCapability,
+    analytics: false,
+    comments: false,
+    reply: false,
+    publish: false,
+    connect_available: false,
+  },
+  transferModes: [],
+  // Fixed synthetic upstream latency exposes overlapping reads equally on both
+  // revisions. This is a controlled adapter, not live Provider timing.
+  getPublicationRequirements: async () => {
+    upstreamReads += 1;
+    await delay(providerDelayMs);
+    return requirementData;
+  },
+});
 
 const assetService = createAssetApiService({
   storageServiceLayer: createStorageServiceTest({
@@ -213,6 +252,7 @@ const app = createApiApp({
   postService,
   resolveActor: async () => actor,
   verifyJwtToken: async () => jwtIdentity,
+  providerRegistry,
 });
 
 instrumentPool(authenticatedPoolFor(env));
@@ -268,6 +308,54 @@ const calendarStart = "2026-07-01T00:00:00.000Z";
 const calendarEnd = "2026-08-31T23:59:59.999Z";
 const analyticsStart = "2026-01-01T00:00:00.000Z";
 const analyticsEnd = "2026-12-31T23:59:59.999Z";
+let analyticsRangeCounter = 0;
+
+/** Builds a unique exact range per cold sample, preserving the same fixed published cohort. */
+function coldAnalyticsPath() {
+  analyticsRangeCounter += 1;
+  const end = new Date(Date.parse(analyticsEnd) - analyticsRangeCounter).toISOString();
+  return `/api/v1/analytics?start=${encodeURIComponent(analyticsStart)}&end=${encodeURIComponent(end)}`;
+}
+
+/** Measures one fresh range or one concurrent burst, validating canonical totals in every response. */
+async function analyticsRead(path, concurrency = 1) {
+  const started = performance.now();
+  const results = await Promise.all(
+    Array.from({ length: concurrency }, () => httpRequest(path, { headers: authorization })),
+  );
+  for (const result of results) {
+    // Stored counters remain canonical even when one Platform is marked partial.
+    assert.equal(result.body.totals.post_count, dataset.posts);
+    assert.equal(result.body.totals.views, (dataset.posts * (dataset.posts + 1)) / 2);
+  }
+  return {
+    bytes: results.reduce((sum, result) => sum + result.bytes, 0),
+    latencyMs: performance.now() - started,
+    operations: concurrency,
+    requestLatencies: results.map((result) => result.durationMs),
+  };
+}
+
+/** Measures sequential or overlapping requirements through real account/RLS/decryption and route code. */
+async function requirementReads(concurrency) {
+  const before = upstreamReads;
+  const started = performance.now();
+  const results = await Promise.all(
+    Array.from({ length: concurrency }, () =>
+      httpRequest(`/api/v1/platforms/${requirementAccountId}/publishing-requirements`, {
+        headers: authorization,
+      }),
+    ),
+  );
+  for (const result of results) assert.deepEqual(result.body, requirementData);
+  return {
+    bytes: results.reduce((sum, result) => sum + result.bytes, 0),
+    latencyMs: performance.now() - started,
+    operations: concurrency,
+    requestLatencies: results.map((result) => result.durationMs),
+    upstreamReads: upstreamReads - before,
+  };
+}
 
 /** Runs the three reads the Posts UI refetches after a successful deletion. */
 async function refetchPostResources() {
@@ -379,13 +467,26 @@ function scenarios() {
     },
     {
       name: "analytics.summary.year",
-      run: async () => {
-        const result = await httpRequest(
+      run: () =>
+        analyticsRead(
           `/api/v1/analytics?start=${encodeURIComponent(analyticsStart)}&end=${encodeURIComponent(analyticsEnd)}`,
-          { headers: authorization },
-        );
-        return { bytes: result.bytes, latencyMs: result.durationMs, operations: 1 };
-      },
+        ),
+    },
+    {
+      name: "analytics.summary.cold-exact-range",
+      run: () => analyticsRead(coldAnalyticsPath()),
+    },
+    {
+      name: "analytics.summary.concurrent-cold20",
+      run: () => analyticsRead(coldAnalyticsPath(), readConcurrency),
+    },
+    {
+      name: "requirements.sequential",
+      run: () => requirementReads(1),
+    },
+    {
+      name: "requirements.concurrent20",
+      run: () => requirementReads(readConcurrency),
     },
     {
       name: "inbox.list.page100",
@@ -624,6 +725,20 @@ async function measureScenario(scenario) {
         applicationQueries.reduce((total, query) => total + query.durationMs, 0),
       ),
       top_statements: topStatements,
+      aggregate_executions: applicationQueries.filter(
+        (query) =>
+          query.statement.includes("WITH candidates AS (") &&
+          query.statement.includes("analytics_snapshots"),
+      ).length,
+      aggregate_time_ms_total: rounded(
+        applicationQueries
+          .filter(
+            (query) =>
+              query.statement.includes("WITH candidates AS (") &&
+              query.statement.includes("analytics_snapshots"),
+          )
+          .reduce((total, query) => total + query.durationMs, 0),
+      ),
     },
     latency_ms: summarize(sampleResults.map((sample) => sample.latencyMs)),
     operations: totalOperations,
@@ -649,6 +764,7 @@ async function measureScenario(scenario) {
         (sampleResults.reduce((total, sample) => total + sample.latencyMs, 0) / 1_000),
     ),
     warmup: warmupsToRun,
+    upstream_reads: sampleResults.reduce((sum, sample) => sum + (sample.upstreamReads ?? 0), 0),
   };
 }
 
@@ -671,6 +787,21 @@ const workflows = [];
 
 try {
   await seed(admin);
+  const cipher = new TokenCipher({
+    currentKeyId: "primary",
+    keys: [{ id: "primary", material: env.TOKEN_ENCRYPTION_KEY }],
+  });
+  await admin.query(
+    `INSERT INTO platform_accounts
+     (id, org_id, brand_profile_id, platform, platform_user_id, access_token, scopes, connection_status)
+     VALUES ($1, $2, $3, 'tiktok', 'benchmark-requirements', $4, ARRAY['video.publish'], 'connected')`,
+    [
+      requirementAccountId,
+      ids.org,
+      ids.brandProfile,
+      await cipher.encrypt("benchmark-provider-token"),
+    ],
+  );
   await cleanupDeleteBatches(admin);
   for (const scenario of scenarios()) {
     process.stdout.write(`running ${scenario.name}\n`);
@@ -698,6 +829,8 @@ const result = {
     delete_warmup: deleteWarmup,
     measured_samples: measuredSamples,
     warmup_samples: warmupSamples,
+    read_concurrency: readConcurrency,
+    controlled_provider_delay_ms: providerDelayMs,
   },
   dataset: {
     ...dataset,

@@ -80,8 +80,13 @@ jobs:
           (cd baseline && bun install --frozen-lockfile)
       - name: Inject benchmark infrastructure into the baseline checkout
         run: |
-          cp -R candidate/workers/api/bench baseline/workers/api/bench
-          cp -R candidate/scripts/benchmarks baseline/scripts/benchmarks
+          mkdir -p baseline/workers/api/bench baseline/scripts/benchmarks
+          cp -R candidate/workers/api/bench/. baseline/workers/api/bench/
+          cp -R candidate/scripts/benchmarks/. baseline/scripts/benchmarks/
+          diff -r candidate/workers/api/bench baseline/workers/api/bench
+      - name: Verify benchmark comparison behavior
+        working-directory: candidate/workers/api
+        run: bunx --no-install vp test run test/benchmark-cli.node.test.ts
       - name: Prepare one database per revision
         run: |
           (cd baseline && BENCHMARK_DATABASE_NAME=meltiply_bench_baseline bun scripts/benchmarks/backend/prepare-database.mjs)

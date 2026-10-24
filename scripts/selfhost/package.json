@@ -9,6 +9,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@types/pg": "8.20.0",
     "effect": "4.0.5"
   },
   "overrides": {

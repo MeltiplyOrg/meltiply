@@ -34,8 +34,9 @@ const pending: (() => void)[] = [];
 const observations: {
   scenario: string;
   api_requests: number;
+  canceled_requests: number;
   upstream_calls: number;
-  latency_ms: { mean: number; p95: number };
+  latency_ms: { count: number; mean: number; p95: number };
 }[] = [];
 let runtime: Miniflare | undefined;
 
@@ -63,14 +64,16 @@ function release() {
   for (const resolve of pending.splice(0)) resolve();
 }
 
-/** Records only completed HTTP samples, nearest-rank p95 and real upstream call counts; fixture preparation is excluded. */
-function record(scenario: string, before: number, samples: { ms: number }[]) {
+/** Records completed-response latency and every started request, including explicitly canceled callers; preparation is excluded. */
+function record(scenario: string, before: number, samples: { ms: number }[], canceled = 0) {
   const latencies = samples.map((sample) => sample.ms).sort((a, b) => a - b);
   observations.push({
     scenario,
-    api_requests: samples.length,
+    api_requests: samples.length + canceled,
+    canceled_requests: canceled,
     upstream_calls: upstreamCalls - before,
     latency_ms: {
+      count: samples.length,
       mean: latencies.reduce((sum, value) => sum + value, 0) / latencies.length,
       p95: latencies[Math.ceil(latencies.length * 0.95) - 1]!,
     },
@@ -208,7 +211,7 @@ try {
     1,
     "Leader disconnect must not terminate the follower's shared I/O",
   );
-  record("leader-network-disconnect", before, [survivingFollower]);
+  record("leader-network-disconnect", before, [survivingFollower], 1);
 
   before = upstreamCalls;
   reads = await accountReads();
@@ -227,7 +230,7 @@ try {
   release();
   const survivingLeaderResult = await survivingLeader;
   assert.equal(upstreamCalls - before, 1);
-  record("joiner-network-disconnect", before, [survivingLeaderResult]);
+  record("joiner-network-disconnect", before, [survivingLeaderResult], 1);
 
   before = upstreamCalls;
   held = true;
@@ -253,11 +256,11 @@ try {
     "UPDATE platform_accounts SET revoked_at = now(), connection_status = 'revoked' WHERE id = $1",
     [accountId],
   );
-  await request("after-revoke", undefined, 409);
+  const revokedResult = await request("after-revoke", undefined, 409);
   release();
   const validResult = await valid;
   assert.equal(upstreamCalls - before, 1);
-  record("revoke-during-flight", before, [validResult]);
+  record("revoke-during-flight", before, [validResult, revokedResult]);
 
   const label = selfhost ? `compose-${process.arch}` : "managed-local-workerd";
   const output = {

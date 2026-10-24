@@ -296,10 +296,10 @@ describe("publishing-requirement coalescing with PostgreSQL RLS", () => {
     firstGate.resolve({ ...defaultRequirements, creatorDisplayName: "Original source" });
     secondGate.resolve({ ...defaultRequirements, creatorDisplayName: "Replacement source" });
     const responses = await Promise.all([first, second]);
-    expect(await responses[0]!.json()).toMatchObject({
+    expect(await responses[0].json()).toMatchObject({
       creator: { display_name: "Original source" },
     });
-    expect(await responses[1]!.json()).toMatchObject({
+    expect(await responses[1].json()).toMatchObject({
       creator: { display_name: "Replacement source" },
     });
     expect(read).toHaveBeenCalledTimes(2);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
-import { chromium } from "../../../frontend/app/node_modules/@playwright/test/index.mjs";
+import { managedOwnerCookie } from "../../../frontend/app/e2e/cache-smoke.mjs";
 import { cacheSmoke } from "./cache-smoke.mjs";
 
 const origin = "http://127.0.0.1:8787";
@@ -82,22 +82,7 @@ try {
     "--strictPort",
   ]);
   await ready(frontendOrigin, frontend);
-  const browser = await chromium.launch({ headless: true });
-  let cookie;
-  try {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await page.goto(`${frontendOrigin}/sign-in`);
-    await page.getByLabel("Email address", { exact: true }).fill("alpha@meltiply.local");
-    await page.getByLabel("Password", { exact: true }).fill("MeltiplyLocal1!");
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await page.waitForURL(/\/posts/, { timeout: 30_000 });
-    cookie = (await context.cookies()).map((entry) => `${entry.name}=${entry.value}`).join("; ");
-  } catch {
-    throw new Error("Managed-runtime owner sign-in failed; sensitive form details suppressed");
-  } finally {
-    await browser.close();
-  }
+  const cookie = await managedOwnerCookie(frontendOrigin);
   await cacheSmoke({
     origin,
     frontendOrigin,

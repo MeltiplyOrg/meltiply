@@ -157,17 +157,26 @@ execFileSync(
     maxBuffer: 1024 * 1024,
   },
 );
+compose(
+  "exec",
+  "-T",
+  "-e",
+  "REQUIREMENTS_SMOKE_BUNDLE=/tmp/cache-proof/worker.js",
+  "-e",
+  "REQUIREMENTS_SMOKE_OUTPUT=/tmp/cache-proof/artifacts",
+  "runtime",
+  "node",
+  "/tmp/cache-proof/check.mjs",
+);
 const requirementsEvidence = JSON.parse(
   compose(
     "exec",
     "-T",
-    "-e",
-    "REQUIREMENTS_SMOKE_BUNDLE=/tmp/cache-proof/worker.js",
-    "-e",
-    "REQUIREMENTS_SMOKE_OUTPUT=/tmp/cache-proof/artifacts",
     "runtime",
     "node",
-    "/tmp/cache-proof/check.mjs",
+    "--input-type=module",
+    "-e",
+    `import {readFileSync} from 'node:fs'; process.stdout.write(readFileSync('/tmp/cache-proof/artifacts/compose-${process.arch}-requirements.json'));`,
   ).toString(),
 );
 await writeFile(

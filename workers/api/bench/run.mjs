@@ -349,7 +349,21 @@ async function requirementReads(concurrency) {
       }),
     ),
   );
-  for (const result of results) assert.deepEqual(result.body, requirementData);
+  for (const result of results) {
+    assert.deepEqual(result.body, {
+      platform: "tiktok",
+      comment_allowed: true,
+      creator: {
+        avatar_url: null,
+        display_name: "Benchmark Creator",
+        username: "benchmark.creator",
+      },
+      duet_allowed: false,
+      max_video_duration_sec: 180,
+      privacy_levels: ["PUBLIC_TO_EVERYONE"],
+      stitch_allowed: false,
+    });
+  }
   return {
     bytes: results.reduce((sum, result) => sum + result.bytes, 0),
     latencyMs: performance.now() - started,

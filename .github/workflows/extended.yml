@@ -80,7 +80,7 @@ jobs:
           bun run docs:links
       - name: Check changed React code diagnostics
         if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
-        run: npx --yes react-doctor@0.9.14 frontend/app --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+        run: npx --yes react-doctor@0.9.18 frontend/app --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
       - name: Exercise navigation focus and reconnect assignment in the browser
         if: inputs.lane == 'cloudflare-full'
         env:

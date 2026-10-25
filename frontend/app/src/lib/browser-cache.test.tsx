@@ -14,10 +14,12 @@ import type {
   AnalyticsPostsResponse,
   PlatformAccountsResponse,
   Post,
+  CalendarEvent,
 } from "@/types";
 import {
   useAnalyticsDashboard,
   useAnalyticsPosts,
+  useCalendar,
   useDeleteBrandProfile,
   usePlatforms,
   usePosts,
@@ -115,11 +117,11 @@ describe("private browser read cache", () => {
 
     vi.setSystemTime(new Date("2026-10-25T12:04:00.000Z"));
     const returned = renderHook(
-      () => ({
+      ({ metric }: { metric: "views" | "likes" }) => ({
         dashboard: useAnalyticsDashboard(scope, { range: "30d" }),
-        posts: useAnalyticsPosts(scope, { range: "30d", metric: "likes", limit: 10, offset: 0 }),
+        posts: useAnalyticsPosts(scope, { range: "30d", metric, limit: 10, offset: 0 }),
       }),
-      { wrapper: Wrapper },
+      { wrapper: Wrapper, initialProps: { metric: "likes" } },
     );
     await act(async () => {
       focusManager.setFocused(false);
@@ -129,13 +131,28 @@ describe("private browser read cache", () => {
     expect(returned.result.current.posts.data).toEqual(posts);
     expect(requests).toHaveLength(3);
 
+    vi.setSystemTime(new Date("2026-10-25T12:05:30.000Z"));
+    returned.rerender({ metric: "views" });
+    await waitFor(() => expect(requests).toHaveLength(4));
+    expect(
+      requests
+        .filter((url) => url.pathname.endsWith("/dashboard"))
+        .at(-1)
+        ?.searchParams.get("end"),
+    ).toBe(
+      requests
+        .filter((url) => url.pathname.endsWith("/posts"))
+        .at(-1)
+        ?.searchParams.get("end"),
+    );
+
     await act(async () => {
       await client.invalidateQueries({ queryKey: ["analytics"] });
     });
     await waitFor(() =>
       expect(requests.slice(-2).map((url) => url.searchParams.get("end"))).toEqual([
-        "2026-10-25T12:04:00.000Z",
-        "2026-10-25T12:04:00.000Z",
+        "2026-10-25T12:05:30.000Z",
+        "2026-10-25T12:05:30.000Z",
       ]),
     );
   });
@@ -230,5 +247,63 @@ describe("private browser read cache", () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 11_000));
     });
     expect(paths).toHaveLength(completedReads);
+  }, 15_000);
+
+  it("refreshes only active and newly due calendar outcomes, preserving settled events", async () => {
+    const fixture = contractSuccessBody<Post["distributions"][number]>("getDistribution");
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    const active: CalendarEvent = {
+      id: "active-outcome",
+      brand_profile_id: fixture.brand_profile_id,
+      post_id: fixture.post_id,
+      post_title: "Publishing",
+      platform: fixture.platform,
+      platform_account_id: fixture.platform_account_id,
+      status: "processing",
+      scheduled_at: null,
+      published_at: null,
+      updated_at: fixture.updated_at,
+    };
+    const scheduled: CalendarEvent = {
+      ...active,
+      id: "future-outcome",
+      status: "scheduled",
+      scheduled_at: new Date(startedAt + 60_000).toISOString(),
+    };
+    const settled: CalendarEvent = { ...active, id: "settled-outcome", status: "published" };
+    const paths: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        paths.push(url.pathname);
+        if (url.pathname.endsWith("/calendar"))
+          return Response.json({ events: [active, scheduled, settled] });
+        return Response.json({
+          ...fixture,
+          id: url.pathname.split("/").at(-1),
+          status: "published",
+        });
+      }),
+    );
+    const view = renderHook(
+      () =>
+        useCalendar(scope, {
+          start: new Date(startedAt - 60_000).toISOString(),
+          end: new Date(startedAt + 120_000).toISOString(),
+        }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(view.result.current.data?.[0]?.status).toBe("published"));
+    expect(paths.some((path) => path.endsWith("/future-outcome"))).toBe(false);
+    expect(view.result.current.data?.[2]).toEqual(settled);
+    clock.mockReturnValue(startedAt + 61_000);
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 11_000));
+    });
+    await waitFor(() => expect(view.result.current.data?.[1]?.status).toBe("published"));
+    expect(paths.filter((path) => path.endsWith("/calendar"))).toHaveLength(1);
+    expect(paths.some((path) => path.endsWith("/settled-outcome"))).toBe(false);
   }, 15_000);
 });

@@ -601,9 +601,13 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
       });
       const tokens = tokenBody(tokenResponse.body, now(), true);
       const userUrl = new URL("/v2/user/info/", apiOrigin);
-      // `username` is only returned when the optional `user.info.profile` scope
-      // was granted; requesting the field without the scope is harmless.
-      userUrl.searchParams.set("fields", "open_id,display_name,avatar_url,username");
+      // Profile fields must match the actual grant; profile consent is optional.
+      userUrl.searchParams.set(
+        "fields",
+        tokens.scopes?.includes("user.info.profile")
+          ? "open_id,display_name,avatar_url,username"
+          : "open_id,display_name,avatar_url",
+      );
       const userResponse = await http.request<unknown>(context, {
         headers: bearer(tokens.accessToken),
         method: "GET",

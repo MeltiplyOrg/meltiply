@@ -181,9 +181,9 @@ describe("createTikTokAdapter", () => {
   });
 
   it.each([
-    "user.info.basic,user.info.stats,video.publish,video.list",
-    "user.info.basic,video.publish",
-    "user.info.basic,video.publish,video.list",
+    "user.info.basic,user.info.profile,user.info.stats,video.publish,video.list",
+    "user.info.basic,user.info.profile,video.publish",
+    "user.info.basic,user.info.profile,video.publish,video.list",
   ])("connects with granted scopes %s and binds the token open ID", async (grantedScopes) => {
     const providerCalls = sequence(
       (url, init) => {
@@ -251,10 +251,12 @@ describe("createTikTokAdapter", () => {
           scope: "user.info.basic,video.publish",
           token_type: "Bearer",
         }),
-      () =>
-        success({
+      (url) => {
+        expect(url.searchParams.get("fields")).toBe("open_id,display_name,avatar_url");
+        return success({
           user: { display_name: "Meltiply Creator", open_id: "open-id-1" },
-        }),
+        });
+      },
     );
     await expect(
       adapter(providerCalls.fetcher).exchangeAuthorizationCode!(context, {

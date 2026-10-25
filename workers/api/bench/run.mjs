@@ -240,13 +240,6 @@ const env = {
   BETTER_AUTH_JWKS_URL: `http://127.0.0.1:${address.port}/jwks`,
 };
 
-const claims = {
-  organizationId: ids.org,
-  organizationRole: "admin",
-  subject: "auth_user_benchmark",
-  userId: ids.user,
-};
-
 const authorization = { Authorization: `Bearer ${bearer}` };
 
 const providerRegistry = new ProviderRegistry();

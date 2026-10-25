@@ -299,6 +299,22 @@ outcomes. This is a capacity experiment, not a live Provider quota measurement.
 Enable the bounded mode only after its latency/throughput gain is observed and
 the installation's Provider budget supports it.
 
+[Run 40192396395](https://github.com/MeltiplyOrg/meltiply/actions/runs/40192396395)
+at `316c93e` exercised five publications across four external accounts, one
+500 ms controlled call and four 50 ms calls. Three alternating samples per mode
+produced these rounded observed ranges:
+
+| Mode        | Whole batch ms | First independent account completion ms | Maximum simultaneous calls |
+| ----------- | -------------: | --------------------------------------: | -------------------------: |
+| Serial      |        905–938 |                                 630–661 |                          1 |
+| Bounded two |        657–665 |                                 106–114 |                          2 |
+
+Every sample persisted five published outcomes, kept same-account concurrency
+at one, and acknowledged redelivery without another Provider write.
+[Raw observations](../../docs/benchmarks/results/2026-10-25-authenticated/queue-capacity.json)
+demonstrate reduced head-of-line blocking under this controlled latency skew,
+not a production throughput or quota guarantee. Serial remains the default.
+
 ### Controlled API placement experiment
 
 Leave deployment placement unchanged until measured. Prepare two isolated API

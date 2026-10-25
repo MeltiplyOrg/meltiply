@@ -1,0 +1,55 @@
+{
+  "runtime": "workerd with PostgreSQL and controlled Provider latency",
+  "slow_provider_ms": 500,
+  "fast_provider_ms": 50,
+  "observations": [
+    {
+      "concurrency": 1,
+      "elapsed_ms": 938.1421980000001,
+      "first_independent_completion_ms": 660.631636,
+      "maximum_active": 1,
+      "maximum_same_account": 1,
+      "accepted": 5
+    },
+    {
+      "concurrency": 2,
+      "elapsed_ms": 656.7939430000001,
+      "first_independent_completion_ms": 105.9220949999999,
+      "maximum_active": 2,
+      "maximum_same_account": 1,
+      "accepted": 5
+    },
+    {
+      "concurrency": 2,
+      "elapsed_ms": 665.0308319999999,
+      "first_independent_completion_ms": 114.3072729999999,
+      "maximum_active": 2,
+      "maximum_same_account": 1,
+      "accepted": 5
+    },
+    {
+      "concurrency": 1,
+      "elapsed_ms": 905.0001619999998,
+      "first_independent_completion_ms": 629.8411929999997,
+      "maximum_active": 1,
+      "maximum_same_account": 1,
+      "accepted": 5
+    },
+    {
+      "concurrency": 1,
+      "elapsed_ms": 906.4892110000001,
+      "first_independent_completion_ms": 633.7752030000001,
+      "maximum_active": 1,
+      "maximum_same_account": 1,
+      "accepted": 5
+    },
+    {
+      "concurrency": 2,
+      "elapsed_ms": 660.5151219999998,
+      "first_independent_completion_ms": 109.61357300000054,
+      "maximum_active": 2,
+      "maximum_same_account": 1,
+      "accepted": 5
+    }
+  ]
+}

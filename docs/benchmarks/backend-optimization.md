@@ -567,3 +567,55 @@ baseline [1](results/2026-10-24-portable-cache/baseline-1.json) /
 [2](results/2026-10-24-portable-cache/candidate-2.json) /
 [3](results/2026-10-24-portable-cache/candidate-3.json).
 The same files are attached as artifact `backend-benchmark-40107515487`.
+
+## Complete authenticated application comparison
+
+[Hosted run 40192060823](https://github.com/MeltiplyOrg/meltiply/actions/runs/40192060823)
+compares `master` at `451c0a224a63` with this PR at `ea52a6fa2640`.
+Unlike the earlier cache-only comparison, this run uses signed JWT verification,
+the live stored session and actor-resolution path, and real PostgreSQL/RLS.
+Both revisions run the same harness with 300 Posts and 90 snapshots per
+Distribution (27,000 history rows). Fixture preparation is outside measurement.
+One baseline/candidate block, three warm-ups and ten samples are an initial
+regression observation, not a statistically strong tail estimate.
+
+| Authenticated workflow                        | Master p95 ms | PR p95 ms | Master / PR application SQL statements per request |
+| --------------------------------------------- | ------------: | --------: | -------------------------------------------------: |
+| Posts page, 100 rows                          |         32.12 |    139.18 |                                            21 / 13 |
+| Cold exact-range Analytics summary            |         17.85 |    117.46 |                                            17 / 10 |
+| Twenty concurrent cold summaries, whole batch |        226.75 |   1535.01 |                                          17 / 9.05 |
+| Complete Analytics dashboard and ranking      |       3967.43 |   4328.44 |                                        18.5 / 10.5 |
+
+Work reduction is observable: warm summaries perform zero aggregate executions
+per request instead of one; a twenty-request cold burst performs 0.05 instead of
+one. Concurrent publishing-requirement reads average 0.07 upstream reads/request
+instead of one; sequential requirements still perform one fresh upstream read.
+Authorization remains authoritative on every request.
+
+**Cold latency regresses in this harness.** The candidate closes invocation-owned
+driver clients on release, while master retains Node PostgreSQL clients across
+requests. This direct PostgreSQL simulation has no Hyperdrive origin pool, so
+connection establishment and authentication are paid repeatedly. [INFERENCE]
+Connection churn is a likely latency contributor; this comparison does not
+isolate its share. Driver-observed statement durations include scheduling, not
+PostgreSQL server CPU alone. This limitation is not a reason to hide regressions
+or restore unsafe cross-invocation sockets. A deployed Hyperdrive comparison is
+still required. The complete Analytics page also remains
+above the documented latency target on this fixture; fewer statements alone do
+not establish a faster page. No production latency, billing, or currency savings
+are inferred from these results.
+
+Browser cache reuse is measured separately through real navigation: it avoids
+entire authenticated requests, whereas this benchmark intentionally sends each
+request. See the operational acceptance targets in the
+[infrastructure guide](../../infra/cloudflare/README.md#acceptance-targets-and-scaling-decisions).
+
+```sh
+gh workflow run backend-benchmark.yml --ref feat/58-portable-read-caching \
+  -f profile=application -f repetitions=1 -f samples=10
+```
+
+Preserved evidence: [generated comparison](results/2026-10-25-authenticated/comparison.md),
+[machine-readable comparison](results/2026-10-25-authenticated/comparison.json),
+[master raw run](results/2026-10-25-authenticated/baseline-1.json), and
+[PR raw run](results/2026-10-25-authenticated/candidate-1.json).

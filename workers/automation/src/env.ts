@@ -18,6 +18,8 @@ export interface AutomationEnv {
   COMMENTS_QUEUE?: Queue<unknown>;
   /** Exact "true" opts into recurring Comment-body collection; demand reads remain available. */
   RECURRING_COMMENTS_ENABLED?: string;
+  /** "1" (default) serializes batches; "2" overlaps only distinct Provider accounts. */
+  PUBLISH_BATCH_CONCURRENCY?: string;
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: string;
   LOG_SAMPLE_RATE?: string;

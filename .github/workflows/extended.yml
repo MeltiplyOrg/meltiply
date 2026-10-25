@@ -60,6 +60,11 @@ jobs:
           bun run --cwd workers/automation test:integration test/comment-policy.integration.test.ts
           node --test scripts/infra/cost-model.test.mjs
           node --test scripts/infra/queue-alert.test.mjs scripts/benchmarks/backend/placement-compare.test.mjs
+          bunx --no-install tsc --project scripts/selfhost/tsconfig.json
+          bunx --no-install wrangler deploy workers/automation/test-support/queue-capacity.ts --config workers/automation/wrangler.test.jsonc --dry-run --outdir artifacts/queue-capacity-worker
+          trap 'rm -f scripts/selfhost/.queue-capacity-check.mjs' EXIT
+          bun build scripts/selfhost/queue-capacity-check.ts --target=node --external miniflare --external pg --external effect --external zod --outfile=scripts/selfhost/.queue-capacity-check.mjs
+          QUEUE_CAPACITY_BUNDLE=artifacts/queue-capacity-worker/queue-capacity.js node scripts/selfhost/.queue-capacity-check.mjs
       - name: Prepare full gate database
         if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull

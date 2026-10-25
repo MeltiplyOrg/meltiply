@@ -862,6 +862,9 @@ export function createAutomationHandler(
      * (`min(3600s, 15s * 2^attempts)`) on transient failures. Every body flows through
      * dispatchQueueMessage: unroutable shapes fail terminally there and surface through the
      * rejected branch below (ack-and-surface, AUD-039).
+     * Opt-in publish batches may overlap two distinct Provider accounts; each
+     * account remains ordered and infrastructure still limits the Queue to one
+     * invocation. Asset and other job kinds stay serial.
      *
      * @param batch - Batch of incoming queue messages with delivery attempt metadata and queue name.
      * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
@@ -873,12 +876,19 @@ export function createAutomationHandler(
       // object storage store, so the dispatcher resolves it lazily through this
       // memoized thunk rather than paying per message.
       let assetProcessor: Promise<AssetJobProcessor> | undefined;
-      for (const message of batch.messages) {
+      const provider = queueProvider(batch.queue);
+      if (
+        env.PUBLISH_BATCH_CONCURRENCY !== undefined &&
+        env.PUBLISH_BATCH_CONCURRENCY !== "1" &&
+        env.PUBLISH_BATCH_CONCURRENCY !== "2"
+      ) {
+        throw new RangeError("PUBLISH_BATCH_CONCURRENCY must be 1 or 2");
+      }
+      const consume = async (message: Message<unknown>) => {
         const startedAt = performance.now();
         const correlation = queueCorrelation(message.body, message.id);
         const event = queueEvent(message.body);
         const job = queueJob(message.body);
-        const provider = queueProvider(batch.queue);
         const scope: JobScope = jobScope(
           env,
           makeJobContext({
@@ -934,7 +944,7 @@ export function createAutomationHandler(
             ...(provider ? { provider } : {}),
             queue: batch.queue,
           });
-          continue;
+          return;
         }
         if (outcome === "rejected") {
           // Terminal: ack-and-surface producer-contract bugs (AUD-039), and
@@ -954,7 +964,7 @@ export function createAutomationHandler(
             queue: batch.queue,
             retry_class: "none",
           });
-          continue;
+          return;
         }
         if (outcome === "ambiguous") {
           // Ambiguous provider writes must never auto-retry: the distribution
@@ -974,7 +984,7 @@ export function createAutomationHandler(
             queue: batch.queue,
             retry_class: "reconciliation",
           });
-          continue;
+          return;
         }
         await flow?.finish("failed");
         // Deliberate: mirrors the outbox's own exponential backoff
@@ -997,6 +1007,18 @@ export function createAutomationHandler(
           queue: batch.queue,
           retry_class: "queue_backoff",
         });
+      };
+      if (provider && env.PUBLISH_BATCH_CONCURRENCY === "2") {
+        // Exception: pg-backed partition lookup cannot be evaluated inside the
+        // workerd unit-test isolate; ordinary serial dispatch stays pg-free.
+        const module = await import("./publish-batch");
+        const partitions = await runDirectProgram(
+          env,
+          module.partitionPublishBatch(env, batch.messages),
+        );
+        await module.consumePublishPartitions(partitions, consume);
+      } else {
+        for (const message of batch.messages) await consume(message);
       }
     },
 
@@ -1100,11 +1122,11 @@ export function createAutomationHandler(
   };
 }
 /**
- * Runs one module program at the service-binding RPC boundary.
+ * Runs a module program at an RPC or bounded publish-batch lookup boundary.
  *
  * Builds a fresh "direct" job scope so the program resolves the same queue
  * services the queue/scheduled paths use, then translates the finished Exit
- * back into the RPC contract: the success value resolves the call, while a
+ * back into the caller's contract: the success value resolves the call, while a
  * failure rejects with the original throw — recoverJobErrorCause restores the
  * name/message classifyJobError stored on the typed wrapper so callers see
  * the pre-migration error shape.

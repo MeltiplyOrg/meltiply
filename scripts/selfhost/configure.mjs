@@ -23,6 +23,7 @@ const values = {
   SELFHOST_OPERATOR_SECRET: randomBytes(32).toString("hex"),
   PROCESSOR_JOB_TOKEN: randomBytes(32).toString("hex"),
   RECURRING_COMMENTS_ENABLED: "false",
+  PUBLISH_BATCH_CONCURRENCY: "1",
   R2_ACCESS_KEY_ID: randomBytes(16).toString("hex"),
   R2_SECRET_ACCESS_KEY: randomBytes(32).toString("hex"),
   MAIL_FROM_ADDRESS: ci ? "no-reply@example.com" : "",

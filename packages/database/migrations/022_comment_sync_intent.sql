@@ -1,3 +1,4 @@
+-- meltiply-release-phase: expand
 -- A deployment may stop recurring Comment collection without dropping an
 -- authorized Inbox fetch, its cursor continuation, or transport-recovery retry.
 -- Intent belongs to the durable claim, not a redeliverable Queue body.

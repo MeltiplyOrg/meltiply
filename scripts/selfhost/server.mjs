@@ -197,6 +197,7 @@ for (const name of [
   "POLAR_ENV",
   "LOG_SAMPLE_RATE",
   "RECURRING_COMMENTS_ENABLED",
+  "PUBLISH_BATCH_CONCURRENCY",
 ]) {
   if (process.env[name]) bindings[name] = process.env[name];
 }

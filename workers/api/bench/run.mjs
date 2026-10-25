@@ -17,6 +17,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
+import { generateKeyPairSync, sign } from "node:crypto";
+import { createServer } from "node:http";
 
 import { configureLogSampling } from "@meltiply/observability";
 import { createStorageServiceTest } from "@meltiply/storage";
@@ -27,7 +29,7 @@ import pg from "pg";
 
 import { createApiApp } from "../src/app.ts";
 import { createAssetApiService } from "../src/asset-service.ts";
-import { authenticatedPoolFor } from "../src/database.ts";
+import { authenticatedPoolFor, systemPoolFor } from "../src/database.ts";
 import { createCoreApiService } from "../src/core-service.ts";
 import { createPostApiService } from "../src/post-service.ts";
 import {
@@ -50,7 +52,8 @@ const outputFile = resolve(
 );
 const label = process.env.BENCHMARK_LABEL ?? "benchmark";
 const profile = process.env.BENCHMARK_PROFILE ?? "all";
-if (!["all", "read-cache"].includes(profile)) throw new TypeError("Unknown BENCHMARK_PROFILE");
+if (!["all", "read-cache", "application"].includes(profile))
+  throw new TypeError("Unknown BENCHMARK_PROFILE");
 const warmupSamples = integerEnv("BENCHMARK_WARMUP", 3, 0, 100);
 const measuredSamples = integerEnv("BENCHMARK_SAMPLES", 20, 1, 1_000);
 if (warmupSamples + measuredSamples > dataset.schedulePosts) {
@@ -154,6 +157,45 @@ function instrumentPool(pool) {
 
 configureLogSampling(0);
 
+// This key is disposable and never serialized to artifacts. The production JWT
+// verifier fetches its public half over HTTP; live sessions and actor resolution
+// use the benchmark database rather than injected authentication callbacks.
+const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+const jwks = JSON.stringify({
+  keys: [
+    { ...publicKey.export({ format: "jwk" }), kid: "benchmark-key", alg: "EdDSA", use: "sig" },
+  ],
+});
+const jwksServer = createServer((_request, response) => {
+  response.writeHead(200, { "Content-Type": "application/json" });
+  response.end(jwks);
+});
+await new Promise((resolve, reject) => {
+  jwksServer.once("error", reject);
+  jwksServer.listen(0, "127.0.0.1", resolve);
+});
+const address = jwksServer.address();
+assert.ok(address && typeof address === "object");
+const authOrigin = "https://benchmark.invalid";
+const nowSeconds = Math.floor(Date.now() / 1000);
+const encodedHeader = Buffer.from(JSON.stringify({ alg: "EdDSA", kid: "benchmark-key" })).toString(
+  "base64url",
+);
+const encodedClaims = Buffer.from(
+  JSON.stringify({
+    sub: "auth_user_benchmark",
+    sid: "benchmark-session",
+    email: "benchmark@meltiply.local",
+    name: "Benchmark User",
+    iss: authOrigin,
+    aud: authOrigin,
+    iat: nowSeconds,
+    exp: nowSeconds + 3600,
+  }),
+).toString("base64url");
+const signingInput = `${encodedHeader}.${encodedClaims}`;
+const bearer = `${signingInput}.${sign(null, Buffer.from(signingInput), privateKey).toString("base64url")}`;
+
 const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   DB_AUTHENTICATED: { connectionString: authenticatedUrl },
@@ -161,6 +203,8 @@ const env = {
   ENVIRONMENT: "test",
   TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
   VERSION: "benchmark",
+  PUBLIC_API_URL: authOrigin,
+  BETTER_AUTH_JWKS_URL: `http://127.0.0.1:${address.port}/jwks`,
 };
 
 const claims = {
@@ -170,26 +214,7 @@ const claims = {
   userId: ids.user,
 };
 
-const actor = {
-  authUserId: claims.subject,
-  claims,
-  role: "admin",
-  userId: claims.userId,
-  workspace: {
-    id: ids.org,
-    isPersonal: false,
-    name: "Benchmark Studio",
-    slug: "benchmark-studio",
-  },
-};
-
-const jwtIdentity = {
-  email: "benchmark@meltiply.local",
-  name: "Benchmark User",
-  subject: claims.subject,
-};
-
-const authorization = { Authorization: "Bearer benchmark.jwt" };
+const authorization = { Authorization: `Bearer ${bearer}` };
 
 const providerRegistry = new ProviderRegistry();
 providerRegistry.register(
@@ -252,12 +277,11 @@ const app = createApiApp({
   assetService,
   coreService,
   postService,
-  resolveActor: async () => actor,
-  verifyJwtToken: async () => jwtIdentity,
   providerRegistry,
 });
 
 instrumentPool(authenticatedPoolFor(env));
+instrumentPool(systemPoolFor(env));
 
 const admin = new pg.Client({ connectionString: systemUrl });
 await admin.connect();
@@ -505,6 +529,28 @@ function scenarios() {
       run: () => requirementReads(readConcurrency),
     },
     {
+      name: "analytics.page.dashboard-and-ranking",
+      run: async () => {
+        const started = performance.now();
+        const range = `start=${encodeURIComponent(analyticsStart)}&end=${encodeURIComponent(analyticsEnd)}`;
+        const [dashboard, ranking] = await Promise.all([
+          httpRequest(`/api/v1/analytics/dashboard?${range}`, { headers: authorization }),
+          httpRequest(`/api/v1/analytics/posts?${range}&metric=views&limit=10&offset=0`, {
+            headers: authorization,
+          }),
+        ]);
+        assert.equal(dashboard.body.cohort.totals.post_count, dataset.posts);
+        assert.equal(dashboard.body.cohort.totals.views, (dataset.posts * (dataset.posts + 1)) / 2);
+        assert.equal(ranking.body.posts[0].views, dataset.posts);
+        return {
+          bytes: dashboard.bytes + ranking.bytes,
+          latencyMs: performance.now() - started,
+          operations: 2,
+          requestLatencies: [dashboard.durationMs, ranking.durationMs],
+        };
+      },
+    },
+    {
       name: "inbox.list.page100",
       run: async () => {
         const result = await httpRequest(`/api/v1/inbox?limit=100&offset=0`, {
@@ -674,9 +720,9 @@ function scenarios() {
       }),
     );
   }
-  return profile === "read-cache"
+  return profile === "read-cache" || profile === "application"
     ? scenarios.filter((scenario) =>
-        /^(posts\.list|posts\.detail|distributions\.list|calendar\.|analytics\.summary|requirements\.|inbox\.list|assets\.detail|assets\.upload-session\.detail)/.test(
+        /^(posts\.list|posts\.detail|distributions\.list|calendar\.|analytics\.|requirements\.|inbox\.list|assets\.detail|assets\.upload-session\.detail)/.test(
           scenario.name,
         ),
       )
@@ -840,12 +886,16 @@ try {
 } finally {
   await cleanup(admin).catch(() => {});
   await admin.end().catch(() => {});
+  await new Promise((resolve, reject) =>
+    jwksServer.close((error) => (error ? reject(error) : resolve())),
+  );
 }
 
 const result = {
   completed_at: new Date().toISOString(),
   config: {
     profile,
+    authentication: "signed-jwt-live-session-actor",
     batch_sizes: batchSizes,
     delete_concurrency: deleteConcurrency,
     delete_samples: deleteSamples,

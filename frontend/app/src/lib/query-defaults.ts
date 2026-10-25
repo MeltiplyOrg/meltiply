@@ -4,6 +4,11 @@ const maxQueryRetries = 2;
 const maxRetryDelayMs = 30_000;
 const pollingIntervalMs = 10_000;
 
+/** Browser-only freshness for slow-changing reference data and stored Analytics. */
+export const referenceFreshnessMs = 5 * 60_000;
+/** Inactive private reads survive route navigation in memory, never persistent storage. */
+export const privateCacheRetentionMs = 30 * 60_000;
+
 const activeAssetStatuses = new Set(["pending_upload", "uploading", "processing", "deleting"]);
 const activeDistributionStatuses = new Set([
   "queued",

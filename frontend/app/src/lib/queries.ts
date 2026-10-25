@@ -20,7 +20,7 @@ import {
 } from "./effect";
 import { useMutationKeyTracker } from "./mutation-idempotency";
 import { analyticsRangeWindow } from "./analytics-range";
-import { pollingInterval } from "./query-defaults";
+import { pollingInterval, privateCacheRetentionMs, referenceFreshnessMs } from "./query-defaults";
 import type {
   AnalyticsPostScopeParams,
   AnalyticsScopeParams,
@@ -296,6 +296,10 @@ export function useCurrentUser(scope: SessionScope) {
  * TanStack query hook listing the active Brand Profiles in the workspace.
  * Brand Profiles are workspace-scoped, not profile-scoped, so this query never
  * merges `brand_profile_id`.
+ * Reuses successful data for five minutes and retains inactive reads for
+ * thirty minutes in the identity/Workspace-scoped browser cache. Profile
+ * mutations invalidate it immediately; other members' edits appear on refresh
+ * or the next stale read.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
  * @returns Query result containing array of BrandProfile records.
@@ -310,6 +314,8 @@ export function useBrandProfiles(scope: SessionScope) {
         signal,
       ),
     enabled: scope.isSignedIn,
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
   });
 }
 
@@ -740,6 +746,8 @@ export function useAssetPreviewUrl(scope: SessionScope, id: string, enabled = tr
  * while the replacement streams prevents a selected filter from blanking the
  * Channels toolbar and main view; the normal loading skeleton is therefore
  * reserved for the first account fetch.
+ * Successful reads remain fresh for five minutes and survive inactive route
+ * navigation for thirty minutes; account mutations still invalidate them.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
  * @param options `enabled` gates the query; `brandProfileId` overrides the scope selection.
@@ -763,6 +771,8 @@ export function usePlatforms(
       ),
     placeholderData: keepPreviousData,
     enabled: scope.isSignedIn && enabled,
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
   });
 }
 

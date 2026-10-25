@@ -13,59 +13,91 @@ import { AccessDenied, DatabaseError } from "@meltiply/domain";
 
 import type { ApiWorkerEnv } from "./env";
 
-// The HTTP boundary supplies a fresh bindings object per invocation. Weak keys
-// let background continuations share their invocation's adapter without keeping
-// sockets or queued checkouts alive across unrelated requests.
-const invocationPools = new WeakMap<ApiWorkerEnv, Map<string, Pool>>();
+// Deployed isolates retain pools per Hyperdrive connection string (AUD-044).
+// Standalone workerd opts into request-owned pools so no socket or queued checkout
+// crosses invocations.
+let authenticatedPool: Pool | undefined;
+let authenticatedConnectionString: string | undefined;
+let systemPool: Pool | undefined;
+let systemConnectionString: string | undefined;
 
 /**
- * Returns an invocation-owned driver pool. Clients close at transaction/query
- * release; Hyperdrive alone retains reusable origin connections. The four-client
- * bound leaves capacity for non-database outgoing I/O in a Worker invocation.
- * The same bindings object may reuse the empty adapter within its invocation,
- * but neither sockets nor checkouts can cross the HTTP request boundary.
+ * Manages caching and instantiation of Hyperdrive connection pools for an isolate.
+ *
+ * Deployed isolates reuse a pool while the connection string is unchanged.
+ * Local and explicitly request-owned invocations create independent pools whose
+ * clients close on release, so standalone workerd never carries sockets or queued
+ * checkouts into a later invocation.
+ *
+ * @param binding - Cloudflare Hyperdrive binding instance.
+ * @param currentPool - Previously cached Pool instance in this isolate, if any.
+ * @param currentConnectionString - Previously cached connection string.
+ * @param label - Descriptive pool identifier used for error reporting.
+ * @param env - Worker environment bindings.
+ * @returns The active connection string and initialized Pool.
+ * @throws {Error} If the specified Hyperdrive binding is undefined.
  */
-function poolFor(binding: Hyperdrive | undefined, label: string, env: ApiWorkerEnv): Pool {
+function poolFor(
+  binding: Hyperdrive | undefined,
+  currentPool: Pool | undefined,
+  currentConnectionString: string | undefined,
+  label: string,
+  env: ApiWorkerEnv,
+): { connectionString: string; pool: Pool } {
   if (!binding) throw new Error(`${label} Hyperdrive binding is unavailable`);
-  let pools = invocationPools.get(env);
-  if (!pools) {
-    pools = new Map();
-    invocationPools.set(env, pools);
+  if (env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request") {
+    return {
+      connectionString: binding.connectionString,
+      pool: destroyClientsOnRelease(createHyperdrivePool(binding)),
+    };
   }
-  let pool = pools.get(binding.connectionString);
-  if (!pool) {
-    pool = destroyClientsOnRelease(createHyperdrivePool(binding, { max: 4 }));
-    pools.set(binding.connectionString, pool);
+  if (!currentPool || currentConnectionString !== binding.connectionString) {
+    const pool = createHyperdrivePool(binding);
+    return {
+      connectionString: binding.connectionString,
+      pool,
+    };
   }
-  return pool;
+  return { connectionString: currentConnectionString, pool: currentPool };
 }
 
 /**
  * Returns the PostgreSQL pool for tenant-authenticated queries.
  *
- * Connects via the `DB_AUTHENTICATED` Hyperdrive binding where Row Level Security (RLS) is
- * enforced based on session claims. The adapter is owned by the current
- * invocation and never retains idle clients across requests.
+ * Connects via `DB_AUTHENTICATED` where Row Level Security is enforced from
+ * verified session claims. Request-owned calls close clients on release;
+ * deployed managed pools are reused per isolate and connection string.
  *
  * @param env - Worker environment bindings containing `DB_AUTHENTICATED`.
- * @returns Cached or newly initialized `Pool` for authenticated transactions.
+ * @returns Cached or newly initialized Pool for authenticated transactions.
  */
 export function authenticatedPoolFor(env: ApiWorkerEnv): Pool {
-  return poolFor(env.DB_AUTHENTICATED, "authenticated", env);
+  const next = poolFor(
+    env.DB_AUTHENTICATED,
+    authenticatedPool,
+    authenticatedConnectionString,
+    "authenticated",
+    env,
+  );
+  authenticatedPool = next.pool;
+  authenticatedConnectionString = next.connectionString;
+  return next.pool;
 }
 
 /**
  * Returns the PostgreSQL pool for system/administrative queries.
  *
- * Connects via the `DB_SYSTEM` Hyperdrive binding for privileged background operations,
- * webhook processing, and tenant setup that bypass standard tenant RLS boundaries.
- * The invocation owns the adapter; every released client closes.
+ * Connects via `DB_SYSTEM` for privileged background operations. Request-owned
+ * calls close clients on release; deployed managed pools are reused per isolate.
  *
  * @param env - Worker environment bindings containing `DB_SYSTEM`.
- * @returns Cached or newly initialized `Pool` for system transactions.
+ * @returns Cached or newly initialized Pool for system transactions.
  */
 export function systemPoolFor(env: ApiWorkerEnv): Pool {
-  return poolFor(env.DB_SYSTEM, "system", env);
+  const next = poolFor(env.DB_SYSTEM, systemPool, systemConnectionString, "system", env);
+  systemPool = next.pool;
+  systemConnectionString = next.connectionString;
+  return next.pool;
 }
 
 /**

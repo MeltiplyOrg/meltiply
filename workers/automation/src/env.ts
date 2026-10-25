@@ -20,6 +20,8 @@ export interface AutomationEnv {
   RECURRING_COMMENTS_ENABLED?: string;
   /** "1" (default) serializes batches; "2" overlaps only distinct Provider accounts. */
   PUBLISH_BATCH_CONCURRENCY?: string;
+  /** Standalone workerd owns sockets per invocation; omitted keeps managed pool reuse. */
+  DATABASE_POOL_MODE?: "request";
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: string;
   LOG_SAMPLE_RATE?: string;

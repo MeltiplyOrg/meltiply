@@ -4,14 +4,15 @@
   "type": "module",
   "dependencies": {
     "miniflare": "5.20261006.0-alpha",
-    "nodemailer": "10.1.2",
+    "nodemailer": "10.1.4",
     "pg": "^8.22.0",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "effect": "4.0.5"
   },
   "overrides": {
-    "sharp": "0.35.5"
+    "sharp": "0.35.5",
+    "undici": "7.30.1"
   }
 }

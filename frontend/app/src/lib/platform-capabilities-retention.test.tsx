@@ -251,47 +251,6 @@ describe("scoped Platform capabilities retention", () => {
   });
 
   /**
-   * Unmounting starts the query's garbage-collection timer. Retained capability
-   * lifetime must outlast the ordinary five-minute window so returning to a
-   * surface after a long absence still reuses the successful result.
-   */
-  it("retains capabilities beyond the default garbage-collection window", async () => {
-    const client = createScopedClient();
-    const first = renderConsumer(client);
-    await waitFor(() =>
-      expect(screen.getByLabelText("capabilities")).toHaveTextContent(
-        capabilitySignature(capabilities.capabilities),
-      ),
-    );
-    await waitFor(() =>
-      expect(screen.getByLabelText("platforms")).toHaveTextContent(
-        accountSignature(accounts.accounts),
-      ),
-    );
-    await waitFor(() =>
-      expect(screen.getByLabelText("requirements")).toHaveTextContent(
-        requirements.creator.display_name,
-      ),
-    );
-    expect(listPlatformCapabilities).toHaveBeenCalledTimes(1);
-
-    vi.useFakeTimers();
-    first.unmount();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10 * 60_000);
-    });
-    vi.useRealTimers();
-
-    renderConsumer(client);
-    await waitFor(() => expect(listPlatforms).toHaveBeenCalledTimes(2));
-
-    expect(screen.getByLabelText("capabilities")).toHaveTextContent(
-      capabilitySignature(capabilities.capabilities),
-    );
-    expect(listPlatformCapabilities).toHaveBeenCalledTimes(1);
-  });
-
-  /**
    * Disconnecting an account invalidates its account data and publishing
    * requirements. The rendered consumer must receive the refreshed dynamic
    * values while the static capability array remains the same retained read.

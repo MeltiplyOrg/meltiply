@@ -47,6 +47,7 @@ jobs:
         run: |
           bun run --filter frontend-app type-check
           bun run --cwd frontend/app test src/lib/browser-cache.test.tsx --coverage.enabled=false
+          node --test scripts/infra/cost-model.test.mjs scripts/infra/queue-alert.test.mjs scripts/benchmarks/backend/placement-compare.test.mjs
       - name: Exercise authenticated request and Worker ownership changes
         if: inputs.lane == 'performance-backend'
         env:
@@ -58,6 +59,7 @@ jobs:
           bun run --cwd workers/api test:integration test/better-auth.integration.test.ts test/permission-matrix.integration.test.ts test/query-budget.integration.test.ts
           bun run --cwd workers/automation test:integration test/comment-policy.integration.test.ts
           node --test scripts/infra/cost-model.test.mjs
+          node --test scripts/infra/queue-alert.test.mjs scripts/benchmarks/backend/placement-compare.test.mjs
       - name: Prepare full gate database
         if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull

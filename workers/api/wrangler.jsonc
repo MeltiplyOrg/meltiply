@@ -19,7 +19,7 @@
     },
     "traces": {
       "enabled": true,
-      "head_sampling_rate": 1,
+      "head_sampling_rate": 0.1,
       "persist": true,
     },
   },
@@ -74,6 +74,7 @@
     "ENVIRONMENT": "staging",
     "MAIL_FROM_ADDRESS": "replace-with-mail-from-address",
     "MAIL_FROM_NAME": "Meltiply",
+    "LOG_SAMPLE_RATE": "0.1",
     "POLAR_ENV": "production",
     "FACEBOOK_LIVE_ACCEPTED": "false",
     "FRONTEND_URL": "https://staging.meltiply.com",

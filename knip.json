@@ -6,6 +6,7 @@
         "scripts/cloudflare-local/r2-gateway.mjs",
         "scripts/cloudflare-local/docker-listener-host.mjs",
         "scripts/cloudflare-local/postgres-endpoint.mjs",
+        "scripts/cloudflare-local/complete-env.mjs",
         "lint/boundaries-plugin.d.mts",
         "lint/astro-ui-contract.d.mts",
         "scripts/cloudflare-local/worker-types.mjs"

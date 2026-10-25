@@ -17,7 +17,7 @@ export interface PublicConfigServiceShape {
  * Service tag for public frontend configuration (API origin, dev mode).
  *
  * This is the Effect-facing view over `lib/env.ts`, the only module permitted
- * to read `import.meta.env`. Invalid `API_BASE_URL` configuration surfaces as a
+ * to read `import.meta.env`. Invalid `APP_URL` configuration surfaces as a
  * defect at resolution time, matching the existing `getPublicEnv` throw.
  */
 export class PublicConfigService extends Context.Service<
@@ -32,7 +32,7 @@ export class PublicConfigService extends Context.Service<
 export const PublicConfigServiceLive: Layer.Layer<PublicConfigService, never, never> =
   Layer.succeed(PublicConfigService, {
     publicEnv: Effect.sync(() => getPublicEnv()),
-    apiBaseUrl: Effect.sync(() => getPublicEnv().API_BASE_URL),
+    apiBaseUrl: Effect.sync(() => getPublicEnv().APP_URL),
     devMode: Effect.sync(() => isDevMode()),
   });
 

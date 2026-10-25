@@ -40,6 +40,8 @@ EOF
 # checkout the real helper so the call shape matches production.
 cp "$repo_root/scripts/cloudflare-local/compose.sh" \
   "$fixture/scripts/cloudflare-local/compose.sh"
+cp "$repo_root/scripts/cloudflare-local/complete-env.mjs" \
+  "$fixture/scripts/cloudflare-local/complete-env.mjs"
 
 cat >"$fixture/scripts/cloudflare-local/database.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -55,7 +57,7 @@ chmod +x \
   "$fixture/scripts/cloudflare-local/database.sh"
 
 cat >"$fixture/.env.example" <<'EOF'
-API_BASE_URL=http://localhost:8787
+APP_URL=http://localhost:8787
 EOF
 
 assert_logged() {
@@ -92,6 +94,7 @@ grep -Fq 'pull postgres' "$COMMAND_LOG" ||
   { echo "expected a postgres image pull" >&2; cat "$COMMAND_LOG" >&2; exit 1; }
 assert_logged "database seed"
 
+cp "$fixture/.env" "$fixture/first-setup.env"
 : >"$COMMAND_LOG"
 (
   cd "$fixture"
@@ -107,6 +110,8 @@ if grep -Fq 'pull postgres' "$COMMAND_LOG"; then
   exit 1
 fi
 assert_logged "database seed"
+# Re-running setup must preserve generated signing/encryption/bootstrap material.
+cmp "$fixture/first-setup.env" "$fixture/.env"
 
 : >"$COMMAND_LOG"
 if (

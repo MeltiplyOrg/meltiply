@@ -58,11 +58,27 @@ function ensureOverlayDom(): void {
 }
 
 /**
+ * Removes the grid element and stylesheet once neither overlay is active, so a
+ * disabled overlay leaves no persistent DOM mutation behind.
+ */
+function pruneOverlayDom(): void {
+  if (
+    document.documentElement.hasAttribute(gridAttribute) ||
+    document.documentElement.hasAttribute(outlinesAttribute)
+  ) {
+    return;
+  }
+  document.getElementById(gridElementId)?.remove();
+  document.getElementById(overlayStyleId)?.remove();
+}
+
+/**
  * Toggles the 8px baseline grid overlay.
  */
 export function setBaselineGrid(enabled: boolean): void {
   if (enabled) ensureOverlayDom();
   document.documentElement.toggleAttribute(gridAttribute, enabled);
+  pruneOverlayDom();
 }
 
 /**
@@ -71,6 +87,18 @@ export function setBaselineGrid(enabled: boolean): void {
 export function setElementOutlines(enabled: boolean): void {
   if (enabled) ensureOverlayDom();
   document.documentElement.toggleAttribute(outlinesAttribute, enabled);
+  pruneOverlayDom();
+}
+
+/**
+ * Removes both overlay attributes and their injected DOM. Called when the
+ * DevBox unmounts so layout inspection cannot outlive the dock.
+ */
+export function clearLayoutOverlays(): void {
+  document.documentElement.removeAttribute(gridAttribute);
+  document.documentElement.removeAttribute(outlinesAttribute);
+  document.getElementById(gridElementId)?.remove();
+  document.getElementById(overlayStyleId)?.remove();
 }
 
 /**

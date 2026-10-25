@@ -10,7 +10,7 @@ import { createAssetApiService } from "../src/asset-service";
 import { createCoreApiService } from "../src/core-service";
 import { createPostApiService } from "../src/post-service";
 import { loadCurrentUser } from "../src/current-user";
-import { createThreadsAdapter, ProviderRegistry } from "@meltiply/providers";
+import { createThreadsAdapter, createYouTubeAdapter, ProviderRegistry } from "@meltiply/providers";
 import { authenticatedPoolFor, systemPoolFor, withSystemTransactionEffect } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 
@@ -250,16 +250,8 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       signUpload: ({ key }) => Effect.succeed(`https://r2.example/upload/${key}`),
     }),
   });
-  // Scheduling budgets are only meaningful against the capability a connected
-  // Channel really has, and `ProviderRegistry.capabilities()` reports every
-  // unregistered platform as an unavailable stub: `publish: false` with empty
-  // MIME and asset-type lists. The saved Posts below target Threads, so that
-  // platform is registered with the real adapter and its genuine capability
-  // list is what the Post scheduler validates against. Flipping `publish` on a
-  // stub instead would only move the refusal from the publish gate to
-  // `validatePublishInput`, and it would invent media limits this fixture never
-  // exercises. YouTube appears here only as already-published read fixture
-  // data, so no write path consults its capability.
+  // Both scheduling targets use real adapter capabilities. A ready vertical
+  // video satisfies YouTube and Threads without weakening either media contract.
   const providerRegistry = new ProviderRegistry();
   providerRegistry.register(
     "threads",
@@ -269,8 +261,15 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       redirectUri: "https://query-budget.invalid/oauth/threads/callback",
     }),
   );
-  // Force one platform analytics-unsupported so coverage classification stays
-  // inside the measured summary path.
+  providerRegistry.register(
+    "youtube",
+    createYouTubeAdapter({
+      clientId: "query-budget-youtube-client",
+      clientSecret: "query-budget-youtube-client-secret",
+      redirectUri: "https://query-budget.invalid/oauth/youtube/callback",
+    }),
+  );
+  // Keep unsupported coverage inside the measured analytics summary path.
   const configuredCapabilities = providerRegistry
     .capabilities()
     .map((capability) =>
@@ -305,22 +304,15 @@ describeIntegration("core API PostgreSQL query budgets", () => {
   let createSample = 0;
   let scheduledBatchCreateSample = 0;
   let uploadSample = 0;
-  // Forty-two saved Posts, each owned by one of the twenty profile/Threads
-  // pairs and targeting that profile's single Channel: a Brand Profile owns at
-  // most one Channel per Provider, so a Post cannot fan out to twenty
-  // same-platform targets. Each schedule route consumes its warmup call plus
-  // twenty measured samples, and a Post an earlier route already scheduled
-  // would exercise the reschedule path — set-based UPDATE and outbox
-  // replacement — instead of the create path this fixture exists to measure,
-  // so the two routes partition the ids disjointly: immediate schedules take
-  // 0–20 and deferred schedules take 21–41.
+  // Forty-two saved video Posts each target their Profile's YouTube and Threads
+  // Channels. The immediate/deferred cases use disjoint Posts (0–20 and 21–41),
+  // so every sample measures creation, not rescheduling an earlier outcome.
   const scheduledPostIds = Array.from(
     { length: 42 },
     (_, index) => `c1000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
   );
-  // Posts cycle through the twenty profile/Threads pairs in the same order the
-  // fixture inserted them, so the owning Brand Profile is a function of the
-  // scheduled Post's index.
+  // Posts cycle through the twenty Profiles in insertion order; both target
+  // Channels and the video attachment belong to the same owning Profile.
   const scheduledPostProfileId = (index: number) =>
     `b4000000-0000-4000-8000-${String((index % 20) + 1).padStart(12, "0")}`;
 
@@ -384,9 +376,8 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                'b1000000-0000-4000-8000-000000000001', 'admin'
              )`,
           );
-          // One Brand Profile owns at most one Channel per Provider, so the 20
-          // scaled accounts are split across 20 profiles: each owns exactly one
-          // YouTube read Channel and one Threads scheduling Channel.
+          // Each of the twenty Profiles owns one Channel per Provider: YouTube
+          // and Threads. Saved video Posts exercise both targets together.
           yield* client.query(
             `INSERT INTO brand_profiles (id, org_id, name, color)
              SELECT
@@ -411,10 +402,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                '{"fixture": true}'::jsonb
              FROM generate_series(1, 20) AS item`,
           );
-          // Scheduling runs against Threads, whose real capability permits a
-          // text-only publication (min_media_count 0). Using the real
-          // authority means the saved Posts stay text-only and no fixture has
-          // to invent processed media it never produced.
+          // Threads and YouTube share each Profile's verified video attachment.
           yield* client.query(
             `INSERT INTO platform_accounts
                (id, org_id, brand_profile_id, platform, platform_user_id,
@@ -510,12 +498,45 @@ describeIntegration("core API PostgreSQL query budgets", () => {
             FROM generate_series(1, $2::integer) AS item`,
             [fixturePrefix, fixtureCount],
           );
-          // Saved Posts each carrying their own Brand Profile's single Threads
-          // Channel as a target: scheduling one resolves one independent
-          // outcome per Post, which is the bounded per-mutation row count the
-          // budget asserts. Targets leave attachment_ids unset, so each Channel
-          // inherits the Post's text-only composition instead of inventing
-          // processed media.
+          // Ready media is owned separately by each Profile. The benchmark never
+          // fetches object bytes: these verified inventory facts are the scheduler's
+          // real validation input, not a replacement capability or HTTP adapter.
+          yield* client.query(
+            `INSERT INTO assets
+               (id, org_id, brand_profile_id, uploaded_by, asset_type, title,
+                status, mime_type, file_size, duration_sec, width, height, finalized_at)
+             SELECT
+               ('ab100000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
+               $1::uuid,
+               ('b4000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
+               $2::uuid, 'video', 'Query budget scheduling video ' || item,
+               'ready', 'video/mp4', 1024, 30, 1080, 1920, now()
+             FROM generate_series(1, 20) AS item`,
+            [queryBudgetClaims.organizationId, queryBudgetClaims.userId],
+          );
+          yield* client.query(
+            `INSERT INTO asset_objects
+               (id, org_id, brand_profile_id, asset_id, kind, profile, r2_key,
+                bytes, content_type, duration_sec, width, height, status)
+             SELECT
+               ('ab200000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
+               $1::uuid,
+               ('b4000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
+               ('ab100000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
+               'rendition', 'query_budget_video',
+               $1::text || '/query-budget/video-' || item || '.mp4',
+               1024, 'video/mp4', 30, 1080, 1920, 'ready'
+             FROM generate_series(1, 20) AS item`,
+            [queryBudgetClaims.organizationId],
+          );
+          yield* client.query(
+            `INSERT INTO asset_renditions
+               (org_id, brand_profile_id, asset_id, profile, object_id, status)
+             SELECT org_id, brand_profile_id, asset_id, profile, id, 'ready'
+             FROM asset_objects
+             WHERE org_id = $1 AND profile = 'query_budget_video'`,
+            [queryBudgetClaims.organizationId],
+          );
           yield* client.query(
             `INSERT INTO posts
                (id, org_id, brand_profile_id, title, default_text, status)
@@ -530,18 +551,30 @@ describeIntegration("core API PostgreSQL query budgets", () => {
             [fixturePrefix],
           );
           yield* client.query(
+            `INSERT INTO post_attachments
+               (post_id, asset_id, org_id, brand_profile_id, position)
+             SELECT id,
+                    ('ab100000-0000-4000-8000-'
+                      || right(brand_profile_id::text, 12))::uuid,
+                    org_id, brand_profile_id, 0
+             FROM posts
+             WHERE org_id = $1 AND id::text LIKE 'c1000000-%'`,
+            [queryBudgetClaims.organizationId],
+          );
+          yield* client.query(
             `INSERT INTO post_targets
                (post_id, platform_account_id, org_id, brand_profile_id,
                 title_override)
              SELECT
                ('c1000000-0000-4000-8000-' || lpad(post_item::text, 12, '0'))::uuid,
-               ('b6000000-0000-4000-8000-'
+               (channel.prefix || '-0000-4000-8000-'
                  || lpad((((post_item - 1) % 20) + 1)::text, 12, '0'))::uuid,
                'b2000000-0000-4000-8000-000000000001'::uuid,
                ('b4000000-0000-4000-8000-'
                  || lpad((((post_item - 1) % 20) + 1)::text, 12, '0'))::uuid,
                'Query budget target'
-            FROM generate_series(1, 42) AS post_item`,
+            FROM generate_series(1, 42) AS post_item
+            CROSS JOIN (VALUES ('b5000000'), ('b6000000')) AS channel(prefix)`,
           );
           yield* client.query(
             `INSERT INTO analytics_snapshots
@@ -793,22 +826,11 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 20,
-        // Scheduling a Post's single Channel must stay bounded rather than
-        // growing with the workspace's Channel count, and the fifteen
-        // statements this route issues are the same fifteen regardless of how
-        // many Channels exist: org id check,
-        // idempotency reservation, workspace lock, Post lock, Brand Profile
-        // guard, saved-target read, attachment-id read, Channel read,
-        // existing-outcome read, usage guard, the set-based Distribution
-        // insert, the outbox insert, the Post activation update, the
-        // distributions projection read (attachments and targets are projected
-        // from rows this transaction already read), and complete idempotency.
-        // These text-only Posts select no media, so the rendition-candidate
-        // read is skipped entirely and the bound sits at the real count: a
-        // per-target INSERT/UPDATE or per-target validation read would add a
-        // statement per target and fail here.
-        maxStatements: 15,
-        minRows: 1,
+        // One rendition lookup and one attachment projection extend the text-only
+        // budget by two statements. Both Channels must produce outcomes while the
+        // insert/outbox work stays set-based rather than growing per target.
+        maxStatements: 17,
+        minRows: 2,
         name: "post schedule create",
         prepare: prepareMutationSample,
         run: async () => {
@@ -831,12 +853,9 @@ describeIntegration("core API PostgreSQL query budgets", () => {
       },
       {
         maxRows: 20,
-        // The same fifteen statements minus the outbox insert: a 2099 schedule
-        // is beyond the delayed-delivery horizon, so every publish command is
-        // deferred to the sweep poller and the batch insert issues no statement
-        // at all.
-        maxStatements: 14,
-        minRows: 1,
+        // Deferred work omits only the immediate outbox insert.
+        maxStatements: 16,
+        minRows: 2,
         name: "scheduled post schedule create",
         prepare: prepareMutationSample,
         run: async () => {

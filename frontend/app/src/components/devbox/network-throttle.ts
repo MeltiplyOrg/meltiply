@@ -24,27 +24,49 @@ let latency: DevBoxLatency = 0;
 let skeletonHold = false;
 let installed = false;
 
+const latencyWaiters = new Set<() => void>();
+
 /**
  * Returns a promise that resolves after `ms`, or rejects when the abort signal
- * fires. `null` ms models infinite latency and can only settle via abort.
+ * fires. `null` ms models infinite latency and can only settle via abort or
+ * throttle uninstall. The release handle is retained so dock teardown cannot
+ * leave held fetches pending.
  */
 function waitForLatency(ms: number | null, signal: AbortSignal | null | undefined): Promise<void> {
   const { promise, resolve, reject } = Promise.withResolvers<void>();
-  const timer = ms === null ? undefined : setTimeout(resolve, ms);
-  if (signal?.aborted) {
+  let settled = false;
+  const onAbort = () => {
+    if (settled) return;
+    settled = true;
     clearTimeout(timer);
-    reject(signal.reason);
+    signal?.removeEventListener("abort", onAbort);
+    latencyWaiters.delete(release);
+    reject(signal?.reason);
+  };
+  const release = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+    latencyWaiters.delete(release);
+    resolve();
+  };
+  const timer = ms === null ? undefined : setTimeout(release, ms);
+  if (signal?.aborted) {
+    onAbort();
     return promise;
   }
-  signal?.addEventListener(
-    "abort",
-    () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    },
-    { once: true },
-  );
+  signal?.addEventListener("abort", onAbort, { once: true });
+  latencyWaiters.add(release);
   return promise;
+}
+
+/**
+ * Resolves every latency-held request so teardown never leaves a fetch promise
+ * pending after the dock unmounts.
+ */
+function releaseLatencyWaiters(): void {
+  for (const release of [...latencyWaiters]) release();
 }
 
 const skeletonWaiters = new Set<() => void>();
@@ -123,6 +145,7 @@ export function uninstallNetworkThrottle(): void {
   if (originalFetch) globalThis.fetch = originalFetch;
   originalFetch = null;
   installed = false;
+  releaseLatencyWaiters();
   setSkeletonHold(false);
   latency = 0;
 }

@@ -53,6 +53,37 @@ function renderDevBox() {
   );
 }
 
+const initialViewport = { width: window.innerWidth, height: window.innerHeight };
+
+/** Overrides layout dimensions that jsdom does not derive from CSS. */
+function setViewport(width: number, height: number): void {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+}
+
+/** Builds a DOMRect-shaped measurement for a mocked dock. */
+function rect(width: number, height: number, left = 0, top = 0): DOMRect {
+  return {
+    width,
+    height,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+/** Replaces one dock's measured box without touching other elements. */
+function mockDockRect(panel: Element, box: DOMRect): void {
+  Object.defineProperty(panel, "getBoundingClientRect", {
+    configurable: true,
+    value: () => box,
+  });
+}
+
 /**
  * Minimal query-backed view used to prove the DevBox exercises a component’s
  * native loading branch: cached data renders text, while a reset query held by
@@ -85,6 +116,7 @@ beforeEach(() => {
 /** Clears browser state and global DevBox hooks so optional records cannot leak between cases. */
 afterEach(() => {
   cleanup();
+  setViewport(initialViewport.width, initialViewport.height);
   registerDevBoxQueryClient(null);
   uninstallNetworkThrottle();
   setPseudoLocalization(false);
@@ -153,6 +185,142 @@ describe("DevBox shell", () => {
     expect(screen.queryByRole("region", { name: "Meltiply DevBox" })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: "d", ctrlKey: true, shiftKey: true });
     expect(screen.getByRole("region", { name: "Meltiply DevBox" })).toBeInTheDocument();
+  });
+
+  for (const viewport of [
+    { name: "desktop", width: 1440, height: 900 },
+    { name: "phone", width: 390, height: 844 },
+  ]) {
+    it(`clamps a persisted position to the expanded dock on mount at ${viewport.name} width`, () => {
+      setViewport(viewport.width, viewport.height);
+      seedDockState({ collapsed: false, position: { x: 5000, y: 5000 } });
+      const measure = vi
+        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockReturnValue(rect(380, 300));
+      try {
+        renderDevBox();
+        expect(screen.getByRole("region", { name: "Meltiply DevBox" })).toHaveStyle({
+          left: `${viewport.width - 380}px`,
+          top: `${viewport.height - 300}px`,
+        });
+      } finally {
+        measure.mockRestore();
+      }
+    });
+  }
+
+  it("re-clamps a persisted position when the viewport resizes", () => {
+    setViewport(1200, 800);
+    seedDockState({ collapsed: false, position: { x: 700, y: 900 } });
+    renderDevBox();
+    const panel = screen.getByRole("region", { name: "Meltiply DevBox" });
+    mockDockRect(panel, rect(380, 300));
+
+    setViewport(390, 844);
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    expect(panel).toHaveStyle({ left: "10px", top: "544px" });
+  });
+
+  it("re-clamps when a collapsed dock expands", () => {
+    setViewport(390, 844);
+    seedDockState({ collapsed: true, position: { x: 350, y: 700 } });
+    renderDevBox();
+    const panel = screen.getByRole("region", { name: "Meltiply DevBox" });
+    mockDockRect(panel, rect(380, 300));
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand DevBox" }));
+
+    expect(screen.getByRole("tab", { name: "Skeletons" })).toBeInTheDocument();
+    expect(panel).toHaveStyle({ left: "10px", top: "544px" });
+  });
+
+  it("keeps an expanded dock inside a phone viewport while dragging", () => {
+    setViewport(390, 844);
+    seedDockState({ collapsed: false });
+    renderDevBox();
+    const panel = screen.getByRole("region", { name: "Meltiply DevBox" });
+    mockDockRect(panel, rect(380, 300));
+    const header = screen.getByRole("button", { name: "Collapse DevBox" }).parentElement
+      ?.parentElement;
+    if (!header) throw new Error("DevBox header is missing");
+
+    fireEvent.pointerDown(header, { pointerId: 7, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(header, { pointerId: 7, clientX: 600, clientY: 600 });
+    fireEvent.pointerUp(header, { pointerId: 7, clientX: 600, clientY: 600 });
+
+    expect(panel).toHaveStyle({ left: "10px", top: "544px" });
+  });
+
+  it("removes overlays, frame, highlights, and the picker on unmount", () => {
+    seedDockState({ tab: "skeletons" });
+    const raw = document.createElement("div");
+    raw.setAttribute("style", "background-color: rgb(255, 0, 0)");
+    document.body.appendChild(raw);
+    const { unmount } = renderDevBox();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Toggle 390px viewport frame" }));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Helpers" }), { button: 0 });
+    fireEvent.click(screen.getByRole("switch", { name: "Toggle baseline grid" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Toggle element outlines" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Toggle token picker" }));
+    fireEvent.click(screen.getByRole("button", { name: "Audit page" }));
+
+    expect(document.documentElement.hasAttribute("data-devbox-grid")).toBe(true);
+    expect(document.documentElement.hasAttribute("data-devbox-outlines")).toBe(true);
+    expect(document.documentElement.hasAttribute("data-devbox-viewport")).toBe(true);
+    expect(raw).toHaveAttribute("data-devbox-token-violation");
+    expect(document.getElementById("devbox-picker-highlight")).not.toBeNull();
+
+    unmount();
+    raw.remove();
+
+    expect(document.documentElement.hasAttribute("data-devbox-grid")).toBe(false);
+    expect(document.documentElement.hasAttribute("data-devbox-outlines")).toBe(false);
+    expect(document.documentElement.hasAttribute("data-devbox-viewport")).toBe(false);
+    expect(document.getElementById("devbox-grid-overlay")).toBeNull();
+    expect(document.getElementById("devbox-viewport-label")).toBeNull();
+    expect(document.getElementById("devbox-overlay-style")).toBeNull();
+    expect(document.getElementById("devbox-viewport-style")).toBeNull();
+    expect(document.getElementById("devbox-token-violation-style")).toBeNull();
+    expect(document.getElementById("devbox-picker-highlight")).toBeNull();
+    expect(raw).not.toHaveAttribute("data-devbox-token-violation");
+  });
+
+  it("removes page overlays when the dock is hidden", () => {
+    seedDockState({ tab: "helpers" });
+    renderDevBox();
+    fireEvent.click(screen.getByRole("switch", { name: "Toggle baseline grid" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Toggle element outlines" }));
+    expect(document.documentElement.hasAttribute("data-devbox-grid")).toBe(true);
+
+    fireEvent.keyDown(window, { key: "d", ctrlKey: true, shiftKey: true });
+
+    expect(screen.queryByRole("region", { name: "Meltiply DevBox" })).not.toBeInTheDocument();
+    expect(document.documentElement.hasAttribute("data-devbox-grid")).toBe(false);
+    expect(document.documentElement.hasAttribute("data-devbox-outlines")).toBe(false);
+    expect(document.getElementById("devbox-grid-overlay")).toBeNull();
+  });
+
+  it("releases requests held by infinite latency when the dock unmounts", async () => {
+    const base = vi.fn(() => Promise.resolve(new Response("{}")));
+    const original = globalThis.fetch;
+    globalThis.fetch = base;
+    try {
+      const { unmount } = renderDevBox();
+      fireEvent.click(screen.getByRole("button", { name: "∞" }));
+      const held = globalThis.fetch("https://api.test/infinite");
+
+      expect(base).not.toHaveBeenCalled();
+      unmount();
+
+      await expect(held).resolves.toBeInstanceOf(Response);
+      expect(base).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 
   it("persists dock state across remounts", () => {

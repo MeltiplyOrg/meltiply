@@ -35,13 +35,11 @@ configure_local_wrangler_network() {
 
   local bind_host="127.0.0.1"
   [[ "$dev_host" == "127.0.0.1" || "$dev_host" == "localhost" ]] || bind_host="0.0.0.0"
-  local frontend_origin="${FRONTEND_URL:-http://${dev_host}:${frontend_port}}"
-  local api_origin="${PUBLIC_API_URL:-http://${dev_host}:${api_port}}"
+  local frontend_origin="${APP_URL:-http://${dev_host}:${frontend_port}}"
 
   export WRANGLER_DEV_IP="${WRANGLER_DEV_IP:-$bind_host}"
   export WRANGLER_DEV_ALLOWED_ORIGINS="${WRANGLER_DEV_ALLOWED_ORIGINS:-${ALLOWED_ORIGINS:-$frontend_origin}}"
-  export WRANGLER_DEV_FRONTEND_URL="${WRANGLER_DEV_FRONTEND_URL:-$frontend_origin}"
-  export WRANGLER_DEV_PUBLIC_API_URL="${WRANGLER_DEV_PUBLIC_API_URL:-$api_origin}"
+  export WRANGLER_DEV_APP_URL="${WRANGLER_DEV_APP_URL:-$frontend_origin}"
   export WRANGLER_DEV_BETTER_AUTH_JWKS_URL="${WRANGLER_DEV_BETTER_AUTH_JWKS_URL:-${BETTER_AUTH_JWKS_URL:-http://127.0.0.1:${api_port}/api/auth/jwks}}"
 }
 append_local_wrangler_env_file() {
@@ -62,13 +60,11 @@ append_local_wrangler_overrides() {
   # The config's local origins stay authoritative even when the root `.env`
   # keeps browser settings blank. These are non-secret command-line variables.
   local allowed_origins="${WRANGLER_DEV_ALLOWED_ORIGINS:-http://localhost:3000}"
-  local frontend_url="${WRANGLER_DEV_FRONTEND_URL:-http://localhost:3000}"
-  local public_api_url="${WRANGLER_DEV_PUBLIC_API_URL:-http://localhost:8787}"
+  local frontend_url="${WRANGLER_DEV_APP_URL:-http://localhost:3000}"
   local jwks_url="${WRANGLER_DEV_BETTER_AUTH_JWKS_URL:-http://127.0.0.1:8787/api/auth/jwks}"
   wrangler_args_ref+=(
     --var "ALLOWED_ORIGINS:${allowed_origins}"
-    --var "FRONTEND_URL:${frontend_url}"
-    --var "PUBLIC_API_URL:${public_api_url}"
+    --var "APP_URL:${frontend_url}"
     --var "BETTER_AUTH_JWKS_URL:${jwks_url}"
   )
 }

@@ -15,7 +15,12 @@
 
 import { elementSelector, ensureStyleTag } from "./dom";
 
-/** Color-valued CSS custom properties that form the approved token ramp. */
+/**
+ * Color-valued CSS custom properties that form the approved token ramp.
+ * Mirrors every color entry in `frontend/shared/tokens.css` and the `@theme`
+ * color aliases in `globals.css`; aliases are included because the audit
+ * compares resolved paint, not the variable an element happened to use.
+ */
 const tokenVariableNames = [
   "--page",
   "--canvas",
@@ -27,18 +32,31 @@ const tokenVariableNames = [
   "--ink",
   "--ink-2",
   "--ink-3",
+  "--ink-inverse",
+  "--charcoal",
   "--line",
   "--line-strong",
   "--line-soft",
+  "--grid-line",
   "--accent",
   "--accent-ink",
   "--accent-tint",
+  "--accent-tint-solid",
+  "--accent-line",
+  "--on-accent",
   "--green",
   "--green-tint",
+  "--green-tint-solid",
   "--orange",
   "--orange-tint",
   "--red",
   "--red-tint",
+  "--red-tint-solid",
+  "--blue",
+  "--violet",
+  "--teal",
+  "--rose",
+  "--gray",
   "--platform-facebook",
   "--platform-instagram",
   "--platform-tiktok",
@@ -48,28 +66,106 @@ const tokenVariableNames = [
   "--tooltip-fg",
   "--tooltip-muted",
   "--tooltip-border",
+  "--overlay",
+  // shadcn-compatible aliases exposed as utilities in globals.css.
+  "--background",
+  "--foreground",
+  "--card",
+  "--card-foreground",
+  "--popover",
+  "--popover-foreground",
+  "--primary",
+  "--primary-foreground",
+  "--secondary",
+  "--secondary-foreground",
+  "--muted",
+  "--muted-foreground",
+  "--accent-foreground",
+  "--destructive",
+  "--destructive-foreground",
+  "--border",
+  "--input",
+  "--ring",
 ] as const;
 
 const colorProperties = ["color", "backgroundColor", "borderColor"] as const;
 
 type ColorProperty = (typeof colorProperties)[number];
 
-// One detached probe reused for every canonicalization — creating an element
-// per call would allocate thousands of nodes during a DOM audit walk.
-let colorProbe: HTMLSpanElement | null = null;
+// Canonicalization depends only on the resolved input string; a theme swap
+// changes the input (light/dark token values differ), so the cache stays valid.
+const canonicalColorCache = new Map<string, string>();
 
 /**
- * Canonicalizes a CSS color string by round-tripping it through a detached
- * probe element, so `oklch(...)`, `rgb(...)`, and `color-mix(...)` results
- * compare equal when they resolve to the same paint. Falls back to the raw
- * string when the environment cannot resolve the value (jsdom).
+ * Expands `var(--name)` references inside a computed custom-property value.
+ * Browsers substitute these already, but test DOMs and older engines can return
+ * the literal token stream; the probe cannot resolve an unexpanded `var()`.
+ *
+ * @param value Raw custom-property value.
+ * @param styles Declaration that owns the referenced variables.
+ * @param depth Recursion guard for cyclic token aliases.
+ * @returns The value with resolvable variable references replaced.
+ */
+function resolveCssVariables(value: string, styles: CSSStyleDeclaration, depth = 0): string {
+  if (depth >= 8 || !value.includes("var(")) return value;
+  return value.replace(
+    /var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g,
+    (_match, name: string, fallback: string | undefined) => {
+      const replacement = styles.getPropertyValue(name).trim() || fallback?.trim() || "";
+      return replacement ? resolveCssVariables(replacement, styles, depth + 1) : "";
+    },
+  );
+}
+
+/**
+ * Normalizes numeric precision in a resolved color string. Browsers and test
+ * DOMs serialize the same paint with different decimal precision depending on
+ * whether it came from a token, `color-mix()`, or an inline value; comparing
+ * four-decimal components keeps those forms equal.
+ */
+function normalizeColorSerialization(value: string): string {
+  return value.replace(/-?\d*\.\d+(?:e[-+]?\d+)?/gi, (match) => {
+    const rounded = Math.round(Number(match) * 10_000) / 10_000;
+    return Number.isFinite(rounded) ? String(rounded) : match;
+  });
+}
+
+/**
+ * Canonicalizes a CSS color string by round-tripping it through a probe
+ * element, so `oklch(...)`, `rgb(...)`, and `color-mix(...)` results compare
+ * equal when they resolve to the same paint. The computed value is used
+ * instead of the serialized inline value because only the former resolves
+ * `color-mix()` into the painted color space. Falls back to the raw string when
+ * the environment cannot resolve the value (jsdom without a color parser).
  */
 function canonicalizeColor(value: string): string {
-  if (typeof document === "undefined") return value.trim();
-  colorProbe ??= document.createElement("span");
-  colorProbe.style.color = value;
-  const resolved = colorProbe.style.color;
-  return (resolved || value).trim();
+  const key = value.trim();
+  const cached = canonicalColorCache.get(key);
+  if (cached !== undefined) return cached;
+  if (typeof document === "undefined") return key;
+  // A fresh probe is required because test DOMs cache computed styles on a
+  // detached element; attaching it also makes browsers resolve `color-mix()`.
+  // The cache keeps this to one probe per distinct color, and the node is
+  // removed before any caller can observe or audit it.
+  const probe = document.createElement("span");
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.cssText = "position:absolute;width:0;height:0;visibility:hidden;pointer-events:none";
+  probe.style.color = key;
+  const parsed = probe.style.color.trim();
+  if (!parsed) {
+    canonicalColorCache.set(key, key);
+    return key;
+  }
+  (document.body ?? document.documentElement).appendChild(probe);
+  let computed = "";
+  try {
+    computed = getComputedStyle(probe).color.trim();
+  } finally {
+    probe.remove();
+  }
+  const canonical = normalizeColorSerialization(computed || parsed);
+  canonicalColorCache.set(key, canonical);
+  return canonical;
 }
 
 export interface TokenColorMap {
@@ -88,7 +184,7 @@ export function collectTokenColors(root: HTMLElement = document.documentElement)
   const byColor = new Map<string, string[]>();
   let resolved = 0;
   for (const name of tokenVariableNames) {
-    const raw = styles.getPropertyValue(name).trim();
+    const raw = resolveCssVariables(styles.getPropertyValue(name).trim(), styles);
     if (!raw) continue;
     resolved += 1;
     const canonical = canonicalizeColor(raw);
@@ -137,29 +233,177 @@ export interface TokenViolation {
   reports: ElementColorReport[];
 }
 
-/** Utility prefixes that paint each audited CSS property. */
-const propertyPrefixes: Record<ColorProperty, string> = {
-  color: "text-",
-  backgroundColor: "bg-",
-  borderColor: "border-",
+/** Utility matchers that paint each audited CSS property. */
+const propertyUtilityPatterns: Record<ColorProperty, RegExp> = {
+  color: /^text-(.+)$/,
+  backgroundColor: /^bg-(.+)$/,
+  borderColor: /^border(?:-[trblxyse])?-(.+)$/,
 };
 
 // Token utility suffixes derived from the token ramp (`--accent-tint` →
 // `accent-tint`), used to recognize opacity-modified token classes.
-const tokenSuffixes = new Set(tokenVariableNames.map((name) => name.slice(2)));
+const tokenSuffixes: Record<string, true> = Object.fromEntries(
+  tokenVariableNames.map((name) => [name.slice(2), true]),
+);
 
 /**
- * Reports whether the element carries a token utility class for this property,
- * including opacity-modified forms (`bg-accent/5`, `border-line/50`). Those
- * resolve to alpha-blended colors that match no raw token value, but they are
- * still tokenized — flagging them would be a false positive.
+ * Splits a utility class at top-level variant separators. Colons inside
+ * arbitrary variants (`data-[state=active]`, `[&_svg]`) stay part of the
+ * variant instead of being mistaken for separators.
+ */
+function splitClassParts(className: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < className.length; index += 1) {
+    const char = className[index];
+    if (char === "[" || char === "(") depth += 1;
+    else if (char === "]" || char === ")") depth = Math.max(0, depth - 1);
+    else if (char === ":" && depth === 0) {
+      parts.push(className.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(className.slice(start));
+  return parts;
+}
+
+/** Safe `matches` for states the current DOM implementation may not support. */
+function matchesSelector(element: Element, selector: string): boolean {
+  try {
+    return element.matches(selector);
+  } catch {
+    return false;
+  }
+}
+
+/** Tailwind's default viewport breakpoints, in pixels. */
+const breakpointMinWidth: Record<string, number> = {
+  sm: 640,
+  md: 768,
+  lg: 1024,
+  xl: 1280,
+  "2xl": 1536,
+};
+
+/** Safe media-query evaluation for environments without `matchMedia`. */
+function mediaMatches(query: string): boolean {
+  try {
+    return window.matchMedia(query).matches;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reports whether a Tailwind variant applies to the element right now. Unknown
+ * or ancestor-dependent variants (`group-hover:`, peer selectors) return false:
+ * assuming they are active would hide a genuine raw color. Container-query
+ * variants (`@4xl:`) are layout-scoped, so their declared token utility is
+ * treated as active; CSS still decides which one paints.
+ */
+function variantApplies(variant: string, element: Element): boolean {
+  switch (variant) {
+    case "hover":
+      return matchesSelector(element, ":hover");
+    case "focus":
+      return matchesSelector(element, ":focus");
+    case "focus-visible":
+      return matchesSelector(element, ":focus-visible");
+    case "active":
+      return matchesSelector(element, ":active");
+    case "disabled":
+      return matchesSelector(element, ":disabled");
+    case "dark":
+      return matchesSelector(
+        document.documentElement,
+        ".dark, [data-theme='dark'], [data-palette='dark']",
+      );
+    case "portrait":
+      return mediaMatches("(orientation: portrait)");
+    case "landscape":
+      return mediaMatches("(orientation: landscape)");
+    case "print":
+      return mediaMatches("print");
+    case "motion-safe":
+      return mediaMatches("(prefers-reduced-motion: no-preference)");
+    case "motion-reduce":
+      return mediaMatches("(prefers-reduced-motion: reduce)");
+    case "contrast-more":
+      return mediaMatches("(prefers-contrast: more)");
+    case "contrast-less":
+      return mediaMatches("(prefers-contrast: less)");
+    case "pointer-coarse":
+      return mediaMatches("(pointer: coarse)");
+    case "pointer-fine":
+      return mediaMatches("(pointer: fine)");
+    default:
+      break;
+  }
+  if (variant.startsWith("@")) return true;
+  const minimum = breakpointMinWidth[variant];
+  if (minimum !== undefined) return mediaMatches(`(min-width: ${minimum}px)`);
+  if (variant.startsWith("max-")) {
+    const maximum = breakpointMinWidth[variant.slice("max-".length)];
+    if (maximum !== undefined) return mediaMatches(`(max-width: ${maximum - 0.02}px)`);
+  }
+  if (variant.startsWith("data-[")) {
+    const condition = variant.slice("data-[".length, -1);
+    return matchesSelector(element, `[data-${condition}]`);
+  }
+  if (variant.startsWith("data-")) {
+    return matchesSelector(element, `[data-${variant.slice("data-".length)}]`);
+  }
+  return false;
+}
+
+/**
+ * Reports whether the element's inline style declares the audited property.
+ * Inline paint wins over utility classes, so a token class must not excuse it.
+ */
+function setsColorInline(element: Element, property: ColorProperty): boolean {
+  const style = element.getAttribute("style");
+  if (!style) return false;
+  const declaration =
+    property === "color"
+      ? /(?:^|;)\s*color\s*:/i
+      : property === "backgroundColor"
+        ? /(?:^|;)\s*background(?:-color)?\s*:/i
+        : /(?:^|;)\s*border(?:-(?:top|right|bottom|left|inline|block|inline-start|inline-end|block-start|block-end|x|y))?(?:-color)?\s*:/i;
+  return declaration.test(style);
+}
+
+/**
+ * Returns the base utility when every variant on the class applies right now;
+ * `null` when the class is inactive or is not a utility.
+ */
+function activeUtilityBase(className: string, element: Element): string | null {
+  const parts = splitClassParts(className);
+  const base = parts.pop() ?? "";
+  const normalized = base.replace(/^!/, "").replace(/!$/, "");
+  return parts.every((variant) => variantApplies(variant, element)) ? normalized : null;
+}
+
+/**
+ * Reports whether the element carries an active token utility class for this
+ * property. Opacity modifiers (`bg-accent/5`, `border-line/50`) are stripped
+ * before matching, and side-specific border utilities (`border-x-line`,
+ * `border-t-line`) count as border colors. Both resolve to alpha-blended or
+ * side-scoped paints that match no raw token value, but they are still
+ * tokenized — flagging them would be a false positive. Variant-prefixed
+ * utilities only qualify while their variant actually applies, so an inactive
+ * `hover:bg-accent/5` cannot excuse a raw background.
  */
 function usesTokenClass(element: Element, property: ColorProperty): boolean {
-  const prefix = propertyPrefixes[property];
+  if (setsColorInline(element, property)) return false;
+  const pattern = propertyUtilityPatterns[property];
   for (const name of element.classList) {
-    if (!name.startsWith(prefix)) continue;
-    const suffix = name.slice(prefix.length).split("/")[0];
-    if (tokenSuffixes.has(suffix)) return true;
+    const base = activeUtilityBase(name, element);
+    if (!base) continue;
+    const match = pattern.exec(base);
+    if (!match) continue;
+    const suffix = match[1].split("/")[0];
+    if (tokenSuffixes[suffix]) return true;
   }
   return false;
 }
@@ -190,19 +434,37 @@ export function auditTokenColors(
 const highlightAttribute = "data-devbox-token-violation";
 const highlightStyleId = "devbox-token-violation-style";
 
+/** Removes violation marks without removing the highlight stylesheet. */
+function removeTokenMarks(): void {
+  for (const el of document.querySelectorAll(`[${highlightAttribute}]`)) {
+    el.removeAttribute(highlightAttribute);
+  }
+}
+
 /**
  * Flashes a persistent accent outline on violating elements so they can be
  * located visually. Pass an empty array to clear all highlights.
  */
 export function highlightTokenViolations(violations: TokenViolation[]): void {
+  removeTokenMarks();
+  if (violations.length === 0) {
+    document.getElementById(highlightStyleId)?.remove();
+    return;
+  }
   ensureStyleTag(
     highlightStyleId,
     `[${highlightAttribute}] { outline: 2px dashed var(--red) !important; outline-offset: 1px; }`,
   );
-  for (const el of document.querySelectorAll(`[${highlightAttribute}]`)) {
-    el.removeAttribute(highlightAttribute);
-  }
   for (const violation of violations) {
     violation.element.setAttribute(highlightAttribute, "");
   }
+}
+
+/**
+ * Removes every token-violation mark and the injected stylesheet. Called when
+ * the owning tab or dock unmounts so audit mutations never outlive the tool.
+ */
+export function clearTokenHighlights(): void {
+  removeTokenMarks();
+  document.getElementById(highlightStyleId)?.remove();
 }

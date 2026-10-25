@@ -27,7 +27,6 @@ override_data {
 variables {
   account_id                         = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   authenticated_hyperdrive_config_id = "11111111111111111111111111111111"
-  frontend_origins                   = ["https://staging.meltiply.com"]
   system_hyperdrive_config_id        = "22222222222222222222222222222222"
   zone_id                            = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 }
@@ -45,8 +44,8 @@ run "staging_plan" {
   }
 
   assert {
-    condition     = output.release_resources.api_hostname == "api.staging.meltiply.com"
-    error_message = "The staging plan must expose the accepted API hostname."
+    condition     = output.release_resources.app_hostname == "staging.meltiply.com"
+    error_message = "The staging plan must derive the dashboard/API hostname from app_url."
   }
 
   assert {
@@ -80,7 +79,7 @@ run "staging_plan" {
 
   assert {
     condition = (
-      !output.release_resources.api_custom_domains_attached &&
+      !output.release_resources.app_custom_domains_attached &&
       !output.release_resources.queue_consumers_attached &&
       output.release_resources.queue_delivery_paused
     )
@@ -97,13 +96,13 @@ run "worker_integrations_attached_paused" {
   }
 
   variables {
-    attach_api_custom_domains = true
+    attach_app_custom_domains = true
     attach_queue_consumers    = true
   }
 
   assert {
     condition = (
-      output.release_resources.api_custom_domains_attached &&
+      output.release_resources.app_custom_domains_attached &&
       output.release_resources.queue_consumers_attached &&
       output.release_resources.queue_delivery_paused
     )

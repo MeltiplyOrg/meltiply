@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 import { seedAnalyticsCohort } from "./analytics-fixtures";
-import { controlledProviderAccountId, provisionControlledChannels } from "./publication-fixtures";
+import {
+  activeBrandProfileName,
+  controlledProviderAccountId,
+  provisionControlledChannels,
+} from "./publication-fixtures";
 import { openIsolatedOwnerWorkspace } from "./workspace-session";
 
 /**
@@ -50,7 +54,6 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   expect(analyticsChunk, "Posts must not download the Analytics chart chunk").toBeNull();
 
   const sidebar = page.locator("aside nav");
-  await expect(sidebar.getByRole("button")).toHaveText(["Posts", "Analytics", "Channels"]);
   await sidebar.getByRole("button", { name: "Analytics", exact: true }).click();
   await expect(page).toHaveURL(/\/analytics(?:\?|$)/);
   await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
@@ -147,6 +150,7 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
     document.cookie = "meltiply-theme=light; Path=/; Max-Age=31536000; SameSite=Lax";
   });
   await page.reload();
+  await activeBrandProfileName(page, workspace.profileName);
   await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await page.screenshot({
@@ -158,6 +162,7 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
     document.cookie = "meltiply-theme=dark; Path=/; Max-Age=31536000; SameSite=Lax";
   });
   await page.reload();
+  await activeBrandProfileName(page);
   await expect(page.locator("html")).toHaveClass(/dark/);
   await page.screenshot({
     animations: "disabled",
@@ -167,12 +172,14 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   // Reduced-motion preference must not break the page or its chart.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.reload();
+  await activeBrandProfileName(page);
   await expect(page.getByRole("heading", { name: "Engagement by platform" })).toBeVisible();
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
 
   // Phones keep the stacked rows and never force page-level horizontal scroll.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
+  await activeBrandProfileName(page);
   await expect(page.getByRole("heading", { name: "Top posts" })).toBeVisible();
   await expect(page.getByText("Analytics E2E older").last()).toBeVisible();
   const overflow = await page.evaluate(

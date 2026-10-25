@@ -22,7 +22,7 @@ function validateAndNormalizeApiBaseUrl(value: unknown): string {
   try {
     url = new URL(raw);
   } catch {
-    throw new Error("Invalid public environment: API_BASE_URL must be a valid URL");
+    throw new Error("Invalid public environment: APP_URL must be a valid URL");
   }
   if (
     (url.protocol !== "http:" && url.protocol !== "https:") ||
@@ -30,7 +30,7 @@ function validateAndNormalizeApiBaseUrl(value: unknown): string {
     url.search !== "" ||
     url.hash !== ""
   ) {
-    throw new Error("Invalid public environment: API_BASE_URL must be a valid URL");
+    throw new Error("Invalid public environment: APP_URL must be a valid URL");
   }
   return raw.replace(/\/+$/, "");
 }
@@ -43,23 +43,23 @@ export type DevModeSource = {
 };
 
 export type PublicEnv = {
-  API_BASE_URL: string;
+  APP_URL: string;
 };
 export type PublicEnvSource = Partial<Record<keyof PublicEnv, string | undefined>>;
 
 /**
  * Resolves and validates public frontend environment variables.
- * Normalizes `API_BASE_URL` by stripping trailing slashes and ensuring no extraneous
+ * Normalizes `APP_URL` by stripping trailing slashes and ensuring no extraneous
  * query parameters or hash fragments are present; unset resolves to the same-origin default.
  *
  * @param source Optional dictionary of environment variable overrides; defaults to `import.meta.env`.
- * @returns Validated `PublicEnv` object containing normalized `API_BASE_URL`.
- * @throws {Error} When `API_BASE_URL` fails validation or is malformed.
+ * @returns Validated `PublicEnv` object containing normalized `APP_URL`.
+ * @throws {Error} When `APP_URL` fails validation or is malformed.
  */
 export function getPublicEnv(source?: PublicEnvSource): PublicEnv {
-  const rawValue = source === undefined ? import.meta.env.API_BASE_URL : source.API_BASE_URL;
+  const rawValue = source === undefined ? import.meta.env.APP_URL : source.APP_URL;
   return {
-    API_BASE_URL: validateAndNormalizeApiBaseUrl(rawValue),
+    APP_URL: validateAndNormalizeApiBaseUrl(rawValue),
   };
 }
 
@@ -73,7 +73,7 @@ export function getPublicEnv(source?: PublicEnvSource): PublicEnv {
  * @returns API base URL string without trailing slash.
  */
 export function getApiBaseUrl(source?: PublicEnvSource): string {
-  return getPublicEnv(source).API_BASE_URL;
+  return getPublicEnv(source).APP_URL;
 }
 
 /**

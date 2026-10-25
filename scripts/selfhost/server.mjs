@@ -29,7 +29,7 @@ const optionalUrl = z.preprocess(
 const config = z
   .object({
     SELFHOST_DATA: z.string().default("/data"),
-    SELFHOST_ORIGIN: z.url().default("http://localhost:8080"),
+    APP_URL: z.url().default("http://localhost:8080"),
     SELFHOST_DB_SYSTEM_PASSWORD: z.string().min(32),
     SELFHOST_DB_AUTHENTICATED_PASSWORD: z.string().min(32),
     BETTER_AUTH_SECRET: z.string().min(32),
@@ -146,14 +146,11 @@ async function host(request) {
 const bindings = {
   ENVIRONMENT: "staging",
   VERSION: process.env.VERSION || "selfhost",
-  FRONTEND_URL: new URL(config.SELFHOST_ORIGIN).origin,
-  PUBLIC_API_URL: new URL(config.SELFHOST_ORIGIN).origin,
-  BETTER_AUTH_URL: new URL(config.SELFHOST_ORIGIN).origin,
+  APP_URL: new URL(config.APP_URL).origin,
   // The public origin may sit behind an authenticating reverse proxy, so the
   // Worker fetches its own JWKS over loopback instead of the browser URL.
   BETTER_AUTH_JWKS_URL: "http://127.0.0.1:8080/api/auth/jwks",
-  ALLOWED_ORIGINS: new URL(config.SELFHOST_ORIGIN).origin,
-  OPERATOR_HOSTNAME: new URL(config.SELFHOST_ORIGIN).hostname,
+  OPERATOR_HOSTNAME: new URL(config.APP_URL).hostname,
   BETTER_AUTH_SECRET: config.BETTER_AUTH_SECRET,
   AUTH_SETUP_SECRET: config.AUTH_SETUP_SECRET,
   TOKEN_ENCRYPTION_KEY: config.TOKEN_ENCRYPTION_KEY,
@@ -162,7 +159,7 @@ const bindings = {
   ...(r2Credentials ?? {}),
   R2_ACCOUNT_ID: "selfhost",
   R2_BUCKET_NAME: "meltiply-assets",
-  R2_ENDPOINT: new URL(config.SELFHOST_ORIGIN).origin,
+  R2_ENDPOINT: new URL(config.APP_URL).origin,
   R2_ENDPOINT_PATH_PREFIX: "/cdn-cgi/local/r2/s3",
   ...(mailConfigured
     ? {
@@ -322,7 +319,7 @@ const runtime = new Miniflare(
         // triggers. The configured public origin is the authority the reverse
         // proxy presents, so reserve a never-used path on that hostname to
         // allowlist it without shadowing app, API, or signed R2 paths.
-        routes: [`${new URL(config.SELFHOST_ORIGIN).hostname}/__selfhost_origin_allow__/*`],
+        routes: [`${new URL(config.APP_URL).hostname}/__selfhost_origin_allow__/*`],
         serviceBindings: { API: "api" },
         assets: {
           directory: resolve(dist, "app"),
@@ -435,7 +432,7 @@ async function dispatch() {
 function listener() {
   return createServer(async (incoming, outgoing) => {
     try {
-      const origin = config.SELFHOST_ORIGIN;
+      const origin = config.APP_URL;
       const url = new URL(incoming.url ?? "/", origin);
       if (url.origin !== new URL(origin).origin) {
         outgoing.writeHead(400).end();

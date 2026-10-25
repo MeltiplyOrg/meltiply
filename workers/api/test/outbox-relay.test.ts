@@ -16,8 +16,7 @@ import { logRecords } from "./log-records";
 const baseEnv = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   ENVIRONMENT: "test",
-  FRONTEND_URL: "http://localhost:3000",
-  PUBLIC_API_URL: "http://localhost:8787",
+  APP_URL: "http://localhost:3000",
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 

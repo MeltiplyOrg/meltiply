@@ -70,8 +70,8 @@ postgres_port="${MELTIPLY_CLOUDFLARE_POSTGRES_PORT:-5433}"
 # other caller manages.
 compose=("$repo_root/scripts/cloudflare-local/compose.sh")
 dev_host="$(node "$repo_root/scripts/cloudflare-local/development-host.mjs")"
-api_origin="${PUBLIC_API_URL:-http://${dev_host}:${api_port}}"
-frontend_origin="${FRONTEND_URL:-http://${dev_host}:${frontend_port}}"
+api_origin="http://${dev_host}:${api_port}"
+frontend_origin="${APP_URL:-http://${dev_host}:${frontend_port}}"
 
 http_code() {
   # http_code <url> [extra curl args...] -> prints status code or 000
@@ -178,7 +178,7 @@ check_root_local_vars() {
   local file=$1
   test -f "$file" || return 1
   grep -q '^BETTER_AUTH_SECRET=' "$file" || return 1
-  grep -q '^BETTER_AUTH_URL=' "$file" || return 1
+  grep -q '^APP_URL=' "$file" || return 1
   grep -q '^MAIL_FROM_ADDRESS=' "$file" || return 1
   grep -q '^TOKEN_ENCRYPTION_KEY=' "$file"
 }
@@ -262,17 +262,17 @@ if [[ "$frontend_status" == '200' ]]; then
   # Browser-baked API origin must be one doctor can also reach.
   baked_base_url="$(
     curl --silent --max-time 5 "http://127.0.0.1:${frontend_port}/src/main.tsx" 2>/dev/null |
-      grep -o '"API_BASE_URL"[^,}]*' | head -1 |
+      grep -o '"APP_URL"[^,}]*' | head -1 |
       sed 's/.*: *"\(.*\)"/\1/'
   )"
   if [[ -z "$baked_base_url" ]]; then
-    warn "could not read API_BASE_URL from the Vite module graph"
+    warn "could not read APP_URL from the Vite module graph"
     hint "is the dev entry still at /src/main.tsx? check frontend/index.html"
-  elif [[ "$baked_base_url" != "$api_origin" ]]; then
-    warn "browser bakes API_BASE_URL=${baked_base_url}, doctor derived ${api_origin}"
-    hint "restart \`make dev\` after changing FRONTEND_URL/PUBLIC_API_URL/.env so Vite re-injects it"
+  elif [[ "$baked_base_url" != "$frontend_origin" ]]; then
+    warn "browser bakes APP_URL=${baked_base_url}, doctor derived ${frontend_origin}"
+    hint "restart \`make dev\` after changing APP_URL/.env so Vite re-injects it"
   else
-    ok "Browser-baked API origin matches the derived origin (${api_origin})"
+    ok "Browser-baked app origin matches the derived origin (${frontend_origin})"
   fi
 elif [[ "$frontend_status" != '000' ]]; then
   warn "Frontend dev server answered HTTP ${frontend_status} on :${frontend_port}"

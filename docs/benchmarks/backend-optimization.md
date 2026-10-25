@@ -305,6 +305,15 @@ separate the backend-lock and invalidation costs.
 - The benchmark excludes provider HTTP, Queue delivery, and Durable Object
   time; no optimization is claimed there.
 
+The current PostgreSQL regression budget uses two saved targets per video Post:
+YouTube and Threads under the same Brand Profile, respecting the one-Channel-per-
+Provider invariant. Each Profile owns a ready MP4 rendition, and both real
+adapter capabilities validate the attachment. Immediate scheduling is bounded at
+17 application statements and deferred scheduling at 16, with two Distribution
+outcomes required in every sample. The two additional reads versus the historical
+text-only budget are rendition validation and attachment projection; the historical
+20-Channel timing results above are not directly comparable to this fixture.
+
 ## Correctness
 
 The changed workflows keep their existing guarantees:

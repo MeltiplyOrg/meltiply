@@ -59,13 +59,12 @@ const providerVariables = {
 };
 
 const exactSpecKeys = new Set([
-  "api_base_url",
+  "app_url",
   "api_workers_dev_url",
   "automation_guard",
   "deployment_mode",
   "environment",
-  "frontend_origins",
-  "frontend_url",
+  "allowed_origins",
   "git_sha",
   "neon_branch_id",
   "neon_project_id",
@@ -290,7 +289,8 @@ export function containsCredentialMaterial(serialized) {
  * and ISO 8601 restore point expiry. Rejects secrets, private keys, and connection strings.
  * Object storage defaults to R2; S3 selection requires a bucket and HTTPS origin,
  * with region us-east-1 and path-style addressing by default. Credentials stay
- * in provider-specific remote secrets, never this document.
+ * in provider-specific remote secrets, never this document. TikTok's optional media
+ * prefix overrides the provider registry's default derived from the public API origin.
  * @param {unknown} input - Raw release specification object
  * @returns {object} Normalized, validated release specification
  * @throws {TypeError} If validation fails or forbidden secrets are present
@@ -315,10 +315,7 @@ export function validateReleaseSpec(input) {
     throw new TypeError("release_id must contain the first 12 characters of git_sha");
   }
 
-  const frontendUrl = httpsUrl(spec.frontend_url, "frontend_url", {
-    originOnly: true,
-  });
-  const apiBaseUrl = httpsUrl(spec.api_base_url, "api_base_url", {
+  const apiBaseUrl = httpsUrl(spec.app_url, "app_url", {
     originOnly: true,
   });
   const apiWorkersDevUrl = httpsUrl(spec.api_workers_dev_url, "api_workers_dev_url", {
@@ -331,21 +328,19 @@ export function validateReleaseSpec(input) {
     throw new TypeError("api_workers_dev_url must name the meltiply-api Worker");
   }
   if (apiWorkersDevUrl === apiBaseUrl) {
-    throw new TypeError("api_workers_dev_url must differ from api_base_url");
+    throw new TypeError("api_workers_dev_url must differ from app_url");
   }
-  if (!Array.isArray(spec.frontend_origins) || spec.frontend_origins.length === 0) {
-    throw new TypeError("frontend_origins must be a non-empty array");
+  if (spec.allowed_origins !== undefined && !Array.isArray(spec.allowed_origins)) {
+    throw new TypeError("allowed_origins must be an array");
   }
   const frontendOrigins = [
-    ...new Set(
-      spec.frontend_origins.map((origin, index) =>
-        httpsUrl(origin, `frontend_origins[${index}]`, { originOnly: true }),
+    ...new Set([
+      apiBaseUrl,
+      ...(spec.allowed_origins ?? []).map((origin, index) =>
+        httpsUrl(origin, `allowed_origins[${index}]`, { originOnly: true }),
       ),
-    ),
+    ]),
   ].sort();
-  if (!frontendOrigins.includes(frontendUrl)) {
-    throw new TypeError("frontend_origins must include frontend_url");
-  }
 
   const acceptance = assertPlainObject(spec.provider_acceptance, "provider_acceptance");
   assertExactKeys(acceptance, exactAcceptanceKeys, "provider_acceptance");
@@ -412,9 +407,6 @@ export function validateReleaseSpec(input) {
       throw new TypeError(`${fields.clientField} is required when ${provider} is accepted`);
     }
   }
-  if (acceptance.tiktok && !validatedRuntime.tiktok_media_url_prefix) {
-    throw new TypeError("tiktok_media_url_prefix is required when TikTok is accepted");
-  }
 
   const automationGuard = assertPlainObject(spec.automation_guard, "automation_guard");
   assertExactKeys(automationGuard, new Set(["consumers_paused", "cron_safe"]), "automation_guard");
@@ -448,13 +440,12 @@ export function validateReleaseSpec(input) {
   }
 
   return {
-    api_base_url: apiBaseUrl,
+    app_url: apiBaseUrl,
     api_workers_dev_url: apiWorkersDevUrl,
     automation_guard: { consumers_paused: true, cron_safe: true },
     deployment_mode: spec.deployment_mode,
     environment: "staging",
-    frontend_origins: frontendOrigins,
-    frontend_url: frontendUrl,
+    allowed_origins: frontendOrigins,
     git_sha: gitSha,
     neon_branch_id: neonBranchId,
     neon_project_id: neonProjectId,
@@ -489,12 +480,12 @@ export function validateIacOutputs(input, spec) {
     throw new TypeError("IaC release resources must be staging");
   }
   const hostname = requiredString(
-    resources.api_hostname,
-    "release_resources.api_hostname",
+    resources.app_hostname,
+    "release_resources.app_hostname",
     /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/,
   );
-  if (spec.api_base_url !== `https://${hostname}`) {
-    throw new TypeError("api_base_url must match the IaC API hostname");
+  if (spec.app_url !== `https://${hostname}`) {
+    throw new TypeError("app_url must match the IaC API hostname");
   }
   const bucket = requiredString(bindings.ASSETS, "worker_bindings.ASSETS");
   if (bucket !== resources.assets_bucket_name || !bucket.endsWith("-staging")) {
@@ -548,7 +539,7 @@ export function validateIacOutputs(input, spec) {
   return {
     access_aud: accessAud,
     access_team_domain: accessTeamDomain,
-    api_hostname: hostname,
+    app_hostname: hostname,
     assets_bucket: bucket,
     authenticated_hyperdrive_id: authenticatedId,
     operator_hostname: operatorHostname,
@@ -617,7 +608,7 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   const api = structuredClone(sourceConfigs.api);
   const commonVars = {
     ENVIRONMENT: "staging",
-    PUBLIC_API_URL: spec.api_base_url,
+    APP_URL: spec.app_url,
     ...(spec.runtime.object_storage_provider === "s3"
       ? {
           OBJECT_STORAGE_PROVIDER: "s3",
@@ -650,9 +641,7 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
 
   api.vars = {
     ...commonVars,
-    ALLOWED_ORIGINS: spec.frontend_origins.join(","),
-    BETTER_AUTH_URL: spec.api_base_url,
-    FRONTEND_URL: spec.frontend_url,
+    ALLOWED_ORIGINS: spec.allowed_origins.join(","),
     MAIL_FROM_ADDRESS: spec.runtime.mail_from_address,
     ...(spec.runtime.mail_from_name ? { MAIL_FROM_NAME: spec.runtime.mail_from_name } : {}),
     ...(iac.access_aud

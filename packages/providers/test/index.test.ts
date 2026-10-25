@@ -72,7 +72,7 @@ describe("ProviderRegistry", () => {
 
   it("reuses an immutable environment registry and invalidates mutations", () => {
     const environment = {
-      PUBLIC_API_URL: "https://api.example.com",
+      APP_URL: "https://api.example.com",
       THREADS_CLIENT_ID: "threads-client",
       THREADS_CLIENT_SECRET: "threads-secret",
       THREADS_LIVE_ACCEPTED: "true",
@@ -150,7 +150,7 @@ describe("ProviderRegistry", () => {
 
   it("keeps runtime providers closed until live acceptance is explicit", () => {
     const environment = {
-      PUBLIC_API_URL: "https://api.example.com",
+      APP_URL: "https://api.example.com",
       THREADS_CLIENT_ID: "threads-client",
       THREADS_CLIENT_SECRET: "threads-secret",
     };
@@ -176,15 +176,15 @@ describe("ProviderRegistry", () => {
     );
     expect(() =>
       createProviderRegistryFromEnvironment({
-        PUBLIC_API_URL: "https://user:password@api.example.com",
+        APP_URL: "https://user:password@api.example.com",
         THREADS_CLIENT_ID: "threads-client",
         THREADS_CLIENT_SECRET: "threads-secret",
         THREADS_LIVE_ACCEPTED: "true",
       }),
-    ).toThrow("PUBLIC_API_URL");
+    ).toThrow("APP_URL");
 
     const registry = createProviderRegistryFromEnvironment({
-      PUBLIC_API_URL: "https://api.example.com/base",
+      APP_URL: "https://api.example.com/base",
       THREADS_CLIENT_ID: "threads-client",
       THREADS_CLIENT_SECRET: "threads-secret",
       THREADS_LIVE_ACCEPTED: "true",
@@ -217,7 +217,7 @@ describe("ProviderRegistry", () => {
 
   it("requires independent live acceptance before exposing engagement", () => {
     const environment = {
-      PUBLIC_API_URL: "https://api.example.com",
+      APP_URL: "https://api.example.com",
       THREADS_CLIENT_ID: "threads-client",
       THREADS_CLIENT_SECRET: "threads-secret",
       THREADS_LIVE_ACCEPTED: "true",
@@ -263,7 +263,7 @@ describe("ProviderRegistry", () => {
     const environment = {
       INSTAGRAM_CLIENT_ID: "instagram-client",
       INSTAGRAM_CLIENT_SECRET: "instagram-secret",
-      PUBLIC_API_URL: "https://api.example.com",
+      APP_URL: "https://api.example.com",
     };
     for (const INSTAGRAM_LIVE_ACCEPTED of [undefined, "", "false"]) {
       const registry = createProviderRegistryFromEnvironment({
@@ -304,7 +304,7 @@ describe("ProviderRegistry", () => {
       INSTAGRAM_CLIENT_ID: "instagram-client",
       INSTAGRAM_CLIENT_SECRET: "instagram-secret",
       INSTAGRAM_LIVE_ACCEPTED: "true",
-      PUBLIC_API_URL: "https://api.example.com/base",
+      APP_URL: "https://api.example.com/base",
     };
     const instagram = createProviderRegistryFromEnvironment(environment).get("instagram")!;
     expect(instagram.capability).toMatchObject({
@@ -349,7 +349,7 @@ describe("ProviderRegistry", () => {
     const environment = {
       FACEBOOK_CLIENT_ID: "facebook-client",
       FACEBOOK_CLIENT_SECRET: "facebook-secret",
-      PUBLIC_API_URL: "https://api.example.com",
+      APP_URL: "https://api.example.com",
     };
     for (const FACEBOOK_LIVE_ACCEPTED of [undefined, "", "false"]) {
       const registry = createProviderRegistryFromEnvironment({
@@ -379,7 +379,7 @@ describe("ProviderRegistry", () => {
       FACEBOOK_CLIENT_ID: "facebook-client",
       FACEBOOK_CLIENT_SECRET: "facebook-secret",
       FACEBOOK_LIVE_ACCEPTED: "true",
-      PUBLIC_API_URL: "https://api.example.com/base",
+      APP_URL: "https://api.example.com/base",
     }).get("facebook")!;
     expect(facebook.capability).toMatchObject({
       analytics: true,
@@ -409,7 +409,7 @@ describe("ProviderRegistry", () => {
 
   it("keeps YouTube absent until Shorts publishing acceptance is explicit", () => {
     const environment = {
-      PUBLIC_API_URL: "https://api.example.com",
+      APP_URL: "https://api.example.com",
       YOUTUBE_SHORTS_CLIENT_ID: "youtube-client",
       YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-secret",
     };
@@ -428,7 +428,7 @@ describe("ProviderRegistry", () => {
 
   it("keeps TikTok absent until Direct Post acceptance is explicit", () => {
     const environment = {
-      PUBLIC_API_URL: "https://api.example.com",
+      APP_URL: "https://api.example.com",
       TIKTOK_CLIENT_KEY: "tiktok-client",
       TIKTOK_CLIENT_SECRET: "tiktok-secret",
       TIKTOK_MEDIA_URL_PREFIX: "https://account.r2.cloudflarestorage.com/assets/",
@@ -455,7 +455,7 @@ describe("ProviderRegistry", () => {
     );
 
     const tiktok = createProviderRegistryFromEnvironment({
-      PUBLIC_API_URL: "https://api.example.com/base",
+      APP_URL: "https://api.example.com/base",
       TIKTOK_CLIENT_KEY: "tiktok-client",
       TIKTOK_CLIENT_SECRET: "tiktok-secret",
       TIKTOK_LIVE_ACCEPTED: "true",
@@ -484,7 +484,13 @@ describe("ProviderRegistry", () => {
       "https://api.example.com/api/v1/platforms/tiktok/callback",
     );
     expect(new Set(authorizationUrl.searchParams.get("scope")?.split(","))).toEqual(
-      new Set(["user.info.basic", "user.info.stats", "video.publish", "video.list"]),
+      new Set([
+        "user.info.basic",
+        "video.publish",
+        "user.info.profile",
+        "user.info.stats",
+        "video.list",
+      ]),
     );
   });
 
@@ -497,7 +503,7 @@ describe("ProviderRegistry", () => {
     );
 
     const youtube = createProviderRegistryFromEnvironment({
-      PUBLIC_API_URL: "https://api.example.com/base",
+      APP_URL: "https://api.example.com/base",
       YOUTUBE_LIVE_ACCEPTED: "true",
       YOUTUBE_SHORTS_CLIENT_ID: "youtube-client",
       YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-secret",

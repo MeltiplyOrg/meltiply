@@ -29,13 +29,8 @@ const oauthOutcomes: Record<string, string> = {
   provider_unavailable: "{platform} connection is not available yet.",
   selection_required:
     "{platform} authorization did not identify a single publishing account. Choose the intended account in the provider and try again.",
-  start_failed:
-    "{platform} connection could not be started. Share the request ID with support if the problem continues.",
-  start_unavailable:
-    "{platform} connection could not reach the API. Check your connection and try again.",
   state_invalid:
     "{platform} connection expired or could not be verified. Start again when the provider is available.",
-  unsupported_provider: "{platform} connection was rejected because the provider is unknown.",
 };
 
 const displayNames: Record<string, string> = {

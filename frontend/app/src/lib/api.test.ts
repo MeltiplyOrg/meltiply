@@ -36,7 +36,7 @@ describe("API URL helpers", () => {
 
   it("normalizes configured backend origins and paths", () => {
     const env = {
-      API_BASE_URL: "https://api.example.com/",
+      APP_URL: "https://api.example.com/",
     };
 
     expect(api.apiUrl("calendar", env)).toBe("https://api.example.com/api/v1/calendar");

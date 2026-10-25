@@ -29,7 +29,7 @@ function safeField(field: string): string {
 }
 
 /**
- * Validates and limits an uppercase environment or configuration variable key (e.g. `API_BASE_URL`).
+ * Validates and limits an uppercase environment or configuration variable key (e.g. `APP_URL`).
  *
  * @param key Candidate configuration key string.
  * @returns Valid uppercase key string, or `undefined` if malformed.

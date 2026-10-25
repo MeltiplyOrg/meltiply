@@ -31,7 +31,7 @@
     "FACEBOOK_LIVE_ACCEPTED": "false",
     "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED": "false",
     "INSTAGRAM_LIVE_ACCEPTED": "false",
-    "PUBLIC_API_URL": "https://api.staging.meltiply.com",
+    "APP_URL": "https://staging.meltiply.com",
     "TIKTOK_LIVE_ACCEPTED": "false",
     "THREADS_ENGAGEMENT_LIVE_ACCEPTED": "false",
     "THREADS_LIVE_ACCEPTED": "false",

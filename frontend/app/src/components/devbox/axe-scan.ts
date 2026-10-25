@@ -72,28 +72,37 @@ export async function runAxeScan(
   };
 }
 
+/** Removes violation marks without removing the highlight stylesheet. */
+function removeAxeMarks(): void {
+  for (const el of document.querySelectorAll(`[${highlightAttribute}]`)) {
+    el.removeAttribute(highlightAttribute);
+  }
+}
+
 /**
  * Outlines every offending element from a scan result. Pass an empty result
  * (or call `clearAxeHighlights`) to remove the markers.
  */
 export function highlightAxeViolations(result: AxeScanResult): void {
+  removeAxeMarks();
+  const nodes = result.violations.flatMap((violation) => violation.nodes);
+  if (nodes.length === 0) {
+    document.getElementById(highlightStyleId)?.remove();
+    return;
+  }
   ensureStyleTag(
     highlightStyleId,
     `[${highlightAttribute}] { outline: 3px solid var(--red) !important; outline-offset: 2px; }`,
   );
-  clearAxeHighlights();
-  for (const violation of result.violations) {
-    for (const node of violation.nodes) {
-      node.element?.setAttribute(highlightAttribute, "");
-    }
+  for (const node of nodes) {
+    node.element?.setAttribute(highlightAttribute, "");
   }
 }
 
 /**
- * Removes all axe violation outlines.
+ * Removes all axe violation outlines and the injected stylesheet.
  */
 export function clearAxeHighlights(): void {
-  for (const el of document.querySelectorAll(`[${highlightAttribute}]`)) {
-    el.removeAttribute(highlightAttribute);
-  }
+  removeAxeMarks();
+  document.getElementById(highlightStyleId)?.remove();
 }

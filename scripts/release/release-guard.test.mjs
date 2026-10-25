@@ -181,7 +181,7 @@ test("approval loading enforces expected job and reviewed plan", async (context)
 test("IaC state transitions are exact and foundation is bootstrap-only", () => {
   const iac = {
     release_resources: {
-      api_custom_domains_attached: false,
+      app_custom_domains_attached: false,
       queue_consumers_attached: false,
       queue_delivery_paused: true,
     },

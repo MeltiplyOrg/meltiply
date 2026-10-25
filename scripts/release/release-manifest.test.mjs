@@ -36,10 +36,8 @@ function releaseInput(overrides = {}) {
     neon_project_id: "project-staging-123",
     release_id: `staging-${gitSha.slice(0, 12)}`,
     restore_point_expires_at: "2026-08-05T12:00:00.000Z",
-    api_base_url: "https://api.staging.meltiply.com",
     api_workers_dev_url: "https://meltiply-api.example.workers.dev",
-    frontend_url: "https://staging.meltiply.com",
-    frontend_origins: ["https://staging.meltiply.com"],
+    app_url: "https://staging.meltiply.com",
     automation_guard: { consumers_paused: true, cron_safe: true },
     provider_acceptance: {
       facebook: false,
@@ -74,8 +72,8 @@ function iacOutput(overrides = {}) {
     "token-refresh": "meltiply-token-refresh-staging",
   };
   const resources = {
-    api_custom_domains_attached: true,
-    api_hostname: "api.staging.meltiply.com",
+    app_custom_domains_attached: true,
+    app_hostname: "staging.meltiply.com",
     assets_bucket_name: "meltiply-assets-staging",
     authenticated_hyperdrive_id: "1".repeat(32),
     environment: "staging",
@@ -128,7 +126,7 @@ function approval(name, planDigest, index = "88888888") {
 // Builds the release plan transition variable triple for a phase.
 function transition(attachDomains, attachConsumers, paused) {
   return {
-    attach_api_custom_domains: attachDomains,
+    attach_app_custom_domains: attachDomains,
     attach_queue_consumers: attachConsumers,
     environment: "staging",
     queue_delivery_paused: paused,
@@ -157,7 +155,7 @@ function healthEvidence(extra = {}) {
   return {
     environment: "staging",
     status: "ok",
-    url: "https://api.staging.meltiply.com/api/v1/health",
+    url: "https://staging.meltiply.com/api/v1/health",
     version: gitSha,
     ...extra,
   };
@@ -658,12 +656,12 @@ function bootstrapEvidenceSet(spec) {
     "foundation-plan.sha256": `${digests.initial}\n`,
     "iac-outputs-domain.json": iacOutput({ queue_delivery_paused: true }),
     "iac-outputs-foundation.json": iacOutput({
-      api_custom_domains_attached: false,
+      app_custom_domains_attached: false,
       queue_consumers_attached: false,
       queue_delivery_paused: true,
     }),
     "iac-outputs-paused-consumers.json": iacOutput({
-      api_custom_domains_attached: false,
+      app_custom_domains_attached: false,
       queue_consumers_attached: true,
       queue_delivery_paused: true,
     }),

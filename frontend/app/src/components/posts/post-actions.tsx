@@ -1,19 +1,11 @@
-import { Edit3, Ellipsis, Info, Trash2 } from "lucide-react";
+import { Edit3, Trash2 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@meltiply/ui/dropdown-menu";
 import { useI18n } from "@/lib/i18n";
 
 export interface PostActionsProps {
   postId: string;
   canMutate: boolean;
   canDelete: boolean;
-  onViewDetails: (postId: string) => void;
   onEdit: (postId: string) => void;
   onDelete: (postId: string) => void;
 }
@@ -22,19 +14,15 @@ const QUICK_ACTION_CLASS =
   "h-6 w-5.5 sm:opacity-0 group-hover/row:opacity-100 group-hover/card:opacity-100 group-focus-within/actions:opacity-100";
 
 /**
- * Gr8r-style row/card hover actions and persistent overflow menu. Publication
- * status is never manually editable: the menu offers real inspection, composer,
- * and confirmed deletion flows. Keyboard focus reveals the same quick actions.
+ * Gr8r-style row/card quick actions. Inspection is the card's own stretched hit
+ * area, so only the real composer and confirmed-deletion flows stay here: a
+ * redundant overflow menu would duplicate them without adding a capability.
+ * Publication status is never manually editable. Keyboard focus reveals the
+ * same actions, and delete carries the destructive colour.
  */
-export function PostActions({
-  postId,
-  canMutate,
-  canDelete,
-  onViewDetails,
-  onEdit,
-  onDelete,
-}: PostActionsProps) {
+export function PostActions({ postId, canMutate, canDelete, onEdit, onDelete }: PostActionsProps) {
   const { t } = useI18n();
+  if (!canMutate && !canDelete) return null;
   return (
     <div
       className="group/actions flex items-center justify-end"
@@ -56,7 +44,7 @@ export function PostActions({
         <Button
           variant="ghost"
           size="icon"
-          className={QUICK_ACTION_CLASS}
+          className={`${QUICK_ACTION_CLASS} text-red hover:text-red`}
           title={t("Delete post")}
           aria-label={t("Delete post")}
           onClick={() => onDelete(postId)}
@@ -64,43 +52,6 @@ export function PostActions({
           <Trash2 className="size-3.5" />
         </Button>
       )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6.5"
-            aria-label={t("Post actions")}
-            title={t("Post actions")}
-          >
-            <Ellipsis className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => onViewDetails(postId)}>
-            <Info className="size-3.5" />
-            {t("View details")}
-          </DropdownMenuItem>
-          {canMutate && (
-            <DropdownMenuItem onClick={() => onEdit(postId)}>
-              <Edit3 className="size-3.5" />
-              {t("Edit post")}
-            </DropdownMenuItem>
-          )}
-          {canDelete && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-red focus:text-red"
-                onClick={() => onDelete(postId)}
-              >
-                <Trash2 className="size-3.5" />
-                {t("Delete post")}
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
     </div>
   );
 }

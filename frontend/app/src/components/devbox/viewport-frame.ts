@@ -69,20 +69,32 @@ export function breakpointForWidth(width: number): TailwindBreakpoint {
 
 /**
  * Enables or disables the 390px frame. Lazily injects the stylesheet and the
- * floating "390px" boundary label on first enable; disabling only flips the
- * attribute and hides the label.
+ * floating "390px" boundary label on first enable; disabling removes both so a
+ * stopped frame leaves no DOM mutation behind.
  */
 export function setViewportFrame(enabled: boolean): void {
-  if (enabled) ensureStyleTag(styleElementId, viewportStylesheet);
-  document.documentElement.toggleAttribute(viewportAttribute, enabled);
+  if (!enabled) {
+    clearViewportFrame();
+    return;
+  }
+  ensureStyleTag(styleElementId, viewportStylesheet);
+  document.documentElement.setAttribute(viewportAttribute, "");
 
-  let label = document.getElementById(labelElementId);
-  if (enabled && !label) {
-    label = document.createElement("div");
+  if (!document.getElementById(labelElementId)) {
+    const label = document.createElement("div");
     label.id = labelElementId;
     label.textContent = "390px";
     document.body.appendChild(label);
   }
+}
+
+/**
+ * Removes the viewport frame attribute, boundary label, and stylesheet.
+ */
+export function clearViewportFrame(): void {
+  document.documentElement.removeAttribute(viewportAttribute);
+  document.getElementById(labelElementId)?.remove();
+  document.getElementById(styleElementId)?.remove();
 }
 
 /**

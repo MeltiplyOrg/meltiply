@@ -22,9 +22,52 @@ export type DevBoxLatency = 0 | 300 | 1500 | "infinite";
 
 const devBoxLatencies: readonly DevBoxLatency[] = [0, 300, 1500, "infinite"];
 
-interface DevBoxPosition {
+export interface DevBoxPosition {
   x: number;
   y: number;
+}
+
+export interface DevBoxSize {
+  width: number;
+  height: number;
+}
+
+export interface DevBoxViewport {
+  width: number;
+  height: number;
+}
+
+/**
+ * Clamps a dock position so its measured box stays fully inside the viewport.
+ * When the dock is larger than the viewport, the result pins it to the top-left
+ * corner instead of producing a negative offset.
+ *
+ * @param position Persisted or pointer-derived top-left position.
+ * @param size Measured dock dimensions, including borders.
+ * @param viewport Current viewport dimensions.
+ * @returns A finite position whose dock box cannot extend past any edge.
+ */
+export function clampDevBoxPosition(
+  position: DevBoxPosition,
+  size: DevBoxSize,
+  viewport: DevBoxViewport,
+): DevBoxPosition {
+  return {
+    x: Math.min(Math.max(0, position.x), Math.max(0, viewport.width - size.width)),
+    y: Math.min(Math.max(0, position.y), Math.max(0, viewport.height - size.height)),
+  };
+}
+
+/**
+ * Validates a persisted position, rejecting non-finite numbers so malformed
+ * storage cannot produce an unclampable `left`/`top`.
+ */
+function readPosition(value: unknown): DevBoxPosition | null {
+  if (!value || typeof value !== "object") return null;
+  const { x, y } = value as Partial<DevBoxPosition>;
+  return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y)
+    ? { x, y }
+    : null;
 }
 
 export interface DevBoxState {
@@ -65,12 +108,7 @@ export function readDevBoxState(): DevBoxState {
   try {
     const parsed = JSON.parse(raw) as Partial<DevBoxState> | null;
     if (!parsed || typeof parsed !== "object") return defaultDevBoxState;
-    const position =
-      parsed.position &&
-      typeof parsed.position.x === "number" &&
-      typeof parsed.position.y === "number"
-        ? { x: parsed.position.x, y: parsed.position.y }
-        : null;
+    const position = readPosition(parsed.position);
     return {
       hidden: parsed.hidden === true,
       collapsed: parsed.collapsed !== false,

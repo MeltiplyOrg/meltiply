@@ -26,7 +26,7 @@ async function fixture() {
       terraform_version: "1.10.2",
       variables: {
         environment: { value: "staging" },
-        attach_api_custom_domains: { value: false },
+        attach_app_custom_domains: { value: false },
         attach_queue_consumers: { value: false },
         queue_delivery_paused: { value: true },
       },
@@ -87,7 +87,7 @@ test("plans, verifies, applies, records outputs, and removes raw plan data", asy
   );
   assert.deepEqual(summary.transition, {
     environment: "staging",
-    attachApiCustomDomains: false,
+    attachAppCustomDomains: false,
     attachQueueConsumers: false,
     queueDeliveryPaused: true,
   });

@@ -1214,6 +1214,19 @@ SET name = EXCLUDED.name,
 -- display name: the directory must fall back to the platform user id rather
 -- than rendering an empty name cell.
 --
+-- LinkedIn is not a supported Provider — the roster, the API contract, and the
+-- frontend label map carry the five platforms above — so retire the accounts an
+-- earlier seed created with that slug. `platform` is part of the upsert key
+-- below, so a retired row would collide on its primary key instead of
+-- converging. Its Post targets cascade away and its Distributions are re-pointed
+-- by the upserts later in this transaction; both ids are re-inserted on
+-- supported platforms.
+DELETE FROM platform_accounts
+WHERE platform = 'linkedin'
+  AND id IN (
+    'e3000000-0000-4000-8000-000000000002',
+    'e4000000-0000-4000-8000-000000000002'
+  );
 INSERT INTO platform_accounts (
   id, org_id, brand_profile_id, platform, platform_user_id, display_name,
   access_token, scopes, metadata, connection_status, last_synced_at, revoked_at

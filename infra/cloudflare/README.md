@@ -128,6 +128,15 @@ protected backend/tfvars files. Populate
 for your own account, domains, database, and exact checked-out commit. Keep the
 checkout clean and use a new ignored release directory for each release.
 
+Use one `app_url` in the release input and the matching `app_url` in protected
+tfvars. The release renders `APP_URL` for API and automation Workers; IaC derives
+the public hostname and R2 CORS origin from that URL. Extra `allowed_origins` are
+optional, not a second required copy of the app origin. The app custom domain
+belongs to `meltiply-frontend-staging`, whose `API` Service Binding forwards
+`/api/*` to `meltiply-api`; the operator hostname remains on the API Worker.
+Deploy both Workers before the domain-attachment phase. Do not attach the app
+hostname to the API Worker directly: that would remove dashboard asset routing.
+
 Plans and review receipts are local operator records, not authenticated approvals
 or signatures. Filesystem permissions and deployment credentials are the trust
 boundary. Never download or apply plans produced by untrusted contributor code.

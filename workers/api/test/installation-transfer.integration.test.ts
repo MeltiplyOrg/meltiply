@@ -69,7 +69,7 @@ const env = {
       "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
   } as Hyperdrive,
   ENVIRONMENT: "test",
-  FRONTEND_URL: "http://localhost:3000",
+  APP_URL: "http://localhost:3000",
   TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;

@@ -102,7 +102,7 @@ try {
       ALLOWED_ORIGINS: "http://localhost:3000",
       VERSION: "storage-pipeline-check",
       TOKEN_ENCRYPTION_KEY: "storage-pipeline-private-media-secret",
-      PUBLIC_API_URL: "https://api.storage.example.test",
+      APP_URL: "https://api.storage.example.test",
       DB_AUTHENTICATED: bindings.DB_AUTHENTICATED,
       DB_SYSTEM: bindings.DB_SYSTEM,
     } satisfies ApiWorkerEnv;

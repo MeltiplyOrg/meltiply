@@ -12,10 +12,8 @@ cat >"$fixture/.env" <<'EOF'
 BETTER_AUTH_SECRET=local-auth-secret
 MAIL_FROM_ADDRESS=no-reply@meltiply.local
 TOKEN_ENCRYPTION_KEY=local-encryption-key
-API_BASE_URL=http://localhost:8787
 ALLOWED_ORIGINS=http://localhost:3000
-FRONTEND_URL=http://localhost:3000
-PUBLIC_API_URL=http://localhost:8787
+APP_URL=http://localhost:3000
 WRANGLER_DEV_PORT=9999
 EOF
 
@@ -42,8 +40,7 @@ append_local_wrangler_overrides args
 
 for value in \
   "ALLOWED_ORIGINS:http://localhost:3000" \
-  "FRONTEND_URL:http://localhost:3000" \
-  "PUBLIC_API_URL:http://localhost:8787"; do
+  "APP_URL:http://localhost:3000"; do
   if ! printf '%s\n' "${args[@]}" | grep -Fxq "$value"; then
     printf 'missing default Wrangler override: %s\n' "$value" >&2
     exit 1
@@ -51,15 +48,13 @@ for value in \
 done
 
 WRANGLER_DEV_ALLOWED_ORIGINS="http://localhost:3000,http://127.0.0.1:3000"
-WRANGLER_DEV_FRONTEND_URL="http://127.0.0.1:3000"
-WRANGLER_DEV_PUBLIC_API_URL="http://127.0.0.1:8787"
+WRANGLER_DEV_APP_URL="http://127.0.0.1:3000"
 args=()
 append_local_wrangler_overrides args
 
 for value in \
   "ALLOWED_ORIGINS:${WRANGLER_DEV_ALLOWED_ORIGINS}" \
-  "FRONTEND_URL:${WRANGLER_DEV_FRONTEND_URL}" \
-  "PUBLIC_API_URL:${WRANGLER_DEV_PUBLIC_API_URL}"; do
+  "APP_URL:${WRANGLER_DEV_APP_URL}"; do
   if ! printf '%s\n' "${args[@]}" | grep -Fxq "$value"; then
     printf 'missing Wrangler override: %s\n' "$value" >&2
     exit 1
@@ -67,15 +62,12 @@ for value in \
 done
 
 unset WRANGLER_DEV_ALLOWED_ORIGINS \
-  WRANGLER_DEV_FRONTEND_URL \
-  WRANGLER_DEV_PUBLIC_API_URL
+  WRANGLER_DEV_APP_URL
 ALLOWED_ORIGINS="https://dashboard.example.test"
-FRONTEND_URL="https://dashboard.example.test"
-PUBLIC_API_URL="https://api.example.test"
+APP_URL="https://dashboard.example.test"
 configure_local_wrangler_network "$repo_root" 3000 8787
 [[ "$WRANGLER_DEV_ALLOWED_ORIGINS" == "$ALLOWED_ORIGINS" ]]
-[[ "$WRANGLER_DEV_FRONTEND_URL" == "$FRONTEND_URL" ]]
-[[ "$WRANGLER_DEV_PUBLIC_API_URL" == "$PUBLIC_API_URL" ]]
+[[ "$WRANGLER_DEV_APP_URL" == "$APP_URL" ]]
 
 # The container-runtime flag is explicit so local media processing is a chosen
 # mode rather than an accident of the pinned Wrangler default, and an invalid

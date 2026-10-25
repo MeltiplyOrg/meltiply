@@ -5,9 +5,21 @@ import { allowedOriginsFor } from "./verifier-cache";
 import { createCloudflareMailSender, mailSenderConfiguration } from "./mail";
 import { authPolicyHandler } from "./auth-policy";
 
-// Auth captures a database adapter, so it may be reused only within the same
-// invocation-owned bindings object, never by configuration across invocations.
-const invocationAuth = new WeakMap<ApiWorkerEnv, BetterAuthInstance>();
+let betterAuthCached:
+  | {
+      baseURL: string | undefined;
+      databaseConnectionString: string | undefined;
+      environment: ApiWorkerEnv["ENVIRONMENT"];
+      mailBinding: SendEmail | undefined;
+      mailFromAddress: string | undefined;
+      mailFromName: string | undefined;
+      origins: string;
+      requireEmailVerification: boolean;
+      secret: string;
+      setupSecret: string | undefined;
+      value: BetterAuthInstance;
+    }
+  | undefined;
 
 /**
  * Outcome of a single auth rate-limit check: `ok` admits the request, `limited`
@@ -24,29 +36,23 @@ interface RateLimitHitRow extends Record<string, unknown> {
 }
 
 /**
- * Returns Better Auth for this invocation. An auth instance captures its
- * database adapter and mail bindings, so reuse is keyed by the invocation's
- * bindings object rather than global configuration strings. Worker entries
- * clone those bindings before dispatch; weak keys release completed scopes.
+ * Returns a cached Better Auth instance keyed by every binding it captures.
+ * Local and explicitly request-owned pools are never cached because their
+ * adapters belong to one invocation; managed isolates reuse the instance while
+ * its secret, origins, mail configuration, policy, and database remain stable.
  *
- * Email verification is an explicit policy, not an accident of configuration:
- * deployed environments (`staging`/`preview`) always require a verified email,
- * while `local`/`test` keep the historical default of allowing unverified
- * sign-in. When verification is required, a usable `MAIL` binding plus a valid
- * `MAIL_FROM_ADDRESS` sender must also exist — a missing or malformed mail
- * configuration fails closed at resolution instead of silently disabling
- * verification. In local/test the sender is wired whenever it is usable so the
- * simulated binding still emits verification/recovery messages.
+ * Email verification is explicit: deployed environments require verified email
+ * by default, while local/test allow unverified sign-in. Required verification
+ * fails closed when the mail binding or sender is unusable.
  *
- * @param env - Worker environment bindings containing database connection and auth configuration.
+ * @param env - Worker environment bindings containing database and auth configuration.
  * @returns Configured Better Auth instance.
- * @throws {Error} When `BETTER_AUTH_SECRET` is absent outside local/test, or when
- *   verification is required but the mail binding or sender configuration is unusable.
+ * @throws {Error} When the secret is missing in a deployed environment or
+ *   required email verification lacks a usable mail binding and sender.
  */
 export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstance> {
   const isLocalOrTest = env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
-  const cached = invocationAuth.get(env);
-  if (cached) return cached;
+  const requestOwnedPool = env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request";
   const secret =
     env.BETTER_AUTH_SECRET?.trim() ||
     (isLocalOrTest ? "meltiply-local-auth-secret-32-chars-long" : undefined);
@@ -54,9 +60,8 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
   if (!secret) {
     throw new Error("BETTER_AUTH_SECRET must be configured in staging and production");
   }
-  const baseURL =
-    env.BETTER_AUTH_URL?.trim() ||
-    (env.PUBLIC_API_URL?.trim() ? env.PUBLIC_API_URL.trim() : undefined);
+  const baseURL = env.APP_URL?.trim() || undefined;
+  const origins = `${baseURL ?? ""}\n${env.ALLOWED_ORIGINS?.trim() || ""}`;
   const requireEmailVerification = requiresEmailVerification(env);
   const senderAddress = mailSenderConfiguration(env);
   const mailUsable =
@@ -68,8 +73,26 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     );
   }
 
+  const databaseConnectionString = env.DB_SYSTEM?.connectionString;
+  if (
+    !requestOwnedPool &&
+    betterAuthCached &&
+    betterAuthCached.secret === secret &&
+    betterAuthCached.baseURL === baseURL &&
+    betterAuthCached.origins === origins &&
+    betterAuthCached.environment === env.ENVIRONMENT &&
+    betterAuthCached.requireEmailVerification === requireEmailVerification &&
+    betterAuthCached.databaseConnectionString === databaseConnectionString &&
+    betterAuthCached.mailBinding === env.MAIL &&
+    betterAuthCached.mailFromAddress === senderAddress?.email &&
+    betterAuthCached.mailFromName === senderAddress?.name &&
+    betterAuthCached.setupSecret === env.AUTH_SETUP_SECRET
+  ) {
+    return betterAuthCached.value;
+  }
+
   const trustedOrigins = Array.from(allowedOriginsFor(env));
-  // Exception: dynamic import avoids loading pg in workerd unit test isolates
+  // Exception: dynamic import avoids loading pg in workerd unit test isolates.
   const { systemPoolFor } = await import("./database");
   const database = systemPoolFor(env);
   const auth = authPolicyHandler(
@@ -97,7 +120,21 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     }),
   );
 
-  invocationAuth.set(env, auth);
+  if (!requestOwnedPool) {
+    betterAuthCached = {
+      baseURL,
+      databaseConnectionString,
+      environment: env.ENVIRONMENT,
+      mailBinding: env.MAIL,
+      mailFromAddress: senderAddress?.email,
+      mailFromName: senderAddress?.name,
+      origins,
+      requireEmailVerification,
+      secret,
+      setupSecret: env.AUTH_SETUP_SECRET,
+      value: auth,
+    };
+  }
 
   return auth;
 }

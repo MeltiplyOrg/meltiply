@@ -23,6 +23,7 @@ const keyServer = createServer((_request, response) => {
 const issuer = "https://analytics-history.test";
 const env: ApiWorkerEnv = {
   ENVIRONMENT: "test",
+  ALLOWED_ORIGINS: issuer,
   VERSION: "analytics-history",
   PUBLIC_API_URL: issuer,
   DB_AUTHENTICATED: { connectionString: process.env.MELTIPLY_DATABASE_TEST_URL! } as Hyperdrive,

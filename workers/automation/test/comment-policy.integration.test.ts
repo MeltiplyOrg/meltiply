@@ -26,9 +26,17 @@ let providerReads = 0;
 // Only the external Queue transport and Provider are controlled. Claims,
 // checkpointing, encryption, leases, and replay guards use real PostgreSQL.
 const queue: Queue<unknown> = {
+  async metrics() {
+    return {
+      backlogCount: delivered.length,
+      backlogBytes: new TextEncoder().encode(JSON.stringify(delivered)).byteLength,
+    };
+  },
   async send(body) {
+    if (failSend) throw new Error("Controlled transport outage");
     if (!isProviderSyncMessage(body)) throw new TypeError("Unexpected Queue body");
     delivered.push(body);
+    return { metadata: { metrics: await queue.metrics() } };
   },
   async sendBatch(batch) {
     if (failSend) throw new Error("Controlled transport outage");
@@ -36,6 +44,7 @@ const queue: Queue<unknown> = {
       if (!isProviderSyncMessage(entry.body)) throw new TypeError("Unexpected Queue body");
       delivered.push(entry.body);
     }
+    return { metadata: { metrics: await queue.metrics() } };
   },
 };
 const env: AutomationEnv = {

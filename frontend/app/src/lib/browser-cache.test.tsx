@@ -366,11 +366,13 @@ describe("private browser read cache", () => {
     await act(async () => {
       await nextPage;
     });
-    expect(view.result.current.data?.map((post) => post.id)).toEqual([
-      "first",
-      "second",
-      "next-page",
-    ]);
+    await waitFor(() =>
+      expect(view.result.current.data?.map((post) => post.id)).toEqual([
+        "first",
+        "second",
+        "next-page",
+      ]),
+    );
   });
 
   it("refreshes only active and newly due Calendar details, preserving settled events", async () => {

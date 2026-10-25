@@ -79,6 +79,9 @@ the loaded Posts and reset the Grid to page one. Fetched pages are reused only
 in the signed-in browser's memory across view and route changes; each page is
 fresh for one minute and inactive pages expire after 30 minutes. Nothing is
 saved across reloads. Publishing progress and your mutations update cached data.
+Progress-only reads do not extend a page's collection freshness. A removed active
+Post is pruned without blocking other outcomes; failed detail reads retain their
+last known data and report an error while later polls retry.
 
 Channels and active Brand Profiles remain fresh for five minutes. Analytics
 dashboard and rankings share the same five-minute cohort, and **Refresh** advances

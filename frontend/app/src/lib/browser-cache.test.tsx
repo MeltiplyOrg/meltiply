@@ -360,6 +360,66 @@ describe("private browser read cache", () => {
     });
   });
 
+  it("expires collection membership from its last list fetch rather than a partial progress update", async () => {
+    const fixture = contractSuccessBody<Post>("getPost");
+    const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
+    const pending: Post = {
+      ...fixture,
+      attachments: [],
+      distributions: [{ ...distribution, status: "processing" }],
+    };
+    const published: Post = {
+      ...pending,
+      distributions: [{ ...distribution, status: "published" }],
+    };
+    const changed: Post = {
+      ...fixture,
+      default_text: "Another member's change",
+      attachments: [],
+      distributions: [],
+    };
+    const initialTime = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(initialTime);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let detailStarted = false;
+    let lists = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+        if (path.endsWith("/posts")) {
+          lists += 1;
+          return Response.json({
+            posts: [lists === 1 ? pending : changed],
+            has_more: false,
+            limit: 60,
+            offset: 0,
+          });
+        }
+        detailStarted = true;
+        await gate;
+        return Response.json(published);
+      }),
+    );
+    const first = renderHook(() => usePosts(scope), { wrapper: Wrapper });
+    await waitFor(() => expect(detailStarted).toBe(true));
+    clock.mockReturnValue(initialTime + 45_000);
+    release();
+    await waitFor(() =>
+      expect(first.result.current.data?.[0]?.distributions[0]?.status).toBe("published"),
+    );
+    first.unmount();
+    clock.mockReturnValue(initialTime + 61_000);
+    const returned = renderHook(() => usePosts(scope), { wrapper: Wrapper });
+    await waitFor(() =>
+      expect(returned.result.current.data?.[0]?.default_text).toBe(changed.default_text),
+    );
+    expect(lists).toBe(2);
+  });
+
   it("does not let a delayed progress response overwrite a later draft save", async () => {
     const fixture = contractSuccessBody<Post>("getPost");
     const pending: Post = {

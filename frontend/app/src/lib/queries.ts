@@ -22,6 +22,7 @@ import {
 } from "./effect";
 import { useMutationKeyTracker } from "./mutation-idempotency";
 import { analyticsRangeWindow } from "./analytics-range";
+import { ApiError } from "./api";
 import { pollingInterval, privateCacheRetentionMs, referenceFreshnessMs } from "./query-defaults";
 import type {
   AnalyticsRangePreset,
@@ -426,6 +427,34 @@ function useDueWorkClock(hasScheduled: boolean): number {
 }
 
 /**
+ * Reads independent progress details with four-request concurrency. Missing
+ * identities are removed from loaded projections; other failures retain their
+ * last known data and surface through the collection while the next poll retries.
+ * Cancellation still propagates instead of producing a partial successful read.
+ */
+function readProgressDetails<A>(
+  ids: readonly string[],
+  read: (id: string) => Effect.Effect<A, ApiClientError, WorkspaceService>,
+) {
+  return Effect.gen(function* () {
+    const exits = yield* Effect.forEach(ids, (id) => Effect.exit(read(id)), { concurrency: 4 });
+    const values: A[] = [];
+    const missing = new Set<string>();
+    let error: Error | null = null;
+    for (const [index, exit] of exits.entries()) {
+      if (Exit.isSuccess(exit)) values.push(exit.value);
+      else {
+        if (Cause.hasInterrupts(exit.cause)) return yield* Effect.failCause(exit.cause);
+        const failure = Cause.squash(exit.cause);
+        if (failure instanceof ApiError && failure.status === 404) missing.add(ids[index]!);
+        else error ??= failure instanceof Error ? failure : new Error("Progress read failed");
+      }
+    }
+    return { values, missing, error };
+  });
+}
+
+/**
  * Keeps draft revisions and independent outcome/Asset timestamps monotonic when
  * an older progress read races a save or a newer detail read. Equal revisions
  * may still contain newer background work; a later poll reconciles the whole
@@ -461,8 +490,8 @@ function newestPost(previous: Post | undefined, received: Post): Post {
  * Refreshes only loaded Posts with active work, at most four HTTP reads at a
  * time. Future scheduled work becomes eligible when its persisted due instant
  * arrives; settled rows never trigger polling. Successful details replace
- * matching cached rows without changing page order or pagination. Failed reads
- * retain the last known row and follow the ordinary query error policy.
+ * matching cached rows without changing page order or pagination. Missing rows
+ * are removed; independent failures retain data and remain visible to the owner.
  * Newer revisions win over delayed reads; publication transitions invalidate
  * Analytics and update loaded calendar projections without range/page refetches.
  */
@@ -488,11 +517,7 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
   const progress = useQuery({
     queryKey: ["post-progress", ids],
     queryFn: ({ signal }) =>
-      runApiQuery(
-        scope,
-        (api) => Effect.forEach(ids, (id) => api.getPost(id), { concurrency: 4 }),
-        signal,
-      ),
+      runApiQuery(scope, (api) => readProgressDetails(ids, (id) => api.getPost(id)), signal),
     enabled: scope.isSignedIn && ids.length > 0,
     refetchInterval: 10_000,
     staleTime: 10_000,
@@ -500,7 +525,8 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
   });
   useEffect(() => {
     if (!progress.data) return;
-    const replacements = new Map(progress.data.map((post) => [post.id, post]));
+    const { missing } = progress.data;
+    const replacements = new Map(progress.data.values.map((post) => [post.id, post]));
     const collections = {
       queryKey: queryKeys.posts(),
       predicate: (query: { queryKey: QueryKey }) =>
@@ -528,17 +554,31 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
     for (const [id, post] of replacements) {
       replacements.set(id, newestPost(queryClient.getQueryData<Post>(queryKeys.post(id)), post));
     }
-    queryClient.setQueriesData<InfiniteData<PostListResponse, number>>(collections, (previous) =>
-      previous
-        ? {
-            ...previous,
-            pages: previous.pages.map((page) => ({
-              ...page,
-              posts: page.posts.map((post) => replacements.get(post.id) ?? post),
-            })),
-          }
-        : previous,
-    );
+    for (const [key, previous] of queryClient.getQueriesData<
+      InfiniteData<PostListResponse, number>
+    >(collections)) {
+      if (
+        !previous?.pages.some((page) =>
+          page.posts.some((post) => replacements.has(post.id) || missing.has(post.id)),
+        )
+      )
+        continue;
+      queryClient.setQueryData(
+        key,
+        {
+          ...previous,
+          pages: previous.pages.map((page) => ({
+            ...page,
+            posts: page.posts
+              .filter((post) => !missing.has(post.id))
+              .map((post) => replacements.get(post.id) ?? post),
+          })),
+        },
+        { updatedAt: queryClient.getQueryState(key)?.dataUpdatedAt },
+      );
+    }
+    for (const id of missing)
+      queryClient.removeQueries({ queryKey: queryKeys.post(id), exact: true });
     for (const post of replacements.values())
       queryClient.setQueryData(queryKeys.post(post.id), post);
     const outcomes = new Map(
@@ -546,21 +586,33 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
         post.distributions.map((distribution) => [distribution.id, distribution] as const),
       ),
     );
-    queryClient.setQueriesData<CalendarEvent[]>({ queryKey: queryKeys.calendar() }, (previous) =>
-      previous?.map((event) => {
-        const outcome = outcomes.get(event.id);
-        if (!outcome || Date.parse(outcome.updated_at) < Date.parse(event.updated_at)) return event;
-        return {
-          ...event,
-          status: outcome.status,
-          scheduled_at: outcome.scheduled_at,
-          published_at: outcome.published_at,
-          updated_at: outcome.updated_at,
-        };
-      }),
-    );
+    for (const [key, previous] of queryClient.getQueriesData<CalendarEvent[]>({
+      queryKey: queryKeys.calendar(),
+    })) {
+      if (!previous?.some((event) => outcomes.has(event.id) || missing.has(event.post_id)))
+        continue;
+      queryClient.setQueryData(
+        key,
+        previous
+          .filter((event) => !missing.has(event.post_id))
+          .map((event) => {
+            const outcome = outcomes.get(event.id);
+            if (!outcome || Date.parse(outcome.updated_at) < Date.parse(event.updated_at))
+              return event;
+            return {
+              ...event,
+              status: outcome.status,
+              scheduled_at: outcome.scheduled_at,
+              published_at: outcome.published_at,
+              updated_at: outcome.updated_at,
+            };
+          }),
+        { updatedAt: queryClient.getQueryState(key)?.dataUpdatedAt },
+      );
+    }
     if (published) void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
   }, [progress.data, queryClient]);
+  return progress.error ?? progress.data?.error ?? null;
 }
 
 /**
@@ -594,8 +646,8 @@ export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "li
     staleTime: 60_000,
     enabled: scope.isSignedIn,
   });
-  usePostProgress(scope, query.data ?? []);
-  return query;
+  const progressError = usePostProgress(scope, query.data ?? []);
+  return { ...query, error: query.error ?? progressError };
 }
 
 /**
@@ -837,8 +889,11 @@ export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryPara
     getNextPageParam: (page) => (page.has_more ? page.offset + page.limit : undefined),
     enabled: scope.isSignedIn,
   });
-  usePostProgress(scope, query.data?.pages.flatMap((page) => page.posts) ?? []);
-  return query;
+  const progressError = usePostProgress(
+    scope,
+    query.data?.pages.flatMap((page) => page.posts) ?? [],
+  );
+  return { ...query, error: query.error ?? progressError };
 }
 
 /** Creates a recurring plan with the shared stable-key mutation lifecycle. */
@@ -1155,7 +1210,7 @@ function useCalendarProgress(scope: SessionScope, events: readonly CalendarEvent
     queryFn: ({ signal }) =>
       runApiQuery(
         scope,
-        (api) => Effect.forEach(ids, (id) => api.getDistribution(id), { concurrency: 4 }),
+        (api) => readProgressDetails(ids, (id) => api.getDistribution(id)),
         signal,
       ),
     enabled: scope.isSignedIn && ids.length > 0,
@@ -1165,33 +1220,44 @@ function useCalendarProgress(scope: SessionScope, events: readonly CalendarEvent
   });
   useEffect(() => {
     if (!progress.data) return;
+    const { missing } = progress.data;
     const replacements = new Map(
-      progress.data.map((distribution) => [distribution.id, distribution]),
+      progress.data.values.map((distribution) => [distribution.id, distribution]),
     );
     let published = false;
     let changed = false;
-    queryClient.setQueriesData<CalendarEvent[]>({ queryKey: queryKeys.calendar() }, (previous) =>
-      previous?.map((event) => {
-        const replacement = replacements.get(event.id);
-        if (!replacement || Date.parse(replacement.updated_at) < Date.parse(event.updated_at))
-          return event;
-        if (replacement.status !== event.status) {
-          changed = true;
-          published ||= replacement.status === "published";
-        }
-        return {
-          ...event,
-          status: replacement.status,
-          scheduled_at: replacement.scheduled_at,
-          published_at: replacement.published_at,
-          updated_at: replacement.updated_at,
-        };
-      }),
-    );
+    for (const [key, previous] of queryClient.getQueriesData<CalendarEvent[]>({
+      queryKey: queryKeys.calendar(),
+    })) {
+      if (!previous?.some((event) => replacements.has(event.id) || missing.has(event.id))) continue;
+      queryClient.setQueryData(
+        key,
+        previous
+          .filter((event) => !missing.has(event.id))
+          .map((event) => {
+            const replacement = replacements.get(event.id);
+            if (!replacement || Date.parse(replacement.updated_at) < Date.parse(event.updated_at))
+              return event;
+            if (replacement.status !== event.status) {
+              changed = true;
+              published ||= replacement.status === "published";
+            }
+            return {
+              ...event,
+              status: replacement.status,
+              scheduled_at: replacement.scheduled_at,
+              published_at: replacement.published_at,
+              updated_at: replacement.updated_at,
+            };
+          }),
+        { updatedAt: queryClient.getQueryState(key)?.dataUpdatedAt },
+      );
+    }
     if (changed)
       void queryClient.invalidateQueries({ queryKey: queryKeys.posts(), refetchType: "none" });
     if (published) void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
   }, [progress.data, queryClient]);
+  return progress.error ?? progress.data?.error ?? null;
 }
 
 /**
@@ -1218,8 +1284,8 @@ export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
     },
     enabled: scope.isSignedIn && Boolean(scopedParams),
   });
-  useCalendarProgress(scope, query.data ?? []);
-  return query;
+  const progressError = useCalendarProgress(scope, query.data ?? []);
+  return { ...query, error: query.error ?? progressError };
 }
 
 /**

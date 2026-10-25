@@ -1,5 +1,10 @@
 # Backend performance comparison
 
+**Current PR #65 evidence:** use the
+[complete authenticated application comparison](#complete-authenticated-application-comparison).
+The earlier sections preserve experiments at their named revisions; their gains
+do not establish current whole-application latency or production savings.
+
 This report compares the backend at the pre-optimization baseline with the
 optimized integration branch using the same benchmark harness, dataset,
 concurrency, configuration, runner class, and PostgreSQL version.
@@ -524,8 +529,10 @@ the authoritative visibility read. Their measured application DB time fell from
 1.66 to 0.72 ms/request. Cold misses incur that extra visibility query: application
 DB time rose from 1.67 to 2.43 ms/request and per-request p95 rose by 1.06 ms.
 This cold-read regression is the explicit authorization/freshness tradeoff, not
-hidden by the warm result. Concurrent summaries are not single-flight; their
-observed aggregate reuse depends on scheduling and completion within a burst.
+hidden by the warm result. Concurrent summaries were not single-flight in that
+measured revision; their observed reuse depended on scheduling and completion
+within a burst. The complete authenticated comparison below measures the later
+single-flight implementation.
 
 Equivalent concurrent requirements reduced controlled Provider work by 95% in
 this 20-request workload, but sequential requirements remain fresh (90 reads on
@@ -619,3 +626,35 @@ Preserved evidence: [generated comparison](results/2026-10-25-authenticated/comp
 [machine-readable comparison](results/2026-10-25-authenticated/comparison.json),
 [master raw run](results/2026-10-25-authenticated/baseline-1.json), and
 [PR raw run](results/2026-10-25-authenticated/candidate-1.json).
+
+## Implementation acceptance
+
+- [Hosted run 40193492485](https://github.com/MeltiplyOrg/meltiply/actions/runs/40193492485)
+  passed `bun run cloudflare:check`: contracts, real S3 signature acceptance,
+  type checks, zero-warning lint, dead-code checks, frontend/public builds and
+  tests, package/Worker tests, and PostgreSQL integration suites. The frontend
+  suite passed 523 tests.
+- The same run passed `node scripts/benchmarks/backend/cache-runtime-check.mjs`
+  against real workerd/PostgreSQL, including exact-range misses, warm reuse,
+  concurrent coalescing, bounded eviction, credential rotation, revocation, and
+  network disconnects. Actual Chromium navigation exercised Channels, Analytics
+  Refresh, and independent Post progress in both palettes at 1280/390 pixels.
+- [Hosted run 40192556048](https://github.com/MeltiplyOrg/meltiply/actions/runs/40192556048)
+  passed `bun run --filter @meltiply/automation-worker smoke:processor`,
+  including real native-engine restart and byte-identical replay. This proves
+  restart correctness in the fixture, not a deployed Container cold-start or
+  billing reduction.
+- React Doctor scored 91/100. Its sole diagnostic names the existing
+  `transportStatus` export in `frontend/app/src/app/providers.tsx`, unchanged
+  from master. No diagnostic configuration or lint baseline was weakened.
+- Four-axis review against `cd54fea` found two unique defects: a missing Post
+  could starve unrelated progress, and partial progress merges could postpone
+  collection membership refresh indefinitely. Both were fixed in `60c126b`;
+  real HTTP-adapter/QueryClient regression coverage passed all eight scenarios
+  in [run 40191580343](https://github.com/MeltiplyOrg/meltiply/actions/runs/40191580343).
+- [Hosted run 40194950426](https://github.com/MeltiplyOrg/meltiply/actions/runs/40194950426)
+  passed the complete automatic CI gate, including both exact-image Compose
+  deployments, browser warm-cache and visible publication-transition checks,
+  optional TLS ingress, crash recovery, and a full backup/restore into separate
+  fresh volumes on amd64 and arm64. See
+  [recovery measurements and limitations](../self-hosting.md#administration-and-recovery).

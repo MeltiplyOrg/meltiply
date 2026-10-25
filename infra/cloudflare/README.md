@@ -387,3 +387,6 @@ must verify Neon history/restore retention and recovery of object, Queue and
 Durable Object state separately; a database restore alone is not full application
 recovery. Do not declare these goals met without a timed deployment-specific
 exercise and recorded backup age.
+The [timed disposable full-restore evidence](../../docs/self-hosting.md#administration-and-recovery)
+records successful amd64/arm64 acceptance; it does not replace the managed
+deployment exercise or establish the RPO/RTO goals above.

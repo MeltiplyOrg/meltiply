@@ -1,0 +1,15 @@
+{
+  "scope": "disposable full Compose restore",
+  "source_quiesced": true,
+  "backup_ms": 919.0471770000004,
+  "restore_to_authenticated_ready_ms": 23157.331096999987,
+  "postgres_backup_bytes": 268200,
+  "runtime_backup_bytes": 1093632,
+  "recovered": {
+    "storage": "recovered",
+    "oauth": "single-use",
+    "workflow": "complete",
+    "queue": "recovered"
+  },
+  "production_rpo_rto_verified": false
+}

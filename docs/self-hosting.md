@@ -433,3 +433,21 @@ Those measurements do not establish a production RPO or RTO; operators must
 record the age of the latest verified protected backup and a timed restore on
 their own infrastructure. Stop writes for consistency. Preserve the encryption
 keys and the exact application revision.
+
+[Hosted run 40194950426](https://github.com/MeltiplyOrg/meltiply/actions/runs/40194950426),
+at `63bb2a2`, passed the complete image/Compose acceptance and full fresh-volume
+restore on both architectures. The isolated clone started its own controlled
+SMTP dependency; it did not reuse the source database, runtime volume, or process.
+Authenticated identity and the ready Asset survived; storage, single-use OAuth
+state, queued delivery and Workflow completion probes recovered.
+
+| Architecture | Backup seconds | Restore to authenticated ready seconds | PostgreSQL archive bytes | Runtime archive bytes |
+| ------------ | -------------: | -------------------------------------: | -----------------------: | --------------------: |
+| amd64        |          0.919 |                                 23.157 |                  268,200 |             1,093,632 |
+| arm64        |          0.822 |                                 22.035 |                  268,038 |             1,093,632 |
+
+These are one sample per architecture on a tiny disposable CI fixture, not
+production recovery capacity. Preserved raw measurements:
+[amd64](benchmarks/results/2026-10-25-authenticated/compose-x64-restore.json) and
+[arm64](benchmarks/results/2026-10-25-authenticated/compose-arm64-restore.json).
+Both explicitly record `production_rpo_rto_verified: false`.

@@ -123,6 +123,14 @@ async function sample(concurrency: 1 | 2) {
             r2Buckets: { ASSETS: "queue-capacity" },
             serviceBindings: {
               PUBLISH_UPSTREAM: async (request) => {
+                const url = new URL(request.url);
+                if (url.pathname === "/lookup") {
+                  const id = accepted.get(url.searchParams.get("operation") ?? "");
+                  return new Response(null, {
+                    status: id ? 200 : 404,
+                    ...(id ? { headers: { "x-publication-id": id } } : {}),
+                  });
+                }
                 const body = providerRequest.parse(await request.json());
                 active += 1;
                 maximumActive = Math.max(maximumActive, active);

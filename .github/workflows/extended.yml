@@ -60,6 +60,7 @@ jobs:
           bun run setup --skip-dependencies --skip-image-pull
           bun run --filter @meltiply/database --filter @meltiply/api-worker --filter @meltiply/automation-worker type-check
           bun run --cwd workers/api --no-install vp test run test/actor-resolution.test.ts
+          bun run --cwd workers/automation test test/provider-sync-due.test.ts test/worker.test.ts --coverage.enabled=false
           bun run --cwd workers/api test:integration test/core-service.integration.test.ts --testNamePattern="summary|analytics|cache"
           bun run --cwd workers/api test:integration test/better-auth.integration.test.ts test/permission-matrix.integration.test.ts test/query-budget.integration.test.ts test/analytics-history.integration.test.ts
           bun run --cwd workers/automation test:integration test/comment-policy.integration.test.ts

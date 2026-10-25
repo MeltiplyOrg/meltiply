@@ -793,14 +793,22 @@ async function measureScenario(scenario) {
     0,
   );
   const applicationQueries = measuredQueries.filter((query) => query.kind === "application");
-  const statementCounts = new Map();
+  const statementCosts = new Map();
   for (const query of applicationQueries) {
-    statementCounts.set(query.statement, (statementCounts.get(query.statement) ?? 0) + 1);
+    const cost = statementCosts.get(query.statement) ?? { count: 0, timeMs: 0 };
+    cost.count += 1;
+    cost.timeMs += query.durationMs;
+    statementCosts.set(query.statement, cost);
   }
-  const topStatements = [...statementCounts.entries()]
-    .sort((left, right) => right[1] - left[1])
+  const topStatements = [...statementCosts.entries()]
+    .sort((left, right) => right[1].timeMs - left[1].timeMs)
     .slice(0, 12)
-    .map(([statement, count]) => ({ count, statement }));
+    .map(([statement, cost]) => ({
+      count: cost.count,
+      statement,
+      total_ms: rounded(cost.timeMs),
+      mean_ms: rounded(cost.timeMs / cost.count),
+    }));
 
   return {
     cpu_ms: {

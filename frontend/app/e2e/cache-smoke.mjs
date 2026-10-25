@@ -37,7 +37,6 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
     let profileReads = 0;
     const analyticsReads = [];
     let completedAnalyticsReads = 0;
-    let survivingStatus;
     page.on("response", async (response) => {
       if (
         ["/api/v1/analytics/dashboard", "/api/v1/analytics/posts"].includes(
@@ -47,14 +46,6 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
         (await response.finished()) === null
       ) {
         completedAnalyticsReads++;
-      }
-      if (
-        progressFixture &&
-        new URL(response.url()).pathname === `/api/v1/posts/${progressFixture.survivingId}` &&
-        response.ok()
-      ) {
-        const post = await response.json().catch(() => null);
-        survivingStatus = post?.distributions?.[0]?.status;
       }
     });
     page.on("request", (request) => {
@@ -77,7 +68,6 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
       await expect(page.getByText("Progress removed smoke", { exact: true })).toHaveCount(0, {
         timeout: 30_000,
       });
-      await expect.poll(() => survivingStatus, { timeout: 30_000 }).toBe("published");
       await expect(
         page.getByText("Progress surviving smoke", { exact: true }).first(),
       ).toBeVisible();

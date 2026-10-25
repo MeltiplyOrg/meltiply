@@ -1,7 +1,7 @@
 # Backend performance comparison
 
 **Current PR #65 evidence:** use the
-[complete authenticated application comparison](#complete-authenticated-application-comparison).
+[initial authenticated regression](#initial-authenticated-application-regression).
 The earlier sections preserve experiments at their named revisions; their gains
 do not establish current whole-application latency or production savings.
 

@@ -312,7 +312,7 @@ async function verifyFullRestore() {
   assert.equal(admin("probe-write", probe, identity.active_organization.id).prepared, true);
   try {
     const backupStarted = performance.now();
-    compose("stop", "runtime", "processor");
+    compose("stop", "runtime", "processor", "smtp-test");
     await copyFile(".env.selfhost", protectedEnv);
     await chmod(protectedEnv, 0o600);
     const source = compose("ps", "-a", "-q", "runtime").toString().trim();
@@ -380,6 +380,7 @@ async function verifyFullRestore() {
     } finally {
       closeSync(runtimeArchive);
     }
+    recover("up", "-d", "--no-deps", "--no-build", "--wait", "--wait-timeout", "120", "smtp-test");
     recover(
       "up",
       "-d",
@@ -429,13 +430,29 @@ async function verifyFullRestore() {
       JSON.stringify(evidence, null, 2),
     );
     console.log(JSON.stringify(evidence));
+  } catch (error) {
+    await writeFile(
+      "artifacts/cache/restore-runtime.log",
+      recover("logs", "--no-color", "--tail", "100", "runtime").toString(),
+    );
+    throw error;
   } finally {
     // These volumes were created above solely for this recovery exercise.
     try {
       recover("down", "--volumes", "--remove-orphans");
     } finally {
       await rm(directory, { recursive: true, force: true });
-      compose("up", "-d", "--no-build", "--wait", "--wait-timeout", "120", "runtime", "processor");
+      compose(
+        "up",
+        "-d",
+        "--no-build",
+        "--wait",
+        "--wait-timeout",
+        "120",
+        "smtp-test",
+        "runtime",
+        "processor",
+      );
     }
   }
 }

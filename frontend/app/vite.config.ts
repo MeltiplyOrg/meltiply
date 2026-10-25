@@ -100,6 +100,11 @@ const devOnlyStubModules: Readonly<Record<string, string>> = {
   "components/devbox/dev-box":
     "export const DevBox = () => null; export const DevBoxClientBridge = () => null;",
   "lib/dev-sign-in": 'export const localDevOwnerSignIn = { email: "", password: "" };',
+  // Pseudo-localization is a DevBox preview tool. Its event constant stays so
+  // the production i18n listener keeps a stable module shape, but the expander
+  // never ships.
+  "lib/pseudo-locale":
+    'export const pseudoLocaleEvent = "meltiply:pseudo-locale"; export const isPseudoLocalized = () => false; export const setPseudoLocalization = () => undefined; export const pseudoLocalize = (message) => message;',
 };
 
 /**

@@ -59,6 +59,8 @@
   --safe-area-left: env(safe-area-inset-left, 0px);
   --safe-control-bottom: max(0.625rem, var(--safe-area-bottom));
   --safe-content-bottom: max(2.5rem, var(--safe-area-bottom));
+  /* Viewport-anchored overlays keep a 1rem breathing edge on the vertical axis. */
+  --overlay-max-height: calc(100dvh - 1rem);
 
   --page: #fbfaf8;
   --canvas: #f4f3f0;

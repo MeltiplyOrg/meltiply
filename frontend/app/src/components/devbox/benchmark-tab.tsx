@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Switch } from "@meltiply/ui/switch";
@@ -28,12 +28,25 @@ export function BenchmarkTab(): React.ReactElement {
   const [scanning, setScanning] = useState(isRenderScannerRunning());
   const [speed, setSpeed] = useState<ScanAnimationSpeed>("fast");
   const [sample, setSample] = useState<PerfSample | null>(null);
+  const mountedRef = useRef(true);
 
-  useEffect(() => startPerfMonitor(setSample), []);
+  // Both monitors mutate the page (FPS loop, scanner outlines). Stop them when
+  // the tab unmounts so switching tabs cannot leave profiling running. The
+  // mounted ref also discards a scanner start that resolves after unmount.
+  useEffect(() => {
+    mountedRef.current = true;
+    const stopPerf = startPerfMonitor(setSample);
+    return () => {
+      mountedRef.current = false;
+      stopPerf();
+      stopRenderScanner();
+    };
+  }, []);
 
   const toggleScanner = async (next: boolean) => {
     if (next) {
-      setScanning(await startRenderScanner(speed));
+      const started = await startRenderScanner(speed);
+      if (mountedRef.current) setScanning(started);
     } else {
       stopRenderScanner();
       setScanning(false);

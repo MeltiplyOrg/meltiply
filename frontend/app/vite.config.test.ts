@@ -69,9 +69,14 @@ describe("Vite frontend configuration", () => {
     const devSignInStub = String(
       load.call(context, "/checkout/frontend/app/src/lib/dev-sign-in.ts"),
     );
+    const pseudoLocaleStub = String(
+      load.call(context, "/checkout/frontend/app/src/lib/pseudo-locale.ts"),
+    );
 
     expect(devSignInStub).not.toContain("alpha@meltiply.local");
     expect(devSignInStub).not.toContain("MeltiplyLocal1!");
+    expect(pseudoLocaleStub).toContain("pseudoLocaleEvent");
+    expect(pseudoLocaleStub).not.toContain("⟦");
     expect(load.call(context, "/checkout/frontend/app/src/lib/env.ts")).toBeNull();
     expect(
       String(load.call(context, "/checkout/frontend/app/src/components/devbox/dev-box.tsx")),

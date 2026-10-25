@@ -25,6 +25,7 @@ import {
   useDeleteBrandProfile,
   usePlatforms,
   usePosts,
+  useUpdatePost,
 } from "./queries";
 
 const scope = { isSignedIn: true, workspaceId: "workspace-a", brandProfileId: null };
@@ -308,4 +309,69 @@ describe("private browser read cache", () => {
     expect(paths.filter((path) => path.endsWith("/calendar"))).toHaveLength(1);
     expect(paths.some((path) => path.endsWith("/settled-outcome"))).toBe(false);
   }, 15_000);
+
+  it("does not let a delayed progress response overwrite a later draft save", async () => {
+    const fixture = contractSuccessBody<Post>("getPost");
+    const pending: Post = {
+      ...fixture,
+      distributions: [],
+      attachments: fixture.attachments.map((attachment) => ({
+        ...attachment,
+        asset: { ...attachment.asset, status: "processing" },
+      })),
+    };
+    const saved: Post = {
+      ...pending,
+      default_text: "Saved while processing",
+      revision: pending.revision + 1,
+    };
+    let finishDetail: ((value: Post) => void) | undefined;
+    const detail = new Promise<Post>((resolve) => {
+      finishDetail = resolve;
+    });
+    let detailStarted = false;
+    let didSave = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const request = input instanceof Request ? input : new Request(String(input));
+        const url = new URL(request.url);
+        if (request.method === "PATCH") {
+          didSave = true;
+          return Response.json(saved);
+        }
+        if (url.pathname.endsWith(`/${pending.id}`)) {
+          detailStarted = true;
+          return Response.json(await detail);
+        }
+        return Response.json({
+          posts: [didSave ? saved : pending],
+          has_more: false,
+          limit: 60,
+          offset: 0,
+        });
+      }),
+    );
+    const view = renderHook(() => ({ posts: usePosts(scope), save: useUpdatePost(scope) }), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(detailStarted).toBe(true));
+    await act(async () => {
+      await view.result.current.save.mutateAsync({
+        id: pending.id,
+        input: { brand_profile_id: pending.brand_profile_id, default_text: saved.default_text },
+      });
+    });
+    await waitFor(() =>
+      expect(view.result.current.posts.data?.[0]?.default_text).toBe(saved.default_text),
+    );
+    await act(async () => {
+      finishDetail?.(pending);
+    });
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(view.result.current.posts.data?.[0]?.default_text).toBe(saved.default_text);
+    expect(client.getQueryData<Post>(queryKeys.post(pending.id))?.default_text).toBe(
+      saved.default_text,
+    );
+  });
 });

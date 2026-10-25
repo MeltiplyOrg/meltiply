@@ -200,6 +200,8 @@ const bearer = `${signingInput}.${sign(null, Buffer.from(signingInput), privateK
 
 const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
+  // Master renamed this binding; both revisions must verify the same origin.
+  APP_URL: authOrigin,
   DB_AUTHENTICATED: { connectionString: authenticatedUrl },
   DB_SYSTEM: { connectionString: systemUrl },
   ENVIRONMENT: "test",

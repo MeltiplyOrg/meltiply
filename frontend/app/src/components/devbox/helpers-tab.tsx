@@ -1,5 +1,5 @@
 import { Languages } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Switch } from "@meltiply/ui/switch";
@@ -80,10 +80,18 @@ export function HelpersTab(): React.ReactElement {
   const [overlays, setOverlays] = useState(overlayState);
   const [pseudo, setPseudo] = useState(isPseudoLocalized());
   const [crash, setCrash] = useState(false);
+  const mountedRef = useRef(true);
 
   // Highlights and the picker outline are owned by this tab; clear them when
-  // it unmounts instead of leaving temporary marks on the page.
-  useEffect(() => clearHelpersDom, []);
+  // it unmounts instead of leaving temporary marks on the page. Async scans
+  // check the ref so a late result neither updates state nor reapplies marks.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearHelpersDom();
+    };
+  }, []);
 
   // Element picker: track the hovered element with a floating outline; a click
   // freezes the selection and reports its token usage. Esc cancels.
@@ -131,6 +139,7 @@ export function HelpersTab(): React.ReactElement {
     setAxeRunning(true);
     try {
       const result = await runAxeScan();
+      if (!mountedRef.current) return;
       setAxeResult(result);
       highlightAxeViolations(result);
     } catch (error) {
@@ -138,9 +147,9 @@ export function HelpersTab(): React.ReactElement {
       // surface the failure in the log instead of leaking an unhandled
       // rejection.
       console.error("DevBox axe scan failed:", error);
-      setAxeResult(null);
+      if (mountedRef.current) setAxeResult(null);
     } finally {
-      setAxeRunning(false);
+      if (mountedRef.current) setAxeRunning(false);
     }
   };
 

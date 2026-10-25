@@ -376,7 +376,7 @@ export function DevBox(): React.ReactElement | null {
           state.position === null && "bottom-4 left-4",
           state.collapsed
             ? "rounded-full border border-tooltip-border bg-tooltip-bg text-tooltip-fg shadow-overlay"
-            : "max-h-[calc(100dvh-1rem)] w-[380px] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-window border border-line bg-surface shadow-overlay",
+            : "max-h-(--overlay-max-height) w-[380px] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-window border border-line bg-surface shadow-overlay",
         )}
         style={state.position ? { left: state.position.x, top: state.position.y } : undefined}
       >

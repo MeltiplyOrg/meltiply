@@ -19,6 +19,7 @@ on:
           - portable-caching-smoke
           - performance-focused
           - performance-backend
+          - performance-media
 
 permissions:
   contents: read
@@ -42,6 +43,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Exercise native processor restart and replay
+        if: inputs.lane == 'performance-media'
+        run: bun run --filter @meltiply/automation-worker smoke:processor
       - name: Type-check and exercise browser cache regressions
         if: inputs.lane == 'performance-focused'
         run: |

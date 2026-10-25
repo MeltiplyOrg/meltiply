@@ -2472,7 +2472,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
   it("shares a cold authorized summary and releases follower transactions before waiting", async () => {
     const service = createCoreApiService();
     const pool = authenticatedPoolFor(env);
-    const connect = pool.connect;
+    // Observe only the Promise checkout used by authenticated transactions.
+    const mutablePool = pool as unknown as { connect: () => Promise<TransactionClient> };
+    const connect = mutablePool.connect;
     let releaseAggregation!: () => void;
     let aggregationStarted!: () => void;
     let followerCommitted!: () => void;
@@ -2489,7 +2491,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     const running: Promise<unknown>[] = [];
     try {
       await seedAnalyticsCacheFixture();
-      pool.connect = async () => {
+      mutablePool.connect = async () => {
         const client = await connect.call(pool);
         const query: TransactionClient["query"] = async <
           Row extends Record<string, unknown> = Record<string, unknown>,
@@ -2525,7 +2527,7 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     } finally {
       releaseAggregation();
       await Promise.allSettled(running);
-      pool.connect = connect;
+      mutablePool.connect = connect;
       await removeAnalyticsCacheFixture();
     }
   });

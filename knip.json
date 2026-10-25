@@ -28,8 +28,9 @@
     "workers/automation": {
       "entry": [
         "test-support/index.ts",
-        "processor/engine/server.mjs",
+        "test-support/queue-capacity.ts",
         "processor/smoke/check.mjs",
+        "processor/smoke/restart-check.mjs",
         "processor/smoke/fixtures-server.mjs",
         "processor/smoke/measure.mjs"
       ],
@@ -50,6 +51,7 @@
         "storage-pipeline-check.ts",
         "oauth-connection-check.ts",
         "requirements-cache-check.ts",
+        "queue-capacity-check.ts",
         "admin.mjs"
       ],
       "project": ["*.ts", "*.mjs"]

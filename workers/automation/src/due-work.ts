@@ -84,7 +84,7 @@ export function reconciliationDedupeKey(idExpression: string, attemptExpression:
  * repeated opens rotate through the whole backlog instead of re-arming one page.
  */
 export const onDemandCommentsBound = 10;
-export const onDemandCommentsIntervalSeconds = 900;
+const onDemandCommentsIntervalSeconds = 900;
 
 /** A claimed unit of Due work awaiting Queue delivery. */
 export interface DueWorkClaim extends Record<string, unknown> {

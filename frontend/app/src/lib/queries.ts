@@ -22,6 +22,7 @@ import { useMutationKeyTracker } from "./mutation-idempotency";
 import { analyticsRangeWindow } from "./analytics-range";
 import { pollingInterval, privateCacheRetentionMs, referenceFreshnessMs } from "./query-defaults";
 import type {
+  AnalyticsRangePreset,
   AnalyticsPostScopeParams,
   AnalyticsScopeParams,
   AuditQueryParams,
@@ -993,14 +994,32 @@ export function useInstallation(scope: SessionScope, workspaceId: string, enable
 }
 
 /**
+ * Shares one exact rolling cohort across dashboard and ranked reads in the
+ * current browser QueryClient. Five-minute reuse avoids clock-driven cache
+ * misses; Analytics invalidation also invalidates this window, so an explicit
+ * Refresh advances every active read together. No instants are rounded.
+ */
+function analyticsWindow(queryClient: QueryClient, range: AnalyticsRangePreset) {
+  return queryClient.fetchQuery({
+    queryKey: ["analytics", "window", range],
+    queryFn: () => analyticsRangeWindow(range),
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
+  });
+}
+
+/**
  * Reads the dashboard's daily series, best-time cells, format and platform
  * breakdowns, follower history, and engagement accumulation for one cohort.
+ * Successful reads stay fresh for five minutes in browser memory; ranked
+ * reads share the same exact window and explicit Refresh advances both.
  *
  * @param scope Session scope: signed-in gate, Workspace, and Brand Profile.
  * @param params Range preset plus optional Platform, account, and format filters.
  * @returns TanStack query carrying the dashboard aggregates.
  */
 export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScopeParams) {
+  const queryClient = useQueryClient();
   const scopedParams = withBrandProfile(scope, {
     account_id: params.account_id,
     format: params.format,
@@ -1009,15 +1028,17 @@ export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScop
   const keyParams = { ...scopedParams, range: params.range };
   return useQuery({
     queryKey: queryKeys.analyticsDashboard(keyParams),
-    queryFn: ({ signal }) =>
-      runApiQuery(
+    queryFn: async ({ signal }) => {
+      const window = await analyticsWindow(queryClient, params.range);
+      return runApiQuery(
         scope,
-        (api) =>
-          api.getAnalyticsDashboard({ ...scopedParams, ...analyticsRangeWindow(params.range) }),
+        (api) => api.getAnalyticsDashboard({ ...scopedParams, ...window }),
         signal,
-      ),
+      );
+    },
     placeholderData: keepPreviousData,
-    staleTime: 60 * 1_000,
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
     enabled: scope.isSignedIn,
   });
 }
@@ -1063,9 +1084,9 @@ export function useWorkspaceMembers(scope: SessionScope, workspaceId: string, en
 /**
  * Reads the ranked per-Post analytics rows for the same cohort.
  *
- * Limit, metric, and offset participate in the cache key; the rolling window
- * is recomputed inside the query function. Keeping previous data avoids
- * collapsing the table while Load more or a metric switch refetches the top N.
+ * Limit, metric, and offset participate in the cache key; dashboard and ranked
+ * reads reuse one exact five-minute browser cohort. Keeping previous data
+ * avoids collapsing the table while Load more or a metric switch fetches.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId`
  *   selects the Workspace, and `brandProfileId` selects the profile scope.
@@ -1074,6 +1095,7 @@ export function useWorkspaceMembers(scope: SessionScope, workspaceId: string, en
  * @returns Query result with the ranked Posts and pagination metadata.
  */
 export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScopeParams) {
+  const queryClient = useQueryClient();
   const { range, ...filters } = params;
   const scopedParams = withBrandProfile(scope, filters);
   const keyParams: AnalyticsPostScopeParams = {
@@ -1088,14 +1110,17 @@ export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScop
   };
   return useQuery({
     queryKey: queryKeys.analyticsPosts(keyParams),
-    queryFn: ({ signal }) =>
-      runApiQuery(
+    queryFn: async ({ signal }) => {
+      const window = await analyticsWindow(queryClient, range);
+      return runApiQuery(
         scope,
-        (api) => api.getAnalyticsPosts({ ...scopedParams, ...analyticsRangeWindow(range) }),
+        (api) => api.getAnalyticsPosts({ ...scopedParams, ...window }),
         signal,
-      ),
+      );
+    },
     placeholderData: keepPreviousData,
-    staleTime: 60 * 1_000,
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
     enabled: scope.isSignedIn,
   });
 }

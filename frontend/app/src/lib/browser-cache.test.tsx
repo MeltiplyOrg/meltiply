@@ -10,7 +10,12 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { contractSuccessBody } from "@/test/contract-fixtures";
 import type { AnalyticsDashboard, AnalyticsPostsResponse, PlatformAccountsResponse } from "@/types";
-import { useAnalyticsDashboard, useAnalyticsPosts, usePlatforms } from "./queries";
+import {
+  useAnalyticsDashboard,
+  useAnalyticsPosts,
+  useDeleteBrandProfile,
+  usePlatforms,
+} from "./queries";
 
 const scope = { isSignedIn: true, workspaceId: "workspace-a", brandProfileId: null };
 let client: QueryClient;
@@ -126,6 +131,45 @@ describe("private browser read cache", () => {
         "2026-10-25T12:04:00.000Z",
         "2026-10-25T12:04:00.000Z",
       ]),
+    );
+  });
+
+  it("removes a deleted Brand Profile from warm Analytics without waiting for expiry", async () => {
+    const dashboard = contractSuccessBody<AnalyticsDashboard>("getAnalyticsDashboard");
+    const empty: AnalyticsDashboard = {
+      ...dashboard,
+      cohort: {
+        ...dashboard.cohort,
+        by_platform: [],
+        last_synced_at: null,
+        totals: { ...dashboard.cohort.totals, post_count: 0, views: 0 },
+      },
+    };
+    let deleted = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const request = input instanceof Request ? input : new Request(String(input));
+        if (request.method === "DELETE") {
+          deleted = true;
+          return new Response(null, { status: 204 });
+        }
+        return Response.json(deleted ? empty : dashboard);
+      }),
+    );
+    const view = renderHook(
+      () => ({
+        dashboard: useAnalyticsDashboard(scope, { range: "30d" }),
+        remove: useDeleteBrandProfile(scope),
+      }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(view.result.current.dashboard.data).toEqual(dashboard));
+    await act(async () => {
+      await view.result.current.remove.mutateAsync("profile-a");
+    });
+    await waitFor(() =>
+      expect(view.result.current.dashboard.data?.cohort.totals.post_count).toBe(0),
     );
   });
 });

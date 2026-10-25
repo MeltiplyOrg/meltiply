@@ -82,6 +82,7 @@ export async function consumePublishPartitions(
             await consume(message);
           } catch (cause) {
             failures.push(cause);
+            break;
           }
         }
       }

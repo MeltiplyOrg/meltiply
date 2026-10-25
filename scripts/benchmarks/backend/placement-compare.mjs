@@ -71,10 +71,24 @@ export async function comparePlacement(input, fetcher = fetch) {
               redirect: "error",
               signal: AbortSignal.timeout(30_000),
             });
-            // Read errors without logging their bodies: they can contain private data.
-            const bytes = (await response.arrayBuffer()).byteLength;
-            if (response.status !== 200)
+            // Never retain private bodies or allocate one buffer for the entire response.
+            if (response.status !== 200) {
+              await response.body?.cancel();
               throw new Error(`${revision} ${workflow.name} returned HTTP ${response.status}`);
+            }
+            let bytes = 0;
+            if (response.body) {
+              const reader = response.body.getReader();
+              try {
+                for (;;) {
+                  const chunk = await reader.read();
+                  if (chunk.done) break;
+                  bytes += chunk.value.byteLength;
+                }
+              } finally {
+                reader.releaseLock();
+              }
+            }
             return {
               bytes,
               placement: response.headers.get("cf-placement"),

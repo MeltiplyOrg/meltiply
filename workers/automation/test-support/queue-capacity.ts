@@ -3,8 +3,6 @@ import SelfhostAutomation from "../../../scripts/selfhost/automation";
 import { createAutomationHandler } from "../src/index";
 import type { AutomationEnv } from "../src/env";
 
-export { ReplyWorkflow } from "../src/index";
-
 interface CapacityEnv extends AutomationEnv {
   PUBLISH_UPSTREAM: Fetcher;
 }
@@ -47,6 +45,8 @@ export default class CapacityAutomation extends SelfhostAutomation {
 
   /** Dispatches host-delivered batches through the real handler with per-invocation bindings. */
   override async queue(batch: MessageBatch<unknown>) {
-    await this.handler.queue!(batch, this.env, this.ctx);
+    const consume = this.handler.queue;
+    if (!consume) throw new Error("Production Queue handler is unavailable");
+    await consume(batch, this.env, this.ctx);
   }
 }

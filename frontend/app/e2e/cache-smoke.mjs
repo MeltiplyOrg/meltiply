@@ -21,7 +21,7 @@ export async function managedOwnerCookie(origin) {
 }
 
 /** Observes warm private reads, shared Analytics cohorts and explicit Refresh through real SPA controls in both palettes/sizes. */
-export async function capabilityNavigation({ origin, cookie, label }) {
+export async function capabilityNavigation({ origin, cookie, label, progressFixture }) {
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext();
@@ -36,6 +36,17 @@ export async function capabilityNavigation({ origin, cookie, label }) {
     let channelReads = 0;
     let profileReads = 0;
     const analyticsReads = [];
+    let survivingStatus;
+    page.on("response", async (response) => {
+      if (
+        progressFixture &&
+        new URL(response.url()).pathname === `/api/v1/posts/${progressFixture.survivingId}` &&
+        response.ok()
+      ) {
+        const post = await response.json().catch(() => null);
+        survivingStatus = post?.distributions?.[0]?.status;
+      }
+    });
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === "/api/v1/platforms/capabilities") reads++;
       const url = new URL(request.url());
@@ -47,6 +58,34 @@ export async function capabilityNavigation({ origin, cookie, label }) {
     });
     await page.goto(`${origin}/posts`);
     await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
+    if (progressFixture) {
+      await expect(page.getByText("Progress removed smoke", { exact: true }).first()).toBeVisible();
+      await expect(
+        page.getByText("Progress surviving smoke", { exact: true }).first(),
+      ).toBeVisible();
+      await progressFixture.advance();
+      await expect(page.getByText("Progress removed smoke", { exact: true })).toHaveCount(0, {
+        timeout: 30_000,
+      });
+      await expect.poll(() => survivingStatus, { timeout: 30_000 }).toBe("published");
+      await expect(
+        page.getByText("Progress surviving smoke", { exact: true }).first(),
+      ).toBeVisible();
+      for (const dark of [false, true]) {
+        for (const width of [1280, 390]) {
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+          await page.evaluate(
+            (enabled) => document.documentElement.classList.toggle("dark", enabled),
+            dark,
+          );
+          await page.screenshot({
+            path: `artifacts/cache/${label}-progress-${dark ? "dark" : "light"}-${width}.png`,
+            fullPage: true,
+          });
+        }
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+    }
     await page.getByRole("button", { name: "Channels", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
     await expect.poll(() => reads).toBe(1);

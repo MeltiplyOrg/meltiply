@@ -183,7 +183,34 @@ export async function cacheSmoke({
     await delay(31_000);
     assert.equal((await api(expiryPath)).data.totals.views, 2560);
     await mkdir("artifacts/cache", { recursive: true });
-    await capabilityNavigation({ origin: frontendOrigin, cookie, label });
+    const removedId = randomUUID();
+    const survivingId = randomUUID();
+    await query(
+      `INSERT INTO posts (id, org_id, brand_profile_id, title, default_text)
+       VALUES ($1, $3, $4, 'Progress removed smoke', 'Progress smoke'),
+              ($2, $3, $4, 'Progress surviving smoke', 'Progress smoke')`,
+      [removedId, survivingId, workspaceId, profile.id],
+    );
+    await query(
+      `INSERT INTO distributions (org_id, brand_profile_id, post_id, platform, status)
+       VALUES ($1, $2, $3, 'threads', 'processing'), ($1, $2, $4, 'threads', 'processing')`,
+      [workspaceId, profile.id, removedId, survivingId],
+    );
+    await capabilityNavigation({
+      origin: frontendOrigin,
+      cookie,
+      label,
+      progressFixture: {
+        survivingId,
+        async advance() {
+          await query("DELETE FROM posts WHERE id = $1", [removedId]);
+          await query(
+            "UPDATE distributions SET status = 'published', published_at = now(), platform_post_id = 'smoke-progress', updated_at = now() WHERE post_id = $1",
+            [survivingId],
+          );
+        },
+      },
+    });
     const evidence = {
       runtime: label,
       dataset: { distributions: 128, snapshots: 128 },

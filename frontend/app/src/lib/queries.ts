@@ -426,11 +426,45 @@ function useDueWorkClock(hasScheduled: boolean): number {
 }
 
 /**
+ * Keeps draft revisions and independent outcome/Asset timestamps monotonic when
+ * an older progress read races a save or a newer detail read. Equal revisions
+ * may still contain newer background work; a later poll reconciles the whole
+ * server projection rather than inventing a partially merged Post.
+ */
+function newestPost(previous: Post | undefined, received: Post): Post {
+  if (!previous) return received;
+  if (previous.revision !== received.revision)
+    return previous.revision > received.revision ? previous : received;
+  if (Date.parse(previous.updated_at) > Date.parse(received.updated_at)) return previous;
+  if (
+    previous.distributions.some((old) =>
+      received.distributions.some(
+        (next) => old.id === next.id && Date.parse(old.updated_at) > Date.parse(next.updated_at),
+      ),
+    )
+  )
+    return previous;
+  if (
+    previous.attachments.some((old) =>
+      received.attachments.some(
+        (next) =>
+          old.asset_id === next.asset_id &&
+          Date.parse(old.asset.updated_at) > Date.parse(next.asset.updated_at),
+      ),
+    )
+  )
+    return previous;
+  return received;
+}
+
+/**
  * Refreshes only loaded Posts with active work, at most four HTTP reads at a
  * time. Future scheduled work becomes eligible when its persisted due instant
  * arrives; settled rows never trigger polling. Successful details replace
  * matching cached rows without changing page order or pagination. Failed reads
  * retain the last known row and follow the ordinary query error policy.
+ * Newer revisions win over delayed reads; publication transitions invalidate
+ * Analytics and update loaded calendar projections without range/page refetches.
  */
 function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
   const queryClient = useQueryClient();
@@ -467,24 +501,65 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
   useEffect(() => {
     if (!progress.data) return;
     const replacements = new Map(progress.data.map((post) => [post.id, post]));
-    queryClient.setQueriesData<InfiniteData<PostListResponse, number>>(
-      {
-        queryKey: queryKeys.posts(),
-        predicate: (query) =>
-          query.queryKey.includes("pages") || query.queryKey.includes("queue-calendar"),
-      },
-      (previous) =>
-        previous
-          ? {
-              ...previous,
-              pages: previous.pages.map((page) => ({
-                ...page,
-                posts: page.posts.map((post) => replacements.get(post.id) ?? post),
-              })),
-            }
-          : previous,
+    const collections = {
+      queryKey: queryKeys.posts(),
+      predicate: (query: { queryKey: QueryKey }) =>
+        query.queryKey.includes("pages") || query.queryKey.includes("queue-calendar"),
+    };
+    let published = false;
+    for (const [, snapshot] of queryClient.getQueriesData<InfiniteData<PostListResponse, number>>(
+      collections,
+    )) {
+      for (const page of snapshot?.pages ?? []) {
+        for (const previous of page.posts) {
+          const received = replacements.get(previous.id);
+          if (!received) continue;
+          const next = newestPost(previous, received);
+          replacements.set(next.id, next);
+          published ||= next.distributions.some(
+            (distribution) =>
+              distribution.status === "published" &&
+              previous.distributions.find((old) => old.id === distribution.id)?.status !==
+                "published",
+          );
+        }
+      }
+    }
+    for (const [id, post] of replacements) {
+      replacements.set(id, newestPost(queryClient.getQueryData<Post>(queryKeys.post(id)), post));
+    }
+    queryClient.setQueriesData<InfiniteData<PostListResponse, number>>(collections, (previous) =>
+      previous
+        ? {
+            ...previous,
+            pages: previous.pages.map((page) => ({
+              ...page,
+              posts: page.posts.map((post) => replacements.get(post.id) ?? post),
+            })),
+          }
+        : previous,
     );
-    for (const post of progress.data) queryClient.setQueryData(queryKeys.post(post.id), post);
+    for (const post of replacements.values())
+      queryClient.setQueryData(queryKeys.post(post.id), post);
+    const outcomes = new Map(
+      [...replacements.values()].flatMap((post) =>
+        post.distributions.map((distribution) => [distribution.id, distribution] as const),
+      ),
+    );
+    queryClient.setQueriesData<CalendarEvent[]>({ queryKey: queryKeys.calendar() }, (previous) =>
+      previous?.map((event) => {
+        const outcome = outcomes.get(event.id);
+        if (!outcome || Date.parse(outcome.updated_at) < Date.parse(event.updated_at)) return event;
+        return {
+          ...event,
+          status: outcome.status,
+          scheduled_at: outcome.scheduled_at,
+          published_at: outcome.published_at,
+          updated_at: outcome.updated_at,
+        };
+      }),
+    );
+    if (published) void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
   }, [progress.data, queryClient]);
 }
 

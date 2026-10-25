@@ -36,8 +36,18 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
     let channelReads = 0;
     let profileReads = 0;
     const analyticsReads = [];
+    let completedAnalyticsReads = 0;
     let survivingStatus;
     page.on("response", async (response) => {
+      if (
+        ["/api/v1/analytics/dashboard", "/api/v1/analytics/posts"].includes(
+          new URL(response.url()).pathname,
+        ) &&
+        response.ok() &&
+        (await response.finished()) === null
+      ) {
+        completedAnalyticsReads++;
+      }
       if (
         progressFixture &&
         new URL(response.url()).pathname === `/api/v1/posts/${progressFixture.survivingId}` &&
@@ -71,6 +81,9 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
       await expect(
         page.getByText("Progress surviving smoke", { exact: true }).first(),
       ).toBeVisible();
+      await expect(
+        page.getByRole("row").filter({ hasText: "Progress surviving smoke" }),
+      ).toContainText("Published");
       for (const dark of [false, true]) {
         for (const width of [1280, 390]) {
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -92,6 +105,8 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
     await page.getByRole("button", { name: "Analytics", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Analytics", exact: true })).toBeVisible();
     await expect.poll(() => analyticsReads.length).toBe(2);
+    // A started read can be canceled on unmount; only completed reads are warm.
+    await expect.poll(() => completedAnalyticsReads).toBe(2);
     assert.equal(
       analyticsReads[0].searchParams.get("start"),
       analyticsReads[1].searchParams.get("start"),
@@ -145,6 +160,7 @@ export async function capabilityNavigation({ origin, cookie, label, progressFixt
         const expected = analyticsReads.length + 2;
         await refresh.click();
         await expect.poll(() => analyticsReads.length).toBe(expected);
+        await expect.poll(() => completedAnalyticsReads).toBe(expected);
         await expect(refresh).toBeEnabled();
         const [dashboard, ranked] = analyticsReads.slice(-2);
         assert.equal(dashboard.searchParams.get("start"), ranked.searchParams.get("start"));

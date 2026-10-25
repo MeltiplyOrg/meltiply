@@ -186,9 +186,9 @@ export async function cacheSmoke({
     const removedId = randomUUID();
     const survivingId = randomUUID();
     await query(
-      `INSERT INTO posts (id, org_id, brand_profile_id, title, default_text)
-       VALUES ($1, $3, $4, 'Progress removed smoke', 'Progress removed smoke'),
-              ($2, $3, $4, 'Progress surviving smoke', 'Progress surviving smoke')`,
+      `INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status)
+       VALUES ($1, $3, $4, 'Progress removed smoke', 'Progress removed smoke', 'active'),
+              ($2, $3, $4, 'Progress surviving smoke', 'Progress surviving smoke', 'active')`,
       [removedId, survivingId, workspaceId, profile.id],
     );
     await query(

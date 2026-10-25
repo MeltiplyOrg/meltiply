@@ -116,8 +116,10 @@ transferred intent through hydration and an initial cookie rejection. Actual
 consent withdrawal returns to the device palette.
 See the cookie policy for persistence rules.
 
-`API_BASE_URL` must be an origin without a path, query, or fragment. Backend
-secrets belong only in protected Worker configuration, never browser variables.
+`APP_URL` is the canonical dashboard/API origin, without a path, query, or fragment.
+The browser uses it when configured and otherwise uses the page origin. `/api/*`
+is proxied by the frontend Worker; no separate browser API URL is required.
+Backend secrets belong only in protected Worker configuration, never browser variables.
 Local mail is simulated in development output; signup success does not prove
 email delivery. Deployed sign-in requires verified email.
 
@@ -190,4 +192,5 @@ an explicit `MELTIPLY_E2E_PUSHGATEWAY_URL`; without it, nothing is pushed.
 [wrangler.jsonc](wrangler.jsonc) owns the application's Cloudflare configuration.
 Use the workspace's explicit staging/production upload and deploy scripts: they
 select the same `CLOUDFLARE_ENV` for Vite and Wrangler, keeping the built bundle
-and deployment environment aligned. Set the target's `API_BASE_URL` at build time.
+and deployment environment aligned. `APP_URL` is the only public application
+origin; the browser can use its page origin when it is omitted.

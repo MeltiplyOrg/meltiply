@@ -8,8 +8,7 @@ const testEnv = {
   DB_AUTHENTICATED: {} as Hyperdrive,
   DB_SYSTEM: {} as Hyperdrive,
   ENVIRONMENT: "test",
-  FRONTEND_URL: "http://localhost:3000",
-  PUBLIC_API_URL: "http://localhost:8787",
+  APP_URL: "http://localhost:3000",
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
 

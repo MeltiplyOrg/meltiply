@@ -501,16 +501,16 @@ function oauthStateStub(env: ApiWorkerEnv, routingKey: string): OAuthStateStub {
  *
  * Enforces HTTPS scheme unless running in local development mode against localhost.
  *
- * @param env - Worker environment bindings containing `PUBLIC_API_URL`.
+ * @param env - Worker environment bindings containing `APP_URL`.
  * @param provider - Social platform identifier (e.g. `'tiktok'`, `'youtube'`).
  * @returns Fully qualified OAuth redirect URI.
- * @throws {CoreApiError} 503 `service_unavailable` if `PUBLIC_API_URL` is missing or insecure.
+ * @throws {CoreApiError} 503 `service_unavailable` if `APP_URL` is missing or insecure.
  */
 function oauthCallbackUrl(env: ApiWorkerEnv, provider: Platform): string {
-  if (!env.PUBLIC_API_URL) {
+  if (!env.APP_URL) {
     throw new CoreApiError(503, "service_unavailable", "The public API URL is unavailable.");
   }
-  const target = new URL(oauthCallbackPath(provider), env.PUBLIC_API_URL);
+  const target = new URL(oauthCallbackPath(provider), env.APP_URL);
   if (
     target.protocol !== "https:" &&
     !(env.ENVIRONMENT !== "staging" && target.hostname === "localhost")
@@ -576,10 +576,10 @@ async function pkceChallenge(verifier: string): Promise<string> {
  * exact same prefix instead of duplicating the literal; the Automation Worker keeps
  * its own byte-identical copy in `workers/automation/src/provider-media.ts` because
  * separate worker bundles cannot share source modules. The Automation Worker signs
- * `<PUBLIC_API_URL>/api/v1/provider-media/<key>?expires=<unix>&signature=<b64url>` URLs;
- * this route verifies the HMAC before streaming the private R2 object. Operators point
- * `TIKTOK_MEDIA_URL_PREFIX` at this prefix on the verified API domain so the TikTok
- * adapter's pathname-prefix check accepts emitted URLs.
+ * `<APP_URL>/api/v1/provider-media/<key>?expires=<unix>&signature=<b64url>` URLs;
+ * this route verifies the HMAC before streaming the private R2 object. The provider
+ * registry derives TikTok's media prefix from this route on APP_URL by default;
+ * any explicit TIKTOK_MEDIA_URL_PREFIX must still cover emitted URLs.
  */
 export const providerMediaRoutePrefix = "/api/v1/provider-media/";
 
@@ -700,11 +700,11 @@ function providerMediaKey(pathname: string): string | undefined {
  *
  * Appends `oauth` status code and `provider` query parameters.
  *
- * @param env - Worker environment bindings containing `FRONTEND_URL`.
+ * @param env - Worker environment bindings containing `APP_URL`.
  * @param provider - Social platform provider identifier.
  * @param outcome - Result status code string (e.g. `'success'` or error code).
  * @returns Fully qualified frontend redirection URL string.
- * @throws {CoreApiError} 503 `service_unavailable` if `FRONTEND_URL` is missing.
+ * @throws {CoreApiError} 503 `service_unavailable` if `APP_URL` is missing.
  */
 function frontendRedirect(
   env: ApiWorkerEnv,
@@ -713,14 +713,14 @@ function frontendRedirect(
   extraParams?: Record<string, string>,
   pathname = "/channels",
 ): string {
-  if (!env.FRONTEND_URL) {
+  if (!env.APP_URL) {
     throw new CoreApiError(
       503,
       "service_unavailable",
       "The frontend redirect target is unavailable.",
     );
   }
-  const target = new URL(pathname, env.FRONTEND_URL);
+  const target = new URL(pathname, env.APP_URL);
   target.searchParams.set("oauth", outcome);
   target.searchParams.set("provider", provider);
   if (extraParams) {
@@ -1505,15 +1505,15 @@ export function registerCoreRoutes(
       c,
       Effect.gen(function* () {
         const selected = yield* fromPromise(() => platformParam(c.req.param("platform")));
-        // Redirect targets are built inside fromPromise so a missing FRONTEND_URL
+        // Redirect targets are built inside fromPromise so a missing APP_URL
         // surfaces as a typed 503 service unavailable failure.
         const redirectTo = (outcome: string) =>
           fromPromise(() => Response.redirect(frontendRedirect(c.env, selected, outcome), 302));
         const state = c.req.query("state")?.trim() ?? "";
+        // The callback is a browser navigation, so every rejection returns to
+        // the Channels surface with an outcome instead of a JSON error page.
         if (state.length < 16) {
-          return yield* Effect.fail(
-            new CoreApiError(400, "invalid_request", "A valid OAuth state is required."),
-          );
+          return yield* redirectTo("state_invalid");
         }
         const routingKey = state.split(".", 1)[0] ?? "";
         if (!OAUTH_ROUTING_KEY_PATTERN.test(routingKey)) {
@@ -1528,8 +1528,14 @@ export function registerCoreRoutes(
         ) {
           return yield* redirectTo("state_invalid");
         }
-        if (c.req.query("error")) {
-          return yield* redirectTo("consent_denied");
+        // `access_denied` is the provider reporting a deliberate refusal; any
+        // other `error` describes a failed exchange and must not be described
+        // to the user as a cancelled grant.
+        const providerError = c.req.query("error");
+        if (providerError) {
+          return yield* redirectTo(
+            providerError === "access_denied" ? "consent_denied" : "provider_error",
+          );
         }
         if (!c.req.query("code")) {
           return yield* redirectTo("missing_code");
@@ -1589,45 +1595,80 @@ export function registerCoreRoutes(
         );
         if (exchanged instanceof Response) return exchanged;
         const discovered = "accounts" in exchanged ? exchanged.accounts : [exchanged];
-        const cipher = tokenCipherFor(c.env);
         const selectionId = `${routingKey}.${randomBase64Url(32)}`;
-        yield* fromPromise(() =>
-          oauthStateStub(c.env, routingKey).createSelection(selectionId, {
-            expires_at: Date.now() + 10 * 60 * 1_000,
-            id: selectionId,
-            organization_id: record.organization_id,
-            platform: selected,
-            user_id: record.user_id,
-          }),
-        );
-        const BATCH_SIZE = 50;
-        for (let i = 0; i < discovered.length; i += BATCH_SIZE) {
-          const chunk = discovered.slice(i, i + BATCH_SIZE);
-          const candidates: OAuthSelectionCandidate[] = [];
-          for (const account of chunk) {
-            const sealed = yield* Effect.tryPromise({
-              catch: (cause) =>
-                new DatabaseError({
-                  cause,
-                  message: "Failed to encrypt candidate OAuth connection.",
-                }),
-              try: () => cipher.encrypt(JSON.stringify(account)),
-            });
-            candidates.push({
-              account: {
-                avatar_url: account.account.avatarUrl ?? null,
-                display_name: account.account.displayName ?? null,
-                id: account.account.id,
-                username: account.account.username ?? null,
-              },
-              encryptedConnection: sealed,
-            });
+        // Staging is the browser-facing write that arms the assignment ticket.
+        // A storage or encryption failure must return to Channels with
+        // `connection_failed`, not strand the browser on the API callback URL
+        // with a JSON error page.
+        const staged: Response | undefined = yield* Effect.gen(function* () {
+          const cipher = tokenCipherFor(c.env);
+          yield* fromPromise(() =>
+            oauthStateStub(c.env, routingKey).createSelection(selectionId, {
+              expires_at: Date.now() + 10 * 60 * 1_000,
+              id: selectionId,
+              organization_id: record.organization_id,
+              platform: selected,
+              user_id: record.user_id,
+            }),
+          );
+          const BATCH_SIZE = 50;
+          for (let i = 0; i < discovered.length; i += BATCH_SIZE) {
+            const chunk = discovered.slice(i, i + BATCH_SIZE);
+            const candidates: OAuthSelectionCandidate[] = [];
+            for (const account of chunk) {
+              const sealed = yield* Effect.tryPromise({
+                catch: (cause) =>
+                  new DatabaseError({
+                    cause,
+                    message: "Failed to encrypt candidate OAuth connection.",
+                  }),
+                try: () => cipher.encrypt(JSON.stringify(account)),
+              });
+              candidates.push({
+                account: {
+                  avatar_url: account.account.avatarUrl ?? null,
+                  display_name: account.account.displayName ?? null,
+                  id: account.account.id,
+                  username: account.account.username ?? null,
+                },
+                encryptedConnection: sealed,
+              });
+            }
+            yield* fromPromise(() =>
+              oauthStateStub(c.env, routingKey).appendSelectionCandidates(selectionId, candidates),
+            );
           }
           yield* fromPromise(() =>
-            oauthStateStub(c.env, routingKey).appendSelectionCandidates(selectionId, candidates),
+            oauthStateStub(c.env, routingKey).finalizeSelection(selectionId),
           );
-        }
-        yield* fromPromise(() => oauthStateStub(c.env, routingKey).finalizeSelection(selectionId));
+        }).pipe(
+          Effect.as(undefined),
+          Effect.catchCause((cause) =>
+            fromPromise(() => {
+              log(
+                "error",
+                {
+                  environment: c.env.ENVIRONMENT,
+                  request_id: requestId(c),
+                  service: "api",
+                  trace_id: c.get("traceId"),
+                  user_id: record.user_id,
+                  version: c.env.VERSION,
+                },
+                {
+                  error_code: "oauth_staging_failed",
+                  event: "oauth_staging_failed",
+                  outcome: "connection_failed",
+                  provider: selected,
+                  retry_class: "client_retry",
+                  ...errorDiagnostic(Cause.squash(cause)),
+                },
+              );
+              return Response.redirect(frontendRedirect(c.env, selected, "connection_failed"), 302);
+            }),
+          ),
+        );
+        if (staged instanceof Response) return staged;
         return yield* fromPromise(() =>
           Response.redirect(
             frontendRedirect(

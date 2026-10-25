@@ -23,6 +23,13 @@ fixtures:
       request_id: request-example-503
       retryable: true
       details: []
+  service_unavailable_error: &service_unavailable_error
+    error:
+      code: service_unavailable
+      message: The service is temporarily unavailable.
+      request_id: request-example-503
+      retryable: true
+      details: []
   not_found_error: &not_found_error
     error:
       code: not_found
@@ -969,10 +976,10 @@ operations:
     success:
       status: 302
       headers:
-        Location: http://localhost:3000/channels?oauth=connected&provider=tiktok
+        Location: http://localhost:3000/channels/connect?oauth=select_account&provider=tiktok&selection_id=select_session_alpha_1234567890
     errors:
-      - status: 400
-        body: *invalid_request_error
+      - status: 503
+        body: *service_unavailable_error
   getOAuthSelection:
     headers: *bearer_authorization
     success:

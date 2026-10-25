@@ -81,7 +81,7 @@ module "storage" {
   source = "./modules/storage"
 
   account_id      = var.account_id
-  allowed_origins = var.frontend_origins
+  allowed_origins = setunion([var.app_url], var.allowed_origins)
   bucket_name     = var.assets_bucket_name
 }
 
@@ -97,9 +97,10 @@ module "edge" {
   source = "./modules/edge"
 
   account_id             = var.account_id
-  api_hostname           = var.api_hostname
+  app_hostname           = trimprefix(var.app_url, "https://")
+  frontend_worker_name   = var.frontend_worker_name
   api_worker_name        = var.api_worker_name
-  attach_custom_domains  = var.attach_api_custom_domains
+  attach_custom_domains  = var.attach_app_custom_domains
   managed_waf_ruleset_id = var.managed_waf_ruleset_id
   operator_hostname      = var.enable_operator_access ? var.operator_hostname : null
   requests_per_minute    = var.rate_limit_requests_per_minute

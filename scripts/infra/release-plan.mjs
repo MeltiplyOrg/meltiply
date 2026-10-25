@@ -5,34 +5,34 @@ import { isDeepStrictEqual } from "node:util";
 
 const transitionByPhase = Object.freeze({
   foundation: Object.freeze({
-    attachApiCustomDomains: false,
+    attachAppCustomDomains: false,
     attachQueueConsumers: false,
     queueDeliveryPaused: true,
   }),
   pause: Object.freeze({
-    attachApiCustomDomains: true,
+    attachAppCustomDomains: true,
     attachQueueConsumers: true,
     queueDeliveryPaused: true,
   }),
   "paused-consumers": Object.freeze({
-    attachApiCustomDomains: false,
+    attachAppCustomDomains: false,
     attachQueueConsumers: true,
     queueDeliveryPaused: true,
   }),
   domain: Object.freeze({
-    attachApiCustomDomains: true,
+    attachAppCustomDomains: true,
     attachQueueConsumers: true,
     queueDeliveryPaused: true,
   }),
   unpause: Object.freeze({
-    attachApiCustomDomains: true,
+    attachAppCustomDomains: true,
     attachQueueConsumers: true,
     queueDeliveryPaused: false,
   }),
 });
 
 const variableNames = Object.freeze({
-  attachApiCustomDomains: "attach_api_custom_domains",
+  attachAppCustomDomains: "attach_app_custom_domains",
   attachQueueConsumers: "attach_queue_consumers",
   queueDeliveryPaused: "queue_delivery_paused",
 });

@@ -4888,9 +4888,10 @@ export interface operations {
         requestBody?: never;
         responses: {
             /**
-             * @description Redirect to the configured frontend result route or to the Page selection
-             *     route (/channels?oauth=select_account&provider={platform}&selection_id={selection_id})
-             *     before persistence when multiple candidate accounts are discovered.
+             * @description Redirect to the Channel assignment view
+             *     (/channels/connect?oauth=select_account&provider={platform}&selection_id={selection_id})
+             *     with the provider outcome appended. No Channel is persisted before the
+             *     user confirms the account and its owning Brand Profile.
              */
             302: {
                 headers: {
@@ -4899,8 +4900,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
-            502: components["responses"]["UpstreamError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getOAuthSelection: {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 
 /**
@@ -13,8 +14,8 @@ interface CohortDistribution {
 }
 
 /**
- * Deterministic Post and Distribution identities for the analytics journey.
- * The isolated owner reset removes the whole Workspace, so reruns are clean.
+ * Deterministic analytics values; each fixture run allocates independent identities
+ * because browser journeys and retries share one Workspace.
  */
 const posts: readonly { distributions: readonly CohortDistribution[]; title: string }[] = [
   {
@@ -107,7 +108,7 @@ export async function seedAnalyticsCohort(profileName: string): Promise<{ profil
     try {
       await client.query("BEGIN");
       for (const [postIndex, post] of posts.entries()) {
-        const postId = `4a000000-0000-4000-8000-${String(postIndex + 1).padStart(12, "0")}`;
+        const postId = randomUUID();
         await client.query(
           `INSERT INTO posts (id, org_id, brand_profile_id, title, default_text, status)
            VALUES ($1, $2, $3, $4, $5, 'active')`,
@@ -120,9 +121,7 @@ export async function seedAnalyticsCohort(profileName: string): Promise<{ profil
           ],
         );
         for (const [distributionIndex, distribution] of post.distributions.entries()) {
-          const distributionId = `9a000000-0000-4000-8000-${String(
-            postIndex * 10 + distributionIndex + 1,
-          ).padStart(12, "0")}`;
+          const distributionId = randomUUID();
           const publishedAt = new Date(
             Date.now() - distribution.daysAgo * 24 * 60 * 60 * 1_000,
           ).toISOString();

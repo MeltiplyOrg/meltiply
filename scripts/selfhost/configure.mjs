@@ -9,7 +9,7 @@ const platform =
 if (!["linux/amd64", "linux/arm64"].includes(platform))
   throw new TypeError("SELFHOST_PLATFORM must be linux/amd64 or linux/arm64");
 const values = {
-  SELFHOST_ORIGIN: "http://localhost:8080",
+  APP_URL: "http://localhost:8080",
   SELFHOST_BIND_ADDRESS: "127.0.0.1",
   SELFHOST_IMAGE_PREFIX: "ghcr.io/meltiplyorg/meltiply",
   SELFHOST_IMAGE_TAG: "latest",

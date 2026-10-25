@@ -662,9 +662,8 @@ const env = {
   DB_AUTHENTICATED: readyBinding,
   DB_SYSTEM: readyBinding,
   ENVIRONMENT: "test",
-  FRONTEND_URL: "http://localhost:3000",
+  APP_URL: "http://localhost:3000",
   OAUTH_STATE: { getByName: () => oauthState },
-  PUBLIC_API_URL: "http://localhost:8787",
   R2_ACCESS_KEY_ID: "test-access-key",
   R2_ACCOUNT_ID: "test-account",
   R2_BUCKET_NAME: "test-assets",
@@ -983,7 +982,6 @@ function errorApp(status: number) {
 }
 
 const errorPathOverrides: Record<string, string> = {
-  completePlatformOAuth: "/api/v1/platforms/threads/callback?state=short-state",
   getAnalyticsSummary:
     "/api/v1/analytics?start=2026-02-01T00%3A00%3A00Z&end=2026-01-01T00%3A00%3A00Z",
   getAnalyticsPosts:
@@ -1074,7 +1072,9 @@ describe("API Worker OpenAPI conformance", () => {
         const errorEnvironment =
           testCase.operationId === "getReadiness"
             ? ({ ...env, DB_SYSTEM: undefined } as unknown as ApiWorkerEnv)
-            : env;
+            : testCase.operationId === "completePlatformOAuth"
+              ? ({ ...env, APP_URL: undefined } as unknown as ApiWorkerEnv)
+              : env;
         const response = await errorApp(errorExample.status).request(
           errorRequest,
           { body: requestBody, headers, method: testCase.method },

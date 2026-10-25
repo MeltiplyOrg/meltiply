@@ -46,8 +46,7 @@ trap 'cleanup_on_signal 129' HUP
 
 WRANGLER_DEV_PORT="$backend_port" \
 WRANGLER_DEV_ALLOWED_ORIGINS=http://localhost:3000 \
-WRANGLER_DEV_FRONTEND_URL=http://localhost:3000 \
-WRANGLER_DEV_PUBLIC_API_URL="$api_base_url" \
+WRANGLER_DEV_APP_URL="$api_base_url" \
   setsid "$repo_root/scripts/cloudflare-local/dev-backend.sh" >"$log_file" 2>&1 &
 backend_pid=$!
 ready=0

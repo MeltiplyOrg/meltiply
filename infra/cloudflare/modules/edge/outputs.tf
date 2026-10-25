@@ -1,6 +1,6 @@
-output "api_hostname" {
-  description = "Configured API hostname, whether or not it is attached yet."
-  value       = var.api_hostname
+output "app_hostname" {
+  description = "Configured dashboard/API hostname, whether or not it is attached yet."
+  value       = var.app_hostname
 }
 
 output "custom_domain_id" {

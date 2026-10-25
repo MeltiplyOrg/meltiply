@@ -20,7 +20,7 @@ import {
 
 const gitSha = "a".repeat(40);
 const accountId = "b".repeat(32);
-const apiOrigin = "https://api.staging.example.com";
+const apiOrigin = "https://staging.example.com";
 const browserOrigin = "https://staging.example.com";
 const r2Origin = `https://${accountId}.r2.cloudflarestorage.com`;
 const bucketName = "meltiply-assets-staging";
@@ -48,13 +48,12 @@ function environment(overrides = {}) {
 
 function releaseInput(overrides = {}) {
   return {
-    api_base_url: apiOrigin,
+    app_url: apiOrigin,
     api_workers_dev_url: "https://meltiply-api.example.workers.dev",
     automation_guard: { consumers_paused: true, cron_safe: true },
     deployment_mode: "update",
     environment: "staging",
-    frontend_origins: [browserOrigin],
-    frontend_url: browserOrigin,
+    allowed_origins: [browserOrigin],
     git_sha: gitSha,
     neon_branch_id: "branch-staging-123",
     neon_project_id: "project-staging-123",
@@ -91,8 +90,8 @@ function queueNames() {
 function iacOutput(resourceOverrides = {}) {
   const queues = queueNames();
   const resources = {
-    api_custom_domains_attached: true,
-    api_hostname: new URL(apiOrigin).hostname,
+    app_custom_domains_attached: true,
+    app_hostname: new URL(apiOrigin).hostname,
     assets_bucket_name: bucketName,
     authenticated_hyperdrive_id: "1".repeat(32),
     dead_letter_queue_ids: {},

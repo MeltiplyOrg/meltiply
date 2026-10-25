@@ -39,18 +39,19 @@ function split(value: string | undefined): string[] | undefined {
 /**
  * Returns the cached set of approved CORS origins parsed from the environment.
  *
- * Parses `env.ALLOWED_ORIGINS` once per unique configuration string and reuses the
- * resulting `ReadonlySet` across requests in the same isolate.
+ * Trusts APP_URL by default and adds explicitly configured ALLOWED_ORIGINS.
+ * Reuses the resulting ReadonlySet until either configuration string changes.
  *
- * @param env - Worker environment bindings containing `ALLOWED_ORIGINS`.
+ * @param env - Worker environment bindings containing APP_URL and optional extra origins.
  * @returns ReadonlySet of approved origin strings.
  */
 export function allowedOriginsFor(env: ApiWorkerEnv): ReadonlySet<string> {
-  const raw = env.ALLOWED_ORIGINS ?? "";
+  const raw = `${env.APP_URL?.trim() ?? ""},${env.ALLOWED_ORIGINS ?? ""}`;
   if (allowedOrigins && allowedOrigins.raw === raw) {
     return allowedOrigins.values;
   }
-  const values = new Set(split(raw) ?? []);
+  const values = new Set(split(env.ALLOWED_ORIGINS) ?? []);
+  if (env.APP_URL?.trim()) values.add(new URL(env.APP_URL.trim()).origin);
   allowedOrigins = { raw, values };
   return values;
 }
@@ -96,10 +97,10 @@ export function accessVerifierFor(env: ApiWorkerEnv): AccessTokenVerifier {
  *
  * @param env - Worker environment bindings containing Better Auth URL configuration.
  * @returns Configured `JwtVerifier` validating signature, issuer, audience, and identity claims.
- * @throws {Error} If neither `BETTER_AUTH_URL` nor `PUBLIC_API_URL` is configured.
+ * @throws {Error} If APP_URL is not configured.
  */
 export function jwtVerifierFor(env: ApiWorkerEnv): JwtVerifier {
-  const configured = env.BETTER_AUTH_URL?.trim() || env.PUBLIC_API_URL?.trim();
+  const configured = env.APP_URL?.trim();
   if (!configured) {
     throw new Error("Better Auth JWT verifier configuration is unavailable");
   }

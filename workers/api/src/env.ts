@@ -23,13 +23,15 @@ export interface AutomationRelayStub {
 export interface ApiWorkerEnv {
   ACCESS_POLICY_AUD?: string;
   ACCESS_TEAM_DOMAIN?: string;
-  ALLOWED_ORIGINS: string;
+  /** Optional additional browser origins; the canonical APP_URL is always trusted. */
+  ALLOWED_ORIGINS?: string;
   ASSETS?: R2Bucket;
   AUTOMATION?: AutomationRelayStub;
   BETTER_AUTH_SECRET?: string;
   /** Private deployment bootstrap secret, at least 32 random characters; required before first signup. */
   AUTH_SETUP_SECRET?: string;
-  BETTER_AUTH_URL?: string;
+  /** Canonical public dashboard/API origin, also used for auth, OAuth and provider media. */
+  APP_URL?: string;
   /** Trusted signing-key endpoint override; issuer/audience still use the public auth URL. */
   BETTER_AUTH_JWKS_URL?: string;
   /** Standalone workerd owns sockets per request; omitted keeps the environment's existing pool policy. */
@@ -40,7 +42,6 @@ export interface ApiWorkerEnv {
   FACEBOOK_CLIENT_ID?: string;
   FACEBOOK_CLIENT_SECRET?: string;
   FACEBOOK_LIVE_ACCEPTED?: string;
-  FRONTEND_URL?: string;
   LOG_SAMPLE_RATE?: string;
   MAIL?: SendEmail;
   MAIL_FROM_ADDRESS?: string;
@@ -55,7 +56,6 @@ export interface ApiWorkerEnv {
   /** Object storage backend: `r2` (default) or `s3`. Selects which bindings below apply. */
   OBJECT_STORAGE_PROVIDER?: string;
   OPERATOR_HOSTNAME?: string;
-  PUBLIC_API_URL?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_ACCOUNT_ID?: string;
   R2_BUCKET_NAME?: string;
@@ -107,9 +107,8 @@ export interface BindingStatus {
 const requiredBindings: (keyof ApiWorkerEnv)[] = [
   "DB_SYSTEM",
   "DB_AUTHENTICATED",
-  "FRONTEND_URL",
+  "APP_URL",
   "OAUTH_STATE",
-  "PUBLIC_API_URL",
   "TOKEN_ENCRYPTION_KEY",
 ];
 
@@ -205,7 +204,8 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
  *
  * Ensures all required environment variables, Hyperdrive databases, R2 storage, a usable
  * Email Sending binding with a valid sender and live-accepted provider
- * credentials (Meta, TikTok, YouTube) are fully configured in staging.
+ * credentials (Meta, TikTok, YouTube) are fully configured in staging. TikTok's
+ * media prefix is optional: the provider registry derives it from APP_URL.
  *
  * The mail checks run before the presence list so a malformed sender or
  * unusable binding reports a precise cause instead of a bare missing name.
@@ -275,13 +275,8 @@ export function validateProductionBindings(env: ApiWorkerEnv): void {
   if (threadsAccepted === "true" && (!env.THREADS_CLIENT_ID || !env.THREADS_CLIENT_SECRET)) {
     throw new Error("accepted Threads provider requires client ID and client secret bindings");
   }
-  if (
-    tiktokAccepted === "true" &&
-    (!env.TIKTOK_CLIENT_KEY || !env.TIKTOK_CLIENT_SECRET || !env.TIKTOK_MEDIA_URL_PREFIX)
-  ) {
-    throw new Error(
-      "accepted TikTok provider requires client key, client secret, and verified media URL prefix bindings",
-    );
+  if (tiktokAccepted === "true" && (!env.TIKTOK_CLIENT_KEY || !env.TIKTOK_CLIENT_SECRET)) {
+    throw new Error("accepted TikTok provider requires client key and client secret bindings");
   }
   if (
     youtubeAccepted === "true" &&

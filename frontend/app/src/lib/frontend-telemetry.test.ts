@@ -61,7 +61,7 @@ describe("frontend telemetry boundary", () => {
     window.addEventListener(frontendTelemetryEvent, listener);
 
     reportFrontendTelemetry({
-      configurationKey: "API_BASE_URL",
+      configurationKey: "APP_URL",
       configurationSource: "vite_public_env",
       configurationState: "invalid",
       diagnosticCode: "api_base_url_invalid",
@@ -70,7 +70,7 @@ describe("frontend telemetry boundary", () => {
 
     expect(listener.mock.calls[0]?.[0]).toMatchObject({
       detail: {
-        configurationKey: "API_BASE_URL",
+        configurationKey: "APP_URL",
         configurationSource: "vite_public_env",
         configurationState: "invalid",
         diagnosticCode: "api_base_url_invalid",

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type * as I18nModule from "@/lib/i18n";
 import type { BrandProfile, PlatformAccount } from "@/types";
@@ -220,8 +220,15 @@ function channelsElement() {
   return (
     <MemoryRouter>
       <ChannelsView />
+      <LocationProbe />
     </MemoryRouter>
   );
+}
+
+/** Reports the settled router location so outcome consumption can be asserted. */
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
 }
 
 /** Mounts the channels view inside a router context for its search-param reads. */
@@ -265,8 +272,8 @@ describe("Channels OAuth outcome", () => {
    * OAuth success arrives through a redirect. It must surface as a one-shot
    * toast, not a persistent banner, and must not replay on subsequent renders.
    */
-  it("announces a connected Channel as a one-shot toast", async () => {
-    navigation.searchParams = new URLSearchParams("oauth=connected&provider=facebook");
+  it("announces a connected Channel as a one-shot toast and keeps unrelated params", async () => {
+    navigation.searchParams = new URLSearchParams("oauth=connected&provider=facebook&review=keep");
     renderChannels();
 
     await waitFor(() =>
@@ -277,6 +284,9 @@ describe("Channels OAuth outcome", () => {
     );
     expect(toastMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Facebook connected successfully.")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("/channels?review=keep"),
+    );
   });
 });
 

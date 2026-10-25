@@ -68,10 +68,8 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
   if (!secret) {
     throw new Error("BETTER_AUTH_SECRET must be configured in staging and production");
   }
-  const baseURL =
-    env.BETTER_AUTH_URL?.trim() ||
-    (env.PUBLIC_API_URL?.trim() ? env.PUBLIC_API_URL.trim() : undefined);
-  const origins = env.ALLOWED_ORIGINS?.trim() || "";
+  const baseURL = env.APP_URL?.trim() || undefined;
+  const origins = `${baseURL ?? ""}\n${env.ALLOWED_ORIGINS?.trim() || ""}`;
   const requireEmailVerification = requiresEmailVerification(env);
   const senderAddress = mailSenderConfiguration(env);
   const mailUsable =

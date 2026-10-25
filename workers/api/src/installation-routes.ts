@@ -217,7 +217,7 @@ function reauthenticateEffect(
 ): Effect.Effect<void, CoreApiError | DatabaseError> {
   return Effect.gen(function* () {
     const auth = yield* Effect.promise(() => betterAuthFor(env));
-    const base = env.BETTER_AUTH_URL?.trim() || env.PUBLIC_API_URL?.trim() || "http://localhost";
+    const base = env.APP_URL?.trim() || "http://localhost";
     const request = new Request(`${base}/api/auth/sign-in/email`, {
       body: JSON.stringify({ email: actor.email, password }),
       headers: { "Content-Type": "application/json" },

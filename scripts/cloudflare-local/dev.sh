@@ -76,7 +76,8 @@ load_stack_environment() {
   # Preserve explicit caller settings over checkout-local .env defaults.
   local -a caller_overrides=()
   local name
-  for name in MELTIPLY_DEV_HOST MELTIPLY_DEV_TUNNEL MELTIPLY_DEV_TUNNEL_MODE \
+  for name in APP_URL PUBLIC_SITE_URL ALLOWED_ORIGINS \
+    MELTIPLY_DEV_HOST MELTIPLY_DEV_TUNNEL MELTIPLY_DEV_TUNNEL_MODE \
     MELTIPLY_CLOUDFLARED_BIN CLOUDFLARED_BIN TUNNEL_TRANSPORT_PROTOCOL \
     MELTIPLY_TUNNEL_NAME MELTIPLY_TUNNEL_NAME_PREFIX MELTIPLY_TUNNEL_SHARED \
     MELTIPLY_TUNNEL_DOMAIN MELTIPLY_TUNNEL_DEV_LABEL \
@@ -103,20 +104,17 @@ load_stack_environment() {
   export WRANGLER_DEV_IP="${WRANGLER_DEV_IP:-$bind_host}"
   export FRONTEND_DEV_HOST="${FRONTEND_DEV_HOST:-$bind_host}"
   export WRANGLER_DEV_PORT="$api_port"
-  export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-${FRONTEND_URL:-http://$dev_host:$frontend_port}}"
-  export FRONTEND_URL="${FRONTEND_URL:-http://$dev_host:$frontend_port}"
+  export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-${APP_URL:-http://$dev_host:$frontend_port}}"
+  export APP_URL="${APP_URL:-http://$dev_host:$frontend_port}"
   export PUBLIC_SITE_URL="${PUBLIC_SITE_URL:-http://$dev_host:$public_port}"
-  export PUBLIC_API_URL="${PUBLIC_API_URL:-http://$dev_host:$api_port}"
-  export API_BASE_URL="${API_BASE_URL:-$PUBLIC_API_URL}"
   export WRANGLER_DEV_ALLOWED_ORIGINS="$ALLOWED_ORIGINS"
-  export WRANGLER_DEV_FRONTEND_URL="$FRONTEND_URL"
-  export WRANGLER_DEV_PUBLIC_API_URL="$PUBLIC_API_URL"
+  export WRANGLER_DEV_APP_URL="$APP_URL"
 
   api_dev_port="$api_port"
   frontend_dev_port="$frontend_port"
   public_dev_port="$public_port"
-  local_frontend_origin="$FRONTEND_URL"
-  local_api_origin="$PUBLIC_API_URL"
+  local_frontend_origin="$APP_URL"
+  local_api_origin="http://$dev_host:$api_port"
   local_public_origin="$PUBLIC_SITE_URL"
   # Read after the .env source so the summary agrees with the hostnames
   # tunnel-hostname.mjs derives, which read the environment at call time.
@@ -199,16 +197,13 @@ apply_tunnel_origins() {
   local app_url=${tunnel_urls[app]}
   local public_url=${tunnel_urls[public]}
 
-  export FRONTEND_URL="$app_url"
+  export APP_URL="$app_url"
   # Same-origin by design: the app Worker forwards /api/* to the API Worker, so
   # the browser never makes a cross-origin request and the session cookie is
   # first-party over the tunnel's HTTPS.
-  export API_BASE_URL="$app_url"
-  export PUBLIC_API_URL="$app_url"
   export ALLOWED_ORIGINS="$local_frontend_origin,$app_url"
   export WRANGLER_DEV_ALLOWED_ORIGINS="$ALLOWED_ORIGINS"
-  export WRANGLER_DEV_FRONTEND_URL="$app_url"
-  export WRANGLER_DEV_PUBLIC_API_URL="$app_url"
+  export WRANGLER_DEV_APP_URL="$app_url"
   export PUBLIC_SITE_URL="$public_url"
 }
 

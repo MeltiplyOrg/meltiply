@@ -4,14 +4,14 @@ import { test } from "node:test";
 import { summarizeReleasePlan, verifyReleasePlan } from "./release-plan.mjs";
 
 function planFor(
-  { attachApiCustomDomains = false, attachQueueConsumers = false, queueDeliveryPaused = true } = {},
+  { attachAppCustomDomains = false, attachQueueConsumers = false, queueDeliveryPaused = true } = {},
   resourceChanges = [],
 ) {
   return {
     terraform_version: "1.10.2",
     variables: {
       environment: { value: "staging" },
-      attach_api_custom_domains: { value: attachApiCustomDomains },
+      attach_app_custom_domains: { value: attachAppCustomDomains },
       attach_queue_consumers: { value: attachQueueConsumers },
       queue_delivery_paused: { value: queueDeliveryPaused },
     },
@@ -50,7 +50,7 @@ function deliveryChanges(paused) {
 test("accepts the bootstrap and update release transition invariants", () => {
   assert.deepEqual(verifyReleasePlan(planFor(), "foundation"), {
     environment: "staging",
-    attachApiCustomDomains: false,
+    attachAppCustomDomains: false,
     attachQueueConsumers: false,
     queueDeliveryPaused: true,
   });
@@ -58,7 +58,7 @@ test("accepts the bootstrap and update release transition invariants", () => {
     verifyReleasePlan(
       planFor(
         {
-          attachApiCustomDomains: true,
+          attachAppCustomDomains: true,
           attachQueueConsumers: true,
         },
         deliveryChanges(true),
@@ -67,28 +67,28 @@ test("accepts the bootstrap and update release transition invariants", () => {
     ),
     {
       environment: "staging",
-      attachApiCustomDomains: true,
+      attachAppCustomDomains: true,
       attachQueueConsumers: true,
       queueDeliveryPaused: true,
     },
   );
   assert.deepEqual(verifyReleasePlan(planFor({ attachQueueConsumers: true }), "paused-consumers"), {
     environment: "staging",
-    attachApiCustomDomains: false,
+    attachAppCustomDomains: false,
     attachQueueConsumers: true,
     queueDeliveryPaused: true,
   });
   assert.deepEqual(
     verifyReleasePlan(
       planFor({
-        attachApiCustomDomains: true,
+        attachAppCustomDomains: true,
         attachQueueConsumers: true,
       }),
       "domain",
     ),
     {
       environment: "staging",
-      attachApiCustomDomains: true,
+      attachAppCustomDomains: true,
       attachQueueConsumers: true,
       queueDeliveryPaused: true,
     },
@@ -97,7 +97,7 @@ test("accepts the bootstrap and update release transition invariants", () => {
     verifyReleasePlan(
       planFor(
         {
-          attachApiCustomDomains: true,
+          attachAppCustomDomains: true,
           attachQueueConsumers: true,
           queueDeliveryPaused: false,
         },
@@ -107,7 +107,7 @@ test("accepts the bootstrap and update release transition invariants", () => {
     ),
     {
       environment: "staging",
-      attachApiCustomDomains: true,
+      attachAppCustomDomains: true,
       attachQueueConsumers: true,
       queueDeliveryPaused: false,
     },
@@ -123,7 +123,7 @@ test("rejects a transition whose resolved plan variables do not match", () => {
     () =>
       verifyReleasePlan(
         planFor({
-          attachApiCustomDomains: true,
+          attachAppCustomDomains: true,
           attachQueueConsumers: true,
         }),
         "unpause",
@@ -162,7 +162,7 @@ test("rejects destructive, early Worker references, and broad unpause plans", ()
       verifyReleasePlan(
         planFor(
           {
-            attachApiCustomDomains: true,
+            attachAppCustomDomains: true,
             attachQueueConsumers: true,
             queueDeliveryPaused: false,
           },
@@ -199,7 +199,7 @@ test("narrow phases reject unrelated non-destructive drift", () => {
       verifyReleasePlan(
         planFor(
           {
-            attachApiCustomDomains: true,
+            attachAppCustomDomains: true,
             attachQueueConsumers: true,
           },
           [storageUpdate],
@@ -213,7 +213,7 @@ test("narrow phases reject unrelated non-destructive drift", () => {
       verifyReleasePlan(
         planFor(
           {
-            attachApiCustomDomains: true,
+            attachAppCustomDomains: true,
             attachQueueConsumers: true,
             queueDeliveryPaused: false,
           },
@@ -228,7 +228,7 @@ test("narrow phases reject unrelated non-destructive drift", () => {
       verifyReleasePlan(
         planFor(
           {
-            attachApiCustomDomains: true,
+            attachAppCustomDomains: true,
             attachQueueConsumers: true,
           },
           [storageUpdate],
@@ -242,7 +242,7 @@ test("narrow phases reject unrelated non-destructive drift", () => {
 test("unpause ignores unrelated no-op resources", () => {
   const plan = planFor(
     {
-      attachApiCustomDomains: true,
+      attachAppCustomDomains: true,
       attachQueueConsumers: true,
       queueDeliveryPaused: false,
     },
@@ -262,7 +262,7 @@ test("unpause ignores unrelated no-op resources", () => {
 
 test("pause and unpause require exactly the delivery flag on all workloads", () => {
   const pauseVariables = {
-    attachApiCustomDomains: true,
+    attachAppCustomDomains: true,
     attachQueueConsumers: true,
   };
   assert.throws(
@@ -321,7 +321,7 @@ test("summary exposes only reviewable metadata and transition values", () => {
   const summary = summarizeReleasePlan(plan, "paused-consumers");
   assert.deepEqual(summary.transition, {
     environment: "staging",
-    attachApiCustomDomains: false,
+    attachAppCustomDomains: false,
     attachQueueConsumers: true,
     queueDeliveryPaused: true,
   });

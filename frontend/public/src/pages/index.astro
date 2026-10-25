@@ -10,7 +10,7 @@ import { LandingPreferences } from "../components/docs-preferences";
 import { HomeSearch } from "../components/search";
 import "../styles/docs.css";
 const appUrl = new URL(
-  process.env.FRONTEND_URL?.trim() || "https://app.meltiply.com",
+  process.env.APP_URL?.trim() || "https://app.meltiply.com",
 );
 const signInUrl = new URL("/sign-in", appUrl);
 const title = "Meltiply — Your social content. Finally, in sync.";

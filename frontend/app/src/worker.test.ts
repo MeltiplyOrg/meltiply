@@ -33,7 +33,7 @@ describe("frontend Worker telemetry boundary", () => {
     const response = await worker.fetch(
       telemetryRequest({
         code: "provider/internal",
-        configurationKey: "API_BASE_URL",
+        configurationKey: "APP_URL",
         configurationSource: "vite_public_env",
         configurationState: "invalid",
         diagnosticCode: "api_base_url_invalid",
@@ -54,7 +54,7 @@ describe("frontend Worker telemetry boundary", () => {
     const event = JSON.parse(logger.mock.calls[0]?.[0] as string) as Record<string, unknown>;
     expect(event).toMatchObject({
       context: expect.objectContaining({
-        configuration_key: "API_BASE_URL",
+        configuration_key: "APP_URL",
         configuration_source: "vite_public_env",
         configuration_state: "invalid",
         diagnostic_code: "api_base_url_invalid",
@@ -207,6 +207,22 @@ describe("frontend Worker API proxy", () => {
 
     const forwarded = upstream.mock.calls[0]?.[0] as Request;
     expect(forwarded.headers.get("Cookie")).toBe("better-auth.session_token=secret");
+  });
+
+  it("prefers a local API origin over a bound service in built previews", async () => {
+    const upstream = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", upstream);
+    const api = { fetch: vi.fn() };
+
+    const response = await worker.fetch(new Request("https://frontend.test/api/auth/get-session"), {
+      ...environment,
+      API: api,
+      API_ORIGIN: "http://127.0.0.1:8787",
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(api.fetch).not.toHaveBeenCalled();
   });
 
   it("rewrites /api/* onto API_ORIGIN when no service binding exists", async () => {

@@ -280,7 +280,7 @@ function validatePlanSummary(summary, phase) {
   const transition = plainObject(summary.transition, `${phase} plan summary transition`);
   const expected = iacPhaseStates[transitionStates[phase]];
   const actual = [
-    transition.attach_api_custom_domains,
+    transition.attach_app_custom_domains,
     transition.attach_queue_consumers,
     transition.queue_delivery_paused,
   ];
@@ -327,7 +327,7 @@ function validatePhaseOutputs(outputs, phase, spec) {
   const iac = validateIacOutputs(outputs, spec);
   const resources = plainObject(iac.release_resources, `${phase} IaC outputs`);
   const actual = [
-    resources.api_custom_domains_attached,
+    resources.app_custom_domains_attached,
     resources.queue_consumers_attached,
     resources.queue_delivery_paused,
   ];
@@ -603,13 +603,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     // The live hostname legitimately serves the previous version during a
     // partial rollout; only a full (or bootstrap) deployment must serve the
     // release SHA deterministically.
-    validateSmokeHealth(
-      evidence,
-      `${spec.api_base_url}/api/v1/health`,
-      name,
-      percentage === 100,
-      spec,
-    );
+    validateSmokeHealth(evidence, `${spec.app_url}/api/v1/health`, name, percentage === 100, spec);
     return;
   }
 
@@ -915,7 +909,7 @@ export async function buildReleaseManifest({
   const active = iacPhaseStates.active;
   if (
     [
-      resources.api_custom_domains_attached,
+      resources.app_custom_domains_attached,
       resources.queue_consumers_attached,
       resources.queue_delivery_paused,
     ].some((value, index) => value !== active[index])

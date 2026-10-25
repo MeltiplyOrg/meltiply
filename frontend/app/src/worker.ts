@@ -121,20 +121,6 @@ function sameOrigin(request: Request, url: URL): boolean {
 }
 
 /**
- * Proxies an `/api/*` request to the Meltiply API Worker, keeping the browser
- * strictly same-origin so the HttpOnly Better Auth session cookie flows without
- * CORS. Production and staging route through the `API` service binding; local
- * development has no bound worker, so the request is rewritten onto
- * `API_ORIGIN` (the Wrangler dev API, default `http://127.0.0.1:8787`) while
- * preserving method, headers, and body. The original `Origin` header is
- * forwarded untouched so the API's own origin checks still apply.
- *
- * @param request Inbound HTTP request targeting `/api/*`.
- * @param env Worker environment bindings (`API` service binding, `API_ORIGIN` fallback).
- * @param url Parsed inbound request URL.
- * @returns The API Worker's response, or 502 when the upstream is unreachable.
- */
-/**
  * Reports whether a request path belongs to the bearer-authenticated public API.
  * Only these paths must have the Better Auth session cookie stripped before
  * proxying, so the API Worker never receives it.
@@ -166,6 +152,21 @@ function stripBetterAuthCookies(cookieHeader: string | null): string | null {
   return kept.length > 0 ? kept.join("; ") : null;
 }
 
+/**
+ * Proxies an `/api/*` request to the Meltiply API Worker, keeping the browser
+ * strictly same-origin so the HttpOnly Better Auth session cookie flows without
+ * CORS. A defined `API_ORIGIN` (local development and preview builds) is used
+ * first; deployed environments omit it and route through the `API` service
+ * binding instead. Method, headers, and body are preserved, and the original
+ * `Origin` header is forwarded untouched so the API's own origin checks still
+ * apply. `/api/v1` requests carry their Better Auth cookies only as far as this
+ * Worker: `isPublicApiPath` scopes the stripping so `/api/auth` keeps its session.
+ *
+ * @param request Inbound HTTP request targeting `/api/*`.
+ * @param env Worker environment bindings (`API_ORIGIN` local upstream or `API` service binding).
+ * @param url Parsed inbound request URL.
+ * @returns The API Worker's response; the caller maps a missing upstream to 502.
+ */
 async function proxyApiRequest(request: Request, env: Env, url: URL): Promise<Response> {
   const headers = new Headers(request.headers);
   if (isPublicApiPath(url.pathname)) {
@@ -185,12 +186,19 @@ async function proxyApiRequest(request: Request, env: Env, url: URL): Promise<Re
     ...(request.body ? { duplex: "half" } : {}),
   };
 
+  // A local API origin wins over a deployed service binding: local development
+  // and preview builds define API_ORIGIN for the Wrangler API process, while
+  // deployed environments never define it and route through `API` instead.
+  // Checking the binding first made a built preview call the not-running
+  // `meltiply-api` service, so every session request failed with 503.
+  if (env.API_ORIGIN) {
+    const target = new URL(`${url.pathname}${url.search}`, env.API_ORIGIN);
+    return fetch(new Request(target, init));
+  }
   if (env.API) {
     return env.API.fetch(new Request(request.url, init));
   }
-  const origin = env.API_ORIGIN ?? "http://127.0.0.1:8787";
-  const target = new URL(`${url.pathname}${url.search}`, origin);
-  return fetch(new Request(target, init));
+  throw new Error("API upstream is not configured");
 }
 
 /**

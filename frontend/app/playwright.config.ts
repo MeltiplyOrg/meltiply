@@ -129,8 +129,7 @@ export default defineConfig({
           env: {
             ...process.env,
             WRANGLER_DEV_ALLOWED_ORIGINS: frontendOrigin,
-            WRANGLER_DEV_FRONTEND_URL: frontendOrigin,
-            WRANGLER_DEV_PUBLIC_API_URL: localApiOrigin,
+            WRANGLER_DEV_APP_URL: frontendOrigin,
           },
           reuseExistingServer: reuseExistingServers,
           // Let the gateway forward shutdown to its detached Wrangler group;
@@ -149,8 +148,7 @@ export default defineConfig({
           cwd: repositoryRoot,
           env: {
             ...process.env,
-            API_BASE_URL: localApiOrigin,
-            FRONTEND_URL: frontendOrigin,
+            APP_URL: frontendOrigin,
           },
           reuseExistingServer: reuseExistingServers,
           timeout: 120_000,

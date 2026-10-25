@@ -17,6 +17,7 @@ on:
           - publishing-queues
           - portable-caching
           - portable-caching-smoke
+          - performance-focused
 
 permissions:
   contents: read
@@ -40,6 +41,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Type-check and exercise browser cache regressions
+        if: inputs.lane == 'performance-focused'
+        run: |
+          bun run --filter frontend-app type-check
+          bun run --cwd frontend/app test src/lib/browser-cache.test.tsx --coverage.enabled=false
       - name: Prepare full gate database
         if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull

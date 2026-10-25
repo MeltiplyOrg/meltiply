@@ -9,8 +9,8 @@ import {
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { contractSuccessBody } from "@/test/contract-fixtures";
-import type { PlatformAccountsResponse } from "@/types";
-import { usePlatforms } from "./queries";
+import type { AnalyticsDashboard, AnalyticsPostsResponse, PlatformAccountsResponse } from "@/types";
+import { useAnalyticsDashboard, useAnalyticsPosts, usePlatforms } from "./queries";
 
 const scope = { isSignedIn: true, workspaceId: "workspace-a", brandProfileId: null };
 let client: QueryClient;
@@ -29,6 +29,7 @@ afterEach(() => {
   focusManager.setFocused(undefined);
   onlineManager.setOnline(true);
   vi.restoreAllMocks();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -65,5 +66,66 @@ describe("private browser read cache", () => {
     });
     await waitFor(() => expect(returned.result.current.data).toEqual([]));
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps dashboard and ranked Posts on one cached exact cohort through metric changes and refresh", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-25T12:00:00.000Z"));
+    const requests: URL[] = [];
+    const dashboard = contractSuccessBody<AnalyticsDashboard>("getAnalyticsDashboard");
+    const posts = contractSuccessBody<AnalyticsPostsResponse>("getAnalyticsPosts");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        requests.push(url);
+        return Response.json(url.pathname.endsWith("/dashboard") ? dashboard : posts);
+      }),
+    );
+    const first = renderHook(
+      ({ metric }: { metric: "views" | "likes" }) => ({
+        dashboard: useAnalyticsDashboard(scope, { range: "30d" }),
+        posts: useAnalyticsPosts(scope, { range: "30d", metric, limit: 10, offset: 0 }),
+      }),
+      { wrapper: Wrapper, initialProps: { metric: "views" } },
+    );
+    await waitFor(() => expect(first.result.current.posts.data).toEqual(posts));
+    await waitFor(() => expect(first.result.current.dashboard.data).toEqual(dashboard));
+
+    vi.setSystemTime(new Date("2026-10-25T12:00:30.000Z"));
+    first.rerender({ metric: "likes" });
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests.map((url) => url.searchParams.get("end"))).toEqual([
+      "2026-10-25T12:00:00.000Z",
+      "2026-10-25T12:00:00.000Z",
+      "2026-10-25T12:00:00.000Z",
+    ]);
+    first.unmount();
+
+    vi.setSystemTime(new Date("2026-10-25T12:04:00.000Z"));
+    const returned = renderHook(
+      () => ({
+        dashboard: useAnalyticsDashboard(scope, { range: "30d" }),
+        posts: useAnalyticsPosts(scope, { range: "30d", metric: "likes", limit: 10, offset: 0 }),
+      }),
+      { wrapper: Wrapper },
+    );
+    await act(async () => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    expect(returned.result.current.dashboard.data).toEqual(dashboard);
+    expect(returned.result.current.posts.data).toEqual(posts);
+    expect(requests).toHaveLength(3);
+
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["analytics"] });
+    });
+    await waitFor(() =>
+      expect(requests.slice(-2).map((url) => url.searchParams.get("end"))).toEqual([
+        "2026-10-25T12:04:00.000Z",
+        "2026-10-25T12:04:00.000Z",
+      ]),
+    );
   });
 });

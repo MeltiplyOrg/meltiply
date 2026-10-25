@@ -92,7 +92,7 @@ jobs:
         if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         env:
           API_BASE_URL: http://127.0.0.1:8787
-          FRONTEND_URL: http://127.0.0.1:3000
+          APP_URL: http://127.0.0.1:3000
         run: |
           ./scripts/cloudflare-local/compose.sh exec -T postgres psql -U postgres -d meltiply -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements'"
           ./scripts/cloudflare-local/compose.sh restart postgres

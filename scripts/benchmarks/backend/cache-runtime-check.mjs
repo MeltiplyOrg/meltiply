@@ -64,7 +64,7 @@ try {
   await pool.query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
   const backend = start("bash", ["scripts/cloudflare-local/dev-backend.sh"], {
     WRANGLER_DEV_ALLOWED_ORIGINS: frontendOrigin,
-    WRANGLER_DEV_APP_URL: origin,
+    WRANGLER_DEV_APP_URL: frontendOrigin,
   });
   await ready(`${origin}/api/v1/ready`, backend);
   const frontend = start("bun", [

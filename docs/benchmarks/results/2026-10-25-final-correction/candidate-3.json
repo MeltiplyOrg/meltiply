@@ -1,0 +1,1855 @@
+{
+  "completed_at": "2026-10-25T14:30:13.170Z",
+  "config": {
+    "profile": "application",
+    "authentication": "signed-jwt-live-session-actor",
+    "batch_sizes": [1, 5, 10, 25, 50],
+    "delete_concurrency": 4,
+    "delete_samples": 5,
+    "delete_warmup": 1,
+    "measured_samples": 30,
+    "warmup_samples": 3,
+    "read_concurrency": 20,
+    "controlled_provider_delay_ms": 100
+  },
+  "dataset": {
+    "assets": 300,
+    "comments": 100,
+    "distributionLimit": 100,
+    "pageSize": 100,
+    "posts": 300,
+    "scheduleChannels": 1,
+    "schedulePosts": 42,
+    "snapshotsPerDistribution": 90,
+    "batch_delete_posts_per_sample": [1, 5, 10, 25, 50]
+  },
+  "environment": {
+    "arch": "x64",
+    "database": "postgres",
+    "database_version": "18.6",
+    "platform": "linux",
+    "runtime": "Bun 1.4.2"
+  },
+  "label": "candidate",
+  "revision": {
+    "branch": "HEAD",
+    "dirty": false,
+    "ref": "961073dbf3c1cc59d45ffe65d05ad6823ae1cfbd",
+    "sha": "961073dbf3c1cc59d45ffe65d05ad6823ae1cfbd"
+  },
+  "started_at": "2026-10-25T14:28:40.213Z",
+  "duration_ms": 92965.15,
+  "workflows": [
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 12.59,
+          "system_total": 57.22,
+          "user_total": 320.4
+        },
+        "db": {
+          "application_statements_per_operation": 13,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 390,
+            "max": 4.51,
+            "mean": 0.82,
+            "min": 0.23,
+            "p50": 0.58,
+            "p95": 1.69,
+            "p99": 2.1
+          },
+          "statements_total": 390,
+          "time_ms_total": 321.21,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT d.post_id, d.id AS distribution_id, d.platform, snapshot.likes, snapshot.comments, snapshot.shares, snapshot.views, snapshot.impressions, snapshot.reach FROM distributions d JOIN LATERAL ( SELECT likes, comments, shares, views, impressions, reach FROM analytics_snapshots WHERE distribution_id = d.id ORDER BY snapshot_at DESC, id DESC LIMIT 1 ) snapshot ON true WHERE d.post_id = ANY($1::uuid[]) AND d.status = 'published' ORDER BY d.post_id, d.platform, d.id",
+              "total_ms": 51.82,
+              "mean_ms": 1.73
+            },
+            {
+              "count": 30,
+              "statement": "SELECT pa.post_id, pa.asset_id, pa.position, asset.id, asset.org_id, asset.brand_profile_id, asset.uploaded_by, asset.asset_type, asset.title, asset.duration_sec, asset.file_size, asset.mime_type, asset.width, asset.height, asset.original_filename, asset.status, asset.failure_code, asset.failure_message, asset.failure_retryable, asset.failure_at, asset.created_at, asset.updated_at FROM post_attachments AS pa JOIN assets AS asset ON asset.id = pa.asset_id AND asset.org_id = pa.org_id WHERE pa.post_id = ANY($1::uuid[]) ORDER BY pa.post_id, pa.position",
+              "total_ms": 48.5,
+              "mean_ms": 1.62
+            },
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, post_id, platform_account_id, platform, status, scheduled_at, published_at, platform_post_id, platform_url, title_override, description_override, hashtags, error_message, attempt_count, last_attempt_at, next_attempt_at, failure_code, failure_retryable, batch_id, created_at, updated_at, ( SELECT operation.publication_snapshot FROM provider_operations AS operation WHERE operation.distribution_id = distributions.id AND operation.operation = 'publish' AND operation.publication_snapshot IS NOT NULL ORDER BY operation.created_at DESC, operation.id DESC LIMIT 1 ) AS publication_snapshot FROM distributions WHERE post_id = ANY($1::uuid[]) ORDER BY post_id, event_at DESC, id DESC",
+              "total_ms": 48.11,
+              "mean_ms": 1.6
+            },
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, title, default_text, status, revision, created_at, updated_at, (SELECT jsonb_build_object('queue_id', membership.queue_id, 'queue_name', membership.queue_name, 'assigned_at', membership.assigned_at) FROM publishing_queue_memberships membership WHERE membership.post_id = posts.id AND membership.released_at IS NULL) AS queue_membership FROM posts WHERE posts.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = posts.brand_profile_id AND bp.deleted_at IS NULL ) ORDER BY posts.created_at DESC, posts.id DESC LIMIT $1 OFFSET $2",
+              "total_ms": 47.8,
+              "mean_ms": 1.59
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 22.04,
+              "mean_ms": 0.37
+            },
+            {
+              "count": 30,
+              "statement": "SELECT post_id, platform_account_id, title_override, description_override, hashtags, provider_options, attachment_ids FROM post_targets WHERE post_id = ANY($1::uuid[]) ORDER BY post_id, created_at, platform_account_id",
+              "total_ms": 20.29,
+              "mean_ms": 0.68
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 19.69,
+              "mean_ms": 0.33
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 19.48,
+              "mean_ms": 0.65
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 16.78,
+              "mean_ms": 0.56
+            },
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 16.46,
+              "mean_ms": 0.55
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 10.25,
+              "mean_ms": 0.34
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 24.68,
+          "mean": 17.91,
+          "min": 14.92,
+          "p50": 17.09,
+          "p95": 23.96,
+          "p99": 24.68
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 24.68,
+          "mean": 17.91,
+          "min": 14.92,
+          "p50": 17.09,
+          "p95": 23.96,
+          "p99": 24.68
+        },
+        "request_samples_ms": [
+          22.92, 18.72, 17.02, 16.7, 16.71, 23.96, 18.14, 17.4, 17.12, 16.97, 16.96, 17.73, 19.86,
+          16.81, 17.09, 17.45, 17.24, 16.42, 15.26, 19.06, 17.64, 15.78, 15.71, 16.6, 16.03, 21.44,
+          24.68, 18.51, 14.92, 16.45
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 146280,
+          "mean": 146280,
+          "min": 146280,
+          "p50": 146280,
+          "p95": 146280,
+          "p99": 146280
+        },
+        "response_bytes_samples": [
+          146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280,
+          146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280,
+          146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280
+        ],
+        "rss_bytes": {
+          "after": 106491904,
+          "before": 90112000,
+          "heap_used_end": 17171522,
+          "peak": 106827776
+        },
+        "samples": 30,
+        "samples_ms": [
+          22.92, 18.72, 17.02, 16.7, 16.71, 23.96, 18.14, 17.4, 17.12, 16.97, 16.96, 17.73, 19.86,
+          16.81, 17.09, 17.45, 17.24, 16.42, 15.26, 19.06, 17.64, 15.78, 15.71, 16.6, 16.03, 21.44,
+          24.68, 18.51, 14.92, 16.45
+        ],
+        "setup_ms_total": 0.06,
+        "throughput_rps": 55.84,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "posts.list.page100"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 6.24,
+          "system_total": 39.66,
+          "user_total": 147.65
+        },
+        "db": {
+          "application_statements_per_operation": 13,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 390,
+            "max": 1.56,
+            "mean": 0.58,
+            "min": 0.23,
+            "p50": 0.44,
+            "p95": 1.08,
+            "p99": 1.15
+          },
+          "statements_total": 390,
+          "time_ms_total": 224.46,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, post_id, platform_account_id, platform, status, scheduled_at, published_at, platform_post_id, platform_url, title_override, description_override, hashtags, error_message, attempt_count, last_attempt_at, next_attempt_at, failure_code, failure_retryable, batch_id, created_at, updated_at, ( SELECT operation.publication_snapshot FROM provider_operations AS operation WHERE operation.distribution_id = distributions.id AND operation.operation = 'publish' AND operation.publication_snapshot IS NOT NULL ORDER BY operation.created_at DESC, operation.id DESC LIMIT 1 ) AS publication_snapshot FROM distributions WHERE post_id = ANY($1::uuid[]) ORDER BY post_id, event_at DESC, id DESC",
+              "total_ms": 32.52,
+              "mean_ms": 1.08
+            },
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, title, default_text, status, revision, created_at, updated_at, (SELECT jsonb_build_object('queue_id', membership.queue_id, 'queue_name', membership.queue_name, 'assigned_at', membership.assigned_at) FROM publishing_queue_memberships membership WHERE membership.post_id = posts.id AND membership.released_at IS NULL) AS queue_membership FROM posts WHERE posts.id = $1 AND posts.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = posts.brand_profile_id AND bp.deleted_at IS NULL )",
+              "total_ms": 30.78,
+              "mean_ms": 1.03
+            },
+            {
+              "count": 30,
+              "statement": "SELECT pa.post_id, pa.asset_id, pa.position, asset.id, asset.org_id, asset.brand_profile_id, asset.uploaded_by, asset.asset_type, asset.title, asset.duration_sec, asset.file_size, asset.mime_type, asset.width, asset.height, asset.original_filename, asset.status, asset.failure_code, asset.failure_message, asset.failure_retryable, asset.failure_at, asset.created_at, asset.updated_at FROM post_attachments AS pa JOIN assets AS asset ON asset.id = pa.asset_id AND asset.org_id = pa.org_id WHERE pa.post_id = ANY($1::uuid[]) ORDER BY pa.post_id, pa.position",
+              "total_ms": 29.37,
+              "mean_ms": 0.98
+            },
+            {
+              "count": 30,
+              "statement": "SELECT d.post_id, d.id AS distribution_id, d.platform, snapshot.likes, snapshot.comments, snapshot.shares, snapshot.views, snapshot.impressions, snapshot.reach FROM distributions d JOIN LATERAL ( SELECT likes, comments, shares, views, impressions, reach FROM analytics_snapshots WHERE distribution_id = d.id ORDER BY snapshot_at DESC, id DESC LIMIT 1 ) snapshot ON true WHERE d.post_id = ANY($1::uuid[]) AND d.status = 'published' ORDER BY d.post_id, d.platform, d.id",
+              "total_ms": 27.46,
+              "mean_ms": 0.92
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 19.91,
+              "mean_ms": 0.33
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 18.32,
+              "mean_ms": 0.61
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 17.23,
+              "mean_ms": 0.29
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 14.92,
+              "mean_ms": 0.5
+            },
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 13.76,
+              "mean_ms": 0.46
+            },
+            {
+              "count": 30,
+              "statement": "SELECT post_id, platform_account_id, title_override, description_override, hashtags, provider_options, attachment_ids FROM post_targets WHERE post_id = ANY($1::uuid[]) ORDER BY post_id, created_at, platform_account_id",
+              "total_ms": 10.86,
+              "mean_ms": 0.36
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 9.34,
+              "mean_ms": 0.31
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 15.49,
+          "mean": 12.72,
+          "min": 11.83,
+          "p50": 12.62,
+          "p95": 14.4,
+          "p99": 15.49
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 15.49,
+          "mean": 12.72,
+          "min": 11.83,
+          "p50": 12.62,
+          "p95": 14.4,
+          "p99": 15.49
+        },
+        "request_samples_ms": [
+          12.18, 14.4, 12, 12.67, 11.94, 11.98, 12.64, 13.27, 12.92, 13.67, 12.2, 12.92, 12.9,
+          12.67, 13.16, 12.64, 13.52, 12.37, 12.1, 12.6, 12.07, 12.15, 12.12, 11.83, 12.82, 12.51,
+          12.17, 12.62, 15.49, 13
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 2052,
+          "mean": 2052,
+          "min": 2052,
+          "p50": 2052,
+          "p95": 2052,
+          "p99": 2052
+        },
+        "response_bytes_samples": [
+          2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052,
+          2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052
+        ],
+        "rss_bytes": {
+          "after": 111996928,
+          "before": 106958848,
+          "heap_used_end": 19483682,
+          "peak": 111996928
+        },
+        "samples": 30,
+        "samples_ms": [
+          12.18, 14.4, 12, 12.67, 11.94, 11.98, 12.64, 13.27, 12.92, 13.67, 12.2, 12.92, 12.9,
+          12.67, 13.16, 12.64, 13.52, 12.37, 12.1, 12.6, 12.07, 12.15, 12.12, 11.83, 12.82, 12.51,
+          12.17, 12.62, 15.49, 13
+        ],
+        "setup_ms_total": 0.06,
+        "throughput_rps": 78.63,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "posts.detail.published"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 5.76,
+          "system_total": 32.83,
+          "user_total": 139.93
+        },
+        "db": {
+          "application_statements_per_operation": 9,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 270,
+            "max": 4.28,
+            "mean": 0.59,
+            "min": 0.23,
+            "p50": 0.35,
+            "p95": 2.16,
+            "p99": 2.42
+          },
+          "statements_total": 270,
+          "time_ms_total": 159.65,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, post_id, platform_account_id, platform, status, scheduled_at, published_at, platform_post_id, platform_url, title_override, description_override, hashtags, error_message, attempt_count, last_attempt_at, next_attempt_at, failure_code, failure_retryable, batch_id, created_at, updated_at, ( SELECT operation.publication_snapshot FROM provider_operations AS operation WHERE operation.distribution_id = distributions.id AND operation.operation = 'publish' AND operation.publication_snapshot IS NOT NULL ORDER BY operation.created_at DESC, operation.id DESC LIMIT 1 ) AS publication_snapshot FROM distributions WHERE EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = distributions.brand_profile_id AND bp.deleted_at IS NULL ) ORDER BY event_at DESC, id DESC LIMIT $1 OFFSET $2",
+              "total_ms": 67.92,
+              "mean_ms": 2.26
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 18.78,
+              "mean_ms": 0.31
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 18.12,
+              "mean_ms": 0.6
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 17.32,
+              "mean_ms": 0.29
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 14.95,
+              "mean_ms": 0.5
+            },
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 12.95,
+              "mean_ms": 0.43
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 9.61,
+              "mean_ms": 0.32
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 12.6,
+          "mean": 10.18,
+          "min": 9,
+          "p50": 10.05,
+          "p95": 11.87,
+          "p99": 12.6
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 12.6,
+          "mean": 10.18,
+          "min": 9,
+          "p50": 10.05,
+          "p95": 11.87,
+          "p99": 12.6
+        },
+        "request_samples_ms": [
+          9.47, 9.37, 9.81, 10.83, 10.71, 10.06, 10.01, 9.92, 10.41, 10.4, 12.6, 10.05, 9.43, 9.52,
+          9.81, 9, 9.73, 10.09, 9.63, 10.74, 10.69, 11.87, 10.9, 10.63, 10.56, 10.79, 10.11, 9.52,
+          9.3, 9.45
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 73158,
+          "mean": 73158,
+          "min": 73158,
+          "p50": 73158,
+          "p95": 73158,
+          "p99": 73158
+        },
+        "response_bytes_samples": [
+          73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158,
+          73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158,
+          73158, 73158, 73158, 73158
+        ],
+        "rss_bytes": {
+          "after": 117067776,
+          "before": 112914432,
+          "heap_used_end": 20956460,
+          "peak": 118075392
+        },
+        "samples": 30,
+        "samples_ms": [
+          9.47, 9.37, 9.81, 10.83, 10.71, 10.06, 10.01, 9.92, 10.41, 10.4, 12.6, 10.05, 9.43, 9.52,
+          9.81, 9, 9.73, 10.09, 9.63, 10.74, 10.69, 11.87, 10.9, 10.63, 10.56, 10.79, 10.11, 9.52,
+          9.3, 9.45
+        ],
+        "setup_ms_total": 0.06,
+        "throughput_rps": 98.24,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "distributions.list.page100"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 5.82,
+          "system_total": 28.78,
+          "user_total": 145.72
+        },
+        "db": {
+          "application_statements_per_operation": 9,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 270,
+            "max": 4.72,
+            "mean": 0.66,
+            "min": 0.25,
+            "p50": 0.37,
+            "p95": 2.53,
+            "p99": 2.98
+          },
+          "statements_total": 270,
+          "time_ms_total": 178.51,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT d.id, d.post_id, p.title AS post_title, d.platform, d.platform_account_id, d.status, d.scheduled_at, d.published_at, d.updated_at, d.brand_profile_id FROM distributions d JOIN posts p ON p.id = d.post_id AND p.org_id = d.org_id WHERE d.event_at >= $1 AND d.event_at <= $2 AND p.deleted_at IS NULL AND ($4::uuid IS NULL OR d.brand_profile_id = $4) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = d.brand_profile_id AND bp.deleted_at IS NULL ) ORDER BY d.event_at ASC, d.id ASC LIMIT $3",
+              "total_ms": 78.75,
+              "mean_ms": 2.63
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 19.77,
+              "mean_ms": 0.33
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 19.42,
+              "mean_ms": 0.32
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 18.27,
+              "mean_ms": 0.61
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 17.16,
+              "mean_ms": 0.57
+            },
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 13.83,
+              "mean_ms": 0.46
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 11.31,
+              "mean_ms": 0.38
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 13.42,
+          "mean": 10.9,
+          "min": 9.49,
+          "p50": 10.65,
+          "p95": 13.42,
+          "p99": 13.42
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 13.42,
+          "mean": 10.9,
+          "min": 9.49,
+          "p50": 10.65,
+          "p95": 13.42,
+          "p99": 13.42
+        },
+        "request_samples_ms": [
+          12.86, 11.41, 10.86, 10.77, 10.55, 10.61, 10.55, 10.73, 12.22, 10.83, 13.1, 13.42, 10.87,
+          10.65, 10.8, 10.2, 10.47, 10.85, 10.68, 10.56, 10.5, 13.42, 11.04, 10.16, 9.79, 9.79,
+          9.49, 9.93, 9.95, 10.08
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 117504,
+          "mean": 117504,
+          "min": 117504,
+          "p50": 117504,
+          "p95": 117504,
+          "p99": 117504
+        },
+        "response_bytes_samples": [
+          117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504,
+          117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504,
+          117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504
+        ],
+        "rss_bytes": {
+          "after": 126832640,
+          "before": 122310656,
+          "heap_used_end": 23370444,
+          "peak": 127021056
+        },
+        "samples": 30,
+        "samples_ms": [
+          12.86, 11.41, 10.86, 10.77, 10.55, 10.61, 10.55, 10.73, 12.22, 10.83, 13.1, 13.42, 10.87,
+          10.65, 10.8, 10.2, 10.47, 10.85, 10.68, 10.56, 10.5, 13.42, 11.04, 10.16, 9.79, 9.79,
+          9.49, 9.93, 9.95, 10.08
+        ],
+        "setup_ms_total": 0.03,
+        "throughput_rps": 91.71,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "calendar.range"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 5.26,
+          "system_total": 26.16,
+          "user_total": 131.59
+        },
+        "db": {
+          "application_statements_per_operation": 9,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 270,
+            "max": 1.1,
+            "mean": 0.45,
+            "min": 0.25,
+            "p50": 0.34,
+            "p95": 0.95,
+            "p99": 1.01
+          },
+          "statements_total": 270,
+          "time_ms_total": 120.34,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT access_scope.organization_id, access_scope.role, encode(sha256(convert_to(COALESCE( ( SELECT string_agg( bp.id::text || ':' || extract(epoch FROM bp.updated_at)::text || ':' || COALESCE(extract(epoch FROM bp.deleted_at)::text, ''), '|' ORDER BY bp.id ) FROM brand_profiles bp WHERE ($1::uuid IS NULL OR bp.id = $1) AND ($1::uuid IS NOT NULL OR bp.deleted_at IS NULL) ), '' ), 'UTF8')), 'hex') AS visibility FROM ( SELECT public.auth_active_org_id()::text AS organization_id, public.auth_active_org_role() AS role ) AS access_scope",
+              "total_ms": 28.53,
+              "mean_ms": 0.95
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 18.85,
+              "mean_ms": 0.31
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 17.99,
+              "mean_ms": 0.6
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 17.77,
+              "mean_ms": 0.3
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 15.15,
+              "mean_ms": 0.51
+            },
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 12.8,
+              "mean_ms": 0.43
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 9.24,
+              "mean_ms": 0.31
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 10.78,
+          "mean": 8.65,
+          "min": 7.67,
+          "p50": 8.51,
+          "p95": 10.18,
+          "p99": 10.78
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 10.75,
+          "mean": 8.61,
+          "min": 7.65,
+          "p50": 8.47,
+          "p95": 10.16,
+          "p99": 10.75
+        },
+        "request_samples_ms": [
+          8.91, 8.83, 10.75, 9.43, 9.65, 8.35, 8.49, 7.87, 8.45, 8.48, 8.45, 8.65, 8.53, 8.47, 8.82,
+          8.11, 7.97, 10.16, 8.75, 9.13, 8.57, 8.64, 8.19, 8.34, 8.12, 7.98, 8.21, 8.33, 8.12, 7.65
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 737,
+          "mean": 737,
+          "min": 737,
+          "p50": 737,
+          "p95": 737,
+          "p99": 737
+        },
+        "response_bytes_samples": [
+          737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737,
+          737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737
+        ],
+        "rss_bytes": {
+          "after": 126832640,
+          "before": 126832640,
+          "heap_used_end": 24437820,
+          "peak": 127348736
+        },
+        "samples": 30,
+        "samples_ms": [
+          8.95, 8.87, 10.78, 9.47, 9.69, 8.38, 8.52, 7.9, 8.48, 8.51, 8.48, 8.68, 8.59, 8.52, 8.88,
+          8.14, 7.99, 10.18, 8.78, 9.16, 8.6, 8.67, 8.21, 8.37, 8.15, 8.01, 8.24, 8.36, 8.15, 7.67
+        ],
+        "setup_ms_total": 0.02,
+        "throughput_rps": 115.65,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "analytics.summary.year"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 5.13,
+          "system_total": 25.65,
+          "user_total": 128.11
+        },
+        "db": {
+          "application_statements_per_operation": 10,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 300,
+            "max": 8.23,
+            "mean": 0.77,
+            "min": 0.22,
+            "p50": 0.4,
+            "p95": 3.55,
+            "p99": 3.7
+          },
+          "statements_total": 300,
+          "time_ms_total": 231.22,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "WITH candidates AS ( SELECT id, platform FROM distributions WHERE status = 'published' AND published_at >= $1 AND published_at <= $2 AND ($3::text IS NULL OR platform = $3) AND ($4::uuid IS NULL OR brand_profile_id = $4) AND ($5::uuid IS NULL OR platform_account_id = $5) AND ($6::text IS NULL OR CASE WHEN COALESCE(array_length(distributions.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(distributions.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = distributions.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END = $6) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = brand_profile_id AND bp.deleted_at IS NULL ) ) SELECT c.platform, COALESCE(SUM(latest.views), 0) AS views, COALESCE(SUM(latest.likes), 0) AS likes, COALESCE(SUM(latest.comments), 0) AS comments, COALESCE(SUM(latest.shares), 0) AS shares, COALESCE(SUM(latest.watch_time_sec), 0) AS watch_time_sec, COALESCE(SUM(latest.reach), 0) AS reach, COALESCE(SUM(latest.impressions), 0) AS impressions, COUNT(*) AS post_count, MAX(latest.snapshot_at) AS last_synced_at FROM candidates c LEFT JOIN LATERAL ( SELECT s.views, s.likes, s.comments, s.shares, s.watch_time_sec, s.reach, s.impressions, s.snapshot_at FROM analytics_snapshots s WHERE s.distribution_id = c.id AND s.snapshot_at <= $2 ORDER BY s.snapshot_at DESC, s.id DESC LIMIT 1 ) latest ON true GROUP BY c.platform ORDER BY c.platform ASC",
+              "total_ms": 112.89,
+              "mean_ms": 3.76
+            },
+            {
+              "count": 30,
+              "statement": "SELECT access_scope.organization_id, access_scope.role, encode(sha256(convert_to(COALESCE( ( SELECT string_agg( bp.id::text || ':' || extract(epoch FROM bp.updated_at)::text || ':' || COALESCE(extract(epoch FROM bp.deleted_at)::text, ''), '|' ORDER BY bp.id ) FROM brand_profiles bp WHERE ($1::uuid IS NULL OR bp.id = $1) AND ($1::uuid IS NOT NULL OR bp.deleted_at IS NULL) ), '' ), 'UTF8')), 'hex') AS visibility FROM ( SELECT public.auth_active_org_id()::text AS organization_id, public.auth_active_org_role() AS role ) AS access_scope",
+              "total_ms": 27.6,
+              "mean_ms": 0.92
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 18.81,
+              "mean_ms": 0.31
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 18.29,
+              "mean_ms": 0.3
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 17.18,
+              "mean_ms": 0.57
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 13.88,
+              "mean_ms": 0.46
+            },
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 13.51,
+              "mean_ms": 0.45
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 9.05,
+              "mean_ms": 0.3
+            }
+          ],
+          "aggregate_executions": 30,
+          "aggregate_time_ms_total": 112.89
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 20.58,
+          "mean": 12.5,
+          "min": 11.35,
+          "p50": 12.08,
+          "p95": 15.12,
+          "p99": 20.58
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 20.55,
+          "mean": 12.47,
+          "min": 11.32,
+          "p50": 12.05,
+          "p95": 15.08,
+          "p99": 20.55
+        },
+        "request_samples_ms": [
+          15.08, 13.42, 12.17, 11.57, 11.33, 11.9, 12.38, 11.78, 11.72, 11.87, 12.33, 11.91, 12.04,
+          11.91, 12.06, 12.77, 20.55, 12.83, 12.26, 12.22, 12.05, 11.59, 11.59, 11.53, 13.14, 11.32,
+          12.2, 12.27, 11.92, 12.26
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 737,
+          "mean": 737,
+          "min": 737,
+          "p50": 737,
+          "p95": 737,
+          "p99": 737
+        },
+        "response_bytes_samples": [
+          737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737,
+          737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737
+        ],
+        "rss_bytes": {
+          "after": 116359168,
+          "before": 127881216,
+          "heap_used_end": 15754803,
+          "peak": 128274432
+        },
+        "samples": 30,
+        "samples_ms": [
+          15.12, 13.45, 12.19, 11.59, 11.36, 11.93, 12.41, 11.81, 11.75, 11.9, 12.35, 11.94, 12.06,
+          11.94, 12.09, 12.8, 20.58, 12.86, 12.3, 12.26, 12.08, 11.62, 11.61, 11.56, 13.17, 11.35,
+          12.23, 12.3, 11.95, 12.28
+        ],
+        "setup_ms_total": 0.02,
+        "throughput_rps": 80.03,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "analytics.summary.cold-exact-range"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 3.65,
+          "system_total": 561.5,
+          "user_total": 1631.23
+        },
+        "db": {
+          "application_statements_per_operation": 9.05,
+          "context_statements": 10200,
+          "statement_ms": {
+            "count": 5430,
+            "max": 22.53,
+            "mean": 1.1,
+            "min": 0.23,
+            "p50": 0.34,
+            "p95": 3.99,
+            "p99": 7.53
+          },
+          "statements_total": 5430,
+          "time_ms_total": 5946.85,
+          "top_statements": [
+            {
+              "count": 600,
+              "statement": "SELECT access_scope.organization_id, access_scope.role, encode(sha256(convert_to(COALESCE( ( SELECT string_agg( bp.id::text || ':' || extract(epoch FROM bp.updated_at)::text || ':' || COALESCE(extract(epoch FROM bp.deleted_at)::text, ''), '|' ORDER BY bp.id ) FROM brand_profiles bp WHERE ($1::uuid IS NULL OR bp.id = $1) AND ($1::uuid IS NOT NULL OR bp.deleted_at IS NULL) ), '' ), 'UTF8')), 'hex') AS visibility FROM ( SELECT public.auth_active_org_id()::text AS organization_id, public.auth_active_org_role() AS role ) AS access_scope",
+              "total_ms": 1964.78,
+              "mean_ms": 3.27
+            },
+            {
+              "count": 600,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 1379.91,
+              "mean_ms": 2.3
+            },
+            {
+              "count": 600,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 1059.24,
+              "mean_ms": 1.77
+            },
+            {
+              "count": 1200,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 387.1,
+              "mean_ms": 0.32
+            },
+            {
+              "count": 30,
+              "statement": "WITH candidates AS ( SELECT id, platform FROM distributions WHERE status = 'published' AND published_at >= $1 AND published_at <= $2 AND ($3::text IS NULL OR platform = $3) AND ($4::uuid IS NULL OR brand_profile_id = $4) AND ($5::uuid IS NULL OR platform_account_id = $5) AND ($6::text IS NULL OR CASE WHEN COALESCE(array_length(distributions.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(distributions.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = distributions.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END = $6) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = brand_profile_id AND bp.deleted_at IS NULL ) ) SELECT c.platform, COALESCE(SUM(latest.views), 0) AS views, COALESCE(SUM(latest.likes), 0) AS likes, COALESCE(SUM(latest.comments), 0) AS comments, COALESCE(SUM(latest.shares), 0) AS shares, COALESCE(SUM(latest.watch_time_sec), 0) AS watch_time_sec, COALESCE(SUM(latest.reach), 0) AS reach, COALESCE(SUM(latest.impressions), 0) AS impressions, COUNT(*) AS post_count, MAX(latest.snapshot_at) AS last_synced_at FROM candidates c LEFT JOIN LATERAL ( SELECT s.views, s.likes, s.comments, s.shares, s.watch_time_sec, s.reach, s.impressions, s.snapshot_at FROM analytics_snapshots s WHERE s.distribution_id = c.id AND s.snapshot_at <= $2 ORDER BY s.snapshot_at DESC, s.id DESC LIMIT 1 ) latest ON true GROUP BY c.platform ORDER BY c.platform ASC",
+              "total_ms": 373.15,
+              "mean_ms": 12.44
+            },
+            {
+              "count": 1200,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 351.08,
+              "mean_ms": 0.29
+            },
+            {
+              "count": 600,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 257.36,
+              "mean_ms": 0.43
+            },
+            {
+              "count": 600,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 174.24,
+              "mean_ms": 0.29
+            }
+          ],
+          "aggregate_executions": 30,
+          "aggregate_time_ms_total": 373.15
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 132.55,
+          "mean": 120.61,
+          "min": 109.54,
+          "p50": 119.89,
+          "p95": 132.2,
+          "p99": 132.55
+        },
+        "operations": 600,
+        "request_latency_ms": {
+          "count": 600,
+          "max": 132.27,
+          "mean": 77.47,
+          "min": 26.99,
+          "p50": 77.51,
+          "p95": 118.62,
+          "p99": 127.62
+        },
+        "request_samples_ms": [
+          78.11, 46.96, 37.54, 32.48, 42.21, 60.6, 51.42, 82.46, 119.59, 107.21, 102.96, 115.51,
+          69.28, 64.88, 97.44, 92.19, 55.95, 73.6, 86.82, 111.17, 82.74, 86.8, 43.53, 115.25, 48.34,
+          55.47, 59.86, 78.07, 110.71, 38.51, 91.2, 95.99, 119.49, 105.28, 73.1, 69.13, 65, 100.57,
+          124.02, 128.36, 32.94, 72.15, 76.4, 37.17, 54.58, 45.9, 106.68, 84.6, 102.25, 89.09, 67.3,
+          80.41, 50.17, 115.05, 97.57, 58.53, 93.08, 62.71, 110.77, 41.35, 36.48, 99.45, 80.03,
+          46.17, 70.19, 127.78, 113.67, 74.95, 84.8, 55.7, 41.34, 60.71, 89.51, 50.69, 118.56,
+          108.94, 94.36, 122.96, 65.34, 104.23, 63.51, 48.27, 58.45, 112.75, 108.15, 95.02, 43.08,
+          132.27, 81.81, 77.07, 99.26, 53.48, 127.3, 72.42, 103.64, 90.5, 117.49, 122.46, 85.97,
+          67.8, 64.63, 50.77, 113.48, 100.16, 45.89, 82.08, 55.4, 104.5, 77.51, 68.68, 40.83, 35.74,
+          91.26, 73.1, 95.46, 59.8, 117.57, 122.2, 108.8, 86.53, 102.03, 57.45, 106.17, 44.98,
+          70.11, 35.98, 49.15, 118.73, 114.36, 74.47, 110.22, 92.81, 78.99, 88.12, 97.4, 53.14,
+          40.52, 83.53, 61.37, 65.83, 47.49, 78.68, 104.29, 87.7, 122.8, 108.8, 60.89, 56.36,
+          118.07, 42.62, 37.92, 51.73, 74.14, 82.94, 65.24, 69.65, 113.19, 33.07, 96.66, 92.06,
+          81.57, 118.19, 85.77, 109.46, 58.02, 105.02, 71.59, 99.51, 76.16, 62.29, 66.87, 40.63,
+          53.52, 36.3, 94.88, 31.29, 113.67, 90.14, 49.16, 44.89, 71.38, 88.74, 40.42, 75.61, 44.76,
+          80.07, 27.06, 57.72, 62.14, 31.26, 35.86, 110.18, 66.64, 97.3, 101.48, 84.14, 53.2, 92.89,
+          105.8, 49.03, 116.07, 76.05, 67.51, 49.42, 54.07, 80.37, 93.54, 58.44, 102.37, 71.61,
+          63.01, 44.43, 120.06, 89.01, 84.68, 106.61, 128.99, 124.5, 97.83, 111.36, 96.47, 63.04,
+          53.6, 48.86, 28.29, 91.7, 118.62, 109.62, 87.18, 58.21, 77.62, 39.91, 100.63, 114.05,
+          67.45, 44.37, 72.2, 35.31, 82.51, 105.04, 69.17, 87.43, 114.23, 92.6, 64.54, 42.38, 46.82,
+          73.04, 77.52, 51.1, 38.28, 60, 96.94, 55.53, 105.72, 82.25, 33.66, 29.32, 109.89, 101.51,
+          40.62, 107.44, 36.08, 26.99, 85.42, 94.04, 67.2, 31.61, 76.33, 49.22, 113.01, 71.84,
+          53.67, 44.83, 58.01, 80.68, 89.67, 62.4, 98.31, 102.67, 69.89, 114.28, 74.22, 51.69,
+          65.33, 45.42, 105.85, 123.15, 127.62, 91.94, 100.9, 87.4, 56.28, 78.5, 131.85, 60.76,
+          109.93, 82.82, 96.26, 118.66, 45.21, 84.72, 75.79, 54.46, 105.76, 49.84, 58.75, 122.64,
+          114.1, 67.42, 71.51, 63.08, 39.67, 80.22, 92.73, 88.68, 96.73, 110.03, 101.04, 118.25,
+          43.66, 78.79, 34.55, 56.22, 38.96, 51.69, 87.68, 29.76, 47.38, 96.57, 110.46, 101.33,
+          61.21, 115.07, 92.09, 74.04, 105.9, 83.06, 69.76, 65.64, 75.1, 89.76, 43.96, 35.03, 39.5,
+          57.23, 84.33, 117.22, 94.58, 70.54, 52.83, 48.35, 61.64, 112.66, 79.27, 66.08, 108.08,
+          98.88, 121.62, 103.38, 122.31, 67.78, 48.53, 72.17, 93.72, 131.11, 106.59, 97.97, 53.78,
+          102.13, 63.23, 117.63, 76.09, 110.67, 84.29, 126.7, 79.3, 87.99, 58.04, 42.97, 79.26,
+          49.33, 100.78, 44.82, 74.87, 58.43, 53.9, 91.53, 109.83, 83.29, 65.37, 39.48, 34.46,
+          122.68, 95.95, 114.03, 69.69, 87.3, 104.86, 118.27, 82.16, 103.55, 95.22, 116.64, 77.61,
+          112.04, 33.79, 64.64, 86.27, 69.04, 55.4, 50.39, 120.91, 90.36, 44.66, 60.18, 99.16,
+          107.52, 73.35, 39.3, 48.67, 87.66, 44.26, 100.47, 39.99, 61.58, 105.05, 109.58, 117.09,
+          31.02, 74.8, 91.76, 57.13, 70.41, 83.3, 96.13, 79.09, 66.08, 35.46, 52.63, 76.19, 93.67,
+          53.92, 71.63, 49.52, 80.91, 107.27, 119.76, 67.13, 115.79, 58.47, 62.79, 45.04, 111.51,
+          40.71, 36.35, 84.8, 89.13, 102.77, 98.06, 73.27, 113.78, 33.48, 50.87, 41.76, 109.53,
+          69.04, 56.07, 64.72, 86.25, 60.41, 90.34, 46.16, 37.55, 28.91, 77.11, 81.3, 94.45, 105.37,
+          98.64, 97.58, 48.75, 30.63, 61.8, 88.43, 74.81, 35.15, 66.03, 53.08, 39.65, 111.3, 102.48,
+          44.12, 57.38, 92.77, 115.55, 79.12, 106.86, 83.5, 70.32, 76.83, 68.57, 35.38, 103.68,
+          112.97, 89.88, 64.7, 30.84, 72.75, 94.17, 47.73, 52.04, 108.28, 81.02, 60.38, 98.79,
+          85.33, 43.68, 55.96, 39.54, 76.95, 46.09, 41.21, 85.95, 81.17, 103.71, 36.16, 62.62,
+          108.13, 50.31, 117.02, 121.41, 67.06, 71.67, 112.51, 125.75, 94.71, 98.77, 57.67, 90.23,
+          40.9, 70.39, 50.4, 45.63, 65.8, 36.37, 83.74, 88.26, 117.37, 92.62, 79.16, 74.68, 121.76,
+          101.48, 105.92, 56.68, 112.17, 96.78, 31.58, 61.15, 83.56, 100.44, 113.12, 108.94, 70.32,
+          43.89, 91.94, 104.79, 48.08, 79.09, 96.11, 52.4, 74.84, 65.61, 87.59, 117.26, 39.37,
+          34.79, 56.83, 61.04, 71.73, 76, 80.09, 37.2, 58.54, 45.83, 28.27, 62.9, 41.47, 84.18,
+          92.33, 96.45, 109.29, 54.18, 104.92, 88.18, 50.01, 100.36, 32.63, 67.09
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 14740,
+          "mean": 14740,
+          "min": 14740,
+          "p50": 14740,
+          "p95": 14740,
+          "p99": 14740
+        },
+        "response_bytes_samples": [
+          14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740,
+          14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740,
+          14740, 14740, 14740, 14740
+        ],
+        "rss_bytes": {
+          "after": 134668288,
+          "before": 124174336,
+          "heap_used_end": 24186051,
+          "peak": 139390976
+        },
+        "samples": 30,
+        "samples_ms": [
+          119.89, 128.81, 115.44, 128.04, 132.55, 122.66, 118.99, 123.03, 118.39, 110.47, 129.33,
+          118.89, 114.44, 113.31, 132.2, 122.93, 115.42, 122, 131.31, 123.05, 121.25, 117.33,
+          120.03, 113.95, 115.87, 113.16, 126.2, 122.1, 117.67, 109.54
+        ],
+        "setup_ms_total": 0.03,
+        "throughput_rps": 165.83,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "analytics.summary.concurrent-cold20"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 5.5,
+          "system_total": 41.7,
+          "user_total": 123.2
+        },
+        "db": {
+          "application_statements_per_operation": 9,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 270,
+            "max": 1.57,
+            "mean": 0.43,
+            "min": 0.24,
+            "p50": 0.37,
+            "p95": 0.71,
+            "p99": 0.75
+          },
+          "statements_total": 270,
+          "time_ms_total": 116.56,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 22.06,
+              "mean_ms": 0.74
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 20.24,
+              "mean_ms": 0.34
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 19.19,
+              "mean_ms": 0.32
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 17.62,
+              "mean_ms": 0.59
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 14.46,
+              "mean_ms": 0.48
+            },
+            {
+              "count": 30,
+              "statement": "SELECT platform, platform_user_id, access_token, connection_status, token_expires_at, revoked_at, extract(epoch FROM updated_at)::text AS updated_at FROM platform_accounts WHERE id = $1 LIMIT 1",
+              "total_ms": 14.18,
+              "mean_ms": 0.47
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 8.82,
+              "mean_ms": 0.29
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 112.72,
+          "mean": 109.38,
+          "min": 108.76,
+          "p50": 109.13,
+          "p95": 110.92,
+          "p99": 112.72
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 112.65,
+          "mean": 109.32,
+          "min": 108.7,
+          "p50": 109.07,
+          "p95": 110.86,
+          "p99": 112.65
+        },
+        "request_samples_ms": [
+          108.88, 108.7, 108.81, 110.75, 108.86, 108.84, 112.65, 109.3, 109.19, 108.93, 109.35,
+          109.06, 110.35, 109.23, 109.25, 109.07, 108.98, 108.74, 109.2, 109.14, 108.95, 109.33,
+          110.86, 109.26, 109.03, 108.88, 108.83, 109.13, 109.26, 108.84
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 253,
+          "mean": 253,
+          "min": 253,
+          "p50": 253,
+          "p95": 253,
+          "p99": 253
+        },
+        "response_bytes_samples": [
+          253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253,
+          253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253
+        ],
+        "rss_bytes": {
+          "after": 129138688,
+          "before": 131280896,
+          "heap_used_end": 26398805,
+          "peak": 139390976
+        },
+        "samples": 30,
+        "samples_ms": [
+          108.94, 108.76, 108.87, 110.81, 108.91, 108.89, 112.72, 109.36, 109.24, 108.99, 109.41,
+          109.12, 110.42, 109.3, 109.35, 109.13, 109.03, 108.79, 109.26, 109.2, 109.03, 109.38,
+          110.92, 109.32, 109.1, 108.94, 108.89, 109.19, 109.31, 108.9
+        ],
+        "setup_ms_total": 0.07,
+        "throughput_rps": 9.14,
+        "warmup": 3,
+        "upstream_reads": 30
+      },
+      "name": "requirements.sequential"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 3.12,
+          "system_total": 580.28,
+          "user_total": 1291.15
+        },
+        "db": {
+          "application_statements_per_operation": 9,
+          "context_statements": 10200,
+          "statement_ms": {
+            "count": 5400,
+            "max": 7.43,
+            "mean": 0.78,
+            "min": 0.22,
+            "p50": 0.33,
+            "p95": 2.55,
+            "p99": 4.12
+          },
+          "statements_total": 5400,
+          "time_ms_total": 4209.02,
+          "top_statements": [
+            {
+              "count": 600,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 1218.7,
+              "mean_ms": 2.03
+            },
+            {
+              "count": 600,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 953.49,
+              "mean_ms": 1.59
+            },
+            {
+              "count": 600,
+              "statement": "SELECT platform, platform_user_id, access_token, connection_status, token_expires_at, revoked_at, extract(epoch FROM updated_at)::text AS updated_at FROM platform_accounts WHERE id = $1 LIMIT 1",
+              "total_ms": 913.78,
+              "mean_ms": 1.52
+            },
+            {
+              "count": 1200,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 367.98,
+              "mean_ms": 0.31
+            },
+            {
+              "count": 1200,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 340.92,
+              "mean_ms": 0.28
+            },
+            {
+              "count": 600,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 243.2,
+              "mean_ms": 0.41
+            },
+            {
+              "count": 600,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 170.96,
+              "mean_ms": 0.28
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 214.28,
+          "mean": 205.03,
+          "min": 198.81,
+          "p50": 205.21,
+          "p95": 210.95,
+          "p99": 214.28
+        },
+        "operations": 600,
+        "request_latency_ms": {
+          "count": 600,
+          "max": 213.84,
+          "mean": 162.79,
+          "min": 116.31,
+          "p50": 163.15,
+          "p95": 202.29,
+          "p99": 208.55
+        },
+        "request_samples_ms": [
+          130.17, 152.24, 196.81, 125.23, 162.58, 158.12, 134.84, 192.77, 139.51, 188.35, 170.87,
+          147.95, 166.52, 143.76, 209.47, 205.17, 200.81, 175.07, 179.38, 183.75, 163.8, 150.26,
+          128.98, 120.38, 202.72, 198.28, 145.87, 124.56, 137.5, 193.86, 189.27, 176.15, 171.79,
+          184.81, 180.47, 159.05, 154.51, 132.95, 167.42, 141.5, 162.31, 158.11, 204.94, 123.22,
+          127.69, 187.26, 178.63, 200.32, 140.42, 195.98, 170.35, 149.28, 153.7, 191.48, 182.85,
+          131.86, 166.06, 144.77, 136.06, 174.18, 152.31, 156.23, 128.49, 119.33, 132.92, 123.99,
+          191.41, 182.47, 178.26, 160.12, 137.12, 141.68, 164.57, 205.65, 196.17, 186.78, 146.82,
+          168.88, 200.91, 173.82, 148.59, 144.12, 181.79, 195.83, 177.6, 120.62, 157.17, 170.54,
+          161.57, 200.13, 204.57, 130.27, 191.3, 186.64, 165.97, 152.71, 125.22, 134.93, 139.4,
+          208.92, 132.58, 194.7, 180.67, 141.27, 185.25, 161.67, 150.19, 166.4, 171.16, 127.92,
+          145.64, 154.94, 123.72, 119.13, 203.64, 189.95, 199.05, 208.07, 136.63, 175.72, 188.52,
+          149.23, 153.45, 140.77, 161.93, 170.63, 175.04, 192.76, 126.64, 144.95, 166.26, 210.53,
+          183.56, 131.35, 206.04, 179.19, 201.57, 197.07, 135.83, 157.47, 119.32, 151.03, 132.45,
+          137.33, 123.46, 169.33, 160.3, 185.71, 155.69, 173.6, 181.51, 193.53, 164.87, 146.47,
+          177.62, 201.88, 189.56, 127.88, 141.6, 197.56, 141.98, 187.19, 169.07, 150.96, 178.52,
+          123.09, 155.4, 136.99, 200.15, 195.99, 182.85, 159.65, 191.49, 127.74, 209.13, 132.42,
+          164.25, 204.87, 173.54, 146.12, 153.96, 162.55, 167.02, 158.18, 175.3, 138.92, 209.47,
+          205.03, 213.84, 127.41, 183.5, 132.5, 179.12, 192.02, 200.68, 144.31, 196.31, 187.7,
+          170.89, 149.09, 191, 177, 163.94, 172.57, 127.56, 118.85, 145.97, 181.72, 150.53, 123.08,
+          203.82, 199.63, 137.13, 141.67, 186.14, 195.3, 167.76, 159.56, 155.01, 132.22, 139.81,
+          135.35, 162.4, 121.93, 126.5, 153.21, 192.9, 201.81, 180.27, 144.18, 166.95, 206.44,
+          157.84, 171.29, 148.61, 130.85, 188.73, 184.44, 175.75, 197.09, 141.63, 187.05, 154.63,
+          150.21, 191.63, 124.12, 205.11, 177.17, 200.58, 119.72, 172.24, 196.07, 145.66, 163.3,
+          167.66, 182.29, 132.6, 158.89, 128.25, 136.92, 165.21, 182.59, 138.66, 178.16, 124.9,
+          147.39, 120.16, 151.74, 191.39, 169.44, 160.56, 156.11, 142.92, 173.52, 195.81, 134.02,
+          129.44, 186.82, 204.69, 200.18, 197.51, 172.51, 193.01, 128.39, 132.85, 159.51, 163.95,
+          185.03, 150.84, 176.33, 201.73, 146.38, 123.99, 188.93, 141.93, 119.46, 167.83, 155.07,
+          137.34, 180.8, 121.38, 138.22, 125.4, 167.76, 129.73, 180.85, 150.99, 163.58, 134.02,
+          189.11, 176.72, 202.29, 184.74, 142.44, 197.97, 193.43, 172.3, 146.63, 155.24, 159.13,
+          196, 178.38, 136.18, 169.57, 122.74, 131.72, 165.09, 173.98, 118.22, 144.86, 160.56,
+          191.47, 182.37, 153.92, 140.38, 127.21, 149.33, 200.29, 205.15, 186.89, 151.72, 142.93,
+          177.03, 193.53, 120.72, 129.85, 134.2, 181.27, 160.05, 138.51, 147.18, 155.79, 172.66,
+          197.85, 185.17, 202.07, 189.42, 168.38, 164.16, 125.09, 191.19, 182.25, 130.62, 156.35,
+          173.65, 126.25, 195.34, 186.58, 164.99, 199.71, 147.69, 134.8, 169.34, 143.38, 177.92,
+          160.59, 139.08, 151.91, 117.52, 121.84, 162.45, 118.24, 142.81, 193.15, 133.95, 123.78,
+          170.86, 202.65, 188.52, 153.55, 149.06, 166.6, 157.88, 184.05, 179.65, 175.15, 206.86,
+          197.74, 138.24, 129.1, 172.81, 163.96, 177.01, 119.52, 150.72, 137.66, 155.08, 198.62,
+          141.99, 190.02, 146.3, 123.79, 128.5, 194.1, 185.48, 159.3, 133.1, 168.19, 181.18, 202.89,
+          138.59, 163.24, 184.57, 194.96, 158.97, 116.97, 130.01, 154.66, 125.5, 171.4, 121.34,
+          134.09, 180.19, 142.33, 146.45, 190.65, 175.68, 199.36, 167.08, 150.49, 167.66, 188.68,
+          132.63, 154.43, 158.78, 137.21, 163.15, 201.58, 127.86, 141.53, 118.75, 192.83, 175.91,
+          145.49, 123.24, 179.99, 149.93, 184.12, 197.22, 171.81, 143.84, 157.11, 139.19, 152.69,
+          122.15, 196.06, 187.37, 134.67, 118, 130.45, 148.14, 126.19, 165.84, 170.21, 161.38,
+          200.01, 183.22, 174.53, 191.6, 178.72, 156.33, 185.58, 198.6, 140, 122.37, 148.24, 168.41,
+          172.61, 144.01, 164.33, 126.92, 152.13, 176.85, 160.12, 189.53, 181.07, 117.73, 131.3,
+          135.6, 193.86, 142.21, 183.15, 192.29, 146.69, 151.18, 128.6, 169.73, 165.18, 119.56,
+          155.94, 178.64, 174.19, 204.98, 137.62, 200.99, 160.48, 132.96, 124.09, 187.57, 196.38,
+          170.29, 152.54, 143.68, 185.04, 198.2, 193.78, 179.11, 207.01, 165.62, 125.48, 147.94,
+          134.62, 156.78, 161.2, 129.99, 189.33, 120.65, 174.56, 202.33, 139.01, 194.84, 125.45,
+          138.69, 156.13, 177.48, 199.1, 116.31, 173.16, 164.86, 120.82, 142.87, 134.12, 168.76,
+          151.57, 160.27, 147.2, 181.61, 190.2, 129.67, 185.83, 163.48, 159.06, 172.04, 145.88,
+          154.67, 150.21, 141.43, 121.04, 132.27, 126.63, 201.5, 189.12, 184.82, 180.51, 136.81,
+          176.21, 205.58, 193.17, 197.32, 167.5, 153.96, 191.32, 178.3, 130.75, 144.85, 124.57,
+          173.96, 199.96, 149.24, 186.92, 162.72, 135.17, 195.59, 182.58, 140.19, 208.55, 118.78,
+          158.22, 204.17, 167.1
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 5060,
+          "mean": 5060,
+          "min": 5060,
+          "p50": 5060,
+          "p95": 5060,
+          "p99": 5060
+        },
+        "response_bytes_samples": [
+          5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060,
+          5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060
+        ],
+        "rss_bytes": {
+          "after": 140840960,
+          "before": 132894720,
+          "heap_used_end": 33484670,
+          "peak": 140840960
+        },
+        "samples": 30,
+        "samples_ms": [
+          209.84, 203.07, 205.21, 206.04, 209.41, 208.51, 210.95, 202.25, 209.55, 214.28, 204.12,
+          206.7, 205.39, 205.09, 201.98, 202.58, 205.52, 202.43, 199.99, 207.17, 203.29, 199.75,
+          201.83, 200.33, 198.81, 205.27, 207.37, 199.33, 205.91, 208.86
+        ],
+        "setup_ms_total": 0.07,
+        "throughput_rps": 97.55,
+        "warmup": 3,
+        "upstream_reads": 30
+      },
+      "name": "requirements.concurrent20"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 9.98,
+          "system_total": 106.08,
+          "user_total": 492.9
+        },
+        "db": {
+          "application_statements_per_operation": 10.5,
+          "context_statements": 1020,
+          "statement_ms": {
+            "count": 630,
+            "max": 2607.96,
+            "mean": 103.4,
+            "min": 0.25,
+            "p50": 0.51,
+            "p95": 25.53,
+            "p99": 2170.34
+          },
+          "statements_total": 630,
+          "time_ms_total": 65142.94,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "WITH candidates AS ( SELECT d.id, d.platform, d.published_at, CASE WHEN COALESCE(array_length(d.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(d.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = d.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END AS format FROM distributions d WHERE d.status = 'published' AND d.published_at >= $1 AND d.published_at <= $2 AND ($3::text IS NULL OR d.platform = $3) AND ($4::uuid IS NULL OR d.brand_profile_id = $4) AND ($5::uuid IS NULL OR d.platform_account_id = $5) AND ($6::text IS NULL OR CASE WHEN COALESCE(array_length(d.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(d.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = d.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END = $6) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = d.brand_profile_id AND bp.deleted_at IS NULL )), baseline AS ( SELECT DISTINCT ON (s.distribution_id) s.distribution_id, s.views, s.likes, s.comments, s.shares, s.impressions, s.reach, s.snapshot_at, s.id, 1 AS is_baseline FROM analytics_snapshots s JOIN candidates c ON c.id = s.distribution_id WHERE s.snapshot_at < $1 ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC ), events AS ( SELECT s.distribution_id, s.views, s.likes, s.comments, s.shares, s.impressions, s.reach, s.snapshot_at, s.id, 0 AS is_baseline FROM analytics_snapshots s JOIN candidates c ON c.id = s.distribution_id WHERE s.snapshot_at >= $1 AND s.snapshot_at <= $2 UNION ALL SELECT distribution_id, views, likes, comments, shares, impressions, reach, snapshot_at, id, is_baseline FROM baseline ), deltas AS ( SELECT e.distribution_id, c.platform, e.snapshot_at, e.is_baseline, CASE WHEN e.is_baseline = 1 THEN 0 ELSE GREATEST(e.views - COALESCE(lag(e.views) OVER w, 0), 0) END AS views, CASE WHEN e.is_baseline = 1 THEN 0 ELSE GREATEST(e.likes - COALESCE(lag(e.likes) OVER w, 0), 0) END AS likes, CASE WHEN e.is_baseline = 1 THEN 0 ELSE GREATEST(e.comments - COALESCE(lag(e.comments) OVER w, 0), 0) END AS comments, CASE WHEN e.is_baseline = 1 THEN 0 ELSE GREATEST(e.shares - COALESCE(lag(e.shares) OVER w, 0), 0) END AS shares, CASE WHEN e.is_baseline = 1 THEN 0 ELSE GREATEST(e.impressions - COALESCE(lag(e.impressions) OVER w, 0), 0) END AS impressions, CASE WHEN e.is_baseline = 1 THEN 0 ELSE GREATEST(e.reach - COALESCE(lag(e.reach) OVER w, 0), 0) END AS reach FROM events e JOIN candidates c ON c.id = e.distribution_id WINDOW w AS (PARTITION BY e.distribution_id ORDER BY e.snapshot_at, e.id) ), snapshot_days AS ( SELECT date_trunc('day', snapshot_at)::date AS date, platform, SUM(views) AS views, SUM(likes) AS likes, SUM(comments) AS comments, SUM(shares) AS shares, SUM(impressions) AS impressions, SUM(reach) AS reach, MAX(snapshot_at) AS last_synced_at FROM deltas GROUP BY 1, 2 ), published_days AS ( SELECT date_trunc('day', published_at)::date AS date, platform, COUNT(*) AS posts FROM candidates GROUP BY 1, 2 ) SELECT date, platform, SUM(posts)::int AS posts, SUM(views) AS views, SUM(likes) AS likes, SUM(comments) AS comments, SUM(shares) AS shares, SUM(impressions) AS impressions, SUM(reach) AS reach, MAX(last_synced_at) AS last_synced_at FROM ( SELECT date, platform, 0::bigint AS posts, views, likes, comments, shares, impressions, reach, last_synced_at FROM snapshot_days UNION ALL SELECT date, platform, posts, 0, 0, 0, 0, 0, 0, NULL FROM published_days ) parts GROUP BY date, platform ORDER BY date ASC, platform ASC",
+              "total_ms": 63089.48,
+              "mean_ms": 2102.98
+            },
+            {
+              "count": 30,
+              "statement": "WITH candidates AS ( SELECT d.id, d.platform, d.published_at, CASE WHEN COALESCE(array_length(d.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(d.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = d.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END AS format FROM distributions d WHERE d.status = 'published' AND d.published_at >= $1 AND d.published_at <= $2 AND ($3::text IS NULL OR d.platform = $3) AND ($4::uuid IS NULL OR d.brand_profile_id = $4) AND ($5::uuid IS NULL OR d.platform_account_id = $5) AND ($6::text IS NULL OR CASE WHEN COALESCE(array_length(d.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(d.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = d.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END = $6) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = d.brand_profile_id AND bp.deleted_at IS NULL )), latest AS ( SELECT DISTINCT ON (s.distribution_id) s.distribution_id, s.views, s.likes, s.comments, s.shares, s.impressions, s.reach, s.watch_time_sec, s.saves, s.clicks, s.snapshot_at FROM analytics_snapshots s JOIN candidates c ON c.id = s.distribution_id WHERE s.snapshot_at <= $2 ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC ), joined AS MATERIALIZED ( SELECT c.id, c.platform, c.published_at, c.format, l.views, l.likes, l.comments, l.shares, l.impressions, l.reach, l.watch_time_sec, l.saves, l.clicks, l.snapshot_at FROM candidates c LEFT JOIN latest l ON l.distribution_id = c.id ) SELECT COALESCE(( SELECT json_agg(platform_row) FROM ( SELECT c.platform, COUNT(*)::int AS posts, COALESCE(SUM(c.views), 0) AS views, COALESCE(SUM(c.likes), 0) AS likes, COALESCE(SUM(c.comments), 0) AS comments, COALESCE(SUM(c.shares), 0) AS shares, COALESCE(SUM(c.impressions), 0) AS impressions, COALESCE(SUM(c.reach), 0) AS reach, COALESCE(SUM(c.watch_time_sec), 0) AS watch_time_sec, SUM(c.saves) AS saves, SUM(c.clicks) AS clicks, CASE WHEN SUM(COALESCE(c.views, 0)) > 0 THEN (SUM(COALESCE(c.likes, 0)) + SUM(COALESCE(c.comments, 0)) + SUM(COALESCE(c.shares, 0)))::float8 / SUM(COALESCE(c.views, 0)) ELSE NULL END AS engagement_rate, MAX(c.snapshot_at) AS last_synced_at FROM joined c GROUP BY c.platform ORDER BY c.platform ASC ) AS platform_row ), '[]'::json) AS platforms, COALESCE(( SELECT json_agg(format_row) FROM ( SELECT c.format, COUNT(*)::int AS posts, COALESCE(SUM(c.views), 0) AS views, COALESCE(SUM(c.likes), 0) AS likes, COALESCE(SUM(c.comments), 0) AS comments, COALESCE(SUM(c.shares), 0) AS shares, (SUM(COALESCE(c.likes, 0)) + SUM(COALESCE(c.comments, 0)) + SUM(COALESCE(c.shares, 0))) AS engagement, MAX(c.snapshot_at) AS last_synced_at FROM joined c GROUP BY c.format ORDER BY posts DESC, c.format ASC ) AS format_row ), '[]'::json) AS formats, COALESCE(( SELECT json_agg(best_row) FROM ( SELECT EXTRACT(DOW FROM c.published_at)::int AS day_of_week, EXTRACT(HOUR FROM c.published_at)::int AS hour, COUNT(*)::int AS posts, AVG(COALESCE(c.views, 0))::float8 AS avg_views, AVG(COALESCE(c.likes, 0))::float8 AS avg_likes, AVG(COALESCE(c.comments, 0))::float8 AS avg_comments, AVG(COALESCE(c.shares, 0))::float8 AS avg_shares, AVG(COALESCE(c.likes, 0) + COALESCE(c.comments, 0) + COALESCE(c.shares, 0))::float8 AS avg_engagement FROM joined c GROUP BY 1, 2 ORDER BY 1 ASC, 2 ASC ) AS best_row ), '[]'::json) AS best_times",
+              "total_ms": 610.02,
+              "mean_ms": 20.33
+            },
+            {
+              "count": 30,
+              "statement": "WITH candidates AS ( SELECT d.id, d.platform, d.published_at, CASE WHEN COALESCE(array_length(d.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(d.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = d.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END AS format FROM distributions d WHERE d.status = 'published' AND d.published_at >= $1 AND d.published_at <= $2 AND ($3::text IS NULL OR d.platform = $3) AND ($4::uuid IS NULL OR d.brand_profile_id = $4) AND ($5::uuid IS NULL OR d.platform_account_id = $5) AND ($6::text IS NULL OR CASE WHEN COALESCE(array_length(d.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(d.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = d.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END = $6) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = d.brand_profile_id AND bp.deleted_at IS NULL )), snapshots AS ( SELECT c.id AS distribution_id, c.published_at, s.snapshot_at, EXTRACT(EPOCH FROM (s.snapshot_at - c.published_at)) / 3600 AS elapsed_hours, (s.likes + s.comments + s.shares) AS engagement FROM candidates c JOIN analytics_snapshots s ON s.distribution_id = c.id WHERE s.snapshot_at >= c.published_at AND s.snapshot_at <= $2 AND s.snapshot_at <= c.published_at + INTERVAL '720 hours' ), buckets(hours) AS (VALUES (1), (6), (24), (72), (168), (720)), per_bucket AS ( SELECT buckets.hours, snapshots.distribution_id, MAX(snapshots.engagement) AS engagement FROM buckets JOIN snapshots ON snapshots.elapsed_hours <= buckets.hours GROUP BY buckets.hours, snapshots.distribution_id ) SELECT hours::int AS elapsed_hours, AVG(engagement)::float8 AS avg_engagement, COUNT(*)::int AS observations FROM per_bucket GROUP BY hours ORDER BY hours ASC",
+              "total_ms": 596.42,
+              "mean_ms": 19.88
+            },
+            {
+              "count": 30,
+              "statement": "WITH candidates AS ( SELECT d.id AS distribution_id, d.post_id, d.platform, d.published_at FROM distributions d WHERE d.status = 'published' AND d.published_at >= $1 AND d.published_at <= $2 AND ($3::text IS NULL OR d.platform = $3) AND ($4::uuid IS NULL OR d.brand_profile_id = $4) AND ($5::uuid IS NULL OR d.platform_account_id = $5) AND ($6::text IS NULL OR CASE WHEN COALESCE(array_length(d.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(d.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = d.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END = $6) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = d.brand_profile_id AND bp.deleted_at IS NULL ) ), latest AS ( SELECT DISTINCT ON (s.distribution_id) s.distribution_id, s.views, s.likes, s.comments, s.shares, s.snapshot_at FROM analytics_snapshots s JOIN candidates c ON c.distribution_id = s.distribution_id WHERE s.snapshot_at <= $2 ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC ), per_post AS ( SELECT c.post_id, MIN(c.published_at) AS published_at, COUNT(*) AS destination_count, COUNT(l.distribution_id) AS synced_destination_count, ARRAY_AGG(DISTINCT c.platform ORDER BY c.platform) AS platforms, MAX(l.snapshot_at) AS last_synced_at, COALESCE(SUM(l.views), 0) AS views, COALESCE(SUM(l.likes), 0) AS likes, COALESCE(SUM(l.comments), 0) AS comments, COALESCE(SUM(l.shares), 0) AS shares FROM candidates c LEFT JOIN latest l ON l.distribution_id = c.distribution_id GROUP BY c.post_id ) SELECT p.id AS post_id, p.title, LEFT(btrim(regexp_replace(p.default_text, '\\s+', ' ', 'g')), 140) AS excerpt, pp.published_at, pp.destination_count, pp.synced_destination_count, pp.platforms, pp.last_synced_at, pp.views, pp.likes, pp.comments, pp.shares FROM per_post pp JOIN posts p ON p.id = pp.post_id AND p.deleted_at IS NULL ORDER BY pp.views DESC, pp.published_at DESC, pp.post_id ASC LIMIT $7 OFFSET $8",
+              "total_ms": 550.69,
+              "mean_ms": 18.36
+            },
+            {
+              "count": 30,
+              "statement": "WITH baseline AS ( SELECT account.id AS account_id, account.platform, account.display_name AS account_name, latest.followers, latest.captured_at FROM platform_accounts account JOIN LATERAL ( SELECT snapshot.followers, snapshot.captured_at FROM platform_account_snapshots snapshot WHERE snapshot.platform_account_id = account.id AND snapshot.captured_at < $1 ORDER BY snapshot.captured_at DESC LIMIT 1 ) latest ON true WHERE ($3::text IS NULL OR account.platform = $3) AND ($4::uuid IS NULL OR account.brand_profile_id = $4) AND ($5::uuid IS NULL OR account.id = $5) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = account.brand_profile_id AND bp.deleted_at IS NULL ) ), daily AS ( SELECT DISTINCT ON (account.id, date_trunc('day', snapshot.captured_at)) account.id AS account_id, account.platform, account.display_name AS account_name, snapshot.followers, snapshot.captured_at FROM platform_account_snapshots snapshot JOIN platform_accounts account ON account.id = snapshot.platform_account_id WHERE snapshot.captured_at >= $1 AND snapshot.captured_at <= $2 AND ($3::text IS NULL OR account.platform = $3) AND ($4::uuid IS NULL OR account.brand_profile_id = $4) AND ($5::uuid IS NULL OR account.id = $5) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = account.brand_profile_id AND bp.deleted_at IS NULL ) ORDER BY account.id, date_trunc('day', snapshot.captured_at), snapshot.captured_at DESC ) SELECT * FROM baseline UNION ALL SELECT * FROM daily ORDER BY platform ASC, account_id ASC, captured_at ASC",
+              "total_ms": 77.95,
+              "mean_ms": 2.6
+            },
+            {
+              "count": 120,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 47.63,
+              "mean_ms": 0.4
+            },
+            {
+              "count": 60,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 40.52,
+              "mean_ms": 0.68
+            },
+            {
+              "count": 120,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 40.17,
+              "mean_ms": 0.33
+            },
+            {
+              "count": 60,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 35.62,
+              "mean_ms": 0.59
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 34.88,
+              "mean_ms": 0.58
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 19.55,
+              "mean_ms": 0.33
+            }
+          ],
+          "aggregate_executions": 120,
+          "aggregate_time_ms_total": 64846.62
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 2668.31,
+          "mean": 2155.41,
+          "min": 2002.72,
+          "p50": 2120.89,
+          "p95": 2481.06,
+          "p99": 2668.31
+        },
+        "operations": 60,
+        "request_latency_ms": {
+          "count": 60,
+          "max": 2668.12,
+          "mean": 1091.54,
+          "min": 22.66,
+          "p50": 40.22,
+          "p95": 2316.69,
+          "p99": 2668.12
+        },
+        "request_samples_ms": [
+          2233.65, 27.39, 2127.43, 23.43, 2120.71, 26.3, 2273.45, 22.66, 2121.67, 28.03, 2131.93,
+          26.18, 2027.09, 26.17, 2208.74, 32.7, 2039.54, 30.11, 2480.83, 24, 2357.79, 40.22,
+          2668.12, 27.13, 2316.69, 32.67, 2082.3, 28.04, 2198.54, 25.29, 2217.19, 31.62, 2093.12,
+          23.89, 2089.67, 30.37, 2038.64, 29.1, 2002.58, 25.68, 2068.77, 27.04, 2029.09, 27.07,
+          2041.12, 23.74, 2043.56, 24.47, 2135.19, 27.22, 2169.61, 25.67, 2014.76, 32.75, 2203.44,
+          29.04, 2106.2, 26.43, 2015.65, 31.15
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 63383,
+          "mean": 63383,
+          "min": 63383,
+          "p50": 63383,
+          "p95": 63383,
+          "p99": 63383
+        },
+        "response_bytes_samples": [
+          63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383,
+          63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383, 63383,
+          63383, 63383, 63383, 63383
+        ],
+        "rss_bytes": {
+          "after": 122441728,
+          "before": 120672256,
+          "heap_used_end": 28340476,
+          "peak": 142544896
+        },
+        "samples": 30,
+        "samples_ms": [
+          2233.81, 2127.6, 2120.89, 2273.64, 2121.85, 2132.11, 2027.25, 2208.92, 2039.71, 2481.06,
+          2357.95, 2668.31, 2316.89, 2082.5, 2198.72, 2217.37, 2093.26, 2089.83, 2038.81, 2002.72,
+          2068.92, 2029.25, 2041.28, 2043.72, 2135.35, 2169.79, 2014.92, 2203.61, 2106.36, 2015.8
+        ],
+        "setup_ms_total": 0.02,
+        "throughput_rps": 0.93,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "analytics.page.dashboard-and-ranking"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 4.76,
+          "system_total": 31.92,
+          "user_total": 110.9
+        },
+        "db": {
+          "application_statements_per_operation": 9,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 270,
+            "max": 5.89,
+            "mean": 0.52,
+            "min": 0.23,
+            "p50": 0.33,
+            "p95": 1.62,
+            "p99": 2.29
+          },
+          "statements_total": 270,
+          "time_ms_total": 141.06,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT c.id, c.distribution_id, d.platform, c.platform_comment_id, c.author_name, c.author_avatar, c.body, c.reply_text, c.reply_status, c.reply_error, c.reply_attempted_at, c.commented_at, c.synced_at, c.updated_at, d.brand_profile_id, d.post_id FROM comments c JOIN distributions d ON d.id = c.distribution_id AND d.org_id = c.org_id WHERE EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = d.brand_profile_id AND bp.deleted_at IS NULL ) ORDER BY c.commented_at DESC, c.id DESC LIMIT $1 OFFSET $2",
+              "total_ms": 53.87,
+              "mean_ms": 1.8
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 20.17,
+              "mean_ms": 0.34
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 17.63,
+              "mean_ms": 0.29
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 16.39,
+              "mean_ms": 0.55
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 12.89,
+              "mean_ms": 0.43
+            },
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 11.42,
+              "mean_ms": 0.38
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 8.69,
+              "mean_ms": 0.29
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 13.69,
+          "mean": 8.66,
+          "min": 7.79,
+          "p50": 8.16,
+          "p95": 12.94,
+          "p99": 13.69
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 13.69,
+          "mean": 8.66,
+          "min": 7.79,
+          "p50": 8.16,
+          "p95": 12.94,
+          "p99": 13.69
+        },
+        "request_samples_ms": [
+          8.25, 8.07, 8.19, 8.1, 7.79, 8.1, 8.03, 7.79, 8.25, 8.16, 8.1, 8.2, 7.94, 7.96, 10.09,
+          13.69, 10.67, 9.11, 8.43, 8.37, 8.14, 8.08, 8.18, 8.16, 7.93, 8.73, 7.98, 12.94, 8.38,
+          8.06
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 54338,
+          "mean": 54338,
+          "min": 54338,
+          "p50": 54338,
+          "p95": 54338,
+          "p99": 54338
+        },
+        "response_bytes_samples": [
+          54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338,
+          54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338,
+          54338, 54338, 54338, 54338
+        ],
+        "rss_bytes": {
+          "after": 138010624,
+          "before": 124538880,
+          "heap_used_end": 13619377,
+          "peak": 142544896
+        },
+        "samples": 30,
+        "samples_ms": [
+          8.25, 8.07, 8.19, 8.1, 7.79, 8.1, 8.03, 7.79, 8.25, 8.16, 8.1, 8.2, 7.94, 7.96, 10.09,
+          13.69, 10.67, 9.11, 8.43, 8.37, 8.14, 8.08, 8.18, 8.16, 7.93, 8.73, 7.98, 12.94, 8.38,
+          8.06
+        ],
+        "setup_ms_total": 0.01,
+        "throughput_rps": 115.44,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "inbox.list.page100"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 3.44,
+          "system_total": 36.28,
+          "user_total": 66.98
+        },
+        "db": {
+          "application_statements_per_operation": 9,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 270,
+            "max": 1.9,
+            "mean": 0.43,
+            "min": 0.23,
+            "p50": 0.33,
+            "p95": 1.02,
+            "p99": 1.13
+          },
+          "statements_total": 270,
+          "time_ms_total": 117.2,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, uploaded_by, asset_type, title, duration_sec, file_size, mime_type, width, height, original_filename, status, failure_code, failure_message, failure_retryable, failure_at, created_at, updated_at FROM assets WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted' AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = assets.brand_profile_id AND bp.deleted_at IS NULL )",
+              "total_ms": 30.65,
+              "mean_ms": 1.02
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 18.13,
+              "mean_ms": 0.3
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 16.89,
+              "mean_ms": 0.28
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 16.58,
+              "mean_ms": 0.55
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 12.95,
+              "mean_ms": 0.43
+            },
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 11.65,
+              "mean_ms": 0.39
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 10.34,
+              "mean_ms": 0.34
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 9.93,
+          "mean": 7.78,
+          "min": 7.18,
+          "p50": 7.56,
+          "p95": 8.85,
+          "p99": 9.93
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 9.93,
+          "mean": 7.78,
+          "min": 7.18,
+          "p50": 7.56,
+          "p95": 8.85,
+          "p99": 9.93
+        },
+        "request_samples_ms": [
+          7.32, 8.85, 7.93, 7.9, 7.32, 7.29, 7.18, 7.31, 7.52, 7.46, 7.47, 7.51, 7.63, 7.27, 7.48,
+          7.56, 7.33, 7.44, 7.37, 7.61, 7.61, 7.94, 8.26, 7.83, 7.78, 8.11, 8.29, 9.93, 8.42, 8.46
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 494,
+          "mean": 494,
+          "min": 494,
+          "p50": 494,
+          "p95": 494,
+          "p99": 494
+        },
+        "response_bytes_samples": [
+          494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494,
+          494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494
+        ],
+        "rss_bytes": {
+          "after": 129019904,
+          "before": 129622016,
+          "heap_used_end": 15167990,
+          "peak": 142544896
+        },
+        "samples": 30,
+        "samples_ms": [
+          7.32, 8.85, 7.93, 7.9, 7.32, 7.29, 7.18, 7.31, 7.52, 7.46, 7.47, 7.51, 7.63, 7.27, 7.48,
+          7.56, 7.33, 7.44, 7.37, 7.61, 7.61, 7.94, 8.26, 7.83, 7.78, 8.11, 8.29, 9.93, 8.42, 8.46
+        ],
+        "setup_ms_total": 0.01,
+        "throughput_rps": 128.54,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "assets.detail"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 3.19,
+          "system_total": 35.43,
+          "user_total": 60.34
+        },
+        "db": {
+          "application_statements_per_operation": 11,
+          "context_statements": 510,
+          "statement_ms": {
+            "count": 330,
+            "max": 1.71,
+            "mean": 0.5,
+            "min": 0.25,
+            "p50": 0.39,
+            "p95": 1.08,
+            "p99": 1.16
+          },
+          "statements_total": 330,
+          "time_ms_total": 164.13,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, asset_id, strategy, status, content_type, file_size, object_key, multipart_upload_id, part_size, part_count, max_parallel_parts, expires_at FROM asset_upload_sessions WHERE id = $1 AND org_id = public.auth_active_org_id() FOR UPDATE",
+              "total_ms": 32.04,
+              "mean_ms": 1.07
+            },
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, uploaded_by, asset_type, title, duration_sec, file_size, mime_type, width, height, original_filename, status, failure_code, failure_message, failure_retryable, failure_at, created_at, updated_at FROM assets WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted' AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = assets.brand_profile_id AND bp.deleted_at IS NULL )",
+              "total_ms": 30.48,
+              "mean_ms": 1.02
+            },
+            {
+              "count": 60,
+              "statement": "INSERT INTO flow_steps (run_id, parent_step_id, org_id, node_key, node_type, service, operation, status, attempt, request_id, trace_id, job_id, workflow_id, queue_name, provider, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id",
+              "total_ms": 18.6,
+              "mean_ms": 0.31
+            },
+            {
+              "count": 60,
+              "statement": "UPDATE flow_steps SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 17.63,
+              "mean_ms": 0.29
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.id, u.auth_user_id, u.email, u.display_name, u.installation_owner, u.suspended_at, o.id AS workspace_id, o.name AS workspace_name, o.slug AS workspace_slug, membership.role AS workspace_role FROM users u JOIN org_members membership ON membership.user_id = u.id JOIN organizations o ON o.id = membership.org_id AND o.is_shared WHERE u.auth_user_id = $1 AND u.email = $2 AND u.display_name IS NOT DISTINCT FROM $3::text AND ($4::uuid IS NULL OR o.id = $4) AND (NOT u.installation_owner OR membership.role = 'admin') LIMIT 1",
+              "total_ms": 17.08,
+              "mean_ms": 0.57
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE asset_objects SET write_hold_until = GREATEST(write_hold_until, $3::timestamptz), updated_at = now() WHERE asset_id = $1 AND kind = 'staging' AND r2_key = $2 AND status <> 'deleted'",
+              "total_ms": 14.13,
+              "mean_ms": 0.47
+            },
+            {
+              "count": 30,
+              "statement": "SELECT u.email, u.name, u.\"emailVerified\" AS email_verified, iu.suspended_at FROM \"session\" s JOIN \"user\" u ON u.id = s.\"userId\" LEFT JOIN users iu ON iu.auth_user_id = u.id WHERE s.id = $1 AND u.id = $2 AND s.\"expiresAt\" > now()",
+              "total_ms": 13.34,
+              "mean_ms": 0.44
+            },
+            {
+              "count": 30,
+              "statement": "INSERT INTO flow_runs (environment, trace_id, request_id, org_id, entrypoint, status, metadata) VALUES ($1, $2, $3, $4, $5, 'running', $6) ON CONFLICT (environment, request_id) DO UPDATE SET entrypoint = EXCLUDED.entrypoint, metadata = EXCLUDED.metadata WHERE flow_runs.org_id IS NOT DISTINCT FROM EXCLUDED.org_id RETURNING id",
+              "total_ms": 11.83,
+              "mean_ms": 0.39
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE flow_runs SET status = $1, error_code = $2, retryable = $3, finished_at = now(), duration_ms = round(extract(epoch from (now() - started_at)) * 1000) WHERE id = $4",
+              "total_ms": 9,
+              "mean_ms": 0.3
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 25.67,
+          "mean": 10.07,
+          "min": 8.62,
+          "p50": 9.42,
+          "p95": 10.62,
+          "p99": 25.67
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 25.67,
+          "mean": 10.07,
+          "min": 8.62,
+          "p50": 9.42,
+          "p95": 10.62,
+          "p99": 25.67
+        },
+        "request_samples_ms": [
+          10.62, 10.21, 10.22, 10.49, 10.39, 10.37, 10.31, 9.78, 9.9, 9.8, 9.83, 9.99, 9.42, 9.15,
+          9.22, 9.25, 8.98, 8.82, 9.97, 9.48, 9.08, 8.73, 8.85, 8.62, 9.42, 8.8, 9.1, 8.69, 25.67,
+          9.03
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 820,
+          "mean": 820,
+          "min": 820,
+          "p50": 820,
+          "p95": 820,
+          "p99": 820
+        },
+        "response_bytes_samples": [
+          820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820,
+          820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820
+        ],
+        "rss_bytes": {
+          "after": 129314816,
+          "before": 129544192,
+          "heap_used_end": 16078406,
+          "peak": 142544896
+        },
+        "samples": 30,
+        "samples_ms": [
+          10.62, 10.21, 10.22, 10.49, 10.39, 10.37, 10.31, 9.78, 9.9, 9.8, 9.83, 9.99, 9.42, 9.15,
+          9.22, 9.25, 8.98, 8.82, 9.97, 9.48, 9.08, 8.73, 8.85, 8.62, 9.42, 8.8, 9.1, 8.69, 25.67,
+          9.03
+        ],
+        "setup_ms_total": 0.01,
+        "throughput_rps": 99.27,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "assets.upload-session.detail"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # Backend performance comparison
 
 **Current PR #65 evidence:** use the
-[initial authenticated regression](#initial-authenticated-application-regression).
+[complete authenticated application comparison](#complete-authenticated-application-comparison).
 The earlier sections preserve experiments at their named revisions; their gains
 do not establish current whole-application latency or production savings.
 
@@ -583,6 +583,92 @@ baseline [1](results/2026-10-24-portable-cache/baseline-1.json) /
 [2](results/2026-10-24-portable-cache/candidate-2.json) /
 [3](results/2026-10-24-portable-cache/candidate-3.json).
 The same files are attached as artifact `backend-benchmark-40107515487`.
+
+## Complete authenticated application comparison
+
+[Hosted run 40201541935](https://github.com/MeltiplyOrg/meltiply/actions/runs/40201541935)
+compares master `9fc48ba30a13` with corrected PR `961073dbf3c1`.
+Three alternating blocks per revision each measure 30 samples after three
+warm-ups: 90 samples per workflow and revision, with signed JWT verification,
+live session/actor resolution, PostgreSQL/RLS, 300 Posts and 27,000 history rows.
+Fixture preparation is excluded. Both revisions receive the same harness.
+
+| Authenticated workflow                                 | Master p95 ms | Corrected PR p95 ms |  Change |
+| ------------------------------------------------------ | ------------: | ------------------: | ------: |
+| Complete Analytics dashboard and ranking               |       2923.09 |             2316.89 |  -20.7% |
+| Posts page, 100 rows                                   |         23.02 |               21.44 |   -6.9% |
+| Post detail                                            |         16.18 |               13.27 |  -18.0% |
+| Cold exact-range Analytics summary                     |         63.03 |               13.62 |  -78.4% |
+| Warm Analytics summary                                 |         19.44 |                9.47 |  -51.3% |
+| Twenty concurrent cold summaries, whole batch          |        166.12 |              132.55 |  -20.2% |
+| Calendar range                                         |         14.31 |               12.86 |  -10.1% |
+| Distribution page, 100 rows                            |         13.22 |               32.09 | +142.7% |
+| Twenty concurrent publishing requirements, whole batch |        215.57 |              214.28 |   -0.6% |
+
+**The regression corrections are measured, not inferred from statement counts.**
+Managed environments again reuse master's isolate pool policy. Standalone
+workerd selects request-owned pools explicitly and passes delivery plus replay.
+The [pool-only checkpoint](results/2026-10-25-pool-correction/comparison.md)
+still had an 11.2% slower Analytics p95.
+[Per-statement diagnosis](https://github.com/MeltiplyOrg/meltiply/actions/runs/40201029407)
+then measured per-Distribution latest-snapshot lookups at 492.66 ms for grouped
+breakdowns and 474.53 ms for ranking, versus master's set-based 28.29/23.36 ms.
+Restoring set-based cohort selection preserves exact as-of semantics and removes
+that regression. Accumulation still bounds scans to its largest 720-hour bucket
+and retains historical maxima through counter corrections.
+
+**Not every tail improved.** Distribution p50 improved 10.80 → 9.01 ms and
+application SQL fell 17 → 9 statements/request, but its pooled p95 worsened.
+Candidate block p95s were 44.93, 10.37 and 11.87 ms; the first block drives the
+regression. Its application statements peaked at 2.25 ms individually.
+[INFERENCE] Scheduling/runtime pauses may contribute, but this run does not
+identify the cause or establish a Distribution-tail improvement. Concurrent
+summary p99 also worsened 232.96 → 418.90 ms, and concurrent requirements p50
+worsened 2.2%. Ninety samples are insufficient for a strong p99 claim. Raw results
+retain these outcomes; no samples were discarded and no blanket speedup is claimed.
+
+Resource reduction is independently observable: the Analytics action averages
+10.5 rather than 18.5 application statements per HTTP request, with driver-observed
+DB time 1173.29 → 1046.35 ms/request. A twenty-request cold summary burst performs
+one aggregate, and a warm summary performs none. Twenty concurrent requirements
+share one controlled upstream read rather than twenty. Sequential requirements
+still revalidate upstream. Fresh authorization remains authoritative.
+
+The harness calls the API app in-process, not deployed Hyperdrive. Process CPU
+includes driver work; SQL timing includes scheduling. These are synthetic
+latency/work measurements, not production billing or currency savings. Browser
+reuse avoids entire authenticated reads and is verified separately.
+
+Reproduce:
+
+```sh
+gh workflow run backend-benchmark.yml --ref feat/58-portable-read-caching \
+  -f profile=application -f repetitions=3 -f samples=30
+```
+
+Preserved evidence: [full comparison](results/2026-10-25-final-correction/comparison.md),
+[machine-readable comparison](results/2026-10-25-final-correction/comparison.json),
+master raw [1](results/2026-10-25-final-correction/baseline-1.json) /
+[2](results/2026-10-25-final-correction/baseline-2.json) /
+[3](results/2026-10-25-final-correction/baseline-3.json), and corrected PR raw
+[1](results/2026-10-25-final-correction/candidate-1.json) /
+[2](results/2026-10-25-final-correction/candidate-2.json) /
+[3](results/2026-10-25-final-correction/candidate-3.json).
+
+Verification at the corrected source:
+
+- [CI 40201520482](https://github.com/MeltiplyOrg/meltiply/actions/runs/40201520482)
+  passed frontend formatting, types, bindings, zero-warning lint, coverage and
+  production builds; package/Worker types, tests and builds; contract and
+  PostgreSQL integration checks; production Compose smoke and TLS on amd64/arm64.
+  Real Chromium observed deletion reconciliation and publication progress, warm
+  navigation and Analytics Refresh at 1280/390 pixels in both palettes.
+- [Backend regression lane 40201402891](https://github.com/MeltiplyOrg/meltiply/actions/runs/40201402891)
+  passed authenticated query-budget, permission, historical Analytics and auth
+  tests, plus real workerd/PostgreSQL Queue delivery and replay.
+- Browser regression coverage includes sixty active Posts sharing one page read,
+  sparse detail polling, pending Load more, delayed deletion reconciliation,
+  Analytics invalidation, and clearing obsolete errors after work settles.
 
 ## Initial authenticated application regression
 

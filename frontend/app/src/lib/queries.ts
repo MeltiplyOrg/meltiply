@@ -91,6 +91,7 @@ function withBrandProfile<T extends object>(
 /** Cache identities for reads; assets() is only an invalidation prefix, not a library query. */
 export const queryKeys = {
   currentUser: () => ["current-user"] as const,
+  analytics: () => ["analytics"] as const,
   installation: () => ["installation"] as const,
   workspaceMembers: () => ["workspace-members"] as const,
   workspaceInvitations: () => ["workspace-invitations"] as const,
@@ -177,6 +178,7 @@ function brandProfileResourceInvalidations(): QueryKey[] {
     queryKeys.distributions(),
     queryKeys.calendar(),
     queryKeys.queues(),
+    queryKeys.analytics(),
   ];
 }
 
@@ -185,12 +187,18 @@ function brandProfileResourceInvalidations(): QueryKey[] {
  * the `posts` prefix, so one prefix covers both; attaching or detaching media
  * changes Asset status and attachment ownership (`assets`), while scheduling
  * moves independent per-Channel outcomes (`distributions`) and their calendar
- * projection. Keeping all four current after every Post mutation means a saved
- * draft, an attachment edit, or a publish never leaves a stale list row, a
- * stale processing status, or a stale calendar entry behind.
+ * projection. Analytics must also drop a cohort when a Post is deleted or its
+ * published caption/format changes. Refreshing these resources after a write
+ * prevents a warm browser cache from retaining the previous composition.
  */
 function postResourceInvalidations(): QueryKey[] {
-  return [queryKeys.posts(), queryKeys.distributions(), queryKeys.calendar(), queryKeys.assets()];
+  return [
+    queryKeys.posts(),
+    queryKeys.distributions(),
+    queryKeys.calendar(),
+    queryKeys.assets(),
+    queryKeys.analytics(),
+  ];
 }
 
 export const mutationInvalidations = {
@@ -203,10 +211,16 @@ export const mutationInvalidations = {
   disconnectPlatform: (id: string) => [
     queryKeys.platforms(),
     queryKeys.platformPublishingRequirements(id),
+    queryKeys.analytics(),
   ],
-  confirmOAuthSelection: () => [queryKeys.platforms()],
-  updateDistribution: () => [queryKeys.distributions(), queryKeys.calendar()],
-  retryDistribution: () => [queryKeys.distributions(), queryKeys.calendar()],
+  confirmOAuthSelection: () => [queryKeys.platforms(), queryKeys.analytics()],
+  updateDistribution: () => [
+    queryKeys.posts(),
+    queryKeys.distributions(),
+    queryKeys.calendar(),
+    queryKeys.analytics(),
+  ],
+  retryDistribution: () => [queryKeys.posts(), queryKeys.distributions(), queryKeys.calendar()],
   createBrandProfile: () => [queryKeys.brandProfiles()],
   updateBrandProfile: () => [queryKeys.brandProfiles()],
   deleteBrandProfile: () => [

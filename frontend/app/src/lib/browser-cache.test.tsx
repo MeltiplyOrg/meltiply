@@ -9,12 +9,18 @@ import {
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { contractSuccessBody } from "@/test/contract-fixtures";
-import type { AnalyticsDashboard, AnalyticsPostsResponse, PlatformAccountsResponse } from "@/types";
+import type {
+  AnalyticsDashboard,
+  AnalyticsPostsResponse,
+  PlatformAccountsResponse,
+  Post,
+} from "@/types";
 import {
   useAnalyticsDashboard,
   useAnalyticsPosts,
   useDeleteBrandProfile,
   usePlatforms,
+  usePosts,
 } from "./queries";
 
 const scope = { isSignedIn: true, workspaceId: "workspace-a", brandProfileId: null };
@@ -171,5 +177,62 @@ describe("private browser read cache", () => {
     await waitFor(() =>
       expect(view.result.current.dashboard.data?.cohort.totals.post_count).toBe(0),
     );
+  });
+
+  it("updates in-flight Posts without refetching loaded pages or disturbing settled rows", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    const fixture = contractSuccessBody<Post>("getPost");
+    const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
+    const pending: Post = {
+      ...fixture,
+      id: "pending-post",
+      attachments: [],
+      distributions: [{ ...distribution, post_id: "pending-post", status: "processing" }],
+    };
+    const settled: Post = { ...fixture, id: "settled-post", attachments: [], distributions: [] };
+    const published: Post = {
+      ...pending,
+      distributions: [{ ...pending.distributions[0]!, status: "published" }],
+    };
+    const paths: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        paths.push(url.pathname);
+        if (url.pathname.endsWith("/pending-post")) return Response.json(published);
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        return Response.json({
+          posts: offset === 0 ? [pending] : [settled],
+          has_more: offset === 0,
+          limit: 60,
+          offset,
+        });
+      }),
+    );
+    const view = renderHook(() => usePosts(scope), { wrapper: Wrapper });
+    await waitFor(() => expect(view.result.current.data?.[0]?.id).toBe("pending-post"));
+    await act(async () => {
+      await view.result.current.fetchNextPage();
+    });
+    await waitFor(() =>
+      expect(view.result.current.data?.map((post) => post.id)).toEqual([
+        "pending-post",
+        "settled-post",
+      ]),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await waitFor(() =>
+      expect(view.result.current.data?.[0]?.distributions[0]?.status).toBe("published"),
+    );
+    expect(view.result.current.data?.[1]).toEqual(settled);
+    expect(paths.filter((path) => path.endsWith("/posts"))).toHaveLength(2);
+    const completedReads = paths.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(paths).toHaveLength(completedReads);
   });
 });

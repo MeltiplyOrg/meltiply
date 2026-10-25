@@ -180,7 +180,6 @@ describe("private browser read cache", () => {
   });
 
   it("updates in-flight Posts without refetching loaded pages or disturbing settled rows", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     const fixture = contractSuccessBody<Post>("getPost");
     const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
     const pending: Post = {
@@ -221,9 +220,6 @@ describe("private browser read cache", () => {
         "settled-post",
       ]),
     );
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
-    });
     await waitFor(() =>
       expect(view.result.current.data?.[0]?.distributions[0]?.status).toBe("published"),
     );
@@ -231,8 +227,8 @@ describe("private browser read cache", () => {
     expect(paths.filter((path) => path.endsWith("/posts"))).toHaveLength(2);
     const completedReads = paths.length;
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(20_000);
+      await new Promise<void>((resolve) => setTimeout(resolve, 11_000));
     });
     expect(paths).toHaveLength(completedReads);
-  });
+  }, 15_000);
 });

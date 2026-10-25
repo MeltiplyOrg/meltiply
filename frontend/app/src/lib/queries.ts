@@ -663,7 +663,7 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[], collection
     }
     if (published) void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
   }, [progress.data, queryClient]);
-  return progress.error ?? progress.data?.error ?? null;
+  return ids.length > 0 ? (progress.error ?? progress.data?.error ?? null) : null;
 }
 
 /**
@@ -1332,7 +1332,7 @@ function useCalendarProgress(
       void queryClient.invalidateQueries({ queryKey: queryKeys.posts(), refetchType: "none" });
     if (published) void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
   }, [progress.data, queryClient]);
-  return progress.error ?? progress.data?.error ?? null;
+  return ids.length > 0 ? (progress.error ?? progress.data?.error ?? null) : null;
 }
 
 /**

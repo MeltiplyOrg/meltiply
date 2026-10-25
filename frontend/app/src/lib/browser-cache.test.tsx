@@ -692,4 +692,55 @@ describe("private browser read cache", () => {
       saved.default_text,
     );
   });
+  it("clears a progress failure after an authoritative refresh settles all work", async () => {
+    const fixture = contractSuccessBody<Post>("getPost");
+    const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
+    const pending: Post = {
+      ...fixture,
+      attachments: [],
+      distributions: [{ ...distribution, status: "processing" }],
+    };
+    let reads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+        if (path.endsWith("/posts")) {
+          reads += 1;
+          return Response.json({
+            posts: [
+              reads === 1
+                ? pending
+                : {
+                    ...pending,
+                    distributions: [{ ...distribution, status: "published" }],
+                  },
+            ],
+            has_more: false,
+            limit: 60,
+            offset: 0,
+          });
+        }
+        return Response.json(
+          {
+            error: {
+              code: "internal_error",
+              message: "Progress unavailable",
+              retryable: false,
+            },
+          },
+          { status: 500 },
+        );
+      }),
+    );
+    const view = renderHook(() => usePosts(scope), { wrapper: Wrapper });
+    await waitFor(() => expect(view.result.current.error).not.toBeNull());
+    await act(async () => {
+      await view.result.current.refetch();
+    });
+    await waitFor(() => {
+      expect(view.result.current.data?.[0]?.distributions[0]?.status).toBe("published");
+      expect(view.result.current.error).toBeNull();
+    });
+  });
 });

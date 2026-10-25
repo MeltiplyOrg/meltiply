@@ -310,6 +310,56 @@ describe("private browser read cache", () => {
     expect(paths.some((path) => path.endsWith("/settled-outcome"))).toBe(false);
   }, 15_000);
 
+  it("keeps unrelated Post and Calendar progress moving after an active resource disappears", async () => {
+    const fixture = contractSuccessBody<Post>("getPost");
+    const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
+    const posts = ["removed", "remaining"].map((id): Post => ({
+      ...fixture,
+      id,
+      attachments: [],
+      distributions: [
+        { ...distribution, id: `${id}-distribution`, post_id: id, status: "processing" },
+      ],
+    }));
+    const events = posts.map((post): CalendarEvent => ({
+      ...post.distributions[0]!,
+      post_title: post.title,
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+        if (path.endsWith("/posts"))
+          return Response.json({ posts, has_more: false, limit: 60, offset: 0 });
+        if (path.endsWith("/calendar")) return Response.json({ events });
+        if (path.includes("/removed"))
+          return Response.json(
+            { error: { code: "not_found", message: "Removed", retryable: false } },
+            { status: 404 },
+          );
+        if (path.includes("/distributions/"))
+          return Response.json({ ...events[1], status: "published" });
+        return Response.json({
+          ...posts[1],
+          distributions: [{ ...events[1], status: "published" }],
+        });
+      }),
+    );
+    const range = { start: "2026-01-01T00:00:00Z", end: "2026-12-31T00:00:00Z" };
+    const view = renderHook(
+      () => ({ posts: usePosts(scope), calendar: useCalendar(scope, range) }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => {
+      expect(view.result.current.posts.data?.map((post) => post.id)).toEqual(["remaining"]);
+      expect(view.result.current.posts.data?.[0]?.distributions[0]?.status).toBe("published");
+      expect(view.result.current.calendar.data?.map((event) => event.id)).toEqual([
+        "remaining-distribution",
+      ]);
+      expect(view.result.current.calendar.data?.[0]?.status).toBe("published");
+    });
+  });
+
   it("does not let a delayed progress response overwrite a later draft save", async () => {
     const fixture = contractSuccessBody<Post>("getPost");
     const pending: Post = {

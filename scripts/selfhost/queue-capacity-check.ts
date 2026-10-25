@@ -74,8 +74,8 @@ async function sample(concurrency: 1 | 2) {
     const token = await cipher.encrypt("controlled-provider-token");
     for (let index = 0; index < profiles.length; index += 1) {
       await database.query(
-        "INSERT INTO brand_profiles (id, org_id, name, color) VALUES ($1, $2, 'Capacity', '#1d4ed8')",
-        [profiles[index], organizationId],
+        "INSERT INTO brand_profiles (id, org_id, name, color) VALUES ($1, $2, $3, '#1d4ed8')",
+        [profiles[index], organizationId, `Capacity ${index}`],
       );
       await database.query(
         `INSERT INTO platform_accounts (id, org_id, brand_profile_id, platform, platform_user_id, access_token, connection_status)

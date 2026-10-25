@@ -501,6 +501,10 @@ describe("private browser read cache", () => {
     client.setQueryData(queryKeys.post("removed"), posts[0]);
     let postReads = 0;
     let calendarReads = 0;
+    let releaseMissing!: () => void;
+    const missingGate = new Promise<void>((resolve) => {
+      releaseMissing = resolve;
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
@@ -528,11 +532,13 @@ describe("private browser read cache", () => {
             events: calendarReads === 1 ? events : [{ ...events[1], status: "published" }],
           });
         }
-        if (path.includes("/removed"))
+        if (path.includes("/removed")) {
+          await missingGate;
           return Response.json(
             { error: { code: "not_found", message: "Removed", retryable: false } },
             { status: 404 },
           );
+        }
         if (path.includes("/distributions/"))
           return Response.json({ ...events[1], status: "published" });
         return Response.json({
@@ -546,6 +552,11 @@ describe("private browser read cache", () => {
       () => ({ posts: usePosts(scope), calendar: useCalendar(scope, range) }),
       { wrapper: Wrapper },
     );
+    await waitFor(() =>
+      expect(view.result.current.posts.data?.map((post) => post.id)).toEqual(["remaining"]),
+    );
+    expect(client.getQueryData(queryKeys.post("removed"))).toEqual(posts[0]);
+    releaseMissing();
     await waitFor(() => {
       expect(view.result.current.posts.data?.map((post) => post.id)).toEqual(["remaining"]);
       expect(view.result.current.posts.data?.[0]?.distributions[0]?.status).toBe("published");

@@ -519,7 +519,7 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[], collection
     .map((post) => post.id)
     .sort();
   const progress = useQuery({
-    queryKey: ["post-progress", collectionKey, ids],
+    queryKey: ["post-progress", collectionKey],
     queryFn: async ({
       signal,
     }): Promise<{ values: Post[]; missing: Set<string>; error: Error | null }> => {
@@ -1264,7 +1264,7 @@ function useCalendarProgress(
     .map((event) => event.id)
     .sort();
   const progress = useQuery({
-    queryKey: ["calendar-progress", collectionKey, ids],
+    queryKey: ["calendar-progress", collectionKey],
     queryFn: async ({ signal }) => {
       if (ids.length > 1) {
         await queryClient.invalidateQueries(

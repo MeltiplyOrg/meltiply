@@ -17,6 +17,7 @@ import { clearRuntimeStatus, simulateAuthExpired, simulateOffline } from "./chao
 import { overlayState, setBaselineGrid, setElementOutlines } from "./layout-overlays";
 import {
   auditTokenColors,
+  clearTokenHighlights,
   collectTokenColors,
   highlightTokenViolations,
   inspectElementColors,
@@ -25,6 +26,17 @@ import {
 } from "./token-audit";
 
 const pickerHighlightId = "devbox-picker-highlight";
+
+/**
+ * Removes every transient Helpers-tab DOM mutation: the element-picker outline,
+ * token-audit marks, and axe outlines plus their stylesheets. Called when the
+ * tab or dock unmounts so inspections never outlive their control surface.
+ */
+export function clearHelpersDom(): void {
+  document.getElementById(pickerHighlightId)?.remove();
+  clearTokenHighlights();
+  clearAxeHighlights();
+}
 
 /**
  * Ensures the floating element-picker highlight box exists; returns it.
@@ -69,6 +81,10 @@ export function HelpersTab(): React.ReactElement {
   const [pseudo, setPseudo] = useState(isPseudoLocalized());
   const [crash, setCrash] = useState(false);
 
+  // Highlights and the picker outline are owned by this tab; clear them when
+  // it unmounts instead of leaving temporary marks on the page.
+  useEffect(() => clearHelpersDom, []);
+
   // Element picker: track the hovered element with a floating outline; a click
   // freezes the selection and reports its token usage. Esc cancels.
   useEffect(() => {
@@ -99,7 +115,7 @@ export function HelpersTab(): React.ReactElement {
     document.addEventListener("click", onClick, true);
     document.addEventListener("keydown", onKey);
     return () => {
-      highlight.style.display = "none";
+      highlight.remove();
       document.removeEventListener("mousemove", onMove, true);
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("keydown", onKey);

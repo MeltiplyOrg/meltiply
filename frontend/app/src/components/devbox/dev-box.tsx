@@ -5,6 +5,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -17,12 +18,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@meltiply/ui/tabs";
 import { toast } from "@meltiply/ui/toast";
 import { copyText } from "@meltiply/ui/copy-text";
 import { hotkeys, useHotkey } from "@/lib/hotkeys";
+import { setPseudoLocalization } from "@/lib/pseudo-locale";
 import { cn } from "@meltiply/ui/utils";
 
 import {
+  clampDevBoxPosition,
   devBoxTabs,
   readDevBoxState,
   writeDevBoxState,
+  type DevBoxPosition,
+  type DevBoxSize,
   type DevBoxState,
   type DevBoxTab,
 } from "./devbox-state";
@@ -37,7 +42,10 @@ import {
   uninstallNetworkThrottle,
 } from "./network-throttle";
 import { BenchmarkTab } from "./benchmark-tab";
-import { HelpersTab } from "./helpers-tab";
+import { clearHelpersDom, HelpersTab } from "./helpers-tab";
+import { clearLayoutOverlays } from "./layout-overlays";
+import { stopRenderScanner } from "./render-scanner";
+import { clearViewportFrame } from "./viewport-frame";
 import { SkeletonsTab } from "./skeletons-tab";
 import { TraceTab } from "./trace-tab";
 
@@ -105,13 +113,37 @@ const tabLabels: Record<DevBoxTab, string> = {
 };
 
 /**
- * Clamps a dock position so the panel never leaves the viewport.
+ * Measures the live dock box, including borders. Returns `null` when the panel
+ * has no usable geometry (for example before layout or in a headless DOM).
  */
-function clampPosition(x: number, y: number): { x: number; y: number } {
-  return {
-    x: Math.min(Math.max(0, x), Math.max(0, window.innerWidth - 120)),
-    y: Math.min(Math.max(0, y), Math.max(0, window.innerHeight - 48)),
-  };
+function measureDock(panel: HTMLDivElement | null): DevBoxSize | null {
+  if (!panel) return null;
+  const rect = panel.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 ? { width: rect.width, height: rect.height } : null;
+}
+
+/**
+ * Clamps a dock position to the current viewport using the measured dock size.
+ */
+function clampPosition(position: DevBoxPosition, size: DevBoxSize): DevBoxPosition {
+  return clampDevBoxPosition(position, size, {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
+}
+
+/**
+ * Removes every page-level mutation the dock can install: layout overlays, the
+ * viewport frame, audit highlights, scanner outlines, and pseudo-localization.
+ * Runs when the dock is hidden or unmounted so no inspection state outlives the
+ * control surface that owns it.
+ */
+function clearPageMutations(): void {
+  clearLayoutOverlays();
+  clearViewportFrame();
+  clearHelpersDom();
+  stopRenderScanner();
+  setPseudoLocalization(false);
 }
 
 /**
@@ -140,7 +172,12 @@ export function DevBox(): React.ReactElement | null {
   const [state, setState] = useState<DevBoxState>(readDevBoxState);
   const [functionalConsent, setFunctionalConsent] = useState(() => hasCookieConsent("functional"));
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ pointerId: number; dx: number; dy: number } | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    dx: number;
+    dy: number;
+    size: DevBoxSize;
+  } | null>(null);
   const queryClient = useSyncExternalStore(subscribeDevBoxQueryClient, getDevBoxQueryClient);
 
   const hasInteractedRef = useRef(false);
@@ -154,6 +191,44 @@ export function DevBox(): React.ReactElement | null {
     hasInteractedRef.current = true;
     setState((current) => ({ ...current, ...patch }));
   }, []);
+
+  /**
+   * Re-clamps a persisted or dragged position against the dock's current
+   * measured box. Runs before paint on mount, after expand/collapse, on window
+   * resize, and whenever the dock's own box changes.
+   */
+  const revalidatePosition = useCallback(() => {
+    setState((current) => {
+      if (!current.position) return current;
+      const size = measureDock(panelRef.current);
+      if (!size) return current;
+      const next = clampPosition(current.position, size);
+      return next.x === current.position.x && next.y === current.position.y
+        ? current
+        : { ...current, position: next };
+    });
+  }, []);
+
+  // Persisted coordinates may come from a wider window, an older dock width, or
+  // hand-edited storage. Validate before paint and whenever the viewport or the
+  // dock itself (expand/collapse, content reflow) changes size.
+  useLayoutEffect(() => {
+    revalidatePosition();
+    window.addEventListener("resize", revalidatePosition);
+    const panel = panelRef.current;
+    const observer =
+      typeof ResizeObserver === "undefined" || !panel
+        ? null
+        : new ResizeObserver(() => revalidatePosition());
+    if (panel) observer?.observe(panel);
+    return () => {
+      window.removeEventListener("resize", revalidatePosition);
+      observer?.disconnect();
+    };
+  }, [revalidatePosition, state.hidden]);
+  useLayoutEffect(() => {
+    revalidatePosition();
+  }, [revalidatePosition, state.collapsed]);
   // Persist state changes, debounced: drag emits a position update per
   // pointermove, so writes are coalesced to one trailing flush per burst. A
   // ref keeps the latest state reachable so unmount can flush synchronously.
@@ -189,6 +264,15 @@ export function DevBox(): React.ReactElement | null {
   }, []);
   useEffect(() => setThrottleLatency(state.latency), [state.latency]);
 
+  // Developer tools mutate the page outside their own React tree. Remove those
+  // mutations when the dock is hidden or unmounted; hiding already unmounts
+  // tab-local effects, and overlays/frame must not remain without their
+  // controls.
+  useEffect(() => {
+    if (state.hidden) clearPageMutations();
+  }, [state.hidden]);
+  useEffect(() => clearPageMutations, []);
+
   useHotkey(hotkeys.devBox, () => update({ hidden: !state.hidden }));
   const onDragStart = (event: React.PointerEvent<HTMLDivElement>) => {
     const panel = panelRef.current;
@@ -201,14 +285,22 @@ export function DevBox(): React.ReactElement | null {
       pointerId: event.pointerId,
       dx: event.clientX - rect.left,
       dy: event.clientY - rect.top,
+      size: { width: rect.width, height: rect.height },
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is unavailable in some headless/test environments.
+    }
   };
   const onDragMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     update({
-      position: clampPosition(event.clientX - drag.dx, event.clientY - drag.dy),
+      position: clampPosition(
+        { x: event.clientX - drag.dx, y: event.clientY - drag.dy },
+        drag.size,
+      ),
     });
   };
   const onDragEnd = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -225,6 +317,7 @@ export function DevBox(): React.ReactElement | null {
     startY: number;
     dx: number;
     dy: number;
+    size: DevBoxSize;
     moved: boolean;
   } | null>(null);
   const suppressClickRef = useRef(false);
@@ -239,6 +332,7 @@ export function DevBox(): React.ReactElement | null {
       startY: event.clientY,
       dx: event.clientX - rect.left,
       dy: event.clientY - rect.top,
+      size: { width: rect.width, height: rect.height },
       moved: false,
     };
     try {
@@ -255,7 +349,10 @@ export function DevBox(): React.ReactElement | null {
     }
     drag.moved = true;
     update({
-      position: clampPosition(event.clientX - drag.dx, event.clientY - drag.dy),
+      position: clampPosition(
+        { x: event.clientX - drag.dx, y: event.clientY - drag.dy },
+        drag.size,
+      ),
     });
   };
   const onPillDragEnd = (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -279,7 +376,7 @@ export function DevBox(): React.ReactElement | null {
           state.position === null && "bottom-4 left-4",
           state.collapsed
             ? "rounded-full border border-tooltip-border bg-tooltip-bg text-tooltip-fg shadow-overlay"
-            : "w-[380px] rounded-window border border-line bg-surface shadow-overlay",
+            : "max-h-[calc(100dvh-1rem)] w-[380px] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-window border border-line bg-surface shadow-overlay",
         )}
         style={state.position ? { left: state.position.x, top: state.position.y } : undefined}
       >

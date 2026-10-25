@@ -53,6 +53,7 @@ export function startPerfMonitor(onSample: (sample: PerfSample) => void): () => 
   let windowStart = last;
   let windowFrames = 0;
   let fps = 0;
+  let frameRequest = 0;
 
   const emit = () => {
     const heap = heapInfo();
@@ -81,11 +82,12 @@ export function startPerfMonitor(onSample: (sample: PerfSample) => void): () => 
       lastEmit = now;
       emit();
     }
-    requestAnimationFrame(tick);
+    frameRequest = requestAnimationFrame(tick);
   };
 
-  requestAnimationFrame(tick);
+  frameRequest = requestAnimationFrame(tick);
   return () => {
     running = false;
+    cancelAnimationFrame(frameRequest);
   };
 }

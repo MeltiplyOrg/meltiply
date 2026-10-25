@@ -10,17 +10,14 @@ import type { DatabaseError } from "@meltiply/domain";
 
 import type { AutomationEnv } from "./env";
 
-// Module-global pool per isolate (AUD-044): Hyperdrive connection strings are
-// stable for managed isolates and pg reconnects internally. Standalone workerd
-// instead opts into request-owned pools so no socket or checkout crosses invocations.
-let systemPool: Pool | undefined;
-let systemConnectionString: string | undefined;
+// Entry boundaries clone bindings per invocation; weak keys never retain an
+// invocation's empty driver adapter after its work and continuations finish.
+const invocationPools = new WeakMap<AutomationEnv, { connectionString: string; pool: Pool }>();
 
 /**
- * Selects a managed-isolate or request-owned PostgreSQL pool for the system Hyperdrive binding.
- * Managed isolates reuse a pool; local or DATABASE_POOL_MODE=request invocations
- * receive independent pools whose clients close on release so sockets and queued
- * connects cannot cross standalone workerd request ownership boundaries.
+ * Returns the invocation-owned PostgreSQL adapter for system transactions.
+ * Released clients close instead of crossing Worker I/O ownership; Hyperdrive
+ * retains its independent origin pool. Four clients bound local concurrency.
  *
  * @param env - Automation worker environment containing the DB_SYSTEM Hyperdrive binding.
  * @returns Cached or newly initialized database Pool instance.
@@ -30,15 +27,11 @@ export function systemPoolFor(env: AutomationEnv): Pool {
   if (!env.DB_SYSTEM) {
     throw new Error("system Hyperdrive binding is unavailable");
   }
-  if (env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request") {
-    return destroyClientsOnRelease(createHyperdrivePool(env.DB_SYSTEM));
-  }
-  if (!systemPool || systemConnectionString !== env.DB_SYSTEM.connectionString) {
-    const pool = createHyperdrivePool(env.DB_SYSTEM);
-    systemPool = pool;
-    systemConnectionString = env.DB_SYSTEM.connectionString;
-  }
-  return systemPool;
+  const previous = invocationPools.get(env);
+  if (previous?.connectionString === env.DB_SYSTEM.connectionString) return previous.pool;
+  const pool = destroyClientsOnRelease(createHyperdrivePool(env.DB_SYSTEM, { max: 4 }));
+  invocationPools.set(env, { connectionString: env.DB_SYSTEM.connectionString, pool });
+  return pool;
 }
 
 /**

@@ -5,21 +5,9 @@ import { allowedOriginsFor } from "./verifier-cache";
 import { createCloudflareMailSender, mailSenderConfiguration } from "./mail";
 import { authPolicyHandler } from "./auth-policy";
 
-let betterAuthCached:
-  | {
-      baseURL: string | undefined;
-      databaseConnectionString: string | undefined;
-      environment: ApiWorkerEnv["ENVIRONMENT"];
-      mailBinding: SendEmail | undefined;
-      mailFromAddress: string | undefined;
-      mailFromName: string | undefined;
-      origins: string;
-      requireEmailVerification: boolean;
-      secret: string;
-      setupSecret: string | undefined;
-      value: BetterAuthInstance;
-    }
-  | undefined;
+// Auth captures a database adapter, so it may be reused only within the same
+// invocation-owned bindings object, never by configuration across invocations.
+const invocationAuth = new WeakMap<ApiWorkerEnv, BetterAuthInstance>();
 
 /**
  * Outcome of a single auth rate-limit check: `ok` admits the request, `limited`
@@ -36,13 +24,10 @@ interface RateLimitHitRow extends Record<string, unknown> {
 }
 
 /**
- * Returns a cached Better Auth instance whose key captures every input the
- * instance depends on: secret, base URL, trusted origins, the verification
- * policy (derived from `ENVIRONMENT`), the `MAIL` binding object identity, the
- * normalized sender address/display name, and the system-database connection
- * string (pool identity in `systemPoolFor`). A changed dependency yields a
- * fresh instance rather than leaking a previous environment's configuration.
- * Local and DATABASE_POOL_MODE=request instances are never cached because their pools are request-owned.
+ * Returns Better Auth for this invocation. An auth instance captures its
+ * database adapter and mail bindings, so reuse is keyed by the invocation's
+ * bindings object rather than global configuration strings. Worker entries
+ * clone those bindings before dispatch; weak keys release completed scopes.
  *
  * Email verification is an explicit policy, not an accident of configuration:
  * deployed environments (`staging`/`preview`) always require a verified email,
@@ -60,7 +45,8 @@ interface RateLimitHitRow extends Record<string, unknown> {
  */
 export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstance> {
   const isLocalOrTest = env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
-  const requestOwnedPool = env.ENVIRONMENT === "local" || env.DATABASE_POOL_MODE === "request";
+  const cached = invocationAuth.get(env);
+  if (cached) return cached;
   const secret =
     env.BETTER_AUTH_SECRET?.trim() ||
     (isLocalOrTest ? "meltiply-local-auth-secret-32-chars-long" : undefined);
@@ -83,23 +69,6 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     );
   }
 
-  const databaseConnectionString = env.DB_SYSTEM?.connectionString;
-  if (
-    !requestOwnedPool &&
-    betterAuthCached &&
-    betterAuthCached.secret === secret &&
-    betterAuthCached.baseURL === baseURL &&
-    betterAuthCached.origins === origins &&
-    betterAuthCached.environment === env.ENVIRONMENT &&
-    betterAuthCached.requireEmailVerification === requireEmailVerification &&
-    betterAuthCached.databaseConnectionString === databaseConnectionString &&
-    betterAuthCached.mailBinding === env.MAIL &&
-    betterAuthCached.mailFromAddress === senderAddress?.email &&
-    betterAuthCached.mailFromName === senderAddress?.name &&
-    betterAuthCached.setupSecret === env.AUTH_SETUP_SECRET
-  ) {
-    return betterAuthCached.value;
-  }
   const trustedOrigins = Array.from(allowedOriginsFor(env));
   // Exception: dynamic import avoids loading pg in workerd unit test isolates
   const { systemPoolFor } = await import("./database");
@@ -129,21 +98,7 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     }),
   );
 
-  if (!requestOwnedPool) {
-    betterAuthCached = {
-      baseURL,
-      databaseConnectionString,
-      environment: env.ENVIRONMENT,
-      mailBinding: env.MAIL,
-      mailFromAddress: senderAddress?.email,
-      mailFromName: senderAddress?.name,
-      origins,
-      requireEmailVerification,
-      secret,
-      setupSecret: env.AUTH_SETUP_SECRET,
-      value: auth,
-    };
-  }
+  invocationAuth.set(env, auth);
 
   return auth;
 }

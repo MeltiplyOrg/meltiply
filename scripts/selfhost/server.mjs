@@ -145,7 +145,6 @@ async function host(request) {
 
 const bindings = {
   ENVIRONMENT: "staging",
-  DATABASE_POOL_MODE: "request",
   VERSION: process.env.VERSION || "selfhost",
   FRONTEND_URL: new URL(config.SELFHOST_ORIGIN).origin,
   PUBLIC_API_URL: new URL(config.SELFHOST_ORIGIN).origin,

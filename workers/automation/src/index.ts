@@ -83,6 +83,7 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
         timeout: "5 minutes",
       },
       async () => {
+        const env = { ...this.env };
         const startedAt = performance.now();
         // Approved boundary: the workflow step body runs as one Effect program
         // through the same mapper as queue/scheduled paths. Ambiguous provider
@@ -90,7 +91,7 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
         // workflow retry: rethrow only retryable failures so reconciliation
         // owns ambiguous outcomes instead of duplicating remote writes.
         const scope = jobScope(
-          this.env,
+          env,
           makeJobContext({
             jobId: event.payload.event_id,
             ...(event.payload.request_id ? { requestId: event.payload.request_id } : {}),
@@ -104,7 +105,7 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
             catch: (cause) => classifyJobError(cause),
             try: () => import("./replies"),
           }),
-          (module) => module.processReplyMessage(this.env, replyWorkflowMessage(event.payload)),
+          (module) => module.processReplyMessage(env, replyWorkflowMessage(event.payload)),
         );
         const exit = await runJobProgram(Effect.provide(program, scope.runtimeLayer));
         const mapped = exitToJobOutcome(exit);
@@ -863,9 +864,10 @@ export function createAutomationHandler(
      * rejected branch below (ack-and-surface, AUD-039).
      *
      * @param batch - Batch of incoming queue messages with delivery attempt metadata and queue name.
-     * @param env - Automation worker environment bindings.
+     * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
      */
-    async queue(batch, env) {
+    async queue(batch, bindings) {
+      const env = { ...bindings };
       configureJobLogging(env);
       // One asset processor per batch: construction builds the configured
       // object storage store, so the dispatcher resolves it lazily through this
@@ -1006,10 +1008,11 @@ export function createAutomationHandler(
      * failures so subsequent scheduled units continue running before reporting errors.
      *
      * @param _controller - ScheduledController providing the triggering cron pattern, or null for direct invocation.
-     * @param env - Automation worker environment bindings.
+     * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
      * @throws Rethrows the first encountered scheduled task failure after all due units have finished.
      */
-    async scheduled(_controller, env) {
+    async scheduled(_controller, bindings) {
+      const env = { ...bindings };
       configureJobLogging(env);
       const startedAt = performance.now();
       const jobId = crypto.randomUUID();
@@ -1145,15 +1148,16 @@ export class AutomationEntrypoint extends WorkerEntrypoint<AutomationEnv> {
    * @returns Counts of outbox messages claimed, published, failed, and dead during eager relay.
    */
   async relayOutbox(): Promise<OutboxRelayResult> {
-    configureJobLogging(this.env);
+    const env = { ...this.env };
+    configureJobLogging(env);
     const program = Effect.flatMap(
       Effect.tryPromise({
         catch: (cause) => classifyJobError(cause),
         try: () => import("./outbox"),
       }),
-      (module) => module.relayOutbox(this.env, EAGER_RELAY_BATCH_SIZE),
+      (module) => module.relayOutbox(env, EAGER_RELAY_BATCH_SIZE),
     );
-    return runDirectProgram(this.env, program);
+    return runDirectProgram(env, program);
   }
 
   /**
@@ -1177,19 +1181,20 @@ export class AutomationEntrypoint extends WorkerEntrypoint<AutomationEnv> {
     organizationId: string,
     distributionId: string | null,
   ): Promise<number> {
-    configureJobLogging(this.env);
+    const env = { ...this.env };
+    configureJobLogging(env);
     const program = Effect.flatMap(
       Effect.tryPromise({
         catch: (cause) => classifyJobError(cause),
         try: () => import("./provider-sync"),
       }),
       (module) =>
-        module.requestOnDemandCommentsSync(this.env, {
+        module.requestOnDemandCommentsSync(env, {
           distributionId,
           organizationId,
         }),
     );
-    return runDirectProgram(this.env, program);
+    return runDirectProgram(env, program);
   }
 
   /**

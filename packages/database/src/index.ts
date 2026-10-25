@@ -41,9 +41,9 @@ const defaultPoolOptions: Required<HyperdrivePoolOptions> = {
 
 /**
  * Close each checked-out PostgreSQL client on release instead of retaining an
- * idle socket. Local workerd sockets belong to the request that created them;
- * a later request cannot safely resume one. Worker database modules apply this
- * only to independent local pools; deployed pool behavior is unchanged.
+ * idle socket. Worker sockets belong to the invocation that created them;
+ * neither managed Workers nor standalone workerd may resume them in another
+ * invocation. Hyperdrive keeps the independent origin connection pool warm.
  *
  * Preserves both node-postgres connect overloads: Pool.query uses the callback
  * form internally, while transactions await the Promise form. Both receive

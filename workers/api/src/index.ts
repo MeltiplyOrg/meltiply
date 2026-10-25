@@ -34,6 +34,8 @@ export default {
    *
    * Configures observability log sampling rates, performs one-time environment binding validation,
    * logs configuration failures with request tracing headers, and delegates execution to the Hono app.
+   * Copies bindings into an invocation-owned scope before database/auth adapters
+   * are created, so no driver socket or pending checkout crosses requests.
    *
    * @param request - Incoming HTTP request.
    * @param env - Cloudflare Worker environment bindings.
@@ -76,6 +78,6 @@ export default {
         status: 500,
       });
     }
-    return app.fetch(request, env, executionContext);
+    return app.fetch(request, { ...env }, executionContext);
   },
 } satisfies ExportedHandler<ApiWorkerEnv>;

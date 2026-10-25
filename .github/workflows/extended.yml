@@ -18,6 +18,7 @@ on:
           - portable-caching
           - portable-caching-smoke
           - performance-focused
+          - performance-backend
 
 permissions:
   contents: read
@@ -46,6 +47,15 @@ jobs:
         run: |
           bun run --filter frontend-app type-check
           bun run --cwd frontend/app test src/lib/browser-cache.test.tsx --coverage.enabled=false
+      - name: Exercise authenticated request and Worker ownership changes
+        if: inputs.lane == 'performance-backend'
+        env:
+          MELTIPLY_DATABASE_TEST_URL: postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: |
+          bun run setup --skip-dependencies --skip-image-pull
+          bun run --filter @meltiply/database --filter @meltiply/api-worker --filter @meltiply/automation-worker type-check
+          bun run --cwd workers/api --no-install vp test run test/actor-resolution.test.ts
+          bun run --cwd workers/api test:integration test/better-auth.integration.test.ts test/permission-matrix.integration.test.ts test/query-budget.integration.test.ts
       - name: Prepare full gate database
         if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull

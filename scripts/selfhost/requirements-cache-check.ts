@@ -125,7 +125,6 @@ try {
           bindings: {
             ENVIRONMENT: "local",
             VERSION: "requirements-network-smoke",
-            DATABASE_POOL_MODE: "request",
             ALLOWED_ORIGINS: "http://localhost:3000",
             FRONTEND_URL: "http://localhost:3000",
             PUBLIC_API_URL: "https://requirements-smoke.test",

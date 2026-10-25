@@ -76,6 +76,6 @@ export default {
         },
       });
     }
-    return app.fetch(request, env, ctx);
+    return app.fetch(request, { ...env }, ctx);
   },
 };

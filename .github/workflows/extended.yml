@@ -57,6 +57,7 @@ jobs:
           bun run --cwd workers/api --no-install vp test run test/actor-resolution.test.ts
           bun run --cwd workers/api test:integration test/better-auth.integration.test.ts test/permission-matrix.integration.test.ts test/query-budget.integration.test.ts
           bun run --cwd workers/automation test:integration test/comment-policy.integration.test.ts
+          node --test scripts/infra/cost-model.test.mjs
       - name: Prepare full gate database
         if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull

@@ -132,28 +132,48 @@ function statementKind(text) {
 const capture = { queries: [] };
 const instrumentedClients = new WeakSet();
 
-/** Wraps every pooled client's query method so statements and timings are recorded. */
+/**
+ * Observes both pg checkout overloads without changing their completion
+ * contract. Pool.query uses callback checkout/query; transactions use Promises.
+ * Every completed statement is counted once, including failed statements;
+ * parameters, credentials and JWTs are never captured.
+ */
 function instrumentPool(pool) {
-  const mutable = pool;
-  const originalConnect = mutable.connect.bind(pool);
-  mutable.connect = async (...args) => {
-    const client = await originalConnect(...args);
+  const originalConnect = pool.connect.bind(pool);
+  const instrumentClient = (client) => {
     if (instrumentedClients.has(client)) return client;
     instrumentedClients.add(client);
     const originalQuery = client.query.bind(client);
-    client.query = async (textOrConfig, values) => {
-      const text =
-        typeof textOrConfig === "string" ? textOrConfig : String(textOrConfig?.text ?? "");
+    client.query = (...args) => {
+      const text = typeof args[0] === "string" ? args[0] : String(args[0]?.text ?? "");
       const started = performance.now();
-      const result = await originalQuery(textOrConfig, values);
-      capture.queries.push({
-        durationMs: performance.now() - started,
-        kind: statementKind(text),
-        statement: text.trim().replaceAll(/\s+/g, " "),
-      });
-      return result;
+      const completed = () => {
+        capture.queries.push({
+          durationMs: performance.now() - started,
+          kind: statementKind(text),
+          statement: text.trim().replaceAll(/\s+/g, " "),
+        });
+      };
+      const callback = args.at(-1);
+      if (typeof callback === "function") {
+        args[args.length - 1] = (...result) => {
+          completed();
+          callback(...result);
+        };
+        return originalQuery(...args);
+      }
+      return originalQuery(...args).finally(completed);
     };
     return client;
+  };
+  pool.connect = (callback) => {
+    if (typeof callback === "function") {
+      return originalConnect((error, client, release) => {
+        if (client) instrumentClient(client);
+        callback(error, client, release);
+      });
+    }
+    return originalConnect().then(instrumentClient);
   };
 }
 

@@ -1,5 +1,6 @@
 import {
   keepPreviousData,
+  skipToken,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -28,6 +29,7 @@ import type {
   AnalyticsScopeParams,
   AuditQueryParams,
   CalendarQueryParams,
+  CalendarEvent,
   CreateBrandProfileInput,
   CreatePostInput,
   DistributionQueryParams,
@@ -243,13 +245,23 @@ export const mutationInvalidations = {
 } satisfies Record<string, (...args: string[]) => QueryKey[]>;
 
 /**
- * Invalidates a list of TanStack Query keys concurrently.
+ * Invalidates resource prefixes; Analytics advances its shared window before
+ * dependent reads run, avoiding refetching both old and new cohorts.
  *
  * @param queryClient The active TanStack QueryClient.
  * @param keys Array of query keys to invalidate.
  */
 export async function invalidateQueryKeys(queryClient: QueryClient, keys: QueryKey[]) {
-  await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+  await Promise.all(
+    keys.map(async (queryKey) => {
+      if (queryKey.length === 1 && queryKey[0] === "analytics") {
+        await queryClient.invalidateQueries({ queryKey, refetchType: "none" });
+        await queryClient.refetchQueries({ queryKey: ["analytics", "window"], type: "active" });
+      } else {
+        await queryClient.invalidateQueries({ queryKey });
+      }
+    }),
+  );
 }
 
 /**
@@ -1044,8 +1056,73 @@ export function useCancelDistribution(scope: SessionScope) {
 }
 
 /**
+ * Tracks only in-flight or due Distribution identities from the loaded calendar.
+ * Reads run four at a time; newer detail timestamps win over delayed responses.
+ * Successful outcomes update matching events in place, preserving range membership
+ * and settled rows. Publication invalidates Analytics once at the transition;
+ * inactive Post collections are marked stale without refetching loaded pages.
+ */
+function useCalendarProgress(scope: SessionScope, events: readonly CalendarEvent[]) {
+  const queryClient = useQueryClient();
+  const now = useDueWorkClock(events.some((event) => event.status === "scheduled"));
+  const ids = events
+    .filter(
+      (event) =>
+        pollingInterval(event) !== false ||
+        (event.status === "scheduled" &&
+          event.scheduled_at !== null &&
+          Date.parse(event.scheduled_at) <= now),
+    )
+    .map((event) => event.id)
+    .sort();
+  const progress = useQuery({
+    queryKey: ["calendar-progress", ids],
+    queryFn: ({ signal }) =>
+      runApiQuery(
+        scope,
+        (api) => Effect.forEach(ids, (id) => api.getDistribution(id), { concurrency: 4 }),
+        signal,
+      ),
+    enabled: scope.isSignedIn && ids.length > 0,
+    refetchInterval: 10_000,
+    staleTime: 10_000,
+    gcTime: 0,
+  });
+  useEffect(() => {
+    if (!progress.data) return;
+    const replacements = new Map(
+      progress.data.map((distribution) => [distribution.id, distribution]),
+    );
+    let published = false;
+    let changed = false;
+    queryClient.setQueriesData<CalendarEvent[]>({ queryKey: queryKeys.calendar() }, (previous) =>
+      previous?.map((event) => {
+        const replacement = replacements.get(event.id);
+        if (!replacement || Date.parse(replacement.updated_at) < Date.parse(event.updated_at))
+          return event;
+        if (replacement.status !== event.status) {
+          changed = true;
+          published ||= replacement.status === "published";
+        }
+        return {
+          ...event,
+          status: replacement.status,
+          scheduled_at: replacement.scheduled_at,
+          published_at: replacement.published_at,
+          updated_at: replacement.updated_at,
+        };
+      }),
+    );
+    if (changed)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.posts(), refetchType: "none" });
+    if (published) void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
+  }, [progress.data, queryClient]);
+}
+
+/**
  * TanStack query hook for calendar events within a specified date window.
- * Polling active when events include in-flight distributions.
+ * Active and newly due events refresh through bounded Distribution detail
+ * reads; settled events never cause periodic range refetches.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace;
  *   its active Brand Profile is merged into params as `brand_profile_id`.
@@ -1054,7 +1131,7 @@ export function useCancelDistribution(scope: SessionScope) {
  */
 export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
   const scopedParams = params ? withBrandProfile(scope, params) : undefined;
-  return useQuery({
+  const query = useQuery({
     queryKey: queryKeys.calendar(scopedParams),
     queryFn: ({ signal }) => {
       if (!scopedParams) return Promise.resolve([]);
@@ -1064,9 +1141,10 @@ export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
         signal,
       );
     },
-    refetchInterval: (query) => pollingInterval(query.state.data),
     enabled: scope.isSignedIn && Boolean(scopedParams),
   });
+  useCalendarProgress(scope, query.data ?? []);
+  return query;
 }
 
 /**
@@ -1087,16 +1165,19 @@ export function useInstallation(scope: SessionScope, workspaceId: string, enable
 
 /**
  * Shares one exact rolling cohort across dashboard and ranked reads in the
- * current browser QueryClient. Five-minute reuse avoids clock-driven cache
- * misses; Analytics invalidation also invalidates this window, so an explicit
- * Refresh advances every active read together. No instants are rounded.
+ * current browser QueryClient. All mounted Analytics consumers observe this
+ * snapshot, so changing a metric cannot silently advance only half the page.
+ * Five-minute freshness controls navigation/focus reuse. Invalidation advances
+ * every read together; a generation also distinguishes refreshes under a
+ * frozen or coarse clock. Exact API instants are never rounded.
  */
-function analyticsWindow(queryClient: QueryClient, range: AnalyticsRangePreset) {
-  return queryClient.fetchQuery({
+function useAnalyticsWindow(scope: SessionScope, range: AnalyticsRangePreset) {
+  return useQuery({
     queryKey: ["analytics", "window", range],
-    queryFn: () => analyticsRangeWindow(range),
+    queryFn: () => ({ ...analyticsRangeWindow(range), generation: crypto.randomUUID() }),
     staleTime: referenceFreshnessMs,
     gcTime: privateCacheRetentionMs,
+    enabled: scope.isSignedIn,
   });
 }
 
@@ -1111,7 +1192,7 @@ function analyticsWindow(queryClient: QueryClient, range: AnalyticsRangePreset) 
  * @returns TanStack query carrying the dashboard aggregates.
  */
 export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScopeParams) {
-  const queryClient = useQueryClient();
+  const window = useAnalyticsWindow(scope, params.range).data;
   const scopedParams = withBrandProfile(scope, {
     account_id: params.account_id,
     format: params.format,
@@ -1119,16 +1200,21 @@ export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScop
   });
   const keyParams = { ...scopedParams, range: params.range };
   return useQuery({
-    queryKey: queryKeys.analyticsDashboard(keyParams),
-    queryFn: async ({ signal }) => {
-      const window = await analyticsWindow(queryClient, params.range);
-      return runApiQuery(
-        scope,
-        (api) => api.getAnalyticsDashboard({ ...scopedParams, ...window }),
-        signal,
-      );
-    },
-    placeholderData: keepPreviousData,
+    queryKey: [...queryKeys.analyticsDashboard(keyParams), window?.generation],
+    queryFn: window
+      ? ({ signal }) =>
+          runApiQuery(
+            scope,
+            (api) =>
+              api.getAnalyticsDashboard({ ...scopedParams, start: window.start, end: window.end }),
+            signal,
+          )
+      : skipToken,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey.at(-1) === window?.generation ? previous : undefined,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     staleTime: referenceFreshnessMs,
     gcTime: privateCacheRetentionMs,
     enabled: scope.isSignedIn,
@@ -1187,7 +1273,7 @@ export function useWorkspaceMembers(scope: SessionScope, workspaceId: string, en
  * @returns Query result with the ranked Posts and pagination metadata.
  */
 export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScopeParams) {
-  const queryClient = useQueryClient();
+  const window = useAnalyticsWindow(scope, params.range).data;
   const { range, ...filters } = params;
   const scopedParams = withBrandProfile(scope, filters);
   const keyParams: AnalyticsPostScopeParams = {
@@ -1201,16 +1287,21 @@ export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScop
     range,
   };
   return useQuery({
-    queryKey: queryKeys.analyticsPosts(keyParams),
-    queryFn: async ({ signal }) => {
-      const window = await analyticsWindow(queryClient, range);
-      return runApiQuery(
-        scope,
-        (api) => api.getAnalyticsPosts({ ...scopedParams, ...window }),
-        signal,
-      );
-    },
-    placeholderData: keepPreviousData,
+    queryKey: [...queryKeys.analyticsPosts(keyParams), window?.generation],
+    queryFn: window
+      ? ({ signal }) =>
+          runApiQuery(
+            scope,
+            (api) =>
+              api.getAnalyticsPosts({ ...scopedParams, start: window.start, end: window.end }),
+            signal,
+          )
+      : skipToken,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey.at(-1) === window?.generation ? previous : undefined,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     staleTime: referenceFreshnessMs,
     gcTime: privateCacheRetentionMs,
     enabled: scope.isSignedIn,

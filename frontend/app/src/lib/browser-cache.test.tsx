@@ -18,6 +18,8 @@ import type {
 } from "@/types";
 import {
   useAnalyticsDashboard,
+  invalidateQueryKeys,
+  queryKeys,
   useAnalyticsPosts,
   useCalendar,
   useDeleteBrandProfile,
@@ -117,7 +119,7 @@ describe("private browser read cache", () => {
 
     vi.setSystemTime(new Date("2026-10-25T12:04:00.000Z"));
     const returned = renderHook(
-      ({ metric }: { metric: "views" | "likes" }) => ({
+      ({ metric }: { metric: "views" | "likes" | "shares" }) => ({
         dashboard: useAnalyticsDashboard(scope, { range: "30d" }),
         posts: useAnalyticsPosts(scope, { range: "30d", metric, limit: 10, offset: 0 }),
       }),
@@ -132,7 +134,7 @@ describe("private browser read cache", () => {
     expect(requests).toHaveLength(3);
 
     vi.setSystemTime(new Date("2026-10-25T12:05:30.000Z"));
-    returned.rerender({ metric: "views" });
+    returned.rerender({ metric: "shares" });
     await waitFor(() => expect(requests).toHaveLength(4));
     expect(
       requests
@@ -147,7 +149,7 @@ describe("private browser read cache", () => {
     );
 
     await act(async () => {
-      await client.invalidateQueries({ queryKey: ["analytics"] });
+      await invalidateQueryKeys(client, [queryKeys.analytics()]);
     });
     await waitFor(() =>
       expect(requests.slice(-2).map((url) => url.searchParams.get("end"))).toEqual([

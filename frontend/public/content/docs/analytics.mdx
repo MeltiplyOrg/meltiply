@@ -75,10 +75,16 @@ drafts, unpublished Posts, and unmeasured counters show a dash rather than zero.
 Posts loads 60 records at a time. In **Grid**, use **Previous page** and **Next
 page** beneath the cards; each page shows at most 60 cards. In **Table**, **Load
 more** appends the next batch without replacing existing rows. Filters apply to
-the loaded Posts and reset the Grid to page one. Fetched pages are reused from
-the browser's memory cache across view and route changes; inactive cached pages
-expire after 30 minutes. They are not saved across a browser reload. Publishing
-progress and mutations still refresh cached data.
+the loaded Posts and reset the Grid to page one. Fetched pages are reused only
+in the signed-in browser's memory across view and route changes; each page is
+fresh for one minute and inactive pages expire after 30 minutes. Nothing is
+saved across reloads. Publishing progress and your mutations update cached data.
+
+Channels and active Brand Profiles remain fresh for five minutes. Analytics
+dashboard and rankings share the same five-minute cohort, and **Refresh** advances
+both together. Private cache data is scoped to your current user and Workspace,
+cleared when identity changes, and never persisted to browser storage or a shared
+CDN. Other members' changes can wait for refresh or freshness expiry.
 
 Open a published Post from **Posts** to see its latest totals and two line charts:
 
@@ -115,6 +121,9 @@ A partial-data banner names any unsupported platforms in scope. The page shows
 the exact last successful sync time and warns when it is older than 26 hours,
 the daily sync cadence plus margin. **Refresh** re-reads stored metrics; it does
 not trigger a Provider sync.
+
+These freshness intervals apply to browser reads only. They do not change server
+authorization or trigger Provider synchronization.
 
 ## Chart and table
 

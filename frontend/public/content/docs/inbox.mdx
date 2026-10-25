@@ -20,10 +20,14 @@ To open a published post on its native platform:
 
 ## Backend comment and reply capabilities
 
-Backend worker pipelines retain comment synchronization and outbox reply infrastructure:
+Backend workers retain authorized Comment reads, historical Comments and outbox
+reply infrastructure:
 
-- **Comment sync** — background services sync audience comments from connected platform accounts.
-- **Reply lifecycle** — backend outbox automation supports reply delivery states including Queued, Processing, Replied, Failed, and Needs reconciliation.
+- **Comment sync** — recurring background collection is opt-in and disabled by
+  default while no Inbox exists. Authorized on-demand reads and their
+  retry/cursor recovery remain available; historical Comments are retained.
+- **Reply lifecycle** — backend outbox automation supports reply delivery states
+  including Queued, Processing, Replied, Failed, and Needs reconciliation.
 
 An interactive comment inbox and reply composer are not exposed in the frontend application.
 

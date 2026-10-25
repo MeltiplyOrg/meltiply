@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 import type { components } from "@meltiply/contracts/schema";
 import type { SessionClaims } from "@meltiply/auth";
 import type { EffectTransactionClient } from "@meltiply/database";
@@ -10,13 +10,13 @@ import {
 } from "@meltiply/domain";
 import { ProviderRegistry } from "@meltiply/providers";
 
-import { AnalyticsSummaryCache } from "./analytics-summary-cache";
+import { AnalyticsSummaryCache, type AnalyticsSummaryFlight } from "./analytics-summary-cache";
 import {
   activeBrandProfilePredicate,
   requireActiveBrandProfileEffect,
 } from "./brand-profile-guard";
 import { disconnectPlatformAccountEffect } from "./brand-profile-service";
-import { CoreApiError, type CoreApiService } from "./core-types";
+import { CoreApiError, type CoreApiService, type CoreServiceError } from "./core-types";
 import { activeOrganizationIdEffect, withTenantTransactionEffect } from "./database";
 import type { ApiWorkerEnv } from "./env";
 import {
@@ -32,6 +32,9 @@ type AnalyticsSnapshot = Schemas["AnalyticsSnapshot"];
 type AnalyticsSummary = Schemas["AnalyticsSummary"];
 /** Effective filters accepted by the public analytics summary operation. */
 type AnalyticsSummaryFilters = Parameters<CoreApiService["summaryAnalytics"]>[2];
+type AnalyticsSummaryTransactionResult =
+  | { kind: "ready"; summary: AnalyticsSummary }
+  | { kind: "pending"; promise: AnalyticsSummaryFlight["promise"] };
 type InboxComment = Schemas["InboxComment"];
 type Platform = Schemas["Platform"];
 type PlatformAccount = Schemas["PlatformAccount"];
@@ -997,39 +1000,63 @@ export function createCoreApiService(
     },
 
     /**
-     * Returns the platform-level performance summary for Distributions
-     * published inside a date range, reusing a successful result for at most
-     * 30 seconds.
-     *
-     * Every request first runs inside an authenticated tenant transaction: it
-     * proves an active membership and reads the persisted Brand Profile ids and
-     * lifecycle generations that shape cache identity. Suspension, membership
-     * removal, RLS, and Brand Profile delete/restore therefore apply before any
-     * hit. A hit returns an isolated copy without moving the absolute
-     * expiration, advancing timestamps, or inventing measurements; a miss
-     * computes the canonical aggregation in the same established transaction.
-     * Filters, explicit versus All Brand Profile scope, identity, deployment,
-     * and capability configuration all partition the cache. Expired, evicted,
-     * oversized, or cold entries simply recompute, and errors are never
-     * retained.
-     *
-     * @param env - Worker environment bindings.
-     * @param session - Authenticated user session claims.
-     * @param filters - Analytics filters including dates, platform, and optional Brand Profile scope.
-     * @returns Effect resolving to canonical summary analytics with platform breakdowns, totals, and sync status.
+     * Returns a thirty-second summary after fresh authorization and persisted
+     * Brand Profile visibility checks. Equivalent cold misses share one bounded
+     * computation; followers commit and release their clients before waiting.
+     * Leaders settle only after commit, never retain failures, and run through
+     * caller cancellation so one caller cannot abort another's shared read.
+     * Database statement deadlines still bound aggregation. Configuration,
+     * identity, role, lifecycle and exact filters partition every result.
      */
     summaryAnalytics(env, session, filters) {
-      return withTenantTransactionEffect(env, session, (client) =>
+      return Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const access = yield* analyticsAccessEffect(client, filters.brandProfileId);
-          const namespace = `${analyticsDeploymentNamespace(env)}|${capabilityNamespace}`;
-          summaryCache.useNamespace(namespace);
-          const key = analyticsSummaryCacheKey(access, filters, namespace, session);
-          const cached = summaryCache.get(key, now().getTime());
-          if (cached !== undefined) return cached;
-          const summary = yield* computeAnalyticsSummaryEffect(client, capabilities, filters);
-          summaryCache.set(key, summary, now().getTime());
-          return summary;
+          let flight: AnalyticsSummaryFlight | undefined;
+          let computation: { key: string; namespace: string; completedAt: number } | undefined;
+          const transaction: Effect.Effect<AnalyticsSummaryTransactionResult, CoreServiceError> =
+            withTenantTransactionEffect(env, session, (client) =>
+              Effect.gen(function* () {
+                const access = yield* analyticsAccessEffect(client, filters.brandProfileId);
+                const namespace = `${analyticsDeploymentNamespace(env)}|${capabilityNamespace}`;
+                summaryCache.useNamespace(namespace);
+                const key = analyticsSummaryCacheKey(access, filters, namespace, session);
+                const cached = summaryCache.get(key, now().getTime());
+                if (cached !== undefined) return { kind: "ready", summary: cached } as const;
+                const acquired = summaryCache.acquire(key);
+                if (acquired && !acquired.leader) {
+                  return { kind: "pending", promise: acquired.promise } as const;
+                }
+                flight = acquired;
+                const summary = yield* computeAnalyticsSummaryEffect(client, capabilities, filters);
+                computation = { key, namespace, completedAt: now().getTime() };
+                return { kind: "ready", summary } as const;
+              }),
+            );
+          const exit = yield* Effect.exit(transaction);
+          if (Exit.isFailure(exit)) {
+            flight?.release();
+            flight?.settle(Exit.failCause(exit.cause));
+            return yield* Effect.failCause(exit.cause);
+          }
+          const outcome = exit.value;
+          if (outcome.kind === "pending") {
+            // This promise always resolves to an Exit, including leader defects.
+            const shared = yield* restore(Effect.promise(() => outcome.promise));
+            return yield* Exit.isSuccess(shared)
+              ? Effect.succeed(structuredClone(shared.value))
+              : Effect.failCause(shared.cause);
+          }
+          if (computation) {
+            summaryCache.set(
+              computation.key,
+              outcome.summary,
+              computation.completedAt,
+              computation.namespace,
+            );
+            flight?.release();
+            flight?.settle(Exit.succeed(structuredClone(outcome.summary)));
+          }
+          return outcome.summary;
         }),
       );
     },

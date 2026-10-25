@@ -101,7 +101,8 @@ export async function capabilityNavigation({ origin, cookie, label }) {
           (enabled) => document.documentElement.classList.toggle("dark", enabled),
           dark,
         );
-        const previous = analyticsReads.at(-1).searchParams.get("end");
+        const previous = analyticsReads.at(-1)?.searchParams.get("end");
+        await page.waitForTimeout(25);
         const expected = analyticsReads.length + 2;
         await refresh.click();
         await expect.poll(() => analyticsReads.length).toBe(expected);

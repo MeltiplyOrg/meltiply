@@ -1009,14 +1009,9 @@ export function createAutomationHandler(
         });
       };
       if (provider && env.PUBLISH_BATCH_CONCURRENCY === "2") {
-        // Exception: pg-backed partition lookup cannot be evaluated inside the
-        // workerd unit-test isolate; ordinary serial dispatch stays pg-free.
-        const module = await import("./publish-batch");
-        const partitions = await runDirectProgram(
-          env,
-          module.partitionPublishBatch(env, batch.messages),
-        );
-        await module.consumePublishPartitions(partitions, consume);
+        const { consumePublishPartitions, partitionPublishBatch } = await import("./publish-batch");
+        const partitions = await runDirectProgram(env, partitionPublishBatch(env, batch.messages));
+        await consumePublishPartitions(partitions, consume);
       } else {
         for (const message of batch.messages) await consume(message);
       }

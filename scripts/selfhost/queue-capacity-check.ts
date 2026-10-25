@@ -151,8 +151,7 @@ async function sample(concurrency: 1 | 2) {
         ],
       }),
     );
-    await runtime.ready;
-    const worker = await runtime.getWorker("queue-capacity");
+    const { origin } = await runtime.ready;
     const rows = distributions.map((id, index) => ({
       id: events[index],
       content_type: "json",
@@ -175,7 +174,7 @@ async function sample(concurrency: 1 | 2) {
       metrics: { backlogCount: 5, backlogBytes: 1000 },
     });
     started = performance.now();
-    const response = await worker.fetch("http://queue-capacity/deliver", {
+    const response = await fetch(`${origin}/deliver`, {
       method: "POST",
       body: request,
     });
@@ -206,7 +205,7 @@ async function sample(concurrency: 1 | 2) {
           row.status === "published" && [...accepted.values()].includes(row.platform_post_id),
       ),
     );
-    const replay = await worker.fetch("http://queue-capacity/deliver", {
+    const replay = await fetch(`${origin}/deliver`, {
       method: "POST",
       body: request,
     });

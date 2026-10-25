@@ -28,9 +28,9 @@ export const dataset = {
   distributionLimit: 100,
   pageSize: 100,
   posts: 300,
-  scheduleChannels: ["read-cache", "application"].includes(process.env.BENCHMARK_PROFILE) ? 1 : 20,
+  scheduleChannels: process.env.BENCHMARK_PROFILE === "all" ? 20 : 1,
   schedulePosts: 42,
-  snapshotsPerDistribution: process.env.BENCHMARK_PROFILE === "application" ? 90 : 1,
+  snapshotsPerDistribution: ["all", "read-cache"].includes(process.env.BENCHMARK_PROFILE) ? 1 : 90,
 };
 
 const authUserId = "auth_user_benchmark";

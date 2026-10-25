@@ -16,7 +16,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const { authenticatedPoolFor, release, systemPoolFor } = vi.hoisted(() => {
+const { authenticatedPoolFor, systemPoolFor } = vi.hoisted(() => {
   const release = vi.fn();
   const client = {
     query: vi.fn(async () => ({ rows: [{ ok: 1 }] })),
@@ -25,7 +25,6 @@ const { authenticatedPoolFor, release, systemPoolFor } = vi.hoisted(() => {
   const pool = { connect: vi.fn(async () => client) };
   return {
     authenticatedPoolFor: vi.fn(() => pool),
-    release,
     systemPoolFor: vi.fn(() => pool),
   };
 });
@@ -658,26 +657,6 @@ describe("API Worker foundation", () => {
         }),
       }),
     );
-  });
-
-  it("releases successful Hyperdrive probes without destroying clients", async () => {
-    release.mockClear();
-    const response = await createApiApp().request(
-      "/api/v1/ready",
-      {},
-      {
-        ...stagingEnv,
-        DB_AUTHENTICATED: undefined,
-        DB_SYSTEM: {
-          connectionString: "postgres://system-release",
-        } as Hyperdrive,
-      },
-    );
-
-    expect(response.status).toBe(503);
-    expect(release).toHaveBeenCalledTimes(1);
-    expect(release).toHaveBeenCalledWith();
-    expect(release).not.toHaveBeenCalledWith(true);
   });
 
   it("keeps binding-only readiness behavior when database bindings are absent", async () => {

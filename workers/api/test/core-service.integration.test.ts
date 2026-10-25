@@ -15,6 +15,7 @@ import {
   type ProviderRequestContext,
 } from "@meltiply/providers";
 import type { JwtIdentity } from "@meltiply/auth";
+import type { TransactionClient } from "@meltiply/database";
 import { Effect } from "effect";
 import {
   createStorageServiceTest,
@@ -2464,6 +2465,67 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       });
       expect(recomputed.last_synced_at).toBe("2031-05-07T12:00:00.000Z");
     } finally {
+      await removeAnalyticsCacheFixture();
+    }
+  });
+
+  it("shares a cold authorized summary and releases follower transactions before waiting", async () => {
+    const service = createCoreApiService();
+    const pool = authenticatedPoolFor(env);
+    const connect = pool.connect;
+    let releaseAggregation!: () => void;
+    let aggregationStarted!: () => void;
+    let followerCommitted!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseAggregation = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      aggregationStarted = resolve;
+    });
+    const committed = new Promise<void>((resolve) => {
+      followerCommitted = resolve;
+    });
+    let aggregations = 0;
+    const running: Promise<unknown>[] = [];
+    try {
+      await seedAnalyticsCacheFixture();
+      pool.connect = async () => {
+        const client = await connect.call(pool);
+        const query: TransactionClient["query"] = async <
+          Row extends Record<string, unknown> = Record<string, unknown>,
+        >(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          if (text.includes("FROM analytics_snapshots s")) {
+            aggregations += 1;
+            aggregationStarted();
+            await held;
+          }
+          const result = await client.query<Row>(text, values);
+          if (text.trim() === "COMMIT") followerCommitted();
+          return result;
+        };
+        return { query, release: () => client.release() };
+      };
+      const range = { start: analyticsCacheStart, end: analyticsCacheEnd };
+      const first = Effect.runPromise(service.summaryAnalytics(env, alpha, range));
+      running.push(first);
+      await started;
+      const second = Effect.runPromise(service.summaryAnalytics(env, alpha, range));
+      running.push(second);
+      await committed;
+      expect(aggregations).toBe(1);
+      releaseAggregation();
+      const [leader, follower] = await Promise.all([first, second]);
+      expect(leader.totals.views).toBe(100);
+      expect(follower).toEqual(leader);
+      leader.totals.views = 999;
+      expect(follower.totals.views).toBe(100);
+    } finally {
+      releaseAggregation();
+      await Promise.allSettled(running);
+      pool.connect = connect;
       await removeAnalyticsCacheFixture();
     }
   });

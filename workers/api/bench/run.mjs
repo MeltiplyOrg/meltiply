@@ -60,7 +60,7 @@ const outputFile = resolve(
   process.env.BENCHMARK_OUTPUT_FILE ?? "benchmark-results/benchmark.json",
 );
 const label = process.env.BENCHMARK_LABEL ?? "benchmark";
-const profile = process.env.BENCHMARK_PROFILE ?? "all";
+const profile = process.env.BENCHMARK_PROFILE ?? "application";
 if (!["all", "read-cache", "application"].includes(profile))
   throw new TypeError("Unknown BENCHMARK_PROFILE");
 const warmupSamples = integerEnv("BENCHMARK_WARMUP", 3, 0, 100);

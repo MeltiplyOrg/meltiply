@@ -3,6 +3,8 @@ import SelfhostAutomation from "../../../scripts/selfhost/automation";
 import { createAutomationHandler } from "../src/index";
 import type { AutomationEnv } from "../src/env";
 
+export { ReplyWorkflow } from "../src/index";
+
 interface CapacityEnv extends AutomationEnv {
   PUBLISH_UPSTREAM: Fetcher;
 }

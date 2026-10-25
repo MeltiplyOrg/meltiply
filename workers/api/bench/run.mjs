@@ -32,6 +32,8 @@ import { createAssetApiService } from "../src/asset-service.ts";
 import { authenticatedPoolFor, systemPoolFor } from "../src/database.ts";
 import { createCoreApiService } from "../src/core-service.ts";
 import { createPostApiService } from "../src/post-service.ts";
+import { activeIdentity } from "../src/auth-policy.ts";
+import { jwtVerifierFor } from "../src/verifier-cache.ts";
 import {
   cleanup,
   cleanupDeleteBatches,
@@ -855,6 +857,8 @@ const workflows = [];
 
 try {
   await seed(admin);
+  const verifiedIdentity = await jwtVerifierFor(env)(bearer);
+  await activeIdentity(env, verifiedIdentity);
   const cipher = new TokenCipher({
     currentKeyId: "primary",
     keys: [{ id: "primary", material: env.TOKEN_ENCRYPTION_KEY }],

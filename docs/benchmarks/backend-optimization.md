@@ -669,6 +669,14 @@ Verification at the corrected source:
 - Browser regression coverage includes sixty active Posts sharing one page read,
   sparse detail polling, pending Load more, delayed deletion reconciliation,
   Analytics invalidation, and clearing obsolete errors after work settles.
+- [Managed local workerd acceptance 40202936516](https://github.com/MeltiplyOrg/meltiply/actions/runs/40202936516)
+  passed `node scripts/benchmarks/backend/cache-runtime-check.mjs`, the controlled
+  Provider requirements driver, `bun run skills:check`, and `bun run docs:links`
+  (545 files, 1423 local links). The smoke now supplies canonical `APP_URL` so its
+  built frontend proxies to the owned local API instead of an absent deployed binding.
+  `npx --yes react-doctor@0.9.18 frontend/app --verbose --scope changed --base origin/master`
+  scored 91/100 with one pre-existing `transportStatus` export warning in
+  `providers.tsx`; that declaration is unchanged from master.
 
 ## Initial authenticated application regression
 

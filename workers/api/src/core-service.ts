@@ -1043,6 +1043,8 @@ export function createCoreApiService(
      * contributes zero. Rows exclude soft-deleted Posts and Brand Profiles,
      * order by the selected metric, publication time, then Post id, and fetch
      * one extra row to report `has_more` without a second count query.
+     * An ordered one-row index lookup per Distribution avoids sorting every
+     * historical capture merely to choose the exact as-of snapshot.
      *
      * @param env - Worker environment bindings.
      * @param session - Authenticated user session claims.
@@ -1067,13 +1069,16 @@ export function createCoreApiService(
                  AND ${activeBrandProfilePredicate("d.brand_profile_id")}
              ),
              latest AS (
-               SELECT DISTINCT ON (s.distribution_id)
-                 s.distribution_id,
-                 s.views, s.likes, s.comments, s.shares, s.snapshot_at
-               FROM analytics_snapshots s
-               JOIN candidates c ON c.distribution_id = s.distribution_id
-               WHERE s.snapshot_at <= $2
-               ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC
+               SELECT c.distribution_id,
+                      s.views, s.likes, s.comments, s.shares, s.snapshot_at
+               FROM candidates c
+               JOIN LATERAL (
+                 SELECT s.views, s.likes, s.comments, s.shares, s.snapshot_at
+                 FROM analytics_snapshots s
+                 WHERE s.distribution_id = c.distribution_id AND s.snapshot_at <= $2
+                 ORDER BY s.snapshot_at DESC, s.id DESC
+                 LIMIT 1
+               ) s ON true
              ),
              per_post AS (
                SELECT
@@ -1154,6 +1159,9 @@ export function createCoreApiService(
      * lifetime totals; a day with no sync contributes no fabricated zero.
      * Followers come from account snapshots, and counters a Provider does not
      * expose stay null and are named in `unavailable_metrics`.
+     * Latest/baseline lookup reads one indexed row per Distribution. Accumulation
+     * retains historical maxima (including counter corrections), but never scans
+     * captures later than its largest 720-hour bucket.
      *
      * @param env - Worker environment bindings.
      * @param session - Authenticated user session claims.
@@ -1185,26 +1193,36 @@ export function createCoreApiService(
           ];
           const latest = `
             latest AS (
-              SELECT DISTINCT ON (s.distribution_id)
-                s.distribution_id, s.views, s.likes, s.comments, s.shares,
+              SELECT c.id AS distribution_id,
+                s.views, s.likes, s.comments, s.shares,
                 s.impressions, s.reach, s.watch_time_sec, s.saves, s.clicks,
                 s.snapshot_at
-              FROM analytics_snapshots s
-              JOIN candidates c ON c.id = s.distribution_id
-              WHERE s.snapshot_at <= $2
-              ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC
+              FROM candidates c
+              JOIN LATERAL (
+                SELECT s.views, s.likes, s.comments, s.shares,
+                       s.impressions, s.reach, s.watch_time_sec, s.saves, s.clicks, s.snapshot_at
+                FROM analytics_snapshots s
+                WHERE s.distribution_id = c.id AND s.snapshot_at <= $2
+                ORDER BY s.snapshot_at DESC, s.id DESC
+                LIMIT 1
+              ) s ON true
             )`;
 
           const seriesResult = yield* client.query<AnalyticsSeriesRow>(
             `WITH candidates AS (${candidates}),
              baseline AS (
-               SELECT DISTINCT ON (s.distribution_id)
-                 s.distribution_id, s.views, s.likes, s.comments, s.shares,
+               SELECT c.id AS distribution_id,
+                 s.views, s.likes, s.comments, s.shares,
                  s.impressions, s.reach, s.snapshot_at, s.id, 1 AS is_baseline
-               FROM analytics_snapshots s
-               JOIN candidates c ON c.id = s.distribution_id
-               WHERE s.snapshot_at < $1
-               ORDER BY s.distribution_id, s.snapshot_at DESC, s.id DESC
+               FROM candidates c
+               JOIN LATERAL (
+                 SELECT s.views, s.likes, s.comments, s.shares,
+                        s.impressions, s.reach, s.snapshot_at, s.id
+                 FROM analytics_snapshots s
+                 WHERE s.distribution_id = c.id AND s.snapshot_at < $1
+                 ORDER BY s.snapshot_at DESC, s.id DESC
+                 LIMIT 1
+               ) s ON true
              ),
              events AS (
                SELECT s.distribution_id, s.views, s.likes, s.comments, s.shares,
@@ -1411,6 +1429,7 @@ export function createCoreApiService(
                FROM candidates c
                JOIN analytics_snapshots s ON s.distribution_id = c.id
                WHERE s.snapshot_at >= c.published_at AND s.snapshot_at <= $2
+                 AND s.snapshot_at <= c.published_at + INTERVAL '720 hours'
              ),
              buckets(hours) AS (VALUES (1), (6), (24), (72), (168), (720)),
              per_bucket AS (

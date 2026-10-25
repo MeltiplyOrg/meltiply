@@ -61,8 +61,8 @@ export async function seed(client) {
     [authUserId],
   );
   await client.query(
-    `INSERT INTO users (id, auth_user_id, email, display_name)
-     VALUES ($1, $2, $3, 'Benchmark User')`,
+    `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
+     VALUES ($1, $2, $3, 'Benchmark User', true)`,
     [ids.user, authUserId, benchmarkEmail],
   );
   await client.query(
@@ -75,6 +75,7 @@ export async function seed(client) {
      VALUES ($1, $2, $3, 'admin')`,
     [ids.member, ids.org, ids.user],
   );
+  await client.query("INSERT INTO usage_reconciliation_state (org_id) VALUES ($1)", [ids.org]);
   await client.query(
     `INSERT INTO brand_profiles (id, org_id, name, color)
      VALUES ($1, $2, 'Benchmark Brand', '#1d4ed8')`,

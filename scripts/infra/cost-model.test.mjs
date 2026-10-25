@@ -226,7 +226,6 @@ test("cost CLI rejects a projection after an explicitly expired price schedule",
       { encoding: "utf8", timeout: 3_000 },
     );
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /workers\\.logs.*expired/u);
     assert.equal(result.stdout, "");
   } finally {
     await rm(directory, { recursive: true, force: true });

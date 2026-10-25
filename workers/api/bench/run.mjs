@@ -29,7 +29,6 @@ import pg from "pg";
 
 import { createApiApp } from "../src/app.ts";
 import { createAssetApiService } from "../src/asset-service.ts";
-import { authenticatedPoolFor, systemPoolFor } from "../src/database.ts";
 import { createCoreApiService } from "../src/core-service.ts";
 import { createPostApiService } from "../src/post-service.ts";
 import { activeIdentity } from "../src/auth-policy.ts";
@@ -44,6 +43,14 @@ import {
   seed,
   seedDeleteBatch,
 } from "./fixtures.mjs";
+
+// A broken callback/transport must fail the experiment, not bill a hosted
+// runner until its workflow deadline. Normal measured work clears this timer.
+const watchdog = setTimeout(() => {
+  process.stderr.write("Benchmark exceeded its 15-minute experiment deadline\\n");
+  process.exit(1);
+}, 15 * 60_000);
+watchdog.unref();
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const authenticatedUrl = requiredEnv("BENCHMARK_DATABASE_AUTHENTICATED_URL");
@@ -136,10 +143,11 @@ const instrumentedClients = new WeakSet();
  * Observes both pg checkout overloads without changing their completion
  * contract. Pool.query uses callback checkout/query; transactions use Promises.
  * Every completed statement is counted once, including failed statements;
- * parameters, credentials and JWTs are never captured.
+ * parameters, credentials and JWTs are never captured. Installed on the Pool
+ * prototype before requests so invocation-owned adapters are observed too.
  */
 function instrumentPool(pool) {
-  const originalConnect = pool.connect.bind(pool);
+  const originalConnect = pool.connect;
   const instrumentClient = (client) => {
     if (instrumentedClients.has(client)) return client;
     instrumentedClients.add(client);
@@ -166,14 +174,15 @@ function instrumentPool(pool) {
     };
     return client;
   };
-  pool.connect = (callback) => {
+  pool.connect = function (callback) {
+    const connect = originalConnect.bind(this);
     if (typeof callback === "function") {
-      return originalConnect((error, client, release) => {
+      return connect((error, client, release) => {
         if (client) instrumentClient(client);
         callback(error, client, release);
       });
     }
-    return originalConnect().then(instrumentClient);
+    return connect().then(instrumentClient);
   };
 }
 
@@ -304,8 +313,7 @@ const app = createApiApp({
   providerRegistry,
 });
 
-instrumentPool(authenticatedPoolFor(env));
-instrumentPool(systemPoolFor(env));
+instrumentPool(pg.Pool.prototype);
 
 const admin = new pg.Client({ connectionString: systemUrl });
 await admin.connect();
@@ -314,10 +322,10 @@ const databaseVersion = (await admin.query("SHOW server_version")).rows[0].serve
 let idempotencyCounter = 0;
 let deleteTagCounter = 0;
 
-/** Executes one in-process HTTP request and records status, body, and bytes. */
+/** Executes a complete HTTP request with its own bindings scope and records status, body, and bytes. */
 async function httpRequest(path, init, expectedStatuses = [200]) {
   const started = performance.now();
-  const response = await app.request(path, init, env);
+  const response = await app.request(path, init, { ...env });
   const text = await response.text();
   const durationMs = performance.now() - started;
   if (!expectedStatuses.includes(response.status)) {
@@ -952,4 +960,5 @@ const result = {
 mkdirSync(dirname(outputFile), { recursive: true });
 writeFileSync(outputFile, `${JSON.stringify(result, null, 2)}\n`);
 process.stdout.write(`wrote ${outputFile}\n`);
+clearTimeout(watchdog);
 if (failed && process.env.BENCHMARK_ALLOW_ERRORS !== "1") process.exitCode = 1;

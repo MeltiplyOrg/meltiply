@@ -95,12 +95,12 @@ async function applyContextNames(directory) {
 }
 
 /**
- * Keeps Meltiply's cache-safety review criteria reproducible when the pinned pack is installed.
- * The upstream checklist already discovers caching opportunities; this adds the application's
- * authorization, portability, freshness and measurement constraints without forking the skill.
+ * Keeps explicit cache review in the checklist and reviewer prompt reproducible
+ * when the pinned pack is installed. Covers existing-cache correctness as well
+ * as measured opportunities, using Meltiply's authorization/runtime constraints.
  *
  * @param {string} directory - Staged `.agents/skills` directory
- * @returns {Promise<void>} Resolves after the Optimization checklist is adapted
+ * @returns {Promise<void>} Resolves after both Optimization review sources are adapted
  */
 async function applyCacheReviewGuidance(directory) {
   const file = join(directory, "code-review", "SCALING.md");
@@ -116,8 +116,40 @@ async function applyCacheReviewGuidance(directory) {
     "and pending-entry cleanup separately from completed-result freshness. Preserve Provider-specific " +
     "freshness obligations and publish-time validation. Require cold/warm/concurrent work counts and " +
     "tail-latency evidence on both deployment paths before claiming savings; report missing measurements " +
-    "instead of implementing a speculative cache during a read-only review.\n";
+    "instead of implementing a speculative cache during a read-only review.\n" +
+    "\nReview existing caches and cache opportunities explicitly when changed reads, writes, " +
+    "authorization, polling, or runtime ownership can affect them:\n" +
+    "\n- **Placement and avoided work:** trace browser, HTTP/CDN, API and database reuse; prefer " +
+    "the nearest safe existing owner. Count avoided requests, queries and upstream calls, not " +
+    "just hits. Preserve batching on cold misses and dense active collections.\n" +
+    "- **Isolation and lifetime:** verify identity/Workspace/role/filter and credential/configuration " +
+    "partitions, fresh authorization on hits, sign-out/scope replacement, and runtime-safe " +
+    "connection ownership. Keep private responses out of public/shared caches.\n" +
+    "- **Freshness and reconciliation:** trace mutation, background publication, deletion/restoration " +
+    "and revocation through list/detail/derived caches. Check absolute versus sliding expiry, " +
+    "partial updates that extend collection freshness, and delayed reads overwriting newer state.\n" +
+    "- **Concurrency and failure:** inspect cold/expired stampedes, leader/follower cancellation, " +
+    "query-key changes during refresh, pagination races, error/negative-result retention and recovery, " +
+    "and bounds/cleanup for pending and completed entries.\n" +
+    "- **Evidence:** compare uncached/cold/warm/concurrent/expired/evicted/error paths under realistic " +
+    "cardinality and sparse/dense activity. Include end-to-end p95/p99, total origin work and memory; " +
+    "report regressions and distinguish observed savings from hypotheses. Report cache review as " +
+    "findings, no findings with inspected paths, or not applicable with a reason.\n";
   await writeFile(file, source.replace(anchor, anchor + guidance));
+  const skillFile = join(directory, "code-review", "SKILL.md");
+  const skillSource = await readFile(skillFile, "utf8");
+  const promptAnchor = "  - **Repeated cost:**";
+  if (!skillSource.includes(promptAnchor))
+    throw new Error("Pinned Optimization reviewer prompt is missing");
+  const cachePrompt =
+    "  - **Cache review:** inspect existing caches as well as opportunities to avoid repeated " +
+    "reads near the user. Apply SCALING.md's Caching checklist to changed read/write/auth/polling " +
+    "paths: keys and isolation, freshness/invalidation, lifecycle and stale-response races, " +
+    "single-flight cancellation, failure recovery, bounds and runtime ownership. Preserve batching " +
+    "and compare total origin work plus end-to-end tails across cold/warm/concurrent paths. " +
+    "State inspected cache paths even when no finding is warranted, or explain non-applicability. " +
+    "Recommend retention only with a plausible reused cost and explicit trade-offs; keep the review read-only.\n";
+  await writeFile(skillFile, skillSource.replace(promptAnchor, cachePrompt + promptAnchor));
 }
 
 /**

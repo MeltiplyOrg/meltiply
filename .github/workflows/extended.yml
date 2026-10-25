@@ -47,7 +47,7 @@ jobs:
         run: |
           bun run --filter frontend-app type-check
           bun run --cwd frontend/app test src/lib/browser-cache.test.tsx --coverage.enabled=false
-          node --test scripts/infra/cost-model.test.mjs scripts/infra/queue-alert.test.mjs scripts/benchmarks/backend/placement-compare.test.mjs
+          node --test scripts/infra/cost-model.test.mjs scripts/infra/queue-ops.test.mjs scripts/infra/queue-alert.test.mjs scripts/benchmarks/backend/placement-compare.test.mjs
       - name: Exercise authenticated request and Worker ownership changes
         if: inputs.lane == 'performance-backend'
         env:
@@ -59,7 +59,7 @@ jobs:
           bun run --cwd workers/api test:integration test/better-auth.integration.test.ts test/permission-matrix.integration.test.ts test/query-budget.integration.test.ts test/analytics-history.integration.test.ts
           bun run --cwd workers/automation test:integration test/comment-policy.integration.test.ts
           node --test scripts/infra/cost-model.test.mjs
-          node --test scripts/infra/queue-alert.test.mjs scripts/benchmarks/backend/placement-compare.test.mjs
+          node --test scripts/infra/queue-ops.test.mjs scripts/infra/queue-alert.test.mjs scripts/benchmarks/backend/placement-compare.test.mjs
           bunx --no-install tsc --project scripts/selfhost/tsconfig.json
           bunx --no-install wrangler deploy workers/automation/test-support/queue-capacity.ts --config workers/automation/wrangler.test.jsonc --dry-run --outdir artifacts/queue-capacity-worker
           trap 'rm -f scripts/selfhost/.queue-capacity-check.mjs' EXIT

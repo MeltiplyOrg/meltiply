@@ -23,11 +23,13 @@ test("unsampled Queue alerts reach the webhook; metrics or delivery failures can
     }
     const pathname = new URL(request.url, "http://fixture").pathname;
     const result = pathname.endsWith("/metrics")
-      ? {
-          backlog_bytes: 10,
-          backlog_count: mode === "healthy" ? 0 : 1,
-          oldest_message_timestamp_ms: mode === "healthy" ? 0 : Date.now() - 120_000,
-        }
+      ? mode === "malformed"
+        ? {}
+        : {
+            backlog_bytes: 10,
+            backlog_count: mode === "healthy" ? 0 : 1,
+            oldest_message_timestamp_ms: mode === "healthy" ? 0 : Date.now() - 120_000,
+          }
       : [
           { queue_id: "source", queue_name: "meltiply-publish-threads-staging-dlq" },
           { queue_id: "target", queue_name: "meltiply-publish-threads-staging" },
@@ -73,6 +75,9 @@ test("unsampled Queue alerts reach the webhook; metrics or delivery failures can
     assert.equal(alerts.length, 1);
     mode = "metrics-failed";
     await assert.rejects(alertQueue(options, dependencies), /monitor-failure alert delivered/u);
+    assert.deepEqual(alerts.at(-1).alerts, ["queue_monitor_unavailable"]);
+    mode = "malformed";
+    await assert.rejects(alertQueue(options, dependencies));
     assert.deepEqual(alerts.at(-1).alerts, ["queue_monitor_unavailable"]);
     mode = "delivery-failed";
     await assert.rejects(alertQueue(options, dependencies), /alert delivery failed/u);

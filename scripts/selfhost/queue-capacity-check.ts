@@ -113,6 +113,7 @@ async function sample(concurrency: 1 | 2) {
             compatibilityFlags: ["nodejs_compat"],
             bindings: {
               ENVIRONMENT: "test",
+              DATABASE_POOL_MODE: "request",
               VERSION: "queue-capacity",
               TOKEN_ENCRYPTION_KEY: key,
               PUBLISH_BATCH_CONCURRENCY: String(concurrency),

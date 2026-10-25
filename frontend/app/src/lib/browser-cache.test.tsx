@@ -251,8 +251,63 @@ describe("private browser read cache", () => {
     });
     expect(paths).toHaveLength(completedReads);
   }, 15_000);
+  it("refreshes a dense active Post page with a batched list read", async () => {
+    const fixture = contractSuccessBody<Post>("getPost");
+    const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
+    const pending = Array.from({ length: 60 }, (_, index): Post => {
+      const id = `active-post-${index}`;
+      return {
+        ...fixture,
+        id,
+        attachments: [],
+        distributions: [
+          {
+            ...distribution,
+            id: `active-distribution-${index}`,
+            post_id: id,
+            status: "processing",
+          },
+        ],
+      };
+    });
+    const published = pending.map((post) => ({
+      ...post,
+      distributions: post.distributions.map((item) => ({ ...item, status: "published" as const })),
+    }));
+    let pageReads = 0;
+    let detailReads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+        if (path.endsWith("/posts")) {
+          pageReads += 1;
+          return Response.json({
+            posts: pageReads === 1 ? pending : published,
+            has_more: false,
+            limit: 60,
+            offset: 0,
+          });
+        }
+        detailReads += 1;
+        return Response.json(published[0]);
+      }),
+    );
 
-  it("refreshes only active and newly due calendar outcomes, preserving settled events", async () => {
+    const view = renderHook(() => usePosts(scope), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(pageReads).toBe(2);
+      expect(
+        view.result.current.data?.every((post) =>
+          post.distributions.every((item) => item.status === "published"),
+        ),
+      ).toBe(true);
+    });
+
+    expect(detailReads).toBe(0);
+  });
+
+  it("refreshes only active and newly due Calendar details, preserving settled events", async () => {
     const fixture = contractSuccessBody<Post["distributions"][number]>("getDistribution");
     const startedAt = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
@@ -276,13 +331,25 @@ describe("private browser read cache", () => {
     };
     const settled: CalendarEvent = { ...active, id: "settled-outcome", status: "published" };
     const paths: string[] = [];
+    let rangeReads = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
         const url = new URL(input instanceof Request ? input.url : String(input));
         paths.push(url.pathname);
-        if (url.pathname.endsWith("/calendar"))
-          return Response.json({ events: [active, scheduled, settled] });
+        if (url.pathname.endsWith("/calendar")) {
+          rangeReads += 1;
+          return Response.json({
+            events:
+              rangeReads === 1
+                ? [active, scheduled, settled]
+                : [
+                    { ...active, status: "published" },
+                    { ...scheduled, status: "published" },
+                    settled,
+                  ],
+          });
+        }
         return Response.json({
           ...fixture,
           id: url.pathname.split("/").at(-1),
@@ -310,6 +377,46 @@ describe("private browser read cache", () => {
     expect(paths.some((path) => path.endsWith("/settled-outcome"))).toBe(false);
   }, 15_000);
 
+  it("refreshes multiple active Calendar outcomes with one range read", async () => {
+    const fixture = contractSuccessBody<Post["distributions"][number]>("getDistribution");
+    const pending = ["active-first", "active-second"].map((id): CalendarEvent => ({
+      ...fixture,
+      id,
+      status: "processing",
+      post_title: "Publishing",
+    }));
+    const published = pending.map((event) => ({ ...event, status: "published" as const }));
+    let rangeReads = 0;
+    let detailReads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+        if (path.endsWith("/calendar")) {
+          rangeReads += 1;
+          return Response.json({ events: rangeReads === 1 ? pending : published });
+        }
+        detailReads += 1;
+        return Response.json({ ...pending[0], status: "published" });
+      }),
+    );
+
+    const view = renderHook(
+      () =>
+        useCalendar(scope, {
+          start: "2026-01-01T00:00:00Z",
+          end: "2026-12-31T00:00:00Z",
+        }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => {
+      expect(rangeReads).toBe(2);
+      expect(view.result.current.data?.every((event) => event.status === "published")).toBe(true);
+    });
+
+    expect(detailReads).toBe(0);
+  });
+
   it("keeps unrelated Post and Calendar progress moving after an active resource disappears", async () => {
     const fixture = contractSuccessBody<Post>("getPost");
     const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
@@ -325,13 +432,35 @@ describe("private browser read cache", () => {
       ...post.distributions[0]!,
       post_title: post.title,
     }));
+    let postReads = 0;
+    let calendarReads = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
         const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
-        if (path.endsWith("/posts"))
-          return Response.json({ posts, has_more: false, limit: 60, offset: 0 });
-        if (path.endsWith("/calendar")) return Response.json({ events });
+        if (path.endsWith("/posts")) {
+          postReads += 1;
+          return Response.json({
+            posts:
+              postReads === 1
+                ? posts
+                : [
+                    {
+                      ...posts[1],
+                      distributions: [{ ...events[1], status: "published" }],
+                    },
+                  ],
+            has_more: false,
+            limit: 60,
+            offset: 0,
+          });
+        }
+        if (path.endsWith("/calendar")) {
+          calendarReads += 1;
+          return Response.json({
+            events: calendarReads === 1 ? events : [{ ...events[1], status: "published" }],
+          });
+        }
         if (path.includes("/removed"))
           return Response.json(
             { error: { code: "not_found", message: "Removed", retryable: false } },

@@ -145,6 +145,7 @@ async function host(request) {
 
 const bindings = {
   ENVIRONMENT: "staging",
+  DATABASE_POOL_MODE: "request",
   VERSION: process.env.VERSION || "selfhost",
   APP_URL: new URL(config.APP_URL).origin,
   // The public origin may sit behind an authenticating reverse proxy, so the

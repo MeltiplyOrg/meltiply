@@ -487,16 +487,20 @@ function newestPost(previous: Post | undefined, received: Post): Post {
 }
 
 /**
- * Refreshes only loaded Posts with active work, at most four HTTP reads at a
- * time. Future scheduled work becomes eligible when its persisted due instant
- * arrives; settled rows never trigger polling. Successful details replace
- * matching cached rows without changing page order or pagination. Missing rows
- * are removed; independent failures retain data and remain visible to the owner.
- * Newer revisions win over delayed reads; publication transitions invalidate
- * Analytics and update loaded calendar projections without range/page refetches.
+ * Refreshes loaded Posts with active work, choosing individual details or one
+ * batched page refresh based on request count. When active identities outnumber
+ * loaded pages, a single invalidation refreshes the authoritative page chain
+ * instead of issuing more detail requests than list requests. Future scheduled
+ * work becomes eligible at its due instant; settled rows never trigger polling.
+ * Detail results preserve page order, remove missing rows, and surface partial
+ * failures. Newer revisions win over delayed reads; publication transitions
+ * invalidate Analytics and update loaded calendar projections.
  */
-function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
+function usePostProgress(scope: SessionScope, posts: readonly Post[], collectionKey: QueryKey) {
   const queryClient = useQueryClient();
+  const pageCount =
+    queryClient.getQueryData<InfiniteData<PostListResponse, number>>(collectionKey)?.pages.length ??
+    0;
   const hasScheduled = posts.some((post) =>
     post.distributions.some((distribution) => distribution.status === "scheduled"),
   );
@@ -515,9 +519,28 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
     .map((post) => post.id)
     .sort();
   const progress = useQuery({
-    queryKey: ["post-progress", ids],
-    queryFn: ({ signal }) =>
-      runApiQuery(scope, (api) => readProgressDetails(ids, (id) => api.getPost(id)), signal),
+    queryKey: ["post-progress", collectionKey, ids],
+    queryFn: async ({
+      signal,
+    }): Promise<{ values: Post[]; missing: Set<string>; error: Error | null }> => {
+      if (ids.length > pageCount) {
+        await queryClient.invalidateQueries(
+          { queryKey: collectionKey, exact: true, refetchType: "active" },
+          { throwOnError: true },
+        );
+        const refreshed =
+          queryClient.getQueryData<InfiniteData<PostListResponse, number>>(collectionKey);
+        return {
+          values:
+            refreshed?.pages
+              .flatMap((page) => page.posts)
+              .filter((post) => ids.includes(post.id)) ?? [],
+          missing: new Set<string>(),
+          error: null,
+        };
+      }
+      return runApiQuery(scope, (api) => readProgressDetails(ids, (id) => api.getPost(id)), signal);
+    },
     enabled: scope.isSignedIn && ids.length > 0,
     refetchInterval: 10_000,
     staleTime: 10_000,
@@ -619,8 +642,8 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
  * Caches explicit 60-Post pages in the workspace's browser QueryClient.
  * Only the first page loads automatically; further reads require fetchNextPage.
  * Filters have independent caches, inactive pages survive route navigation for
- * 30 minutes. Stale reads and mutations refresh pages; active work refreshes
- * only its Post details with bounded concurrency.
+ * 30 minutes. Stale reads and mutations refresh pages; active progress uses
+ * details when sparse and one batched page refresh when denser than the cache.
  * The workspace/auth provider discards the cache when its identity changes;
  * Post content is not persisted to localStorage or IndexedDB.
  *
@@ -630,8 +653,9 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
  */
 export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "limit" | "offset">) {
   const scopedParams = withBrandProfile(scope, params);
+  const collectionKey = [...queryKeys.posts(scopedParams), "pages", POSTS_PAGE_SIZE] as const;
   const query = useInfiniteQuery({
-    queryKey: [...queryKeys.posts(scopedParams), "pages", POSTS_PAGE_SIZE],
+    queryKey: collectionKey,
     initialPageParam: 0,
     queryFn: ({ signal, pageParam }) =>
       runApiQuery(
@@ -646,7 +670,7 @@ export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "li
     staleTime: 60_000,
     enabled: scope.isSignedIn,
   });
-  const progressError = usePostProgress(scope, query.data ?? []);
+  const progressError = usePostProgress(scope, query.data ?? [], collectionKey);
   return { ...query, error: query.error ?? progressError };
 }
 
@@ -875,10 +899,11 @@ export function useQueues(scope: SessionScope, brandProfileId: string | null, en
   });
 }
 
-/** Pages a Queue's bounded calendar window; active and due Posts refresh through bounded detail reads, never a periodic refetch of every loaded page. */
+/** Pages a Queue's bounded window; sparse progress uses details and dense progress refreshes its loaded pages once. */
 export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryParams) {
+  const collectionKey = [...queryKeys.posts(params), "queue-calendar"] as const;
   const query = useInfiniteQuery({
-    queryKey: [...queryKeys.posts(params), "queue-calendar"],
+    queryKey: collectionKey,
     initialPageParam: 0,
     queryFn: ({ pageParam, signal }) =>
       runApiQuery(
@@ -892,6 +917,7 @@ export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryPara
   const progressError = usePostProgress(
     scope,
     query.data?.pages.flatMap((page) => page.posts) ?? [],
+    collectionKey,
   );
   return { ...query, error: query.error ?? progressError };
 }
@@ -1186,13 +1212,17 @@ export function useCancelDistribution(scope: SessionScope) {
 }
 
 /**
- * Tracks only in-flight or due Distribution identities from the loaded calendar.
- * Reads run four at a time; newer detail timestamps win over delayed responses.
- * Successful outcomes update matching events in place, preserving range membership
- * and settled rows. Publication invalidates Analytics once at the transition;
- * inactive Post collections are marked stale without refetching loaded pages.
+ * Tracks active or due Distribution identities in a loaded Calendar range.
+ * A single active outcome uses a detail read; multiple active outcomes refresh
+ * the bounded range once rather than fan out one detail request per event.
+ * Sparse detail results preserve range membership and settled rows; newer
+ * timestamps win over delayed reads. Publication invalidates Analytics once.
  */
-function useCalendarProgress(scope: SessionScope, events: readonly CalendarEvent[]) {
+function useCalendarProgress(
+  scope: SessionScope,
+  events: readonly CalendarEvent[],
+  collectionKey: QueryKey,
+) {
   const queryClient = useQueryClient();
   const now = useDueWorkClock(events.some((event) => event.status === "scheduled"));
   const ids = events
@@ -1206,13 +1236,30 @@ function useCalendarProgress(scope: SessionScope, events: readonly CalendarEvent
     .map((event) => event.id)
     .sort();
   const progress = useQuery({
-    queryKey: ["calendar-progress", ids],
-    queryFn: ({ signal }) =>
-      runApiQuery(
+    queryKey: ["calendar-progress", collectionKey, ids],
+    queryFn: async ({ signal }) => {
+      if (ids.length > 1) {
+        await queryClient.invalidateQueries(
+          { queryKey: collectionKey, exact: true, refetchType: "active" },
+          { throwOnError: true },
+        );
+        const refreshed = queryClient.getQueryData<CalendarEvent[]>(collectionKey) ?? [];
+        if (
+          events.some((previous) =>
+            refreshed.some((next) => next.id === previous.id && next.status !== previous.status),
+          )
+        ) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.posts(), refetchType: "none" });
+          void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
+        }
+        return { values: [], missing: new Set<string>(), error: null };
+      }
+      return runApiQuery(
         scope,
         (api) => readProgressDetails(ids, (id) => api.getDistribution(id)),
         signal,
-      ),
+      );
+    },
     enabled: scope.isSignedIn && ids.length > 0,
     refetchInterval: 10_000,
     staleTime: 10_000,
@@ -1261,9 +1308,9 @@ function useCalendarProgress(scope: SessionScope, events: readonly CalendarEvent
 }
 
 /**
- * TanStack query hook for calendar events within a specified date window.
- * Active and newly due events refresh through bounded Distribution detail
- * reads; settled events never cause periodic range refetches.
+ * TanStack query hook for Calendar events within a specified date window.
+ * One active event uses a Distribution detail read; multiple active events
+ * trigger one batched range refresh. Settled events never cause periodic reads.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace;
  *   its active Brand Profile is merged into params as `brand_profile_id`.
@@ -1272,8 +1319,9 @@ function useCalendarProgress(scope: SessionScope, events: readonly CalendarEvent
  */
 export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
   const scopedParams = params ? withBrandProfile(scope, params) : undefined;
+  const collectionKey = queryKeys.calendar(scopedParams);
   const query = useQuery({
-    queryKey: queryKeys.calendar(scopedParams),
+    queryKey: collectionKey,
     queryFn: ({ signal }) => {
       if (!scopedParams) return Promise.resolve([]);
       return runApiQuery(
@@ -1284,7 +1332,7 @@ export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
     },
     enabled: scope.isSignedIn && Boolean(scopedParams),
   });
-  const progressError = useCalendarProgress(scope, query.data ?? []);
+  const progressError = useCalendarProgress(scope, query.data ?? [], collectionKey);
   return { ...query, error: query.error ?? progressError };
 }
 

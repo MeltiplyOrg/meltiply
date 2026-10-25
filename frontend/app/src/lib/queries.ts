@@ -9,6 +9,7 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { Cause, Effect, Exit } from "effect";
+import { useEffect, useState } from "react";
 
 import {
   ApiClientService,
@@ -401,11 +402,86 @@ function selectPostPages(data: InfiniteData<PostListResponse, number>): Post[] {
   return [...posts.values()];
 }
 
+/** Advances eligibility for scheduled work without issuing network reads before its due instant. */
+function useDueWorkClock(hasScheduled: boolean): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!hasScheduled) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 10_000);
+    return () => window.clearInterval(timer);
+  }, [hasScheduled]);
+  return now;
+}
+
+/**
+ * Refreshes only loaded Posts with active work, at most four HTTP reads at a
+ * time. Future scheduled work becomes eligible when its persisted due instant
+ * arrives; settled rows never trigger polling. Successful details replace
+ * matching cached rows without changing page order or pagination. Failed reads
+ * retain the last known row and follow the ordinary query error policy.
+ */
+function usePostProgress(scope: SessionScope, posts: readonly Post[]) {
+  const queryClient = useQueryClient();
+  const hasScheduled = posts.some((post) =>
+    post.distributions.some((distribution) => distribution.status === "scheduled"),
+  );
+  const now = useDueWorkClock(hasScheduled);
+  const ids = posts
+    .filter(
+      (post) =>
+        pollingInterval(post) !== false ||
+        post.distributions.some(
+          (distribution) =>
+            distribution.status === "scheduled" &&
+            distribution.scheduled_at !== null &&
+            Date.parse(distribution.scheduled_at) <= now,
+        ),
+    )
+    .map((post) => post.id)
+    .sort();
+  const progress = useQuery({
+    queryKey: ["post-progress", ids],
+    queryFn: ({ signal }) =>
+      runApiQuery(
+        scope,
+        (api) => Effect.forEach(ids, (id) => api.getPost(id), { concurrency: 4 }),
+        signal,
+      ),
+    enabled: scope.isSignedIn && ids.length > 0,
+    refetchInterval: 10_000,
+    staleTime: 10_000,
+    gcTime: 0,
+  });
+  useEffect(() => {
+    if (!progress.data) return;
+    const replacements = new Map(progress.data.map((post) => [post.id, post]));
+    queryClient.setQueriesData<InfiniteData<PostListResponse, number>>(
+      {
+        queryKey: queryKeys.posts(),
+        predicate: (query) =>
+          query.queryKey.includes("pages") || query.queryKey.includes("queue-calendar"),
+      },
+      (previous) =>
+        previous
+          ? {
+              ...previous,
+              pages: previous.pages.map((page) => ({
+                ...page,
+                posts: page.posts.map((post) => replacements.get(post.id) ?? post),
+              })),
+            }
+          : previous,
+    );
+    for (const post of progress.data) queryClient.setQueryData(queryKeys.post(post.id), post);
+  }, [progress.data, queryClient]);
+}
+
 /**
  * Caches explicit 60-Post pages in the workspace's browser QueryClient.
  * Only the first page loads automatically; further reads require fetchNextPage.
  * Filters have independent caches, inactive pages survive route navigation for
- * 30 minutes, and stale reads/mutations and active-state polling refresh data.
+ * 30 minutes. Stale reads and mutations refresh pages; active work refreshes
+ * only its Post details with bounded concurrency.
  * The workspace/auth provider discards the cache when its identity changes;
  * Post content is not persisted to localStorage or IndexedDB.
  *
@@ -415,7 +491,7 @@ function selectPostPages(data: InfiniteData<PostListResponse, number>): Post[] {
  */
 export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "limit" | "offset">) {
   const scopedParams = withBrandProfile(scope, params);
-  return useInfiniteQuery({
+  const query = useInfiniteQuery({
     queryKey: [...queryKeys.posts(scopedParams), "pages", POSTS_PAGE_SIZE],
     initialPageParam: 0,
     queryFn: ({ signal, pageParam }) =>
@@ -429,9 +505,10 @@ export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "li
     select: selectPostPages,
     gcTime: 30 * 60_000,
     staleTime: 60_000,
-    refetchInterval: (query) => pollingInterval(query.state.data),
     enabled: scope.isSignedIn,
   });
+  usePostProgress(scope, query.data ?? []);
+  return query;
 }
 
 /**
@@ -659,9 +736,9 @@ export function useQueues(scope: SessionScope, brandProfileId: string | null, en
   });
 }
 
-/** Pages only one Queue's bounded calendar window. Consumers drain pages before declaring the window complete; Post-prefix invalidation refreshes reservations after removal/scheduling, and 30-second polling follows due work even before its first transition. */
+/** Pages a Queue's bounded calendar window; active and due Posts refresh through bounded detail reads, never a periodic refetch of every loaded page. */
 export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryParams) {
-  return useInfiniteQuery({
+  const query = useInfiniteQuery({
     queryKey: [...queryKeys.posts(params), "queue-calendar"],
     initialPageParam: 0,
     queryFn: ({ pageParam, signal }) =>
@@ -671,9 +748,10 @@ export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryPara
         signal,
       ),
     getNextPageParam: (page) => (page.has_more ? page.offset + page.limit : undefined),
-    refetchInterval: 30_000,
     enabled: scope.isSignedIn,
   });
+  usePostProgress(scope, query.data?.pages.flatMap((page) => page.posts) ?? []);
+  return query;
 }
 
 /** Creates a recurring plan with the shared stable-key mutation lifecycle. */

@@ -50,6 +50,7 @@ interface DistributionSyncRow extends Record<string, unknown> {
   attempt_count: number;
   connection_status: string | null;
   cursor: string | null;
+  on_demand: boolean;
   event_id: string;
   id: string;
   org_id: string;
@@ -402,7 +403,9 @@ export function requestOnDemandCommentsSync(
 /**
  * Loads and locks a published distribution record matching the incoming sync event ID.
  *
- * If the event ID no longer matches the distribution row, unsets the sync event and clears leases.
+ * Clears stale matching events and leases. With recurring collection disabled,
+ * only a durable on-demand claim may reach the Provider; legacy queued work is
+ * retired without deleting retained Comments or numerical Analytics.
  *
  * @param env - Automation worker environment bindings.
  * @param message - Provider sync queue message.
@@ -424,6 +427,7 @@ function loadDistributionTarget(
               distribution.${prefix}_cursor AS cursor,
               distribution.${prefix}_attempt_count AS attempt_count,
               distribution.${prefix}_sync_event_id::text AS event_id,
+              distribution.comments_sync_on_demand AS on_demand,
               account.access_token, account.connection_status,
               account.token_expires_at, account.platform_user_id
        FROM distributions AS distribution
@@ -437,7 +441,14 @@ function loadDistributionTarget(
        FOR UPDATE OF distribution`,
         [message.target_id, message.event_id],
       );
-      if (result.rows[0]) return result.rows[0];
+      const row = result.rows[0];
+      if (
+        row &&
+        (message.workload !== "comments" ||
+          env.RECURRING_COMMENTS_ENABLED === "true" ||
+          row.on_demand)
+      )
+        return row;
       yield* client.query(
         `UPDATE distributions
        SET ${prefix}_sync_event_id = NULL,
@@ -821,7 +832,8 @@ function recordAnalyticsSuccess(
  * Inserts synced comments into the comments table and schedules the next comments polling trigger.
  *
  * Deduplicates comments on conflict with (distribution_id, platform_comment_id), updates content and author metadata,
- * resets failure counts, and arms the next delayed delivery trigger according to post age and activity.
+ * resets failure counts, and arms cursor continuations. Completed demand fetches
+ * stop; recurring cadence is armed only when the deployment explicitly opts in.
  *
  * @param env - Automation worker environment bindings.
  * @param row - Distribution sync row.
@@ -889,10 +901,12 @@ function recordCommentsSuccess(
         }
         delay = nextCursor
           ? 0
-          : commentsCadenceSeconds(
-              ageSeconds(row.published_at, now),
-              execution.page.items.length > 0,
-            );
+          : row.on_demand || env.RECURRING_COMMENTS_ENABLED !== "true"
+            ? null
+            : commentsCadenceSeconds(
+                ageSeconds(row.published_at, now),
+                execution.page.items.length > 0,
+              );
         nextEventId = armedEventId(delay);
         yield* client.query(
           `UPDATE distributions
@@ -904,6 +918,7 @@ function recordCommentsSuccess(
                  END,
                  comments_lease_expires_at = NULL,
                  comments_sync_event_id = $5::uuid,
+                 comments_sync_on_demand = comments_sync_on_demand AND $5::uuid IS NOT NULL,
                  comments_attempt_count = 0,
                  comments_last_error = NULL, updated_at = now()
              WHERE id = $1 AND comments_sync_event_id = $2::uuid`,

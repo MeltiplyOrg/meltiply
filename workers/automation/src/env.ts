@@ -16,6 +16,8 @@ export interface AutomationEnv {
   ASSET_PROCESSING_QUEUE?: Queue<unknown>;
   CHANNEL_REVOCATION_QUEUE?: Queue<unknown>;
   COMMENTS_QUEUE?: Queue<unknown>;
+  /** Exact "true" opts into recurring Comment-body collection; demand reads remain available. */
+  RECURRING_COMMENTS_ENABLED?: string;
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: string;
   LOG_SAMPLE_RATE?: string;

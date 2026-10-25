@@ -26,6 +26,7 @@
   "vars": {
     "ENVIRONMENT": "staging",
     "LOG_SAMPLE_RATE": "0.1",
+    "RECURRING_COMMENTS_ENABLED": "false",
     "FACEBOOK_LIVE_ACCEPTED": "false",
     "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED": "false",
     "INSTAGRAM_LIVE_ACCEPTED": "false",

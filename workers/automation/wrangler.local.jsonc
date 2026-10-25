@@ -23,6 +23,7 @@
   },
   "vars": {
     "ENVIRONMENT": "local",
+    "RECURRING_COMMENTS_ENABLED": "false",
     "VERSION": "1.0.0-target.0",
   },
   "r2_buckets": [

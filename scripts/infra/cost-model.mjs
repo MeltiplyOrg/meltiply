@@ -169,6 +169,12 @@ export function validateCostProfile(profile) {
       if (tariff.effective_on !== undefined && !datePattern.test(tariff.effective_on)) {
         failures.push(`${tariff.id}.effective_on must use YYYY-MM-DD`);
       }
+      if (tariff.expires_on !== undefined) {
+        if (!datePattern.test(tariff.expires_on))
+          failures.push(`${tariff.id}.expires_on must use YYYY-MM-DD`);
+        else if (profile.projection_on > tariff.expires_on)
+          failures.push(`${tariff.id} price schedule expired on ${tariff.expires_on}`);
+      }
     }
   }
 
@@ -535,17 +541,24 @@ export function assertMeasuredNeonConfig(config) {
  * Parses command-line arguments for the cost-model tool.
  *
  * @param {Array<string>} argv - CLI argument vector
- * @returns {{ check: boolean, input: string, requireComplete: boolean }} Parsed execution options
+ * @returns {{ check: boolean, input: string, neonConfig: string, requireComplete: boolean }} Parsed execution options
  * @throws {TypeError} If an unknown argument is encountered
  */
 function argumentsFor(argv) {
-  const options = { check: false, input: defaultInput, requireComplete: false };
+  const options = {
+    check: false,
+    input: defaultInput,
+    neonConfig: defaultNeonConfig,
+    requireComplete: false,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--check") options.check = true;
     else if (argument === "--require-complete") options.requireComplete = true;
     else if (argument === "--input" && argv[index + 1]) {
       options.input = resolve(argv[(index += 1)]);
+    } else if (argument === "--neon-config" && argv[index + 1]) {
+      options.neonConfig = resolve(argv[(index += 1)]);
     } else throw new TypeError(`unknown cost-model argument: ${argument}`);
   }
   return options;
@@ -561,7 +574,7 @@ function argumentsFor(argv) {
 async function run() {
   const options = argumentsFor(process.argv.slice(2));
   const projection = buildCostProjection(await loadCostProfile(options.input));
-  const neon = await loadNeonEndpointConfig();
+  const neon = await loadNeonEndpointConfig(options.neonConfig);
   if (options.requireComplete) {
     assertCompleteProjection(projection);
     assertMeasuredNeonConfig(neon);

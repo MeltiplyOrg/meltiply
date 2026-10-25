@@ -727,8 +727,10 @@ const onDemandCommentsClaimStatement = `WITH candidates AS (
      WHERE distribution.org_id = $2::uuid
        AND ($3::uuid IS NULL OR distribution.id = $3::uuid)
        AND ${readableDistributionPredicate("$4")}
-       AND distribution.comments_next_sync_at IS NULL
-       AND distribution.comments_sync_event_id IS NULL
+       AND (
+         (distribution.comments_next_sync_at IS NULL AND distribution.comments_sync_event_id IS NULL)
+         OR (NOT $8::boolean AND NOT distribution.comments_sync_on_demand)
+       )
        AND distribution.comments_attempt_count < $5
        AND (
          distribution.comments_last_synced_at IS NULL
@@ -744,6 +746,8 @@ const onDemandCommentsClaimStatement = `WITH candidates AS (
    )
    UPDATE ${dueWorkTables.distributions} AS distribution
    SET comments_sync_event_id = gen_random_uuid(),
+       comments_sync_on_demand = true,
+       comments_next_sync_at = NULL,
        comments_lease_expires_at = now() + ($7 * INTERVAL '1 second'),
        comments_attempt_count = distribution.comments_attempt_count + 1,
        comments_last_error = NULL,
@@ -802,7 +806,12 @@ export function sweepDueProviderSyncWork(
   transaction: DueWorkTransaction,
 ): Effect.Effect<DueWorkClaim[], AutomationJobError> {
   if (platforms.length === 0) return Effect.succeed([]);
-  const descriptor = providerSyncDueWorkDescriptors[workload];
+  const base = providerSyncDueWorkDescriptors[workload];
+  // Deployment policy never discards authorized demand continuations/retries.
+  const descriptor =
+    workload === "comments" && env.RECURRING_COMMENTS_ENABLED !== "true"
+      ? { ...base, predicate: `${base.predicate} AND distribution.comments_sync_on_demand` }
+      : base;
   return transaction(env, (client) =>
     Effect.map(
       client.query<DueWorkClaim>(providerSyncClaimStatement(descriptor), [
@@ -848,6 +857,7 @@ export function claimOnDemandCommentsWork(
         maximumProviderSyncAttempts,
         onDemandCommentsIntervalSeconds,
         providerAttemptLeaseSeconds,
+        env.RECURRING_COMMENTS_ENABLED === "true",
       ]),
       (result) => result.rows,
     ),

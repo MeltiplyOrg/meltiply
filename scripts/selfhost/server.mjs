@@ -196,6 +196,7 @@ for (const name of [
   "POLAR_WEBHOOK_SECRET",
   "POLAR_ENV",
   "LOG_SAMPLE_RATE",
+  "RECURRING_COMMENTS_ENABLED",
 ]) {
   if (process.env[name]) bindings[name] = process.env[name];
 }

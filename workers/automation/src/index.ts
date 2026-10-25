@@ -640,25 +640,6 @@ export function createAutomationHandler(
   // per unit with Effect.suspend + classifyJobError.
   const scheduledWork: readonly ScheduledWorkUnit[] = [
     {
-      empty: { failed: 0, recorded: 0, scanned: 0 },
-      field: "account_analytics",
-      name: "account-analytics-sweep",
-      run: dependencies.sweepAccountAnalytics
-        ? (env) =>
-            Effect.suspend(() => dependencies.sweepAccountAnalytics!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./account-analytics"),
-              }),
-              (module) => module.sweepAccountAnalytics(env),
-            ),
-      tier: "hourly",
-    },
-    {
       empty: 0,
       field: "due_distributions",
       name: "due-distribution-scan",
@@ -767,6 +748,25 @@ export function createAutomationHandler(
                 try: () => import("./reply-reconciliation"),
               }),
               (module) => module.enqueueDueReplyReconciliations(env),
+            ),
+      tier: "hourly",
+    },
+    {
+      empty: { failed: 0, recorded: 0, scanned: 0 },
+      field: "account_analytics",
+      name: "account-analytics-sweep",
+      run: dependencies.sweepAccountAnalytics
+        ? (env) =>
+            Effect.suspend(() => dependencies.sweepAccountAnalytics!(env)).pipe(
+              Effect.mapError((cause) => classifyJobError(cause)),
+            )
+        : (env) =>
+            Effect.flatMap(
+              Effect.tryPromise({
+                catch: (cause) => classifyJobError(cause),
+                try: () => import("./account-analytics"),
+              }),
+              (module) => module.sweepAccountAnalytics(env),
             ),
       tier: "hourly",
     },

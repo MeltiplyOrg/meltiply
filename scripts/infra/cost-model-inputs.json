@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "profile_version": "2026-08-24-prelaunch-known-lower-bound",
-  "projection_on": "2026-08-24",
+  "profile_version": "2026-10-25-unmeasured-deployment",
+  "projection_on": "2026-10-25",
   "currency": "USD",
   "scenarios": [1, 3, 10],
   "sources": {
@@ -38,8 +38,16 @@
       "url": "https://developers.cloudflare.com/stream/pricing/"
     },
     "neon": {
-      "retrieved_on": "2026-08-15",
+      "retrieved_on": "2026-10-25",
       "url": "https://neon.com/pricing"
+    },
+    "cloudflare_containers": {
+      "retrieved_on": "2026-10-25",
+      "url": "https://developers.cloudflare.com/containers/platform/pricing/"
+    },
+    "cloudflare_logs": {
+      "retrieved_on": "2026-10-25",
+      "url": "https://developers.cloudflare.com/workers/observability/logs/workers-logs/#pricing"
     }
   },
   "monthly_base_costs": [
@@ -78,11 +86,12 @@
     {
       "id": "workers.logs",
       "usage": "workers_log_events",
-      "source": "cloudflare_workers",
+      "source": "cloudflare_logs",
       "included": 20000000,
       "billing_unit": 1000000,
       "usd_per_unit": 0.6,
-      "rounding": "continuous"
+      "rounding": "continuous",
+      "expires_on": "2026-11-30"
     },
     {
       "id": "workers.trace_logpush",
@@ -283,66 +292,187 @@
       "billing_unit": 1,
       "usd_per_unit": 0.1,
       "rounding": "continuous"
+    },
+    {
+      "id": "containers.cpu",
+      "usage": "containers_active_vcpu_seconds",
+      "source": "cloudflare_containers",
+      "included": 22500,
+      "billing_unit": 1,
+      "usd_per_unit": 0.00002,
+      "rounding": "continuous"
+    },
+    {
+      "id": "containers.memory",
+      "usage": "containers_provisioned_gib_seconds",
+      "source": "cloudflare_containers",
+      "included": 90000,
+      "billing_unit": 1,
+      "usd_per_unit": 0.0000025,
+      "rounding": "continuous"
+    },
+    {
+      "id": "containers.disk",
+      "usage": "containers_provisioned_gb_seconds",
+      "source": "cloudflare_containers",
+      "included": 720000,
+      "billing_unit": 1,
+      "usd_per_unit": 7e-8,
+      "rounding": "continuous"
+    },
+    {
+      "id": "containers.egress_na_europe",
+      "usage": "containers_egress_na_europe_gb",
+      "source": "cloudflare_containers",
+      "included": 1000,
+      "billing_unit": 1,
+      "usd_per_unit": 0.025,
+      "rounding": "continuous"
+    },
+    {
+      "id": "containers.egress_oceania_korea_taiwan",
+      "usage": "containers_egress_oceania_korea_taiwan_gb",
+      "source": "cloudflare_containers",
+      "included": 500,
+      "billing_unit": 1,
+      "usd_per_unit": 0.05,
+      "rounding": "continuous"
+    },
+    {
+      "id": "containers.egress_other",
+      "usage": "containers_egress_other_gb",
+      "source": "cloudflare_containers",
+      "included": 500,
+      "billing_unit": 1,
+      "usd_per_unit": 0.04,
+      "rounding": "continuous"
+    },
+    {
+      "id": "neon.snapshots",
+      "usage": "neon_snapshot_gb_month",
+      "source": "neon",
+      "included": 0,
+      "billing_unit": 1,
+      "usd_per_unit": 0.09,
+      "rounding": "continuous"
     }
   ],
   "usage_1x": {
-    "workers_and_workflows_requests": 0,
-    "workers_and_workflows_cpu_ms": 0,
-    "workers_log_events": 0,
-    "workers_trace_logpush_requests": 0,
-    "queue_operations": 0,
-    "workflow_steps": 0,
-    "workflow_storage_gb_month": 0,
-    "durable_object_requests": 0,
-    "durable_object_duration_gb_seconds": 0,
-    "durable_object_rows_read": 0,
-    "durable_object_rows_written": 0,
-    "durable_object_storage_gb_month": 0,
-    "r2_standard_storage_gb_month": 0,
-    "r2_class_a_operations": 0,
-    "r2_class_b_operations": 0,
-    "images_transformations": 0,
-    "images_hosted_stored": 0,
-    "images_hosted_delivered": 0,
-    "stream_stored_minutes": 0,
-    "stream_delivered_minutes": 0,
+    "workers_and_workflows_requests": null,
+    "workers_and_workflows_cpu_ms": null,
+    "workers_log_events": null,
+    "workers_trace_logpush_requests": null,
+    "queue_operations": null,
+    "workflow_steps": null,
+    "workflow_storage_gb_month": null,
+    "durable_object_requests": null,
+    "durable_object_duration_gb_seconds": null,
+    "durable_object_rows_read": null,
+    "durable_object_rows_written": null,
+    "durable_object_storage_gb_month": null,
+    "r2_standard_storage_gb_month": null,
+    "r2_class_a_operations": null,
+    "r2_class_b_operations": null,
+    "images_transformations": null,
+    "images_hosted_stored": null,
+    "images_hosted_delivered": null,
+    "stream_stored_minutes": null,
+    "stream_delivered_minutes": null,
     "neon_compute_cu_hours": null,
-    "neon_storage_gb_month": 0,
-    "neon_history_gb_month": 0,
-    "neon_extra_branch_hours": 0,
-    "neon_public_egress_gb": 0
+    "neon_storage_gb_month": null,
+    "neon_history_gb_month": null,
+    "neon_extra_branch_hours": null,
+    "neon_public_egress_gb": null,
+    "containers_active_vcpu_seconds": null,
+    "containers_provisioned_gib_seconds": null,
+    "containers_provisioned_gb_seconds": null,
+    "containers_egress_na_europe_gb": null,
+    "containers_egress_oceania_korea_taiwan_gb": null,
+    "containers_egress_other_gb": null,
+    "neon_snapshot_gb_month": null
   },
   "business_units_1x": {
-    "api_requests": 0,
-    "uploaded_gb": 0,
-    "assets_processed": 0,
-    "distribution_attempts": 0,
-    "successful_publishes": 0,
-    "sync_runs": 0,
-    "active_organizations": 0
+    "api_requests": null,
+    "uploaded_gb": null,
+    "assets_processed": null,
+    "distribution_attempts": null,
+    "successful_publishes": null,
+    "sync_runs": null,
+    "active_organizations": null
   },
   "observed_metrics_1x": {
-    "hyperdrive_queries": 0,
-    "provider_calls": 0,
-    "workflow_invocations": 0
+    "hyperdrive_queries": null,
+    "provider_calls": null,
+    "workflow_invocations": null
   },
   "external_costs": {
     "billing_provider": {
-      "fixed_usd": 0,
-      "variable_usd_1x": 0
+      "fixed_usd": null,
+      "variable_usd_1x": null
     },
     "ci_previews": {
-      "fixed_usd": 0,
-      "variable_usd_1x": 0
+      "fixed_usd": null,
+      "variable_usd_1x": null
     },
     "observability_export": {
-      "fixed_usd": 0,
-      "variable_usd_1x": 0
+      "fixed_usd": null,
+      "variable_usd_1x": null
     },
     "provider_apis": {
-      "fixed_usd": 0,
-      "variable_usd_1x": 0
+      "fixed_usd": null,
+      "variable_usd_1x": null
     }
   },
-  "expected_unknown_inputs": ["usage_1x.neon_compute_cu_hours"]
+  "expected_unknown_inputs": [
+    "business_units_1x.active_organizations",
+    "business_units_1x.api_requests",
+    "business_units_1x.assets_processed",
+    "business_units_1x.distribution_attempts",
+    "business_units_1x.successful_publishes",
+    "business_units_1x.sync_runs",
+    "business_units_1x.uploaded_gb",
+    "external_costs.billing_provider.fixed_usd",
+    "external_costs.billing_provider.variable_usd_1x",
+    "external_costs.ci_previews.fixed_usd",
+    "external_costs.ci_previews.variable_usd_1x",
+    "external_costs.observability_export.fixed_usd",
+    "external_costs.observability_export.variable_usd_1x",
+    "external_costs.provider_apis.fixed_usd",
+    "external_costs.provider_apis.variable_usd_1x",
+    "observed_metrics_1x.hyperdrive_queries",
+    "observed_metrics_1x.provider_calls",
+    "observed_metrics_1x.workflow_invocations",
+    "usage_1x.containers_active_vcpu_seconds",
+    "usage_1x.containers_egress_na_europe_gb",
+    "usage_1x.containers_egress_oceania_korea_taiwan_gb",
+    "usage_1x.containers_egress_other_gb",
+    "usage_1x.containers_provisioned_gb_seconds",
+    "usage_1x.containers_provisioned_gib_seconds",
+    "usage_1x.durable_object_duration_gb_seconds",
+    "usage_1x.durable_object_requests",
+    "usage_1x.durable_object_rows_read",
+    "usage_1x.durable_object_rows_written",
+    "usage_1x.durable_object_storage_gb_month",
+    "usage_1x.images_hosted_delivered",
+    "usage_1x.images_hosted_stored",
+    "usage_1x.images_transformations",
+    "usage_1x.neon_compute_cu_hours",
+    "usage_1x.neon_extra_branch_hours",
+    "usage_1x.neon_history_gb_month",
+    "usage_1x.neon_public_egress_gb",
+    "usage_1x.neon_snapshot_gb_month",
+    "usage_1x.neon_storage_gb_month",
+    "usage_1x.queue_operations",
+    "usage_1x.r2_class_a_operations",
+    "usage_1x.r2_class_b_operations",
+    "usage_1x.r2_standard_storage_gb_month",
+    "usage_1x.stream_delivered_minutes",
+    "usage_1x.stream_stored_minutes",
+    "usage_1x.workers_and_workflows_cpu_ms",
+    "usage_1x.workers_and_workflows_requests",
+    "usage_1x.workers_log_events",
+    "usage_1x.workers_trace_logpush_requests",
+    "usage_1x.workflow_steps",
+    "usage_1x.workflow_storage_gb_month"
+  ]
 }

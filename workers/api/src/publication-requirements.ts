@@ -136,7 +136,7 @@ function requirementReadNamespace(env: ApiWorkerEnv, registry: ProviderRegistry)
     nextRequirementRegistryId += 1;
     requirementRegistryIds.set(registry, registryId);
   }
-  return [env.ENVIRONMENT, env.VERSION, env.PUBLIC_API_URL ?? "", registryId].join("\u0000");
+  return [env.ENVIRONMENT, env.VERSION, env.APP_URL ?? "", registryId].join("\u0000");
 }
 
 /**

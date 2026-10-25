@@ -25,7 +25,7 @@ const env: ApiWorkerEnv = {
   ENVIRONMENT: "test",
   ALLOWED_ORIGINS: issuer,
   VERSION: "analytics-history",
-  PUBLIC_API_URL: issuer,
+  APP_URL: issuer,
   DB_AUTHENTICATED: { connectionString: process.env.MELTIPLY_DATABASE_TEST_URL! } as Hyperdrive,
   DB_SYSTEM: {
     connectionString:

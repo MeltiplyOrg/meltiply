@@ -66,8 +66,7 @@ import type { ApiWorkerEnv } from "../src/env";
 const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
   ENVIRONMENT: "test",
-  FRONTEND_URL: "http://localhost:3000",
-  PUBLIC_API_URL: "https://api.meltiply.test",
+  APP_URL: "https://api.meltiply.test",
   TOKEN_ENCRYPTION_KEY: "0".repeat(32),
   VERSION: "runtime-test",
 } as unknown as ApiWorkerEnv;

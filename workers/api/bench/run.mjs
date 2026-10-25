@@ -236,7 +236,6 @@ const env = {
   ENVIRONMENT: "test",
   TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
   VERSION: "benchmark",
-  PUBLIC_API_URL: authOrigin,
   BETTER_AUTH_JWKS_URL: `http://127.0.0.1:${address.port}/jwks`,
 };
 

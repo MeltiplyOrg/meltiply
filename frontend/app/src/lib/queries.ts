@@ -524,20 +524,48 @@ function usePostProgress(scope: SessionScope, posts: readonly Post[], collection
       signal,
     }): Promise<{ values: Post[]; missing: Set<string>; error: Error | null }> => {
       if (ids.length > pageCount) {
+        // A progress tick must not cancel or replace a user's pending Load more.
+        if (queryClient.getQueryState(collectionKey)?.fetchStatus === "fetching")
+          return { values: [], missing: new Set<string>(), error: null };
         await queryClient.invalidateQueries(
           { queryKey: collectionKey, exact: true, refetchType: "active" },
-          { throwOnError: true },
+          { throwOnError: true, cancelRefetch: false },
         );
         const refreshed =
           queryClient.getQueryData<InfiniteData<PostListResponse, number>>(collectionKey);
-        return {
-          values:
-            refreshed?.pages
-              .flatMap((page) => page.posts)
-              .filter((post) => ids.includes(post.id)) ?? [],
-          missing: new Set<string>(),
-          error: null,
-        };
+        const activeIds = new Set(ids);
+        const values =
+          refreshed?.pages.flatMap((page) => page.posts).filter((post) => activeIds.has(post.id)) ??
+          [];
+        const receivedIds = new Set(values.map((post) => post.id));
+        // Absence from a filtered/offset page is not proof of deletion.
+        const absent = ids.filter((id) => !receivedIds.has(id));
+        const details =
+          absent.length > 0
+            ? await runApiQuery(
+                scope,
+                (api) => readProgressDetails(absent, (id) => api.getPost(id)),
+                signal,
+              )
+            : { values: [], missing: new Set<string>(), error: null };
+        values.push(...details.values);
+        if (
+          values.some((next) =>
+            next.distributions.some(
+              (distribution) =>
+                distribution.status === "published" &&
+                posts.some(
+                  (previous) =>
+                    previous.id === next.id &&
+                    previous.distributions.some(
+                      (old) => old.id === distribution.id && old.status !== "published",
+                    ),
+                ),
+            ),
+          )
+        )
+          void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
+        return { values, missing: details.missing, error: details.error };
       }
       return runApiQuery(scope, (api) => readProgressDetails(ids, (id) => api.getPost(id)), signal);
     },

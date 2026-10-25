@@ -274,6 +274,11 @@ describe("private browser read cache", () => {
       ...post,
       distributions: post.distributions.map((item) => ({ ...item, status: "published" as const })),
     }));
+    const analyticsKey = queryKeys.analyticsDashboard({ range: "30d" });
+    client.setQueryData(
+      analyticsKey,
+      contractSuccessBody<AnalyticsDashboard>("getAnalyticsDashboard"),
+    );
     let pageReads = 0;
     let detailReads = 0;
     vi.stubGlobal(
@@ -305,6 +310,67 @@ describe("private browser read cache", () => {
     });
 
     expect(detailReads).toBe(0);
+    expect(client.getQueryState(analyticsKey)?.isInvalidated).toBe(true);
+  });
+
+  it("does not cancel Load more when dense progress polls during pagination", async () => {
+    const fixture = contractSuccessBody<Post>("getPost");
+    const distribution = contractSuccessBody<Post["distributions"][number]>("getDistribution");
+    const active = ["first", "second"].map((id): Post => ({
+      ...fixture,
+      id,
+      attachments: [],
+      distributions: [
+        { ...distribution, id: `${id}-distribution`, post_id: id, status: "processing" },
+      ],
+    }));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let nextStarted = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        const offset = Number(url.searchParams.get("offset"));
+        if (offset > 0) {
+          nextStarted = true;
+          await gate;
+        }
+        return Response.json({
+          posts:
+            offset === 0
+              ? active
+              : [{ ...fixture, id: "next-page", distributions: [], attachments: [] }],
+          has_more: offset === 0,
+          offset,
+          limit: 60,
+        });
+      }),
+    );
+    const view = renderHook(() => usePosts(scope), { wrapper: Wrapper });
+    await waitFor(() =>
+      expect(view.result.current.data?.map((post) => post.id)).toEqual(["first", "second"]),
+    );
+    await waitFor(() => expect(client.isFetching({ queryKey: ["post-progress"] })).toBe(0));
+    let nextPage!: ReturnType<typeof view.result.current.fetchNextPage>;
+    act(() => {
+      nextPage = view.result.current.fetchNextPage();
+    });
+    await waitFor(() => expect(nextStarted).toBe(true));
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["post-progress"] });
+    });
+    release();
+    await act(async () => {
+      await nextPage;
+    });
+    expect(view.result.current.data?.map((post) => post.id)).toEqual([
+      "first",
+      "second",
+      "next-page",
+    ]);
   });
 
   it("refreshes only active and newly due Calendar details, preserving settled events", async () => {
@@ -432,6 +498,7 @@ describe("private browser read cache", () => {
       ...post.distributions[0]!,
       post_title: post.title,
     }));
+    client.setQueryData(queryKeys.post("removed"), posts[0]);
     let postReads = 0;
     let calendarReads = 0;
     vi.stubGlobal(
@@ -486,6 +553,7 @@ describe("private browser read cache", () => {
         "remaining-distribution",
       ]);
       expect(view.result.current.calendar.data?.[0]?.status).toBe("published");
+      expect(client.getQueryData(queryKeys.post("removed"))).toBeUndefined();
     });
   });
 

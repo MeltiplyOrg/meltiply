@@ -584,7 +584,7 @@ baseline [1](results/2026-10-24-portable-cache/baseline-1.json) /
 [3](results/2026-10-24-portable-cache/candidate-3.json).
 The same files are attached as artifact `backend-benchmark-40107515487`.
 
-## Complete authenticated application comparison
+## Initial authenticated application regression
 
 [Hosted run 40192060823](https://github.com/MeltiplyOrg/meltiply/actions/runs/40192060823)
 compares `master` at `451c0a224a63` with this PR at `ea52a6fa2640`.
@@ -608,18 +608,18 @@ one. Concurrent publishing-requirement reads average 0.07 upstream reads/request
 instead of one; sequential requirements still perform one fresh upstream read.
 Authorization remains authoritative on every request.
 
-**Cold latency regresses in this harness.** The candidate closes invocation-owned
-driver clients on release, while master retains Node PostgreSQL clients across
-requests. This direct PostgreSQL simulation has no Hyperdrive origin pool, so
-connection establishment and authentication are paid repeatedly. [INFERENCE]
-Connection churn is a likely latency contributor; this comparison does not
-isolate its share. Driver-observed statement durations include scheduling, not
-PostgreSQL server CPU alone. This limitation is not a reason to hide regressions
-or restore unsafe cross-invocation sockets. A deployed Hyperdrive comparison is
-still required. The complete Analytics page also remains
-above the documented latency target on this fixture; fewer statements alone do
-not establish a faster page. No production latency, billing, or currency savings
-are inferred from these results.
+**This pre-correction run exposed a real latency regression.** The candidate
+destroyed every checked-out driver client, including in managed environments
+where master reuses an isolate pool. Connection establishment and authentication
+were paid repeatedly. The correction restores master's managed pool policy,
+while standalone workerd explicitly selects `DATABASE_POOL_MODE=request` so
+sockets cannot cross its invocation boundaries. A hosted workerd delivery/replay
+smoke now verifies the standalone path. Driver-observed statement durations
+include scheduling, not PostgreSQL server CPU alone; this direct PostgreSQL
+harness is not deployed Hyperdrive and establishes no production latency,
+billing, or currency savings. The complete Analytics page also exceeded the
+documented latency target here; fewer statements alone did not establish a
+faster page. Raw evidence below preserves the original failure.
 
 Browser cache reuse is measured separately through real navigation: it avoids
 entire authenticated requests, whereas this benchmark intentionally sends each

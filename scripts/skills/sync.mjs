@@ -10,7 +10,7 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const skillsRoot = join(repositoryRoot, ".agents", "skills");
 
 const pack = "Essential-kit/skills";
-const packRef = "936efac7e8e2ba2bb4413edf0fa530c2cff1eed8";
+const packRef = "6d8d860bbe8fd67c8354a8564418dbd8c353d606";
 const skillsCli = "skills@1.7.4";
 const agent = "opencode";
 

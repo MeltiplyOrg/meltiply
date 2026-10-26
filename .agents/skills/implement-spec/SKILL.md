@@ -9,11 +9,11 @@ You have been provided a spec. This spec should have tickets associated with it,
 The spec and tickets are **GitHub issues**. Use the `gh` CLI, which infers the repository from the clone:
 
 - **Read a ticket**: `gh issue view <number> --json number,title,body,labels,comments`
-- **Close a ticket**: `gh issue close <number> --comment "<what landed>"`
+- **Link a ticket to a PR**: add `Closes #<number>` to the PR body; GitHub closes the issue when the PR merges. Do not run `gh issue close` on issues linked this way.
 
 Before starting, read `CONTEXT.md` at the repo root (or `CONTEXT-MAP.md` and the per-context glossaries it points at) and any ADRs under `docs/adr/` or `src/*/docs/adr/` that touch the area. If they don't exist, proceed silently. Use their vocabulary in branches, commits, and PRs, and surface any ADR conflict rather than silently overriding it.
 
-The goal is the entire spec implemented on a single **integration branch**, with every ticket resolved the way GitHub closes work: a merged PR with a closing reference, or a direct `gh issue close`.
+The goal is the entire spec implemented on a single **integration branch**, with every ticket resolved through a merged PR whose body links the spec and tickets as closing references (`Closes #...`), so GitHub closes them on merge. Do not close linked issues by hand.
 
 The tickets are not a list of steps. They are a **task graph** with blocking relationships between them. This means there is always a **frontier** of tickets which are ready to be grabbed.
 
@@ -27,7 +27,7 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 
 2. (optional) Use an **exploration subagent** to conduct any exploration required by the tickets - relevant codebase files or external documentation. Ensure the exploration subagent can save files - it should save its markdown notes in a directory outside the repo, accessible by all future subagents. This lets **implementer subagents** focus on implementation rather than exploration.
 
-3. Create the integration branch. If the user asks for a PR, or the repo closes work through PRs, open a draft PR after the first merge in step 5 (a branch with no commits ahead of main can't open one). Its body should include `Closes #<spec>` and one `Closes #<ticket>` line per ticket, so merging closes them all.
+3. Create the integration branch. If the user asks for a PR, or the repo closes work through PRs, open a draft PR after the first merge in step 5 (a branch with no commits ahead of main can't open one). Its body should link the spec and every ticket as closing references (`Closes #<spec>` and one `Closes #<ticket>` per ticket) so they close with the PR on merge — do not close them directly.
 
 4. Use **implementer subagents** to implement each ticket, each in its own worktree on its own branch. Each implementer subagent:
    - confirms its worktree is based on the integration branch before starting, and resets onto it if not;
@@ -40,6 +40,6 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 
 7. Once all tickets are complete, call the Skill tool with `code-review` on the integration branch. Fix all issues raised by the code review in a single **implementer subagent**.
 
-8. If a draft PR exists, mark it ready for review. Otherwise, close each ticket with `gh issue close <number> --comment "<what landed>"`, and report the integration branch.
+8. If a draft PR exists, mark it ready for review so a **ready PR** exists after all implement steps are finished; otherwise create a ready PR now. In either case, ensure the spec and all tickets are linked to the PR as closing references (`Closes #<spec>` and one `Closes #<ticket>` per ticket) so they close with the PR on merge — do not run `gh issue close` on them. Report the ready PR and the integration branch.
 
 9. Clean up all **implementer subagent** worktrees.

@@ -16,13 +16,21 @@ export function createPreviewState(
       operation.method !== "get" ||
       body === null ||
       typeof body !== "object" ||
-      Array.isArray(body)
+      Array.isArray(body) ||
+      typeof body.id === "string" ||
+      typeof body.user_id === "string"
     )
       continue;
     for (const [field, value] of Object.entries(body)) {
       if (
         !Array.isArray(value) ||
-        value.some((item) => item === null || typeof item !== "object" || Array.isArray(item))
+        value.some(
+          (item) =>
+            item === null ||
+            typeof item !== "object" ||
+            Array.isArray(item) ||
+            (typeof item.id !== "string" && typeof item.user_id !== "string"),
+        )
       )
         continue;
       const items: PreviewObject[] = [];

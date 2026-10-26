@@ -247,6 +247,9 @@ try {
   await page.goto(
     `${origin}/posts?previewOperation=updatePost&previewStatus=422&previewScenario=validation-error`,
   );
+  await expect(
+    page.getByRole("button", { name: original.default_text, exact: true }).first(),
+  ).toBeVisible();
   const rejected = await page.evaluate(
     async (post) =>
       (

@@ -215,7 +215,7 @@ try {
       await expect(page.getByRole("status").filter({ hasText: "Loading posts…" })).toBeVisible();
     else if (["server-error", "permission-denied"].includes(scenario))
       await expect(
-        page.getByRole("alert").filter({ hasText: "An error has occurred." }),
+        page.getByRole("main").getByRole("alert").filter({ hasText: "An error has occurred." }),
       ).toBeVisible({ timeout: 30_000 });
     else if (scenario === "viewer")
       await expect(page.getByRole("button", { name: "Create post", exact: true })).toHaveCount(0);

@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin, lazyPlugins } from "vite-plus";
+import { previewContractPlugin } from "./preview-contract";
 
 // The repo root .env is the single source of truth for frontend public vars:
 // dev-backend.sh already sources it for Wrangler, and here its two public
@@ -170,6 +171,7 @@ export default defineConfig(({ mode }) => {
     build: uiPreview ? { outDir: "dist/ui-preview" } : {},
     plugins: lazyPlugins(() => [
       react(),
+      uiPreview && previewContractPlugin(),
       // Local builds must reach the Wrangler API process directly; deployed
       // environments omit API_ORIGIN and route through the API service binding.
       !uiPreview &&

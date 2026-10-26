@@ -10,15 +10,13 @@ for (let attempt = 0; ; attempt++) {
     break;
   } catch (error) {
     if (attempt >= 60) throw error;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const { promise, resolve } = Promise.withResolvers();
+    setTimeout(resolve, 1000);
+    await promise;
   }
 }
 const direct = await fetch(`${origin}/api/v1/users/me`);
-assert.equal(
-  direct.status,
-  503,
-  "the deployed Worker must reject API access without browser fixtures",
-);
+assert.equal(direct.status, 503, "the Worker has no API when browser interception is absent");
 assert.match(direct.headers.get("content-security-policy"), /connect-src 'self'/);
 const browser = await chromium.launch();
 try {
@@ -27,28 +25,29 @@ try {
   const errors = [];
   const external = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  page.on("console", (message) => {
-    if (message.type() === "error") console.error(message.text());
-  });
   page.on("request", (request) => {
     if (!request.url().startsWith(origin) && !/^(data|blob):/.test(request.url()))
       external.push(request.url());
   });
   await page.goto(`${origin}/posts`);
   await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "UI preview" })).toBeVisible();
   await page.getByRole("button", { name: "Reject optional", exact: true }).click();
+  const original = await page.evaluate(
+    async () => (await fetch("/api/v1/posts").then((response) => response.json())).posts[0],
+  );
   await expect(
-    page.getByRole("button", { name: /^A little progress, every day/ }).first(),
+    page.getByRole("button", { name: original.default_text, exact: true }).first(),
   ).toBeVisible();
+
+  // Verify local file effects, not just canned upload responses: uploaded bytes must decode and remain attached after saving.
   const upload = await page.evaluate(
-    async (bytes) => {
+    async ({ bytes, profileId }) => {
       const created = await fetch("/api/v1/asset-upload-sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           asset_type: "image",
-          brand_profile_id: "00000000-0000-4000-8000-000000000111",
+          brand_profile_id: profileId,
           filename: "sample.png",
           content_type: "image/png",
           file_size: bytes.length,
@@ -74,7 +73,7 @@ try {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          brand_profile_id: "00000000-0000-4000-8000-000000000111",
+          brand_profile_id: profileId,
           default_text: "Preview upload smoke",
           attachment_ids: [created.asset.id],
         }),
@@ -88,7 +87,10 @@ try {
         title: post.attachments[0].asset.title,
       };
     },
-    Array.from(await readFile("frontend/app/e2e/fixtures/composer-blue.png")),
+    {
+      bytes: Array.from(await readFile("frontend/app/e2e/fixtures/composer-blue.png")),
+      profileId: original.brand_profile_id,
+    },
   );
   assert.deepEqual(upload, {
     initial: "created",
@@ -98,36 +100,71 @@ try {
     caption: "Preview upload smoke",
     title: "Uploaded preview artwork",
   });
-  const edited = await page.evaluate(async () => {
-    const response = await fetch("/api/v1/posts/00000000-0000-4000-8000-000000000701", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        brand_profile_id: "00000000-0000-4000-8000-000000000111",
-        default_text: "Only this browser can see this edit",
-      }),
-    });
-    return response.json();
-  });
+  const edited = await page.evaluate(
+    async (post) =>
+      fetch(`/api/v1/posts/${post.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brand_profile_id: post.brand_profile_id,
+          default_text: "Only this browser can see this edit",
+        }),
+      }).then((response) => response.json()),
+    original,
+  );
   assert.equal(edited.default_text, "Only this browser can see this edit");
-  const unknown = await page.evaluate(async () => (await fetch("/api/v1/no-fixture")).status);
-  assert.equal(unknown, 422);
+  assert.equal(await page.evaluate(async () => (await fetch("/api/v1/no-fixture")).status), 501);
   await page.reload();
   await expect(
-    page.getByRole("button", { name: /^A little progress, every day/ }).first(),
+    page.getByRole("button", { name: original.default_text, exact: true }).first(),
   ).toBeVisible();
-  const reset = await page.evaluate(async () =>
-    (await fetch("/api/v1/posts/00000000-0000-4000-8000-000000000701")).json(),
+  const reset = await page.evaluate(
+    async (id) => fetch(`/api/v1/posts/${id}`).then((response) => response.json()),
+    original.id,
   );
-  assert.match(reset.default_text, /synthetic sample content/);
-  for (const [route, heading] of [
-    ["posts", "Posts"],
-    ["analytics", "Analytics"],
-    ["channels", "Channels"],
-    ["queues", "Queues"],
-  ]) {
-    await page.goto(`${origin}/${route}`);
-    await expect(page.getByRole("heading", { name: heading, exact: true }).first()).toBeVisible();
+  assert.equal(reset.default_text, original.default_text);
+
+  // The route list comes from the real router; adding a literal frontend route automatically extends this browser smoke.
+  await page.getByRole("button", { name: "Preview controls", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "Preview controls", exact: true });
+  await dialog.getByRole("combobox", { name: "Preview route", exact: true }).click();
+  const routes = await page.getByRole("option").allTextContents();
+  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  for (const route of routes) {
+    await page.getByRole("button", { name: "Preview controls", exact: true }).click();
+    dialog = page.getByRole("dialog", { name: "Preview controls", exact: true });
+    await dialog.getByRole("combobox", { name: "Preview route", exact: true }).click();
+    await page.getByRole("option", { name: route, exact: true }).click();
+    await dialog.getByRole("combobox", { name: "Preview scenario", exact: true }).click();
+    await page
+      .getByRole("option", {
+        name: route === "/invitations/accept" ? "signed-out" : "populated",
+        exact: true,
+      })
+      .click();
+    const navigation = page.waitForEvent("domcontentloaded");
+    await dialog.getByRole("button", { name: "Apply preview", exact: true }).click();
+    await navigation;
+    const headings = {
+      "/": "Posts",
+      "/posts": "Posts",
+      "/analytics": "Analytics",
+      "/channels": "Channels",
+      "/queues": "Queues",
+      "/settings": "Appearance",
+    };
+    if (headings[route])
+      await expect(
+        page.getByRole("heading", { name: headings[route], exact: true }).first(),
+      ).toBeVisible();
+    else if (route === "/sign-in")
+      await expect(page.getByLabel("Email address", { exact: true })).toBeVisible();
+    else if (route === "/channels/connect")
+      await expect(page.getByRole("heading", { name: /^Connect / }).first()).toBeVisible();
+    else if (route === "/invitations/accept")
+      await expect(page.getByRole("heading", { name: /^Join / }).first()).toBeVisible();
+    else await expect(page.getByRole("main").first()).toBeVisible();
     for (const dark of [false, true])
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 900 });
@@ -136,33 +173,125 @@ try {
           dark,
         );
         await page.screenshot({
-          path: `artifacts/ui-preview/${route}-${dark ? "dark" : "light"}-${width}.png`,
+          path: `artifacts/ui-preview/route-${route.replace(/\W+/g, "-") || "root"}-${dark ? "dark" : "light"}-${width}.png`,
           fullPage: true,
         });
       }
   }
-  assert.deepEqual(errors, [], "preview routes must not throw browser errors");
-  assert.deepEqual(external, [], "preview must make no external requests");
+
+  // Apply an empty state through the real controls, including a scoped operation. No query-cache or auth state may leak across the reload.
+  await page.goto(`${origin}/posts`);
+  await page.getByRole("button", { name: "Preview controls", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Preview controls", exact: true });
+  await dialog.getByRole("combobox", { name: "Preview scenario", exact: true }).click();
+  await page.getByRole("option", { name: "empty", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Preview operation", exact: true }).click();
+  await page.getByRole("option", { name: "GET listPosts", exact: true }).click();
+  await dialog.getByRole("button", { name: "Apply preview", exact: true }).click();
+  await expect(
+    page.getByText("No posts found matching the active filters.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Create post", exact: true }).first(),
+  ).toBeVisible();
+  await page.screenshot({ path: "artifacts/ui-preview/scenario-empty.png", fullPage: true });
+
+  for (const scenario of [
+    "server-error",
+    "permission-denied",
+    "loading",
+    "publication-failed",
+    "channel-expired",
+    "viewer",
+    "editor",
+    "success",
+  ]) {
+    const route = scenario === "channel-expired" ? "/channels" : "/posts";
+    await page.goto(
+      `${origin}${route}?previewScenario=${scenario}&previewOperation=${scenario === "channel-expired" ? "listPlatformAccounts" : "listPosts"}`,
+    );
+    await expect(page.getByRole("button", { name: "Preview controls", exact: true })).toBeVisible();
+    if (scenario === "loading")
+      await expect(page.getByRole("status").filter({ hasText: "Loading posts…" })).toBeVisible();
+    else if (["server-error", "permission-denied"].includes(scenario))
+      await expect(
+        page.getByRole("alert").filter({ hasText: "An error has occurred." }),
+      ).toBeVisible({ timeout: 30_000 });
+    else if (scenario === "viewer")
+      await expect(page.getByRole("button", { name: "Create post", exact: true })).toHaveCount(0);
+    else if (scenario === "publication-failed")
+      await expect(page.getByRole("row").filter({ hasText: "Failed" }).last()).toBeVisible();
+    else
+      await expect(
+        page.getByRole("heading", {
+          name: route === "/channels" ? "Channels" : "Posts",
+          exact: true,
+        }),
+      ).toBeVisible();
+    await page.screenshot({
+      path: `artifacts/ui-preview/scenario-${scenario}.png`,
+      fullPage: true,
+    });
+  }
+  await page.goto(`${origin}/sign-in?previewScenario=first-run`);
+  await expect(
+    page.getByRole("button", { name: "Create owner account", exact: true }),
+  ).toBeVisible();
+  await page.goto(`${origin}/sign-in?previewScenario=two-factor`);
+  await page.getByLabel("Email address", { exact: true }).fill("preview@example.test");
+  await page.getByLabel("Password", { exact: true }).fill("preview-only-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Verify and sign in", exact: true })).toBeVisible();
+  await page.screenshot({ path: "artifacts/ui-preview/scenario-two-factor.png", fullPage: true });
+
+  await page.goto(
+    `${origin}/posts?previewOperation=updatePost&previewStatus=422&previewScenario=validation-error`,
+  );
+  const rejected = await page.evaluate(
+    async (post) =>
+      (
+        await fetch(`/api/v1/posts/${post.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            brand_profile_id: post.brand_profile_id,
+            default_text: "Rejected by selected scenario",
+          }),
+        })
+      ).status,
+    original,
+  );
+  assert.equal(rejected, 422);
+  assert.deepEqual(
+    errors,
+    [],
+    "all preview routes/scenarios must render without browser exceptions",
+  );
+  assert.deepEqual(
+    external,
+    [],
+    "no preview route may contact an external API, media host, or Provider",
+  );
 } finally {
   for (const context of browser.contexts())
-    for (const page of context.pages()) {
+    for (const page of context.pages())
       await page.screenshot({ path: "artifacts/ui-preview/final-state.png", fullPage: true });
-    }
   await browser.close();
 }
 
-/** Inspects emitted production assets recursively to prove sample identity and MSW bootstrap do not ship. */
+/** Proves the mock runtime and canonical sample identities never ship in the production app. */
 async function inspectProduction(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = `${directory}/${entry.name}`;
     if (entry.isDirectory()) await inspectProduction(path);
-    else if (/\.(js|html)$/.test(entry.name)) {
-      const source = await readFile(path, "utf8");
-      assert.doesNotMatch(source, /preview@example\.test|mockServiceWorker\.js/);
-    }
+    else if (/\.(js|html)$/.test(entry.name))
+      assert.doesNotMatch(
+        await readFile(path, "utf8"),
+        /alpha-admin@example\.test|mockServiceWorker\.js|preview_unhandled/,
+      );
   }
 }
 await inspectProduction("frontend/app/dist/client");
 console.log(
-  "UI preview smoke passed: isolated Worker, fake session, mutable/reset data, nested routes, palettes/viewports, production exclusion.",
+  "Contract-driven UI preview smoke passed: generated routes, outcome controls, auth/roles, local uploads/reset, isolation, and production exclusion.",
 );

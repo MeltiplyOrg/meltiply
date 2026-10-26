@@ -244,13 +244,52 @@ second demo UI. The build excludes this module graph from production.
 Build from the repository root with
 `bun run --filter frontend-app build:ui-preview`. The output is
 `frontend/app/dist/ui-preview`; MSW starts before the router and session reads.
-Sample Posts cover draft, scheduled, published, and failed outcomes. Channels,
-Brand Profiles, Analytics, Queues, and administration reads use synthetic data.
-Post edits, profile/Queue changes, sign-in/out, and single-part media uploads
-operate only in the current browser tab. Refresh restores the initial data.
-Uploaded bytes become local Blob URLs, never R2 objects. Publishing, external
-OAuth, invitations, and security/account changes return an explicit preview
-error instead of claiming a real effect. The preview notice follows the selected interface language.
+
+`frontend/app/preview-contract.ts` compiles the existing
+[`openapi.yaml`](../packages/contracts/openapi.yaml) and
+[`examples/operations.yaml`](../packages/contracts/examples/operations.yaml)
+into a preview-only virtual module. Every documented operation is registered
+automatically. Canonical response examples win; documented statuses without an
+example receive deterministic schema-derived responses. Missing operation examples
+fail the build, following the existing contract catalog requirement.
+No duplicate seed dataset or endpoint-handler list is maintained. Database seeds
+remain integration-test infrastructure, not a source of browser records.
+
+The route picker is extracted structurally from the real `app-router.tsx` literal
+Route declarations. It includes sign-in, Channel assignment, invitations,
+Settings, and the dashboard routes. Standalone handoffs receive synthetic query
+parameters; OAuth opens the local assignment screen rather than a Provider.
+
+Open **Preview controls** from the persistent notice. Select an outcome, optionally
+scope it to an operation, choose an exact documented HTTP response, and pick a
+frontend route. **Apply preview** reloads with shareable URL parameters and fresh
+browser state; **Reset preview** removes those overrides. Scenario and operation
+identifiers are technical codes; control labels follow the interface language.
+
+| Scenario                                | Frontend state                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| `populated`, `success`                  | Canonical successful responses and sample content                       |
+| `empty`                                 | Empty collections and zero aggregate counters                           |
+| `loading`                               | Requests remain pending until canceled or the page reloads              |
+| `validation-error`                      | Mutation validation failure; reads still populate forms                 |
+| `server-error`, `permission-denied`     | Data-request failures, with session/workspace bootstrap retained        |
+| `signed-out`, `first-run`, `two-factor` | Sign-in, installation setup, and authenticator challenge journeys       |
+| `viewer`, `editor`                      | Read-only or editorial permissions without Installation Owner authority |
+| `publication-failed`, `channel-expired` | Publishing failures and Channel reconnection states                     |
+
+URL parameters are `previewScenario`, `previewOperation`, and `previewStatus`.
+For example, `/posts?previewScenario=server-error&previewOperation=listPosts`
+keeps the workspace usable while Posts fails. Selecting an explicit operation
+also permits testing bootstrap/auth failures. A selected error never applies
+the corresponding local mutation.
+
+Generic form saves, deletes, sign-in/out, and single-part media uploads operate
+only in browser memory. Uploaded bytes become local Blob URLs, never R2 objects.
+No preview response sends email, changes real credentials, publishes content,
+or invokes background infrastructure. This is frontend scenario testing, not a
+second backend implementation or proof of backend business semantics. A new
+feature-specific multi-request outcome may need a small scenario transformation;
+ordinary UI changes and newly documented endpoints need no duplicate mock data.
 
 The dedicated `wrangler.ui-preview.jsonc` Worker has no service, database, or
 storage bindings. It rejects API/telemetry requests that reach the server.
@@ -282,5 +321,6 @@ and [Preview configuration](https://developers.cloudflare.com/workers/previews/c
 Preview URLs are public by default; synthetic data contains no credentials or
 real records. Use Cloudflare Access if unpublished UI itself is sensitive.
 The hosted `UI preview verification` workflow checks the frontend, deployment
-dry-run, browser isolation/reset behavior, production exclusion, and screenshots
-of Posts, Analytics, Channels, and Queues at desktop/phone widths in both palettes.
+dry-run, scenario controls, generated frontend routes, auth/role outcomes, local
+uploads/reset, isolation, production exclusion, and desktop/phone screenshots in
+both palettes.

@@ -1,4 +1,11 @@
 {
+  "Preview controls": "Controles da prévia",
+  "Preview scenario": "Cenário da prévia",
+  "Preview operation": "Operação da prévia",
+  "Preview response": "Resposta da prévia",
+  "Preview route": "Rota da prévia",
+  "Reset preview": "Redefinir prévia",
+  "Apply preview": "Aplicar prévia",
   "UI preview · Synthetic data · Refresh resets changes": "Prévia da interface · Dados fictícios · Recarregar redefine as alterações",
   "Add slot": "Adicionar horário",
   "Add to Queue": "Adicionar à fila",

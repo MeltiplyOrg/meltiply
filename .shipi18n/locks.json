@@ -17024,6 +17024,202 @@
     "zh::ui::UI preview · Synthetic data · Refresh resets changes": {
       "sourceHash": "b90272405503dc1a",
       "translationHash": "5802bf96353cb86e"
+    },
+    "de::ui::Preview controls": {
+      "sourceHash": "9e6fe5d33626fc8e",
+      "translationHash": "1b8247f049eef7d5"
+    },
+    "es::ui::Preview controls": {
+      "sourceHash": "9e6fe5d33626fc8e",
+      "translationHash": "98e3991c6ffc36db"
+    },
+    "fr::ui::Preview controls": {
+      "sourceHash": "9e6fe5d33626fc8e",
+      "translationHash": "2f5ffdb56d25f11d"
+    },
+    "it::ui::Preview controls": {
+      "sourceHash": "9e6fe5d33626fc8e",
+      "translationHash": "ea58b043fdd49f81"
+    },
+    "pt-BR::ui::Preview controls": {
+      "sourceHash": "9e6fe5d33626fc8e",
+      "translationHash": "547b452177b1bdf0"
+    },
+    "vi::ui::Preview controls": {
+      "sourceHash": "9e6fe5d33626fc8e",
+      "translationHash": "004458128eb10cbe"
+    },
+    "zh::ui::Preview controls": {
+      "sourceHash": "9e6fe5d33626fc8e",
+      "translationHash": "be88ac7c99e06487"
+    },
+    "de::ui::Preview scenario": {
+      "sourceHash": "7453ed18cc8901ce",
+      "translationHash": "1734c5a428152a7a"
+    },
+    "es::ui::Preview scenario": {
+      "sourceHash": "7453ed18cc8901ce",
+      "translationHash": "9e0a9c857176f53e"
+    },
+    "fr::ui::Preview scenario": {
+      "sourceHash": "7453ed18cc8901ce",
+      "translationHash": "0e4394581f986691"
+    },
+    "it::ui::Preview scenario": {
+      "sourceHash": "7453ed18cc8901ce",
+      "translationHash": "fe4c3d262eb6f2a6"
+    },
+    "pt-BR::ui::Preview scenario": {
+      "sourceHash": "7453ed18cc8901ce",
+      "translationHash": "73e799dd205b6297"
+    },
+    "vi::ui::Preview scenario": {
+      "sourceHash": "7453ed18cc8901ce",
+      "translationHash": "b9cfbf2332567748"
+    },
+    "zh::ui::Preview scenario": {
+      "sourceHash": "7453ed18cc8901ce",
+      "translationHash": "260cab6ca5b2b353"
+    },
+    "de::ui::Preview operation": {
+      "sourceHash": "9a55ed225f3f23a3",
+      "translationHash": "4fb8e33ad1713e56"
+    },
+    "es::ui::Preview operation": {
+      "sourceHash": "9a55ed225f3f23a3",
+      "translationHash": "215648e16d9a3548"
+    },
+    "fr::ui::Preview operation": {
+      "sourceHash": "9a55ed225f3f23a3",
+      "translationHash": "acf54e69e604de5e"
+    },
+    "it::ui::Preview operation": {
+      "sourceHash": "9a55ed225f3f23a3",
+      "translationHash": "67f6dd27ea3aa96a"
+    },
+    "pt-BR::ui::Preview operation": {
+      "sourceHash": "9a55ed225f3f23a3",
+      "translationHash": "a9dcee9df8f1fdf0"
+    },
+    "vi::ui::Preview operation": {
+      "sourceHash": "9a55ed225f3f23a3",
+      "translationHash": "fff1841bace4803a"
+    },
+    "zh::ui::Preview operation": {
+      "sourceHash": "9a55ed225f3f23a3",
+      "translationHash": "9e32ad355ec91ac0"
+    },
+    "de::ui::Preview response": {
+      "sourceHash": "c5b02f45eec6a271",
+      "translationHash": "1055ce175ede2a63"
+    },
+    "es::ui::Preview response": {
+      "sourceHash": "c5b02f45eec6a271",
+      "translationHash": "66274db77560a059"
+    },
+    "fr::ui::Preview response": {
+      "sourceHash": "c5b02f45eec6a271",
+      "translationHash": "b186870601874fec"
+    },
+    "it::ui::Preview response": {
+      "sourceHash": "c5b02f45eec6a271",
+      "translationHash": "8262ef13878d0df5"
+    },
+    "pt-BR::ui::Preview response": {
+      "sourceHash": "c5b02f45eec6a271",
+      "translationHash": "4a2f87da6e47c278"
+    },
+    "vi::ui::Preview response": {
+      "sourceHash": "c5b02f45eec6a271",
+      "translationHash": "9f01b6ad1352f4e9"
+    },
+    "zh::ui::Preview response": {
+      "sourceHash": "c5b02f45eec6a271",
+      "translationHash": "e9af3d555ea6d8a2"
+    },
+    "de::ui::Preview route": {
+      "sourceHash": "158e3a992d6a4905",
+      "translationHash": "86d4388837548d4e"
+    },
+    "es::ui::Preview route": {
+      "sourceHash": "158e3a992d6a4905",
+      "translationHash": "158cbde2c4ce3a11"
+    },
+    "fr::ui::Preview route": {
+      "sourceHash": "158e3a992d6a4905",
+      "translationHash": "b7a96f8add9fb4ef"
+    },
+    "it::ui::Preview route": {
+      "sourceHash": "158e3a992d6a4905",
+      "translationHash": "6ad8f9c575169775"
+    },
+    "pt-BR::ui::Preview route": {
+      "sourceHash": "158e3a992d6a4905",
+      "translationHash": "1a09b981b15211ce"
+    },
+    "vi::ui::Preview route": {
+      "sourceHash": "158e3a992d6a4905",
+      "translationHash": "22badbcfd94c9ebc"
+    },
+    "zh::ui::Preview route": {
+      "sourceHash": "158e3a992d6a4905",
+      "translationHash": "31d278c7657f0ffa"
+    },
+    "de::ui::Reset preview": {
+      "sourceHash": "f3eabc7e5beb7edd",
+      "translationHash": "e4020c2fd3938c90"
+    },
+    "es::ui::Reset preview": {
+      "sourceHash": "f3eabc7e5beb7edd",
+      "translationHash": "7b1213fcf8b19bb7"
+    },
+    "fr::ui::Reset preview": {
+      "sourceHash": "f3eabc7e5beb7edd",
+      "translationHash": "704a0b25c32e9d61"
+    },
+    "it::ui::Reset preview": {
+      "sourceHash": "f3eabc7e5beb7edd",
+      "translationHash": "ce99e798fc0ea26a"
+    },
+    "pt-BR::ui::Reset preview": {
+      "sourceHash": "f3eabc7e5beb7edd",
+      "translationHash": "0c6e4b3636671c0b"
+    },
+    "vi::ui::Reset preview": {
+      "sourceHash": "f3eabc7e5beb7edd",
+      "translationHash": "4aed14ab4e4a595d"
+    },
+    "zh::ui::Reset preview": {
+      "sourceHash": "f3eabc7e5beb7edd",
+      "translationHash": "117079ce24998e12"
+    },
+    "de::ui::Apply preview": {
+      "sourceHash": "5215abeb7ecbd701",
+      "translationHash": "4959c17f2e71b155"
+    },
+    "es::ui::Apply preview": {
+      "sourceHash": "5215abeb7ecbd701",
+      "translationHash": "72952fc848822199"
+    },
+    "fr::ui::Apply preview": {
+      "sourceHash": "5215abeb7ecbd701",
+      "translationHash": "b7088370075a3407"
+    },
+    "it::ui::Apply preview": {
+      "sourceHash": "5215abeb7ecbd701",
+      "translationHash": "3bf43f475e846dfa"
+    },
+    "pt-BR::ui::Apply preview": {
+      "sourceHash": "5215abeb7ecbd701",
+      "translationHash": "767f2cce2a02a956"
+    },
+    "vi::ui::Apply preview": {
+      "sourceHash": "5215abeb7ecbd701",
+      "translationHash": "6bfefbf023b78d83"
+    },
+    "zh::ui::Apply preview": {
+      "sourceHash": "5215abeb7ecbd701",
+      "translationHash": "e322bfbb2a110ce3"
     }
   }
 }

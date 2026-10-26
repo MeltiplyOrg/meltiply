@@ -1,4 +1,11 @@
 {
+  "Preview controls": "Controles de vista previa",
+  "Preview scenario": "Escenario de vista previa",
+  "Preview operation": "Operación de vista previa",
+  "Preview response": "Respuesta de vista previa",
+  "Preview route": "Ruta de vista previa",
+  "Reset preview": "Restablecer vista previa",
+  "Apply preview": "Aplicar vista previa",
   "UI preview · Synthetic data · Refresh resets changes": "Vista previa de la interfaz · Datos ficticios · Recargar restablece los cambios",
   "Add slot": "Añadir horario",
   "Add to Queue": "Añadir a la cola",

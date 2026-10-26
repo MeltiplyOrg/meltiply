@@ -1,4 +1,11 @@
 {
+  "Preview controls": "Controlli anteprima",
+  "Preview scenario": "Scenario anteprima",
+  "Preview operation": "Operazione anteprima",
+  "Preview response": "Risposta anteprima",
+  "Preview route": "Percorso anteprima",
+  "Reset preview": "Reimposta anteprima",
+  "Apply preview": "Applica anteprima",
   "UI preview · Synthetic data · Refresh resets changes": "Anteprima interfaccia · Dati fittizi · Ricaricare ripristina le modifiche",
   "Add slot": "Aggiungi fascia oraria",
   "Add to Queue": "Aggiungi alla coda",

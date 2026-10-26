@@ -1,4 +1,11 @@
 {
+  "Preview controls": "Điều khiển bản xem trước",
+  "Preview scenario": "Kịch bản xem trước",
+  "Preview operation": "Thao tác xem trước",
+  "Preview response": "Phản hồi xem trước",
+  "Preview route": "Đường dẫn xem trước",
+  "Reset preview": "Đặt lại bản xem trước",
+  "Apply preview": "Áp dụng bản xem trước",
   "UI preview · Synthetic data · Refresh resets changes": "Xem trước giao diện · Dữ liệu giả lập · Tải lại để đặt lại thay đổi",
   "Add slot": "Thêm khung giờ",
   "Add to Queue": "Thêm vào hàng đợi",

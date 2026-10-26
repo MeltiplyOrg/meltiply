@@ -11,9 +11,11 @@ afterAll(() => {
   server.close();
   vi.unstubAllGlobals();
 });
+const postPath = `${origin}/api/v1/posts/00000000-0000-4000-8000-000000000701`;
+const profileId = "00000000-0000-4000-8000-000000000111";
 
-/** Exercises real request/response boundaries, including isolation, mutable sample data, and reset semantics. */
-describe("synthetic UI preview HTTP boundary", () => {
+/** Exercises browser-preview behavior through HTTP, including scenario scope, read-after-edit/reset, authentication, and fail-closed misses. */
+describe("contract-driven UI preview HTTP boundary", () => {
   it("returns empty collections without removing the authenticated workspace shell", async () => {
     server.resetHandlers(...createPreviewHandlers({ scenario: "empty" }));
     const session = await fetch(`${origin}/api/auth/get-session`).then((response) =>
@@ -25,48 +27,90 @@ describe("synthetic UI preview HTTP boundary", () => {
     expect(profile.active_organization.role).toBe("admin");
     expect(session.user.email).toBe(profile.email);
   });
-  it("signs in without credentials and resets draft edits with a fresh preview", async () => {
-    const session = await fetch(`${origin}/api/auth/get-session`).then((response) =>
-      response.json(),
-    );
-    expect(session.user.email).toBe("preview@example.test");
-    const id = "00000000-0000-4000-8000-000000000701";
-    const path = `${origin}/api/v1/posts/${id}`;
-    const changed = await fetch(path, {
+
+  it("keeps draft edits local and resets them with a fresh preview", async () => {
+    const original = await fetch(postPath).then((response) => response.json());
+    const changed = await fetch(postPath, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        brand_profile_id: "00000000-0000-4000-8000-000000000111",
-        default_text: "A preview-only edit",
-      }),
+      body: JSON.stringify({ brand_profile_id: profileId, default_text: "A preview-only edit" }),
     });
-    expect(changed.status).toBe(200);
-    expect((await fetch(path).then((response) => response.json())).default_text).toBe(
+    expect(changed.ok).toBe(true);
+    expect((await fetch(postPath).then((response) => response.json())).default_text).toBe(
       "A preview-only edit",
     );
     server.resetHandlers(...createPreviewHandlers());
-    expect((await fetch(path).then((response) => response.json())).default_text).toContain(
-      "synthetic sample content",
+    expect((await fetch(postPath).then((response) => response.json())).default_text).toBe(
+      original.default_text,
     );
   });
 
-  it("rejects unknown endpoints and publishing rather than contacting an upstream", async () => {
-    for (const path of ["/api/v1/unhandled", "/api/v1/posts/example/schedule"]) {
-      const response = await fetch(`${origin}${path}`, { method: "POST" });
-      expect(response.status).toBe(422);
-      expect((await response.json()).error.code).toBe("preview_unavailable");
-    }
+  it("rejects requests outside the contract rather than contacting an upstream", async () => {
+    const response = await fetch(`${origin}/api/v1/unhandled`, { method: "POST" });
+    expect(response.status).toBe(501);
+    expect((await response.json()).error.code).toBe("preview_unhandled");
   });
 
-  it("deleting a sample Post removes it from subsequent reads without affecting other Posts", async () => {
-    const id = "00000000-0000-4000-8000-000000000701";
-    expect((await fetch(`${origin}/api/v1/posts/${id}`, { method: "DELETE" })).status).toBe(204);
-    expect((await fetch(`${origin}/api/v1/posts/${id}`)).status).toBe(422);
+  it("removes a deleted sample without losing a separately created Post", async () => {
+    const created = await fetch(`${origin}/api/v1/posts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brand_profile_id: profileId, default_text: "Keep this sample" }),
+    }).then((response) => response.json());
+    expect((await fetch(postPath, { method: "DELETE" })).ok).toBe(true);
+    expect((await fetch(postPath)).status).toBe(404);
     const list = await fetch(`${origin}/api/v1/posts`).then((response) => response.json());
-    expect(list.posts.map((post: { id: string }) => post.id)).toEqual([
-      "00000000-0000-4000-8000-000000000702",
-      "00000000-0000-4000-8000-000000000703",
-      "00000000-0000-4000-8000-000000000704",
-    ]);
+    expect(
+      list.posts.map((post: { id: string; default_text: string }) => ({
+        id: post.id,
+        text: post.default_text,
+      })),
+    ).toEqual([{ id: created.id, text: "Keep this sample" }]);
+  });
+
+  it("scopes exact error responses to one operation without mutating successful data", async () => {
+    server.resetHandlers(
+      ...createPreviewHandlers({ operationId: "updatePost", responseStatus: 422 }),
+    );
+    const original = await fetch(postPath).then((response) => response.json());
+    const response = await fetch(postPath, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brand_profile_id: profileId, default_text: "Must not be saved" }),
+    });
+    expect(response.status).toBe(422);
+    expect((await response.json()).error.code).toBe("validation_error");
+    expect((await fetch(postPath).then((response) => response.json())).default_text).toBe(
+      original.default_text,
+    );
+    expect((await fetch(`${origin}/api/v1/users/me`)).status).toBe(200);
+  });
+
+  it("allows signed-out and second-factor journeys without real authentication", async () => {
+    server.resetHandlers(...createPreviewHandlers({ scenario: "two-factor" }));
+    expect(
+      await fetch(`${origin}/api/auth/get-session`).then((response) => response.json()),
+    ).toBeNull();
+    const challenge = await fetch(`${origin}/api/auth/sign-in/email`, { method: "POST" }).then(
+      (response) => response.json(),
+    );
+    expect(challenge.twoFactorRedirect).toBe(true);
+    await fetch(`${origin}/api/auth/two-factor/verify-totp`, { method: "POST" });
+    const profile = await fetch(`${origin}/api/v1/users/me`).then((response) => response.json());
+    expect(
+      (await fetch(`${origin}/api/auth/get-session`).then((response) => response.json())).user
+        .email,
+    ).toBe(profile.email);
+  });
+
+  it("exposes failed publication and expired Channel recovery states from the shared examples", async () => {
+    server.resetHandlers(...createPreviewHandlers({ scenario: "publication-failed" }));
+    const post = await fetch(postPath).then((response) => response.json());
+    expect(post.status).toBe("active");
+    expect(post.distributions[0].status).toBe("failed");
+    expect(post.distributions[0].failure.retryable).toBe(true);
+    server.resetHandlers(...createPreviewHandlers({ scenario: "channel-expired" }));
+    const channels = await fetch(`${origin}/api/v1/platforms`).then((response) => response.json());
+    expect(channels.accounts[0].connection_status).toBe("reconnect_required");
   });
 });

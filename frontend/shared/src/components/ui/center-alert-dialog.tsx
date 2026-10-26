@@ -3,6 +3,7 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { cn } from "@meltiply/ui/utils";
 import { buttonVariants } from "./button";
 import { useCenterDialogMorph } from "./center-dialog-motion";
+import { useDialogOpenerFocus } from "./dialog-opener-focus";
 import { dialogChrome } from "./dialog-chrome";
 
 /**
@@ -42,13 +43,15 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
  *
  * Shares `dialogChrome` with `CenterDialogContent`; only the narrower width and
  * the AlertDialog's non-dismissible semantics differ. There is no corner close
- * button: answering requires Cancel or the destructive action.
+ * button: answering requires Cancel or the destructive action. Closing restores
+ * focus to the control that opened the confirmation, not to a Radix trigger.
  */
 export const CenterAlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, children, ...props }, ref) => {
+>(({ className, children, onOpenAutoFocus, onCloseAutoFocus, ...props }, ref) => {
   const boxRef = useCenterDialogMorph(ref);
+  const openerFocus = useDialogOpenerFocus(onOpenAutoFocus, onCloseAutoFocus);
   return (
     <AlertDialogPortal>
       <AlertDialogOverlay />
@@ -58,6 +61,8 @@ export const CenterAlertDialogContent = React.forwardRef<
         data-lenis-prevent=""
         data-dialog-surface=""
         {...props}
+        onOpenAutoFocus={openerFocus.onOpenAutoFocus}
+        onCloseAutoFocus={openerFocus.onCloseAutoFocus}
       >
         {children}
       </AlertDialogPrimitive.Content>

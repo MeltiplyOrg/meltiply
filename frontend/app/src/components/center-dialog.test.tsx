@@ -64,6 +64,53 @@ function DestructiveDialog(): React.ReactElement {
 }
 
 /**
+ * Ordinary dialog opened only through owner state, matching row actions and
+ * toolbar buttons that have no Radix `Trigger` to restore focus from.
+ */
+function ControlledDialog(): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open controlled profile
+      </button>
+      <CenterDialog open={open} onOpenChange={setOpen}>
+        <CenterDialogContent aria-describedby={undefined}>
+          <CenterDialogHeader>
+            <CenterDialogTitle>Controlled profile</CenterDialogTitle>
+          </CenterDialogHeader>
+          <input aria-label="Controlled name" defaultValue="Original" />
+        </CenterDialogContent>
+      </CenterDialog>
+    </>
+  );
+}
+
+/** Destructive confirmation opened from feature state without a Radix trigger. */
+function ControlledDestructiveDialog(): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Delete controlled profile
+      </button>
+      <CenterAlertDialog open={open} onOpenChange={setOpen}>
+        <CenterAlertDialogContent>
+          <CenterAlertDialogHeader>
+            <CenterAlertDialogTitle>Delete controlled profile?</CenterAlertDialogTitle>
+            <CenterAlertDialogDescription>This cannot be undone.</CenterAlertDialogDescription>
+          </CenterAlertDialogHeader>
+          <CenterAlertDialogFooter>
+            <CenterAlertDialogCancel>Cancel</CenterAlertDialogCancel>
+            <CenterAlertDialogAction>Delete profile</CenterAlertDialogAction>
+          </CenterAlertDialogFooter>
+        </CenterAlertDialogContent>
+      </CenterAlertDialog>
+    </>
+  );
+}
+
+/**
  * Opens the ordinary fixture and waits for Radix's focus scope to settle on the
  * first field, which is also when the dismissable layer starts listening.
  */
@@ -122,6 +169,27 @@ describe("ordinary centered dialog dismissal", () => {
     });
   });
 
+  it("restores focus to a controlled opener without a Radix trigger", async () => {
+    render(<ControlledDialog />);
+    const opener = screen.getByRole("button", { name: "Open controlled profile" });
+    await act(async () => {
+      opener.focus();
+      fireEvent.click(opener);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Controlled name" })).toHaveFocus();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(opener).toHaveFocus();
+  });
+
   it("exposes the caller's localized close label", async () => {
     render(<OrdinaryDialog closeLabel="Dismiss editor" />);
     await openOrdinaryDialog();
@@ -157,5 +225,27 @@ describe("destructive centered dialog dismissal", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     });
+  });
+
+  it("returns focus to the controlled opener after cancelling", async () => {
+    render(<ControlledDestructiveDialog />);
+    const opener = screen.getByRole("button", { name: "Delete controlled profile" });
+    await act(async () => {
+      opener.focus();
+      fireEvent.click(opener);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
+    expect(opener).toHaveFocus();
   });
 });

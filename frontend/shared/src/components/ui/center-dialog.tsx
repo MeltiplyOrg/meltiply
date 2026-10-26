@@ -3,6 +3,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 import { useCenterDialogMorph } from "./center-dialog-motion";
+import { useDialogOpenerFocus } from "./dialog-opener-focus";
 import { Button } from "./button";
 import { dialogChrome } from "./dialog-chrome";
 
@@ -81,38 +82,48 @@ export interface CenterDialogContentProps extends React.ComponentPropsWithoutRef
  * This ordinary Dialog primitive keeps outside-click and Escape dismissal,
  * while the destructive AlertDialog variant blocks outside dismissal. The
  * canonical ghost icon Button carries the caller's localized close label.
+ * Controlled callers restore focus to the element that opened the dialog even
+ * without a `CenterDialogTrigger`.
  */
 export const CenterDialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   CenterDialogContentProps
->(({ className, children, closeLabel = "Close", ...props }, ref) => {
-  const boxRef = useCenterDialogMorph(ref);
-  return (
-    <DialogPortal>
-      <DialogOverlay />
-      <DialogPrimitive.Content
-        ref={boxRef}
-        className={cn(dialogChrome.surface, "max-w-lg", className)}
-        data-dialog-surface=""
-        data-lenis-prevent=""
-        {...props}
-      >
-        {children}
-        <DialogPrimitive.Close asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={closeLabel}
-            className="absolute right-2 top-2 size-8 pointer-coarse:size-11"
-          >
-            <X className="size-4" aria-hidden="true" />
-          </Button>
-        </DialogPrimitive.Close>
-      </DialogPrimitive.Content>
-    </DialogPortal>
-  );
-});
+>(
+  (
+    { className, children, closeLabel = "Close", onOpenAutoFocus, onCloseAutoFocus, ...props },
+    ref,
+  ) => {
+    const boxRef = useCenterDialogMorph(ref);
+    const openerFocus = useDialogOpenerFocus(onOpenAutoFocus, onCloseAutoFocus);
+    return (
+      <DialogPortal>
+        <DialogOverlay />
+        <DialogPrimitive.Content
+          ref={boxRef}
+          className={cn(dialogChrome.surface, "max-w-lg", className)}
+          data-dialog-surface=""
+          data-lenis-prevent=""
+          {...props}
+          onOpenAutoFocus={openerFocus.onOpenAutoFocus}
+          onCloseAutoFocus={openerFocus.onCloseAutoFocus}
+        >
+          {children}
+          <DialogPrimitive.Close asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={closeLabel}
+              className="absolute right-2 top-2 size-8 pointer-coarse:size-11"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </Button>
+          </DialogPrimitive.Close>
+        </DialogPrimitive.Content>
+      </DialogPortal>
+    );
+  },
+);
 CenterDialogContent.displayName = DialogPrimitive.Content.displayName;
 
 /**

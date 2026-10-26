@@ -1,0 +1,57 @@
+name: UI preview verification
+
+on:
+  pull_request:
+    paths:
+      - "frontend/app/**"
+      - "frontend/shared/**"
+      - ".github/workflows/ui-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Check focused preview HTTP regressions
+        run: bun run --cwd frontend/app test src/preview/handlers.test.ts --coverage.enabled=false
+      - name: Verify frontend and production build
+        run: bun run --filter frontend-app check
+      - name: Check dead code
+        run: bun run lint:dead
+      - name: Build isolated UI preview and validate deployment
+        run: |
+          bun run --filter frontend-app build:ui-preview
+          bun run --cwd frontend/app deploy:ui-preview --dry-run
+          bun run docs:links
+      - name: Install Chromium
+        run: bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Exercise the real preview in Chromium
+        run: |
+          bun run --cwd frontend/app --no-install wrangler dev --config wrangler.ui-preview.jsonc --port 4173 > /tmp/ui-preview.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true; cat /tmp/ui-preview.log' EXIT
+          node frontend/app/e2e/ui-preview-smoke.mjs
+      - name: Compare React health with the base branch
+        run: |
+          version=$(npm view react-doctor version)
+          mkdir -p /tmp/meltiply-react-base
+          git archive "$(git merge-base HEAD origin/master)" | tar -x -C /tmp/meltiply-react-base
+          (cd /tmp/meltiply-react-base && npx --yes "react-doctor@$version" --verbose) | tee artifacts/ui-preview/react-base.txt
+          npx --yes "react-doctor@$version" --verbose | tee artifacts/ui-preview/react-current.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-preview-browser-evidence
+          path: artifacts/ui-preview

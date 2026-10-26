@@ -87,3 +87,8 @@ export function getApiBaseUrl(source?: PublicEnvSource): string {
 export function isDevMode(source?: DevModeSource): boolean {
   return (source === undefined ? import.meta.env.DEV : source.DEV) === true;
 }
+
+/** Identifies the dedicated synthetic UI build; runtime URLs and user input cannot enable this mode. */
+export function isUiPreview(): boolean {
+  return import.meta.env.MODE === "ui-preview";
+}

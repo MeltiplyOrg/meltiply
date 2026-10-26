@@ -108,13 +108,14 @@ const devOnlyStubModules: Readonly<Record<string, string>> = {
 };
 
 /**
- * Vite plugin that resolves every `devOnlyStubModules` entry to its stub for
- * `vite build`, so production artifacts contain no dev tooling or local
- * credentials regardless of minifier behavior.
+ * Replaces development-only entries in builds and excludes the entire preview
+ * dependency graph unless building the dedicated ui-preview mode. Static
+ * imports therefore cannot ship MSW or synthetic identities in production.
  *
- * @returns Vite `Plugin` that no-ops the listed development entries.
+ * @param uiPreview Whether this is the isolated synthetic preview build; defaults to false.
+ * @returns Vite plugin substituting build-only modules without affecting development.
  */
-function devOnlyStubPlugin(): Plugin {
+function devOnlyStubPlugin(uiPreview = false): Plugin {
   return {
     name: "dev-only-stub",
     apply: "build" as const,
@@ -122,6 +123,12 @@ function devOnlyStubPlugin(): Plugin {
     // match the resolved absolute path in `load` instead.
     load(id: string) {
       const normalized = id.replace(/\\/g, "/").replace(/\.(tsx?|jsx?)$/, "");
+      if (!uiPreview && normalized.endsWith("/preview/browser")) {
+        return "export const startPreview = async () => {};";
+      }
+      if (!uiPreview && normalized.endsWith("/preview/notice")) {
+        return "export const PreviewNotice = () => null;";
+      }
       const stub = Object.entries(devOnlyStubModules).find(([suffix]) =>
         normalized.endsWith(suffix),
       )?.[1];
@@ -130,8 +137,9 @@ function devOnlyStubPlugin(): Plugin {
   };
 }
 
-export default defineConfig(() => {
-  const rootFileEnv = parseEnvFile(rootEnvFile);
+export default defineConfig(({ mode }) => {
+  const uiPreview = mode === "ui-preview";
+  const rootFileEnv = uiPreview ? {} : parseEnvFile(rootEnvFile);
   const publicEnv = Object.fromEntries(
     ["APP_URL"]
       .map((key) => {
@@ -140,7 +148,9 @@ export default defineConfig(() => {
       })
       .filter(([, value]) => value !== undefined),
   );
-  const frontendUrl = process.env.APP_URL?.trim() || rootFileEnv.APP_URL?.trim() || undefined;
+  const frontendUrl = uiPreview
+    ? undefined
+    : process.env.APP_URL?.trim() || rootFileEnv.APP_URL?.trim() || undefined;
   const localApiPort = process.env.WRANGLER_DEV_PORT || rootFileEnv.WRANGLER_DEV_PORT || "8787";
   const localApp =
     frontendUrl !== undefined &&
@@ -149,30 +159,34 @@ export default defineConfig(() => {
     // Statically substitute the whitelisted root .env values into import.meta.env.
     // Launcher-provided values override the file so detected MagicDNS origins
     // and configured ports reach browser code.
-    define: Object.fromEntries(
-      Object.entries(publicEnv).map(([key, value]) => [
-        `import.meta.env.${key}`,
-        JSON.stringify(value),
-      ]),
-    ),
+    define: uiPreview
+      ? { "import.meta.env.APP_URL": JSON.stringify("") }
+      : Object.fromEntries(
+          Object.entries(publicEnv).map(([key, value]) => [
+            `import.meta.env.${key}`,
+            JSON.stringify(value),
+          ]),
+        ),
+    build: uiPreview ? { outDir: "dist/ui-preview" } : {},
     plugins: lazyPlugins(() => [
       react(),
       // Local builds must reach the Wrangler API process directly; deployed
       // environments omit API_ORIGIN and route through the API service binding.
-      cloudflare({
-        config: (config) =>
-          localApp
-            ? {
-                vars: {
-                  ...config.vars,
-                  API_ORIGIN: `http://127.0.0.1:${localApiPort}`,
-                },
-              }
-            : {},
-      }),
+      !uiPreview &&
+        cloudflare({
+          config: (config) =>
+            localApp
+              ? {
+                  vars: {
+                    ...config.vars,
+                    API_ORIGIN: `http://127.0.0.1:${localApiPort}`,
+                  },
+                }
+              : {},
+        }),
       rootEnvReloadPlugin(),
       canonicalFrontendOriginPlugin(frontendUrl),
-      devOnlyStubPlugin(),
+      devOnlyStubPlugin(uiPreview),
     ]),
     server: {
       host: process.env.FRONTEND_DEV_HOST ?? "127.0.0.1",

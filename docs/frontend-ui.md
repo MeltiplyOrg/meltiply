@@ -234,3 +234,53 @@ The public document frame (`frontend/public/src/components/layout.astro`) owns o
 Landing and docs serve different jobs: product explanation and reading. `DocumentationSearchTrigger` opens the canonical article-index dialog from both landing and documentation preferences; it is separate from workspace jump search. Its body portal is browser-only so static generation renders the full page without accessing `document`; browser dismissal retains the existing exit and opener-focus lifecycle. Public scrolling/navigation adapters release state during Astro swaps. Native links, keyboard navigation, fragments, and accessibility behavior remain usable.
 
 For each change: read the owner/caller, extend the canonical implementation, migrate callers and guides, and exercise actual states at desktop/phone widths in both palettes. Verify focus, hover, busy, loading, empty, recoverable errors, selection, and nested overflow. Follow the repository's hosted completion gate. Compilation and lint are not visual proof; report only verification actually exercised.
+
+## Isolated pull-request UI previews
+
+`frontend/app/src/preview` supplies synthetic HTTP responses to the **same**
+application routes, auth provider, queries, and shared controls. It is not a
+second demo UI. The build excludes this module graph from production.
+
+Build from the repository root with
+`bun run --filter frontend-app build:ui-preview`. The output is
+`frontend/app/dist/ui-preview`; MSW starts before the router and session reads.
+Sample Posts cover draft, scheduled, published, and failed outcomes. Channels,
+Brand Profiles, Analytics, Queues, and administration reads use synthetic data.
+Post edits, profile/Queue changes, sign-in/out, and single-part media uploads
+operate only in the current browser tab. Refresh restores the initial data.
+Uploaded bytes become local Blob URLs, never R2 objects. Publishing, external
+OAuth, invitations, and security/account changes return an explicit preview
+error instead of claiming a real effect. The preview notice follows the selected interface language.
+
+The dedicated `wrangler.ui-preview.jsonc` Worker has no service, database, or
+storage bindings. It rejects API/telemetry requests that reach the server.
+Browser handlers also reject unknown API calls, and the preview's CSP limits
+network access to its own origin. Do not add production secrets, an `API`
+binding, or a real backend origin to this Worker.
+
+### Cloudflare Git integration
+
+Create a **separate** Git-connected Worker named `meltiply-ui-preview` in
+Cloudflare Workers & Pages. Keep the repository root as the build root so Bun
+can resolve workspaces. Configure:
+
+| Setting         | Value                                            |
+| --------------- | ------------------------------------------------ |
+| Build command   | `bun run --filter frontend-app build:ui-preview` |
+| Deploy command  | `bun run --cwd frontend/app deploy:ui-preview`   |
+| Preview command | `bun run --cwd frontend/app preview:ui-preview`  |
+| Preview builds  | Enabled for the PR branches you want to review   |
+
+Do not configure `APP_URL` or production credentials. The preview build ignores
+the root `.env` and forces same-origin requests. Enable the Git integration's
+PR comments to receive links on pull requests. Existing Workers Builds projects
+may require Cloudflare's one-time switch to Worker Previews; use this separate
+project rather than changing the application's production deployment.
+See [branch builds](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/)
+and [Preview configuration](https://developers.cloudflare.com/workers/previews/configuration/).
+
+Preview URLs are public by default; synthetic data contains no credentials or
+real records. Use Cloudflare Access if unpublished UI itself is sensitive.
+The hosted `UI preview verification` workflow checks the frontend, deployment
+dry-run, browser isolation/reset behavior, production exclusion, and screenshots
+of Posts, Analytics, Channels, and Queues at desktop/phone widths in both palettes.

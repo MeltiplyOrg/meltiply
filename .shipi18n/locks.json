@@ -16996,6 +16996,34 @@
     "zh::ui::Facebook connected successfully.": {
       "sourceHash": "b51bfb61132cadfb",
       "translationHash": "cfbe8d9f547d6b59"
+    },
+    "de::ui::UI preview · Synthetic data · Refresh resets changes": {
+      "sourceHash": "b90272405503dc1a",
+      "translationHash": "724e218ee537ac50"
+    },
+    "es::ui::UI preview · Synthetic data · Refresh resets changes": {
+      "sourceHash": "b90272405503dc1a",
+      "translationHash": "86f155415fddac45"
+    },
+    "fr::ui::UI preview · Synthetic data · Refresh resets changes": {
+      "sourceHash": "b90272405503dc1a",
+      "translationHash": "343587a27651ac28"
+    },
+    "it::ui::UI preview · Synthetic data · Refresh resets changes": {
+      "sourceHash": "b90272405503dc1a",
+      "translationHash": "4d050f457296f309"
+    },
+    "pt-BR::ui::UI preview · Synthetic data · Refresh resets changes": {
+      "sourceHash": "b90272405503dc1a",
+      "translationHash": "2f0cb9c1407da3a1"
+    },
+    "vi::ui::UI preview · Synthetic data · Refresh resets changes": {
+      "sourceHash": "b90272405503dc1a",
+      "translationHash": "4717dbc65edbf126"
+    },
+    "zh::ui::UI preview · Synthetic data · Refresh resets changes": {
+      "sourceHash": "b90272405503dc1a",
+      "translationHash": "5802bf96353cb86e"
     }
   }
 }

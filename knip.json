@@ -13,7 +13,7 @@
       ]
     },
     "frontend/app": {
-      "entry": ["src/app/globals.css", "e2e/support/invitation-db.mjs"]
+      "entry": ["src/app/globals.css", "src/preview/worker.ts", "e2e/support/invitation-db.mjs"]
     },
     "workers/api": {
       "entry": [

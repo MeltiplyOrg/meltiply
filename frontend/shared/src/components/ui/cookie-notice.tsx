@@ -160,8 +160,8 @@ export function CookieNotice({
             <span>
               <strong>Functional preferences</strong>
               <span>
-                Remember theme, language, recent navigation, and local work recovery. Without this,
-                preferences are not remembered for later visits.
+                Remember theme, language, and local work recovery. Without this, preferences are not
+                remembered for later visits.
               </span>
             </span>
           </label>

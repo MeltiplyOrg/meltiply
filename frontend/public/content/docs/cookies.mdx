@@ -26,7 +26,7 @@ Sign-in, session, and security mechanisms needed to authenticate accounts and pr
 Functional storage is optional and is used for convenience and recovery preferences. It is written only after you allow the functional category. Known examples include:
 
 - The `meltiply-theme` cookie, which remembers the selected Light, Dark, or System preference across eligible Meltiply sites for up to one year.
-- Origin-local storage keys `meltiply.theme`, `meltiply.language`, `meltiply.recent-navigation`, and `meltiply.devbox` for theme, language, recent navigation, and developer-tool preferences.
+- Origin-local storage keys `meltiply.theme`, `meltiply.language`, and `meltiply.devbox` for theme, language, and developer-tool preferences.
 - Origin-local storage prefixes `meltiply.composer.v2.*`, `meltiply.upload.v1.*`, and `meltiply.upload.create.v1.*` for in-progress post and upload recovery data. Composer recovery includes selected profiles/channels and saved copy identities so partial multi-profile work can resume.
 
 Without functional consent, theme selection still works for the current page, but is not remembered for later visits. An explicit theme choice follows links between landing, docs, and app without granting consent or writing optional storage at an unconsented destination. The destination applies it before paint and preserves it through hydration and an initial rejection of optional cookies. Initial color scheme follows the device unless explicitly selected. There is no separate stored motion mode. Server-saved Posts and active uploads remain product functionality; only supplemental browser-local recovery is optional.

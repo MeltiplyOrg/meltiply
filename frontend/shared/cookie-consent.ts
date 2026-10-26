@@ -11,7 +11,6 @@ export const consentLifetimeSeconds = 180 * 24 * 60 * 60;
 export const functionalStorageKeys = [
   "meltiply.theme",
   "meltiply.language",
-  "meltiply.recent-navigation",
   "meltiply.devbox",
 ] as const;
 export const functionalStoragePrefixes = [

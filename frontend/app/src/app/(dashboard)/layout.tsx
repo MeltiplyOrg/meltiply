@@ -1,11 +1,10 @@
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 import { Outlet, useNavigate } from "react-router";
 
 import { NavigationShell, type WorkspaceView } from "@/components/layout/navigation-shell";
 import { resolveWorkspaceView, workspaceViewPath } from "@/components/primitives/sidebar-nav";
 import { WorkspaceProvider } from "@/context/workspace.context";
 import { usePathname } from "@/lib/navigation";
-import { recordRecentNavigation } from "@/lib/recent-navigation";
 
 import { AppProviders } from "../providers";
 
@@ -22,8 +21,8 @@ type DashboardLayoutProps = Readonly<{
  * `WORKSPACE_NAV_ITEMS` descriptor. The routed view renders through the
  * standard nested-route `<Outlet />` fallback inside the shell's persistent
  * main content column, so navigation swaps the routed child directly.
- * Records recent navigation; destination chunks warm only on navigation intent
- * rather than downloading every workspace tool when the shell mounts.
+ * Destination chunks warm only on navigation intent rather than downloading
+ * every workspace tool when the shell mounts.
  *
  * @param props.children - Optional explicit children; when omitted, the
  *   nested-route `<Outlet />` is rendered.
@@ -33,10 +32,6 @@ function WorkspaceShell({ children }: DashboardLayoutProps): React.ReactElement 
   const pathname = usePathname();
   const navigate = useNavigate();
   const currentView = resolveWorkspaceView(pathname);
-
-  useEffect(() => {
-    recordRecentNavigation(pathname);
-  }, [pathname]);
 
   const handleNavigate = useCallback(
     (view: WorkspaceView, options?: { search?: string }) => {

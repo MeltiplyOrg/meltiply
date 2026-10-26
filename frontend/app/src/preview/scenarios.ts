@@ -29,7 +29,7 @@ export function isPreviewScenario(value: string | null): value is PreviewScenari
 }
 
 /** Reads shareable preview-only options without persisting records or changing production configuration. Unknown values use the populated scenario. */
-export function previewOptionsFromUrl(url: URL): PreviewOptions {
+function previewOptionsFromUrl(url: URL): PreviewOptions {
   const value = url.searchParams.get("previewScenario");
   const operationId = url.searchParams.get("previewOperation");
   const responseStatus = Number(url.searchParams.get("previewStatus"));

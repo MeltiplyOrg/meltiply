@@ -57,9 +57,8 @@ export function exampleForSchema(value: unknown, document: PreviewObject, depth 
   if (type === "number" || type === "integer")
     return typeof schema.minimum === "number" ? schema.minimum : 0;
   if (type === "array")
-    return Array.from(
-      { length: typeof schema.minItems === "number" ? Math.min(schema.minItems, 20) : 0 },
-      () => exampleForSchema(schema.items ?? {}, document, depth + 1),
+    return Array.from({ length: typeof schema.minItems === "number" ? schema.minItems : 0 }, () =>
+      exampleForSchema(schema.items ?? {}, document, depth + 1),
     );
   if (type === "object" || schema.properties !== undefined) {
     const properties = Schema.decodeUnknownSync(previewObjectSchema)(schema.properties ?? {});

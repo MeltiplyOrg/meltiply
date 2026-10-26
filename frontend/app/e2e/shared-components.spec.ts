@@ -1,0 +1,218 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
+
+/** Whether the focused element matches the browser's keyboard-only focus ring. */
+async function focusedElementIsFocusVisible(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement && active.matches(":focus-visible");
+  });
+}
+
+/** Asserts the page itself has no horizontal document overflow. */
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true);
+}
+
+/** Asserts a segmented radio has focus through keyboard modality, not a pointer click. */
+async function expectKeyboardFocus(page: Page, radio: Locator): Promise<void> {
+  await expect(radio).toBeFocused();
+  expect(await focusedElementIsFocusVisible(page)).toBe(true);
+}
+
+/**
+ * Real-stack proof that the shared segmented contract reaches the Posts views:
+ * one checked radio per radiogroup, arrow/Home/End selection with focus moved
+ * to the chosen option, the calendar period groups, reduced-motion selection,
+ * and no phone-width document overflow.
+ */
+test("keeps segmented selection keyboard-complete across Posts and Calendar", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await openIsolatedOwnerWorkspace(page);
+  await waitForWorkspace(page);
+
+  const postView = page.getByRole("radiogroup", { name: "Post view", exact: true });
+  const gridRadio = postView.getByRole("radio", { name: "Grid", exact: true });
+  const calendarRadio = postView.getByRole("radio", { name: "Calendar", exact: true });
+  const tableRadio = postView.getByRole("radio", { name: "Table", exact: true });
+  await expect(postView).toBeVisible();
+  await expect(postView.getByRole("radio", { checked: true })).toHaveCount(1);
+
+  // Grid is the last option: ArrowLeft reaches Calendar, ArrowRight returns,
+  // then Home/End jump to the first and last checked options.
+  await gridRadio.click();
+  await expect(gridRadio).toBeChecked();
+  await page.keyboard.press("ArrowLeft");
+  await expect(calendarRadio).toBeChecked();
+  await expectKeyboardFocus(page, calendarRadio);
+  await page.keyboard.press("ArrowRight");
+  await expect(gridRadio).toBeChecked();
+  await expectKeyboardFocus(page, gridRadio);
+  await page.keyboard.press("Home");
+  await expect(tableRadio).toBeChecked();
+  await expectKeyboardFocus(page, tableRadio);
+  await page.keyboard.press("End");
+  await expect(gridRadio).toBeChecked();
+  await expectKeyboardFocus(page, gridRadio);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-posts-radio-keyboard.png"),
+  });
+
+  // Calendar swaps the collection surface and owns its own periodic radiogroup.
+  await calendarRadio.click();
+  const calendar = page.getByRole("region", { name: "Publishing calendar", exact: true });
+  await expect(calendar).toBeVisible();
+  const period = calendar.getByRole("radiogroup", { name: "Calendar period", exact: true });
+  const monthRadio = period.getByRole("radio", { name: "Month", exact: true });
+  const weekRadio = period.getByRole("radio", { name: "Week", exact: true });
+  await expect(period.getByRole("radio", { checked: true })).toHaveCount(1);
+  await monthRadio.click();
+  await page.keyboard.press("End");
+  await expect(weekRadio).toBeChecked();
+  await expectKeyboardFocus(page, weekRadio);
+  await page.keyboard.press("Home");
+  await expect(monthRadio).toBeChecked();
+  await expectKeyboardFocus(page, monthRadio);
+  await page.keyboard.press("ArrowRight");
+  await expect(weekRadio).toBeChecked();
+  await expectKeyboardFocus(page, weekRadio);
+  await page.keyboard.press("ArrowLeft");
+  await expect(monthRadio).toBeChecked();
+  await expectKeyboardFocus(page, monthRadio);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-calendar-period-keyboard.png"),
+  });
+
+  // A reduced-motion preference commits the same selection without the spring.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await gridRadio.click();
+  await expect(gridRadio).toBeChecked();
+  const gridSurface = page
+    .getByRole("checkbox", { name: "Select all visible posts" })
+    .or(page.getByText("No posts match filters", { exact: true }));
+  await expect(gridSurface).toBeVisible();
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-posts-grid-reduced-motion.png"),
+  });
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-posts-phone-320x568.png"),
+    fullPage: true,
+  });
+});
+
+/**
+ * Real-stack proof of the centered dialog contract: the ordinary editor
+ * dismisses from outside/Escape with a localized Close and returns focus to its
+ * Edit trigger, while the destructive confirmation blocks outside dismissal and
+ * focuses Cancel until Escape cancels it back into the still-open editor.
+ */
+test("keeps centered dialog dismissal and destructive focus distinct", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
+  await page.goto("/channels");
+  await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: /Brand Profiles/ }).click();
+
+  const editTrigger = page.getByRole("button", { name: `Edit ${profileName}`, exact: true });
+  await expect(editTrigger).toBeVisible();
+  await editTrigger.click();
+  const editor = page.getByRole("dialog", { name: "Update Brand Profile", exact: true });
+  await expect(editor).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Close", exact: true })).toBeVisible();
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-dialog-desktop.png"),
+  });
+
+  await page.keyboard.press("Escape");
+  await expect(editor).toBeHidden();
+  await expect(editTrigger).toBeFocused();
+
+  // The backdrop belongs to the ordinary dialog, so a real pointer sequence closes it.
+  await editTrigger.click();
+  await expect(editor).toBeVisible();
+  await page
+    .locator('[data-dialog-backdrop][data-state="open"]')
+    .click({ position: { x: 8, y: 8 } });
+  await expect(editor).toBeHidden();
+  await expect(editTrigger).toBeFocused();
+
+  // The destructive confirmation cannot be dismissed by the same outside click.
+  await editTrigger.click();
+  await expect(editor).toBeVisible();
+  const deleteTrigger = editor.getByRole("button", { name: "Delete profile", exact: true });
+  await deleteTrigger.click();
+  const confirmation = page.getByRole("alertdialog", {
+    name: "Delete Brand Profile",
+    exact: true,
+  });
+  const cancel = confirmation.getByRole("button", { name: "Cancel", exact: true });
+  await expect(confirmation).toBeVisible();
+  await expect(cancel).toBeFocused();
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-alert-desktop.png"),
+  });
+
+  await page
+    .locator('[data-dialog-backdrop][data-state="open"]')
+    .last()
+    .click({ position: { x: 8, y: 8 } });
+  await expect(confirmation).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toBeHidden();
+  await expect(editor).toBeVisible();
+  await expect(deleteTrigger).toBeFocused();
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-dialog-after-cancel.png"),
+  });
+
+  await page.keyboard.press("Escape");
+  await expect(editor).toBeHidden();
+  await expect(editTrigger).toBeFocused();
+
+  // The same editor keeps its fixed box inside a short phone viewport.
+  await page.setViewportSize({ width: 320, height: 480 });
+  await editTrigger.click();
+  await expect(editor).toBeVisible();
+  // The bottom-up entrance starts below the viewport; measure the resting box.
+  await expect
+    .poll(() =>
+      editor.evaluate((element) =>
+        element.getAnimations().every((animation) => animation.playState !== "running"),
+      ),
+    )
+    .toBe(true);
+  const box = await editor.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320.5);
+  expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(480.5);
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-dialog-phone-320x480.png"),
+  });
+
+  await page.keyboard.press("Escape");
+  await expect(editor).toBeHidden();
+  await expect(editTrigger).toBeFocused();
+});

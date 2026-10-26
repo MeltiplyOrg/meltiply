@@ -116,6 +116,7 @@ function QueueEditor({
       }}
     >
       <CenterDialogContent
+        closeLabel={t("Close")}
         onEscapeKeyDown={(event) => {
           // The timezone panel owns Escape while open; Radix listens on the
           // document, so the dialog must decline the same keypress.

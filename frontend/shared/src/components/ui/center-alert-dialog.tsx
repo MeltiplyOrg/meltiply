@@ -3,6 +3,7 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { cn } from "@meltiply/ui/utils";
 import { buttonVariants } from "./button";
 import { useCenterDialogMorph } from "./center-dialog-motion";
+import { dialogChrome } from "./dialog-chrome";
 
 /**
  * Confirmation variant of the centered dialog type, for explicit
@@ -24,10 +25,7 @@ const AlertDialogOverlay = React.forwardRef<
   <AlertDialogPrimitive.Overlay
     ref={ref}
     data-dialog-backdrop=""
-    className={cn(
-      "fixed inset-0 z-50 bg-overlay/80 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className,
-    )}
+    className={cn(dialogChrome.backdrop, className)}
     {...props}
   />
 ));
@@ -41,6 +39,10 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
  * so destructive actions require an explicit answer.
  * Dynamic-viewport bounds and native scrolling keep both answers reachable on
  * phones and short landscape screens without weakening confirmation semantics.
+ *
+ * Shares `dialogChrome` with `CenterDialogContent`; only the narrower width and
+ * the AlertDialog's non-dismissible semantics differ. There is no corner close
+ * button: answering requires Cancel or the destructive action.
  */
 export const CenterAlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
@@ -52,10 +54,7 @@ export const CenterAlertDialogContent = React.forwardRef<
       <AlertDialogOverlay />
       <AlertDialogPrimitive.Content
         ref={boxRef}
-        className={cn(
-          "fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-md max-h-[calc(100dvh-2rem)] content-start -translate-x-1/2 -translate-y-1/2 gap-4 overflow-x-hidden overflow-y-auto overscroll-contain rounded-window border border-line bg-surface p-4 shadow-overlay dialog-bottom-popup sm:p-6",
-          className,
-        )}
+        className={cn(dialogChrome.surface, "max-w-md", className)}
         data-lenis-prevent=""
         data-dialog-surface=""
         {...props}
@@ -74,7 +73,7 @@ export const CenterAlertDialogHeader = ({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex flex-col gap-1.5 text-left", className)} {...props} />
+  <div className={cn(dialogChrome.header, className)} {...props} />
 );
 
 /**
@@ -84,10 +83,7 @@ export const CenterAlertDialogFooter = ({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
-    {...props}
-  />
+  <div className={cn(dialogChrome.footer, className)} {...props} />
 );
 
 /**
@@ -97,11 +93,7 @@ export const CenterAlertDialogTitle = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Title>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Title>
 >(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Title
-    ref={ref}
-    className={cn("text-base font-semibold text-ink", className)}
-    {...props}
-  />
+  <AlertDialogPrimitive.Title ref={ref} className={cn(dialogChrome.title, className)} {...props} />
 ));
 CenterAlertDialogTitle.displayName = AlertDialogPrimitive.Title.displayName;
 
@@ -114,7 +106,7 @@ export const CenterAlertDialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Description
     ref={ref}
-    className={cn("text-[13px] leading-relaxed text-ink-2", className)}
+    className={cn(dialogChrome.description, className)}
     {...props}
   />
 ));

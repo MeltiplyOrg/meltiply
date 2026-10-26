@@ -22,7 +22,7 @@ afterEach(() => {
 
 describe("collection toolbar interactions", () => {
   it("clears a localized search, restores filter disclosure focus, and animates the close", async () => {
-    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    writeCookieConsent({ functional: true });
     window.localStorage.setItem("meltiply.language", "es");
     const onChange = vi.fn();
     render(

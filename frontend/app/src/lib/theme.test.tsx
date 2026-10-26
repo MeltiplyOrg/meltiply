@@ -61,7 +61,7 @@ beforeEach(() => {
   document.documentElement.removeAttribute("data-theme");
   document.documentElement.classList.remove("dark");
   window.localStorage.clear();
-  writeCookieConsent({ functional: true, analytics: false, marketing: false });
+  writeCookieConsent({ functional: true });
 });
 
 /** Removes hydrated page intent so later scenarios cannot inherit a transferred palette. */
@@ -115,13 +115,13 @@ it("preserves a transferred light palette through hydration without functional c
   expect(screen.getByTestId("committed")).toHaveTextContent("light");
   expect(screen.getByTestId("requested")).toHaveTextContent("light");
   expect(window.localStorage.getItem(themeStorageKey)).toBeNull();
-  act(() => writeCookieConsent({ functional: false, analytics: false, marketing: false }));
+  act(() => writeCookieConsent({ functional: false }));
   expect(document.documentElement).not.toHaveClass("dark");
   expect(document.documentElement.style.colorScheme).toBe("light");
 });
 
 it("keeps theme usable in memory without reading or writing optional storage", () => {
-  writeCookieConsent({ functional: false, analytics: false, marketing: false });
+  writeCookieConsent({ functional: false });
   window.localStorage.setItem(themeStorageKey, "light");
   const get = vi.spyOn(Storage.prototype, "getItem");
   const set = vi.spyOn(Storage.prototype, "setItem");
@@ -146,7 +146,7 @@ it("keeps theme usable in memory without reading or writing optional storage", (
  */
 it("persists the current choice on acceptance and clears it on withdrawal", () => {
   act(() => {
-    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    writeCookieConsent({ functional: false });
   });
   render(
     <ThemeProvider>
@@ -157,12 +157,12 @@ it("persists the current choice on acceptance and clears it on withdrawal", () =
   expect(window.localStorage.getItem(themeStorageKey)).toBeNull();
 
   act(() => {
-    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    writeCookieConsent({ functional: true });
   });
   expect(window.localStorage.getItem(themeStorageKey)).toBe("dark");
 
   act(() => {
-    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    writeCookieConsent({ functional: false });
   });
   expect(window.localStorage.getItem(themeStorageKey)).toBeNull();
   expect(document.cookie).not.toContain("meltiply-theme=dark");
@@ -209,7 +209,7 @@ it("drops current-page intent when functional consent is withdrawn", () => {
   expect(screen.getByTestId("requested")).toHaveTextContent("dark");
 
   act(() => {
-    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    writeCookieConsent({ functional: false });
   });
   expect(document.documentElement).not.toHaveAttribute("data-theme-preference");
   expect(document.documentElement).not.toHaveClass("dark");

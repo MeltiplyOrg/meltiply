@@ -34,15 +34,13 @@ export function ownerCredentials(): GeneratedCredentials {
   };
 }
 
-/** Grants functional consent before boot; analytics and marketing remain explicitly denied. */
+/** Grants the one optional purpose before boot so journeys start with an explicit saved decision. */
 async function allowFunctionalConsent(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const consent = encodeURIComponent(
       JSON.stringify({
-        analytics: false,
         expires: Date.now() + 180 * 24 * 60 * 60 * 1_000,
         functional: true,
-        marketing: false,
         v: 1,
       }),
     );

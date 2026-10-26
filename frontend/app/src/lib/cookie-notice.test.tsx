@@ -11,7 +11,7 @@ import {
   writeCookieConsent,
 } from "@meltiply/ui/cookie-consent";
 
-/** UI scenarios start with no decision; only an explicit prompt action authorizes a category. */
+/** UI scenarios start with no decision; only an explicit prompt action authorizes the optional purpose. */
 beforeEach(() => {
   document.cookie = `${consentCookieName}=; Path=/; Max-Age=0`;
   window.localStorage.clear();
@@ -27,16 +27,16 @@ afterEach(() => {
 
 describe("cookie notification", () => {
   /** Any valid saved decision ends the prompt without leaving a control that can reopen it. */
-  it.each([
-    { functional: true, analytics: true, marketing: true },
-    { functional: false, analytics: false, marketing: false },
-  ])("renders no consent controls for a saved decision: %j", (choice) => {
-    writeCookieConsent(choice);
-    render(<CookieNotice />);
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    expect(screen.queryByRole("region")).not.toBeInTheDocument();
-    expect(readCookieConsent()).toEqual(choice);
-  });
+  it.each([{ functional: true }, { functional: false }])(
+    "renders no consent controls for a saved decision: %j",
+    (choice) => {
+      writeCookieConsent(choice);
+      render(<CookieNotice />);
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+      expect(screen.queryByRole("region")).not.toBeInTheDocument();
+      expect(readCookieConsent()).toEqual(choice);
+    },
+  );
 
   /** Rejecting the initial prompt records denial and keeps subsequent mounts free of consent controls. */
   it("leaves consent unset until an explicit choice and remembers rejection", () => {
@@ -44,22 +44,34 @@ describe("cookie notification", () => {
     expect(screen.getByRole("region")).toBeVisible();
     expect(readCookieConsent()).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Reject optional" }));
-    expect(readCookieConsent()).toEqual({ functional: false, analytics: false, marketing: false });
+    expect(readCookieConsent()).toEqual({ functional: false });
     view.unmount();
     render(<CookieNotice />);
     expect(screen.queryByRole("region")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  /** Initial category management starts denied and grants only the categories explicitly selected. */
-  it("starts categories unchecked and saves functional consent without tracking consent", () => {
+  /** Only the implemented optional purpose is exposed; unimplemented tracking categories are absent. */
+  it("offers only the implemented optional purpose and saves it only when chosen", () => {
     render(<CookieNotice />);
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Analytics/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Marketing/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Manage preferences" }));
-    for (const checkbox of screen.getAllByRole("checkbox")) expect(checkbox).not.toBeChecked();
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(1);
+    expect(checkboxes[0]).not.toBeChecked();
     expect(readCookieConsent()).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: /Functional preferences/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
-    expect(readCookieConsent()).toEqual({ functional: true, analytics: false, marketing: false });
+    expect(readCookieConsent()).toEqual({ functional: true });
+  });
+
+  /** Accepting from the prompt grants the one implemented purpose without enabling anything else. */
+  it("accepts only functional preferences from the initial prompt", () => {
+    render(<CookieNotice />);
+    fireEvent.click(screen.getByRole("button", { name: "Allow functional" }));
+    expect(readCookieConsent()).toEqual({ functional: true });
   });
 
   /** The initial management flow focuses its options and confirmation, then dismisses without stealing moved focus. */
@@ -70,10 +82,10 @@ describe("cookie notification", () => {
       render(<CookieNotice />);
       fireEvent.click(screen.getByRole("button", { name: "Manage preferences" }));
       expect(document.activeElement).toBe(screen.getByRole("group"));
-      fireEvent.click(screen.getByRole("button", { name: "Accept all" }));
+      fireEvent.click(screen.getByRole("button", { name: "Allow functional" }));
       const status = screen.getByRole("status");
       expect(document.activeElement).toBe(status.parentElement);
-      expect(readCookieConsent()).toEqual({ functional: true, analytics: true, marketing: true });
+      expect(readCookieConsent()).toEqual({ functional: true });
       document.body.appendChild(elsewhere);
       elsewhere.focus();
       act(() => vi.advanceTimersByTime(1800));

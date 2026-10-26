@@ -19,7 +19,7 @@ beforeEach(() => {
   document.cookie = "meltiply-consent=; Path=/; Max-Age=0";
   document.cookie = "meltiply-theme=; Path=/; Max-Age=0";
   window.localStorage.clear();
-  writeCookieConsent({ functional: true, analytics: false, marketing: false });
+  writeCookieConsent({ functional: true });
 });
 
 afterEach(() => {

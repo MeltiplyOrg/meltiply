@@ -1,10 +1,9 @@
-export type ConsentCategory = "functional" | "analytics" | "marketing";
+/** The only optional purpose Meltiply implements: remembered preferences and local recovery. */
+export type ConsentCategory = "functional";
 
-/** Optional purposes are independent; essential authentication and consent storage are not toggles. */
+/** Essential authentication and consent storage are not optional; no other optional purpose is installed. */
 export interface CookieConsent {
   functional: boolean;
-  analytics: boolean;
-  marketing: boolean;
 }
 
 export const consentCookieName = "meltiply-consent";
@@ -23,7 +22,12 @@ export const functionalStoragePrefixes = [
 const consentChangeEvent = "meltiply:cookie-consent";
 let volatileConsent: CookieConsent | null = null;
 
-/** Reads only the essential consent cookie; malformed, expired, or obsolete records grant no optional purposes. */
+/**
+ * Reads only the essential consent cookie; malformed, expired, or obsolete records
+ * grant no optional purposes. Records written before the model narrowed to the one
+ * implemented purpose stay valid: only `functional` is read, so a returning visitor
+ * keeps an explicit decision instead of being re-prompted after an upgrade.
+ */
 export function readCookieConsent(): CookieConsent | null {
   if (typeof document === "undefined") return null;
   if (volatileConsent !== null) return volatileConsent;
@@ -45,26 +49,14 @@ export function readCookieConsent(): CookieConsent | null {
       value.expires <= Date.now()
     )
       return null;
-    if (
-      !("functional" in value) ||
-      typeof value.functional !== "boolean" ||
-      !("analytics" in value) ||
-      typeof value.analytics !== "boolean" ||
-      !("marketing" in value) ||
-      typeof value.marketing !== "boolean"
-    )
-      return null;
-    return {
-      functional: value.functional,
-      analytics: value.analytics,
-      marketing: value.marketing,
-    };
+    if (!("functional" in value) || typeof value.functional !== "boolean") return null;
+    return { functional: value.functional };
   } catch {
     return null;
   }
 }
 
-/** Denies optional storage/tracking until a valid, explicit choice permits that purpose. */
+/** Denies optional storage until a valid, explicit choice permits that purpose. */
 export function hasCookieConsent(category: ConsentCategory): boolean {
   return readCookieConsent()?.[category] === true;
 }

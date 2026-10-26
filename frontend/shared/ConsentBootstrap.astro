@@ -33,9 +33,7 @@ import {
         typeof parsedConsent.expires === "number" &&
         Number.isFinite(parsedConsent.expires) &&
         parsedConsent.expires > Date.now() &&
-        typeof parsedConsent.functional === "boolean" &&
-        typeof parsedConsent.analytics === "boolean" &&
-        typeof parsedConsent.marketing === "boolean"
+        typeof parsedConsent.functional === "boolean"
       )
         consent = parsedConsent;
     }

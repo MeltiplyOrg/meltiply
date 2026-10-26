@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   filterAndSortPosts,
-  isPublishedDistributionStatus,
+  normalizePostStatus,
   prunePostSelection,
   resolveChannelMedia,
   resolveChannelText,
@@ -84,7 +84,38 @@ describe("filterAndSortPosts multi-select", () => {
       channelItem({ status: "queued", distribution: { ...baseDistribution, status: "queued" } }),
     ],
   });
-  const rows = [draft, mixed, scheduled];
+  const reconciliation = postRow({
+    id: "reconciliation-d",
+    status: "needs_reconciliation",
+    brandProfileId: "profile-d",
+    post: { ...basePost, status: "active" },
+    channels: [
+      channelItem({
+        status: "needs_reconciliation",
+        distribution: { ...baseDistribution, status: "needs_reconciliation" },
+      }),
+    ],
+  });
+  const unknown = postRow({
+    id: "unknown-e",
+    status: "future_provider_status",
+    brandProfileId: "profile-e",
+    post: { ...basePost, status: "active" },
+    channels: [channelItem({ status: "future_provider_status" })],
+  });
+  const cancellationRequested = postRow({
+    id: "cancel-requested-f",
+    status: "cancel_requested",
+    brandProfileId: "profile-f",
+    post: { ...basePost, status: "active" },
+    channels: [
+      channelItem({
+        status: "cancel_requested",
+        distribution: { ...baseDistribution, status: "cancel_requested" },
+      }),
+    ],
+  });
+  const rows = [draft, mixed, scheduled, reconciliation, unknown, cancellationRequested];
   const criteria: FilterCriteria = {
     statusFilter: [],
     profileFilter: [],
@@ -100,7 +131,7 @@ describe("filterAndSortPosts multi-select", () => {
         ...criteria,
         statusFilter: ["published", "failed", "draft"],
       }).map((row) => row.id),
-    ).toEqual(["draft-a", "mixed-b"]);
+    ).toEqual(["draft-a", "mixed-b", "reconciliation-d"]);
   });
 
   it("intersects profile and status fields while unioning values within each", () => {
@@ -124,7 +155,24 @@ describe("filterAndSortPosts multi-select", () => {
       "draft-a",
       "mixed-b",
       "scheduled-c",
+      "reconciliation-d",
+      "unknown-e",
+      "cancel-requested-f",
     ]);
+  });
+
+  it("uses the canonical buckets for reconciliation, cancellation, and unknown outcomes", () => {
+    expect(
+      filterAndSortPosts(rows, { ...criteria, statusFilter: ["failed"] }).map((row) => row.id),
+    ).toEqual(["mixed-b", "reconciliation-d"]);
+    expect(
+      filterAndSortPosts(rows, { ...criteria, statusFilter: ["scheduled"] }).map((row) => row.id),
+    ).toEqual(["scheduled-c", "cancel-requested-f"]);
+    expect(
+      filterAndSortPosts(rows, { ...criteria, statusFilter: ["scheduled", "failed"] }).map(
+        (row) => row.id,
+      ),
+    ).not.toContain("unknown-e");
   });
 });
 
@@ -351,24 +399,18 @@ describe("prunePostSelection", () => {
   });
 });
 
-describe("isPublishedDistributionStatus", () => {
-  it("protects published, in-flight, and ambiguous Provider attempts", () => {
-    for (const status of ["published", "processing", "awaiting_provider", "needs_reconciliation"]) {
-      expect(isPublishedDistributionStatus(status), status).toBe(true);
-    }
+describe("normalizePostStatus", () => {
+  it("reads the row aggregate first and falls back to its first Channel outcome", () => {
+    expect(normalizePostStatus(postRow({ status: "published" }))).toBe("published");
+    expect(
+      normalizePostStatus(postRow({ status: "", channels: [channelItem({ status: "queued" })] })),
+    ).toBe("queued");
   });
 
-  it("leaves drafts and cancellable work editable by non-admins", () => {
-    for (const status of [
-      "draft",
-      "scheduled",
-      "queued",
-      "cancel_requested",
-      "cancelled",
-      "failed",
-    ]) {
-      expect(isPublishedDistributionStatus(status), status).toBe(false);
-    }
+  it("never presents an unrecognized or absent status as scheduled", () => {
+    expect(normalizePostStatus(postRow({ status: "future_provider_status" }))).toBe("unknown");
+    expect(normalizePostStatus(postRow({ status: "publishing" }))).toBe("unknown");
+    expect(normalizePostStatus(postRow({ status: "", channels: [] }))).toBe("unknown");
   });
 });
 

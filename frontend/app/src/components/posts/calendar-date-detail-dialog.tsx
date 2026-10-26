@@ -47,7 +47,8 @@ export interface CalendarDateDetailDialogProps extends PostSelectionProps {
 /**
  * Presenter component for Date Detail modal: expands a calendar cell to inspect
  * and manage the Posts that land on that day, one card per durable `Post.id`.
- * Uses the shared destructive action treatment when scheduling a new post.
+ * Creating a Post for the date uses the normal primary treatment; destructive
+ * styling is reserved for deleting an existing Post.
  * The day list doubles as the Calendar mode's selection surface: a header
  * checkbox selects all rows shown for this day and each card carries its own
  * toggle, so multi-select stays reachable in every view mode.

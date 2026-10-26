@@ -1,4 +1,5 @@
 import { ApiError } from "./api";
+import { isInFlightPublicationStatus } from "./publication-status";
 
 const maxQueryRetries = 2;
 const maxRetryDelayMs = 30_000;
@@ -10,12 +11,6 @@ export const referenceFreshnessMs = 5 * 60_000;
 export const privateCacheRetentionMs = 30 * 60_000;
 
 const activeAssetStatuses = new Set(["pending_upload", "uploading", "processing", "deleting"]);
-const activeDistributionStatuses = new Set([
-  "queued",
-  "processing",
-  "awaiting_provider",
-  "cancel_requested",
-]);
 const activeReplyStatuses = new Set(["queued", "processing"]);
 
 /**
@@ -63,7 +58,7 @@ function containsActiveState(value: unknown): boolean {
 
   const record = value as Record<string, unknown>;
   if (typeof record.status === "string") {
-    if (activeAssetStatuses.has(record.status) || activeDistributionStatuses.has(record.status)) {
+    if (activeAssetStatuses.has(record.status) || isInFlightPublicationStatus(record.status)) {
       return true;
     }
   }

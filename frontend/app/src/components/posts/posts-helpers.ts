@@ -1,99 +1,26 @@
 import { platformDisplayName } from "@/lib/platforms";
+import {
+  isCancellablePublicationStatus,
+  publicationStatusFilterBucket,
+  resolvePublicationStatus,
+  type PublicationStatus,
+} from "@/lib/publication-status";
 import type { Distribution, Platform, Post, PostAttachment, PostTarget } from "@/types";
 import type { ChannelMediaItem, FilterCriteria, PostRow, PostSelectionEntry } from "./types";
 
 /**
  * Normalizes the lifecycle status of a Post row consistently across all views and dialogs.
  *
- * Reads the row aggregate first and falls back to its first channel entry, so a
- * row always reports the same status regardless of which surface renders it.
+ * Reads the row aggregate first and falls back to its first channel entry, then
+ * canonicalizes the result so every surface agrees on what an unknown or
+ * superseded value means. Unknown values become the neutral `unknown` state, not
+ * `scheduled`.
  *
  * @param row - The Post row to inspect.
- * @returns Lowercase normalized status string (e.g. 'published', 'scheduled', 'draft', 'failed').
+ * @returns Canonical publication status (e.g. 'published', 'scheduled', 'draft', 'failed', 'unknown').
  */
-export function normalizePostStatus(row: PostRow): string {
-  return (row.status || row.channels?.[0]?.status || "").toLowerCase();
-}
-
-/**
- * Channel outcomes that still accept `cancel`/`reschedule` mutations.
- * Terminal states (published, failed, cancelled) and in-flight cancel requests are excluded
- * so action affordances only appear where the contract can honor them.
- */
-const CANCELLABLE_STATUSES: Record<string, true> = {
-  scheduled: true,
-  queued: true,
-  processing: true,
-  awaiting_provider: true,
-  needs_reconciliation: true,
-};
-
-/**
- * Reports whether a contract `DistributionStatus` still accepts cancel/reschedule mutations.
- * Shared by the posts view and detail modal so action affordances stay consistent.
- *
- * @param status - Raw distribution status string.
- * @returns True when the distribution is pending and can be cancelled or rescheduled.
- */
-export function isCancellableStatus(status: string): boolean {
-  return status in CANCELLABLE_STATUSES;
-}
-
-/**
- * Outcome states that make Post deletion Admin-only.
- *
- * A Provider attempt may already have published: `processing` is in flight,
- * `awaiting_provider` and `needs_reconciliation` are ambiguous, and `published`
- * is retained history. The Worker's service guard and RLS policy use the same
- * set, so the UI must not offer Editors a deletion the server will reject.
- */
-const PROTECTED_DELETE_STATUSES: Record<string, true> = {
-  processing: true,
-  awaiting_provider: true,
-  published: true,
-  needs_reconciliation: true,
-};
-
-/**
- * Reports whether a Distribution status makes its Post Admin-only for deletion.
- *
- * @param status - Raw distribution or channel status string.
- * @returns True when the Post has protected publication history or an attempt.
- */
-export function isPublishedDistributionStatus(status: string): boolean {
-  return PROTECTED_DELETE_STATUSES[status] === true;
-}
-
-/**
- * Aggregates independent Channel outcomes into one worst-case display status.
- *
- * Priority order surfaces actionable states first: failures and reconciliation
- * needs outrank in-flight work, which outranks pending schedules, which outrank
- * terminal published/cancelled states. Every value comes from the channel
- * outcomes alone, so partial success still reads as the actionable failure it is
- * rather than a flattened global success flag.
- *
- * @param statuses - Status strings of the row's channel outcomes.
- * @param fallback - Status reported when the row has no channel outcome at all.
- * @returns The highest-priority status for badge display.
- */
-export function summarizeChannelStatuses(statuses: string[], fallback = "draft"): string {
-  const order = [
-    "failed",
-    "needs_reconciliation",
-    "processing",
-    "awaiting_provider",
-    "queued",
-    "scheduled",
-    "cancel_requested",
-    "cancelled",
-    "published",
-  ];
-  const present = new Set(statuses);
-  for (const status of order) {
-    if (present.has(status)) return status;
-  }
-  return statuses[0] ?? fallback;
+export function normalizePostStatus(row: PostRow): PublicationStatus {
+  return resolvePublicationStatus(row.status || row.channels?.[0]?.status);
 }
 
 /** Fixed counter order for a Post's stored analytics, matching the Posts columns. */
@@ -367,7 +294,7 @@ export function resolveRowProviders(row: PostRow): string[] {
  */
 export function resolveCancellableDistributionIds(row: PostRow): string[] {
   return row.channels
-    .filter((c) => c.distribution && isCancellableStatus(c.distribution.status))
+    .filter((c) => c.distribution && isCancellablePublicationStatus(c.distribution.status))
     .map((c) => c.distribution!.id);
 }
 
@@ -394,28 +321,14 @@ export function toLocalDateKey(d: Date | string): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Outcome buckets that keep a Post under the "scheduled" toolbar filter. */
-const PENDING_OUTCOMES: Record<string, true> = {
-  scheduled: true,
-  queued: true,
-  processing: true,
-  awaiting_provider: true,
-  cancel_requested: true,
-};
-
-/** Outcome buckets that keep a Post under the "failed" toolbar filter. */
-const FAILED_OUTCOMES: Record<string, true> = {
-  failed: true,
-  needs_reconciliation: true,
-};
-
 /**
  * Filters and sorts Post rows by status, selected platforms, profile, search
  * query, and date.
  *
  * Buckets other than `draft` are derived from the row's Channel outcomes, since
  * one Post can hold published, pending, and failed Channels at the same time and
- * still needs to be findable under each of them.
+ * still needs to be findable under each of them. A Channel maps to a bucket
+ * through the canonical publication status table.
  *
  * @param posts - Complete list of Post rows.
  * @param filters - Active criteria; empty arrays mean all, values within a field
@@ -426,20 +339,15 @@ export function filterAndSortPosts(posts: PostRow[], filters: FilterCriteria): P
   let list = [...posts];
 
   if (filters.statusFilter.length > 0) {
-    const includeDrafts = filters.statusFilter.includes("draft");
-    const includePublished = filters.statusFilter.includes("published");
-    const includeScheduled = filters.statusFilter.includes("scheduled");
-    const includeFailed = filters.statusFilter.includes("failed");
+    const statuses = new Set(filters.statusFilter);
     list = list.filter((row) => {
       if (row.status === "draft" || row.post?.status === "draft") {
-        return includeDrafts;
+        return statuses.has("draft");
       }
-      return row.channels.some(
-        (channel) =>
-          (includePublished && channel.distribution?.status === "published") ||
-          (includeScheduled && PENDING_OUTCOMES[channel.status] === true) ||
-          (includeFailed && FAILED_OUTCOMES[channel.status] === true),
-      );
+      return row.channels.some((channel) => {
+        const bucket = publicationStatusFilterBucket(channel.status);
+        return bucket !== null && statuses.has(bucket);
+      });
     });
   }
 

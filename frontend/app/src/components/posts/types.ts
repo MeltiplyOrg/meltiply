@@ -94,7 +94,7 @@ export interface PostRow {
   date: string;
   /**
    * Aggregate display status derived only from Channel outcomes (see
-   * `summarizeChannelStatuses`), or the Post's own `'draft'` state. Never
+   * `summarizePublicationStatuses`), or the Post's own `'draft'` state. Never
    * derived from `Post.status` as a global success flag.
    */
   status: string;

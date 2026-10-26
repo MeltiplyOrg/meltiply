@@ -46,12 +46,12 @@ import { usePostDetailSurface } from "./post-detail-surface";
 import { PostsToolbar } from "./posts-toolbar";
 import {
   filterAndSortPosts,
-  isPublishedDistributionStatus,
   prunePostSelection,
   resolveCancellableDistributionIds,
   resolveRowCaption,
   toLocalDateKey,
 } from "./posts-helpers";
+import { isDeleteProtectedPublicationStatus } from "@/lib/publication-status";
 import type {
   PostViewMode,
   PostStatusFilter,
@@ -364,7 +364,7 @@ export function PostsView({
   const hasPublishedDistribution = useCallback(
     (row: PostRow) =>
       row.channels.some((channel) =>
-        isPublishedDistributionStatus(channel.distribution?.status ?? channel.status),
+        isDeleteProtectedPublicationStatus(channel.distribution?.status ?? channel.status),
       ),
     [],
   );

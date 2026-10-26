@@ -1,14 +1,20 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { LazyMotion, domAnimation, m } from "motion/react";
+import { LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
 import { cn } from "@meltiply/ui/utils";
 
 /**
  * Attributes that name the active item. Every consumer family writes one of
  * them: Radix menus mark the hovered row `data-highlighted`, Radix tabs mark the
- * selected trigger `data-state="active"`, the segmented atom marks its choice
- * `aria-pressed`, and page-composed strips may mark `data-selected`.
+ * selected trigger `data-state="active"`, the segmented atom marks its checked
+ * choice `aria-checked`, and page-composed strips may mark `data-selected`.
  */
-const ACTIVE_ATTRIBUTES = ["data-highlighted", "data-state", "aria-pressed", "data-selected"];
+const ACTIVE_ATTRIBUTES = [
+  "data-highlighted",
+  "data-state",
+  "aria-pressed",
+  "aria-checked",
+  "data-selected",
+];
 
 /**
  * Measuring must land before the first paint: the highlight *is* the selected
@@ -103,7 +109,10 @@ export interface SlidingHighlightProps {
  *
  * Only transforms animate, so travel stays off the layout path, and a selection
  * that lands mid-flight retargets the running spring instead of jumping. Items
- * must paint above the highlight (`relative z-10`).
+ * must paint above the highlight (`relative z-10`). When the operating system
+ * asks for reduced motion, travel commits instantly while the opacity fade still
+ * marks appearance and disappearance, so selection keeps working without a
+ * spring.
  *
  * @param props - Tracked container, item/active selectors, travel axis, and styling.
  * @returns An absolutely positioned motion element rendered behind the items.
@@ -116,6 +125,8 @@ export function SlidingHighlight({
   deferUntilInteraction = false,
   className,
 }: SlidingHighlightProps) {
+  const prefersReducedMotion = useReducedMotion();
+  const travelTransition = prefersReducedMotion ? NO_TRAVEL : TRAVEL_SPRING;
   const [box, setBox] = useState<ItemBox | null>(null);
   const [travel, setTravel] = useState<Travel>(SETTLED);
   const [isTravelling, setIsTravelling] = useState(false);
@@ -350,9 +361,9 @@ export function SlidingHighlight({
           opacity: isVisible && box ? 1 : 0,
         }}
         transition={{
-          x: isTravelling ? TRAVEL_SPRING : NO_TRAVEL,
-          y: isTravelling ? TRAVEL_SPRING : NO_TRAVEL,
-          scaleX: isTravelling ? TRAVEL_SPRING : NO_TRAVEL,
+          x: isTravelling ? travelTransition : NO_TRAVEL,
+          y: isTravelling ? travelTransition : NO_TRAVEL,
+          scaleX: isTravelling ? travelTransition : NO_TRAVEL,
           opacity: { duration: 0.14, ease: "easeOut" },
         }}
         onAnimationComplete={handleTravelComplete}

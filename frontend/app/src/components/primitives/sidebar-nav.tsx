@@ -319,13 +319,14 @@ export function SidebarNav({
             <DropdownMenuSeparator />
             <DropdownMenuLabel>{t("Theme")}</DropdownMenuLabel>
             <DropdownMenuRadioGroup
+              variant="segment"
               value={requestedTheme}
               onValueChange={(value) => {
                 const theme = ACCOUNT_THEMES.find((option) => option.value === value);
                 if (theme) setTheme(theme.value);
               }}
               aria-label={t("Theme")}
-              className="mx-1.5 mb-1.5 flex gap-0.5 rounded-control bg-hover-2 p-0.5"
+              className="mx-1.5 mb-1.5 flex"
             >
               {ACCOUNT_THEMES.map(({ value, icon: Icon }) => (
                 <DropdownMenuRadioItem

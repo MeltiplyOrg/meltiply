@@ -375,7 +375,9 @@ describe("analytics view", () => {
 
   it("re-ranks from a Post metric header", () => {
     renderView();
-    expect(within(screen.getByRole("toolbar")).queryByRole("group", { name: "Metric" })).toBeNull();
+    expect(
+      within(screen.getByRole("toolbar")).queryByRole("radiogroup", { name: "Metric" }),
+    ).toBeNull();
     const topPosts = screen.getByRole("heading", { name: "Top posts" }).closest(".rounded-card");
     if (!topPosts) throw new Error("Top posts card missing");
     fireEvent.click(within(topPosts as HTMLElement).getByRole("button", { name: "Sort by Likes" }));

@@ -246,6 +246,7 @@ export function SidebarNav({
             href="https://meltiply.com/docs"
             target="_blank"
             rel="noreferrer"
+            data-theme-link
             aria-label={t("Help and resources")}
             title={collapsed ? t("Help and resources") : undefined}
           >

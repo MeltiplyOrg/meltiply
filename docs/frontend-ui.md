@@ -23,6 +23,8 @@ Use [product UI intent](../PRODUCT.md#modular-consistent-surfaces) for behavior,
 
 Read [`@meltiply/ui` exports](../frontend/shared/package.json), the implementation, and a real caller before changing a control. Use explicit subpaths such as `@meltiply/ui/button` or `@meltiply/ui/table`. Shared modules do not import app internals; feature owners supply authorized data, labels, pending state, and actions.
 
+The before-paint theme reader lives once in `@meltiply/ui/theme-bootstrap`: both the app's Vite-injected inline script and the public Astro layout embed the same runtime, which validates transferred intent, reads each optional store independently, commits the root palette, and retargets marked cross-site links from the live choice. Hydrated React providers are thin adapters over `@meltiply/ui/theme-controller-react`, which binds the shared `@meltiply/ui/theme-controller` through `useSyncExternalStore`; that controller owns OS changes, consent acceptance/withdrawal, persistence, and repeated toggles. Keep palette decisions there instead of adding a third reader or adapter-local state branch.
+
 ## TypeScript, React, and styling
 
 Rewritten app components use strict TypeScript/TSX, React, Tailwind utilities, semantic tokens, and `cn`. Extend a canonical variant or compose a page from existing primitives. Keep finite style maps outside render functions. Shared CSS owns global reset/focus, tokens, and browser interoperability; public Astro/Fumadocs adapters use the same tokens within their framework.

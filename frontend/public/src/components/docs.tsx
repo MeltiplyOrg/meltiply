@@ -65,8 +65,8 @@ function SiteFooter() {
  * shell-owned `CookieNotice` and app-style `Toaster` stay outside the keyed page
  * so route updates retain consent drafts, confirmation deadlines, and copy feedback.
  * Saved consent leaves no shell or article control for reopening preferences.
- * `DocsThemeProvider` owns the shared public-site reveal and OS palette updates;
- * the home link stays same-origin while `appUrl` targets the separate app.
+ * `DocsThemeProvider` projects the shared theme controller into the public
+ * controls; the home link stays same-origin while `appUrl` targets the separate app.
  * Both TOC surfaces share the reading-progress rail;
  * the desktop controller animates it while Fumadocs retains anchor tracking,
  * reading layout, search, and pagination. The theme hotkey stays disabled; toolbar

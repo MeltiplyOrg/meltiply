@@ -22,7 +22,7 @@ type TabsListProps = React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> &
 };
 const listStyles = {
   segment: SEGMENTED_TRACK,
-  line: "relative flex h-10 items-center justify-start gap-6 border-b border-line",
+  line: "relative flex min-h-10 items-center justify-start gap-6 border-b border-line",
   navigation: "flex flex-col items-stretch gap-1",
 };
 const indicatorStyles = {
@@ -34,7 +34,9 @@ const indicatorStyles = {
  * One tab owner supports compact segments, directory underlines, and settings
  * navigation without page CSS. The horizontal variants hand their selection to a
  * shared partial: the highlight travels to the selected trigger instead of each
- * trigger painting the fill in place, so switching sections slides.
+ * trigger painting the fill in place, so switching sections slides. The `line`
+ * strip uses a minimum height so a coarse-pointer trigger (the shared 44px item
+ * minimum) grows the strip instead of being clipped by it.
  */
 export const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,

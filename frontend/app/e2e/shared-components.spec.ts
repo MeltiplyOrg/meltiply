@@ -24,6 +24,24 @@ async function expectKeyboardFocus(page: Page, radio: Locator): Promise<void> {
 }
 
 /**
+ * Rendered height of one segmented track and every segment inside it, so the
+ * coarse-pointer growth contract is measured on real layout instead of classes.
+ */
+async function segmentedGeometry(
+  track: Locator,
+): Promise<{ trackHeight: number; itemHeights: number[] }> {
+  return track.evaluate((element) => {
+    const items = Array.from(
+      element.querySelectorAll<HTMLElement>('[role="radio"], [role="tab"], [role="menuitemradio"]'),
+    );
+    return {
+      trackHeight: element.getBoundingClientRect().height,
+      itemHeights: items.map((item) => item.getBoundingClientRect().height),
+    };
+  });
+}
+
+/**
  * Real-stack proof that the shared segmented contract reaches the Posts views:
  * one checked radio per radiogroup, arrow/Home/End selection with focus moved
  * to the chosen option, the calendar period groups, reduced-motion selection,
@@ -43,6 +61,11 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
   const tableRadio = postView.getByRole("radio", { name: "Table", exact: true });
   await expect(postView).toBeVisible();
   await expect(postView.getByRole("radio", { checked: true })).toHaveCount(1);
+
+  // Fine pointers keep the canonical density: 24px items inside a 28px track.
+  const fineGeometry = await segmentedGeometry(postView);
+  expect(fineGeometry.trackHeight).toBeCloseTo(28, 0);
+  for (const height of fineGeometry.itemHeights) expect(height).toBeCloseTo(24, 0);
 
   // Grid is the last option: ArrowLeft reaches Calendar, ArrowRight returns,
   // then Home/End jump to the first and last checked options.
@@ -215,4 +238,126 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
   await page.keyboard.press("Escape");
   await expect(editor).toBeHidden();
   await expect(editTrigger).toBeFocused();
+});
+
+/**
+ * Real-stack proof of the coarse-pointer segmented contract: touch emulation
+ * makes `(pointer: coarse)` match, so the shared atom, line tab strip, and
+ * account-menu theme radios must render the documented 44px target inside a
+ * track that grows instead of clipping them. A width-constrained Language track
+ * must start at its first option and scroll to its last at 320px.
+ */
+test.describe("coarse pointer segmented chrome", () => {
+  // `hasTouch` alone makes Chromium report `(pointer: coarse)`; the assertion in
+  // the test keeps this from silently running as a fine pointer.
+  test.use({ hasTouch: true });
+
+  test("keeps segmented targets coarse-sized and the scroll origin reachable", async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await openIsolatedOwnerWorkspace(page);
+    await waitForWorkspace(page);
+
+    // Posts atom: every view target is at least 44px tall and the track grew.
+    const postView = page.getByRole("radiogroup", { name: "Post view", exact: true });
+    await expect(postView.getByRole("radio")).toHaveCount(3);
+    const postsGeometry = await segmentedGeometry(postView);
+    expect(postsGeometry.trackHeight).toBeGreaterThanOrEqual(47.5);
+    for (const height of postsGeometry.itemHeights) {
+      expect(height).toBeGreaterThanOrEqual(43.5);
+    }
+    await page.screenshot({
+      animations: "disabled",
+      path: testInfo.outputPath("shared-components-coarse-posts-1440.png"),
+    });
+
+    // The account-menu theme segments are reachable on the desktop rail.
+    const accountTrigger = page.getByRole("button", { name: "Account menu", exact: true });
+    await accountTrigger.click();
+    const themeGroup = page
+      .getByRole("menu", { name: "Account menu", exact: true })
+      .getByRole("group", { name: "Theme", exact: true });
+    await expect(themeGroup.getByRole("menuitemradio")).toHaveCount(3);
+    const themeGeometry = await segmentedGeometry(themeGroup);
+    expect(themeGeometry.trackHeight).toBeGreaterThanOrEqual(47.5);
+    for (const height of themeGeometry.itemHeights) {
+      expect(height).toBeGreaterThanOrEqual(43.5);
+    }
+    await page.screenshot({
+      animations: "disabled",
+      path: testInfo.outputPath("shared-components-coarse-account-theme.png"),
+    });
+    await page.keyboard.press("Escape");
+    await expect(accountTrigger).toBeFocused();
+
+    // The Channels line tabs grow the strip rather than clipping the trigger.
+    await page.goto("/channels");
+    const channelTabs = page.getByRole("tablist", {
+      name: "Channel directory sections",
+      exact: true,
+    });
+    await expect(channelTabs).toBeVisible();
+    const tabGeometry = await segmentedGeometry(channelTabs);
+    expect(tabGeometry.trackHeight).toBeGreaterThanOrEqual(43.5);
+    for (const height of tabGeometry.itemHeights) {
+      expect(height).toBeGreaterThanOrEqual(43.5);
+    }
+    await page.screenshot({
+      animations: "disabled",
+      path: testInfo.outputPath("shared-components-coarse-channels-tabs.png"),
+    });
+
+    // Settings Language: the constrained track starts at its first option and
+    // the last option is reachable by scrolling at phone width.
+    await page.goto("/settings?section=language");
+    const languageTrack = page.getByRole("radiogroup", { name: "Language", exact: true });
+    await expect(languageTrack).toBeVisible();
+    await page.setViewportSize({ width: 320, height: 568 });
+    await expect
+      .poll(() => languageTrack.evaluate((track) => track.scrollWidth > track.clientWidth + 1))
+      .toBe(true);
+
+    const startGeometry = await languageTrack.evaluate((track) => {
+      const items = Array.from(track.querySelectorAll<HTMLElement>('[role="radio"]'));
+      const trackBox = track.getBoundingClientRect();
+      return {
+        scrollLeft: track.scrollLeft,
+        trackLeft: trackBox.left,
+        firstLeft: items[0]?.getBoundingClientRect().left ?? Number.NEGATIVE_INFINITY,
+        heights: items.map((item) => item.getBoundingClientRect().height),
+      };
+    });
+    expect(startGeometry.scrollLeft).toBe(0);
+    expect(startGeometry.firstLeft).toBeGreaterThanOrEqual(startGeometry.trackLeft - 0.5);
+    for (const height of startGeometry.heights) {
+      expect(height).toBeGreaterThanOrEqual(43.5);
+    }
+
+    await languageTrack.evaluate((track) => {
+      track.scrollLeft = track.scrollWidth;
+    });
+    await expect.poll(() => languageTrack.evaluate((track) => track.scrollLeft)).toBeGreaterThan(0);
+    const endGeometry = await languageTrack.evaluate((track) => {
+      const items = Array.from(track.querySelectorAll<HTMLElement>('[role="radio"]'));
+      const trackBox = track.getBoundingClientRect();
+      const last = items.at(-1)?.getBoundingClientRect();
+      return {
+        lastLeft: last?.left ?? Number.POSITIVE_INFINITY,
+        lastRight: last?.right ?? Number.POSITIVE_INFINITY,
+        trackLeft: trackBox.left,
+        trackRight: trackBox.right,
+      };
+    });
+    expect(endGeometry.lastLeft).toBeGreaterThanOrEqual(endGeometry.trackLeft - 0.5);
+    expect(endGeometry.lastRight).toBeLessThanOrEqual(endGeometry.trackRight + 0.5);
+
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({
+      animations: "disabled",
+      path: testInfo.outputPath("shared-components-coarse-language-320x568.png"),
+    });
+  });
 });

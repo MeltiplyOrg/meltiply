@@ -301,9 +301,10 @@ DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displa
  * Selectable radio option within a {@link DropdownMenuRadioGroup}. The default
  * layout is a menu row with a right-aligned accent check; `segment` joins
  * compact horizontal choices inside a `segment` group, using the shared segmented
- * item chrome and leaving the checked fill to that group's travelling highlight.
- * Radix retains menu arrow-key navigation and checked semantics. Callers may
- * prevent selection dismissal for immediate preferences.
+ * item chrome (24px on fine pointers, the shared 44px coarse minimum) and leaving
+ * the checked fill to that group's travelling highlight. Radix retains menu
+ * arrow-key navigation and checked semantics. Callers may prevent selection
+ * dismissal for immediate preferences.
  *
  * @param value - Value of this radio option.
  * @param variant - `default` row or `segment` cell inside a segmented group.
@@ -329,7 +330,7 @@ export const DropdownMenuRadioItem = React.forwardRef<
       variant === "segment"
         ? cn(
             SEGMENTED_ITEM,
-            "min-h-6 flex-1 justify-center data-[highlighted]:text-ink data-[state=checked]:text-ink",
+            "pointer-fine:min-h-6 flex-1 justify-center data-[highlighted]:text-ink data-[state=checked]:text-ink",
           )
         : "pr-8",
       className,

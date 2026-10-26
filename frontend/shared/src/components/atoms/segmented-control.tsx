@@ -22,9 +22,14 @@ import { cn } from "@meltiply/ui/utils";
  * stay above the pill (`relative z-10`) with their own label color and hover —
  * the pill owns the selected fill.
  *
- * By default the track hugs its options, so a caller that sets a width wider
- * than the labels leaves an unselected tail that `fill` shares out instead:
- * every option then takes an equal share of the track and centers its label.
+ * By default the track hugs its options and starts them at the leading edge, so
+ * a caller that constrains it (`max-w-full overflow-x-auto` on a phone) scrolls
+ * from the first option instead of clipping it into unreachable negative
+ * overflow. A caller that sets a width wider than the labels leaves an
+ * unselected tail that `fill` shares out instead: every option then takes an
+ * equal share of the track and centers its label. Coarse pointers grow every
+ * option to the shared 44px minimum and the track grows with them; fine
+ * pointers keep the 24px item inside the 28px track.
  */
 export function SegmentedControl<T extends string>({
   options,

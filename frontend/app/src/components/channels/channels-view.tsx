@@ -891,7 +891,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         open={isAdmin && addAccountOpen}
         onOpenChange={(open) => setAddAccountOpen(isAdmin && open)}
       >
-        <CenterDialogContent className="max-w-xl">
+        <CenterDialogContent closeLabel={t("Close")} className="max-w-xl">
           <CenterDialogHeader>
             <CenterDialogTitle>{t("Connect social account")}</CenterDialogTitle>
             <CenterDialogDescription>

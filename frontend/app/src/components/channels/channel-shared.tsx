@@ -232,7 +232,7 @@ export function ChannelSettingsAction({
         </TooltipTrigger>
         <TooltipContent>{t("Channel settings")}</TooltipContent>
       </Tooltip>
-      <CenterDialogContent className="sm:max-w-md">
+      <CenterDialogContent closeLabel={t("Close")} className="sm:max-w-md">
         <CenterDialogHeader>
           <CenterDialogTitle>{channelName}</CenterDialogTitle>
           <CenterDialogDescription>

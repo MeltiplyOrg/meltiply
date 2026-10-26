@@ -665,7 +665,7 @@ export default function SettingsPage({
       </Tabs>
 
       <CenterDialog open={inviteOpen} onOpenChange={setInviteOpen}>
-        <CenterDialogContent aria-describedby={undefined}>
+        <CenterDialogContent closeLabel={t("Close")} aria-describedby={undefined}>
           <CenterDialogHeader>
             <CenterDialogTitle>{t("Invite a member")}</CenterDialogTitle>
             <CenterDialogDescription>
@@ -840,7 +840,7 @@ export default function SettingsPage({
       </CenterAlertDialog>
 
       <CenterDialog open={transferOpen} onOpenChange={setTransferOpen}>
-        <CenterDialogContent aria-describedby={undefined}>
+        <CenterDialogContent closeLabel={t("Close")} aria-describedby={undefined}>
           <CenterDialogHeader>
             <CenterDialogTitle>{t("Transfer installation ownership")}</CenterDialogTitle>
             <CenterDialogDescription>

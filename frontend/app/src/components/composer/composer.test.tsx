@@ -446,7 +446,7 @@ describe("Composer leave guard", () => {
     const textarea = composerTextarea();
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.change(textarea, { target: { value: "Unsaved without functional storage" } });
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Queue" }));
     fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
 
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
@@ -469,7 +469,7 @@ describe("Composer leave guard", () => {
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.change(textarea, { target: { value: "draft" } });
     fireEvent.change(textarea, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Queue" }));
     fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save draft and continue" }));
 
@@ -488,7 +488,7 @@ describe("Composer leave guard", () => {
     const textarea = composerTextarea();
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.change(textarea, { target: { value: "Recoverable draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Queue" }));
     fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
 
     expect(onNavigate).toHaveBeenCalledWith("queues", undefined);

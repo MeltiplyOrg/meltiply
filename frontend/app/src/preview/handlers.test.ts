@@ -14,6 +14,17 @@ afterAll(() => {
 
 /** Exercises real request/response boundaries, including isolation, mutable sample data, and reset semantics. */
 describe("synthetic UI preview HTTP boundary", () => {
+  it("returns empty collections without removing the authenticated workspace shell", async () => {
+    server.resetHandlers(...createPreviewHandlers({ scenario: "empty" }));
+    const session = await fetch(`${origin}/api/auth/get-session`).then((response) =>
+      response.json(),
+    );
+    const posts = await fetch(`${origin}/api/v1/posts`).then((response) => response.json());
+    expect(posts.posts).toEqual([]);
+    const profile = await fetch(`${origin}/api/v1/users/me`).then((response) => response.json());
+    expect(profile.active_organization.role).toBe("admin");
+    expect(session.user.email).toBe(profile.email);
+  });
   it("signs in without credentials and resets draft edits with a fresh preview", async () => {
     const session = await fetch(`${origin}/api/auth/get-session`).then((response) =>
       response.json(),

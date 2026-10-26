@@ -1,6 +1,8 @@
 name: UI preview verification
 
 on:
+  push:
+    branches: ["verify/ui-preview-contract"]
   pull_request:
     paths:
       - "frontend/app/**"

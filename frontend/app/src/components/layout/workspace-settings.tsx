@@ -209,6 +209,7 @@ export default function WorkspaceSettings() {
                 value={language}
                 onChange={setLanguage}
                 label={t("Language")}
+                className="max-w-full overflow-x-auto"
                 renderOption={(code) =>
                   supportedLanguages.find((option) => option.code === code)?.label ?? code
                 }

@@ -7,8 +7,9 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { writeCookieConsent } from "@meltiply/ui/cookie-consent";
+import { resolveTheme } from "@meltiply/ui/theme-controller";
 import { themeStorageKey } from "@meltiply/ui/theme-preference";
-import { resolveTheme, ThemeProvider, useTheme } from "./theme";
+import { ThemeProvider, useTheme } from "./theme";
 
 /** Exposes the committed and requested palette while driving the real theme provider. */
 function ToggleProbe(): React.ReactElement {
@@ -57,6 +58,8 @@ beforeEach(() => {
   document.cookie = "meltiply-consent=; Path=/; Max-Age=0";
   document.cookie = "meltiply-theme=; Path=/; Max-Age=0";
   document.documentElement.removeAttribute("data-theme-preference");
+  document.documentElement.removeAttribute("data-theme");
+  document.documentElement.classList.remove("dark");
   window.localStorage.clear();
   writeCookieConsent({ functional: true, analytics: false, marketing: false });
 });
@@ -65,6 +68,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   document.documentElement.removeAttribute("data-theme-preference");
+  document.documentElement.removeAttribute("data-theme");
+  document.documentElement.classList.remove("dark");
   document.documentElement.style.removeProperty("color-scheme");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -162,6 +167,73 @@ it("persists the current choice on acceptance and clears it on withdrawal", () =
   expect(window.localStorage.getItem(themeStorageKey)).toBeNull();
   expect(document.cookie).not.toContain("meltiply-theme=dark");
   expect(screen.getByTestId("committed")).toHaveTextContent("light");
+});
+
+/** A storage clear elsewhere must not erase an explicit page choice while optional storage remains allowed. */
+it("retains current-page intent when optional stores are cleared", () => {
+  render(
+    <ThemeProvider>
+      <SelectProbe />
+    </ThemeProvider>,
+  );
+  act(() => screen.getByRole("button", { name: "dark-instant" }).click());
+  expect(document.documentElement).toHaveClass("dark");
+
+  act(() => {
+    window.localStorage.removeItem(themeStorageKey);
+    document.cookie = "meltiply-theme=; Path=/; Max-Age=0";
+    window.dispatchEvent(new Event("focus"));
+  });
+
+  expect(document.documentElement).toHaveClass("dark");
+  expect(document.documentElement).toHaveAttribute("data-theme-preference", "dark");
+  expect(screen.getByTestId("requested")).toHaveTextContent("dark");
+});
+
+/** Withdrawal must also drop page intent when the optional stores were already empty. */
+it("drops current-page intent when functional consent is withdrawn", () => {
+  render(
+    <ThemeProvider>
+      <SelectProbe />
+    </ThemeProvider>,
+  );
+  act(() => screen.getByRole("button", { name: "dark-instant" }).click());
+  expect(document.documentElement).toHaveAttribute("data-theme-preference", "dark");
+
+  act(() => {
+    window.localStorage.removeItem(themeStorageKey);
+    document.cookie = "meltiply-theme=; Path=/; Max-Age=0";
+    window.dispatchEvent(new Event("focus"));
+  });
+  expect(document.documentElement).toHaveAttribute("data-theme-preference", "dark");
+  expect(screen.getByTestId("requested")).toHaveTextContent("dark");
+
+  act(() => {
+    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+  });
+  expect(document.documentElement).not.toHaveAttribute("data-theme-preference");
+  expect(document.documentElement).not.toHaveClass("dark");
+  expect(screen.getByTestId("requested")).toHaveTextContent("system");
+});
+
+/** Hydrated commits must update both root conventions, not only the class the app uses. */
+it("updates the data-theme convention after hydration", () => {
+  document.documentElement.setAttribute("data-theme-preference", "dark");
+  document.documentElement.dataset.theme = "dark";
+  render(
+    <ThemeProvider>
+      <SelectProbe />
+    </ThemeProvider>,
+  );
+  expect(screen.getByTestId("committed")).toHaveTextContent("dark");
+
+  act(() => screen.getByRole("button", { name: "light-instant" }).click());
+  expect(document.documentElement.dataset.theme).toBe("light");
+  expect(document.documentElement).not.toHaveClass("dark");
+
+  act(() => screen.getByRole("button", { name: "dark-instant" }).click());
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(document.documentElement).toHaveClass("dark");
 });
 
 /** OS changes update System mode without overwriting intent; explicit choices remain authoritative. */

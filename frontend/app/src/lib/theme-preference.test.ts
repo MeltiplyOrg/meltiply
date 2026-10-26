@@ -47,6 +47,29 @@ describe("page-only theme intent", () => {
     expect(readInitialThemePreference()).toBe("dark");
   });
 
+  it("falls back to valid origin storage when the encoded cookie is malformed", () => {
+    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    document.cookie = `${themeCookieName}=%E0%A4%A; Path=/`;
+    window.localStorage.setItem(themeStorageKey, "dark");
+    expect(readThemePreference()).toBe("dark");
+    expect(readInitialThemePreference()).toBe("dark");
+  });
+
+  it("keeps current-page intent when stores are cleared but functional consent remains", () => {
+    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    writeThemePreference("dark");
+    document.documentElement.setAttribute(themePreferenceAttribute, "dark");
+    const unsubscribe = subscribeThemePreference(() => undefined);
+    try {
+      document.cookie = `${themeCookieName}=; Path=/; Max-Age=0`;
+      window.localStorage.removeItem(themeStorageKey);
+      window.dispatchEvent(new Event("focus"));
+      expect(readInitialThemePreference()).toBe("dark");
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("clears persisted page intent when functional consent is withdrawn", () => {
     writeCookieConsent({ functional: true, analytics: false, marketing: false });
     writeThemePreference("dark");

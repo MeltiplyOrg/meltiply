@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin, lazyPlugins } from "vite-plus";
+import { renderThemeBootstrap, themeBootstrapMarker } from "../shared/theme-bootstrap-source";
 
 // The repo root .env is the single source of truth for frontend public vars:
 // dev-backend.sh already sources it for Wrangler, and here its two public
@@ -11,6 +12,9 @@ import { defineConfig, type Plugin, lazyPlugins } from "vite-plus";
 // the root .env would not reach the app at all.
 const rootEnvFile = fileURLToPath(new URL("../../.env", import.meta.url));
 const sharedUiManifest = fileURLToPath(new URL("../shared/package.json", import.meta.url));
+const themeBootstrapRuntimeFile = fileURLToPath(
+  new URL("../shared/theme-bootstrap.js", import.meta.url),
+);
 /**
  * Synchronously reads and parses key-value environment pairs from an ini-style `.env` file.
  *
@@ -130,6 +134,29 @@ function devOnlyStubPlugin(): Plugin {
   };
 }
 
+/**
+ * Injects the public site's shared before-paint theme runtime into the static
+ * app shell. The runtime stays a blocking inline script (no module import), so
+ * the stored or transferred palette is committed before React or CSS can paint
+ * the wrong theme. The docs link is marked with `data-theme-link`, so the app
+ * does not need an allowlisted public origin.
+ *
+ * @returns Vite plugin replacing `themeBootstrapMarker` in `index.html`.
+ */
+function themeBootstrapPlugin(): Plugin {
+  return {
+    name: "meltiply-theme-bootstrap",
+    transformIndexHtml(html) {
+      if (!html.includes(themeBootstrapMarker)) return html;
+      const runtime = readFileSync(themeBootstrapRuntimeFile, "utf8");
+      return html.replace(
+        themeBootstrapMarker,
+        `<script>${renderThemeBootstrap(runtime, { mode: "class" })}</script>`,
+      );
+    },
+  };
+}
+
 export default defineConfig(() => {
   const rootFileEnv = parseEnvFile(rootEnvFile);
   const publicEnv = Object.fromEntries(
@@ -172,6 +199,7 @@ export default defineConfig(() => {
       }),
       rootEnvReloadPlugin(),
       canonicalFrontendOriginPlugin(frontendUrl),
+      themeBootstrapPlugin(),
       devOnlyStubPlugin(),
     ]),
     server: {

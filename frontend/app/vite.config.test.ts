@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath, URL } from "node:url";
 import type { Plugin } from "vite";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { themeBootstrapMarker } from "../shared/theme-bootstrap-source";
 import viteConfig from "./vite.config";
 
 type Middleware = (
@@ -81,6 +84,36 @@ describe("Vite frontend configuration", () => {
     expect(
       String(load.call(context, "/checkout/frontend/app/src/components/devbox/dev-box.tsx")),
     ).toContain("DevBoxClientBridge");
+  });
+
+  it("injects one blocking shared theme runtime into the app shell", () => {
+    const config = viteConfig({ command: "build", mode: "production" });
+    const plugin = config.plugins?.find(
+      (candidate) =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        "name" in candidate &&
+        candidate.name === "meltiply-theme-bootstrap",
+    ) as Plugin | undefined;
+    if (!plugin) throw new Error("theme bootstrap plugin is unavailable");
+    const transform =
+      typeof plugin.transformIndexHtml === "function"
+        ? plugin.transformIndexHtml
+        : plugin.transformIndexHtml?.handler;
+    if (!transform) throw new Error("theme bootstrap plugin has no HTML transform");
+
+    const shell = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
+    expect(shell).toContain(themeBootstrapMarker);
+    const html = String(
+      transform.call({} as never, `<head>${themeBootstrapMarker}</head>`, {} as never),
+    );
+
+    expect(html).not.toContain(themeBootstrapMarker);
+    expect(html).toContain("<script>");
+    expect(html).toContain('"mode":"class"');
+    expect(html).toContain('"themePreferenceAttribute":"data-theme-preference"');
+    expect(html).toContain("meltiply:theme-link-reset");
+    expect(String(transform.call({} as never, "<head></head>", {} as never))).toBe("<head></head>");
   });
 
   it("redirects alternate HTML navigations without redirecting canonical or asset requests", () => {

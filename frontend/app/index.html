@@ -24,9 +24,7 @@
         typeof consentValue.expires === "number" &&
         Number.isFinite(consentValue.expires) &&
         consentValue.expires > Date.now() &&
-        typeof consentValue.functional === "boolean" &&
-        typeof consentValue.analytics === "boolean" &&
-        typeof consentValue.marketing === "boolean";
+        typeof consentValue.functional === "boolean";
       var functional = decided && consentValue.functional === true;
       root.toggleAttribute("data-cookie-decided", Boolean(decided));
       root.toggleAttribute("data-cookie-functional", Boolean(functional));

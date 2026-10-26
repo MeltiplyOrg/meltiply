@@ -247,7 +247,7 @@ describe("Composer recovery consent", () => {
    * storage path, so a deep-linked Post must still hydrate and become editable.
    */
   it("stays editable after hydrating a saved Post when functional consent is rejected", async () => {
-    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    writeCookieConsent({ functional: false });
     renderComposer({ initialPostId: hydratedPost.id, post: hydratedPost });
 
     const textarea = composerTextarea();
@@ -282,7 +282,7 @@ describe("Composer recovery consent", () => {
       }),
     );
     act(() => {
-      writeCookieConsent({ functional: true, analytics: false, marketing: false });
+      writeCookieConsent({ functional: true });
     });
 
     await waitFor(() => expect(textarea).toHaveValue("Recovered paragraph"));
@@ -481,7 +481,7 @@ describe("Composer leave guard", () => {
   });
 
   it("leaves directly when functional recovery can restore the composition", async () => {
-    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    writeCookieConsent({ functional: true });
     const onNavigate = vi.fn();
     renderComposer({ onNavigate });
 

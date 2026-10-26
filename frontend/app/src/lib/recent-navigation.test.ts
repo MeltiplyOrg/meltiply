@@ -8,7 +8,7 @@ import { loadRecentNavigation, recordRecentNavigation } from "./recent-navigatio
 beforeEach(() => {
   document.cookie = "meltiply-consent=; Path=/; Max-Age=0";
   window.localStorage.clear();
-  writeCookieConsent({ functional: true, analytics: false, marketing: false });
+  writeCookieConsent({ functional: true });
 });
 
 afterEach(() => {
@@ -37,7 +37,7 @@ describe("recent navigation", () => {
 
 describe("recent navigation without optional consent", () => {
   it("does not read or persist recent routes after functional consent is rejected", () => {
-    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    writeCookieConsent({ functional: false });
     const get = vi.spyOn(Storage.prototype, "getItem");
     const set = vi.spyOn(Storage.prototype, "setItem");
 

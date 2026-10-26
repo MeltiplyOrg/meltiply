@@ -16,16 +16,8 @@ import {
 import "../../../cookie-notice.css";
 import { Sileo } from "./sileo";
 
-const denied: CookieConsent = {
-  functional: false,
-  analytics: false,
-  marketing: false,
-};
-const accepted: CookieConsent = {
-  functional: true,
-  analytics: true,
-  marketing: true,
-};
+const denied: CookieConsent = { functional: false };
+const accepted: CookieConsent = { functional: true };
 
 const confirmationDurationMs = 1800;
 const confirmationExitMs = 400;
@@ -53,8 +45,9 @@ function serverConsentSnapshot(): string {
 /**
  * Presents the initial consent prompt and its brief confirmation on every site.
  * A valid saved decision hides all consent controls; there is no reopen action.
- * Categories remain available before a decision, and their focus handoff avoids
- * scrolling. Confirmation dismissal never moves focus to an unrelated control.
+ * Only the implemented optional purpose is offered, so no choice implies tracking
+ * that is not installed. Its focus handoff avoids scrolling, and confirmation
+ * dismissal never moves focus to an unrelated control.
  * @param props.policyUrl - Cookie-policy destination.
  * @returns The initial consent/confirmation surface, or an empty container after a saved decision.
  */
@@ -72,7 +65,7 @@ export function CookieNotice({
   const [managing, setManaging] = useState(false);
   const [draft, setDraft] = useState<CookieConsent>(denied);
   const [message, setMessage] = useState("");
-  const [acceptedAny, setAcceptedAny] = useState(false);
+  const [acceptedOptional, setAcceptedOptional] = useState(false);
   const [exiting, setExiting] = useState(false);
   const categoriesRef = useRef<HTMLFieldSetElement>(null);
   const viewportRef = useRef<HTMLElement>(null);
@@ -82,7 +75,7 @@ export function CookieNotice({
   // Records the active surface for pre-paint consent suppression and styling.
   const toastKind = visible ? (managing ? "manage" : "prompt") : "status";
 
-  /** Focuses initial category options when Sileo actually mounts them after its content transition. */
+  /** Focuses the optional-purpose option when Sileo actually mounts it after its content transition. */
   const focusCategories = useCallback((element: HTMLFieldSetElement | null) => {
     categoriesRef.current = element;
     if (element && pendingFocusRef.current === "categories") {
@@ -104,7 +97,7 @@ export function CookieNotice({
     };
   }, [message]);
 
-  // Categories and the confirmation receive focus after their DOM is mounted.
+  // The optional-purpose option and the confirmation receive focus after their DOM is mounted.
   // Dismissal removes only the transient surface, never focusing another control.
   useLayoutEffect(() => {
     const target = pendingFocusRef.current;
@@ -115,7 +108,7 @@ export function CookieNotice({
     element.focus({ preventScroll: true });
   });
 
-  /** Opens unchecked initial category choices without granting consent and focuses the options. */
+  /** Opens the unchecked optional purpose without granting consent and focuses the option. */
   const manage = () => {
     setDraft(denied);
     setExiting(false);
@@ -124,16 +117,15 @@ export function CookieNotice({
     pendingFocusRef.current = "categories";
   };
 
-  /** Commits explicit choices, morphs the Sileo toast into a confirmation status, and parks focus on that region. */
+  /** Commits the explicit choice, morphs the Sileo toast into a confirmation status, and parks focus on that region. */
   const save = (choice: CookieConsent) => {
-    const hasOptional = choice.functional || choice.analytics || choice.marketing;
     setExiting(false);
     writeCookieConsent(choice);
     setManaging(false);
-    setAcceptedAny(hasOptional);
+    setAcceptedOptional(choice.functional);
     setMessage(
-      hasOptional
-        ? "Cookie preferences saved. Only the categories you accepted are enabled."
+      choice.functional
+        ? "Cookie preferences saved. Functional preferences are enabled."
         : "Optional cookies rejected. Sign-in and security still work.",
     );
     pendingFocusRef.current = "status";
@@ -143,23 +135,22 @@ export function CookieNotice({
     ? managing
       ? "Cookie preferences"
       : "Your cookie choices"
-    : acceptedAny
+    : acceptedOptional
       ? "Preferences saved"
       : "Optional cookies rejected";
 
   const description = visible ? (
     <div data-cookie-body>
       <p data-cookie-copy>
-        Essential cookies keep sign-in and security working and remember this choice. Optional
-        cookies and local storage remember preferences or support analytics and marketing only if
-        you accept.{" "}
+        Essential cookies keep sign-in and security working and remember this choice. Optional local
+        storage remembers your theme, language, and in-progress work only if you allow it.{" "}
         <a data-cookie-policy-link href={policyUrl}>
           Read our cookie policy
         </a>
       </p>
       {managing && (
         <fieldset data-cookie-categories ref={focusCategories} tabIndex={-1}>
-          <legend data-cookie-legend>Choose optional purposes</legend>
+          <legend data-cookie-legend>Optional purpose</legend>
           <label data-cookie-option data-checked={draft.functional ? "" : undefined}>
             <input
               type="checkbox"
@@ -169,36 +160,8 @@ export function CookieNotice({
             <span>
               <strong>Functional preferences</strong>
               <span>
-                Remember theme, language, motion, and local work recovery. Without this, preferences
-                are not remembered for later visits.
-              </span>
-            </span>
-          </label>
-          <label data-cookie-option data-checked={draft.analytics ? "" : undefined}>
-            <input
-              type="checkbox"
-              checked={draft.analytics}
-              onChange={(event) => setDraft({ ...draft, analytics: event.target.checked })}
-            />
-            <span>
-              <strong>Analytics</strong>
-              <span>
-                Allow visitor measurement. No visitor analytics tracker is currently installed; your
-                social-content reports are unaffected.
-              </span>
-            </span>
-          </label>
-          <label data-cookie-option data-checked={draft.marketing ? "" : undefined}>
-            <input
-              type="checkbox"
-              checked={draft.marketing}
-              onChange={(event) => setDraft({ ...draft, marketing: event.target.checked })}
-            />
-            <span>
-              <strong>Marketing</strong>
-              <span>
-                Allow advertising and campaign attribution. No marketing tracker is currently
-                installed.
+                Remember theme, language, recent navigation, and local work recovery. Without this,
+                preferences are not remembered for later visits.
               </span>
             </span>
           </label>
@@ -209,7 +172,7 @@ export function CookieNotice({
           Reject optional
         </button>
         <button type="button" data-cookie-btn="primary" onClick={() => save(accepted)}>
-          Accept all
+          Allow functional
         </button>
         {managing ? (
           <button type="button" data-cookie-btn="manage" onClick={() => save(draft)}>
@@ -240,7 +203,7 @@ export function CookieNotice({
             firstVisitMarker={!managing && visible}
             role={visible ? "region" : "status"}
             ariaLabel={visible ? title : undefined}
-            state={visible ? "action" : acceptedAny ? "success" : "info"}
+            state={visible ? "action" : acceptedOptional ? "success" : "info"}
             icon={visible ? <Cookie className="size-3.5" aria-hidden="true" /> : undefined}
             title={title}
             description={description}

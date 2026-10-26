@@ -109,7 +109,7 @@ function QuerySkeletonFixture() {
 beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
-  writeCookieConsent({ functional: true, analytics: false, marketing: false });
+  writeCookieConsent({ functional: true });
   seedDockState();
 });
 
@@ -337,7 +337,7 @@ describe("DevBox shell", () => {
   it("keeps DevBox usable without optional persistence after rejection", () => {
     window.localStorage.setItem("feedback-annotations-/posts", "optional annotation");
     window.sessionStorage.setItem("agentation-session-/posts", "optional session");
-    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    writeCookieConsent({ functional: false });
     window.localStorage.setItem(
       devBoxStorageKey,
       JSON.stringify({

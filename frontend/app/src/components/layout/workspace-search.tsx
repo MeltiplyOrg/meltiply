@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { ArrowRight, LayoutGrid, Search } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
@@ -22,10 +22,13 @@ export function WorkspaceSearch({
   open,
   onOpenChange,
   onNavigate,
+  fallbackFocusRef,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onNavigate: (view: WorkspaceView, options?: { search?: string }) => void;
+  /** Focus target when search opens from the keyboard with no useful opener. */
+  fallbackFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const { brandProfiles, setSelectedBrandProfileId } = useWorkspace();
   const { t } = useI18n();
@@ -50,14 +53,19 @@ export function WorkspaceSearch({
         className="flex max-w-xl flex-col gap-0 overflow-hidden p-0 sm:p-0"
         aria-describedby="workspace-search-description"
         onOpenAutoFocus={() => {
+          const opener = document.activeElement;
           returnFocus.current =
-            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            opener instanceof HTMLElement && opener !== document.body
+              ? opener
+              : (fallbackFocusRef?.current ?? null);
         }}
         onCloseAutoFocus={(event) => {
-          if (returnFocus.current?.isConnected) {
-            event.preventDefault();
-            returnFocus.current.focus();
-          }
+          const target = returnFocus.current?.isConnected
+            ? returnFocus.current
+            : fallbackFocusRef?.current;
+          if (!target?.isConnected) return;
+          event.preventDefault();
+          target.focus();
         }}
       >
         <CenterDialogTitle className="sr-only">{t("Search and jump to")}</CenterDialogTitle>

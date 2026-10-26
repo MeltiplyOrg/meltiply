@@ -35,6 +35,77 @@ the PostgreSQL and runtime state. Social Providers and billing remain external
 services and require your own credentials, public callback URLs, and approvals.
 No Cloudflare account or remote Workers are needed by this deployment.
 
+The API uses bounded, disposable Worker-local memory for read optimization, with
+the same implementation on managed Workers and self-hosted workerd. Publishing
+requirements share only overlapping equivalent Provider reads, after every caller's
+fresh account/credential checks; completed results are not retained. At most 32
+pending keys are retained; additional distinct reads bypass coalescing. Analytics
+`GET /api/v1/analytics` summaries retain successful values for an absolute 30 seconds,
+at most 64 entries of 16 KiB each (1 MiB serialized payload, plus keys/bookkeeping).
+Every request still establishes current authorization and active Brand Profile
+lifecycle visibility under PostgreSQL RLS. Snapshot/publication changes can remain
+invisible until expiry; deletion/restoration and access changes are checked on
+each request. The dashboard endpoint is not cached by this optimization.
+
+These caches are neither durable nor shared across isolates or runtime replicas.
+Restart, eviction, capacity bypass, and configuration replacement fall back to
+authoritative reads. No Redis, Valkey, KV, new binding, backup, or operator cache
+configuration is required. Measurements and their runtime limits are recorded in
+the [backend performance report](benchmarks/backend-optimization.md).
+
+## Browser reads and private freshness
+
+The signed-in app keeps API responses only in an in-memory TanStack QueryClient
+scoped to the current user and Workspace. Identity or Workspace changes clear
+that client's private entries; reloads start cold. Private responses are not
+written to browser storage or shared CDN caches.
+
+| Read                                          | Freshness before another request | Inactive in-memory retention |
+| --------------------------------------------- | -------------------------------- | ---------------------------- |
+| Analytics, active Brand Profiles and Channels | 5 minutes                        | 30 minutes                   |
+| Posts                                         | 1 minute                         | 30 minutes                   |
+| Provider capabilities                         | Current signed-in QueryClient    | Until that client is cleared |
+
+Your own supported mutations update or invalidate the affected cache immediately.
+Analytics Refresh advances its shared dashboard/ranking cohort. Other members'
+changes may remain unseen until freshness expires or you refresh. These browser
+rules do not replace live server authorization: sessions, suspension, current
+Workspace membership, role and profile visibility are checked on each API read.
+
+Active Post and Calendar work refreshes at most four detail reads concurrently
+per loaded collection every ten seconds. Future scheduled work starts polling only
+when due. Settled rows do not poll, and updated details do not refetch every loaded
+collection page. This is progress discovery, not a scheduling deadline guarantee.
+Managed API and Automation drivers close PostgreSQL clients at operation release;
+Hyperdrive alone retains origin connections. The operator must not disable origin
+pooling to compensate for invocation-scoped driver ownership.
+
+## Managed Worker operations
+
+The two-minute media-container idle timeout applies only after a Worker Durable
+Object/RPC request completes, never in the middle of a media job. Container
+restarts lose engine memory; the persisted job identity and idempotent stored
+output, not an in-memory engine cache, govern replay.
+
+Recurring Comment-body collection defaults off because there is no in-app Inbox.
+The managed Automation Worker accepts `RECURRING_COMMENTS_ENABLED=true` to opt in
+after an authorized operational need exists. Default-off deployments still retain
+historical Comments, numerical Analytics, authorized on-demand fetching and
+their durable retry/cursor recovery. This flag does not expose an Inbox or grant
+additional member access.
+
+Publishing Queues remain capped at one consumer invocation. The serial batch
+default (`PUBLISH_BATCH_CONCURRENCY=1`) may be changed to `2` to overlap two
+different Provider accounts only; one account remains ordered. Use the hosted
+capacity acceptance measurement and verify the account's actual Provider rate
+budget before enabling it. This bounded mode is not a cross-invocation lock.
+
+Automation scheduled recovery performs Due publishing, Outbox relay and
+Distribution reconciliation before account analytics. Application success logs
+and traces are sampled at 10%, but platform logs/invocation logs remain unsampled
+so failures are not discarded by the application sampling rate. Audit and durable
+job/outbox records are unchanged.
+
 ## First start from source
 
 Requirements: Docker Engine with a recent Docker Compose v2 supporting inline
@@ -356,3 +427,31 @@ Use `docker compose ... down` to stop while retaining volumes. **Do not use
 Allow the configured 11-minute graceful stop for in-flight media jobs. Monitor
 `/api/v1/ready`, container health, logs, disk space, and queue backlog; local
 persistence cannot survive loss of its host without backups.
+
+The hosted self-host acceptance suite also restores a full disposable clone:
+PostgreSQL dump, stopped `/data` runtime volume, matching image revision, and
+protected environment are recovered together before real authenticated identity,
+R2, OAuth, Queue and Workflow probes run. `artifacts/cache/compose-<arch>-restore.json`
+records archive sizes and backup/restore wall times for that CI fixture only.
+Those measurements do not establish a production RPO or RTO; operators must
+record the age of the latest verified protected backup and a timed restore on
+their own infrastructure. Stop writes for consistency. Preserve the encryption
+keys and the exact application revision.
+
+[Hosted run 40194950426](https://github.com/MeltiplyOrg/meltiply/actions/runs/40194950426),
+at `63bb2a2`, passed the complete image/Compose acceptance and full fresh-volume
+restore on both architectures. The isolated clone started its own controlled
+SMTP dependency; it did not reuse the source database, runtime volume, or process.
+Authenticated identity and the ready Asset survived; storage, single-use OAuth
+state, queued delivery and Workflow completion probes recovered.
+
+| Architecture | Backup seconds | Restore to authenticated ready seconds | PostgreSQL archive bytes | Runtime archive bytes |
+| ------------ | -------------: | -------------------------------------: | -----------------------: | --------------------: |
+| amd64        |          0.919 |                                 23.157 |                  268,200 |             1,093,632 |
+| arm64        |          0.822 |                                 22.035 |                  268,038 |             1,093,632 |
+
+These are one sample per architecture on a tiny disposable CI fixture, not
+production recovery capacity. Preserved raw measurements:
+[amd64](benchmarks/results/2026-10-25-authenticated/compose-x64-restore.json) and
+[arm64](benchmarks/results/2026-10-25-authenticated/compose-arm64-restore.json).
+Both explicitly record `production_rpo_rto_verified: false`.

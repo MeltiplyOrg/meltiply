@@ -15,8 +15,8 @@ export const PROCESSOR_CONTAINER_TIMEOUT_MS = 600_000;
 /** Readiness budget for a cold container start before the job is attempted. */
 export const PROCESSOR_READY_TIMEOUT_MS = 90_000;
 
-/** Idle park window: an instance with no work is reclaimed after this long. */
-export const PROCESSOR_INACTIVITY_TIMEOUT_MS = 600_000;
+/** Two-minute park window after the owning DO becomes inactive, never during an active RPC. */
+export const PROCESSOR_INACTIVITY_TIMEOUT_MS = 120_000;
 
 /**
  * Signed capability lifetime: long enough to outlast one job, short enough to

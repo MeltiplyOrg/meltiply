@@ -12,7 +12,7 @@ import { ApiError } from "@/lib/api";
 import { isDevMode } from "@/lib/env";
 import { userFacingErrorMessage } from "@/lib/frontend-errors";
 import { reportFrontendError } from "@/lib/frontend-telemetry";
-import { queryRetryDelay, shouldRetryQuery } from "@/lib/query-defaults";
+import { privateCacheRetentionMs, queryRetryDelay, shouldRetryQuery } from "@/lib/query-defaults";
 import {
   authRefreshRequestEvent,
   dispatchRuntimeStatus,
@@ -176,10 +176,15 @@ function ScopedAppProviders({ children }: AppProvidersProps): React.ReactElement
             retry: shouldRetryQuery,
             retryDelay: queryRetryDelay,
             staleTime: 60 * 1000,
+            gcTime: privateCacheRetentionMs,
           },
         },
       }),
   );
+
+  // A replaced identity/Workspace must release private data and cancel its
+  // in-flight reads, not merely leave the old QueryClient to a GC timer.
+  useEffect(() => () => queryClient.clear(), [queryClient]);
 
   return (
     <QueryClientProvider client={queryClient}>

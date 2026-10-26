@@ -6,11 +6,11 @@ resources. Worker code and version deployment remain Wrangler-owned.
 
 ## Ownership
 
-| Owner               | Resources                                                                                                                                                       |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenTofu            | API domain, WAF/rate controls, private R2 bucket/CORS/lifecycle/events, Queues and DLQs, consumer retry/concurrency, Access, notifications, and release outputs |
-| Wrangler            | Worker source/versions, compatibility/CPU settings, bindings, handler declarations, and Durable Object migrations                                               |
-| Protected bootstrap | Two distinct Hyperdrive configurations, validated by OpenTofu with query caching disabled                                                                       |
+| Owner               | Resources                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| OpenTofu            | API domain, WAF/rate controls, private R2 bucket/CORS/lifecycle/events, Queues and DLQs, consumer retry/concurrency, Access, and release outputs |
+| Wrangler            | Worker source/versions, compatibility/CPU settings, bindings, handler declarations, and Durable Object migrations                                |
+| Protected bootstrap | Two distinct Hyperdrive configurations, validated by OpenTofu with query caching disabled                                                        |
 
 Staging Queue consumers are OpenTofu-owned; the Automation Wrangler config
 intentionally omits them. Local Wrangler declares consumers because workerd has
@@ -223,6 +223,179 @@ Replay is a dry run until `--apply` and environment/workload confirmation are
 provided. It emits payload-free audit JSON and fails on partial, rejected, or
 ambiguous settlement. The operator token needs account-scoped Queues Read/Write.
 
-`bun run cost:model` reports the checked-in profile's known lower bound, not a
-complete estimate. Use `cost:require-complete` only with a populated staging/release
-profile; the incomplete repository profile intentionally fails that gate.
+`bun run cost:model` reports known charges and explicit unknowns, not a bill.
+All checked-in deployment usage is unmeasured. Populate protected copies of
+[`cost-model-inputs.json`](../../scripts/infra/cost-model-inputs.json) and
+[`endpoint.json`](../neon/endpoint.json), then run:
+
+```bash
+bun run cost:model --input /protected/usage.json --neon-config /protected/neon.json
+bun run cost:require-complete --input /protected/usage.json --neon-config /protected/neon.json
+```
+
+Use one measured billing month and account scope for usage and business units.
+Keep unknown values `null` and update `expected_unknown_inputs` to match; zero
+means measured zero, not missing data. The complete gate rejects any unknown
+usage/endpoint setting. Retrieve Neon settings and CU-seconds with the commands
+embedded in `endpoint.json`; divide CU-seconds by 3,600, not endpoint uptime.
+The assumed Neon Launch tariff is not evidence of the installation's actual plan.
+
+Container accounting includes active vCPU-seconds, **provisioned** GiB-seconds
+and disk GB-seconds, plus regional egress. RSS is not billable provisioned memory.
+Four simultaneously running `standard-3` instances provision up to eight vCPUs,
+32 GiB memory and 64 GB disk; actual active time and egress remain unknown.
+Record cold-start latency and provisioned lifetime as well as native CPU/RSS.
+The managed processor's two-minute inactivity timeout applies after requests
+finish, not while FFmpeg is running; the next job may pay another cold start.
+
+Pricing sources and retrieval dates live beside each tariff, including
+[Containers](https://developers.cloudflare.com/containers/platform/pricing/) and
+[Neon](https://neon.com/pricing). The current
+[Workers Logs schedule](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)
+expires after November 30, 2026. The calculator rejects a later projection until
+that tariff is explicitly reverified; it does not invent the replacement price.
+
+### Telemetry and failure notifications
+
+Managed application success logs and traces sample at 10%. Platform logs remain
+unsampled, with invocation logs enabled: head sampling cannot promise to keep
+all warnings/errors. Workspace Audit, Outbox and job-ledger persistence are not
+sampled. Traces and sampled success logs are never the source of Queue alerts.
+
+The repository does **not** provision a notification policy. Configure an
+operator-owned HTTPS JSON receiver and a supervised, five-minute monitor outside
+the application request path:
+
+```bash
+# Supply CLOUDFLARE_ACCOUNT_ID, a Queues Read token in CLOUDFLARE_API_TOKEN,
+# and MELTIPLY_ALERT_WEBHOOK_URL through the monitor's protected environment.
+bun run queue:alert --environment staging --workload publish-threads \
+  --max-backlog 1000 --max-age-seconds 46800
+```
+
+Run it for every workload/DLQ, with thresholds derived from actual traffic.
+Publish queues contain intentionally delayed messages (up to twelve hours);
+transport age/backlog is **not** scheduled-publication lateness. The example
+allows that delay plus an hourly recovery margin; monitor actual due-to-published
+lag separately from durable Distribution outcomes. Other workload thresholds
+need their own service-time budgets.
+
+The monitor uses point-in-time
+[Queue metrics](https://developers.cloudflare.com/queues/observability/metrics/),
+not sampled GraphQL aggregates. Any DLQ backlog alerts. Missing/invalid metrics
+also notify and fail; rejected notification delivery fails without exposing
+message bodies or webhook secrets. Exit 0 means healthy, 2 means an unhealthy
+notification was accepted, and 1 means monitoring/delivery failed. The supervisor
+must page on missed runs and exit 1 independently of this webhook. Test actual
+receipt and outage escalation before declaring alerts operational; local HTTP
+fixtures cannot certify a live destination.
+
+### Bounded publication capacity
+
+`PUBLISH_BATCH_CONCURRENCY=1` is the safe serial default. Setting it to `2`
+overlaps at most two **different external Provider accounts** within one publish
+batch. Account identity comes from PostgreSQL, not the Queue payload; messages
+for the same account stay ordered. Keep OpenTofu's consumer-concurrency limit at
+one invocation per Provider Queue. Asset jobs and other queues remain serial.
+Do not raise consumer concurrency without a separate cross-invocation account
+coordination design. Existing persisted rate budgets, leases, Ambiguous outcome
+reconciliation, backoff, Outbox and DLQ rules are unchanged.
+
+The hosted `performance-backend` lane runs the real Queue handler in workerd
+with PostgreSQL and a controlled slow Provider. Its `queue-capacity.json` records
+serial/bounded timing, head-of-line delay, maximum active calls and redelivery
+outcomes. This is a capacity experiment, not a live Provider quota measurement.
+Enable the bounded mode only after its latency/throughput gain is observed and
+the installation's Provider budget supports it.
+
+[Run 40192396395](https://github.com/MeltiplyOrg/meltiply/actions/runs/40192396395)
+at `316c93e` exercised five publications across four external accounts, one
+500 ms controlled call and four 50 ms calls. Three alternating samples per mode
+produced these rounded observed ranges:
+
+| Mode        | Whole batch ms | First independent account completion ms | Maximum simultaneous calls |
+| ----------- | -------------: | --------------------------------------: | -------------------------: |
+| Serial      |        905–938 |                                 630–661 |                          1 |
+| Bounded two |        657–665 |                                 106–114 |                          2 |
+
+Every sample persisted five published outcomes, kept same-account concurrency
+at one, and acknowledged redelivery without another Provider write.
+[Raw observations](../../docs/benchmarks/results/2026-10-25-authenticated/queue-capacity.json)
+demonstrate reduced head-of-line blocking under this controlled latency skew,
+not a production throughput or quota guarantee. Serial remains the default.
+
+### Controlled API placement experiment
+
+Leave deployment placement unchanged until measured. Prepare two isolated API
+versions with identical code/data/authentication; vary only placement. Supply a
+live test session through `MELTIPLY_BENCHMARK_TOKEN`, never a command-line token:
+
+```bash
+bun run benchmark:placement \
+  --baseline https://baseline-api.example.com \
+  --candidate https://candidate-api.example.com \
+  --workspace 20000000-0000-4000-8000-000000000005 \
+  --start 2026-07-01T00:00:00Z --end 2026-10-01T00:00:00Z \
+  --location actual-client-region --samples 30
+```
+
+The read-only experiment alternates paired requests, discards warm-up, consumes
+responses, and records p50/p95/p99, bytes, `cf-placement` and `cf-ray` without
+private bodies. Run from representative client regions after placement learning;
+compare complete forwarding-inclusive user latency, not only origin duration.
+[Smart Placement](https://developers.cloudflare.com/workers/configuration/placement/)
+affects fetch handlers, not named-entrypoint RPC. A local workerd/PostgreSQL
+benchmark cannot establish managed placement gains.
+
+### Acceptance targets and scaling decisions
+
+These are engineering targets and an illustrative planning profile, **not
+production observations or SLAs**. Evaluate live latency from declared client
+regions with authentication, forwarding and response consumption included.
+
+| Surface                                                            | Acceptance target                                                                                                       |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Warm Channels/active Brand Profiles/identical Analytics navigation | No resource GET within the five-minute freshness window; own mutations and Analytics Refresh do not wait for expiry     |
+| Warm Posts navigation                                              | No collection GET within one minute; loaded active work uses bounded detail reads, not repeated page chains             |
+| Visible connected publication/Asset progress                       | Next ten-second polling opportunity plus request duration; hidden/offline tabs resume on return                         |
+| Cold Posts page / complete Analytics page                          | p95 under 1 second and p99 under 2 seconds at 20 concurrent active sessions; report misses and authorization separately |
+| Normal scheduled publication dispatch                              | p95 due-to-attempt lag under 30 seconds, excluding external Provider completion                                         |
+| Hourly durable recovery                                            | Eligible work rediscovered within 65 minutes; foreground delivery does not depend on the hourly backstop                |
+| Authorization changes                                              | No server-side stale authorization window; every HTTP request checks the live session and Workspace access              |
+
+Illustrative capacity: 100 daily active users, two sessions/user/day and 20 views
+per session imply 4,000 view actions/day before cache reuse; plan separately for a
+20-session peak. At 300 Posts/day and two destinations/Post, plan for 600
+publications/day and a burst of 60 due in one minute. Provider account diversity
+matters: one hot account still serializes even in bounded mode. With a planning
+assumption of 90 retained captures/Distribution, that publication rate adds about
+1.62 million snapshots per 30 days; this is not the scheduler's capture contract.
+The benchmark's 300-Distribution/27,000-snapshot history is a regression fixture,
+not proof of that larger capacity.
+
+For each Provider Queue, require arrival rate × measured mean service time below
+effective concurrency, with at least 2× burst headroom. Include retries and
+account-serialization skew. Database demand depends on uncached actions and the
+complete authenticated statement count, not UI clicks alone.
+
+Before increasing Neon compute, capture slow SQL, `EXPLAIN (ANALYZE, BUFFERS)`,
+origin-pool wait, connection utilization, CPU and working-set/cache misses.
+Investigate sustained CPU over 70%, origin connections over 70% of the reviewed
+limit, pool-wait p95 over 50 ms, or hot-query p95 over 100 ms in three consecutive
+15-minute windows. Fix avoidable work/index or lock problems first; then increase
+the existing endpoint's reviewed CU ceiling with a cost cap and repeat the same
+load. Do not introduce sharding, a replica or another cache from averages alone.
+Retention, history growth and data skew must be included in the next capacity run.
+
+Recovery design goals are **RPO ≤24 hours and RTO ≤4 hours**, not a claim about
+the current installation. Self-hosting requires daily consistent off-host
+PostgreSQL and stopped-runtime backups, protected environment/encryption keys,
+the matching image revision, and periodic timed full restores. The hosted
+disposable Compose restore records fixture timings only. Managed deployments
+must verify Neon history/restore retention and recovery of object, Queue and
+Durable Object state separately; a database restore alone is not full application
+recovery. Do not declare these goals met without a timed deployment-specific
+exercise and recorded backup age.
+The [timed disposable full-restore evidence](../../docs/self-hosting.md#administration-and-recovery)
+records successful amd64/arm64 acceptance; it does not replace the managed
+deployment exercise or establish the RPO/RTO goals above.

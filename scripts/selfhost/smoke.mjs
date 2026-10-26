@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { readFile } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { closeSync, openSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseEnv } from "node:util";
 import { ownerBrowserSession } from "../../frontend/app/e2e/selfhost-auth-smoke.mjs";
+import { cacheSmoke } from "../benchmarks/backend/cache-smoke.mjs";
 
 const composeArgs = [
   "compose",
@@ -89,6 +93,108 @@ const profile = await api(
   "/api/v1/brand-profiles",
   { name: "Selfhost smoke", description: "Production image acceptance", color: "#1d4ed8" },
   201,
+);
+// Test-only privileged observation runs outside workerd; the public API still authenticates normally.
+await cacheSmoke({
+  origin,
+  cookie,
+  label: `compose-${process.arch}`,
+  observeMemory: async () => {
+    const containerId = compose("ps", "-q", "runtime").toString().trim();
+    return {
+      container_working_set: execFileSync(
+        "docker",
+        ["stats", "--no-stream", "--format", "{{.MemUsage}}", containerId],
+        { encoding: "utf8" },
+      ).trim(),
+    };
+  },
+  query: async (text, values = []) =>
+    JSON.parse(
+      execFileSync(
+        "docker",
+        [
+          ...composeArgs,
+          "exec",
+          "-T",
+          "runtime",
+          "node",
+          "--input-type=module",
+          "-e",
+          `import pg from './scripts/selfhost/node_modules/pg/lib/index.js';
+           import { readFileSync } from 'node:fs';
+           const { text, values } = JSON.parse(readFileSync(0, 'utf8'));
+           const pool = new pg.Pool({host:'postgres',user:'postgres',database:'meltiply',password:process.env.SELFHOST_DB_PASSWORD});
+           try { const result = await pool.query(text, values); console.log(JSON.stringify({rows: result.rows})); }
+           finally { await pool.end(); }`,
+        ],
+        { input: JSON.stringify({ text, values }), encoding: "utf8", maxBuffer: 1024 * 1024 },
+      ),
+    ),
+});
+// Run independently dispatched Provider reads inside the exact production runtime image.
+// Only the disposable Worker/driver are copied to writable tmpfs; production routes stay unchanged.
+execFileSync(
+  "docker",
+  [
+    ...composeArgs,
+    "exec",
+    "-T",
+    "runtime",
+    "node",
+    "--input-type=module",
+    "-e",
+    `import { mkdir, writeFile, symlink } from 'node:fs/promises';
+     import { readFileSync } from 'node:fs';
+     const payload = JSON.parse(readFileSync(0, 'utf8'));
+     await mkdir('/tmp/cache-proof', {recursive:true});
+     await symlink('/app/scripts/selfhost/node_modules', '/tmp/cache-proof/node_modules');
+     await writeFile('/tmp/cache-proof/worker.js', payload.worker);
+     await writeFile('/tmp/cache-proof/check.mjs', payload.driver);`,
+  ],
+  {
+    input: JSON.stringify({
+      worker: await readFile("artifacts/cache-provider-worker/requirements-smoke.js", "utf8"),
+      driver: await readFile("scripts/selfhost/.requirements-cache-check.mjs", "utf8"),
+    }),
+    maxBuffer: 1024 * 1024,
+  },
+);
+compose(
+  "exec",
+  "-T",
+  "-e",
+  "REQUIREMENTS_SMOKE_BUNDLE=/tmp/cache-proof/worker.js",
+  "-e",
+  "REQUIREMENTS_SMOKE_OUTPUT=/tmp/cache-proof/artifacts",
+  "runtime",
+  "node",
+  "/tmp/cache-proof/check.mjs",
+);
+const requirementsEvidence = JSON.parse(
+  compose(
+    "exec",
+    "-T",
+    "runtime",
+    "node",
+    "--input-type=module",
+    "-e",
+    `import {readFileSync} from 'node:fs'; process.stdout.write(readFileSync('/tmp/cache-proof/artifacts/compose-${process.arch}-requirements.json'));`,
+  ).toString(),
+);
+await writeFile(
+  `artifacts/cache/compose-${process.arch}-requirements.json`,
+  JSON.stringify(requirementsEvidence, null, 2),
+);
+console.log(JSON.stringify(requirementsEvidence));
+compose(
+  "exec",
+  "-T",
+  "runtime",
+  "node",
+  "--input-type=module",
+  "-e",
+  "import {rm} from 'node:fs/promises'; await rm('/tmp/cache-proof',{recursive:true});",
 );
 const png = compose(
   "exec",
@@ -176,3 +282,178 @@ assert.equal((await api(`/api/v1/assets/${upload.asset.id}`)).status, "ready");
 console.log(
   "Crash recovery preserved sessions, PostgreSQL records, R2 objects, delayed queue messages, OAuth consumption, and workflow execution",
 );
+
+/**
+ * Restores a consistent, stopped-runtime backup into a separate disposable
+ * Compose project. PostgreSQL, runtime volume, application revision, and secret
+ * environment are restored together; the source volumes are never overwritten.
+ * Validates real authentication and independent R2/OAuth/Queue/Workflow state.
+ * Timings describe this fixture only, not a deployed installation's RPO/RTO.
+ * Protected archives are deleted after the clone has been torn down.
+ */
+async function verifyFullRestore() {
+  const directory = await mkdtemp(join(tmpdir(), "meltiply-restore-"));
+  await chmod(directory, 0o700);
+  const protectedEnv = join(directory, "environment");
+  const dump = join(directory, "postgres.dump");
+  const archive = join(directory, "runtime.tar");
+  const project = `meltiply-restore-${randomUUID()}`;
+  const args = composeArgs.map((argument) =>
+    argument === ".env.selfhost" ? protectedEnv : argument,
+  );
+  args.push("--project-name", project);
+  const options = {
+    maxBuffer: 8 * 1024 * 1024,
+    env: { ...process.env, SELFHOST_ENV_FILE: protectedEnv },
+  };
+  /** Addresses only the freshly named recovery project, never the source deployment. */
+  const recover = (...command) => execFileSync("docker", [...args, ...command], options);
+  const probe = randomUUID();
+  assert.equal(admin("probe-write", probe, identity.active_organization.id).prepared, true);
+  try {
+    const backupStarted = performance.now();
+    compose("stop", "runtime", "processor", "smtp-test");
+    await copyFile(".env.selfhost", protectedEnv);
+    await chmod(protectedEnv, 0o600);
+    const source = compose("ps", "-a", "-q", "runtime").toString().trim();
+    assert.match(source, /^[0-9a-f]+$/u);
+    for (const [path, command] of [
+      [
+        dump,
+        [
+          ...composeArgs,
+          "exec",
+          "-T",
+          "postgres",
+          "pg_dump",
+          "-U",
+          "postgres",
+          "-d",
+          "meltiply",
+          "-Fc",
+        ],
+      ],
+      [archive, ["cp", `${source}:/data/.`, "-"]],
+    ]) {
+      const output = openSync(path, "wx", 0o600);
+      try {
+        execFileSync("docker", command, { stdio: ["ignore", output, "inherit"] });
+      } finally {
+        closeSync(output);
+      }
+    }
+    const backupMs = performance.now() - backupStarted;
+    const restoreStarted = performance.now();
+    recover("up", "-d", "--wait", "--wait-timeout", "120", "postgres");
+    recover("run", "--rm", "migrate");
+    const input = openSync(dump, "r");
+    try {
+      execFileSync(
+        "docker",
+        [
+          ...args,
+          "exec",
+          "-T",
+          "postgres",
+          "pg_restore",
+          "-U",
+          "postgres",
+          "-d",
+          "meltiply",
+          "--clean",
+          "--if-exists",
+          "--exit-on-error",
+        ],
+        { ...options, stdio: [input, "inherit", "inherit"] },
+      );
+    } finally {
+      closeSync(input);
+    }
+    recover("up", "--no-start", "--no-deps", "--no-build", "runtime");
+    const target = recover("ps", "-a", "-q", "runtime").toString().trim();
+    assert.match(target, /^[0-9a-f]+$/u);
+    const runtimeArchive = openSync(archive, "r");
+    try {
+      execFileSync("docker", ["cp", "-a", "-", `${target}:/data`], {
+        stdio: [runtimeArchive, "inherit", "inherit"],
+      });
+    } finally {
+      closeSync(runtimeArchive);
+    }
+    recover("up", "-d", "--no-deps", "--no-build", "--wait", "--wait-timeout", "120", "smtp-test");
+    recover(
+      "up",
+      "-d",
+      "--no-deps",
+      "--no-build",
+      "--wait",
+      "--wait-timeout",
+      "120",
+      "runtime",
+      "processor",
+    );
+    const recovered = JSON.parse(
+      recover(
+        "exec",
+        "-T",
+        "runtime",
+        "node",
+        "scripts/selfhost/admin.mjs",
+        "probe-read",
+        probe,
+        identity.active_organization.id,
+      ).toString(),
+    );
+    assert.deepEqual(recovered, {
+      storage: "recovered",
+      oauth: "single-use",
+      queue: "recovered",
+      workflow: "complete",
+    });
+    assert.equal(
+      (await api("/api/v1/users/me")).active_organization.id,
+      identity.active_organization.id,
+    );
+    assert.equal((await api(`/api/v1/assets/${upload.asset.id}`)).status, "ready");
+    const evidence = {
+      scope: "disposable full Compose restore",
+      source_quiesced: true,
+      backup_ms: backupMs,
+      restore_to_authenticated_ready_ms: performance.now() - restoreStarted,
+      postgres_backup_bytes: (await stat(dump)).size,
+      runtime_backup_bytes: (await stat(archive)).size,
+      recovered,
+      production_rpo_rto_verified: false,
+    };
+    await writeFile(
+      `artifacts/cache/compose-${process.arch}-restore.json`,
+      JSON.stringify(evidence, null, 2),
+    );
+    console.log(JSON.stringify(evidence));
+  } catch (error) {
+    await writeFile(
+      "artifacts/cache/restore-runtime.log",
+      recover("logs", "--no-color", "--tail", "100", "runtime").toString(),
+    );
+    throw error;
+  } finally {
+    // These volumes were created above solely for this recovery exercise.
+    try {
+      recover("down", "--volumes", "--remove-orphans");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+      compose(
+        "up",
+        "-d",
+        "--no-build",
+        "--wait",
+        "--wait-timeout",
+        "120",
+        "smtp-test",
+        "runtime",
+        "processor",
+      );
+    }
+  }
+}
+await verifyFullRestore();

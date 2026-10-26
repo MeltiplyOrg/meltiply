@@ -1,5 +1,10 @@
 # Backend performance comparison
 
+**Current PR #65 evidence:** use the
+[complete authenticated application comparison](#complete-authenticated-application-comparison).
+The earlier sections preserve experiments at their named revisions; their gains
+do not establish current whole-application latency or production savings.
+
 This report compares the backend at the pre-optimization baseline with the
 optimized integration branch using the same benchmark harness, dataset,
 concurrency, configuration, runner class, and PostgreSQL version.
@@ -394,3 +399,365 @@ uniform latency improvements: target removal's p50 rose 5.2%, and its tail
 latencies and upload creation's tail latencies worsened. No latency win is
 claimed for those cases; the measured regressions remain explicit rather than
 being inferred away from the smaller SQL counts.
+
+## Portable read-cache acceptance (2026-10-24)
+
+This is a new fixed-dataset observation for issue #58, not a reuse of the historical
+baseline above. The application implementation is shared by both deployment paths.
+Node 24.18.0/Bun 1.4.2 hosted runners use PostgreSQL, 128 published Threads
+Distributions with 128 stored snapshots, and authenticated production API routes.
+Each scenario below contains 20 requests. Fixture creation and forced lifecycle
+generation writes are excluded from request latency. Database time is the measured
+canonical aggregate's execution time from `pg_stat_statements`, not total database
+time: warm requests still perform authorization/visibility work.
+
+The managed-path [workerd journey](https://github.com/MeltiplyOrg/meltiply/actions/runs/40103706049)
+passed. The exact-image [Compose run](https://github.com/MeltiplyOrg/meltiply/actions/runs/40104311932)
+passed the complete native amd64/ARM64 deployment smoke, including the disposable
+Provider driver, crash recovery, storage/media processing, email, and optional TLS.
+The table uses the managed run above and this passing Compose run.
+
+| Runtime               | Summary workload                                         | Aggregate executions | Aggregate DB ms | Mean ms | p95 ms |
+| --------------------- | -------------------------------------------------------- | -------------------: | --------------: | ------: | -----: |
+| Managed local workerd | Cold, distinct exact ranges                              |                   20 |           28.38 |   82.05 |  86.44 |
+| Managed local workerd | Uncached, identical range / changed lifecycle generation |                   20 |           28.08 |   79.89 |  84.00 |
+| Managed local workerd | Warm, identical range                                    |                    0 |               0 |   66.92 |  71.55 |
+| Managed local workerd | Concurrent cold, identical range                         |                    1 |            1.99 |  512.34 | 736.11 |
+| Compose amd64         | Cold, distinct exact ranges                              |                   20 |           19.37 |   54.84 |  56.63 |
+| Compose amd64         | Uncached, identical range / changed lifecycle generation |                   20 |           20.00 |   57.57 |  73.23 |
+| Compose amd64         | Warm, identical range                                    |                    0 |               0 |   46.03 |  52.36 |
+| Compose amd64         | Concurrent cold, identical range                         |                    2 |           13.85 |  383.19 | 524.74 |
+| Compose ARM64         | Cold, distinct exact ranges                              |                   20 |           14.57 |   39.98 |  41.34 |
+| Compose ARM64         | Uncached, identical range / changed lifecycle generation |                   20 |           15.22 |   42.41 |  50.40 |
+| Compose ARM64         | Warm, identical range                                    |                    0 |               0 |   34.51 |  37.37 |
+| Compose ARM64         | Concurrent cold, identical range                         |                    1 |            0.78 |  207.26 | 282.45 |
+
+Warm reads avoided the canonical aggregate in every measured request. Concurrent
+cold requests had substantially higher latency than sequential requests; reduced
+work is not a claim of a concurrency latency win. Analytics misses are not
+single-flight: the one/two aggregate observations depend on request scheduling,
+not a guaranteed cross-request computation count. Synthetic local timing does not
+establish production percentages, cross-architecture superiority, or currency savings.
+
+Each journey observed a warm explicit Brand Profile become empty after an independent
+persisted deletion and recover after restoration. A stored snapshot change remained
+hidden before the absolute TTL and became visible after 31 wall-clock seconds.
+Sixty-five distinct exact ranges produced 65 canonical computations; requesting an
+evicted older range recomputed once. All measured summary payloads were 486 bytes.
+The browser visited Posts, Channels, Analytics, and Channels again, dispatched
+focus/reconnect events, and observed one capabilities request; a full reload made
+the second request. Desktop/phone screenshots cover both palettes.
+
+Memory observations are whole-runtime context, not cache-retained heap attribution:
+
+| Runtime               |  Cold measurement | After 65 distinct ranges | Measurement boundary                                 |
+| --------------------- | ----------------: | -----------------------: | ---------------------------------------------------- |
+| Managed local workerd | 521,101,312 bytes |        594,509,824 bytes | RSS sum of workerd descendants owned by the launcher |
+| Compose amd64         |         544.4 MiB |                580.4 MiB | Runtime container working set                        |
+| Compose ARM64         |           503 MiB |                  555 MiB | Runtime container working set                        |
+
+The implementation's 64 × 16 KiB admission limits bound retained serialized summary
+payload to 1 MiB, with bounded key/entry bookkeeping. That is a contractual upper
+bound, **not a measured isolated cache heap**. Runtime memory includes unrelated
+Workers, connections, compiled code, transient allocations, and garbage collection;
+the different observation boundaries must not be compared as cache overhead.
+Provider pending entries are separately bounded to 32, with no completed result
+retention. No shared cache, durable state, new hosted dependency, or cache backup
+is involved.
+
+Credential-free JSON and screenshots are workflow artifacts:
+`extended-portable-caching-smoke/artifacts/cache/managed-local-workerd*.json` and
+`owner-login-{amd64,arm64}/cache/compose-*.json`. The managed-path observation is
+local workerd, not a deployed Cloudflare isolate. Provider evidence uses a
+disposable controlled upstream and never publishes real content; it does not
+certify live Provider permissions or freshness.
+
+The independently dispatched Provider journey measured the following controlled
+upstream counts. Each workload contains 20 API requests; the upstream deliberately
+holds concurrent work while fresh account SQL completes. Its held duration is
+included in latency, so these p95 values are not a sequential-versus-concurrent
+performance comparison.
+
+| Runtime               | Workload                              | Upstream reads | Mean ms | p95 ms |
+| --------------------- | ------------------------------------- | -------------: | ------: | -----: |
+| Managed local workerd | Sequential, cold and after settlement |             20 |   52.75 |  63.27 |
+| Managed local workerd | Concurrent equivalent                 |              1 |  536.92 | 540.62 |
+| Compose amd64         | Sequential, cold and after settlement |             20 |   48.58 |  54.79 |
+| Compose amd64         | Concurrent equivalent                 |              1 |  531.79 | 535.56 |
+| Compose ARM64         | Sequential, cold and after settlement |             20 |   33.14 |  38.45 |
+| Compose ARM64         | Concurrent equivalent                 |              1 |  321.14 | 323.80 |
+
+Each runtime also observed one successful survivor and one upstream read after
+canceling either the initiating network request or its joiner. Two persisted
+credential generations produced two distinguishable upstream reads; a newly
+revoked caller was rejected while the prior valid read finished. HTTP responses
+kept independent request IDs. These are observed network outcomes, not deterministic
+flight-membership or server-interruption acknowledgments; controlled Effect and
+authenticated PostgreSQL route regressions own those exact synchronization guarantees.
+The first Deferred implementation passed in-process tests but failed across real
+Worker HTTP contexts; native Promise outcomes now register each waiter's Effect
+continuation in its own request, with leader work protected by the route's lifetime.
+
+## PR #65 versus master
+
+[Hosted run 40107515487](https://github.com/MeltiplyOrg/meltiply/actions/runs/40107515487)
+compared `master@025e1d6e331e` with `6884734be553` from PR #65. Both use exactly
+the same injected benchmark harness, locked dependencies, and separately migrated
+PostgreSQL 18.6 databases on one Linux x64 hosted runner with Bun 1.4.2. The workload
+is in-process Hono/API service execution, not a deployed Worker or Compose comparison.
+The earlier both-runtime acceptance above remains separate evidence.
+
+Three alternating blocks ran baseline/candidate, candidate/baseline, then
+baseline/candidate. Each workload has three warm-ups and 30 measured samples per
+block: 90 sequential requests or 90 bursts of 20 requests per revision. Each run
+recreates one Workspace/Brand Profile, 300 Posts/Distributions/snapshots, 300 Assets,
+100 comments, and one Channel per Provider. Requirements use a separate TikTok
+Channel with real credential decryption and a controlled adapter's fixed 100 ms
+delay. Fixture setup is excluded from measurement. No production schema, cache,
+permission, or Provider policy was changed for the benchmark.
+
+The focused `read-cache` profile avoids the historical full-workload fixture's
+20-Channels-per-Provider assumption, which current master rejects. It measures
+all five cache workloads plus seven unchanged read endpoints as controls; it does
+not claim to benchmark scheduling, deletion, frontend retention, or live Providers.
+All 12 workflows completed without scenario errors in all six runs.
+
+B/C means master/PR. Latencies below are **per request**, including requests within
+concurrent bursts; work counts are pooled across all three repetitions.
+
+| Workload                                                | Requests per revision |    p95 B/C (ms) | Canonical aggregates B/C | Provider reads B/C | Application SQL/request B/C |
+| ------------------------------------------------------- | --------------------: | --------------: | -----------------------: | -----------------: | --------------------------: |
+| Analytics, warm identical year                          |                    90 |     7.79 / 6.44 |                   90 / 0 |                  — |                       1 / 1 |
+| Analytics, cold distinct exact ranges                   |                    90 |     6.85 / 7.91 |                  90 / 90 |                  — |                       1 / 2 |
+| Analytics, concurrent cold (20 requests/burst)          |                 1,800 |  107.17 / 93.43 |              1,800 / 741 |                  — |                    1 / 1.41 |
+| Requirements, sequential                                |                    90 | 107.27 / 106.78 |                        — |            90 / 90 |                       1 / 1 |
+| Requirements, concurrent equivalent (20 requests/burst) |                 1,800 | 184.65 / 181.77 |                        — |         1,800 / 90 |                       1 / 1 |
+
+Warm summaries eliminated repeated canonical aggregation, while still executing
+the authoritative visibility read. Their measured application DB time fell from
+1.66 to 0.72 ms/request. Cold misses incur that extra visibility query: application
+DB time rose from 1.67 to 2.43 ms/request and per-request p95 rose by 1.06 ms.
+This cold-read regression is the explicit authorization/freshness tradeoff, not
+hidden by the warm result. Concurrent summaries were not single-flight in that
+measured revision; their observed reuse depended on scheduling and completion
+within a burst. The complete authenticated comparison below measures the later
+single-flight implementation.
+
+Equivalent concurrent requirements reduced controlled Provider work by 95% in
+this 20-request workload, but sequential requirements remain fresh (90 reads on
+each revision). The roughly unchanged request p95 reflects the fixed upstream delay
+and per-caller persisted checks; the work reduction is not a 95% latency claim.
+
+The controls do not show uniform improvements:
+
+| Unchanged control (single-request workflow) | Workflow p95 B/C (ms) | Workflow p99 B/C (ms) |
+| ------------------------------------------- | --------------------: | --------------------: |
+| Posts list                                  |         13.82 / 12.81 |         16.41 / 13.59 |
+| Published Post detail                       |           9.67 / 9.73 |         10.27 / 10.74 |
+| Distributions list                          |           7.38 / 7.90 |          8.21 / 77.61 |
+| Calendar                                    |           8.35 / 8.43 |         16.52 / 11.86 |
+| Inbox                                       |           7.49 / 6.49 |           8.72 / 7.60 |
+| Asset detail                                |           5.54 / 5.93 |           6.42 / 6.69 |
+| Upload-session detail                       |           8.07 / 7.13 |           8.76 / 8.28 |
+
+The Distributions tail outlier is retained in the raw results; no uniform
+whole-application speedup is claimed. One runner, fixed execution order within
+blocks, shared database host, process-wide CPU/GC, and small synthetic cohorts
+limit attribution. Client-observed SQL durations include driver/scheduling time;
+they are not PostgreSQL server CPU. RSS/heap is whole-process context, not isolated
+cache memory. No currency or production hit-rate extrapolation is justified.
+
+Reproduce with:
+
+```sh
+gh workflow run backend-benchmark.yml --ref feat/58-portable-read-caching \
+  -f profile=read-cache -f repetitions=3 -f samples=30
+```
+
+Committed evidence: [full generated comparison](results/2026-10-24-portable-cache/comparison.md),
+[machine-readable comparison](results/2026-10-24-portable-cache/comparison.json),
+baseline [1](results/2026-10-24-portable-cache/baseline-1.json) /
+[2](results/2026-10-24-portable-cache/baseline-2.json) /
+[3](results/2026-10-24-portable-cache/baseline-3.json), and candidate
+[1](results/2026-10-24-portable-cache/candidate-1.json) /
+[2](results/2026-10-24-portable-cache/candidate-2.json) /
+[3](results/2026-10-24-portable-cache/candidate-3.json).
+The same files are attached as artifact `backend-benchmark-40107515487`.
+
+## Complete authenticated application comparison
+
+[Hosted run 40201541935](https://github.com/MeltiplyOrg/meltiply/actions/runs/40201541935)
+compares master `9fc48ba30a13` with corrected PR `961073dbf3c1`.
+Three alternating blocks per revision each measure 30 samples after three
+warm-ups: 90 samples per workflow and revision, with signed JWT verification,
+live session/actor resolution, PostgreSQL/RLS, 300 Posts and 27,000 history rows.
+Fixture preparation is excluded. Both revisions receive the same harness.
+
+| Authenticated workflow                                 | Master p95 ms | Corrected PR p95 ms |  Change |
+| ------------------------------------------------------ | ------------: | ------------------: | ------: |
+| Complete Analytics dashboard and ranking               |       2923.09 |             2316.89 |  -20.7% |
+| Posts page, 100 rows                                   |         23.02 |               21.44 |   -6.9% |
+| Post detail                                            |         16.18 |               13.27 |  -18.0% |
+| Cold exact-range Analytics summary                     |         63.03 |               13.62 |  -78.4% |
+| Warm Analytics summary                                 |         19.44 |                9.47 |  -51.3% |
+| Twenty concurrent cold summaries, whole batch          |        166.12 |              132.55 |  -20.2% |
+| Calendar range                                         |         14.31 |               12.86 |  -10.1% |
+| Distribution page, 100 rows                            |         13.22 |               32.09 | +142.7% |
+| Twenty concurrent publishing requirements, whole batch |        215.57 |              214.28 |   -0.6% |
+
+**The regression corrections are measured, not inferred from statement counts.**
+Managed environments again reuse master's isolate pool policy. Standalone
+workerd selects request-owned pools explicitly and passes delivery plus replay.
+The [pool-only checkpoint](results/2026-10-25-pool-correction/comparison.md)
+still had an 11.2% slower Analytics p95.
+[Per-statement diagnosis](https://github.com/MeltiplyOrg/meltiply/actions/runs/40201029407)
+then measured per-Distribution latest-snapshot lookups at 492.66 ms for grouped
+breakdowns and 474.53 ms for ranking, versus master's set-based 28.29/23.36 ms.
+Restoring set-based cohort selection preserves exact as-of semantics and removes
+that regression. Accumulation still bounds scans to its largest 720-hour bucket
+and retains historical maxima through counter corrections.
+
+**Not every tail improved.** Distribution p50 improved 10.80 → 9.01 ms and
+application SQL fell 17 → 9 statements/request, but its pooled p95 worsened.
+Candidate block p95s were 44.93, 10.37 and 11.87 ms; the first block drives the
+regression. Its application statements peaked at 2.25 ms individually.
+[INFERENCE] Scheduling/runtime pauses may contribute, but this run does not
+identify the cause or establish a Distribution-tail improvement. Concurrent
+summary p99 also worsened 232.96 → 418.90 ms, and concurrent requirements p50
+worsened 2.2%. Ninety samples are insufficient for a strong p99 claim. Raw results
+retain these outcomes; no samples were discarded and no blanket speedup is claimed.
+
+Resource reduction is independently observable: the Analytics action averages
+10.5 rather than 18.5 application statements per HTTP request, with driver-observed
+DB time 1173.29 → 1046.35 ms/request. A twenty-request cold summary burst performs
+one aggregate, and a warm summary performs none. Twenty concurrent requirements
+share one controlled upstream read rather than twenty. Sequential requirements
+still revalidate upstream. Fresh authorization remains authoritative.
+
+The harness calls the API app in-process, not deployed Hyperdrive. Process CPU
+includes driver work; SQL timing includes scheduling. These are synthetic
+latency/work measurements, not production billing or currency savings. Browser
+reuse avoids entire authenticated reads and is verified separately.
+
+Reproduce:
+
+```sh
+gh workflow run backend-benchmark.yml --ref feat/58-portable-read-caching \
+  -f profile=application -f repetitions=3 -f samples=30
+```
+
+Preserved evidence: [full comparison](results/2026-10-25-final-correction/comparison.md),
+[machine-readable comparison](results/2026-10-25-final-correction/comparison.json),
+master raw [1](results/2026-10-25-final-correction/baseline-1.json) /
+[2](results/2026-10-25-final-correction/baseline-2.json) /
+[3](results/2026-10-25-final-correction/baseline-3.json), and corrected PR raw
+[1](results/2026-10-25-final-correction/candidate-1.json) /
+[2](results/2026-10-25-final-correction/candidate-2.json) /
+[3](results/2026-10-25-final-correction/candidate-3.json).
+
+Verification at the corrected source:
+
+- [CI 40201520482](https://github.com/MeltiplyOrg/meltiply/actions/runs/40201520482)
+  passed frontend formatting, types, bindings, zero-warning lint, coverage and
+  production builds; package/Worker types, tests and builds; contract and
+  PostgreSQL integration checks; production Compose smoke and TLS on amd64/arm64.
+  Real Chromium observed deletion reconciliation and publication progress, warm
+  navigation and Analytics Refresh at 1280/390 pixels in both palettes.
+- [Backend regression lane 40201402891](https://github.com/MeltiplyOrg/meltiply/actions/runs/40201402891)
+  passed authenticated query-budget, permission, historical Analytics and auth
+  tests, plus real workerd/PostgreSQL Queue delivery and replay.
+- Browser regression coverage includes sixty active Posts sharing one page read,
+  sparse detail polling, pending Load more, delayed deletion reconciliation,
+  Analytics invalidation, and clearing obsolete errors after work settles.
+- [Managed local workerd acceptance 40202936516](https://github.com/MeltiplyOrg/meltiply/actions/runs/40202936516)
+  passed `node scripts/benchmarks/backend/cache-runtime-check.mjs`, the controlled
+  Provider requirements driver, `bun run skills:check`, and `bun run docs:links`
+  (545 files, 1423 local links). The smoke now supplies canonical `APP_URL` so its
+  built frontend proxies to the owned local API instead of an absent deployed binding.
+  `npx --yes react-doctor@0.9.18 frontend/app --verbose --scope changed --base origin/master`
+  scored 91/100 with one pre-existing `transportStatus` export warning in
+  `providers.tsx`; that declaration is unchanged from master.
+
+## Initial authenticated application regression
+
+[Hosted run 40192060823](https://github.com/MeltiplyOrg/meltiply/actions/runs/40192060823)
+compares `master` at `451c0a224a63` with this PR at `ea52a6fa2640`.
+Unlike the earlier cache-only comparison, this run uses signed JWT verification,
+the live stored session and actor-resolution path, and real PostgreSQL/RLS.
+Both revisions run the same harness with 300 Posts and 90 snapshots per
+Distribution (27,000 history rows). Fixture preparation is outside measurement.
+One baseline/candidate block, three warm-ups and ten samples are an initial
+regression observation, not a statistically strong tail estimate.
+
+| Authenticated workflow                        | Master p95 ms | PR p95 ms | Master / PR application SQL statements per request |
+| --------------------------------------------- | ------------: | --------: | -------------------------------------------------: |
+| Posts page, 100 rows                          |         32.12 |    139.18 |                                            21 / 13 |
+| Cold exact-range Analytics summary            |         17.85 |    117.46 |                                            17 / 10 |
+| Twenty concurrent cold summaries, whole batch |        226.75 |   1535.01 |                                          17 / 9.05 |
+| Complete Analytics dashboard and ranking      |       3967.43 |   4328.44 |                                        18.5 / 10.5 |
+
+Work reduction is observable: warm summaries perform zero aggregate executions
+per request instead of one; a twenty-request cold burst performs 0.05 instead of
+one. Concurrent publishing-requirement reads average 0.07 upstream reads/request
+instead of one; sequential requirements still perform one fresh upstream read.
+Authorization remains authoritative on every request.
+
+**This pre-correction run exposed a real latency regression.** The candidate
+destroyed every checked-out driver client, including in managed environments
+where master reuses an isolate pool. Connection establishment and authentication
+were paid repeatedly. The correction restores master's managed pool policy,
+while standalone workerd explicitly selects `DATABASE_POOL_MODE=request` so
+sockets cannot cross its invocation boundaries. A hosted workerd delivery/replay
+smoke now verifies the standalone path. Driver-observed statement durations
+include scheduling, not PostgreSQL server CPU alone; this direct PostgreSQL
+harness is not deployed Hyperdrive and establishes no production latency,
+billing, or currency savings. The complete Analytics page also exceeded the
+documented latency target here; fewer statements alone did not establish a
+faster page. Raw evidence below preserves the original failure.
+
+Browser cache reuse is measured separately through real navigation: it avoids
+entire authenticated requests, whereas this benchmark intentionally sends each
+request. See the operational acceptance targets in the
+[infrastructure guide](../../infra/cloudflare/README.md#acceptance-targets-and-scaling-decisions).
+
+```sh
+gh workflow run backend-benchmark.yml --ref feat/58-portable-read-caching \
+  -f profile=application -f repetitions=1 -f samples=10
+```
+
+Preserved evidence: [generated comparison](results/2026-10-25-authenticated/comparison.md),
+[machine-readable comparison](results/2026-10-25-authenticated/comparison.json),
+[master raw run](results/2026-10-25-authenticated/baseline-1.json), and
+[PR raw run](results/2026-10-25-authenticated/candidate-1.json).
+
+## Implementation acceptance
+
+- [Hosted run 40193492485](https://github.com/MeltiplyOrg/meltiply/actions/runs/40193492485)
+  passed `bun run cloudflare:check`: contracts, real S3 signature acceptance,
+  type checks, zero-warning lint, dead-code checks, frontend/public builds and
+  tests, package/Worker tests, and PostgreSQL integration suites. The frontend
+  suite passed 523 tests.
+- The same run passed `node scripts/benchmarks/backend/cache-runtime-check.mjs`
+  against real workerd/PostgreSQL, including exact-range misses, warm reuse,
+  concurrent coalescing, bounded eviction, credential rotation, revocation, and
+  network disconnects. Actual Chromium navigation exercised Channels, Analytics
+  Refresh, and independent Post progress in both palettes at 1280/390 pixels.
+- [Hosted run 40192556048](https://github.com/MeltiplyOrg/meltiply/actions/runs/40192556048)
+  passed `bun run --filter @meltiply/automation-worker smoke:processor`,
+  including real native-engine restart and byte-identical replay. This proves
+  restart correctness in the fixture, not a deployed Container cold-start or
+  billing reduction.
+- React Doctor scored 91/100. Its sole diagnostic names the existing
+  `transportStatus` export in `frontend/app/src/app/providers.tsx`, unchanged
+  from master. No diagnostic configuration or lint baseline was weakened.
+- Four-axis review against `cd54fea` found two unique defects: a missing Post
+  could starve unrelated progress, and partial progress merges could postpone
+  collection membership refresh indefinitely. Both were fixed in `60c126b`;
+  real HTTP-adapter/QueryClient regression coverage passed all eight scenarios
+  in [run 40191580343](https://github.com/MeltiplyOrg/meltiply/actions/runs/40191580343).
+- [Hosted run 40194950426](https://github.com/MeltiplyOrg/meltiply/actions/runs/40194950426)
+  passed the complete automatic CI gate, including both exact-image Compose
+  deployments, browser warm-cache and visible publication-transition checks,
+  optional TLS ingress, crash recovery, and a full backup/restore into separate
+  fresh volumes on amd64 and arm64. See
+  [recovery measurements and limitations](../self-hosting.md#administration-and-recovery).

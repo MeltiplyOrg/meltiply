@@ -1,5 +1,6 @@
 import {
   keepPreviousData,
+  skipToken,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -9,6 +10,7 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { Cause, Effect, Exit } from "effect";
+import { useEffect, useState } from "react";
 
 import {
   ApiClientService,
@@ -20,12 +22,15 @@ import {
 } from "./effect";
 import { useMutationKeyTracker } from "./mutation-idempotency";
 import { analyticsRangeWindow } from "./analytics-range";
-import { pollingInterval } from "./query-defaults";
+import { ApiError } from "./api";
+import { pollingInterval, privateCacheRetentionMs, referenceFreshnessMs } from "./query-defaults";
 import type {
+  AnalyticsRangePreset,
   AnalyticsPostScopeParams,
   AnalyticsScopeParams,
   AuditQueryParams,
   CalendarQueryParams,
+  CalendarEvent,
   CreateBrandProfileInput,
   CreatePostInput,
   DistributionQueryParams,
@@ -90,6 +95,7 @@ function withBrandProfile<T extends object>(
 /** Cache identities for reads; assets() is only an invalidation prefix, not a library query. */
 export const queryKeys = {
   currentUser: () => ["current-user"] as const,
+  analytics: () => ["analytics"] as const,
   installation: () => ["installation"] as const,
   workspaceMembers: () => ["workspace-members"] as const,
   workspaceInvitations: () => ["workspace-invitations"] as const,
@@ -176,6 +182,7 @@ function brandProfileResourceInvalidations(): QueryKey[] {
     queryKeys.distributions(),
     queryKeys.calendar(),
     queryKeys.queues(),
+    queryKeys.analytics(),
   ];
 }
 
@@ -184,12 +191,18 @@ function brandProfileResourceInvalidations(): QueryKey[] {
  * the `posts` prefix, so one prefix covers both; attaching or detaching media
  * changes Asset status and attachment ownership (`assets`), while scheduling
  * moves independent per-Channel outcomes (`distributions`) and their calendar
- * projection. Keeping all four current after every Post mutation means a saved
- * draft, an attachment edit, or a publish never leaves a stale list row, a
- * stale processing status, or a stale calendar entry behind.
+ * projection. Analytics must also drop a cohort when a Post is deleted or its
+ * published caption/format changes. Refreshing these resources after a write
+ * prevents a warm browser cache from retaining the previous composition.
  */
 function postResourceInvalidations(): QueryKey[] {
-  return [queryKeys.posts(), queryKeys.distributions(), queryKeys.calendar(), queryKeys.assets()];
+  return [
+    queryKeys.posts(),
+    queryKeys.distributions(),
+    queryKeys.calendar(),
+    queryKeys.assets(),
+    queryKeys.analytics(),
+  ];
 }
 
 export const mutationInvalidations = {
@@ -202,10 +215,16 @@ export const mutationInvalidations = {
   disconnectPlatform: (id: string) => [
     queryKeys.platforms(),
     queryKeys.platformPublishingRequirements(id),
+    queryKeys.analytics(),
   ],
-  confirmOAuthSelection: () => [queryKeys.platforms()],
-  updateDistribution: () => [queryKeys.distributions(), queryKeys.calendar()],
-  retryDistribution: () => [queryKeys.distributions(), queryKeys.calendar()],
+  confirmOAuthSelection: () => [queryKeys.platforms(), queryKeys.analytics()],
+  updateDistribution: () => [
+    queryKeys.posts(),
+    queryKeys.distributions(),
+    queryKeys.calendar(),
+    queryKeys.analytics(),
+  ],
+  retryDistribution: () => [queryKeys.posts(), queryKeys.distributions(), queryKeys.calendar()],
   createBrandProfile: () => [queryKeys.brandProfiles()],
   updateBrandProfile: () => [queryKeys.brandProfiles()],
   deleteBrandProfile: () => [
@@ -227,13 +246,23 @@ export const mutationInvalidations = {
 } satisfies Record<string, (...args: string[]) => QueryKey[]>;
 
 /**
- * Invalidates a list of TanStack Query keys concurrently.
+ * Invalidates resource prefixes; Analytics advances its shared window before
+ * dependent reads run, avoiding refetching both old and new cohorts.
  *
  * @param queryClient The active TanStack QueryClient.
  * @param keys Array of query keys to invalidate.
  */
 export async function invalidateQueryKeys(queryClient: QueryClient, keys: QueryKey[]) {
-  await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+  await Promise.all(
+    keys.map(async (queryKey) => {
+      if (queryKey.length === 1 && queryKey[0] === "analytics") {
+        await queryClient.invalidateQueries({ queryKey, refetchType: "none" });
+        await queryClient.refetchQueries({ queryKey: ["analytics", "window"], type: "active" });
+      } else {
+        await queryClient.invalidateQueries({ queryKey });
+      }
+    }),
+  );
 }
 
 /**
@@ -296,6 +325,10 @@ export function useCurrentUser(scope: SessionScope) {
  * TanStack query hook listing the active Brand Profiles in the workspace.
  * Brand Profiles are workspace-scoped, not profile-scoped, so this query never
  * merges `brand_profile_id`.
+ * Reuses successful data for five minutes and retains inactive reads for
+ * thirty minutes in the identity/Workspace-scoped browser cache. Profile
+ * mutations invalidate it immediately; other members' edits appear on refresh
+ * or the next stale read.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
  * @returns Query result containing array of BrandProfile records.
@@ -310,6 +343,8 @@ export function useBrandProfiles(scope: SessionScope) {
         signal,
       ),
     enabled: scope.isSignedIn,
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
   });
 }
 
@@ -380,11 +415,263 @@ function selectPostPages(data: InfiniteData<PostListResponse, number>): Post[] {
   return [...posts.values()];
 }
 
+/** Advances eligibility for scheduled work without issuing network reads before its due instant. */
+function useDueWorkClock(hasScheduled: boolean): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!hasScheduled) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 10_000);
+    return () => window.clearInterval(timer);
+  }, [hasScheduled]);
+  return now;
+}
+
+/**
+ * Reads independent progress details with four-request concurrency. Missing
+ * identities are removed from loaded projections; other failures retain their
+ * last known data and surface through the collection while the next poll retries.
+ * Cancellation still propagates instead of producing a partial successful read.
+ */
+function readProgressDetails<A>(
+  ids: readonly string[],
+  read: (id: string) => Effect.Effect<A, ApiClientError, WorkspaceService>,
+) {
+  return Effect.gen(function* () {
+    const exits = yield* Effect.forEach(ids, (id) => Effect.exit(read(id)), { concurrency: 4 });
+    const values: A[] = [];
+    const missing = new Set<string>();
+    let error: Error | null = null;
+    for (const [index, exit] of exits.entries()) {
+      if (Exit.isSuccess(exit)) values.push(exit.value);
+      else {
+        if (Cause.hasInterrupts(exit.cause)) return yield* Effect.failCause(exit.cause);
+        const failure = Cause.squash(exit.cause);
+        if (failure instanceof ApiError && failure.status === 404) missing.add(ids[index]!);
+        else error ??= failure instanceof Error ? failure : new Error("Progress read failed");
+      }
+    }
+    return { values, missing, error };
+  });
+}
+
+/**
+ * Keeps draft revisions and independent outcome/Asset timestamps monotonic when
+ * an older progress read races a save or a newer detail read. Equal revisions
+ * may still contain newer background work; a later poll reconciles the whole
+ * server projection rather than inventing a partially merged Post.
+ */
+function newestPost(previous: Post | undefined, received: Post): Post {
+  if (!previous) return received;
+  if (previous.revision !== received.revision)
+    return previous.revision > received.revision ? previous : received;
+  if (Date.parse(previous.updated_at) > Date.parse(received.updated_at)) return previous;
+  if (
+    previous.distributions.some((old) =>
+      received.distributions.some(
+        (next) => old.id === next.id && Date.parse(old.updated_at) > Date.parse(next.updated_at),
+      ),
+    )
+  )
+    return previous;
+  if (
+    previous.attachments.some((old) =>
+      received.attachments.some(
+        (next) =>
+          old.asset_id === next.asset_id &&
+          Date.parse(old.asset.updated_at) > Date.parse(next.asset.updated_at),
+      ),
+    )
+  )
+    return previous;
+  return received;
+}
+
+/**
+ * Refreshes loaded Posts with active work, choosing individual details or one
+ * batched page refresh based on request count. When active identities outnumber
+ * loaded pages, a single invalidation refreshes the authoritative page chain
+ * instead of issuing more detail requests than list requests. Future scheduled
+ * work becomes eligible at its due instant; settled rows never trigger polling.
+ * Detail results preserve page order, remove missing rows, and surface partial
+ * failures. Newer revisions win over delayed reads; publication transitions
+ * invalidate Analytics and update loaded calendar projections.
+ */
+function usePostProgress(scope: SessionScope, posts: readonly Post[], collectionKey: QueryKey) {
+  const queryClient = useQueryClient();
+  const pageCount =
+    queryClient.getQueryData<InfiniteData<PostListResponse, number>>(collectionKey)?.pages.length ??
+    0;
+  const hasScheduled = posts.some((post) =>
+    post.distributions.some((distribution) => distribution.status === "scheduled"),
+  );
+  const now = useDueWorkClock(hasScheduled);
+  const ids = posts
+    .filter(
+      (post) =>
+        pollingInterval(post) !== false ||
+        post.distributions.some(
+          (distribution) =>
+            distribution.status === "scheduled" &&
+            distribution.scheduled_at !== null &&
+            Date.parse(distribution.scheduled_at) <= now,
+        ),
+    )
+    .map((post) => post.id)
+    .sort();
+  const progress = useQuery({
+    queryKey: ["post-progress", collectionKey],
+    queryFn: async ({
+      signal,
+    }): Promise<{ values: Post[]; missing: Set<string>; error: Error | null }> => {
+      if (ids.length > pageCount) {
+        // A progress tick must not cancel or replace a user's pending Load more.
+        if (queryClient.getQueryState(collectionKey)?.fetchStatus === "fetching")
+          return { values: [], missing: new Set<string>(), error: null };
+        await queryClient.invalidateQueries(
+          { queryKey: collectionKey, exact: true, refetchType: "active" },
+          { throwOnError: true, cancelRefetch: false },
+        );
+        const refreshed =
+          queryClient.getQueryData<InfiniteData<PostListResponse, number>>(collectionKey);
+        const activeIds = new Set(ids);
+        const values =
+          refreshed?.pages.flatMap((page) => page.posts).filter((post) => activeIds.has(post.id)) ??
+          [];
+        const receivedIds = new Set(values.map((post) => post.id));
+        // Absence from a filtered/offset page is not proof of deletion.
+        const absent = ids.filter((id) => !receivedIds.has(id));
+        const details =
+          absent.length > 0
+            ? await runApiQuery(
+                scope,
+                (api) => readProgressDetails(absent, (id) => api.getPost(id)),
+                signal,
+              )
+            : { values: [], missing: new Set<string>(), error: null };
+        values.push(...details.values);
+        if (
+          values.some((next) =>
+            next.distributions.some(
+              (distribution) =>
+                distribution.status === "published" &&
+                posts.some(
+                  (previous) =>
+                    previous.id === next.id &&
+                    previous.distributions.some(
+                      (old) => old.id === distribution.id && old.status !== "published",
+                    ),
+                ),
+            ),
+          )
+        )
+          void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
+        return { values, missing: details.missing, error: details.error };
+      }
+      return runApiQuery(scope, (api) => readProgressDetails(ids, (id) => api.getPost(id)), signal);
+    },
+    enabled: scope.isSignedIn && ids.length > 0,
+    refetchInterval: 10_000,
+    staleTime: 10_000,
+    gcTime: 0,
+  });
+  useEffect(() => {
+    if (!progress.data) return;
+    const { missing } = progress.data;
+    const replacements = new Map(progress.data.values.map((post) => [post.id, post]));
+    const collections = {
+      queryKey: queryKeys.posts(),
+      predicate: (query: { queryKey: QueryKey }) =>
+        query.queryKey.includes("pages") || query.queryKey.includes("queue-calendar"),
+    };
+    let published = false;
+    for (const [, snapshot] of queryClient.getQueriesData<InfiniteData<PostListResponse, number>>(
+      collections,
+    )) {
+      for (const page of snapshot?.pages ?? []) {
+        for (const previous of page.posts) {
+          const received = replacements.get(previous.id);
+          if (!received) continue;
+          const next = newestPost(previous, received);
+          replacements.set(next.id, next);
+          published ||= next.distributions.some(
+            (distribution) =>
+              distribution.status === "published" &&
+              previous.distributions.find((old) => old.id === distribution.id)?.status !==
+                "published",
+          );
+        }
+      }
+    }
+    for (const [id, post] of replacements) {
+      replacements.set(id, newestPost(queryClient.getQueryData<Post>(queryKeys.post(id)), post));
+    }
+    for (const [key, previous] of queryClient.getQueriesData<
+      InfiniteData<PostListResponse, number>
+    >(collections)) {
+      if (
+        !previous?.pages.some((page) =>
+          page.posts.some((post) => replacements.has(post.id) || missing.has(post.id)),
+        )
+      )
+        continue;
+      queryClient.setQueryData(
+        key,
+        {
+          ...previous,
+          pages: previous.pages.map((page) => ({
+            ...page,
+            posts: page.posts
+              .filter((post) => !missing.has(post.id))
+              .map((post) => replacements.get(post.id) ?? post),
+          })),
+        },
+        { updatedAt: queryClient.getQueryState(key)?.dataUpdatedAt },
+      );
+    }
+    for (const id of missing)
+      queryClient.removeQueries({ queryKey: queryKeys.post(id), exact: true });
+    for (const post of replacements.values())
+      queryClient.setQueryData(queryKeys.post(post.id), post);
+    const outcomes = new Map(
+      [...replacements.values()].flatMap((post) =>
+        post.distributions.map((distribution) => [distribution.id, distribution] as const),
+      ),
+    );
+    for (const [key, previous] of queryClient.getQueriesData<CalendarEvent[]>({
+      queryKey: queryKeys.calendar(),
+    })) {
+      if (!previous?.some((event) => outcomes.has(event.id) || missing.has(event.post_id)))
+        continue;
+      queryClient.setQueryData(
+        key,
+        previous
+          .filter((event) => !missing.has(event.post_id))
+          .map((event) => {
+            const outcome = outcomes.get(event.id);
+            if (!outcome || Date.parse(outcome.updated_at) < Date.parse(event.updated_at))
+              return event;
+            return {
+              ...event,
+              status: outcome.status,
+              scheduled_at: outcome.scheduled_at,
+              published_at: outcome.published_at,
+              updated_at: outcome.updated_at,
+            };
+          }),
+        { updatedAt: queryClient.getQueryState(key)?.dataUpdatedAt },
+      );
+    }
+    if (published) void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
+  }, [progress.data, queryClient]);
+  return ids.length > 0 ? (progress.error ?? progress.data?.error ?? null) : null;
+}
+
 /**
  * Caches explicit 60-Post pages in the workspace's browser QueryClient.
  * Only the first page loads automatically; further reads require fetchNextPage.
  * Filters have independent caches, inactive pages survive route navigation for
- * 30 minutes, and stale reads/mutations and active-state polling refresh data.
+ * 30 minutes. Stale reads and mutations refresh pages; active progress uses
+ * details when sparse and one batched page refresh when denser than the cache.
  * The workspace/auth provider discards the cache when its identity changes;
  * Post content is not persisted to localStorage or IndexedDB.
  *
@@ -394,8 +681,9 @@ function selectPostPages(data: InfiniteData<PostListResponse, number>): Post[] {
  */
 export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "limit" | "offset">) {
   const scopedParams = withBrandProfile(scope, params);
-  return useInfiniteQuery({
-    queryKey: [...queryKeys.posts(scopedParams), "pages", POSTS_PAGE_SIZE],
+  const collectionKey = [...queryKeys.posts(scopedParams), "pages", POSTS_PAGE_SIZE] as const;
+  const query = useInfiniteQuery({
+    queryKey: collectionKey,
     initialPageParam: 0,
     queryFn: ({ signal, pageParam }) =>
       runApiQuery(
@@ -408,9 +696,10 @@ export function usePosts(scope: SessionScope, params?: Omit<PostQueryParams, "li
     select: selectPostPages,
     gcTime: 30 * 60_000,
     staleTime: 60_000,
-    refetchInterval: (query) => pollingInterval(query.state.data),
     enabled: scope.isSignedIn,
   });
+  const progressError = usePostProgress(scope, query.data ?? [], collectionKey);
+  return { ...query, error: query.error ?? progressError };
 }
 
 /**
@@ -638,10 +927,11 @@ export function useQueues(scope: SessionScope, brandProfileId: string | null, en
   });
 }
 
-/** Pages only one Queue's bounded calendar window. Consumers drain pages before declaring the window complete; Post-prefix invalidation refreshes reservations after removal/scheduling, and 30-second polling follows due work even before its first transition. */
+/** Pages a Queue's bounded window; sparse progress uses details and dense progress refreshes its loaded pages once. */
 export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryParams) {
-  return useInfiniteQuery({
-    queryKey: [...queryKeys.posts(params), "queue-calendar"],
+  const collectionKey = [...queryKeys.posts(params), "queue-calendar"] as const;
+  const query = useInfiniteQuery({
+    queryKey: collectionKey,
     initialPageParam: 0,
     queryFn: ({ pageParam, signal }) =>
       runApiQuery(
@@ -650,9 +940,14 @@ export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryPara
         signal,
       ),
     getNextPageParam: (page) => (page.has_more ? page.offset + page.limit : undefined),
-    refetchInterval: 30_000,
     enabled: scope.isSignedIn,
   });
+  const progressError = usePostProgress(
+    scope,
+    query.data?.pages.flatMap((page) => page.posts) ?? [],
+    collectionKey,
+  );
+  return { ...query, error: query.error ?? progressError };
 }
 
 /** Creates a recurring plan with the shared stable-key mutation lifecycle. */
@@ -740,6 +1035,8 @@ export function useAssetPreviewUrl(scope: SessionScope, id: string, enabled = tr
  * while the replacement streams prevents a selected filter from blanking the
  * Channels toolbar and main view; the normal loading skeleton is therefore
  * reserved for the first account fetch.
+ * Successful reads remain fresh for five minutes and survive inactive route
+ * navigation for thirty minutes; account mutations still invalidate them.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
  * @param options `enabled` gates the query; `brandProfileId` overrides the scope selection.
@@ -763,11 +1060,23 @@ export function usePlatforms(
       ),
     placeholderData: keepPreviousData,
     enabled: scope.isSignedIn && enabled,
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
   });
 }
 
 /**
  * TanStack query hook for platform capabilities specifications across all providers.
+ *
+ * Deployment-defined capabilities are static for the lifetime of one
+ * identity/Workspace-scoped QueryClient, so this single bounded query alone
+ * keeps successful data fresh and retained indefinitely. Mount, focus,
+ * reconnect, and time-based refetches therefore reuse the successful result
+ * instead of calling the API again; replacing the scoped client (sign-out or
+ * identity/Workspace switch) starts empty and loads fresh. Results stay in
+ * browser memory only, and account mutations intentionally do not invalidate
+ * them. General query defaults and dynamic publishing-requirement freshness
+ * remain unchanged.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
  * @returns Query result containing array of PlatformCapability records.
@@ -782,6 +1091,8 @@ export function usePlatformCapabilities(scope: SessionScope) {
         signal,
       ),
     enabled: scope.isSignedIn,
+    staleTime: Infinity,
+    gcTime: Infinity,
   });
 }
 
@@ -929,8 +1240,105 @@ export function useCancelDistribution(scope: SessionScope) {
 }
 
 /**
- * TanStack query hook for calendar events within a specified date window.
- * Polling active when events include in-flight distributions.
+ * Tracks active or due Distribution identities in a loaded Calendar range.
+ * A single active outcome uses a detail read; multiple active outcomes refresh
+ * the bounded range once rather than fan out one detail request per event.
+ * Sparse detail results preserve range membership and settled rows; newer
+ * timestamps win over delayed reads. Publication invalidates Analytics once.
+ */
+function useCalendarProgress(
+  scope: SessionScope,
+  events: readonly CalendarEvent[],
+  collectionKey: QueryKey,
+) {
+  const queryClient = useQueryClient();
+  const now = useDueWorkClock(events.some((event) => event.status === "scheduled"));
+  const ids = events
+    .filter(
+      (event) =>
+        pollingInterval(event) !== false ||
+        (event.status === "scheduled" &&
+          event.scheduled_at !== null &&
+          Date.parse(event.scheduled_at) <= now),
+    )
+    .map((event) => event.id)
+    .sort();
+  const progress = useQuery({
+    queryKey: ["calendar-progress", collectionKey],
+    queryFn: async ({ signal }) => {
+      if (ids.length > 1) {
+        await queryClient.invalidateQueries(
+          { queryKey: collectionKey, exact: true, refetchType: "active" },
+          { throwOnError: true },
+        );
+        const refreshed = queryClient.getQueryData<CalendarEvent[]>(collectionKey) ?? [];
+        if (
+          events.some((previous) =>
+            refreshed.some((next) => next.id === previous.id && next.status !== previous.status),
+          )
+        ) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.posts(), refetchType: "none" });
+          void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
+        }
+        return { values: [], missing: new Set<string>(), error: null };
+      }
+      return runApiQuery(
+        scope,
+        (api) => readProgressDetails(ids, (id) => api.getDistribution(id)),
+        signal,
+      );
+    },
+    enabled: scope.isSignedIn && ids.length > 0,
+    refetchInterval: 10_000,
+    staleTime: 10_000,
+    gcTime: 0,
+  });
+  useEffect(() => {
+    if (!progress.data) return;
+    const { missing } = progress.data;
+    const replacements = new Map(
+      progress.data.values.map((distribution) => [distribution.id, distribution]),
+    );
+    let published = false;
+    let changed = false;
+    for (const [key, previous] of queryClient.getQueriesData<CalendarEvent[]>({
+      queryKey: queryKeys.calendar(),
+    })) {
+      if (!previous?.some((event) => replacements.has(event.id) || missing.has(event.id))) continue;
+      queryClient.setQueryData(
+        key,
+        previous
+          .filter((event) => !missing.has(event.id))
+          .map((event) => {
+            const replacement = replacements.get(event.id);
+            if (!replacement || Date.parse(replacement.updated_at) < Date.parse(event.updated_at))
+              return event;
+            if (replacement.status !== event.status) {
+              changed = true;
+              published ||= replacement.status === "published";
+            }
+            return {
+              ...event,
+              status: replacement.status,
+              scheduled_at: replacement.scheduled_at,
+              published_at: replacement.published_at,
+              updated_at: replacement.updated_at,
+            };
+          }),
+        { updatedAt: queryClient.getQueryState(key)?.dataUpdatedAt },
+      );
+    }
+    if (changed)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.posts(), refetchType: "none" });
+    if (published) void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
+  }, [progress.data, queryClient]);
+  return ids.length > 0 ? (progress.error ?? progress.data?.error ?? null) : null;
+}
+
+/**
+ * TanStack query hook for Calendar events within a specified date window.
+ * One active event uses a Distribution detail read; multiple active events
+ * trigger one batched range refresh. Settled events never cause periodic reads.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace;
  *   its active Brand Profile is merged into params as `brand_profile_id`.
@@ -939,8 +1347,9 @@ export function useCancelDistribution(scope: SessionScope) {
  */
 export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
   const scopedParams = params ? withBrandProfile(scope, params) : undefined;
-  return useQuery({
-    queryKey: queryKeys.calendar(scopedParams),
+  const collectionKey = queryKeys.calendar(scopedParams);
+  const query = useQuery({
+    queryKey: collectionKey,
     queryFn: ({ signal }) => {
       if (!scopedParams) return Promise.resolve([]);
       return runApiQuery(
@@ -949,9 +1358,10 @@ export function useCalendar(scope: SessionScope, params?: CalendarQueryParams) {
         signal,
       );
     },
-    refetchInterval: (query) => pollingInterval(query.state.data),
     enabled: scope.isSignedIn && Boolean(scopedParams),
   });
+  const progressError = useCalendarProgress(scope, query.data ?? [], collectionKey);
+  return { ...query, error: query.error ?? progressError };
 }
 
 /**
@@ -971,14 +1381,35 @@ export function useInstallation(scope: SessionScope, workspaceId: string, enable
 }
 
 /**
+ * Shares one exact rolling cohort across dashboard and ranked reads in the
+ * current browser QueryClient. All mounted Analytics consumers observe this
+ * snapshot, so changing a metric cannot silently advance only half the page.
+ * Five-minute freshness controls navigation/focus reuse. Invalidation advances
+ * every read together; a generation also distinguishes refreshes under a
+ * frozen or coarse clock. Exact API instants are never rounded.
+ */
+function useAnalyticsWindow(scope: SessionScope, range: AnalyticsRangePreset) {
+  return useQuery({
+    queryKey: ["analytics", "window", range],
+    queryFn: () => ({ ...analyticsRangeWindow(range), generation: crypto.randomUUID() }),
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
+    enabled: scope.isSignedIn,
+  });
+}
+
+/**
  * Reads the dashboard's daily series, best-time cells, format and platform
  * breakdowns, follower history, and engagement accumulation for one cohort.
+ * Successful reads stay fresh for five minutes in browser memory; ranked
+ * reads share the same exact window and explicit Refresh advances both.
  *
  * @param scope Session scope: signed-in gate, Workspace, and Brand Profile.
  * @param params Range preset plus optional Platform, account, and format filters.
  * @returns TanStack query carrying the dashboard aggregates.
  */
 export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScopeParams) {
+  const window = useAnalyticsWindow(scope, params.range).data;
   const scopedParams = withBrandProfile(scope, {
     account_id: params.account_id,
     format: params.format,
@@ -986,16 +1417,23 @@ export function useAnalyticsDashboard(scope: SessionScope, params: AnalyticsScop
   });
   const keyParams = { ...scopedParams, range: params.range };
   return useQuery({
-    queryKey: queryKeys.analyticsDashboard(keyParams),
-    queryFn: ({ signal }) =>
-      runApiQuery(
-        scope,
-        (api) =>
-          api.getAnalyticsDashboard({ ...scopedParams, ...analyticsRangeWindow(params.range) }),
-        signal,
-      ),
-    placeholderData: keepPreviousData,
-    staleTime: 60 * 1_000,
+    queryKey: [...queryKeys.analyticsDashboard(keyParams), window?.generation],
+    queryFn: window
+      ? ({ signal }) =>
+          runApiQuery(
+            scope,
+            (api) =>
+              api.getAnalyticsDashboard({ ...scopedParams, start: window.start, end: window.end }),
+            signal,
+          )
+      : skipToken,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey.at(-1) === window?.generation ? previous : undefined,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
     enabled: scope.isSignedIn,
   });
 }
@@ -1041,9 +1479,9 @@ export function useWorkspaceMembers(scope: SessionScope, workspaceId: string, en
 /**
  * Reads the ranked per-Post analytics rows for the same cohort.
  *
- * Limit, metric, and offset participate in the cache key; the rolling window
- * is recomputed inside the query function. Keeping previous data avoids
- * collapsing the table while Load more or a metric switch refetches the top N.
+ * Limit, metric, and offset participate in the cache key; dashboard and ranked
+ * reads reuse one exact five-minute browser cohort. Keeping previous data
+ * avoids collapsing the table while Load more or a metric switch fetches.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId`
  *   selects the Workspace, and `brandProfileId` selects the profile scope.
@@ -1052,6 +1490,7 @@ export function useWorkspaceMembers(scope: SessionScope, workspaceId: string, en
  * @returns Query result with the ranked Posts and pagination metadata.
  */
 export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScopeParams) {
+  const window = useAnalyticsWindow(scope, params.range).data;
   const { range, ...filters } = params;
   const scopedParams = withBrandProfile(scope, filters);
   const keyParams: AnalyticsPostScopeParams = {
@@ -1065,15 +1504,23 @@ export function useAnalyticsPosts(scope: SessionScope, params: AnalyticsPostScop
     range,
   };
   return useQuery({
-    queryKey: queryKeys.analyticsPosts(keyParams),
-    queryFn: ({ signal }) =>
-      runApiQuery(
-        scope,
-        (api) => api.getAnalyticsPosts({ ...scopedParams, ...analyticsRangeWindow(range) }),
-        signal,
-      ),
-    placeholderData: keepPreviousData,
-    staleTime: 60 * 1_000,
+    queryKey: [...queryKeys.analyticsPosts(keyParams), window?.generation],
+    queryFn: window
+      ? ({ signal }) =>
+          runApiQuery(
+            scope,
+            (api) =>
+              api.getAnalyticsPosts({ ...scopedParams, start: window.start, end: window.end }),
+            signal,
+          )
+      : skipToken,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey.at(-1) === window?.generation ? previous : undefined,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: referenceFreshnessMs,
+    gcTime: privateCacheRetentionMs,
     enabled: scope.isSignedIn,
   });
 }

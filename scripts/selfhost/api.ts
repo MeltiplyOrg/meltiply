@@ -60,9 +60,9 @@ const app = createApiApp({
 });
 
 export default {
-  /** Retains production binding validation and the canonical API app, changing only operator token verification. */
+  /** Validates bindings and scopes database/auth adapters to this invocation; only operator verification differs from managed Workers. */
   fetch(request: Request, env: SelfhostEnv, ctx: ExecutionContext) {
     validateProductionBindings(env);
-    return app.fetch(request, env, ctx);
+    return app.fetch(request, { ...env }, ctx);
   },
 };

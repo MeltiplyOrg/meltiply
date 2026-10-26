@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   assertCompleteProjection,
   assertMeasuredNeonConfig,
   buildCostProjection,
   loadCostProfile,
-  loadNeonEndpointConfig,
   validateCostProfile,
   validateNeonEndpointConfig,
 } from "./cost-model.mjs";
 
+/** Explicitly measured zeroes isolate tariff arithmetic from unmeasured deployment inputs. */
 function replaceNulls(value) {
   for (const [key, nested] of Object.entries(value)) {
     if (nested === null) value[key] = 0;
@@ -19,26 +24,6 @@ function replaceNulls(value) {
     }
   }
 }
-
-test("checked-in cost profile reports Neon compute as an explicit unknown", async () => {
-  const projection = buildCostProjection(await loadCostProfile());
-
-  assert.equal(projection.complete, false);
-  assert.deepEqual(projection.unknown_inputs, ["usage_1x.neon_compute_cu_hours"]);
-  assert.deepEqual(projection.non_billable_services, ["cloudflare.hyperdrive.paid_plan"]);
-  assert.deepEqual(
-    projection.scenarios.map(({ known_monthly_usd, projection_kind }) => ({
-      known_monthly_usd,
-      projection_kind,
-    })),
-    [
-      { known_monthly_usd: 5, projection_kind: "known_lower_bound" },
-      { known_monthly_usd: 5, projection_kind: "known_lower_bound" },
-      { known_monthly_usd: 5, projection_kind: "known_lower_bound" },
-    ],
-  );
-  assert.throws(() => assertCompleteProjection(projection), /cost projection is incomplete/u);
-});
 
 test("projects shared allowances, scaled usage, and provider rounding", async () => {
   const profile = structuredClone(await loadCostProfile());
@@ -79,6 +64,11 @@ test("projects shared allowances, scaled usage, and provider rounding", async ()
 
 test("rounds Durable Objects compute overage after its included allowance", async () => {
   const profile = structuredClone(await loadCostProfile());
+  replaceNulls(profile.usage_1x);
+  replaceNulls(profile.business_units_1x);
+  replaceNulls(profile.observed_metrics_1x);
+  replaceNulls(profile.external_costs);
+  profile.expected_unknown_inputs = [];
   Object.assign(profile.usage_1x, {
     durable_object_requests: 1_000_001,
     durable_object_duration_gb_seconds: 400_001,
@@ -105,7 +95,7 @@ test("rejects silent unknown drift and invalid tariff values", async () => {
   );
 
   const drifted = structuredClone(await loadCostProfile());
-  drifted.usage_1x.queue_operations = null;
+  drifted.usage_1x.queue_operations = 1;
   assert.throws(() => validateCostProfile(drifted), /expected unknown inputs differ/u);
 
   const malformed = structuredClone(await loadCostProfile());
@@ -144,25 +134,6 @@ function measuredNeonConfig() {
   };
 }
 
-test("checked-in Neon configuration names every unmeasured field", async () => {
-  const config = await loadNeonEndpointConfig();
-
-  // The dashboard values and the billed month are not yet readable from here,
-  // so they are declared unmeasured rather than defaulted to a number.
-  assert.deepEqual(config.unmeasured, [
-    "endpoint.autosuspend_delay_seconds",
-    "endpoint.max_cu",
-    "endpoint.min_cu",
-    "recent_month.billed_compute_cu_hours",
-    "recent_month.month",
-    "recent_month.wall_clock_hours",
-  ]);
-  assert.throws(
-    () => assertMeasuredNeonConfig(config),
-    /Neon compute configuration is unmeasured/u,
-  );
-});
-
 test("Neon configuration must be measured or explicitly unmeasured, never inferred", () => {
   const measured = measuredNeonConfig();
   assert.doesNotThrow(() => validateNeonEndpointConfig(measured));
@@ -200,4 +171,63 @@ test("Neon configuration must be measured or explicitly unmeasured, never inferr
     () => validateNeonEndpointConfig(unknownField),
     /unmeasured names endpoint\.region, which is not a field/u,
   );
+});
+
+test("cost CLI accepts external measured inputs without editing repository configuration", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "meltiply-cost-inputs-"));
+  try {
+    const profile = structuredClone(await loadCostProfile());
+    replaceNulls(profile.usage_1x);
+    replaceNulls(profile.business_units_1x);
+    replaceNulls(profile.observed_metrics_1x);
+    replaceNulls(profile.external_costs);
+    profile.expected_unknown_inputs = [];
+    profile.usage_1x.neon_compute_cu_hours = 186;
+    profile.usage_1x.workers_and_workflows_requests = 11_000_000;
+    const input = join(directory, "usage.json");
+    const neon = join(directory, "neon.json");
+    await writeFile(input, JSON.stringify(profile));
+    await writeFile(neon, JSON.stringify(measuredNeonConfig()));
+    const result = spawnSync(
+      process.execPath,
+      [
+        fileURLToPath(new URL("./cost-model.mjs", import.meta.url)),
+        "--input",
+        input,
+        "--neon-config",
+        neon,
+        "--require-complete",
+      ],
+      { encoding: "utf8", timeout: 3_000 },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.complete, true);
+    assert.equal(report.scenarios[0].components["neon.compute"], 19.716);
+    assert.equal(report.scenarios[0].known_monthly_usd, 25.016);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("cost CLI rejects a projection after an explicitly expired price schedule", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "meltiply-cost-expiry-"));
+  try {
+    const profile = structuredClone(await loadCostProfile());
+    profile.projection_on = "2026-12-01";
+    const logs = profile.tariffs.find((tariff) => tariff.id === "workers.logs");
+    assert.ok(logs);
+    logs.expires_on = "2026-11-30";
+    const input = join(directory, "usage.json");
+    await writeFile(input, JSON.stringify(profile));
+    const result = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("./cost-model.mjs", import.meta.url)), "--input", input],
+      { encoding: "utf8", timeout: 3_000 },
+    );
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, "");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

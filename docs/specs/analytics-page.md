@@ -76,6 +76,15 @@ Contract change: approved in conversation on 2026-10-19
 > Channels. Expiring accounts wait for token refresh. Publishing does not require
 > optional TikTok or YouTube analytics consent, and stored scopes reflect actual
 > explicit grants. Facebook Page likes are not recorded as following.
+>
+> Read-cache revision (2026-10-24): only `GET /api/v1/analytics` summary data may
+> reuse a successful result for an absolute 30 seconds. Every hit still checks
+> authorization and active Brand Profile lifecycle generations under tenant RLS;
+> deletion/restoration handled by another API instance changes the cache identity.
+> Hits preserve the exact requested range and stored last-synced timestamp.
+> Ordinary snapshot/publication writes may remain invisible until expiry.
+> `/analytics/dashboard`, Post details, and Distribution histories are unchanged;
+> the dashboard page's combined cohort request does not inherit this cache.
 
 ## 1. Summary
 

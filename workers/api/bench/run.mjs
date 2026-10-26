@@ -15,18 +15,24 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
+import { generateKeyPairSync, sign } from "node:crypto";
+import { createServer } from "node:http";
 
 import { configureLogSampling } from "@meltiply/observability";
 import { createStorageServiceTest } from "@meltiply/storage";
 import { createThreadsAdapter, ProviderRegistry } from "@meltiply/providers";
+import { TokenCipher } from "@meltiply/secrets";
 import { Effect } from "effect";
 import pg from "pg";
 
 import { createApiApp } from "../src/app.ts";
 import { createAssetApiService } from "../src/asset-service.ts";
-import { authenticatedPoolFor } from "../src/database.ts";
 import { createCoreApiService } from "../src/core-service.ts";
 import { createPostApiService } from "../src/post-service.ts";
+import { activeIdentity } from "../src/auth-policy.ts";
+import { jwtVerifierFor } from "../src/verifier-cache.ts";
 import {
   cleanup,
   cleanupDeleteBatches,
@@ -38,6 +44,14 @@ import {
   seedDeleteBatch,
 } from "./fixtures.mjs";
 
+// A broken callback/transport must fail the experiment, not bill a hosted
+// runner until its workflow deadline. Normal measured work clears this timer.
+const watchdog = setTimeout(() => {
+  process.stderr.write("Benchmark exceeded its 15-minute experiment deadline\\n");
+  process.exit(1);
+}, 15 * 60_000);
+watchdog.unref();
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const authenticatedUrl = requiredEnv("BENCHMARK_DATABASE_AUTHENTICATED_URL");
 const systemUrl = requiredEnv("BENCHMARK_DATABASE_SYSTEM_URL");
@@ -46,6 +60,9 @@ const outputFile = resolve(
   process.env.BENCHMARK_OUTPUT_FILE ?? "benchmark-results/benchmark.json",
 );
 const label = process.env.BENCHMARK_LABEL ?? "benchmark";
+const profile = process.env.BENCHMARK_PROFILE ?? "application";
+if (!["all", "read-cache", "application"].includes(profile))
+  throw new TypeError("Unknown BENCHMARK_PROFILE");
 const warmupSamples = integerEnv("BENCHMARK_WARMUP", 3, 0, 100);
 const measuredSamples = integerEnv("BENCHMARK_SAMPLES", 20, 1, 1_000);
 if (warmupSamples + measuredSamples > dataset.schedulePosts) {
@@ -122,69 +139,107 @@ function statementKind(text) {
 const capture = { queries: [] };
 const instrumentedClients = new WeakSet();
 
-/** Wraps every pooled client's query method so statements and timings are recorded. */
+/**
+ * Observes both pg checkout overloads without changing their completion
+ * contract. Pool.query uses callback checkout/query; transactions use Promises.
+ * Every completed statement is counted once, including failed statements;
+ * parameters, credentials and JWTs are never captured. Installed on the Pool
+ * prototype before requests so invocation-owned adapters are observed too.
+ */
 function instrumentPool(pool) {
-  const mutable = pool;
-  const originalConnect = mutable.connect.bind(pool);
-  mutable.connect = async (...args) => {
-    const client = await originalConnect(...args);
+  const originalConnect = pool.connect;
+  const instrumentClient = (client) => {
     if (instrumentedClients.has(client)) return client;
     instrumentedClients.add(client);
     const originalQuery = client.query.bind(client);
-    client.query = async (textOrConfig, values) => {
-      const text =
-        typeof textOrConfig === "string" ? textOrConfig : String(textOrConfig?.text ?? "");
+    client.query = (...args) => {
+      const text = typeof args[0] === "string" ? args[0] : String(args[0]?.text ?? "");
       const started = performance.now();
-      const result = await originalQuery(textOrConfig, values);
-      capture.queries.push({
-        durationMs: performance.now() - started,
-        kind: statementKind(text),
-        statement: text.trim().replaceAll(/\s+/g, " "),
-      });
-      return result;
+      const completed = () => {
+        capture.queries.push({
+          durationMs: performance.now() - started,
+          kind: statementKind(text),
+          statement: text.trim().replaceAll(/\s+/g, " "),
+        });
+      };
+      const callback = args.at(-1);
+      if (typeof callback === "function") {
+        args[args.length - 1] = (...result) => {
+          completed();
+          callback(...result);
+        };
+        return originalQuery(...args);
+      }
+      return originalQuery(...args).finally(completed);
     };
     return client;
+  };
+  pool.connect = function (callback) {
+    const connect = originalConnect.bind(this);
+    if (typeof callback === "function") {
+      return connect((error, client, release) => {
+        if (client) instrumentClient(client);
+        callback(error, client, release);
+      });
+    }
+    return connect().then(instrumentClient);
   };
 }
 
 configureLogSampling(0);
 
+// This key is disposable and never serialized to artifacts. The production JWT
+// verifier fetches its public half over HTTP; live sessions and actor resolution
+// use the benchmark database rather than injected authentication callbacks.
+const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+const jwks = JSON.stringify({
+  keys: [
+    { ...publicKey.export({ format: "jwk" }), kid: "benchmark-key", alg: "EdDSA", use: "sig" },
+  ],
+});
+const jwksServer = createServer((_request, response) => {
+  response.writeHead(200, { "Content-Type": "application/json" });
+  response.end(jwks);
+});
+await new Promise((resolve, reject) => {
+  jwksServer.once("error", reject);
+  jwksServer.listen(0, "127.0.0.1", resolve);
+});
+const address = jwksServer.address();
+assert.ok(address && typeof address === "object");
+const authOrigin = "https://benchmark.invalid";
+const nowSeconds = Math.floor(Date.now() / 1000);
+const encodedHeader = Buffer.from(JSON.stringify({ alg: "EdDSA", kid: "benchmark-key" })).toString(
+  "base64url",
+);
+const encodedClaims = Buffer.from(
+  JSON.stringify({
+    sub: "auth_user_benchmark",
+    sid: "benchmark-session",
+    email: "benchmark@meltiply.local",
+    name: "Benchmark User",
+    iss: authOrigin,
+    aud: authOrigin,
+    iat: nowSeconds,
+    exp: nowSeconds + 3600,
+  }),
+).toString("base64url");
+const signingInput = `${encodedHeader}.${encodedClaims}`;
+const bearer = `${signingInput}.${sign(null, Buffer.from(signingInput), privateKey).toString("base64url")}`;
+
 const env = {
   ALLOWED_ORIGINS: "http://localhost:3000",
+  // Master renamed this binding; both revisions must verify the same origin.
+  APP_URL: authOrigin,
   DB_AUTHENTICATED: { connectionString: authenticatedUrl },
   DB_SYSTEM: { connectionString: systemUrl },
   ENVIRONMENT: "test",
   TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
   VERSION: "benchmark",
+  BETTER_AUTH_JWKS_URL: `http://127.0.0.1:${address.port}/jwks`,
 };
 
-const claims = {
-  organizationId: ids.org,
-  organizationRole: "admin",
-  subject: "auth_user_benchmark",
-  userId: ids.user,
-};
-
-const actor = {
-  authUserId: claims.subject,
-  claims,
-  role: "admin",
-  userId: claims.userId,
-  workspace: {
-    id: ids.org,
-    isPersonal: false,
-    name: "Benchmark Studio",
-    slug: "benchmark-studio",
-  },
-};
-
-const jwtIdentity = {
-  email: "benchmark@meltiply.local",
-  name: "Benchmark User",
-  subject: claims.subject,
-};
-
-const authorization = { Authorization: "Bearer benchmark.jwt" };
+const authorization = { Authorization: `Bearer ${bearer}` };
 
 const providerRegistry = new ProviderRegistry();
 providerRegistry.register(
@@ -196,6 +251,42 @@ providerRegistry.register(
   }),
 );
 const capabilities = providerRegistry.capabilities();
+const providerDelayMs = 100;
+const readConcurrency = 20;
+const requirementAccountId = "b7000000-0000-4000-8000-000000000001";
+let upstreamReads = 0;
+const requirementData = {
+  commentAllowed: true,
+  creatorDisplayName: "Benchmark Creator",
+  creatorUsername: "benchmark.creator",
+  duetAllowed: false,
+  maxVideoDurationSeconds: 180,
+  platform: "tiktok",
+  privacyLevels: ["PUBLIC_TO_EVERYONE"],
+  stitchAllowed: false,
+};
+const tiktokCapability = providerRegistry
+  .capabilities()
+  .find((value) => value.platform === "tiktok");
+assert.ok(tiktokCapability);
+providerRegistry.register("tiktok", {
+  capability: {
+    ...tiktokCapability,
+    analytics: false,
+    comments: false,
+    reply: false,
+    publish: false,
+    connect_available: false,
+  },
+  transferModes: [],
+  // Fixed synthetic upstream latency exposes overlapping reads equally on both
+  // revisions. This is a controlled adapter, not live Provider timing.
+  getPublicationRequirements: async () => {
+    upstreamReads += 1;
+    await delay(providerDelayMs);
+    return requirementData;
+  },
+});
 
 const assetService = createAssetApiService({
   storageServiceLayer: createStorageServiceTest({
@@ -211,11 +302,10 @@ const app = createApiApp({
   assetService,
   coreService,
   postService,
-  resolveActor: async () => actor,
-  verifyJwtToken: async () => jwtIdentity,
+  providerRegistry,
 });
 
-instrumentPool(authenticatedPoolFor(env));
+instrumentPool(pg.Pool.prototype);
 
 const admin = new pg.Client({ connectionString: systemUrl });
 await admin.connect();
@@ -224,10 +314,10 @@ const databaseVersion = (await admin.query("SHOW server_version")).rows[0].serve
 let idempotencyCounter = 0;
 let deleteTagCounter = 0;
 
-/** Executes one in-process HTTP request and records status, body, and bytes. */
+/** Executes a complete HTTP request with its own bindings scope and records status, body, and bytes. */
 async function httpRequest(path, init, expectedStatuses = [200]) {
   const started = performance.now();
-  const response = await app.request(path, init, env);
+  const response = await app.request(path, init, { ...env });
   const text = await response.text();
   const durationMs = performance.now() - started;
   if (!expectedStatuses.includes(response.status)) {
@@ -268,6 +358,68 @@ const calendarStart = "2026-07-01T00:00:00.000Z";
 const calendarEnd = "2026-08-31T23:59:59.999Z";
 const analyticsStart = "2026-01-01T00:00:00.000Z";
 const analyticsEnd = "2026-12-31T23:59:59.999Z";
+let analyticsRangeCounter = 0;
+
+/** Builds a unique exact range per cold sample, preserving the same fixed published cohort. */
+function coldAnalyticsPath() {
+  analyticsRangeCounter += 1;
+  const end = new Date(Date.parse(analyticsEnd) - analyticsRangeCounter).toISOString();
+  return `/api/v1/analytics?start=${encodeURIComponent(analyticsStart)}&end=${encodeURIComponent(end)}`;
+}
+
+/** Measures one fresh range or one concurrent burst, validating canonical totals in every response. */
+async function analyticsRead(path, concurrency = 1) {
+  const started = performance.now();
+  const results = await Promise.all(
+    Array.from({ length: concurrency }, () => httpRequest(path, { headers: authorization })),
+  );
+  for (const result of results) {
+    // Stored counters remain canonical even when one Platform is marked partial.
+    assert.equal(result.body.totals.post_count, dataset.posts);
+    assert.equal(result.body.totals.views, (dataset.posts * (dataset.posts + 1)) / 2);
+  }
+  return {
+    bytes: results.reduce((sum, result) => sum + result.bytes, 0),
+    latencyMs: performance.now() - started,
+    operations: concurrency,
+    requestLatencies: results.map((result) => result.durationMs),
+  };
+}
+
+/** Measures sequential or overlapping requirements through real account/RLS/decryption and route code. */
+async function requirementReads(concurrency) {
+  const before = upstreamReads;
+  const started = performance.now();
+  const results = await Promise.all(
+    Array.from({ length: concurrency }, () =>
+      httpRequest(`/api/v1/platforms/${requirementAccountId}/publishing-requirements`, {
+        headers: authorization,
+      }),
+    ),
+  );
+  for (const result of results) {
+    assert.deepEqual(result.body, {
+      platform: "tiktok",
+      comment_allowed: true,
+      creator: {
+        avatar_url: null,
+        display_name: "Benchmark Creator",
+        username: "benchmark.creator",
+      },
+      duet_allowed: false,
+      max_video_duration_sec: 180,
+      privacy_levels: ["PUBLIC_TO_EVERYONE"],
+      stitch_allowed: false,
+    });
+  }
+  return {
+    bytes: results.reduce((sum, result) => sum + result.bytes, 0),
+    latencyMs: performance.now() - started,
+    operations: concurrency,
+    requestLatencies: results.map((result) => result.durationMs),
+    upstreamReads: upstreamReads - before,
+  };
+}
 
 /** Runs the three reads the Posts UI refetches after a successful deletion. */
 async function refetchPostResources() {
@@ -379,12 +531,47 @@ function scenarios() {
     },
     {
       name: "analytics.summary.year",
-      run: async () => {
-        const result = await httpRequest(
+      run: () =>
+        analyticsRead(
           `/api/v1/analytics?start=${encodeURIComponent(analyticsStart)}&end=${encodeURIComponent(analyticsEnd)}`,
-          { headers: authorization },
-        );
-        return { bytes: result.bytes, latencyMs: result.durationMs, operations: 1 };
+        ),
+    },
+    {
+      name: "analytics.summary.cold-exact-range",
+      run: () => analyticsRead(coldAnalyticsPath()),
+    },
+    {
+      name: "analytics.summary.concurrent-cold20",
+      run: () => analyticsRead(coldAnalyticsPath(), readConcurrency),
+    },
+    {
+      name: "requirements.sequential",
+      run: () => requirementReads(1),
+    },
+    {
+      name: "requirements.concurrent20",
+      run: () => requirementReads(readConcurrency),
+    },
+    {
+      name: "analytics.page.dashboard-and-ranking",
+      run: async () => {
+        const started = performance.now();
+        const range = `start=${encodeURIComponent(analyticsStart)}&end=${encodeURIComponent(analyticsEnd)}`;
+        const [dashboard, ranking] = await Promise.all([
+          httpRequest(`/api/v1/analytics/dashboard?${range}`, { headers: authorization }),
+          httpRequest(`/api/v1/analytics/posts?${range}&metric=views&limit=10&offset=0`, {
+            headers: authorization,
+          }),
+        ]);
+        assert.equal(dashboard.body.cohort.totals.post_count, dataset.posts);
+        assert.equal(dashboard.body.cohort.totals.views, (dataset.posts * (dataset.posts + 1)) / 2);
+        assert.equal(ranking.body.posts[0].views, dataset.posts);
+        return {
+          bytes: dashboard.bytes + ranking.bytes,
+          latencyMs: performance.now() - started,
+          operations: 2,
+          requestLatencies: [dashboard.durationMs, ranking.durationMs],
+        };
       },
     },
     {
@@ -557,7 +744,13 @@ function scenarios() {
       }),
     );
   }
-  return scenarios;
+  return profile === "read-cache" || profile === "application"
+    ? scenarios.filter((scenario) =>
+        /^(posts\.list|posts\.detail|distributions\.list|calendar\.|analytics\.|requirements\.|inbox\.list|assets\.detail|assets\.upload-session\.detail)/.test(
+          scenario.name,
+        ),
+      )
+    : scenarios;
 }
 
 const sampleIndex = { schedule: 0 };
@@ -600,14 +793,22 @@ async function measureScenario(scenario) {
     0,
   );
   const applicationQueries = measuredQueries.filter((query) => query.kind === "application");
-  const statementCounts = new Map();
+  const statementCosts = new Map();
   for (const query of applicationQueries) {
-    statementCounts.set(query.statement, (statementCounts.get(query.statement) ?? 0) + 1);
+    const cost = statementCosts.get(query.statement) ?? { count: 0, timeMs: 0 };
+    cost.count += 1;
+    cost.timeMs += query.durationMs;
+    statementCosts.set(query.statement, cost);
   }
-  const topStatements = [...statementCounts.entries()]
-    .sort((left, right) => right[1] - left[1])
+  const topStatements = [...statementCosts.entries()]
+    .sort((left, right) => right[1].timeMs - left[1].timeMs)
     .slice(0, 12)
-    .map(([statement, count]) => ({ count, statement }));
+    .map(([statement, cost]) => ({
+      count: cost.count,
+      statement,
+      total_ms: rounded(cost.timeMs),
+      mean_ms: rounded(cost.timeMs / cost.count),
+    }));
 
   return {
     cpu_ms: {
@@ -624,6 +825,20 @@ async function measureScenario(scenario) {
         applicationQueries.reduce((total, query) => total + query.durationMs, 0),
       ),
       top_statements: topStatements,
+      aggregate_executions: applicationQueries.filter(
+        (query) =>
+          query.statement.includes("WITH candidates AS (") &&
+          query.statement.includes("analytics_snapshots"),
+      ).length,
+      aggregate_time_ms_total: rounded(
+        applicationQueries
+          .filter(
+            (query) =>
+              query.statement.includes("WITH candidates AS (") &&
+              query.statement.includes("analytics_snapshots"),
+          )
+          .reduce((total, query) => total + query.durationMs, 0),
+      ),
     },
     latency_ms: summarize(sampleResults.map((sample) => sample.latencyMs)),
     operations: totalOperations,
@@ -649,6 +864,7 @@ async function measureScenario(scenario) {
         (sampleResults.reduce((total, sample) => total + sample.latencyMs, 0) / 1_000),
     ),
     warmup: warmupsToRun,
+    upstream_reads: sampleResults.reduce((sum, sample) => sum + (sample.upstreamReads ?? 0), 0),
   };
 }
 
@@ -671,6 +887,23 @@ const workflows = [];
 
 try {
   await seed(admin);
+  const verifiedIdentity = await jwtVerifierFor(env)(bearer);
+  await activeIdentity(env, verifiedIdentity);
+  const cipher = new TokenCipher({
+    currentKeyId: "primary",
+    keys: [{ id: "primary", material: env.TOKEN_ENCRYPTION_KEY }],
+  });
+  await admin.query(
+    `INSERT INTO platform_accounts
+     (id, org_id, brand_profile_id, platform, platform_user_id, access_token, scopes, connection_status)
+     VALUES ($1, $2, $3, 'tiktok', 'benchmark-requirements', $4, ARRAY['video.publish'], 'connected')`,
+    [
+      requirementAccountId,
+      ids.org,
+      ids.brandProfile,
+      await cipher.encrypt("benchmark-provider-token"),
+    ],
+  );
   await cleanupDeleteBatches(admin);
   for (const scenario of scenarios()) {
     process.stdout.write(`running ${scenario.name}\n`);
@@ -687,17 +920,24 @@ try {
 } finally {
   await cleanup(admin).catch(() => {});
   await admin.end().catch(() => {});
+  await new Promise((resolve, reject) =>
+    jwksServer.close((error) => (error ? reject(error) : resolve())),
+  );
 }
 
 const result = {
   completed_at: new Date().toISOString(),
   config: {
+    profile,
+    authentication: "signed-jwt-live-session-actor",
     batch_sizes: batchSizes,
     delete_concurrency: deleteConcurrency,
     delete_samples: deleteSamples,
     delete_warmup: deleteWarmup,
     measured_samples: measuredSamples,
     warmup_samples: warmupSamples,
+    read_concurrency: readConcurrency,
+    controlled_provider_delay_ms: providerDelayMs,
   },
   dataset: {
     ...dataset,
@@ -720,4 +960,5 @@ const result = {
 mkdirSync(dirname(outputFile), { recursive: true });
 writeFileSync(outputFile, `${JSON.stringify(result, null, 2)}\n`);
 process.stdout.write(`wrote ${outputFile}\n`);
+clearTimeout(watchdog);
 if (failed && process.env.BENCHMARK_ALLOW_ERRORS !== "1") process.exitCode = 1;

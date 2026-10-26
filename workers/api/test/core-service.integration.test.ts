@@ -15,6 +15,7 @@ import {
   type ProviderRequestContext,
 } from "@meltiply/providers";
 import type { JwtIdentity } from "@meltiply/auth";
+import type { TransactionClient } from "@meltiply/database";
 import { Effect } from "effect";
 import {
   createStorageServiceTest,
@@ -259,7 +260,7 @@ const fixturePostIds = {
  * exactly as `post-service` does when it writes a schedule.
  *
  * @param client - Transaction client shared with the calling fixture block.
- * @param input - Post identity plus the optional attachment and Channel to pin.
+ * @param input - Post identity, optional attachment/Channel, and an optional owner pair; defaults to Alpha's RLS fixture scope.
  * @returns Effect inserting the Post and, when supplied, its children.
  */
 function insertFixturePost(
@@ -267,22 +268,25 @@ function insertFixturePost(
   input: {
     accountId?: string;
     assetId?: string;
+    owner?: { organizationId: string; brandProfileId: string };
     postId: string;
     title: string;
   },
 ): Effect.Effect<void, DatabaseError> {
   return Effect.gen(function* () {
+    const organizationId = input.owner?.organizationId ?? alpha.organizationId;
+    const brandProfileId = input.owner?.brandProfileId ?? alphaBrandProfileId;
     yield* client.query(
       `INSERT INTO posts (id, org_id, brand_profile_id, title, status)
-       VALUES ($1, '${alpha.organizationId}', '${alphaBrandProfileId}', $2, 'active')`,
-      [input.postId, input.title],
+       VALUES ($1, $3, $4, $2, 'active')`,
+      [input.postId, input.title, organizationId, brandProfileId],
     );
     if (input.assetId !== undefined) {
       yield* client.query(
         `INSERT INTO post_attachments
            (post_id, asset_id, org_id, brand_profile_id, position)
-         VALUES ($1, $2, '${alpha.organizationId}', '${alphaBrandProfileId}', 0)`,
-        [input.postId, input.assetId],
+         VALUES ($1, $2, $3, $4, 0)`,
+        [input.postId, input.assetId, organizationId, brandProfileId],
       );
     }
     if (input.accountId !== undefined) {
@@ -290,10 +294,10 @@ function insertFixturePost(
         `INSERT INTO post_targets
            (post_id, platform_account_id, org_id, brand_profile_id,
             attachment_ids)
-         VALUES ($1, $2, '${alpha.organizationId}', '${alphaBrandProfileId}',
+         VALUES ($1, $2, $4, $5,
                  CASE WHEN $3::uuid IS NULL THEN NULL
                       ELSE ARRAY[$3::uuid] END)`,
-        [input.postId, input.accountId, input.assetId ?? null],
+        [input.postId, input.accountId, input.assetId ?? null, organizationId, brandProfileId],
       );
     }
   });
@@ -660,6 +664,94 @@ function assetServiceHarness(ids: string[]) {
     signedGets,
     uploadKeys,
   };
+}
+
+const analyticsCachePostId = "4f000000-0000-4000-8000-000000000090";
+const analyticsCacheDistributionId = "96000000-0000-4000-8000-000000000090";
+const analyticsCacheStart = new Date("2031-05-01T00:00:00Z");
+const analyticsCacheEnd = new Date("2031-05-31T23:59:59Z");
+
+/**
+ * Seeds the published Distribution and first snapshot used by every analytics
+ * cache scenario. The 2031 window is disjoint from seeded and other fixture
+ * data, so a warm or expired result can only come from these rows.
+ *
+ * @param owner - Owning scope; defaults to Alpha's database-only RLS Workspace, while HTTP tests pass the resolved shared Workspace.
+ * @returns Resolves after the Post, Distribution, and snapshot commit.
+ */
+async function seedAnalyticsCacheFixture(
+  owner = { organizationId: alpha.organizationId, brandProfileId: alphaBrandProfileId },
+): Promise<void> {
+  await systemTransaction(env, (client) =>
+    Effect.gen(function* () {
+      yield* insertFixturePost(client, {
+        postId: analyticsCachePostId,
+        title: "Integration cached analytics",
+        owner,
+      });
+      yield* client.query(
+        `INSERT INTO distributions
+           (id, org_id, brand_profile_id, post_id, platform, status,
+            published_at, platform_post_id)
+         VALUES ($1, $2, $3, $4, 'instagram', 'published',
+                 '2031-05-05T12:00:00Z', 'integration-cached-analytics')`,
+        [
+          analyticsCacheDistributionId,
+          owner.organizationId,
+          owner.brandProfileId,
+          analyticsCachePostId,
+        ],
+      );
+      yield* client.query(
+        `INSERT INTO analytics_snapshots
+           (distribution_id, org_id, views, likes, comments, shares, snapshot_at)
+         VALUES ($1, $2, 100, 10, 1, 2, '2031-05-06T12:00:00Z')`,
+        [analyticsCacheDistributionId, owner.organizationId],
+      );
+    }),
+  );
+}
+
+/**
+ * Appends a later snapshot inside the cache fixture's reporting window.
+ *
+ * A retained summary keeps the earlier totals until its absolute expiration,
+ * while a canonical recomputation reads this newest snapshot.
+ *
+ * @param values - Metric values for the new snapshot; defaults to the 400-view change.
+ * @returns Resolves after the snapshot commits.
+ */
+async function addAnalyticsCacheSnapshot(values: {
+  comments: number;
+  likes: number;
+  shares: number;
+  views: number;
+}): Promise<void> {
+  await systemTransaction(env, (client) =>
+    client.query(
+      `INSERT INTO analytics_snapshots
+         (distribution_id, org_id, views, likes, comments, shares, snapshot_at)
+       VALUES ($1, $2, $3, $4, $5, $6, '2031-05-07T12:00:00Z')`,
+      [
+        analyticsCacheDistributionId,
+        alpha.organizationId,
+        values.views,
+        values.likes,
+        values.comments,
+        values.shares,
+      ],
+    ),
+  );
+}
+
+/** Removes the analytics cache fixture rows without touching seeded data. */
+async function removeAnalyticsCacheFixture(): Promise<void> {
+  await systemTransaction(env, (client) =>
+    Effect.gen(function* () {
+      yield* client.query("DELETE FROM distributions WHERE post_id = $1", [analyticsCachePostId]);
+      yield* client.query("DELETE FROM posts WHERE id = $1", [analyticsCachePostId]);
+    }),
+  );
 }
 
 describeIntegration("Worker core service with PostgreSQL RLS", () => {
@@ -2324,6 +2416,501 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           yield* client.query("DELETE FROM posts WHERE id = $1", [postId]);
         }),
       );
+    }
+  });
+
+  it("reuses an authorized analytics summary for thirty seconds without sliding or masking timestamps", async () => {
+    const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
+    const analyticsService = createCoreApiService(undefined, { now: () => clock.current });
+    try {
+      await seedAnalyticsCacheFixture();
+      const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
+      const first = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
+      expect(first.totals).toMatchObject({
+        comments: 1,
+        likes: 10,
+        post_count: 1,
+        shares: 2,
+        views: 100,
+      });
+      expect(first.last_synced_at).toBe("2031-05-06T12:00:00.000Z");
+
+      // A newer persisted snapshot must stay invisible inside the absolute
+      // window: the second request returns the retained successful summary
+      // instead of repeating the latest-snapshot aggregation.
+      await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
+      clock.current = new Date("2031-06-01T00:00:10.000Z");
+      const retained = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, range),
+      );
+      expect(retained.totals.views).toBe(100);
+      expect(retained.last_synced_at).toBe("2031-05-06T12:00:00.000Z");
+
+      // A hit at 29 seconds does not extend the 30-second absolute lifetime.
+      clock.current = new Date("2031-06-01T00:00:29.000Z");
+      await expect(
+        Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range)),
+      ).resolves.toMatchObject({ totals: { views: 100 } });
+
+      clock.current = new Date("2031-06-01T00:00:31.000Z");
+      const recomputed = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, range),
+      );
+      expect(recomputed.totals).toMatchObject({
+        comments: 4,
+        likes: 40,
+        post_count: 1,
+        shares: 8,
+        views: 400,
+      });
+      expect(recomputed.last_synced_at).toBe("2031-05-07T12:00:00.000Z");
+    } finally {
+      await removeAnalyticsCacheFixture();
+    }
+  });
+
+  it("shares a cold authorized summary and releases follower transactions before waiting", async () => {
+    const service = createCoreApiService();
+    const pool = authenticatedPoolFor(env);
+    // Observe only the Promise checkout used by authenticated transactions.
+    const mutablePool = pool as unknown as { connect: () => Promise<TransactionClient> };
+    const connect = mutablePool.connect;
+    let releaseAggregation!: () => void;
+    let aggregationStarted!: () => void;
+    let followerCommitted!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseAggregation = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      aggregationStarted = resolve;
+    });
+    const committed = new Promise<void>((resolve) => {
+      followerCommitted = resolve;
+    });
+    let aggregations = 0;
+    const running: Promise<unknown>[] = [];
+    try {
+      await seedAnalyticsCacheFixture();
+      mutablePool.connect = async () => {
+        const client = await connect.call(pool);
+        const query: TransactionClient["query"] = async <
+          Row extends Record<string, unknown> = Record<string, unknown>,
+        >(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          if (text.includes("FROM analytics_snapshots s")) {
+            aggregations += 1;
+            aggregationStarted();
+            await held;
+          }
+          const result = await client.query<Row>(text, values);
+          if (text.trim() === "COMMIT") followerCommitted();
+          return result;
+        };
+        return { query, release: () => client.release() };
+      };
+      const range = { start: analyticsCacheStart, end: analyticsCacheEnd };
+      const first = Effect.runPromise(service.summaryAnalytics(env, alpha, range));
+      running.push(first);
+      await started;
+      const second = Effect.runPromise(service.summaryAnalytics(env, alpha, range));
+      running.push(second);
+      await committed;
+      expect(aggregations).toBe(1);
+      releaseAggregation();
+      const [leader, follower] = await Promise.all([first, second]);
+      expect(leader.totals.views).toBe(100);
+      expect(follower).toEqual(leader);
+      leader.totals.views = 999;
+      expect(follower.totals.views).toBe(100);
+    } finally {
+      releaseAggregation();
+      await Promise.allSettled(running);
+      mutablePool.connect = connect;
+      await removeAnalyticsCacheFixture();
+    }
+  });
+
+  it("partitions analytics cache entries across filters, profiles, identities, and capabilities", async () => {
+    const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
+    const analyticsService = createCoreApiService(undefined, { now: () => clock.current });
+    try {
+      await seedAnalyticsCacheFixture();
+      const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
+      const base = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
+      expect(base.totals.views).toBe(100);
+
+      await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
+      const stillRetained = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, range),
+      );
+      expect(stillRetained.totals.views).toBe(100);
+
+      const platformScoped = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { ...range, platform: "instagram" }),
+      );
+      expect(platformScoped.totals.views).toBe(400);
+      const otherPlatform = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { ...range, platform: "youtube" }),
+      );
+      expect(otherPlatform.by_platform).toEqual([]);
+      expect(otherPlatform.totals.views).toBe(0);
+
+      const textFormat = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { ...range, format: "text" }),
+      );
+      expect(textFormat.totals.views).toBe(400);
+      const videoFormat = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, { ...range, format: "video" }),
+      );
+      expect(videoFormat.by_platform).toEqual([]);
+
+      const profileScoped = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, {
+          ...range,
+          brandProfileId: alphaBrandProfileId,
+        }),
+      );
+      expect(profileScoped.totals.views).toBe(400);
+      const accountScoped = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, {
+          ...range,
+          accountId: "94000000-0000-4000-8000-000000000099",
+        }),
+      );
+      expect(accountScoped.by_platform).toEqual([]);
+
+      // Another authorized identity in another Workspace must never inherit
+      // Alpha's warm entry even with identical filters.
+      const betaScoped = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, beta, range),
+      );
+      expect(betaScoped.by_platform).toEqual([]);
+      expect(betaScoped.totals.views).toBe(0);
+
+      const unsupportedService = createCoreApiService(
+        new ProviderRegistry().capabilities().map((capability) => ({
+          ...capability,
+          analytics: capability.platform !== "instagram",
+        })),
+        { now: () => clock.current },
+      );
+      const unsupported = await Effect.runPromise(
+        unsupportedService.summaryAnalytics(env, alpha, range),
+      );
+      expect(unsupported.totals.views).toBe(400);
+      expect(unsupported.partial).toBe(true);
+      expect(unsupported.unsupported_platforms).toEqual(["instagram"]);
+
+      const baseAfterScopedReads = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, range),
+      );
+      expect(baseAfterScopedReads.totals.views).toBe(100);
+    } finally {
+      await removeAnalyticsCacheFixture();
+    }
+  });
+
+  it("invalidates a warm analytics entry when the active profile generation changes", async () => {
+    const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
+    const analyticsService = createCoreApiService(undefined, { now: () => clock.current });
+    try {
+      await seedAnalyticsCacheFixture();
+      const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
+      const warm = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
+      expect(warm.totals.views).toBe(100);
+      await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
+
+      // Persisted lifecycle changes handled by any instance must alter the
+      // applicable identity, even without deleting the profile.
+      await systemTransaction(env, (client) =>
+        client.query("UPDATE brand_profiles SET updated_at = now() WHERE id = $1", [
+          alphaBrandProfileId,
+        ]),
+      );
+      const recomputed = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, range),
+      );
+      expect(recomputed.totals.views).toBe(400);
+    } finally {
+      await removeAnalyticsCacheFixture();
+    }
+  });
+
+  it("derives cache identity from persisted Brand Profile lifecycle and re-authorizes every hit", async () => {
+    const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
+    const firstInstance = createCoreApiService(undefined, { now: () => clock.current });
+    const secondInstance = createCoreApiService(undefined, { now: () => clock.current });
+    const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
+    try {
+      await seedAnalyticsCacheFixture();
+      const warmAll = await Effect.runPromise(firstInstance.summaryAnalytics(env, alpha, range));
+      const warmExplicit = await Effect.runPromise(
+        firstInstance.summaryAnalytics(env, alpha, {
+          ...range,
+          brandProfileId: alphaBrandProfileId,
+        }),
+      );
+      const warmSecondInstance = await Effect.runPromise(
+        secondInstance.summaryAnalytics(env, alpha, range),
+      );
+      expect(warmAll.totals.views).toBe(100);
+      expect(warmExplicit.totals.views).toBe(100);
+      expect(warmSecondInstance.totals.views).toBe(100);
+
+      // Simulate another API instance retiring the Profile after caches warmed.
+      await systemTransaction(env, (client) =>
+        client.query(
+          `UPDATE brand_profiles
+           SET deleted_at = now(), purge_at = now() + INTERVAL '7 days'
+           WHERE id = $1`,
+          [alphaBrandProfileId],
+        ),
+      );
+      try {
+        const hidden = await Effect.runPromise(firstInstance.summaryAnalytics(env, alpha, range));
+        expect(hidden.by_platform).toEqual([]);
+        expect(hidden.totals.views).toBe(0);
+        const hiddenExplicit = await Effect.runPromise(
+          firstInstance.summaryAnalytics(env, alpha, {
+            ...range,
+            brandProfileId: alphaBrandProfileId,
+          }),
+        );
+        expect(hiddenExplicit.by_platform).toEqual([]);
+        const hiddenSecondInstance = await Effect.runPromise(
+          secondInstance.summaryAnalytics(env, alpha, range),
+        );
+        expect(hiddenSecondInstance.by_platform).toEqual([]);
+      } finally {
+        // Restoring elsewhere advances the persisted lifecycle generation, so
+        // neither the pre-delete nor the hidden key can satisfy the next read.
+        await systemTransaction(env, (client) =>
+          client.query(
+            `UPDATE brand_profiles
+             SET deleted_at = NULL, purge_at = NULL, updated_at = now()
+             WHERE id = $1`,
+            [alphaBrandProfileId],
+          ),
+        );
+      }
+
+      const restored = await Effect.runPromise(firstInstance.summaryAnalytics(env, alpha, range));
+      const restoredExplicit = await Effect.runPromise(
+        firstInstance.summaryAnalytics(env, alpha, {
+          ...range,
+          brandProfileId: alphaBrandProfileId,
+        }),
+      );
+      const restoredSecondInstance = await Effect.runPromise(
+        secondInstance.summaryAnalytics(env, alpha, range),
+      );
+      expect(restored.totals.views).toBe(100);
+      expect(restoredExplicit.totals.views).toBe(100);
+      expect(restoredSecondInstance.totals.views).toBe(100);
+
+      // Removing membership must fail even with every cache warm, and the
+      // failure must not be retained or overwrite the successful entry.
+      await systemTransaction(env, (client) =>
+        client.query("DELETE FROM org_members WHERE org_id = $1 AND user_id = $2", [
+          alpha.organizationId,
+          alpha.userId,
+        ]),
+      );
+      try {
+        await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
+        await expect(
+          Effect.runPromise(firstInstance.summaryAnalytics(env, alpha, range)),
+        ).rejects.toMatchObject({ code: "active_organization_required" });
+      } finally {
+        await systemTransaction(env, (client) =>
+          client.query(
+            `INSERT INTO org_members (org_id, user_id, role)
+             VALUES ($1, $2, 'admin')
+             ON CONFLICT (org_id, user_id) DO UPDATE SET role = 'admin'`,
+            [alpha.organizationId, alpha.userId],
+          ),
+        );
+      }
+      const afterReauthorization = await Effect.runPromise(
+        firstInstance.summaryAnalytics(env, alpha, range),
+      );
+      expect(afterReauthorization.totals.views).toBe(100);
+    } finally {
+      await systemTransaction(env, (client) =>
+        Effect.gen(function* () {
+          yield* client.query(
+            `UPDATE brand_profiles
+             SET deleted_at = NULL, purge_at = NULL
+             WHERE id = $1 AND deleted_at IS NOT NULL`,
+            [alphaBrandProfileId],
+          );
+          yield* client.query(
+            `INSERT INTO org_members (org_id, user_id, role)
+             VALUES ($1, $2, 'admin')
+             ON CONFLICT (org_id, user_id) DO UPDATE SET role = 'admin'`,
+            [alpha.organizationId, alpha.userId],
+          );
+        }),
+      );
+      await removeAnalyticsCacheFixture();
+    }
+  });
+
+  it("bounds retained analytics summaries to sixty-four entries and recomputes after eviction", async () => {
+    const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
+    const analyticsService = createCoreApiService(undefined, { now: () => clock.current });
+    try {
+      await seedAnalyticsCacheFixture();
+      const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
+      const warm = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
+      expect(warm.totals.views).toBe(100);
+      await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
+
+      const emptyStart = Date.UTC(2024, 1, 1);
+      for (let index = 0; index < 64; index += 1) {
+        const start = new Date(emptyStart + index * 24 * 60 * 60 * 1_000);
+        const end = new Date(start.getTime() + 60 * 60 * 1_000);
+        await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, { end, start }));
+      }
+
+      // The 65th distinct entry evicted the warm fixture key, so the next read
+      // must recompute instead of serving the pre-eviction value.
+      const recomputed = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, range),
+      );
+      expect(recomputed.totals.views).toBe(400);
+    } finally {
+      await removeAnalyticsCacheFixture();
+    }
+  });
+
+  it("replaces the owned analytics cache when deployment configuration changes", async () => {
+    const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
+    const analyticsService = createCoreApiService(undefined, { now: () => clock.current });
+    try {
+      await seedAnalyticsCacheFixture();
+      const range = { end: analyticsCacheEnd, start: analyticsCacheStart };
+      const warm = await Effect.runPromise(analyticsService.summaryAnalytics(env, alpha, range));
+      expect(warm.totals.views).toBe(100);
+      await addAnalyticsCacheSnapshot({ comments: 4, likes: 40, shares: 8, views: 400 });
+
+      // A different deployment configuration replaces the namespace and
+      // recomputes from the authoritative rows instead of reusing the entry.
+      const variantEnv = { ...env, VERSION: "1.0.0-target.1" };
+      const variant = await Effect.runPromise(
+        analyticsService.summaryAnalytics(variantEnv, alpha, range),
+      );
+      expect(variant.totals.views).toBe(400);
+
+      // Returning to the original configuration replaces (not restores) the
+      // previous namespace, so its old entry cannot reappear from the past.
+      const replaced = await Effect.runPromise(
+        analyticsService.summaryAnalytics(env, alpha, range),
+      );
+      expect(replaced.totals.views).toBe(400);
+    } finally {
+      await removeAnalyticsCacheFixture();
+    }
+  });
+
+  it("blocks a suspended member before a warm analytics cache can be reused", async () => {
+    const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
+    const analyticsService = createCoreApiService(undefined, { now: () => clock.current });
+    const sharedProfileId = "a0000000-0000-4000-8000-000000000091";
+    try {
+      const actor = await resolveActor(
+        env,
+        alphaIdentity,
+        new Request("https://api.meltiply.test"),
+      );
+      await systemTransaction(env, (client) =>
+        client.query(
+          "INSERT INTO brand_profiles (id, org_id, name, color) VALUES ($1, $2, 'Suspension cache fixture', '#1d4ed8')",
+          [sharedProfileId, actor.workspace.id],
+        ),
+      );
+      await seedAnalyticsCacheFixture({
+        organizationId: actor.workspace.id,
+        brandProfileId: sharedProfileId,
+      });
+      const app = createApiApp({
+        coreService: analyticsService,
+        resolveActor,
+        verifyJwtToken: async () => alphaIdentity,
+      });
+      const query = `brand_profile_id=${sharedProfileId}&start=${encodeURIComponent(analyticsCacheStart.toISOString())}&end=${encodeURIComponent(analyticsCacheEnd.toISOString())}`;
+      const request = () =>
+        app.request(
+          `/api/v1/analytics?${query}`,
+          { headers: { Authorization: bearerAuthorization } },
+          env,
+        );
+
+      const warm = await request();
+      expect(warm.status).toBe(200);
+      expect(await warm.json()).toMatchObject({ totals: { views: 100 } });
+
+      // Actor resolution runs on every request, so a warm cache cannot be
+      // reached while the account is suspended.
+      await systemTransaction(env, (client) =>
+        client.query("UPDATE users SET suspended_at = now() WHERE id = $1", [alpha.userId]),
+      );
+      try {
+        const blocked = await request();
+        expect(blocked.status).toBe(403);
+        expect(errorCodeFrom(await blocked.json())).toBe("account_suspended");
+      } finally {
+        await systemTransaction(env, (client) =>
+          client.query("UPDATE users SET suspended_at = NULL WHERE id = $1", [alpha.userId]),
+        );
+      }
+
+      const resumed = await request();
+      expect(resumed.status).toBe(200);
+      expect(await resumed.json()).toMatchObject({ totals: { views: 100 } });
+    } finally {
+      await systemTransaction(env, (client) =>
+        client.query("UPDATE users SET suspended_at = NULL WHERE id = $1", [alpha.userId]),
+      );
+      await removeAnalyticsCacheFixture();
+      await systemTransaction(env, (client) =>
+        client.query("DELETE FROM brand_profiles WHERE id = $1", [sharedProfileId]),
+      );
+    }
+  });
+
+  it("keeps request identity independent between cached analytics responses", async () => {
+    const clock = { current: new Date("2031-06-01T00:00:00.000Z") };
+    const analyticsService = createCoreApiService(undefined, { now: () => clock.current });
+    try {
+      await seedAnalyticsCacheFixture();
+      const app = createApiApp({
+        coreService: analyticsService,
+        resolveActor: async () => alphaActor,
+        verifyJwtToken: async () => alphaIdentity,
+      });
+      const query = `start=${encodeURIComponent(analyticsCacheStart.toISOString())}&end=${encodeURIComponent(analyticsCacheEnd.toISOString())}`;
+      const request = () =>
+        app.request(
+          `/api/v1/analytics?${query}`,
+          { headers: { Authorization: bearerAuthorization } },
+          env,
+        );
+
+      const first = await request();
+      const second = await request();
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      const firstRequestId = first.headers.get("X-Request-ID");
+      const secondRequestId = second.headers.get("X-Request-ID");
+      expect(firstRequestId).toBeTruthy();
+      expect(secondRequestId).toBeTruthy();
+      expect(secondRequestId).not.toBe(firstRequestId);
+      await expect(first.json()).resolves.toEqual(await second.json());
+    } finally {
+      await removeAnalyticsCacheFixture();
     }
   });
 

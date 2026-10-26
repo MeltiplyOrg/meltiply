@@ -2,30 +2,37 @@
 
 Reproducible, evidence-first measurement of the API Worker's core backend
 workflows. The runner builds the real Hono app and services in-process against
-a dedicated PostgreSQL database, times each workflow through the same service
-or route the product uses, and emits JSON that the comparison script turns into
-a before/after report.
+a dedicated PostgreSQL database. Requests traverse production JWT verification,
+the live Better Auth session lookup, actor resolution, authorization and RLS;
+the harness generates disposable signing keys and serves a real HTTP JWKS.
+Only the external Provider transport is controlled. JSON results feed the
+before/after comparison report.
 
 Current results and analysis:
 [backend performance comparison](../../../docs/benchmarks/backend-optimization.md).
 
 ## What it measures
 
-| Workflow                             | Path                                                     |
-| ------------------------------------ | -------------------------------------------------------- |
-| `posts.list.page100`                 | `GET /api/v1/posts?limit=100&offset=0`                   |
-| `posts.detail.published`             | `GET /api/v1/posts/:id`                                  |
-| `distributions.list.page100`         | `GET /api/v1/distributions?limit=100&offset=0`           |
-| `calendar.range`                     | `GET /api/v1/calendar?start=…&end=…`                     |
-| `analytics.summary.year`             | `GET /api/v1/analytics?start=…&end=…` (366-day maximum)  |
-| `inbox.list.page100`                 | `GET /api/v1/inbox?limit=100&offset=0`                   |
-| `assets.detail`                      | `GET /api/v1/assets/:id`                                 |
-| `assets.upload-session.detail`       | `GET /api/v1/asset-upload-sessions/:id`                  |
-| `posts.create.draft`                 | `POST /api/v1/posts` (text-only draft)                   |
-| `posts.schedule.fanout20`            | `POST /api/v1/posts/:id/schedule` with 20 saved Channels |
-| `posts.schedule.drop19`              | Reschedule 20 Channels down to one, cancelling 19        |
-| `assets.upload-session.create`       | `POST /api/v1/asset-upload-sessions` (single PUT)        |
-| `posts.delete.*.batch{1,5,10,25,50}` | `DELETE /api/v1/posts/:id` under four execution modes    |
+| Workflow                               | Path                                                              |
+| -------------------------------------- | ----------------------------------------------------------------- |
+| `posts.list.page100`                   | `GET /api/v1/posts?limit=100&offset=0`                            |
+| `posts.detail.published`               | `GET /api/v1/posts/:id`                                           |
+| `distributions.list.page100`           | `GET /api/v1/distributions?limit=100&offset=0`                    |
+| `calendar.range`                       | `GET /api/v1/calendar?start=…&end=…`                              |
+| `analytics.summary.year`               | `GET /api/v1/analytics?start=…&end=…` (366-day maximum)           |
+| `analytics.summary.cold-exact-range`   | Fresh exact range per sample, same published cohort               |
+| `analytics.summary.concurrent-cold20`  | 20 simultaneous reads of one fresh exact range                    |
+| `requirements.sequential`              | Fresh publishing requirements after the prior read settles        |
+| `requirements.concurrent20`            | 20 equivalent publishing-requirement requests                     |
+| `analytics.page.dashboard-and-ranking` | Concurrent dashboard and ranked Posts with one exact as-of window |
+| `inbox.list.page100`                   | `GET /api/v1/inbox?limit=100&offset=0`                            |
+| `assets.detail`                        | `GET /api/v1/assets/:id`                                          |
+| `assets.upload-session.detail`         | `GET /api/v1/asset-upload-sessions/:id`                           |
+| `posts.create.draft`                   | `POST /api/v1/posts` (text-only draft)                            |
+| `posts.schedule.fanout20`              | `POST /api/v1/posts/:id/schedule` with 20 saved Channels          |
+| `posts.schedule.drop19`                | Reschedule 20 Channels down to one, cancelling 19                 |
+| `assets.upload-session.create`         | `POST /api/v1/asset-upload-sessions` (single PUT)                 |
+| `posts.delete.*.batch{1,5,10,25,50}`   | `DELETE /api/v1/posts/:id` under four execution modes             |
 
 Deletion modes isolate the two costs in the user-visible path:
 
@@ -46,17 +53,20 @@ touch.
 Every scenario records:
 
 - latency p50/p95/p99/mean/min/max over measured samples;
-- per-request latency samples (deletion batches);
+- per-request latency samples, including concurrent read bursts and deletion batches;
 - throughput (operations per second);
 - HTTP response bytes;
 - application SQL statement count per operation, statement-time percentiles,
   total statement time, and the most repeated statements;
 - process CPU and RSS/heap around the measured operation only; fixture setup
   time is reported separately as `setup_ms_total`.
+- canonical analytics aggregate executions/client-observed SQL time and controlled
+  upstream requirement reads, normalized by request count rather than burst count.
 
-Unavailable metrics are stated in the comparison report: deployed Worker CPU
-time, Queue delivery, provider HTTP time, and Durable Object work are outside
-this harness.
+Unavailable metrics are stated in the comparison report: deployed Worker CPU,
+live Provider/network time, Queue delivery, and Durable Objects are outside this
+harness. Requirements use the real route/RLS/decryption path and a controlled
+adapter with a fixed 100 ms delay, not a live Provider.
 
 ## Local run
 
@@ -78,6 +88,7 @@ names must still start with `meltiply_bench`.
 Run the harness:
 
 ```sh
+BENCHMARK_PROFILE=application \
 BENCHMARK_DATABASE_AUTHENTICATED_URL='postgres://meltiply_rls:meltiply-authenticated-local@127.0.0.1:5433/meltiply_benchmark?sslmode=disable' \
 BENCHMARK_DATABASE_SYSTEM_URL='postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply_benchmark?sslmode=disable' \
 BENCHMARK_LABEL=local BENCHMARK_OUTPUT_FILE=/tmp/meltiply-benchmark/local.json \
@@ -86,22 +97,40 @@ bun run benchmark:backend
 
 Configuration:
 
-| Variable                          | Default        | Meaning                                             |
-| --------------------------------- | -------------- | --------------------------------------------------- |
-| `BENCHMARK_SAMPLES`               | `20`           | Measured samples for read/mutation workflows        |
-| `BENCHMARK_WARMUP`                | `3`            | Warm-up samples before measurement                  |
-| `BENCHMARK_DELETE_SAMPLES`        | `3`            | Measured batches per delete mode                    |
-| `BENCHMARK_DELETE_WARMUP`         | `1`            | Warm-up batches per delete mode                     |
-| `BENCHMARK_DELETE_BATCH_SIZES`    | `1,5,10,25,50` | Batch sizes                                         |
-| `BENCHMARK_DELETE_CONCURRENCY`    | `4`            | Bounded deletion concurrency                        |
-| `BENCHMARK_ALLOW_ERRORS`          | unset          | Exit zero despite scenario errors                   |
-| `BENCHMARK_ALLOW_REMOTE_DATABASE` | `0`            | Set exactly `1` to permit a remote preparation host |
+| Variable                          | Default                               | Meaning                                                                                                      |
+| --------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `BENCHMARK_PROFILE`               | `application` locally and in workflow | Realistic authenticated Analytics/control reads; `read-cache` uses short histories; `all` is historical only |
+| `BENCHMARK_SAMPLES`               | `20`                                  | Measured samples for read/mutation workflows                                                                 |
+| `BENCHMARK_WARMUP`                | `3`                                   | Warm-up samples before measurement                                                                           |
+| `BENCHMARK_DELETE_SAMPLES`        | `3`                                   | Measured batches per delete mode                                                                             |
+| `BENCHMARK_DELETE_WARMUP`         | `1`                                   | Warm-up batches per delete mode                                                                              |
+| `BENCHMARK_DELETE_BATCH_SIZES`    | `1,5,10,25,50`                        | Batch sizes                                                                                                  |
+| `BENCHMARK_DELETE_CONCURRENCY`    | `4`                                   | Bounded deletion concurrency                                                                                 |
+| `BENCHMARK_ALLOW_ERRORS`          | unset                                 | Exit zero despite scenario errors                                                                            |
+| `BENCHMARK_ALLOW_REMOTE_DATABASE` | `0`                                   | Set exactly `1` to permit a remote preparation host                                                          |
 
 The dataset is fixed in [`fixtures.mjs`](fixtures.mjs): one Workspace, one Brand
 Profile, 40 Channels, 300 Posts with attachments and published Distributions,
 300 analytics snapshots, 100 comments, and 42 drafts with 20 saved targets.
 Deletion fixtures are created per sample. Every run deletes and recreates its
 Workspace, so repeated runs are independent.
+
+The `read-cache` profile measures the five analytics/requirements workloads and
+seven unchanged read controls. It uses one YouTube and one Threads Channel in the
+Brand Profile plus a controlled TikTok requirements Channel, preserving the current
+one-Channel-per-Provider invariant. The historical `all` profile retains its old
+20-Channels-per-Provider fixture and is not valid for current migrations; use it
+only with compatible historical revisions. The focused profile does not measure
+the legacy scheduling/deletion workloads or frontend QueryClient behavior.
+
+The default `application` profile uses the same current-model Channels and read
+controls, but seeds 90 snapshots per Distribution (27,000 history rows). It also
+measures the complete Analytics page's dashboard-plus-ranking action against one
+exact window and checks published cohort totals/ranking before reporting timings.
+Fixture users are already provisioned, as they are after first sign-in; the
+production actor lookup still runs for every request. Every simulated request
+receives its own binding identity, so invocation-owned pools cannot impose one
+artificial global four-connection limit across concurrent requests.
 
 The `posts.schedule.drop19` scenario runs after fan-out and reuses the last
 seeded schedule Post. Before every sample it restores all 20 targets through the
@@ -118,6 +147,14 @@ checkout, and gives each revision its own migrated database.
 Runs alternate baseline/candidate order by repetition; the workflow uses three
 repetitions, 30 read/mutation samples, and five samples per deletion batch. Raw JSON and the
 Markdown report are uploaded as artifacts.
+
+The workflow's default `profile=application` uses three alternating repetitions,
+30 measured samples per workload after three warm-ups, and 20-request concurrent
+bursts. It overlays harness contents (not a nested directory) and verifies both
+checkouts receive identical code before measurement. `analytics.summary.year`
+measures repeat reads after warm-up; cold workloads use distinct exact end instants
+without changing the published cohort. A regression test checks that aggregate and
+upstream metrics are pooled per request, not per burst.
 
 The harness may only use APIs present in both revisions. It is intentionally
 coupled to `workers/api/src` behavior, not to any optimization added on the
@@ -139,8 +176,11 @@ bun run benchmark:compare -- \
 
 ## Limitations
 
-- In-process Hono invocation: no Worker isolate, Cloudflare CPU accounting, TLS,
-  or network.
+- In-process Hono invocation: no Worker isolate, Cloudflare CPU accounting or
+  client-to-edge TLS/network. JWT/JWKS/session/actor work is included, not replaced.
+- Direct local PostgreSQL connections do not model Hyperdrive origin pooling;
+  invocation-owned client destruction pays physical connection setup here.
+  Use the managed placement experiment for actual edge/origin latency.
 - A single Node process and one PostgreSQL instance; CPU is process-wide.
 - RSS/heap deltas are noisy. Peak RSS is reported for context only.
 - p99 uses pooled samples across repetitions; deletion per-request p95 is

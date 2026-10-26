@@ -19,13 +19,15 @@
     },
     "traces": {
       "enabled": true,
-      "head_sampling_rate": 1,
+      "head_sampling_rate": 0.1,
       "persist": true,
     },
   },
   "vars": {
     "ENVIRONMENT": "staging",
     "LOG_SAMPLE_RATE": "0.1",
+    "RECURRING_COMMENTS_ENABLED": "false",
+    "PUBLISH_BATCH_CONCURRENCY": "1",
     "FACEBOOK_LIVE_ACCEPTED": "false",
     "INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED": "false",
     "INSTAGRAM_LIVE_ACCEPTED": "false",

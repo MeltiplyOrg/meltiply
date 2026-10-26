@@ -247,7 +247,8 @@ export function replayPayload(message) {
 
 /**
  * Constructs an authenticated HTTP client for interacting with the Cloudflare Queues v4 REST API.
- * Provides wrappers for acknowledge, list, metrics, pull, and push with bounded response parsing.
+ * Provides wrappers for acknowledge, list, metrics, pull, and push with bounded response parsing,
+ * a ten-second transport deadline, and no credential-bearing redirects.
  *
  * @param {object} params - Client options
  * @param {string} params.accountId - Cloudflare account ID
@@ -260,6 +261,8 @@ function apiClient({ accountId, apiToken, fetchImpl }) {
   const call = async (path, init = {}) => {
     const response = await fetchImpl(`${root}${path}`, {
       ...init,
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
       headers: {
         Authorization: `Bearer ${apiToken}`,
         ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -325,18 +328,31 @@ async function resolveQueues(client, names) {
 
 /**
  * Normalizes raw Cloudflare Queue metric counters into a consistent snapshot.
- * Computes the age of the oldest message in seconds relative to current time.
+ * Computes oldest-message age; rejects missing/non-finite counters instead of
+ * converting an incomplete monitoring response into a healthy empty Queue.
  *
  * @param {string} name - Queue name
  * @param {object} metrics - Raw metrics object from Cloudflare API
  * @param {number} now - Current epoch timestamp in milliseconds
  * @returns {{ backlog_bytes: number, backlog_count: number, name: string, oldest_age_seconds: number }} Normalized metric snapshot
+ * @throws {TypeError} If counters or a nonempty Queue's oldest timestamp are invalid.
  */
 function metricSnapshot(name, metrics, now) {
-  const oldest = Number(metrics.oldest_message_timestamp_ms ?? 0);
+  if (!metrics || typeof metrics !== "object" || Array.isArray(metrics)) {
+    throw new TypeError("Cloudflare Queue metrics are invalid");
+  }
+  for (const field of ["backlog_bytes", "backlog_count"]) {
+    if (!Number.isSafeInteger(metrics[field]) || metrics[field] < 0) {
+      throw new TypeError(`Cloudflare Queue ${field} is missing or invalid`);
+    }
+  }
+  const oldest = metrics.oldest_message_timestamp_ms ?? 0;
+  if (!Number.isSafeInteger(oldest) || oldest < 0 || (metrics.backlog_count > 0 && oldest === 0)) {
+    throw new TypeError("Cloudflare Queue oldest timestamp is missing or invalid");
+  }
   return {
-    backlog_bytes: Number(metrics.backlog_bytes ?? 0),
-    backlog_count: Number(metrics.backlog_count ?? 0),
+    backlog_bytes: metrics.backlog_bytes,
+    backlog_count: metrics.backlog_count,
     name,
     oldest_age_seconds: oldest > 0 ? Math.max(0, Math.floor((now - oldest) / 1_000)) : 0,
   };

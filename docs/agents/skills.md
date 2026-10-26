@@ -38,6 +38,15 @@ this repository's domain-document names: the pack reads `GLOSSARY.md`,
 `GLOSSARY-MAP.md`, and `GLOSSARY-FORMAT.md`, while this repository keeps
 `CONTEXT.md`, `CONTEXT-MAP.md`, and `CONTEXT-FORMAT.md`.
 
+The sync also reapplies explicit cache review to `code-review`'s Optimization
+prompt and checklist: inspect existing caches and opportunities to avoid reads
+closer to the user. Review isolation, freshness/invalidation, lifecycle and
+concurrency races, failure recovery, bounded memory, batching, and runtime
+ownership. Require origin-work and end-to-end latency evidence before claiming
+savings; report inspected paths or explain why caching is not applicable.
+This adaptation is owned by `applyCacheReviewGuidance` in the sync script;
+regenerate the managed guidance with `skills:sync` so `skills:check` stays reproducible.
+
 ## Repository-owned skill
 
 `pr` is not pack-managed. It follows the

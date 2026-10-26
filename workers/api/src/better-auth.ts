@@ -36,27 +36,19 @@ interface RateLimitHitRow extends Record<string, unknown> {
 }
 
 /**
- * Returns a cached Better Auth instance whose key captures every input the
- * instance depends on: secret, base URL, trusted origins, the verification
- * policy (derived from `ENVIRONMENT`), the `MAIL` binding object identity, the
- * normalized sender address/display name, and the system-database connection
- * string (pool identity in `systemPoolFor`). A changed dependency yields a
- * fresh instance rather than leaking a previous environment's configuration.
- * Local and DATABASE_POOL_MODE=request instances are never cached because their pools are request-owned.
+ * Returns a cached Better Auth instance keyed by every binding it captures.
+ * Local and explicitly request-owned pools are never cached because their
+ * adapters belong to one invocation; managed isolates reuse the instance while
+ * its secret, origins, mail configuration, policy, and database remain stable.
  *
- * Email verification is an explicit policy, not an accident of configuration:
- * deployed environments (`staging`/`preview`) always require a verified email,
- * while `local`/`test` keep the historical default of allowing unverified
- * sign-in. When verification is required, a usable `MAIL` binding plus a valid
- * `MAIL_FROM_ADDRESS` sender must also exist — a missing or malformed mail
- * configuration fails closed at resolution instead of silently disabling
- * verification. In local/test the sender is wired whenever it is usable so the
- * simulated binding still emits verification/recovery messages.
+ * Email verification is explicit: deployed environments require verified email
+ * by default, while local/test allow unverified sign-in. Required verification
+ * fails closed when the mail binding or sender is unusable.
  *
- * @param env - Worker environment bindings containing database connection and auth configuration.
+ * @param env - Worker environment bindings containing database and auth configuration.
  * @returns Configured Better Auth instance.
- * @throws {Error} When `BETTER_AUTH_SECRET` is absent outside local/test, or when
- *   verification is required but the mail binding or sender configuration is unusable.
+ * @throws {Error} When the secret is missing in a deployed environment or
+ *   required email verification lacks a usable mail binding and sender.
  */
 export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstance> {
   const isLocalOrTest = env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
@@ -98,8 +90,9 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
   ) {
     return betterAuthCached.value;
   }
+
   const trustedOrigins = Array.from(allowedOriginsFor(env));
-  // Exception: dynamic import avoids loading pg in workerd unit test isolates
+  // Exception: dynamic import avoids loading pg in workerd unit test isolates.
   const { systemPoolFor } = await import("./database");
   const database = systemPoolFor(env);
   const auth = authPolicyHandler(

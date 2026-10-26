@@ -74,6 +74,24 @@ Posts Table and its Columns menu share `postAnalyticsColumns`: Likes, Cmts, Shrs
 
 `usePosts` owns an infinite-query cache of 60-record server pages. Grid slices the filtered loaded collection into pages; Table appends explicitly requested pages. Both reuse the same browser-memory cache across view/route navigation, retain inactive pages for 30 minutes, and share the existing mutation invalidation and active-publication polling. Cached content is not written to persistent browser storage and is discarded with the user/workspace query-provider boundary. A failed next-page read leaves loaded records and selection intact and exposes retry through the same bottom control.
 
+Active and due work refreshes every ten seconds. Sparse Post activity uses bounded
+detail reads; when active identities outnumber loaded pages, the owning collection
+refreshes its page chain once instead of issuing one request per Post. A pending
+Load more is not canceled. Calendar uses one detail read for a single active
+outcome and one bounded range read for multiple active outcomes. Disappeared Posts
+are checked individually before clearing other projections; a filtered page's
+absence is not proof of deletion. Publication invalidates stored Analytics.
+
+`usePlatformCapabilities` retains its one successful deployment-defined result for
+the lifetime of the current identity/Workspace-scoped QueryClient (`staleTime` and
+`gcTime` are infinite for this query only). Navigation, focus, reconnect, and Channel
+disconnects do not refetch it. Sign-out, scope replacement, and a full application
+reload create fresh query state. Nothing is persisted to browser storage. The
+general freshness default remains 60 seconds; Channel/reference lists and stored
+Analytics explicitly reuse successful browser reads for five minutes. Mutations
+invalidate affected reads, and Analytics Refresh advances its shared exact cohort.
+Dynamic publishing requirements and Asset preview URL policies remain separate.
+
 The empty Table message and Create post action belong to the visible viewport outside the wide table body, so they do not disappear offscreen with analytics columns. Calendar navigation is outside its independently scrolling date canvas; horizontal or vertical calendar movement cannot carry Today, period navigation, or Month/Week away.
 
 Queues extends `PostCalendarGridView` rather than introducing a second month grid

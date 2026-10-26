@@ -1,0 +1,1199 @@
+{
+  "completed_at": "2026-10-24T15:36:38.262Z",
+  "config": {
+    "profile": "read-cache",
+    "batch_sizes": [1, 5, 10, 25, 50],
+    "delete_concurrency": 4,
+    "delete_samples": 5,
+    "delete_warmup": 1,
+    "measured_samples": 30,
+    "warmup_samples": 3,
+    "read_concurrency": 20,
+    "controlled_provider_delay_ms": 100
+  },
+  "dataset": {
+    "assets": 300,
+    "comments": 100,
+    "distributionLimit": 100,
+    "pageSize": 100,
+    "posts": 300,
+    "scheduleChannels": 1,
+    "schedulePosts": 42,
+    "batch_delete_posts_per_sample": [1, 5, 10, 25, 50]
+  },
+  "environment": {
+    "arch": "x64",
+    "database": "postgres",
+    "database_version": "18.6",
+    "platform": "linux",
+    "runtime": "Bun 1.4.2"
+  },
+  "label": "baseline",
+  "revision": {
+    "branch": "master",
+    "dirty": true,
+    "ref": "master",
+    "sha": "025e1d6e331eb575e3f519d523859f2902bf24d7"
+  },
+  "started_at": "2026-10-24T15:36:22.700Z",
+  "duration_ms": 15569.48,
+  "workflows": [
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 7.67,
+          "system_total": 28.01,
+          "user_total": 202
+        },
+        "db": {
+          "application_statements_per_operation": 5,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 150,
+            "max": 2.42,
+            "mean": 1.09,
+            "min": 0.45,
+            "p50": 1.15,
+            "p95": 1.52,
+            "p99": 2.19
+          },
+          "statements_total": 150,
+          "time_ms_total": 164.12,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, title, default_text, status, revision, created_at, updated_at, (SELECT jsonb_build_object('queue_id', membership.queue_id, 'queue_name', membership.queue_name, 'assigned_at', membership.assigned_at) FROM publishing_queue_memberships membership WHERE membership.post_id = posts.id AND membership.released_at IS NULL) AS queue_membership FROM posts WHERE posts.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = posts.brand_profile_id AND bp.deleted_at IS NULL ) ORDER BY posts.created_at DESC, posts.id DESC LIMIT $1 OFFSET $2"
+            },
+            {
+              "count": 30,
+              "statement": "SELECT pa.post_id, pa.asset_id, pa.position, asset.id, asset.org_id, asset.brand_profile_id, asset.uploaded_by, asset.asset_type, asset.title, asset.duration_sec, asset.file_size, asset.mime_type, asset.width, asset.height, asset.original_filename, asset.status, asset.failure_code, asset.failure_message, asset.failure_retryable, asset.failure_at, asset.created_at, asset.updated_at FROM post_attachments AS pa JOIN assets AS asset ON asset.id = pa.asset_id AND asset.org_id = pa.org_id WHERE pa.post_id = ANY($1::uuid[]) ORDER BY pa.post_id, pa.position"
+            },
+            {
+              "count": 30,
+              "statement": "SELECT post_id, platform_account_id, title_override, description_override, hashtags, provider_options, attachment_ids FROM post_targets WHERE post_id = ANY($1::uuid[]) ORDER BY post_id, created_at, platform_account_id"
+            },
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, post_id, platform_account_id, platform, status, scheduled_at, published_at, platform_post_id, platform_url, title_override, description_override, hashtags, error_message, attempt_count, last_attempt_at, next_attempt_at, failure_code, failure_retryable, batch_id, created_at, updated_at, ( SELECT operation.publication_snapshot FROM provider_operations AS operation WHERE operation.distribution_id = distributions.id AND operation.operation = 'publish' AND operation.publication_snapshot IS NOT NULL ORDER BY operation.created_at DESC, operation.id DESC LIMIT 1 ) AS publication_snapshot FROM distributions WHERE post_id = ANY($1::uuid[]) ORDER BY post_id, event_at DESC, id DESC"
+            },
+            {
+              "count": 30,
+              "statement": "SELECT d.post_id, d.id AS distribution_id, d.platform, snapshot.likes, snapshot.comments, snapshot.shares, snapshot.views, snapshot.impressions, snapshot.reach FROM distributions d JOIN LATERAL ( SELECT likes, comments, shares, views, impressions, reach FROM analytics_snapshots WHERE distribution_id = d.id ORDER BY snapshot_at DESC, id DESC LIMIT 1 ) snapshot ON true WHERE d.post_id = ANY($1::uuid[]) AND d.status = 'published' ORDER BY d.post_id, d.platform, d.id"
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 14.27,
+          "mean": 11.54,
+          "min": 10.02,
+          "p50": 11.43,
+          "p95": 13.94,
+          "p99": 14.27
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 14.27,
+          "mean": 11.54,
+          "min": 10.02,
+          "p50": 11.43,
+          "p95": 13.94,
+          "p99": 14.27
+        },
+        "request_samples_ms": [
+          13.94, 13.08, 11.83, 11.6, 11.48, 12.55, 11.11, 11.69, 11.57, 10.79, 10.6, 11.29, 12.21,
+          10.91, 10.51, 10.21, 11.43, 10.89, 11.92, 10.58, 12.15, 10.41, 10.13, 10.02, 14.27, 13.82,
+          12.93, 11.44, 10.47, 10.28
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 146280,
+          "mean": 146280,
+          "min": 146280,
+          "p50": 146280,
+          "p95": 146280,
+          "p99": 146280
+        },
+        "response_bytes_samples": [
+          146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280,
+          146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280,
+          146280, 146280, 146280, 146280, 146280, 146280, 146280, 146280
+        ],
+        "rss_bytes": {
+          "after": 103706624,
+          "before": 87134208,
+          "heap_used_end": 16904059,
+          "peak": 103706624
+        },
+        "samples": 30,
+        "samples_ms": [
+          13.94, 13.08, 11.83, 11.6, 11.48, 12.55, 11.11, 11.69, 11.57, 10.79, 10.6, 11.29, 12.21,
+          10.91, 10.51, 10.21, 11.43, 10.89, 11.92, 10.58, 12.15, 10.41, 10.13, 10.02, 14.27, 13.82,
+          12.93, 11.44, 10.47, 10.28
+        ],
+        "setup_ms_total": 0.03,
+        "throughput_rps": 86.68,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "posts.list.page100"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 3.66,
+          "system_total": 36.44,
+          "user_total": 73.47
+        },
+        "db": {
+          "application_statements_per_operation": 5,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 150,
+            "max": 1.5,
+            "mean": 0.71,
+            "min": 0.25,
+            "p50": 0.77,
+            "p95": 0.9,
+            "p99": 1.09
+          },
+          "statements_total": 150,
+          "time_ms_total": 106.23,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, title, default_text, status, revision, created_at, updated_at, (SELECT jsonb_build_object('queue_id', membership.queue_id, 'queue_name', membership.queue_name, 'assigned_at', membership.assigned_at) FROM publishing_queue_memberships membership WHERE membership.post_id = posts.id AND membership.released_at IS NULL) AS queue_membership FROM posts WHERE posts.id = $1 AND posts.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = posts.brand_profile_id AND bp.deleted_at IS NULL )"
+            },
+            {
+              "count": 30,
+              "statement": "SELECT pa.post_id, pa.asset_id, pa.position, asset.id, asset.org_id, asset.brand_profile_id, asset.uploaded_by, asset.asset_type, asset.title, asset.duration_sec, asset.file_size, asset.mime_type, asset.width, asset.height, asset.original_filename, asset.status, asset.failure_code, asset.failure_message, asset.failure_retryable, asset.failure_at, asset.created_at, asset.updated_at FROM post_attachments AS pa JOIN assets AS asset ON asset.id = pa.asset_id AND asset.org_id = pa.org_id WHERE pa.post_id = ANY($1::uuid[]) ORDER BY pa.post_id, pa.position"
+            },
+            {
+              "count": 30,
+              "statement": "SELECT post_id, platform_account_id, title_override, description_override, hashtags, provider_options, attachment_ids FROM post_targets WHERE post_id = ANY($1::uuid[]) ORDER BY post_id, created_at, platform_account_id"
+            },
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, post_id, platform_account_id, platform, status, scheduled_at, published_at, platform_post_id, platform_url, title_override, description_override, hashtags, error_message, attempt_count, last_attempt_at, next_attempt_at, failure_code, failure_retryable, batch_id, created_at, updated_at, ( SELECT operation.publication_snapshot FROM provider_operations AS operation WHERE operation.distribution_id = distributions.id AND operation.operation = 'publish' AND operation.publication_snapshot IS NOT NULL ORDER BY operation.created_at DESC, operation.id DESC LIMIT 1 ) AS publication_snapshot FROM distributions WHERE post_id = ANY($1::uuid[]) ORDER BY post_id, event_at DESC, id DESC"
+            },
+            {
+              "count": 30,
+              "statement": "SELECT d.post_id, d.id AS distribution_id, d.platform, snapshot.likes, snapshot.comments, snapshot.shares, snapshot.views, snapshot.impressions, snapshot.reach FROM distributions d JOIN LATERAL ( SELECT likes, comments, shares, views, impressions, reach FROM analytics_snapshots WHERE distribution_id = d.id ORDER BY snapshot_at DESC, id DESC LIMIT 1 ) snapshot ON true WHERE d.post_id = ANY($1::uuid[]) AND d.status = 'published' ORDER BY d.post_id, d.platform, d.id"
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 10.15,
+          "mean": 8.52,
+          "min": 7.77,
+          "p50": 8.43,
+          "p95": 9.65,
+          "p99": 10.15
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 10.15,
+          "mean": 8.52,
+          "min": 7.77,
+          "p50": 8.43,
+          "p95": 9.65,
+          "p99": 10.15
+        },
+        "request_samples_ms": [
+          8.67, 8.49, 9.11, 8.33, 8.43, 8.73, 8.5, 10.15, 8.8, 8.66, 8.97, 8.49, 8.51, 8.38, 8.57,
+          8.37, 8.01, 9.65, 8.33, 8.05, 8.49, 7.77, 8.26, 8.4, 8.01, 8.43, 7.94, 8.28, 8.38, 8.57
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 2052,
+          "mean": 2052,
+          "min": 2052,
+          "p50": 2052,
+          "p95": 2052,
+          "p99": 2052
+        },
+        "response_bytes_samples": [
+          2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052,
+          2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052, 2052
+        ],
+        "rss_bytes": {
+          "after": 105140224,
+          "before": 102150144,
+          "heap_used_end": 18668060,
+          "peak": 105971712
+        },
+        "samples": 30,
+        "samples_ms": [
+          8.67, 8.49, 9.11, 8.33, 8.43, 8.73, 8.5, 10.15, 8.8, 8.66, 8.97, 8.49, 8.51, 8.38, 8.57,
+          8.37, 8.01, 9.65, 8.33, 8.05, 8.49, 7.77, 8.26, 8.4, 8.01, 8.43, 7.94, 8.28, 8.38, 8.57
+        ],
+        "setup_ms_total": 0.03,
+        "throughput_rps": 117.33,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "posts.detail.published"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 3.34,
+          "system_total": 36.54,
+          "user_total": 63.61
+        },
+        "db": {
+          "application_statements_per_operation": 1,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 30,
+            "max": 2.7,
+            "mean": 1.63,
+            "min": 1.51,
+            "p50": 1.59,
+            "p95": 1.68,
+            "p99": 2.7
+          },
+          "statements_total": 30,
+          "time_ms_total": 48.98,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, post_id, platform_account_id, platform, status, scheduled_at, published_at, platform_post_id, platform_url, title_override, description_override, hashtags, error_message, attempt_count, last_attempt_at, next_attempt_at, failure_code, failure_retryable, batch_id, created_at, updated_at, ( SELECT operation.publication_snapshot FROM provider_operations AS operation WHERE operation.distribution_id = distributions.id AND operation.operation = 'publish' AND operation.publication_snapshot IS NOT NULL ORDER BY operation.created_at DESC, operation.id DESC LIMIT 1 ) AS publication_snapshot FROM distributions WHERE EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = distributions.brand_profile_id AND bp.deleted_at IS NULL ) ORDER BY event_at DESC, id DESC LIMIT $1 OFFSET $2"
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 8.21,
+          "mean": 6.48,
+          "min": 5.94,
+          "p50": 6.37,
+          "p95": 7.38,
+          "p99": 8.21
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 8.21,
+          "mean": 6.48,
+          "min": 5.94,
+          "p50": 6.37,
+          "p95": 7.38,
+          "p99": 8.21
+        },
+        "request_samples_ms": [
+          6.56, 6.76, 6.44, 6.58, 6.69, 8.21, 6.83, 6.95, 6.31, 6.69, 6.61, 6.43, 6.35, 6.19, 6.52,
+          6.23, 6.51, 6.19, 6.05, 7.38, 6.23, 6.28, 6.13, 6.37, 5.94, 6.58, 5.94, 6.24, 6.18, 6.03
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 73158,
+          "mean": 73158,
+          "min": 73158,
+          "p50": 73158,
+          "p95": 73158,
+          "p99": 73158
+        },
+        "response_bytes_samples": [
+          73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158,
+          73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158, 73158,
+          73158, 73158, 73158, 73158
+        ],
+        "rss_bytes": {
+          "after": 112164864,
+          "before": 104513536,
+          "heap_used_end": 20167581,
+          "peak": 112164864
+        },
+        "samples": 30,
+        "samples_ms": [
+          6.56, 6.76, 6.44, 6.58, 6.69, 8.21, 6.83, 6.95, 6.31, 6.69, 6.61, 6.43, 6.35, 6.19, 6.52,
+          6.23, 6.51, 6.19, 6.05, 7.38, 6.23, 6.28, 6.13, 6.37, 5.94, 6.58, 5.94, 6.24, 6.18, 6.03
+        ],
+        "setup_ms_total": 0.03,
+        "throughput_rps": 154.33,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "distributions.list.page100"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 4.32,
+          "system_total": 28.98,
+          "user_total": 100.66
+        },
+        "db": {
+          "application_statements_per_operation": 1,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 30,
+            "max": 2.6,
+            "mean": 1.98,
+            "min": 1.86,
+            "p50": 1.93,
+            "p95": 2.46,
+            "p99": 2.6
+          },
+          "statements_total": 30,
+          "time_ms_total": 59.32,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT d.id, d.post_id, p.title AS post_title, d.platform, d.platform_account_id, d.status, d.scheduled_at, d.published_at, d.updated_at, d.brand_profile_id FROM distributions d JOIN posts p ON p.id = d.post_id AND p.org_id = d.org_id WHERE d.event_at >= $1 AND d.event_at <= $2 AND p.deleted_at IS NULL AND ($4::uuid IS NULL OR d.brand_profile_id = $4) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = d.brand_profile_id AND bp.deleted_at IS NULL ) ORDER BY d.event_at ASC, d.id ASC LIMIT $3"
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 11.41,
+          "mean": 7.01,
+          "min": 6.25,
+          "p50": 6.78,
+          "p95": 7.77,
+          "p99": 11.41
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 11.41,
+          "mean": 7.01,
+          "min": 6.25,
+          "p50": 6.78,
+          "p95": 7.77,
+          "p99": 11.41
+        },
+        "request_samples_ms": [
+          7.18, 6.62, 6.68, 7.07, 6.51, 6.58, 6.25, 6.64, 7.73, 6.67, 6.9, 6.41, 7.77, 6.68, 6.9,
+          7.02, 6.82, 6.88, 11.41, 7.51, 6.78, 6.45, 6.74, 6.71, 6.79, 7.02, 6.9, 6.59, 6.37, 7.75
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 117504,
+          "mean": 117504,
+          "min": 117504,
+          "p50": 117504,
+          "p95": 117504,
+          "p99": 117504
+        },
+        "response_bytes_samples": [
+          117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504,
+          117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504,
+          117504, 117504, 117504, 117504, 117504, 117504, 117504, 117504
+        ],
+        "rss_bytes": {
+          "after": 124317696,
+          "before": 117137408,
+          "heap_used_end": 14748274,
+          "peak": 124317696
+        },
+        "samples": 30,
+        "samples_ms": [
+          7.18, 6.62, 6.68, 7.07, 6.51, 6.58, 6.25, 6.64, 7.73, 6.67, 6.9, 6.41, 7.77, 6.68, 6.9,
+          7.02, 6.82, 6.88, 11.41, 7.51, 6.78, 6.45, 6.74, 6.71, 6.79, 7.02, 6.9, 6.59, 6.37, 7.75
+        ],
+        "setup_ms_total": 0.02,
+        "throughput_rps": 142.64,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "calendar.range"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 3.03,
+          "system_total": 26.99,
+          "user_total": 63.84
+        },
+        "db": {
+          "application_statements_per_operation": 1,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 30,
+            "max": 1.72,
+            "mean": 1.65,
+            "min": 1.59,
+            "p50": 1.64,
+            "p95": 1.7,
+            "p99": 1.72
+          },
+          "statements_total": 30,
+          "time_ms_total": 49.53,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "WITH candidates AS ( SELECT id, platform FROM distributions WHERE status = 'published' AND published_at >= $1 AND published_at <= $2 AND ($3::text IS NULL OR platform = $3) AND ($4::uuid IS NULL OR brand_profile_id = $4) AND ($5::uuid IS NULL OR platform_account_id = $5) AND ($6::text IS NULL OR CASE WHEN COALESCE(array_length(distributions.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(distributions.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = distributions.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END = $6) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = brand_profile_id AND bp.deleted_at IS NULL ) ) SELECT c.platform, COALESCE(SUM(latest.views), 0) AS views, COALESCE(SUM(latest.likes), 0) AS likes, COALESCE(SUM(latest.comments), 0) AS comments, COALESCE(SUM(latest.shares), 0) AS shares, COALESCE(SUM(latest.watch_time_sec), 0) AS watch_time_sec, COALESCE(SUM(latest.reach), 0) AS reach, COALESCE(SUM(latest.impressions), 0) AS impressions, COUNT(*) AS post_count, MAX(latest.snapshot_at) AS last_synced_at FROM candidates c LEFT JOIN LATERAL ( SELECT s.views, s.likes, s.comments, s.shares, s.watch_time_sec, s.reach, s.impressions, s.snapshot_at FROM analytics_snapshots s WHERE s.distribution_id = c.id AND s.snapshot_at <= $2 ORDER BY s.snapshot_at DESC, s.id DESC LIMIT 1 ) latest ON true GROUP BY c.platform ORDER BY c.platform ASC"
+            }
+          ],
+          "aggregate_executions": 30,
+          "aggregate_time_ms_total": 49.53
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 7.85,
+          "mean": 6.54,
+          "min": 6.11,
+          "p50": 6.47,
+          "p95": 7.81,
+          "p99": 7.85
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 7.83,
+          "mean": 6.53,
+          "min": 6.1,
+          "p50": 6.45,
+          "p95": 7.79,
+          "p99": 7.83
+        },
+        "request_samples_ms": [
+          6.49, 6.56, 6.51, 6.38, 6.47, 6.41, 6.54, 6.59, 6.42, 6.23, 7.12, 7.83, 6.54, 6.55, 6.63,
+          6.45, 6.33, 6.22, 6.39, 6.52, 6.94, 6.28, 6.16, 6.16, 6.24, 7.79, 6.46, 6.1, 6.24, 6.29
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 737,
+          "mean": 737,
+          "min": 737,
+          "p50": 737,
+          "p95": 737,
+          "p99": 737
+        },
+        "response_bytes_samples": [
+          737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737,
+          737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737
+        ],
+        "rss_bytes": {
+          "after": 116871168,
+          "before": 125104128,
+          "heap_used_end": 15799477,
+          "peak": 125235200
+        },
+        "samples": 30,
+        "samples_ms": [
+          6.5, 6.59, 6.52, 6.39, 6.49, 6.43, 6.55, 6.6, 6.43, 6.24, 7.13, 7.85, 6.57, 6.57, 6.65,
+          6.47, 6.34, 6.23, 6.4, 6.53, 6.95, 6.29, 6.17, 6.17, 6.25, 7.81, 6.47, 6.11, 6.25, 6.3
+        ],
+        "setup_ms_total": 0.01,
+        "throughput_rps": 152.85,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "analytics.summary.year"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 2.27,
+          "system_total": 18.24,
+          "user_total": 50
+        },
+        "db": {
+          "application_statements_per_operation": 1,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 30,
+            "max": 1.76,
+            "mean": 1.65,
+            "min": 1.57,
+            "p50": 1.64,
+            "p95": 1.7,
+            "p99": 1.76
+          },
+          "statements_total": 30,
+          "time_ms_total": 49.41,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "WITH candidates AS ( SELECT id, platform FROM distributions WHERE status = 'published' AND published_at >= $1 AND published_at <= $2 AND ($3::text IS NULL OR platform = $3) AND ($4::uuid IS NULL OR brand_profile_id = $4) AND ($5::uuid IS NULL OR platform_account_id = $5) AND ($6::text IS NULL OR CASE WHEN COALESCE(array_length(distributions.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(distributions.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = distributions.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END = $6) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = brand_profile_id AND bp.deleted_at IS NULL ) ) SELECT c.platform, COALESCE(SUM(latest.views), 0) AS views, COALESCE(SUM(latest.likes), 0) AS likes, COALESCE(SUM(latest.comments), 0) AS comments, COALESCE(SUM(latest.shares), 0) AS shares, COALESCE(SUM(latest.watch_time_sec), 0) AS watch_time_sec, COALESCE(SUM(latest.reach), 0) AS reach, COALESCE(SUM(latest.impressions), 0) AS impressions, COUNT(*) AS post_count, MAX(latest.snapshot_at) AS last_synced_at FROM candidates c LEFT JOIN LATERAL ( SELECT s.views, s.likes, s.comments, s.shares, s.watch_time_sec, s.reach, s.impressions, s.snapshot_at FROM analytics_snapshots s WHERE s.distribution_id = c.id AND s.snapshot_at <= $2 ORDER BY s.snapshot_at DESC, s.id DESC LIMIT 1 ) latest ON true GROUP BY c.platform ORDER BY c.platform ASC"
+            }
+          ],
+          "aggregate_executions": 30,
+          "aggregate_time_ms_total": 49.41
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 6.78,
+          "mean": 6.32,
+          "min": 5.91,
+          "p50": 6.36,
+          "p95": 6.74,
+          "p99": 6.78
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 6.77,
+          "mean": 6.31,
+          "min": 5.9,
+          "p50": 6.35,
+          "p95": 6.73,
+          "p99": 6.77
+        },
+        "request_samples_ms": [
+          6.53, 6.46, 6.35, 6.55, 6.36, 6.35, 6.18, 6.22, 6.18, 6.73, 6.36, 5.92, 6.26, 5.99, 6.35,
+          6.17, 6.16, 6.41, 6.21, 6.77, 6.39, 6.38, 6.51, 6.35, 6.32, 6.57, 6.3, 6.16, 6.06, 5.9
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 737,
+          "mean": 737,
+          "min": 737,
+          "p50": 737,
+          "p95": 737,
+          "p99": 737
+        },
+        "response_bytes_samples": [
+          737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737,
+          737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737, 737
+        ],
+        "rss_bytes": {
+          "after": 119648256,
+          "before": 117002240,
+          "heap_used_end": 15799477,
+          "peak": 125235200
+        },
+        "samples": 30,
+        "samples_ms": [
+          6.54, 6.48, 6.36, 6.56, 6.37, 6.36, 6.19, 6.22, 6.19, 6.74, 6.37, 5.93, 6.27, 6, 6.37,
+          6.18, 6.17, 6.42, 6.22, 6.78, 6.4, 6.39, 6.53, 6.36, 6.33, 6.58, 6.31, 6.16, 6.07, 5.91
+        ],
+        "setup_ms_total": 0.01,
+        "throughput_rps": 158.1,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "analytics.summary.cold-exact-range"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 2.33,
+          "system_total": 449.54,
+          "user_total": 950.49
+        },
+        "db": {
+          "application_statements_per_operation": 1,
+          "context_statements": 1800,
+          "statement_ms": {
+            "count": 600,
+            "max": 14.54,
+            "mean": 5.43,
+            "min": 1.91,
+            "p50": 5,
+            "p95": 10.63,
+            "p99": 13.23
+          },
+          "statements_total": 600,
+          "time_ms_total": 3257.82,
+          "top_statements": [
+            {
+              "count": 600,
+              "statement": "WITH candidates AS ( SELECT id, platform FROM distributions WHERE status = 'published' AND published_at >= $1 AND published_at <= $2 AND ($3::text IS NULL OR platform = $3) AND ($4::uuid IS NULL OR brand_profile_id = $4) AND ($5::uuid IS NULL OR platform_account_id = $5) AND ($6::text IS NULL OR CASE WHEN COALESCE(array_length(distributions.attachment_ids, 1), 0) = 0 THEN 'text' WHEN array_length(distributions.attachment_ids, 1) > 1 THEN 'carousel' WHEN EXISTS ( SELECT 1 FROM assets AS format_asset WHERE format_asset.id = distributions.attachment_ids[1] AND format_asset.asset_type = 'video' ) THEN 'video' ELSE 'image' END = $6) AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = brand_profile_id AND bp.deleted_at IS NULL ) ) SELECT c.platform, COALESCE(SUM(latest.views), 0) AS views, COALESCE(SUM(latest.likes), 0) AS likes, COALESCE(SUM(latest.comments), 0) AS comments, COALESCE(SUM(latest.shares), 0) AS shares, COALESCE(SUM(latest.watch_time_sec), 0) AS watch_time_sec, COALESCE(SUM(latest.reach), 0) AS reach, COALESCE(SUM(latest.impressions), 0) AS impressions, COUNT(*) AS post_count, MAX(latest.snapshot_at) AS last_synced_at FROM candidates c LEFT JOIN LATERAL ( SELECT s.views, s.likes, s.comments, s.shares, s.watch_time_sec, s.reach, s.impressions, s.snapshot_at FROM analytics_snapshots s WHERE s.distribution_id = c.id AND s.snapshot_at <= $2 ORDER BY s.snapshot_at DESC, s.id DESC LIMIT 1 ) latest ON true GROUP BY c.platform ORDER BY c.platform ASC"
+            }
+          ],
+          "aggregate_executions": 600,
+          "aggregate_time_ms_total": 3257.82
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 101.3,
+          "mean": 96.77,
+          "min": 92.79,
+          "p50": 96.55,
+          "p95": 101.12,
+          "p99": 101.3
+        },
+        "operations": 600,
+        "request_latency_ms": {
+          "count": 600,
+          "max": 101.06,
+          "mean": 58.41,
+          "min": 13.25,
+          "p50": 58.52,
+          "p95": 94.76,
+          "p99": 98.91
+        },
+        "request_samples_ms": [
+          28.21, 36.14, 74.1, 20.13, 51.63, 39.97, 66.59, 31.87, 59.41, 24.16, 55.3, 47.64, 43.77,
+          62.93, 78.24, 85.75, 81.99, 89.98, 70.29, 93.8, 56.81, 28.72, 51.96, 40.33, 47.89, 19.37,
+          32.47, 24.86, 44.09, 36.59, 89.5, 81.49, 69.09, 60.75, 64.82, 73.08, 97.42, 85.46, 93.4,
+          77.41, 28.44, 44.52, 32.14, 24.47, 71.91, 60.13, 48.39, 20.46, 40.49, 36.48, 56.17, 79.72,
+          91.75, 87.75, 67.8, 63.95, 52.23, 75.74, 83.61, 95.69, 67.9, 60.51, 30.92, 22.25, 52.86,
+          39.45, 48.76, 35.22, 26.3, 44.83, 75.65, 64.22, 71.78, 56.4, 79.42, 83.72, 87.63, 91.87,
+          99.7, 95.83, 54.91, 13.25, 58.84, 34.6, 22.68, 50.94, 66.75, 30.68, 38.57, 62.91, 26.62,
+          46.92, 42.84, 78.8, 82.86, 86.73, 72.85, 90.87, 101.06, 96.53, 24.61, 39.93, 28.31, 59.95,
+          47.53, 20.45, 43.75, 36.06, 63.93, 32.25, 51.55, 67.74, 55.32, 87.64, 75.7, 79.75, 71.75,
+          91.65, 83.7, 95.37, 33.86, 49.5, 45.45, 41.44, 65.21, 61.21, 29.65, 25.45, 21.37, 72.97,
+          37.52, 68.96, 76.85, 57.39, 97.55, 80.82, 53.36, 84.85, 88.77, 92.59, 24.46, 32.3, 36.27,
+          18.77, 52.49, 40.18, 44.03, 48.2, 28.45, 60.63, 64.6, 56.68, 68.59, 92.34, 72.46, 80.31,
+          76.4, 96.6, 88.37, 84.26, 52.42, 41.01, 25.18, 33.11, 36.86, 48.39, 56.15, 44.65, 21.17,
+          29.15, 63.74, 59.92, 67.6, 91.39, 75.44, 87.33, 79.41, 71.46, 83.43, 95.31, 69.38, 26.17,
+          37.99, 30.06, 73.06, 45.53, 21.73, 49.44, 34.14, 53.5, 41.63, 61.38, 94.27, 76.8, 57.42,
+          65.41, 86.34, 90.48, 98.14, 80.54, 20.84, 56.45, 36.91, 60.21, 48.47, 28.79, 40.71, 24.75,
+          32.7, 44.56, 68.16, 64.06, 76.16, 52.29, 87.67, 80, 91.42, 95.12, 83.72, 72.19, 45.94,
+          23.35, 42.09, 19.33, 57.42, 53.52, 27.07, 49.63, 30.84, 38.32, 34.54, 69.37, 61.55, 77.21,
+          65.48, 92.96, 89.11, 85.06, 73.27, 81.1, 61.75, 30.41, 26.78, 75.06, 57.94, 42.01, 22.68,
+          38.17, 49.67, 53.73, 45.77, 34.18, 66.88, 70.79, 87.24, 79.46, 94.76, 91.03, 83.25, 98.49,
+          52.89, 36.42, 60.72, 40.56, 44.6, 20.26, 32.34, 24.3, 48.68, 28.3, 56.76, 64.63, 68.6,
+          80.71, 76.71, 72.68, 84.68, 96.64, 88.65, 92.57, 38.03, 33.98, 53.78, 41.79, 57.82, 18.03,
+          22.22, 29.82, 49.78, 26.08, 45.6, 73.01, 69.33, 76.68, 61.81, 80.51, 84.3, 88.15, 93.86,
+          65.6, 19.79, 50.86, 39.18, 85.71, 43.01, 46.98, 23.64, 27.32, 35.08, 31.05, 59.08, 73.86,
+          77.69, 81.69, 54.8, 63.02, 70.29, 66.78, 89.21, 93.16, 29.21, 40.93, 20.91, 56.85, 17.12,
+          25.06, 44.9, 60.8, 36.9, 32.99, 52.61, 48.77, 81.11, 72.87, 88.91, 64.97, 68.95, 77.14,
+          85, 92.6, 52.16, 25.62, 37.04, 60.34, 29.45, 17.95, 33.32, 40.95, 21.7, 56.09, 64.24,
+          71.92, 91.5, 79.59, 68.1, 75.69, 83.47, 99.3, 87.37, 95.41, 20.62, 33.91, 63.47, 45.72,
+          24.97, 68.4, 29.81, 49.49, 37.94, 76.74, 41.98, 55.35, 72.68, 59.44, 84.44, 88.21, 80.6,
+          91.94, 95.89, 99.46, 34, 30.12, 51.31, 26.26, 18.4, 37.89, 22.35, 59.38, 47.24, 41.83,
+          55.5, 71.62, 67.46, 63.37, 94.35, 82.86, 79.18, 86.7, 75.5, 90.48, 47.89, 66.75, 62.98,
+          39.71, 29.86, 25.45, 34.56, 51.57, 43.77, 21.32, 59.1, 55.04, 98.47, 82.89, 70.76, 94.42,
+          90.5, 74.81, 78.93, 86.59, 18.78, 30.79, 38.53, 58.52, 50.54, 71.07, 34.57, 46.25, 22.66,
+          26.38, 62.43, 66.04, 42.3, 54.43, 74.82, 90.49, 94.18, 86.61, 82.64, 79.06, 52.77, 45.55,
+          49.18, 21.43, 33.7, 25.63, 41.83, 56.57, 76.26, 37.84, 29.81, 72.25, 84.09, 91.34, 95.41,
+          60.65, 87.56, 68.45, 64.66, 80.2, 22.28, 41.66, 51.08, 30.42, 62.71, 55.18, 46.98, 37.86,
+          34.01, 26.1, 70.37, 66.46, 78.72, 86.83, 95.1, 74.37, 59.05, 91.02, 99.18, 82.6, 25.35,
+          21.28, 41.68, 33.63, 64.27, 53.17, 49.56, 37.63, 29.25, 45.84, 56.68, 75.87, 67.84, 71.86,
+          79.79, 60.44, 91.91, 87.86, 96.04, 83.68, 82.17, 42.92, 18.96, 22.89, 27.05, 38.91, 50.93,
+          30.98, 46.85, 34.93, 90.83, 77.31, 66.34, 95.8, 86.67, 62.82, 58.86, 54.84, 70.51, 100.92,
+          34.46, 22.1, 42.07, 30.34, 26.21, 49.3, 45.51, 53.01, 60.73, 38.43, 56.88, 66.2, 86.37,
+          70.6, 78.9, 74.79, 90.38, 94.78, 98.91, 82.42, 76.78, 47.99, 36.67, 44.18, 40.54, 55.49,
+          20.88, 24.78, 28.7, 32.69, 59.36, 51.71, 80.51, 68.44, 72.5, 63.13, 88.55, 84.53, 96.55,
+          92.59, 49.34, 53.14, 42.1, 56.65, 38.15, 30.28, 64.61, 45.76, 60.8, 22.25, 26.2, 34.24,
+          68.1, 71.92, 76.11, 87.87, 84.09, 80.02, 91.91, 96.41, 34.84, 42.6, 27.16, 23.37, 53.94,
+          50.28, 46.55, 38.56, 30.89, 19.48, 75.48, 61.78, 57.75, 67.09, 83.13, 71.1, 95.07, 87.19,
+          79.29, 90.91
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 14740,
+          "mean": 14740,
+          "min": 14740,
+          "p50": 14740,
+          "p95": 14740,
+          "p99": 14740
+        },
+        "response_bytes_samples": [
+          14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740,
+          14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740, 14740,
+          14740, 14740, 14740, 14740
+        ],
+        "rss_bytes": {
+          "after": 123580416,
+          "before": 120901632,
+          "heap_used_end": 20930625,
+          "peak": 127868928
+        },
+        "samples": 30,
+        "samples_ms": [
+          94.01, 97.6, 95.89, 99.88, 101.3, 95.56, 97.71, 96.78, 95.54, 98.31, 95.29, 93.12, 98.66,
+          96.8, 94.02, 93.36, 92.79, 99.46, 99.66, 94.52, 98.59, 94.38, 95.57, 99.37, 96.2, 101.12,
+          99.11, 96.7, 96.55, 95.24
+        ],
+        "setup_ms_total": 0.02,
+        "throughput_rps": 206.68,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "analytics.summary.concurrent-cold20"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 3.02,
+          "system_total": 27.82,
+          "user_total": 62.71
+        },
+        "db": {
+          "application_statements_per_operation": 1,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 30,
+            "max": 0.41,
+            "mean": 0.32,
+            "min": 0.3,
+            "p50": 0.31,
+            "p95": 0.35,
+            "p99": 0.41
+          },
+          "statements_total": 30,
+          "time_ms_total": 9.59,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT platform, platform_user_id, access_token, connection_status, token_expires_at, revoked_at FROM platform_accounts WHERE id = $1 LIMIT 1"
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 106.7,
+          "mean": 105.33,
+          "min": 104.85,
+          "p50": 105.22,
+          "p95": 106.56,
+          "p99": 106.7
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 106.68,
+          "mean": 105.31,
+          "min": 104.83,
+          "p50": 105.21,
+          "p95": 106.53,
+          "p99": 106.68
+        },
+        "request_samples_ms": [
+          105.34, 104.92, 105.25, 105.29, 106.68, 105.43, 105.5, 105.27, 105.2, 104.84, 105.55,
+          105.02, 105.76, 106.53, 105.34, 105.46, 104.91, 104.84, 104.83, 104.88, 105.34, 105.07,
+          105.21, 106.18, 105.34, 104.93, 105.11, 105.18, 104.96, 105.07
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 253,
+          "mean": 253,
+          "min": 253,
+          "p50": 253,
+          "p95": 253,
+          "p99": 253
+        },
+        "response_bytes_samples": [
+          253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253,
+          253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253, 253
+        ],
+        "rss_bytes": {
+          "after": 117428224,
+          "before": 117989376,
+          "heap_used_end": 21788418,
+          "peak": 127868928
+        },
+        "samples": 30,
+        "samples_ms": [
+          105.36, 104.94, 105.26, 105.31, 106.7, 105.45, 105.52, 105.29, 105.21, 104.85, 105.58,
+          105.04, 105.82, 106.56, 105.38, 105.48, 104.92, 104.85, 104.85, 104.89, 105.36, 105.09,
+          105.22, 106.2, 105.36, 104.94, 105.13, 105.19, 104.98, 105.09
+        ],
+        "setup_ms_total": 0.03,
+        "throughput_rps": 9.49,
+        "warmup": 3,
+        "upstream_reads": 30
+      },
+      "name": "requirements.sequential"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 2.23,
+          "system_total": 505.26,
+          "user_total": 832.87
+        },
+        "db": {
+          "application_statements_per_operation": 1,
+          "context_statements": 1800,
+          "statement_ms": {
+            "count": 600,
+            "max": 3.23,
+            "mean": 0.9,
+            "min": 0.27,
+            "p50": 0.78,
+            "p95": 1.8,
+            "p99": 2.62
+          },
+          "statements_total": 600,
+          "time_ms_total": 541.29,
+          "top_statements": [
+            {
+              "count": 600,
+              "statement": "SELECT platform, platform_user_id, access_token, connection_status, token_expires_at, revoked_at FROM platform_accounts WHERE id = $1 LIMIT 1"
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 190.12,
+          "mean": 184.92,
+          "min": 181.15,
+          "p50": 184.36,
+          "p95": 189.86,
+          "p99": 190.12
+        },
+        "operations": 600,
+        "request_latency_ms": {
+          "count": 600,
+          "max": 189.9,
+          "mean": 146.36,
+          "min": 106.8,
+          "p50": 146.68,
+          "p95": 183.23,
+          "p99": 185.98
+        },
+        "request_samples_ms": [
+          119.59, 127.37, 123.47, 108.08, 111.89, 131.25, 139.23, 115.66, 135.18, 143.22, 147.27,
+          151.22, 166.98, 170.91, 159.25, 163.1, 155.25, 174.69, 178.39, 182.09, 128.25, 108.11,
+          120.33, 143.93, 139.97, 112.24, 116.33, 136.06, 132.09, 124.25, 151.98, 147.96, 156.29,
+          160.59, 172.44, 168.72, 164.75, 184.16, 176.44, 180.42, 130.48, 122.9, 151.89, 118.99,
+          107.52, 126.42, 147.7, 137.94, 111.59, 115.35, 134.3, 156.35, 160.4, 172.63, 180.63,
+          164.4, 188.76, 184.72, 176.63, 168.61, 115.66, 123.29, 107.71, 135.26, 127.06, 142.77,
+          131.4, 138.76, 119.27, 111.48, 146.7, 170.95, 167.04, 155.08, 163.17, 159.11, 175.1,
+          150.53, 179.42, 184.63, 121.56, 146.84, 129.48, 142.62, 133.52, 138.4, 117.58, 113.69,
+          125.5, 109.62, 166.34, 178.57, 162.29, 170.39, 150.84, 174.42, 154.63, 158.2, 182.42,
+          185.98, 132.21, 114.97, 122.83, 128.26, 118.72, 106.86, 148.07, 144.08, 110.93, 136.08,
+          140.07, 160.11, 163.94, 152.08, 167.98, 156.31, 171.84, 184.15, 175.75, 180.08, 140.85,
+          124.59, 132.58, 116.15, 111.98, 128.57, 108.11, 136.69, 120.59, 144.45, 148.55, 152.67,
+          156.37, 175.6, 171.86, 168.04, 160.36, 164.03, 179.4, 183.23, 113.06, 124.57, 159.2,
+          109.05, 132.24, 128.39, 136.06, 155.42, 120.76, 116.91, 151.45, 147.64, 171.35, 143.73,
+          163.06, 167.07, 139.85, 175.33, 179.27, 183.38, 108.72, 144.15, 148.86, 116.52, 120.47,
+          112.51, 132.17, 136.33, 124.37, 128.15, 140.33, 153.84, 158.81, 167.41, 172.68, 177.66,
+          181.52, 163.13, 185.57, 189.63, 114.51, 118.31, 133, 140.89, 110.24, 125.63, 129.23,
+          121.82, 137, 144.5, 179.66, 148.34, 160.3, 156.34, 164.35, 175.78, 171.98, 168.32, 152.23,
+          183.68, 132.22, 112.33, 124.25, 128.32, 120.41, 135.85, 139.57, 147.48, 108.26, 116.42,
+          143.48, 151.03, 159.15, 155.09, 171.42, 183.25, 167.38, 179.35, 175.38, 163.24, 110.53,
+          130.57, 138.42, 142.42, 118.51, 106.8, 122.57, 114.49, 126.58, 134.32, 146.06, 150.03,
+          154.03, 157.8, 169.13, 172.84, 165.13, 161.31, 180.96, 176.75, 110.81, 130.57, 142.57,
+          118.62, 134.59, 146.55, 138.5, 114.59, 122.7, 126.68, 170.48, 166.48, 158.68, 162.56,
+          154.45, 150.34, 183.14, 174.5, 178.92, 187.26, 116.67, 120.45, 108.73, 128.31, 136.2,
+          124.43, 152.65, 140.21, 144.27, 112.48, 132.17, 156.87, 148.42, 165.14, 176.95, 161.05,
+          172.98, 169.07, 184.59, 180.94, 131.14, 111.66, 123.23, 119.17, 115.33, 127.11, 142.98,
+          139, 108, 135.09, 172.66, 156.28, 168.72, 164.66, 146.74, 184.18, 152, 160.59, 176.55,
+          180.41, 143.46, 107.89, 127.49, 111.97, 135.11, 139.28, 123.58, 119.78, 115.85, 131.22,
+          147.29, 159.39, 155.4, 151.43, 163.35, 179.87, 175.7, 183.87, 167.59, 171.59, 108.86,
+          133.09, 129.02, 145.38, 141.33, 113.09, 116.99, 124.89, 137.1, 120.94, 149.37, 157.13,
+          153.25, 164.85, 183.69, 161.15, 168.44, 179.72, 175.82, 172.13, 107.45, 122.99, 119.27,
+          135.3, 139.33, 151.11, 115.17, 131.26, 111.23, 127.17, 159.2, 171.47, 163.19, 143.31,
+          155.18, 167.3, 146.98, 179.52, 175.44, 183.49, 111.79, 107.35, 119.59, 115.64, 127.64,
+          135.46, 123.42, 143.53, 163.1, 131.72, 139.57, 155.33, 147.52, 159.2, 166.96, 151.42,
+          174.69, 178.55, 182.42, 170.85, 131.7, 119.69, 111.72, 139.56, 107.74, 115.92, 148.2,
+          153.2, 127.72, 123.7, 135.54, 164.16, 159.27, 143.33, 167.86, 177.1, 189.9, 172.48,
+          181.53, 185.66, 112.03, 123.83, 127.49, 143.63, 120, 135.94, 139.77, 107.74, 131.48,
+          115.91, 155.3, 163.51, 147.26, 151.15, 159.27, 167.72, 171.74, 175.9, 180, 184.13, 123.34,
+          107.12, 119.2, 130.84, 111.21, 143.56, 115.21, 126.94, 139.34, 134.64, 159.85, 151.77,
+          172.25, 155.81, 147.66, 163.94, 176.38, 180.52, 168.14, 184.76, 127.64, 107.3, 139.27,
+          119.6, 131.6, 143.28, 111.07, 123.41, 115.39, 135.41, 159.42, 147.39, 151.39, 171.21,
+          175.38, 155.36, 167.4, 163.45, 179.37, 183.37, 111.79, 134.18, 138.63, 129.77, 125.31,
+          107.45, 116.28, 146.68, 120.77, 142.51, 150.79, 163.09, 158.93, 167.09, 154.83, 175.28,
+          179.22, 171.13, 187.39, 183.16, 107.1, 125.9, 110.77, 141.02, 118.03, 121.9, 136.99,
+          114.25, 133.32, 129.47, 145.23, 158.68, 171.16, 167.2, 162.84, 150.9, 183.24, 179.13,
+          175.11, 187.27, 129.51, 137.4, 107.75, 145.51, 133.37, 165.73, 125.41, 117.2, 121.31, 113,
+          161.72, 153.57, 141.34, 157.67, 169.33, 173.34, 180.65, 149.51, 176.93, 184.65, 109.33,
+          113.45, 137.32, 129.26, 117.47, 121.57, 141.28, 125.3, 145.15, 133.22, 157.12, 149.18,
+          153.29, 168.71, 172.79, 164.82, 176.97, 161.01, 184.59, 180.8, 141.41, 129.9, 137.62,
+          145.25, 121.67, 108.9, 113.22, 133.75, 125.76, 117.57, 156.68, 149.04, 152.89, 169.1,
+          176.82, 164.82, 160.72, 180.88, 172.7, 184.54, 112.44, 116.3, 148.62, 136.8, 128.78,
+          144.47, 120.19, 124.63, 108.44, 140.75, 156.34, 152.64, 167.69, 132.91, 179.35, 163.96,
+          183.42, 160.08, 171.6, 175.46, 107.08, 138.95, 111.14, 119.12, 146.75, 127.07, 123.17,
+          114.94, 130.95, 135.01, 155.29, 142.64, 151.16, 171.3, 163.22, 159.27, 179.38, 183.96,
+          167.19, 175.18
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 5060,
+          "mean": 5060,
+          "min": 5060,
+          "p50": 5060,
+          "p95": 5060,
+          "p99": 5060
+        },
+        "response_bytes_samples": [
+          5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060,
+          5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060, 5060
+        ],
+        "rss_bytes": {
+          "after": 124919808,
+          "before": 119787520,
+          "heap_used_end": 16876250,
+          "peak": 130277376
+        },
+        "samples": 30,
+        "samples_ms": [
+          182.35, 184.41, 188.99, 184.86, 186.2, 184.36, 183.44, 183.59, 189.86, 183.94, 183.44,
+          181.15, 187.47, 184.79, 184.36, 184.06, 183.86, 183.69, 182.62, 190.12, 184.4, 184.96,
+          183.57, 187.55, 187.47, 184.87, 184.79, 184.76, 183.6, 184.12
+        ],
+        "setup_ms_total": 0.06,
+        "throughput_rps": 108.15,
+        "warmup": 3,
+        "upstream_reads": 600
+      },
+      "name": "requirements.concurrent20"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 2.85,
+          "system_total": 28.63,
+          "user_total": 56.96
+        },
+        "db": {
+          "application_statements_per_operation": 1,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 30,
+            "max": 1.84,
+            "mean": 1.48,
+            "min": 1.33,
+            "p50": 1.43,
+            "p95": 1.84,
+            "p99": 1.84
+          },
+          "statements_total": 30,
+          "time_ms_total": 44.49,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT c.id, c.distribution_id, d.platform, c.platform_comment_id, c.author_name, c.author_avatar, c.body, c.reply_text, c.reply_status, c.reply_error, c.reply_attempted_at, c.commented_at, c.synced_at, c.updated_at, d.brand_profile_id, d.post_id FROM comments c JOIN distributions d ON d.id = c.distribution_id AND d.org_id = c.org_id WHERE EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = d.brand_profile_id AND bp.deleted_at IS NULL ) ORDER BY c.commented_at DESC, c.id DESC LIMIT $1 OFFSET $2"
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 8.72,
+          "mean": 6.34,
+          "min": 5.46,
+          "p50": 6.11,
+          "p95": 7.75,
+          "p99": 8.72
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 8.72,
+          "mean": 6.34,
+          "min": 5.46,
+          "p50": 6.11,
+          "p95": 7.75,
+          "p99": 8.72
+        },
+        "request_samples_ms": [
+          6.5, 6.03, 5.82, 5.73, 5.78, 5.94, 5.71, 5.98, 6.24, 6.12, 6.13, 6.43, 7.5, 6.27, 5.82,
+          6.54, 6.08, 6.11, 7.49, 7.75, 8.72, 7.31, 6.05, 5.85, 5.84, 6.65, 6.26, 5.81, 5.46, 6.34
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 54338,
+          "mean": 54338,
+          "min": 54338,
+          "p50": 54338,
+          "p95": 54338,
+          "p99": 54338
+        },
+        "response_bytes_samples": [
+          54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338,
+          54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338, 54338,
+          54338, 54338, 54338, 54338
+        ],
+        "rss_bytes": {
+          "after": 132874240,
+          "before": 126885888,
+          "heap_used_end": 19050601,
+          "peak": 132874240
+        },
+        "samples": 30,
+        "samples_ms": [
+          6.5, 6.03, 5.82, 5.73, 5.78, 5.94, 5.71, 5.98, 6.24, 6.12, 6.13, 6.43, 7.5, 6.27, 5.82,
+          6.54, 6.08, 6.11, 7.49, 7.75, 8.72, 7.31, 6.05, 5.85, 5.84, 6.65, 6.26, 5.81, 5.46, 6.34
+        ],
+        "setup_ms_total": 0.03,
+        "throughput_rps": 157.68,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "inbox.list.page100"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 1.82,
+          "system_total": 19.08,
+          "user_total": 35.59
+        },
+        "db": {
+          "application_statements_per_operation": 1,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 30,
+            "max": 0.92,
+            "mean": 0.81,
+            "min": 0.78,
+            "p50": 0.8,
+            "p95": 0.85,
+            "p99": 0.92
+          },
+          "statements_total": 30,
+          "time_ms_total": 24.33,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, uploaded_by, asset_type, title, duration_sec, file_size, mime_type, width, height, original_filename, status, failure_code, failure_message, failure_retryable, failure_at, created_at, updated_at FROM assets WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted' AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = assets.brand_profile_id AND bp.deleted_at IS NULL )"
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 5.88,
+          "mean": 5.24,
+          "min": 4.98,
+          "p50": 5.27,
+          "p95": 5.54,
+          "p99": 5.88
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 5.88,
+          "mean": 5.24,
+          "min": 4.98,
+          "p50": 5.27,
+          "p95": 5.54,
+          "p99": 5.88
+        },
+        "request_samples_ms": [
+          5.36, 5.28, 5.32, 5.31, 5.54, 5.3, 5.39, 5.36, 5.33, 5.88, 5.27, 5.29, 5.3, 5.14, 5.02,
+          5.34, 5.46, 5.16, 5.28, 5.17, 5.12, 5, 5.03, 5.14, 5.18, 5.11, 4.98, 5.03, 5.02, 5.1
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 494,
+          "mean": 494,
+          "min": 494,
+          "p50": 494,
+          "p95": 494,
+          "p99": 494
+        },
+        "response_bytes_samples": [
+          494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494,
+          494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494, 494
+        ],
+        "rss_bytes": {
+          "after": 130117632,
+          "before": 132489216,
+          "heap_used_end": 19050601,
+          "peak": 133144576
+        },
+        "samples": 30,
+        "samples_ms": [
+          5.36, 5.28, 5.32, 5.31, 5.54, 5.3, 5.39, 5.36, 5.33, 5.88, 5.27, 5.29, 5.3, 5.14, 5.02,
+          5.34, 5.46, 5.16, 5.28, 5.17, 5.12, 5, 5.03, 5.14, 5.18, 5.11, 4.98, 5.03, 5.02, 5.1
+        ],
+        "setup_ms_total": 0.02,
+        "throughput_rps": 190.83,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "assets.detail"
+    },
+    {
+      "metrics": {
+        "cpu_ms": {
+          "per_operation": 2.2,
+          "system_total": 25.96,
+          "user_total": 39.99
+        },
+        "db": {
+          "application_statements_per_operation": 3,
+          "context_statements": 90,
+          "statement_ms": {
+            "count": 90,
+            "max": 1.03,
+            "mean": 0.7,
+            "min": 0.35,
+            "p50": 0.8,
+            "p95": 0.9,
+            "p99": 1.03
+          },
+          "statements_total": 90,
+          "time_ms_total": 62.68,
+          "top_statements": [
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, asset_id, strategy, status, content_type, file_size, object_key, multipart_upload_id, part_size, part_count, max_parallel_parts, expires_at FROM asset_upload_sessions WHERE id = $1 AND org_id = public.auth_active_org_id() FOR UPDATE"
+            },
+            {
+              "count": 30,
+              "statement": "UPDATE asset_objects SET write_hold_until = GREATEST(write_hold_until, $3::timestamptz), updated_at = now() WHERE asset_id = $1 AND kind = 'staging' AND r2_key = $2 AND status <> 'deleted'"
+            },
+            {
+              "count": 30,
+              "statement": "SELECT id, org_id, brand_profile_id, uploaded_by, asset_type, title, duration_sec, file_size, mime_type, width, height, original_filename, status, failure_code, failure_message, failure_retryable, failure_at, created_at, updated_at FROM assets WHERE id = $1 AND org_id = public.auth_active_org_id() AND status != 'deleted' AND EXISTS ( SELECT 1 FROM brand_profiles bp WHERE bp.id = assets.brand_profile_id AND bp.deleted_at IS NULL )"
+            }
+          ],
+          "aggregate_executions": 0,
+          "aggregate_time_ms_total": 0
+        },
+        "latency_ms": {
+          "count": 30,
+          "max": 8.07,
+          "mean": 6.83,
+          "min": 6.47,
+          "p50": 6.75,
+          "p95": 7.37,
+          "p99": 8.07
+        },
+        "operations": 30,
+        "request_latency_ms": {
+          "count": 30,
+          "max": 8.07,
+          "mean": 6.83,
+          "min": 6.47,
+          "p50": 6.75,
+          "p95": 7.37,
+          "p99": 8.07
+        },
+        "request_samples_ms": [
+          6.47, 6.59, 6.53, 6.62, 6.5, 6.58, 6.62, 6.54, 6.5, 6.62, 6.68, 6.64, 6.94, 6.61, 7.1, 7,
+          6.93, 6.74, 6.75, 7.17, 7.3, 6.94, 6.81, 6.8, 8.07, 7.37, 6.98, 6.89, 6.81, 6.88
+        ],
+        "response_bytes": {
+          "count": 30,
+          "max": 820,
+          "mean": 820,
+          "min": 820,
+          "p50": 820,
+          "p95": 820,
+          "p99": 820
+        },
+        "response_bytes_samples": [
+          820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820,
+          820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820, 820
+        ],
+        "rss_bytes": {
+          "after": 129130496,
+          "before": 130301952,
+          "heap_used_end": 20762039,
+          "peak": 133144576
+        },
+        "samples": 30,
+        "samples_ms": [
+          6.47, 6.59, 6.53, 6.62, 6.5, 6.58, 6.62, 6.54, 6.5, 6.62, 6.68, 6.64, 6.94, 6.61, 7.1, 7,
+          6.93, 6.74, 6.75, 7.17, 7.3, 6.94, 6.81, 6.8, 8.07, 7.37, 6.98, 6.89, 6.81, 6.88
+        ],
+        "setup_ms_total": 0.02,
+        "throughput_rps": 146.39,
+        "warmup": 3,
+        "upstream_reads": 0
+      },
+      "name": "assets.upload-session.detail"
+    }
+  ]
+}

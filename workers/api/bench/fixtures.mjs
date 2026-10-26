@@ -28,8 +28,9 @@ export const dataset = {
   distributionLimit: 100,
   pageSize: 100,
   posts: 300,
-  scheduleChannels: 20,
+  scheduleChannels: process.env.BENCHMARK_PROFILE === "all" ? 20 : 1,
   schedulePosts: 42,
+  snapshotsPerDistribution: ["all", "read-cache"].includes(process.env.BENCHMARK_PROFILE) ? 1 : 90,
 };
 
 const authUserId = "auth_user_benchmark";
@@ -55,13 +56,18 @@ export async function seed(client) {
     [authUserId, benchmarkEmail],
   );
   await client.query(
-    `INSERT INTO users (id, auth_user_id, email, display_name)
-     VALUES ($1, $2, $3, 'Benchmark User')`,
+    `INSERT INTO "session" (id, "userId", token, "expiresAt")
+     VALUES ('benchmark-session', $1, 'benchmark-session-token', now() + interval '1 hour')`,
+    [authUserId],
+  );
+  await client.query(
+    `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
+     VALUES ($1, $2, $3, 'Benchmark User', true)`,
     [ids.user, authUserId, benchmarkEmail],
   );
   await client.query(
-    `INSERT INTO organizations (id, name, slug, plan, billing_status)
-     VALUES ($1, 'Benchmark Studio', 'benchmark-studio', 'agency', 'active')`,
+    `INSERT INTO organizations (id, name, slug, plan, billing_status, is_shared)
+     VALUES ($1, 'Benchmark Studio', 'benchmark-studio', 'agency', 'active', true)`,
     [ids.org],
   );
   await client.query(
@@ -69,6 +75,7 @@ export async function seed(client) {
      VALUES ($1, $2, $3, 'admin')`,
     [ids.member, ids.org, ids.user],
   );
+  await client.query("INSERT INTO usage_reconciliation_state (org_id) VALUES ($1)", [ids.org]);
   await client.query(
     `INSERT INTO brand_profiles (id, org_id, name, color)
      VALUES ($1, $2, 'Benchmark Brand', '#1d4ed8')`,
@@ -83,8 +90,8 @@ export async function seed(client) {
        $1::uuid, $2::uuid, 'youtube', 'benchmark-youtube-' || item,
        'Benchmark YouTube ' || item, 'benchmark-token-youtube-' || item,
        ARRAY['upload'], '{"fixture": true}'::jsonb
-     FROM generate_series(1, 20) AS item`,
-    [ids.org, ids.brandProfile],
+     FROM generate_series(1, $3::integer) AS item`,
+    [ids.org, ids.brandProfile, dataset.scheduleChannels],
   );
   await client.query(
     `INSERT INTO platform_accounts
@@ -95,8 +102,8 @@ export async function seed(client) {
        $1::uuid, $2::uuid, 'threads', 'benchmark-threads-' || item,
        'Benchmark Threads ' || item, 'benchmark-token-threads-' || item,
        ARRAY['upload'], '{"fixture": true}'::jsonb
-     FROM generate_series(1, 20) AS item`,
-    [ids.org, ids.brandProfile],
+     FROM generate_series(1, $3::integer) AS item`,
+    [ids.org, ids.brandProfile, dataset.scheduleChannels],
   );
   await client.query(
     `INSERT INTO assets
@@ -162,8 +169,8 @@ export async function seed(client) {
        $1::uuid, $2::uuid,
        ('c0000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
        CASE WHEN item % 2 = 0
-         THEN ('b5000000-0000-4000-8000-' || lpad(((item % 20) + 1)::text, 12, '0'))::uuid
-         ELSE ('b6000000-0000-4000-8000-' || lpad(((item % 20) + 1)::text, 12, '0'))::uuid
+         THEN ('b5000000-0000-4000-8000-' || lpad(((item % $4::integer) + 1)::text, 12, '0'))::uuid
+         ELSE ('b6000000-0000-4000-8000-' || lpad(((item % $4::integer) + 1)::text, 12, '0'))::uuid
        END,
        CASE WHEN item % 2 = 0 THEN 'youtube' ELSE 'threads' END,
        'published',
@@ -173,7 +180,7 @@ export async function seed(client) {
        'Benchmark publication ' || item,
        TIMESTAMP '2026-07-01 00:00:00+00' + item * INTERVAL '1 hour'
      FROM generate_series(1, $3::integer) AS item`,
-    [ids.org, ids.brandProfile, dataset.posts],
+    [ids.org, ids.brandProfile, dataset.posts, dataset.scheduleChannels],
   );
   await client.query(
     `INSERT INTO analytics_snapshots
@@ -182,11 +189,36 @@ export async function seed(client) {
      SELECT
        ('e1000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
        ('d1000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
-       $1::uuid, item, item, item, item, item, item, item,
+       $1::uuid,
+       CASE WHEN $3::integer > 1 THEN 0 ELSE item END,
+       CASE WHEN $3::integer > 1 THEN 0 ELSE item END,
+       CASE WHEN $3::integer > 1 THEN 0 ELSE item END,
+       CASE WHEN $3::integer > 1 THEN 0 ELSE item END,
+       CASE WHEN $3::integer > 1 THEN 0 ELSE item END,
+       CASE WHEN $3::integer > 1 THEN 0 ELSE item END,
+       CASE WHEN $3::integer > 1 THEN 0 ELSE item END,
        TIMESTAMP '2026-07-02 00:00:00+00' + item * INTERVAL '1 hour'
      FROM generate_series(1, $2::integer) AS item`,
-    [ids.org, dataset.assets],
+    [ids.org, dataset.assets, dataset.snapshotsPerDistribution],
   );
+  if (dataset.snapshotsPerDistribution > 1) {
+    await client.query(
+      `INSERT INTO analytics_snapshots
+         (distribution_id, org_id, views, likes, comments, shares,
+          watch_time_sec, reach, impressions, snapshot_at)
+       SELECT
+         ('d1000000-0000-4000-8000-' || lpad(item::text, 12, '0'))::uuid,
+         $1::uuid, counter, counter, counter, counter, counter, counter, counter,
+         TIMESTAMP '2026-07-02 00:00:00+00' + item * INTERVAL '1 hour'
+           + capture * INTERVAL '1 day'
+       FROM generate_series(1, $2::integer) AS item
+       CROSS JOIN generate_series(1, $3::integer - 1) AS capture
+       CROSS JOIN LATERAL (
+         SELECT floor(item * capture::numeric / ($3::integer - 1)) AS counter
+       ) AS counters`,
+      [ids.org, dataset.posts, dataset.snapshotsPerDistribution],
+    );
+  }
   await client.query(
     `INSERT INTO comments
        (id, distribution_id, org_id, platform_comment_id, author_name, body,

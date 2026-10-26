@@ -3,6 +3,12 @@ name: Backend benchmark
 on:
   workflow_dispatch:
     inputs:
+      profile:
+        description: Authenticated application history, read-cache, or complete workload
+        required: true
+        default: application
+        type: choice
+        options: [application, read-cache, all]
       repetitions:
         description: Alternating run blocks per revision
         required: true
@@ -28,6 +34,7 @@ env:
   WRANGLER_SEND_METRICS: "false"
   BENCHMARK_DATABASE_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5432/postgres?sslmode=disable
   BENCHMARK_SAMPLES: ${{ inputs.samples || '30' }}
+  BENCHMARK_PROFILE: ${{ inputs.profile || 'application' }}
   BENCHMARK_WARMUP: "3"
   BENCHMARK_DELETE_SAMPLES: "5"
   BENCHMARK_DELETE_WARMUP: "1"
@@ -80,8 +87,13 @@ jobs:
           (cd baseline && bun install --frozen-lockfile)
       - name: Inject benchmark infrastructure into the baseline checkout
         run: |
-          cp -R candidate/workers/api/bench baseline/workers/api/bench
-          cp -R candidate/scripts/benchmarks baseline/scripts/benchmarks
+          mkdir -p baseline/workers/api/bench baseline/scripts/benchmarks
+          cp -R candidate/workers/api/bench/. baseline/workers/api/bench/
+          cp -R candidate/scripts/benchmarks/. baseline/scripts/benchmarks/
+          diff -r candidate/workers/api/bench baseline/workers/api/bench
+      - name: Verify benchmark comparison behavior
+        working-directory: candidate/workers/api
+        run: bunx --no-install vp test run --config vitest.contract.config.ts test/benchmark-cli.node.test.ts
       - name: Prepare one database per revision
         run: |
           (cd baseline && BENCHMARK_DATABASE_NAME=meltiply_bench_baseline bun scripts/benchmarks/backend/prepare-database.mjs)

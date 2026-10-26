@@ -83,6 +83,7 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
         timeout: "5 minutes",
       },
       async () => {
+        const env = { ...this.env };
         const startedAt = performance.now();
         // Approved boundary: the workflow step body runs as one Effect program
         // through the same mapper as queue/scheduled paths. Ambiguous provider
@@ -90,7 +91,7 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
         // workflow retry: rethrow only retryable failures so reconciliation
         // owns ambiguous outcomes instead of duplicating remote writes.
         const scope = jobScope(
-          this.env,
+          env,
           makeJobContext({
             jobId: event.payload.event_id,
             ...(event.payload.request_id ? { requestId: event.payload.request_id } : {}),
@@ -104,7 +105,7 @@ export class ReplyWorkflow extends WorkflowEntrypoint<AutomationEnv, ReplyWorkfl
             catch: (cause) => classifyJobError(cause),
             try: () => import("./replies"),
           }),
-          (module) => module.processReplyMessage(this.env, replyWorkflowMessage(event.payload)),
+          (module) => module.processReplyMessage(env, replyWorkflowMessage(event.payload)),
         );
         const exit = await runJobProgram(Effect.provide(program, scope.runtimeLayer));
         const mapped = exitToJobOutcome(exit);
@@ -639,25 +640,6 @@ export function createAutomationHandler(
   // per unit with Effect.suspend + classifyJobError.
   const scheduledWork: readonly ScheduledWorkUnit[] = [
     {
-      empty: { failed: 0, recorded: 0, scanned: 0 },
-      field: "account_analytics",
-      name: "account-analytics-sweep",
-      run: dependencies.sweepAccountAnalytics
-        ? (env) =>
-            Effect.suspend(() => dependencies.sweepAccountAnalytics!(env)).pipe(
-              Effect.mapError((cause) => classifyJobError(cause)),
-            )
-        : (env) =>
-            Effect.flatMap(
-              Effect.tryPromise({
-                catch: (cause) => classifyJobError(cause),
-                try: () => import("./account-analytics"),
-              }),
-              (module) => module.sweepAccountAnalytics(env),
-            ),
-      tier: "hourly",
-    },
-    {
       empty: 0,
       field: "due_distributions",
       name: "due-distribution-scan",
@@ -770,6 +752,25 @@ export function createAutomationHandler(
       tier: "hourly",
     },
     {
+      empty: { failed: 0, recorded: 0, scanned: 0 },
+      field: "account_analytics",
+      name: "account-analytics-sweep",
+      run: dependencies.sweepAccountAnalytics
+        ? (env) =>
+            Effect.suspend(() => dependencies.sweepAccountAnalytics!(env)).pipe(
+              Effect.mapError((cause) => classifyJobError(cause)),
+            )
+        : (env) =>
+            Effect.flatMap(
+              Effect.tryPromise({
+                catch: (cause) => classifyJobError(cause),
+                try: () => import("./account-analytics"),
+              }),
+              (module) => module.sweepAccountAnalytics(env),
+            ),
+      tier: "hourly",
+    },
+    {
       empty: undefined,
       field: "retention",
       name: "retention",
@@ -861,22 +862,33 @@ export function createAutomationHandler(
      * (`min(3600s, 15s * 2^attempts)`) on transient failures. Every body flows through
      * dispatchQueueMessage: unroutable shapes fail terminally there and surface through the
      * rejected branch below (ack-and-surface, AUD-039).
+     * Opt-in publish batches may overlap two distinct Provider accounts; each
+     * account remains ordered and infrastructure still limits the Queue to one
+     * invocation. Asset and other job kinds stay serial.
      *
      * @param batch - Batch of incoming queue messages with delivery attempt metadata and queue name.
-     * @param env - Automation worker environment bindings.
+     * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
      */
-    async queue(batch, env) {
+    async queue(batch, bindings) {
+      const env = { ...bindings };
       configureJobLogging(env);
       // One asset processor per batch: construction builds the configured
       // object storage store, so the dispatcher resolves it lazily through this
       // memoized thunk rather than paying per message.
       let assetProcessor: Promise<AssetJobProcessor> | undefined;
-      for (const message of batch.messages) {
+      const provider = queueProvider(batch.queue);
+      if (
+        env.PUBLISH_BATCH_CONCURRENCY !== undefined &&
+        env.PUBLISH_BATCH_CONCURRENCY !== "1" &&
+        env.PUBLISH_BATCH_CONCURRENCY !== "2"
+      ) {
+        throw new RangeError("PUBLISH_BATCH_CONCURRENCY must be 1 or 2");
+      }
+      const consume = async (message: Message<unknown>) => {
         const startedAt = performance.now();
         const correlation = queueCorrelation(message.body, message.id);
         const event = queueEvent(message.body);
         const job = queueJob(message.body);
-        const provider = queueProvider(batch.queue);
         const scope: JobScope = jobScope(
           env,
           makeJobContext({
@@ -932,7 +944,7 @@ export function createAutomationHandler(
             ...(provider ? { provider } : {}),
             queue: batch.queue,
           });
-          continue;
+          return;
         }
         if (outcome === "rejected") {
           // Terminal: ack-and-surface producer-contract bugs (AUD-039), and
@@ -952,7 +964,7 @@ export function createAutomationHandler(
             queue: batch.queue,
             retry_class: "none",
           });
-          continue;
+          return;
         }
         if (outcome === "ambiguous") {
           // Ambiguous provider writes must never auto-retry: the distribution
@@ -972,7 +984,7 @@ export function createAutomationHandler(
             queue: batch.queue,
             retry_class: "reconciliation",
           });
-          continue;
+          return;
         }
         await flow?.finish("failed");
         // Deliberate: mirrors the outbox's own exponential backoff
@@ -995,6 +1007,13 @@ export function createAutomationHandler(
           queue: batch.queue,
           retry_class: "queue_backoff",
         });
+      };
+      if (provider && env.PUBLISH_BATCH_CONCURRENCY === "2") {
+        const { consumePublishPartitions, partitionPublishBatch } = await import("./publish-batch");
+        const partitions = await runDirectProgram(env, partitionPublishBatch(env, batch.messages));
+        await consumePublishPartitions(partitions, consume);
+      } else {
+        for (const message of batch.messages) await consume(message);
       }
     },
 
@@ -1006,10 +1025,11 @@ export function createAutomationHandler(
      * failures so subsequent scheduled units continue running before reporting errors.
      *
      * @param _controller - ScheduledController providing the triggering cron pattern, or null for direct invocation.
-     * @param env - Automation worker environment bindings.
+     * @param bindings - Automation worker bindings, copied into this invocation's ownership scope.
      * @throws Rethrows the first encountered scheduled task failure after all due units have finished.
      */
-    async scheduled(_controller, env) {
+    async scheduled(_controller, bindings) {
+      const env = { ...bindings };
       configureJobLogging(env);
       const startedAt = performance.now();
       const jobId = crypto.randomUUID();
@@ -1097,11 +1117,11 @@ export function createAutomationHandler(
   };
 }
 /**
- * Runs one module program at the service-binding RPC boundary.
+ * Runs a module program at an RPC or bounded publish-batch lookup boundary.
  *
  * Builds a fresh "direct" job scope so the program resolves the same queue
  * services the queue/scheduled paths use, then translates the finished Exit
- * back into the RPC contract: the success value resolves the call, while a
+ * back into the caller's contract: the success value resolves the call, while a
  * failure rejects with the original throw — recoverJobErrorCause restores the
  * name/message classifyJobError stored on the typed wrapper so callers see
  * the pre-migration error shape.
@@ -1145,15 +1165,16 @@ export class AutomationEntrypoint extends WorkerEntrypoint<AutomationEnv> {
    * @returns Counts of outbox messages claimed, published, failed, and dead during eager relay.
    */
   async relayOutbox(): Promise<OutboxRelayResult> {
-    configureJobLogging(this.env);
+    const env = { ...this.env };
+    configureJobLogging(env);
     const program = Effect.flatMap(
       Effect.tryPromise({
         catch: (cause) => classifyJobError(cause),
         try: () => import("./outbox"),
       }),
-      (module) => module.relayOutbox(this.env, EAGER_RELAY_BATCH_SIZE),
+      (module) => module.relayOutbox(env, EAGER_RELAY_BATCH_SIZE),
     );
-    return runDirectProgram(this.env, program);
+    return runDirectProgram(env, program);
   }
 
   /**
@@ -1177,19 +1198,20 @@ export class AutomationEntrypoint extends WorkerEntrypoint<AutomationEnv> {
     organizationId: string,
     distributionId: string | null,
   ): Promise<number> {
-    configureJobLogging(this.env);
+    const env = { ...this.env };
+    configureJobLogging(env);
     const program = Effect.flatMap(
       Effect.tryPromise({
         catch: (cause) => classifyJobError(cause),
         try: () => import("./provider-sync"),
       }),
       (module) =>
-        module.requestOnDemandCommentsSync(this.env, {
+        module.requestOnDemandCommentsSync(env, {
           distributionId,
           organizationId,
         }),
     );
-    return runDirectProgram(this.env, program);
+    return runDirectProgram(env, program);
   }
 
   /**

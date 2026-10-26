@@ -619,6 +619,18 @@ describeIntegration("core API PostgreSQL query budgets", () => {
     await systemPoolFor(env).end();
   });
 
+  it("reuses an idle PostgreSQL connection across released managed-pool queries", async () => {
+    const pool = authenticatedPoolFor(env);
+    const first = await pool.query<{ backend_pid: number }>(
+      "SELECT pg_backend_pid() AS backend_pid",
+    );
+    const second = await pool.query<{ backend_pid: number }>(
+      "SELECT pg_backend_pid() AS backend_pid",
+    );
+
+    expect(second.rows[0]?.backend_pid).toBe(first.rows[0]?.backend_pid);
+  });
+
   it("resolves only the verified user's active organization identity", async () => {
     await expect(loadCurrentUser(env, alpha)).resolves.toMatchObject({
       active_organization: {

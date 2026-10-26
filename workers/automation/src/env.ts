@@ -16,7 +16,11 @@ export interface AutomationEnv {
   ASSET_PROCESSING_QUEUE?: Queue<unknown>;
   CHANNEL_REVOCATION_QUEUE?: Queue<unknown>;
   COMMENTS_QUEUE?: Queue<unknown>;
-  /** Standalone workerd owns sockets per invocation; omitted retains the environment's existing pool policy. */
+  /** Exact "true" opts into recurring Comment-body collection; demand reads remain available. */
+  RECURRING_COMMENTS_ENABLED?: string;
+  /** "1" (default) serializes batches; "2" overlaps only distinct Provider accounts. */
+  PUBLISH_BATCH_CONCURRENCY?: string;
+  /** Standalone workerd owns sockets per invocation; omitted keeps managed pool reuse. */
   DATABASE_POOL_MODE?: "request";
   DB_SYSTEM?: Hyperdrive;
   ENVIRONMENT: string;

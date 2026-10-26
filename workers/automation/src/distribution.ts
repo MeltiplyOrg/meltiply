@@ -1031,7 +1031,8 @@ function providerRetryDelaySeconds(
 /**
  * Dispatches initial background sync triggers for analytics and comments to Cloudflare Queues.
  *
- * Enqueues messages to ANALYTICS_QUEUE and COMMENTS_QUEUE immediately following successful publication.
+ * Enqueues Analytics immediately after publication; Comment-body collection is
+ * emitted only when the deployment explicitly enables recurring collection.
  *
  * @param env - Automation worker environment bindings.
  * @param distributionId - Target distribution UUID.
@@ -1063,7 +1064,7 @@ async function dispatchInitialEngagementTriggers(
       // Retained durably in analytics_sync_event_id; hourly sweep recovers lost sends.
     }
   }
-  if (commentsEventId && env.COMMENTS_QUEUE) {
+  if (env.RECURRING_COMMENTS_ENABLED === "true" && commentsEventId && env.COMMENTS_QUEUE) {
     try {
       await env.COMMENTS_QUEUE.sendBatch([
         {
@@ -1193,11 +1194,11 @@ function recordPublishOutcome(
              ELSE analytics_sync_event_id
            END,
            comments_next_sync_at = CASE
-             WHEN $2 = 'published' THEN COALESCE(comments_next_sync_at, now())
+             WHEN $2 = 'published' AND $10::boolean THEN COALESCE(comments_next_sync_at, now())
              ELSE comments_next_sync_at
            END,
            comments_sync_event_id = CASE
-             WHEN $2 = 'published' THEN COALESCE(comments_sync_event_id, gen_random_uuid())
+             WHEN $2 = 'published' AND $10::boolean THEN COALESCE(comments_sync_event_id, gen_random_uuid())
              ELSE comments_sync_event_id
            END,
            failure_code = CASE
@@ -1242,6 +1243,7 @@ function recordPublishOutcome(
             state.retryable,
             state.message,
             nextAttemptDelay,
+            env.RECURRING_COMMENTS_ENABLED === "true",
           ],
         );
         analyticsEventId = updated.rows[0]?.analytics_event_id;
@@ -1700,11 +1702,11 @@ function recordReconciliationOutcome(
                ELSE analytics_sync_event_id
              END,
              comments_next_sync_at = CASE
-               WHEN $2 = 'published' THEN COALESCE(comments_next_sync_at, now())
+               WHEN $2 = 'published' AND $11::boolean THEN COALESCE(comments_next_sync_at, now())
                ELSE comments_next_sync_at
              END,
              comments_sync_event_id = CASE
-               WHEN $2 = 'published' THEN COALESCE(comments_sync_event_id, gen_random_uuid())
+               WHEN $2 = 'published' AND $11::boolean THEN COALESCE(comments_sync_event_id, gen_random_uuid())
                ELSE comments_sync_event_id
              END,
              failure_code = CASE WHEN status = 'cancel_requested' THEN failure_code ELSE $6 END,
@@ -1736,6 +1738,7 @@ function recordReconciliationOutcome(
             outcome.message,
             nextAttemptDelay,
             providerStillProcessing,
+            env.RECURRING_COMMENTS_ENABLED === "true",
           ],
         );
         analyticsEventId = updated.rows[0]?.analytics_event_id;

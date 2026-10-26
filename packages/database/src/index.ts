@@ -40,10 +40,10 @@ const defaultPoolOptions: Required<HyperdrivePoolOptions> = {
 };
 
 /**
- * Close each checked-out PostgreSQL client on release instead of retaining an
- * idle socket. Local workerd sockets belong to the request that created them;
- * a later request cannot safely resume one. Worker database modules apply this
- * only to independent local pools; deployed pool behavior is unchanged.
+ * Closes checked-out clients on release for pools whose sockets must not
+ * outlive a request. Managed Cloudflare isolates reuse module-scoped pools;
+ * local and standalone workerd runtimes use this helper for request-owned
+ * pools. Hyperdrive continues pooling origin connections independently.
  *
  * Preserves both node-postgres connect overloads: Pool.query uses the callback
  * form internally, while transactions await the Promise form. Both receive

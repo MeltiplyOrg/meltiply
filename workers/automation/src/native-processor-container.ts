@@ -36,6 +36,21 @@ import {
  */
 export class MediaProcessorContainer extends DurableObject<AutomationEnv> {
   /**
+   * Restores the park policy when a DO restarts around an already-running
+   * container. Cloudflare does not retain this setting across DO restarts;
+   * inactivity begins only after active RPC work completes, not during FFmpeg.
+   */
+  constructor(ctx: DurableObjectState, env: AutomationEnv) {
+    super(ctx, env);
+    const container = ctx.container;
+    if (container?.running) {
+      void ctx.blockConcurrencyWhile(() =>
+        container.setInactivityTimeout(PROCESSOR_INACTIVITY_TIMEOUT_MS),
+      );
+    }
+  }
+
+  /**
    * Returns this instance's generated job token, minting it on first use. The
    * token lives in Durable Object storage (not memory) so a restarted container
    * is always addressed with the secret it was actually started with.
@@ -70,6 +85,7 @@ export class MediaProcessorContainer extends DurableObject<AutomationEnv> {
         enableInternet: true,
         env: { PROCESSOR_JOB_TOKEN: token },
       });
+      await container.setInactivityTimeout(PROCESSOR_INACTIVITY_TIMEOUT_MS);
     }
     const port = container.getTcpPort(PROCESSOR_ENGINE_PORT);
     const deadline = Date.now() + PROCESSOR_READY_TIMEOUT_MS;
@@ -144,12 +160,6 @@ export class MediaProcessorContainer extends DurableObject<AutomationEnv> {
         },
         ok: false,
       };
-    } finally {
-      // Park the instance when idle so an unused processor is reclaimed instead
-      // of billing until the next job arrives.
-      await this.ctx.container
-        ?.setInactivityTimeout(PROCESSOR_INACTIVITY_TIMEOUT_MS)
-        .catch(() => undefined);
     }
   }
 }

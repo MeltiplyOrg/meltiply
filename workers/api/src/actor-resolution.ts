@@ -329,14 +329,43 @@ function resolveWorkspace(
 }
 
 /**
+ * Projects freshly read user and membership facts into the request actor.
+ * Installation ownership changes role only after a real Workspace membership
+ * exists; this never manufactures membership from the ownership flag.
+ */
+function resolvedActor(user: InternalUserRow, workspace: WorkspaceRow): ResolvedActor {
+  const role = user.installation_owner
+    ? "admin"
+    : isWorkspaceRole(workspace.role)
+      ? workspace.role
+      : "viewer";
+  return {
+    authUserId: user.auth_user_id,
+    claims: {
+      organizationId: workspace.id,
+      organizationRole: role,
+      subject: user.auth_user_id,
+      userId: user.id,
+    },
+    displayName: user.display_name,
+    email: user.email,
+    isInstallationOwner: user.installation_owner,
+    role,
+    userId: user.id,
+    workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug },
+  };
+}
+
+/**
  * Resolves the authenticated request actor from a verified Better Auth JWT identity.
  *
  * The bearer JWT is verified upstream by the app middleware; this resolver binds
  * the verified subject to the internal user, claims first-boot installation
  * ownership, consumes a matching pending invitation after email verification,
  * then resolves the shared Workspace. Role changes are visible on the next
- * request because the role is read from `org_members` here rather than trusted
- * from JWT claims.
+ * request. Already-provisioned members with unchanged identity data resolve
+ * through one read-only join. Missing/changed records and ownership repairs
+ * take the atomic provisioning path; no authorization facts are cached.
  *
  * @param env - Worker environment bindings.
  * @param identity - Verified JWT identity (subject, email, optional name).
@@ -368,6 +397,42 @@ export async function resolveActor(
   return Effect.runPromise(
     withSystemTransactionEffect(env, (client) =>
       Effect.gen(function* () {
+        const existing = yield* client.query<
+          InternalUserRow & {
+            workspace_id: string;
+            workspace_name: string;
+            workspace_slug: string;
+            workspace_role: string;
+          }
+        >(
+          `SELECT u.id, u.auth_user_id, u.email, u.display_name,
+                  u.installation_owner, u.suspended_at,
+                  o.id AS workspace_id, o.name AS workspace_name,
+                  o.slug AS workspace_slug, membership.role AS workspace_role
+           FROM users u
+           JOIN org_members membership ON membership.user_id = u.id
+           JOIN organizations o ON o.id = membership.org_id AND o.is_shared
+           WHERE u.auth_user_id = $1 AND u.email = $2
+             AND u.display_name IS NOT DISTINCT FROM $3::text
+             AND ($4::uuid IS NULL OR o.id = $4)
+             AND (NOT u.installation_owner OR membership.role = 'admin')
+           LIMIT 1`,
+          [verified.authUserId, verified.email, verified.name?.trim() || null, requested || null],
+        );
+        const current = existing.rows[0];
+        if (current) {
+          if (current.suspended_at !== null) {
+            return yield* Effect.fail(
+              new CoreApiError(403, "account_suspended", "This account is suspended."),
+            );
+          }
+          return resolvedActor(current, {
+            id: current.workspace_id,
+            name: current.workspace_name,
+            slug: current.workspace_slug,
+            role: current.workspace_role,
+          });
+        }
         const user = yield* ensureInternalUser(client, verified);
         if (user.suspended_at !== null) {
           return yield* Effect.fail(
@@ -398,7 +463,6 @@ export async function resolveActor(
         }
         const resolvedRole = isWorkspaceRole(workspace.role) ? workspace.role : "viewer";
         // The Owner must remain Admin while owning the installation.
-        const role = isInstallationOwner ? "admin" : resolvedRole;
         if (isInstallationOwner && resolvedRole !== "admin") {
           yield* client.query(
             `UPDATE org_members SET role = 'admin', updated_at = now()
@@ -406,25 +470,7 @@ export async function resolveActor(
             [workspace.id, user.id],
           );
         }
-        return {
-          authUserId: verified.authUserId,
-          claims: {
-            organizationId: workspace.id,
-            organizationRole: role,
-            subject: verified.authUserId,
-            userId: user.id,
-          },
-          displayName: user.display_name,
-          email: user.email,
-          isInstallationOwner,
-          role,
-          userId: user.id,
-          workspace: {
-            id: workspace.id,
-            name: workspace.name,
-            slug: workspace.slug,
-          },
-        } satisfies ResolvedActor;
+        return resolvedActor({ ...user, installation_owner: isInstallationOwner }, workspace);
       }),
     ),
   );

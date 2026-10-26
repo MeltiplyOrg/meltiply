@@ -200,6 +200,25 @@ docker run --rm --platform "$TOOLS_PLATFORM" --user "$HOST_USER" $RESOURCE_ARGS 
   -e PROCESSOR_JOB_TOKEN="$TOKEN" \
   "$TOOLS_IMAGE" node /smoke/check.mjs || SUITE_STATUS=$?
 
+# Preserve resource measurements before deliberately terminating the sampled
+# process. The restart probe then proves output safety without its replay map.
+stop_monitor
+if [ "$SUITE_STATUS" -eq 0 ]; then
+  docker run --rm --platform "$TOOLS_PLATFORM" --user "$HOST_USER" \
+    --network "$NETWORK" -v "$TMP:/fixtures" -v "$SMOKE_DIR:/smoke:ro" \
+    -e BASE_URL=http://engine:8080 -e FIXTURE_URL=http://fixtures:8099 \
+    -e FIXTURE_DIR=/fixtures -e PROCESSOR_JOB_TOKEN="$TOKEN" \
+    "$TOOLS_IMAGE" node /smoke/restart-check.mjs prepare || SUITE_STATUS=$?
+fi
+if [ "$SUITE_STATUS" -eq 0 ]; then
+  docker restart "$ENGINE_CONTAINER" >/dev/null
+  docker run --rm --platform "$TOOLS_PLATFORM" --user "$HOST_USER" \
+    --network "$NETWORK" -v "$TMP:/fixtures" -v "$SMOKE_DIR:/smoke:ro" \
+    -e BASE_URL=http://engine:8080 -e FIXTURE_URL=http://fixtures:8099 \
+    -e FIXTURE_DIR=/fixtures -e PROCESSOR_JOB_TOKEN="$TOKEN" \
+    "$TOOLS_IMAGE" node /smoke/restart-check.mjs verify || SUITE_STATUS=$?
+fi
+
 # EXIT trap stops the sampler, emits the benchmark summary, then removes the
 # containers, network and temp dir, preserving the suite's exit status.
 exit "$SUITE_STATUS"

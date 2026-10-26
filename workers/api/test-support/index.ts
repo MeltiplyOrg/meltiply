@@ -314,6 +314,6 @@ export default {
     if (url.pathname.startsWith(controlledProviderRoutePrefix)) {
       return controlledProviderRouter.fetch(request, env, executionContext);
     }
-    return acceptanceApp(env).fetch(request, env, executionContext);
+    return acceptanceApp(env).fetch(request, { ...env }, executionContext);
   },
 } satisfies ExportedHandler<ApiWorkerEnv>;

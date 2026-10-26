@@ -10,20 +10,19 @@ import type { DatabaseError } from "@meltiply/domain";
 
 import type { AutomationEnv } from "./env";
 
-// Module-global pool per isolate (AUD-044): Hyperdrive connection strings are
-// stable for managed isolates and pg reconnects internally. Standalone workerd
-// instead opts into request-owned pools so no socket or checkout crosses invocations.
+// Module-global pools per managed isolate (AUD-044). Standalone workerd opts
+// into request-owned pools so sockets and queued checkouts cannot cross invocations.
 let systemPool: Pool | undefined;
 let systemConnectionString: string | undefined;
 
 /**
  * Selects a managed-isolate or request-owned PostgreSQL pool for the system Hyperdrive binding.
- * Managed isolates reuse a pool; local or DATABASE_POOL_MODE=request invocations
- * receive independent pools whose clients close on release so sockets and queued
- * connects cannot cross standalone workerd request ownership boundaries.
+ *
+ * Managed isolates reuse a pool; local or `DATABASE_POOL_MODE=request` calls
+ * receive independent pools whose clients close on release.
  *
  * @param env - Automation worker environment containing the DB_SYSTEM Hyperdrive binding.
- * @returns Cached or newly initialized database Pool instance.
+ * @returns Cached or newly initialized Pool instance.
  * @throws {Error} When the DB_SYSTEM Hyperdrive binding is missing.
  */
 export function systemPoolFor(env: AutomationEnv): Pool {
@@ -34,8 +33,7 @@ export function systemPoolFor(env: AutomationEnv): Pool {
     return destroyClientsOnRelease(createHyperdrivePool(env.DB_SYSTEM));
   }
   if (!systemPool || systemConnectionString !== env.DB_SYSTEM.connectionString) {
-    const pool = createHyperdrivePool(env.DB_SYSTEM);
-    systemPool = pool;
+    systemPool = createHyperdrivePool(env.DB_SYSTEM);
     systemConnectionString = env.DB_SYSTEM.connectionString;
   }
   return systemPool;

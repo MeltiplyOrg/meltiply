@@ -14,6 +14,8 @@ import { useI18n } from "@/lib/i18n";
 import { usePathname, useSearchParams } from "@/lib/navigation";
 import { platformDisplayName } from "@/lib/platforms";
 import {
+  invalidateQueryKeys,
+  queryKeys,
   useAnalyticsPosts,
   useAnalyticsDashboard,
   usePlatformCapabilities,
@@ -200,7 +202,7 @@ export function AnalyticsView(): React.ReactElement {
   const rangeLabel = analyticsRangeLabel(range, t);
 
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    void invalidateQueryKeys(queryClient, [queryKeys.analytics()]);
   };
   const retry = () => {
     void capabilitiesQuery.refetch();

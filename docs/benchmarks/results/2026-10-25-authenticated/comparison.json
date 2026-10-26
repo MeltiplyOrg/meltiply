@@ -1,0 +1,487 @@
+{
+  "baseline_revision": ["master@451c0a224a63"],
+  "candidate_revision": ["HEAD@ea52a6fa2640"],
+  "rows": [
+    {
+      "baseline": {
+        "bytes": 63383,
+        "cpuPerOp": 18.3665,
+        "dbMsPerOp": 1798.7849999999999,
+        "p50": 3484.45,
+        "p95": 3967.43,
+        "p99": 3967.43,
+        "reqP95": 3703.18,
+        "setupMs": 0.01,
+        "statementsPerOp": 18.5,
+        "throughput": 0.560169014194963,
+        "aggregatesPerOp": 2,
+        "aggregateDbMsPerOp": 1788.5875,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 63383,
+        "cpuPerOp": 36.1175,
+        "dbMsPerOp": 2343.7745,
+        "p50": 4195.35,
+        "p95": 4328.44,
+        "p99": 4328.44,
+        "reqP95": 4277.1,
+        "setupMs": 0.01,
+        "statementsPerOp": 10.5,
+        "throughput": 0.4759258840620751,
+        "aggregatesPerOp": 2,
+        "aggregateDbMsPerOp": 2298.68,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "analytics.page.dashboard-and-ranking",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 737,
+        "cpuPerOp": 7.111,
+        "dbMsPerOp": 10.279,
+        "p50": 16.19,
+        "p95": 17.85,
+        "p99": 17.85,
+        "reqP95": 17.82,
+        "setupMs": 0.02,
+        "statementsPerOp": 17,
+        "throughput": 60.72751563733527,
+        "aggregatesPerOp": 1,
+        "aggregateDbMsPerOp": 4.322,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 737,
+        "cpuPerOp": 25.689,
+        "dbMsPerOp": 60.366,
+        "p50": 108.75,
+        "p95": 117.46,
+        "p99": 117.46,
+        "reqP95": 117.38,
+        "setupMs": 0.03,
+        "statementsPerOp": 10,
+        "throughput": 9.107136352045464,
+        "aggregatesPerOp": 1,
+        "aggregateDbMsPerOp": 11.471,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "analytics.summary.cold-exact-range",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 14740,
+        "cpuPerOp": 6.719650000000001,
+        "dbMsPerOp": 48.590900000000005,
+        "p50": 205.19,
+        "p95": 226.75,
+        "p99": 226.75,
+        "reqP95": 205.7,
+        "setupMs": 0.02,
+        "statementsPerOp": 17,
+        "throughput": 96.2765061255927,
+        "aggregatesPerOp": 1,
+        "aggregateDbMsPerOp": 6.11475,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 14740,
+        "cpuPerOp": 22.71345,
+        "dbMsPerOp": 214.71869999999998,
+        "p50": 1494.49,
+        "p95": 1535.01,
+        "p99": 1535.01,
+        "reqP95": 1469.68,
+        "setupMs": 0.02,
+        "statementsPerOp": 9.05,
+        "throughput": 13.347766718411508,
+        "aggregatesPerOp": 0.05,
+        "aggregateDbMsPerOp": 3.1010000000000004,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "analytics.summary.concurrent-cold20",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 737,
+        "cpuPerOp": 7.880000000000001,
+        "dbMsPerOp": 10.801,
+        "p50": 16.87,
+        "p95": 19.85,
+        "p99": 19.85,
+        "reqP95": 19.82,
+        "setupMs": 0.01,
+        "statementsPerOp": 17,
+        "throughput": 57.68343331795108,
+        "aggregatesPerOp": 1,
+        "aggregateDbMsPerOp": 4.356,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 737,
+        "cpuPerOp": 23.622000000000003,
+        "dbMsPerOp": 48.057,
+        "p50": 95.63,
+        "p95": 97.98,
+        "p99": 97.98,
+        "reqP95": 97.94,
+        "setupMs": 0.02,
+        "statementsPerOp": 9,
+        "throughput": 10.441247102553927,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "analytics.summary.year",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 494,
+        "cpuPerOp": 6.4399999999999995,
+        "dbMsPerOp": 7.439,
+        "p50": 12.76,
+        "p95": 16.61,
+        "p99": 16.61,
+        "reqP95": 16.61,
+        "setupMs": 0.01,
+        "statementsPerOp": 17,
+        "throughput": 76.07455306200077,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 494,
+        "cpuPerOp": 22.006999999999998,
+        "dbMsPerOp": 47.95,
+        "p50": 93.85,
+        "p95": 97.61,
+        "p99": 97.61,
+        "reqP95": 97.61,
+        "setupMs": 0.01,
+        "statementsPerOp": 9,
+        "throughput": 10.637166258908627,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "assets.detail",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 820,
+        "cpuPerOp": 7.117,
+        "dbMsPerOp": 9.455,
+        "p50": 15.18,
+        "p95": 16.49,
+        "p99": 16.49,
+        "reqP95": 16.49,
+        "setupMs": 0.01,
+        "statementsPerOp": 19,
+        "throughput": 65.30825496342737,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 820,
+        "cpuPerOp": 22.395,
+        "dbMsPerOp": 56.612,
+        "p50": 102.4,
+        "p95": 111.97,
+        "p99": 111.97,
+        "reqP95": 111.97,
+        "setupMs": 0.01,
+        "statementsPerOp": 11,
+        "throughput": 9.590854161471619,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "assets.upload-session.detail",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 117504,
+        "cpuPerOp": 12.102,
+        "dbMsPerOp": 9.626000000000001,
+        "p50": 15.9,
+        "p95": 23.83,
+        "p99": 23.83,
+        "reqP95": 23.83,
+        "setupMs": 0.01,
+        "statementsPerOp": 17,
+        "throughput": 59.056280635445574,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 117504,
+        "cpuPerOp": 29.811,
+        "dbMsPerOp": 54.75,
+        "p50": 104.81,
+        "p95": 118.62,
+        "p99": 118.62,
+        "reqP95": 118.62,
+        "setupMs": 0.02,
+        "statementsPerOp": 9,
+        "throughput": 9.468172737343421,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "calendar.range",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 73158,
+        "cpuPerOp": 10.324000000000002,
+        "dbMsPerOp": 9.484,
+        "p50": 15.89,
+        "p95": 20.18,
+        "p99": 20.18,
+        "reqP95": 20.18,
+        "setupMs": 0.02,
+        "statementsPerOp": 17,
+        "throughput": 59.4883997620464,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 73158,
+        "cpuPerOp": 26.1,
+        "dbMsPerOp": 54.254,
+        "p50": 102.28,
+        "p95": 115.41,
+        "p99": 115.41,
+        "reqP95": 115.41,
+        "setupMs": 0.05,
+        "statementsPerOp": 9,
+        "throughput": 9.643852526207167,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "distributions.list.page100",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 54338,
+        "cpuPerOp": 7.032000000000001,
+        "dbMsPerOp": 8.434000000000001,
+        "p50": 13.84,
+        "p95": 15.32,
+        "p99": 15.32,
+        "reqP95": 15.32,
+        "setupMs": 0,
+        "statementsPerOp": 17,
+        "throughput": 70.3828828828829,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 54338,
+        "cpuPerOp": 23.508,
+        "dbMsPerOp": 52.242999999999995,
+        "p50": 99.03,
+        "p95": 102.59,
+        "p99": 102.59,
+        "reqP95": 102.59,
+        "setupMs": 0.01,
+        "statementsPerOp": 9,
+        "throughput": 10.043690051725005,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "inbox.list.page100",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 2052,
+        "cpuPerOp": 8.978,
+        "dbMsPerOp": 11.681999999999999,
+        "p50": 18.45,
+        "p95": 21.61,
+        "p99": 21.61,
+        "reqP95": 21.61,
+        "setupMs": 0.02,
+        "statementsPerOp": 21,
+        "throughput": 53.27934359848687,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 2052,
+        "cpuPerOp": 28.105,
+        "dbMsPerOp": 66.704,
+        "p50": 116.99,
+        "p95": 119,
+        "p99": 119,
+        "reqP95": 119,
+        "setupMs": 0.02,
+        "statementsPerOp": 13,
+        "throughput": 8.54920064973925,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "posts.detail.published",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 146280,
+        "cpuPerOp": 19.373,
+        "dbMsPerOp": 16.483,
+        "p50": 25.47,
+        "p95": 32.12,
+        "p99": 32.12,
+        "reqP95": 32.12,
+        "setupMs": 0.02,
+        "statementsPerOp": 21,
+        "throughput": 38.25847425204682,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "candidate": {
+        "bytes": 146280,
+        "cpuPerOp": 44.55,
+        "dbMsPerOp": 74.70599999999999,
+        "p50": 129.62,
+        "p95": 139.18,
+        "p99": 139.18,
+        "reqP95": 139.18,
+        "setupMs": 0.02,
+        "statementsPerOp": 13,
+        "throughput": 7.611161006499932,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0
+      },
+      "name": "posts.list.page100",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 5060,
+        "cpuPerOp": 6.52015,
+        "dbMsPerOp": 34.10065,
+        "p50": 235.88,
+        "p95": 248.3,
+        "p99": 248.3,
+        "reqP95": 234.32,
+        "setupMs": 0.01,
+        "statementsPerOp": 17,
+        "throughput": 84.05374396389051,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 1
+      },
+      "candidate": {
+        "bytes": 5060,
+        "cpuPerOp": 21.4702,
+        "dbMsPerOp": 187.5846,
+        "p50": 1490.64,
+        "p95": 1527.39,
+        "p99": 1527.39,
+        "reqP95": 1461.99,
+        "setupMs": 0.01,
+        "statementsPerOp": 9,
+        "throughput": 13.402930282647697,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 0.065
+      },
+      "name": "requirements.concurrent20",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    },
+    {
+      "baseline": {
+        "bytes": 253,
+        "cpuPerOp": 10.288,
+        "dbMsPerOp": 8.572,
+        "p50": 136.65,
+        "p95": 526.59,
+        "p99": 526.59,
+        "reqP95": 526.52,
+        "setupMs": 0.01,
+        "statementsPerOp": 17,
+        "throughput": 5.635390250774866,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 1
+      },
+      "candidate": {
+        "bytes": 253,
+        "cpuPerOp": 24.599,
+        "dbMsPerOp": 45.735,
+        "p50": 194.03,
+        "p95": 200.74,
+        "p99": 200.74,
+        "reqP95": 200.66,
+        "setupMs": 0.01,
+        "statementsPerOp": 9,
+        "throughput": 5.138086062941555,
+        "aggregatesPerOp": 0,
+        "aggregateDbMsPerOp": 0,
+        "upstreamReadsPerOp": 1
+      },
+      "name": "requirements.sequential",
+      "samples": {
+        "baseline": 10,
+        "candidate": 10
+      }
+    }
+  ]
+}

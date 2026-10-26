@@ -113,6 +113,8 @@ const env = {
       "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
   } as Hyperdrive,
   ENVIRONMENT: "test",
+  // These scenarios exercise the explicitly enabled recurring engagement product.
+  RECURRING_COMMENTS_ENABLED: "true",
   VERSION: "1.0.0-target.0",
   YOUTUBE_PUBLISH_QUEUE: {
     sendBatch: youtubePublishSend,

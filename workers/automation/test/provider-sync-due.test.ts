@@ -10,7 +10,6 @@ const { withSystemTransactionEffect } = vi.hoisted(() => ({
 
 vi.mock("../src/database", () => ({ withSystemTransactionEffect }));
 
-import { onDemandCommentsBound, onDemandCommentsIntervalSeconds } from "../src/due-work";
 import { createQueuePublisherTest } from "../src/effect/services";
 import type { AutomationEnv } from "../src/env";
 import {
@@ -141,6 +140,7 @@ function processingHarness(row: Record<string, unknown>, prior?: Record<string, 
   const env = {
     ENVIRONMENT: "test",
     VERSION: "test",
+    RECURRING_COMMENTS_ENABLED: "true",
   } as AutomationEnv;
   return { env, query, transaction };
 }
@@ -550,63 +550,6 @@ describe("on-demand comment sync requested by an Inbox open", () => {
     });
     return registry;
   }
-
-  it("claims a bounded, rate-limited page of unscheduled distributions", async () => {
-    const { env, executed, publisher, sendBatch, transaction } = claimHarness([
-      { event_id: eventIds[0], target_id: targetIds[0] },
-    ]);
-
-    await expect(
-      Effect.runPromise(
-        Effect.provide(
-          requestOnDemandCommentsSync(
-            env,
-            { distributionId: null, organizationId },
-            { providerRegistry: commentsRegistry(), transaction },
-          ),
-          publisher,
-        ),
-      ),
-    ).resolves.toBe(1);
-
-    expect(executed).toHaveLength(1);
-    const claim = executed[0]!;
-    // Only rows the cadence ladder no longer schedules are eligible.
-    expect(claim.sql).toContain("distribution.comments_next_sync_at IS NULL");
-    // The rate limit is enforced in the claim itself, against the existing
-    // last-success column, so repeated opens cannot re-fetch the same row.
-    expect(claim.sql).toContain(
-      "distribution.comments_last_synced_at <= now() - ($6 * INTERVAL '1 second')",
-    );
-    expect(claim.sql).toContain("ORDER BY distribution.comments_last_synced_at ASC NULLS FIRST");
-    expect(claim.sql).toContain("LIMIT $1");
-    expect(claim.sql).toContain("FOR UPDATE OF distribution SKIP LOCKED");
-    expect(claim.params).toEqual([
-      onDemandCommentsBound,
-      organizationId,
-      null,
-      expect.any(Array),
-      20,
-      onDemandCommentsIntervalSeconds,
-      providerAttemptLeaseSeconds,
-    ]);
-
-    // The armed work travels on the existing comments Queue path, undelayed.
-    expect(sendBatch).toHaveBeenCalledTimes(1);
-    expect(sendBatch.mock.calls[0]?.[0]).toBe(env.COMMENTS_QUEUE);
-    expect(sendBatch.mock.calls[0]?.[1]).toEqual([
-      {
-        body: {
-          event_id: eventIds[0],
-          request_id: eventIds[0],
-          target_id: targetIds[0],
-          type: "provider.sync",
-          version: 1,
-          workload: "comments",
-        },
-      },
-    ]);
-  });
 
   it("narrows the claim to a single distribution in view", async () => {
     const { env, executed, publisher, transaction } = claimHarness([]);

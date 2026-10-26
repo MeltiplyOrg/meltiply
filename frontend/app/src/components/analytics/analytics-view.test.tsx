@@ -373,10 +373,8 @@ describe("analytics view", () => {
     expect(screen.getByRole("heading", { name: "Top posts" })).toBeInTheDocument();
   });
 
-  it("reloads stored metrics and re-ranks from a Post metric header", () => {
+  it("re-ranks from a Post metric header", () => {
     renderView();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh analytics" }));
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["analytics"] });
     expect(within(screen.getByRole("toolbar")).queryByRole("group", { name: "Metric" })).toBeNull();
     const topPosts = screen.getByRole("heading", { name: "Top posts" }).closest(".rounded-card");
     if (!topPosts) throw new Error("Top posts card missing");

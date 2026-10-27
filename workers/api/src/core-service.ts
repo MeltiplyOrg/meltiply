@@ -17,7 +17,10 @@ import {
 } from "./brand-profile-guard";
 import { disconnectPlatformAccountEffect } from "./brand-profile-service";
 import { CoreApiError, type CoreApiService, type CoreServiceError } from "./core-types";
-import { activeOrganizationIdEffect, withTenantTransactionEffect } from "./database";
+import {
+  activeOrganizationIdEffect,
+  withTenantTransactionEffect as defaultTenantTransaction,
+} from "./database";
 import type { ApiWorkerEnv } from "./env";
 import {
   completeIdempotencyEffect,
@@ -562,7 +565,7 @@ function mapPlatformAccount(
  * @param row - Database row from `analytics_snapshots`.
  * @returns Formatted `AnalyticsSnapshot` contract object.
  */
-function mapSnapshot(row: AnalyticsSnapshotRow): AnalyticsSnapshot {
+export function mapSnapshot(row: AnalyticsSnapshotRow): AnalyticsSnapshot {
   return {
     comments: number(row.comments),
     distribution_id: row.distribution_id,
@@ -799,13 +802,17 @@ function computeAnalyticsSummaryEffect(
  * content calendar queries, cross-platform analytics aggregation, and inbox comments.
  *
  * @param configuredCapabilities - Optional platform capability list (defaults to `ProviderRegistry`).
- * @param options - Optional clock override for deterministic analytics cache expiry; defaults to `Date`.
+ * @param options - Optional clock and factory-owned tenant transaction overrides. Defaults use the real clock and Hyperdrive transaction; build-time seed compilation supplies an already scoped embedded SQL client without changing read projections.
  * @returns Configured `CoreApiService` instance implementing all core business operations via Effect.
  */
 export function createCoreApiService(
   configuredCapabilities = new ProviderRegistry().capabilities(),
-  options: { now?: () => Date } = {},
+  options: {
+    now?: () => Date;
+    tenantTransaction?: typeof defaultTenantTransaction;
+  } = {},
 ): CoreApiService {
+  const withTenantTransactionEffect = options.tenantTransaction ?? defaultTenantTransaction;
   const capabilities = capabilityMap(configuredCapabilities);
   const capabilityNamespace = analyticsCapabilityNamespace(capabilities);
   const summaryCache = new AnalyticsSummaryCache();

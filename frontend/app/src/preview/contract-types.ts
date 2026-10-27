@@ -18,6 +18,8 @@ export interface PreviewOperation {
   success: PreviewResponse;
   errors: PreviewResponse[];
   responses: PreviewResponse[];
+  /** Successful data was compiled from seed.sql; its timestamps must not be shifted as catalog examples. */
+  seeded?: true;
 }
 
 export interface PreviewContract {
@@ -25,4 +27,6 @@ export interface PreviewContract {
   routes: string[];
   /** Canonical synthetic examples, not production records or credentials. */
   fixtures: PreviewObject;
+  /** Sanitized public records compiled from the real development seed; no credential tables or SQL runtime. */
+  seedFixtures: PreviewObject;
 }

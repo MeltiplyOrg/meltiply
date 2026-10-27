@@ -8,6 +8,7 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "test-support/**/*.ts",
+    "../../scripts/lib/preview-seed.ts",
     "vitest.config.ts",
     "vitest.contract.config.ts",
     "vitest.integration.config.ts"

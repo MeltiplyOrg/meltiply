@@ -2,19 +2,21 @@ import sampleUrl from "./sample.svg?url";
 import type { PreviewObject, PreviewValue } from "./contract-types";
 import type { PreviewOptions } from "./scenarios";
 
-/** Copies validated canonical examples into a fresh browser scenario, shifts sample dates near today, and removes external resource URLs. Feature outcomes alter data, never application code. */
+/** Copies validated data into a fresh browser scenario and removes external resource URLs. Catalog dates shift near today by default; a zero dateOffset preserves real seed timestamps and timezone-aware Queue assignments. */
 export function scenarioValue(
   value: PreviewValue,
   options: PreviewOptions,
   now: number,
   key = "",
+  dateOffset = now - Date.parse("2026-01-01T00:00:00Z"),
 ): PreviewValue {
-  if (Array.isArray(value)) return value.map((item) => scenarioValue(item, options, now, key));
+  if (Array.isArray(value))
+    return value.map((item) => scenarioValue(item, options, now, key, dateOffset));
   if (value !== null && typeof value === "object") {
     const result: PreviewObject = Object.fromEntries(
       Object.entries(value).map(([field, child]) => [
         field,
-        scenarioValue(child, options, now, field),
+        scenarioValue(child, options, now, field, dateOffset),
       ]),
     );
     if ("asset_type" in result) {
@@ -47,9 +49,7 @@ export function scenarioValue(
   }
   if (typeof value !== "string") return value;
   if (/^\d{4}-\d\d-\d\d(?:T|$)/.test(value) && Number.isFinite(Date.parse(value))) {
-    const shifted = new Date(
-      now + Date.parse(value) - Date.parse("2026-01-01T00:00:00Z"),
-    ).toISOString();
+    const shifted = new Date(Date.parse(value) + dateOffset).toISOString();
     return value.length === 10 ? shifted.slice(0, 10) : shifted;
   }
   if (key === "totpURI")

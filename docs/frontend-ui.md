@@ -249,18 +249,24 @@ Build from the repository root with
 [`openapi.yaml`](../packages/contracts/openapi.yaml) and
 [`examples/operations.yaml`](../packages/contracts/examples/operations.yaml)
 into a preview-only virtual module. Every documented operation is registered
-automatically. Canonical response examples win; documented statuses without an
-example receive deterministic schema-derived responses. Missing operation examples
-fail the build, following the existing contract catalog requirement.
-No duplicate seed dataset or endpoint-handler list is maintained. Database seeds
-remain integration-test infrastructure, not a source of browser records.
+automatically. Canonical examples and schema-derived responses provide transport
+outcomes; missing operation examples fail the build under the existing catalog
+requirement.
 
-`preview/workspace.ts` expands those templates into a deterministic editorial
-Workspace: three Brand Profiles, every canonical Platform, 72 Posts spanning
-draft and Distribution lifecycles, weekly Queues, related calendar events,
-multi-day analytics, and administration lists. Identifiers and foreign keys
-stay linked; dates move together relative to today. This generator varies
-content and outcomes, not API shapes or database seeds.
+Workspace data comes from the **same**
+[`seed.sql`](../scripts/cloudflare-local/postgres/seed.sql) used by `bun run db:seed`.
+`scripts/lib/preview-seed.ts` applies the real migrations and seed in disposable,
+in-memory PGlite during the build. It reuses the API's Post, Asset, Channel,
+Queue, and analytics read projections, scopes reads to the seeded Installation
+Owner's shared Workspace, and emits only public JSON records. The database is
+closed after compilation; there is no database server, SQL/Wasm runtime, or
+credential table in the browser/Worker artifact.
+
+Seed changes appear on the next preview build without editing another dataset.
+The seed's IDs, ordered attachments, frozen publications, analytics history,
+and timezone-aware Queue assignments are retained. Seed timestamps are preserved,
+not shifted on refresh. This is a snapshot of the seed definitions at build time,
+not a connection to a contributor's running or modified database.
 
 The route picker is extracted structurally from the real `app-router.tsx` literal
 Route declarations. It includes sign-in, Channel assignment, invitations,

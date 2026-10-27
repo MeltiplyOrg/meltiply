@@ -31,7 +31,9 @@ export function createPreviewState(
             item === null ||
             typeof item !== "object" ||
             Array.isArray(item) ||
-            (typeof item.id !== "string" && typeof item.user_id !== "string"),
+            (typeof item.id !== "string" &&
+              typeof item.user_id !== "string" &&
+              typeof item.post_id !== "string"),
         )
       )
         continue;
@@ -77,10 +79,14 @@ export function createPreviewState(
     const item = collection.items.find((item) => item.id === id || item.user_id === id);
     if (operation.method === "get" && suffix === "") {
       const query = new URL(request.url).searchParams;
-      const filtered = collection.items.filter((item) =>
-        ["brand_profile_id", "post_id", "platform_account_id", "status"].every(
-          (key) => !query.has(key) || item[key] === query.get(key),
-        ),
+      const filtered = collection.items.filter(
+        (item) =>
+          ["brand_profile_id", "post_id", "platform_account_id", "status"].every(
+            (key) => !query.has(key) || item[key] === query.get(key),
+          ) &&
+          Object.entries(params).every(
+            ([key, value]) => !Object.hasOwn(item, key) || item[key] === value,
+          ),
       );
       const limit = Math.min(
         100,

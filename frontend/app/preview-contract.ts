@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Schema } from "effect";
 import YAML from "yaml";
@@ -22,6 +24,16 @@ const examplesPath = fileURLToPath(
   new URL("../../packages/contracts/examples/operations.yaml", import.meta.url),
 );
 const routerPath = fileURLToPath(new URL("./src/app-router.tsx", import.meta.url));
+const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+const seedPath = fileURLToPath(
+  new URL("../../scripts/cloudflare-local/postgres/seed.sql", import.meta.url),
+);
+const migrationDirectory = fileURLToPath(
+  new URL("../../packages/database/migrations/", import.meta.url),
+);
+const seedCompilerPath = fileURLToPath(
+  new URL("../../scripts/lib/preview-seed.ts", import.meta.url),
+);
 const methods: PreviewMethod[] = ["get", "post", "put", "patch", "delete", "head", "options"];
 const serversSchema = Schema.Array(Schema.Struct({ url: Schema.String }));
 const responseSchema = Schema.Struct({
@@ -72,7 +84,7 @@ function frontendRoutes(): string[] {
 }
 
 /** Compiles every documented operation from the existing spec/example catalog. Missing or mismatched examples fail the build instead of silently losing preview coverage. */
-function compileContract(): PreviewContract {
+async function compileContract(): Promise<PreviewContract> {
   const source = Schema.decodeUnknownSync(previewObjectSchema)(
     YAML.parse(readFileSync(specificationPath, "utf8"), { merge: true }),
   );
@@ -157,20 +169,53 @@ function compileContract(): PreviewContract {
       ([key]) => !["bearer_authorization", "session_cookie"].includes(key),
     ),
   );
-  return { operations, fixtures, routes: frontendRoutes() };
+  const { stdout } = await promisify(execFile)("bun", ["run", "--silent", "preview:seed"], {
+    cwd: repositoryRoot,
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 120_000,
+  });
+  const seed = Schema.decodeUnknownSync(
+    Schema.Struct({
+      responses: Schema.Record(Schema.String, Schema.MutableJson),
+      fixtures: previewObjectSchema,
+    }),
+  )(JSON.parse(stdout));
+  for (const [operationId, body] of Object.entries(seed.responses)) {
+    const operation = operations.find((operation) => operation.operationId === operationId);
+    if (!operation) throw new Error(`Seed projection has no documented operation: ${operationId}`);
+    operation.success = { ...operation.success, body };
+    operation.responses = operation.responses.map((response) =>
+      response.status === operation.success.status ? operation.success : response,
+    );
+    operation.seeded = true;
+  }
+  return { operations, fixtures, seedFixtures: seed.fixtures, routes: frontendRoutes() };
 }
 
 /** Supplies a browser-safe, transport-header-free manifest only to preview/test builds; parser and filesystem dependencies never enter the frontend bundle. */
 export function previewContractPlugin(): Plugin {
+  let compiled: Promise<PreviewContract> | undefined;
   return {
     name: "preview-contract",
     resolveId(id) {
       return id === virtualId ? resolvedId : undefined;
     },
+    watchChange() {
+      compiled = undefined;
+    },
     load(id) {
       if (id !== resolvedId) return;
-      for (const path of [specificationPath, examplesPath, routerPath]) this.addWatchFile(path);
-      return `export default ${JSON.stringify(compileContract())};`;
+      for (const path of [
+        specificationPath,
+        examplesPath,
+        routerPath,
+        seedPath,
+        migrationDirectory,
+        seedCompilerPath,
+      ])
+        this.addWatchFile(path);
+      compiled ??= compileContract();
+      return compiled.then((contract) => `export default ${JSON.stringify(contract)};`);
     },
   };
 }

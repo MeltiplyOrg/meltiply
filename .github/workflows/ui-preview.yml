@@ -8,6 +8,13 @@ on:
       - "frontend/app/**"
       - "frontend/shared/**"
       - "packages/contracts/**"
+      - "packages/database/migrations/**"
+      - "packages/providers/**"
+      - "workers/api/src/**"
+      - "scripts/cloudflare-local/postgres/seed.sql"
+      - "scripts/lib/preview-seed.ts"
+      - "package.json"
+      - "bun.lock"
       - ".github/workflows/ui-preview.yml"
   workflow_dispatch:
 

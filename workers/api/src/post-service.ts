@@ -440,7 +440,7 @@ function assemblePost(row: PostRow, collections: PostCollections): Post {
  * @param preloads - Collections already loaded in this transaction, keyed by Post id.
  * @returns Effect resolving to the assembled Post read models.
  */
-function assemblePostsEffect(
+export function assemblePostsEffect(
   client: EffectTransactionClient,
   rows: readonly PostRow[],
   preloads: PostCollectionPreloads = {},

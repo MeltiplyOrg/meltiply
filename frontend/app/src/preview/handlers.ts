@@ -12,7 +12,6 @@ import { emptyValue, scenarioValue } from "./values";
 import { createPreviewUploads } from "./uploads";
 import { createPreviewState } from "./state";
 
-import { populatePreviewWorkspace } from "./workspace";
 const bootstrapOperations: Record<string, true> = {
   getAuthSession: true,
   getSetupStatus: true,
@@ -32,39 +31,56 @@ function responseFor(result: PreviewResponse, operationId: string): Response {
   );
 }
 
-/** Registers every contract operation automatically. Canonical examples supply data; generic browser CRUD and local Blobs support frontend interactions without implementing backend rules. Each factory call resets the scenario. */
+/** Registers every contract operation automatically. Build-time seed projections supply public workspace data; browser scenarios, local CRUD, and Blobs never access Postgres, credentials, or external effects. Each factory call resets the scenario. */
 export function createPreviewHandlers(options: PreviewOptions = {}) {
   const now = Date.now();
-  const fixtures = Schema.decodeUnknownSync(previewObjectSchema)(
-    scenarioValue(contract.fixtures, options, now),
+  const fixtures = Object.assign(
+    Schema.decodeUnknownSync(previewObjectSchema)(scenarioValue(contract.fixtures, options, now)),
+    Schema.decodeUnknownSync(previewObjectSchema)(
+      scenarioValue(contract.seedFixtures, options, now, "", 0),
+    ),
   );
-  const operations = populatePreviewWorkspace(contract.operations, contract.fixtures).map(
-    (operation): PreviewOperation => ({
-      ...operation,
-      success: {
-        status: operation.success.status,
-        ...(operation.success.body === undefined
-          ? {}
-          : { body: scenarioValue(operation.success.body, options, now) }),
-      },
-      errors: operation.errors.map((response) => ({
-        status: response.status,
-        ...(response.body === undefined
-          ? {}
-          : { body: scenarioValue(response.body, options, now) }),
-      })),
-      responses: operation.responses.map((response) => ({
-        status: response.status,
-        ...(response.body === undefined
-          ? {}
-          : { body: scenarioValue(response.body, options, now) }),
-      })),
-    }),
-  );
+  const operations = contract.operations.map((operation): PreviewOperation => ({
+    ...operation,
+    success: {
+      status: operation.success.status,
+      ...(operation.success.body === undefined
+        ? {}
+        : {
+            body: scenarioValue(
+              operation.success.body,
+              options,
+              now,
+              "",
+              operation.seeded ? 0 : undefined,
+            ),
+          }),
+    },
+    errors: operation.errors.map((response) => ({
+      status: response.status,
+      ...(response.body === undefined ? {} : { body: scenarioValue(response.body, options, now) }),
+    })),
+    responses: operation.responses.map((response) => ({
+      status: response.status,
+      ...(response.body === undefined
+        ? {}
+        : {
+            body: scenarioValue(
+              response.body,
+              options,
+              now,
+              "",
+              operation.seeded && response.status === operation.success.status ? 0 : undefined,
+            ),
+          }),
+    })),
+  }));
   const uploads = createPreviewUploads(
     Schema.decodeUnknownSync(previewObjectSchema)(fixtures.asset),
     Schema.decodeUnknownSync(previewObjectSchema)(fixtures.upload_session),
   );
+  for (const asset of Schema.decodeUnknownSync(Schema.Array(previewObjectSchema))(fixtures.assets))
+    if (typeof asset.id === "string") uploads.assets.set(asset.id, asset);
   const storedResponse = createPreviewState(operations, uploads.assets);
   let signedIn = !["signed-out", "first-run", "two-factor"].includes(
     options.scenario ?? "populated",

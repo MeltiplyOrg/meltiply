@@ -12,8 +12,21 @@ afterAll(() => {
   server.close();
   vi.unstubAllGlobals();
 });
-const postPath = `${origin}/api/v1/posts/00000000-0000-4000-8000-000000000701`;
-const profileId = "00000000-0000-4000-8000-000000000111";
+const postPath = `${origin}/api/v1/posts/49000000-0000-4000-8000-000000000001`;
+const profileId = "c0000000-0000-4000-8000-000000000001";
+
+/** Reads every bounded HTTP page so seed growth cannot silently narrow edit/delete or relationship coverage to the first page. */
+async function readAllPosts(): Promise<Post[]> {
+  const posts: Post[] = [];
+  for (let offset = 0; offset < 10_000; offset += 60) {
+    const page: { posts: Post[]; has_more: boolean } = await fetch(
+      `${origin}/api/v1/posts?limit=60&offset=${offset}`,
+    ).then((response) => response.json());
+    posts.push(...page.posts);
+    if (!page.has_more) return posts;
+  }
+  throw new Error("Preview pagination never reached the end of the seeded Posts");
+}
 
 /** Exercises browser-preview behavior through HTTP, including scenario scope, read-after-edit/reset, authentication, and fail-closed misses. */
 describe("contract-driven UI preview HTTP boundary", () => {
@@ -71,9 +84,7 @@ describe("contract-driven UI preview HTTP boundary", () => {
   });
 
   it("removes a deleted sample without losing separately created or unrelated Posts", async () => {
-    const before = await fetch(`${origin}/api/v1/posts?limit=100`).then((response) =>
-      response.json(),
-    );
+    const before = await readAllPosts();
     const created = await fetch(`${origin}/api/v1/posts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -81,20 +92,12 @@ describe("contract-driven UI preview HTTP boundary", () => {
     }).then((response) => response.json());
     expect((await fetch(postPath, { method: "DELETE" })).ok).toBe(true);
     expect((await fetch(postPath)).status).toBe(404);
-    const list = await fetch(`${origin}/api/v1/posts?limit=100`).then((response) =>
-      response.json(),
-    );
-    expect(list.posts.some((post: { id: string }) => post.id === postPath.split("/").at(-1))).toBe(
-      false,
-    );
-    expect(list.posts.find((post: { id: string }) => post.id === created.id)?.default_text).toBe(
-      "Keep this sample",
-    );
-    expect(list.posts.map((post: { id: string }) => post.id).sort()).toEqual(
+    const remaining = await readAllPosts();
+    expect(remaining.some((post) => post.id === postPath.split("/").at(-1))).toBe(false);
+    expect(remaining.find((post) => post.id === created.id)?.default_text).toBe("Keep this sample");
+    expect(remaining.map((post) => post.id).sort()).toEqual(
       [
-        ...before.posts
-          .filter((post: { id: string }) => post.id !== postPath.split("/").at(-1))
-          .map((post: { id: string }) => post.id),
+        ...before.filter((post) => post.id !== postPath.split("/").at(-1)).map((post) => post.id),
         created.id,
       ].sort(),
     );
@@ -148,16 +151,8 @@ describe("contract-driven UI preview HTTP boundary", () => {
     expect(channels.accounts[0].connection_status).toBe("reconnect_required");
   });
 
-  it("keeps generated workspace identities coherent across pagination, Channels, Queues, and calendar events", async () => {
-    const first = await fetch(`${origin}/api/v1/posts?limit=60`).then((response) =>
-      response.json(),
-    );
-    const second = await fetch(`${origin}/api/v1/posts?limit=60&offset=60`).then((response) =>
-      response.json(),
-    );
-    expect(first.has_more).toBe(true);
-    expect(second.has_more).toBe(false);
-    const posts: Post[] = [...first.posts, ...second.posts];
+  it("keeps seeded workspace identities coherent across pagination, Channels, Queues, and calendar events", async () => {
+    const posts = await readAllPosts();
     const ids = posts.map((post: { id: string }) => post.id);
     expect(new Set(ids).size).toBe(ids.length);
     const profiles = await fetch(`${origin}/api/v1/brand-profiles`).then((response) =>
@@ -192,7 +187,11 @@ describe("contract-driven UI preview HTTP boundary", () => {
         ),
       ).toBe(true);
     expect(
-      queues.items.map((queue: { brand_profile_id: string }) => queue.brand_profile_id).sort(),
+      [
+        ...new Set(
+          queues.items.map((queue: { brand_profile_id: string }) => queue.brand_profile_id),
+        ),
+      ].sort(),
     ).toEqual([...profileIds].sort());
     const calendar = await fetch(`${origin}/api/v1/calendar`).then((response) => response.json());
     for (const event of calendar.events) {

@@ -2,6 +2,10 @@
 
 This document owns layout and scroll boundaries for the current Gr8r-adapted interface. Use [shared UI ownership](frontend-ui.md) for implementation seams and [product conventions](../PRODUCT.md#modular-consistent-surfaces) for supported behavior. Exact shared values come from [`tokens.css`](../frontend/shared/tokens.css), not a parallel page theme.
 
+## Alignment and scroll contract
+
+Routes share one gutter: 16px on phones and 24px from the small breakpoint. A route's heading, toolbar, and content begin on that same edge; documented maximum widths apply only to prose, forms, and the directory composition, never as a second page inset. Fine-pointer table rows keep the 36px collection density, while coarse-pointer selection targets grow to 44px inside their cell. Each route owns exactly one primary vertical scroller; horizontal scrolling belongs only to the table or calendar canvas, or to a deliberately scrollable segmented track. Settings centers its active section in the rail and returns the content pane to the top when the section changes.
+
 ## Workspace shell
 
 `NavigationShell` owns the viewport frame, persistent header, desktop rail, `MobileNavigationSidebar` layer, skip link, and route working column. Routes own their headings, toolbars, content gutters, and scroll regions; the shell does not add a second padded card.
@@ -28,7 +32,7 @@ The shell and drawer frames use the shared safe-area tokens for viewport cutouts
 
 `WorkspaceSurface` composes the page heading/actions, toolbar, active filters, and selected collection view on the shared surface background.
 
-- **Table** is the default. The shared spreadsheet table has a sticky header, selection column, title, optional metadata, and counted collapsible groups. Rows paint the shared table hover fill, and the header row stays pinned while the table scrolls; a group's toggle turns its chevron while its rows collapse in place with a height transition, staying mounted so expanding and collapsing animate alike. Status, Brand Profile, or no grouping changes presentation without changing identity or selection. Rows reach the working edges and inset the leading cell. There is no trailing actions column.
+- **Table** is the default. The shared spreadsheet table has a sticky header, selection column, title, optional metadata, and counted collapsible groups. Rows paint the shared table hover fill, and the header row stays pinned while the table scrolls; a group's toggle turns its chevron while its rows collapse in place with a height transition, staying mounted so expanding and collapsing animate alike. Status, Brand Profile, or no grouping changes presentation without changing identity or selection. Rows reach the working edges and inset the leading cell. There is no trailing actions column. On coarse pointers the selection cell fills its 48px column at 44px tall for rows, the select-all header, and the loading skeleton, so touch targets match the shared control height; fine pointers keep the 36px row and 16px checkbox.
 - **Calendar** is a flush canvas, not a nested card. Its toolbar contains Today, previous/next, the period heading, and Month/Week controls. Month is Monday-first with 35 or 42 local dates, 112px minimum rows, three Post chips per day, and overflow/day-list access. Week uses seven date columns. The canvas may scroll horizontally; its surrounding controls wrap.
 - **Grid** uses `PostCard`, real attachments, and the selected column count. A bottom analytics row shows icon-led views, likes, comments, and shares in four non-wrapping slots, with compact localized counts and accessible exact values. Draft, unpublished, and unmeasured counters show a dash; measured zeros stay zero. The loading card reserves the same footer. The grid viewport owns its gutters. Cards reflow rather than causing document overflow.
 
@@ -77,6 +81,8 @@ All sections share one layout; Security does not get a separate width rule.
 
 - Navigation and content use the same surface background.
 - Below 768px, section navigation is a horizontally scrollable row; from 768px it is a 220px rail.
+- The horizontal section rail centers its `aria-current="page"` section with its own `scrollLeft` on mount, on section change (including reload and history navigation), on language change, and on resize; it clamps to the scrollable range and leaves a non-scrolling desktop rail untouched. A section change also returns the content pane to the top, while a language change keeps the reader's position.
+- Settings content keeps the collection pages' **24px** top padding at every width, so its heading aligns with Posts and Channels from the small breakpoint; only the section-specific horizontal inset and maximum width differ.
 - Appearance, Language, Account, and Security all use one left-aligned **672px maximum** content column with full available width below that limit.
 - Administration uses the directory composition: a centered **1200px** ceiling, a content-width tab strip, and shared **spreadsheet grid tables** for Members and pending invitations. Workspace is a 672px settings form with its seat counts as a compact label/value summary rather than a table. The Administration route is height-locked — only each list scrolls. The Installation Owner is marked by a crown tooltip; their lifecycle control is a toggle and row actions collapse into a three-dot menu. Its Audit tab owns a bounded scroll viewport — a pinned header over 100-entry pages with a paging footer — while the toolbar's search, action, and target filters have fixed widths, Refresh re-reads the current page, and every filter applies server-side across the whole trail.
 - Light, Dark, and System cards are **192px**, wrap, and do not stretch to fill a wide screen.
@@ -90,6 +96,8 @@ All sections share one layout; Security does not get a separate width rule.
 Dialog bodies own native scrolling and keep `data-lenis-prevent` where the document's smooth-scroll controller must not intercept them. Primitives own Escape, scroll lock, and opener restoration; the side inspector deliberately leaves focus untrapped so the workspace stays reachable, while the phone navigation sidebar and the centered dialogs keep containment.
 
 Centered forms and confirmations have 16px viewport gutters and a maximum height of `100dvh - 32px`; their canonical primitives own native scrolling rather than each caller setting a `vh` ceiling. Jump search retains a shrinkable results viewport between its input and keyboard-help row. The mobile navigation sidebar spans the full viewport height on the left edge.
+
+The Brand Profile dialog's 51-color honeycomb is an inline-size container: cells size from `--hex-w`/`--hex-h`, cap at the original 42×48px, and shrink to about 21×24px so every swatch fits a 320px dialog without clipping while the name and description fields stay inside the surface.
 
 `BulkSelectionBar` is portalled outside clipped collection viewports. Its inverse-ink pill stays 24px above the safe-area edge and within the available viewport width.
 

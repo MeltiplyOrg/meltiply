@@ -23,6 +23,92 @@ async function expectKeyboardFocus(page: Page, radio: Locator): Promise<void> {
   expect(await focusedElementIsFocusVisible(page)).toBe(true);
 }
 
+/** One rendered frame of the segmented highlight's translate/scale. */
+interface HighlightSample {
+  checked: string | null;
+  scaleX: number;
+  translateX: number;
+}
+
+/**
+ * Samples the travelling highlight around one click and reports the frames after
+ * the checked value changed. The rendered transform — not a transition property —
+ * proves whether the pill travelled, so reduced motion is measured rather than
+ * inferred from CSS.
+ */
+async function sampleHighlightTravel(
+  page: Page,
+  group: Locator,
+  next: Locator,
+): Promise<{
+  changed: boolean;
+  travelledFrames: number;
+  finalSample: HighlightSample;
+}> {
+  const label = await group.getAttribute("aria-label");
+  if (!label) throw new Error("segmented group has no accessible label");
+
+  await page.evaluate((groupLabel) => {
+    const groupElement = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="radiogroup"]'),
+    ).find((element) => element.getAttribute("aria-label") === groupLabel);
+    const highlight = groupElement?.querySelector<HTMLElement>(':scope > [aria-hidden="true"]');
+    if (!groupElement || !highlight) throw new Error("segmented highlight is missing");
+    const initial =
+      groupElement
+        .querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')
+        ?.textContent?.trim() ?? null;
+    const samples: HighlightSample[] = [];
+    const started = performance.now();
+    const frame = (now: number) => {
+      const transform = getComputedStyle(highlight).transform;
+      const matrix = new DOMMatrixReadOnly(transform === "none" ? undefined : transform);
+      samples.push({
+        checked:
+          groupElement
+            .querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')
+            ?.textContent?.trim() ?? null,
+        scaleX: matrix.a,
+        translateX: matrix.e,
+      });
+      if (now - started < 500) {
+        requestAnimationFrame(frame);
+      } else {
+        Reflect.set(window, "__segmentedHighlightSampler", { done: true, initial, samples });
+      }
+    };
+    requestAnimationFrame(frame);
+  }, label);
+
+  await next.click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, "__segmentedHighlightSampler")?.done === true),
+    )
+    .toBe(true);
+
+  return page.evaluate(() => {
+    const sampler = Reflect.get(window, "__segmentedHighlightSampler") as {
+      initial: string | null;
+      samples: HighlightSample[];
+    };
+    Reflect.deleteProperty(window, "__segmentedHighlightSampler");
+    const changedAt = sampler.samples.findIndex((sample) => sample.checked !== sampler.initial);
+    const afterChange = changedAt === -1 ? [] : sampler.samples.slice(changedAt);
+    return {
+      changed: changedAt !== -1,
+      travelledFrames: afterChange.filter(
+        (sample) => Math.abs(sample.scaleX - 1) > 0.01 || Math.abs(sample.translateX) > 0.5,
+      ).length,
+      finalSample: sampler.samples.at(-1) ?? {
+        checked: sampler.initial,
+        scaleX: 1,
+        translateX: 0,
+      },
+    };
+  });
+}
+
 /**
  * Rendered height of one segmented track and every segment inside it, so the
  * coarse-pointer growth contract is measured on real layout instead of classes.
@@ -88,6 +174,13 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
     path: testInfo.outputPath("shared-components-posts-radio-keyboard.png"),
   });
 
+  // Normal motion travels: the rendered pill is at a non-resting transform on
+  // at least one frame after the checked value changes.
+  const travel = await sampleHighlightTravel(page, postView, tableRadio);
+  expect(travel.changed).toBe(true);
+  expect(travel.travelledFrames).toBeGreaterThan(0);
+  await expect(tableRadio).toBeChecked();
+
   // Calendar swaps the collection surface and owns its own periodic radiogroup.
   await calendarRadio.click();
   const calendar = page.getByRole("region", { name: "Publishing calendar", exact: true });
@@ -114,8 +207,8 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
     path: testInfo.outputPath("shared-components-calendar-period-keyboard.png"),
   });
 
-  // A reduced-motion preference commits the same selection without the spring.
-  await page.emulateMedia({ reducedMotion: "reduce" });
+  // Return to the grid for the phone capture; reduced-motion travel boots in its
+  // own session-level test so the preference exists before the highlight mounts.
   await gridRadio.click();
   await expect(gridRadio).toBeChecked();
   const gridSurface = page
@@ -133,6 +226,43 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
     animations: "disabled",
     path: testInfo.outputPath("shared-components-posts-phone-320x568.png"),
     fullPage: true,
+  });
+});
+
+/**
+ * A session that starts with the OS reduced-motion preference proves the
+ * travelling pill commits the checked state without rendered translation or
+ * scale, while the selected view still switches.
+ */
+test.describe("reduced motion segmented travel", () => {
+  test.use({ reducedMotion: "reduce" });
+
+  test("commits the selection without rendered travel", async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await openIsolatedOwnerWorkspace(page);
+    await waitForWorkspace(page);
+    expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(
+      true,
+    );
+
+    const postView = page.getByRole("radiogroup", { name: "Post view", exact: true });
+    const gridRadio = postView.getByRole("radio", { name: "Grid", exact: true });
+    const travel = await sampleHighlightTravel(page, postView, gridRadio);
+    expect(travel.changed).toBe(true);
+    expect(travel.travelledFrames).toBe(0);
+    expect(travel.finalSample.scaleX).toBeCloseTo(1, 2);
+    expect(travel.finalSample.translateX).toBeCloseTo(0, 1);
+    await expect(gridRadio).toBeChecked();
+    await expect(
+      page
+        .getByRole("checkbox", { name: "Select all visible posts" })
+        .or(page.getByText("No posts match filters", { exact: true })),
+    ).toBeVisible();
+    await page.screenshot({
+      animations: "disabled",
+      path: testInfo.outputPath("shared-components-posts-grid-reduced-motion.png"),
+    });
   });
 });
 

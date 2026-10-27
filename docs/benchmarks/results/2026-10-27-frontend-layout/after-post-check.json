@@ -1,0 +1,349 @@
+{
+  "direct": {
+    "ttfb": 19,
+    "dcl": 236,
+    "load": 236,
+    "scriptTransferKB": 1397,
+    "scriptCount": 47,
+    "styleTransferKB": 138,
+    "longtasks": [
+      {
+        "start": 1132,
+        "duration": 131
+      },
+      {
+        "start": 1271,
+        "duration": 88
+      },
+      {
+        "start": 1444,
+        "duration": 60
+      },
+      {
+        "start": 1514,
+        "duration": 56
+      },
+      {
+        "start": 1707,
+        "duration": 137
+      },
+      {
+        "start": 1851,
+        "duration": 197
+      }
+    ],
+    "cls": 0.0001,
+    "scripts": [
+      {
+        "n": "index-CyDSSZVR.js",
+        "kb": 789
+      },
+      {
+        "n": "react-XUJkUy5z.js",
+        "kb": 122
+      },
+      {
+        "n": "queries-C4cCIunw.js",
+        "kb": 117
+      },
+      {
+        "n": "dropdown-menu-D7KGRjtY.js",
+        "kb": 98
+      },
+      {
+        "n": "post-detail-surface-BQeLcQPj.js",
+        "kb": 55
+      },
+      {
+        "n": "page-D8DF9MJB.js",
+        "kb": 45
+      },
+      {
+        "n": "segmented-control-Bp4zxsK-.js",
+        "kb": 24
+      },
+      {
+        "n": "sidebar-glide-highlight-DnyEgLY3.js",
+        "kb": 16
+      }
+    ]
+  },
+  "navs": [
+    {
+      "label": "posts->channels",
+      "path": "/channels",
+      "ms": 899,
+      "newScriptKB": 43,
+      "scripts": [
+        "page-BNjE3tUB.js",
+        "ellipsis-CPKg2V5g.js",
+        "pencil-DA3shIG6.js",
+        "tabs-Di2arCDr.js",
+        "types-DM7E_tdW.js",
+        "channel-avatar-RIICliZj.js"
+      ],
+      "longtasks": [
+        {
+          "start": 4779,
+          "duration": 58
+        }
+      ],
+      "cls": 0,
+      "events": [
+        {
+          "name": "pointerdown",
+          "start": 4645,
+          "duration": 32,
+          "interactionId": 5542
+        },
+        {
+          "name": "pointerup",
+          "start": 4645,
+          "duration": 32,
+          "interactionId": 5542
+        },
+        {
+          "name": "click",
+          "start": 4645,
+          "duration": 32,
+          "interactionId": 5542
+        }
+      ]
+    },
+    {
+      "label": "channels->settings",
+      "path": "/settings",
+      "ms": 818,
+      "newScriptKB": 45,
+      "scripts": [
+        "workspace-settings-_uYWNKz7.js",
+        "shield-check-kADturWD.js",
+        "switch-BdPxkeGP.js"
+      ],
+      "longtasks": [],
+      "cls": 0,
+      "events": [
+        {
+          "name": "pointerdown",
+          "start": 5518,
+          "duration": 24,
+          "interactionId": 5549
+        },
+        {
+          "name": "pointerup",
+          "start": 5518,
+          "duration": 24,
+          "interactionId": 5549
+        },
+        {
+          "name": "click",
+          "start": 5518,
+          "duration": 24,
+          "interactionId": 5549
+        }
+      ]
+    },
+    {
+      "label": "settings->posts",
+      "path": "/posts",
+      "ms": 900,
+      "newScriptKB": 0,
+      "scripts": [],
+      "longtasks": [
+        {
+          "start": 6430,
+          "duration": 98
+        },
+        {
+          "start": 6528,
+          "duration": 53
+        }
+      ],
+      "cls": 0,
+      "events": [
+        {
+          "name": "pointerdown",
+          "start": 6341,
+          "duration": 40,
+          "interactionId": 5556
+        },
+        {
+          "name": "pointerup",
+          "start": 6341,
+          "duration": 40,
+          "interactionId": 5556
+        },
+        {
+          "name": "click",
+          "start": 6341,
+          "duration": 40,
+          "interactionId": 5556
+        }
+      ]
+    }
+  ],
+  "composer": {
+    "label": "composer-open",
+    "path": "/posts",
+    "ms": 946,
+    "newScriptKB": 332,
+    "scripts": [
+      "composer-CfEhuGhb.js",
+      "time-of-day-field-C-Tn-G_J.js"
+    ],
+    "longtasks": [],
+    "cls": 0,
+    "events": [
+      {
+        "name": "pointerdown",
+        "start": 7258,
+        "duration": 80,
+        "interactionId": 5563
+      },
+      {
+        "name": "pointerup",
+        "start": 7258,
+        "duration": 80,
+        "interactionId": 5563
+      },
+      {
+        "name": "click",
+        "start": 7258,
+        "duration": 80,
+        "interactionId": 5563
+      }
+    ],
+    "openMs": 132
+  },
+  "filter": {
+    "label": "filter-type",
+    "path": "/posts",
+    "ms": 647,
+    "newScriptKB": 0,
+    "scripts": [],
+    "longtasks": [],
+    "cls": 0,
+    "events": [
+      {
+        "name": "pointerdown",
+        "start": 8864,
+        "duration": 16,
+        "interactionId": 5577
+      },
+      {
+        "name": "pointerup",
+        "start": 8864,
+        "duration": 16,
+        "interactionId": 5577
+      },
+      {
+        "name": "click",
+        "start": 8864,
+        "duration": 16,
+        "interactionId": 5577
+      },
+      {
+        "name": "keydown",
+        "start": 8892,
+        "duration": 48,
+        "interactionId": 5584
+      },
+      {
+        "name": "keypress",
+        "start": 8892,
+        "duration": 48,
+        "interactionId": 5584
+      },
+      {
+        "name": "keyup",
+        "start": 8920,
+        "duration": 24,
+        "interactionId": 5584
+      },
+      {
+        "name": "keydown",
+        "start": 8923,
+        "duration": 40,
+        "interactionId": 5591
+      },
+      {
+        "name": "keypress",
+        "start": 8923,
+        "duration": 40,
+        "interactionId": 5591
+      },
+      {
+        "name": "keyup",
+        "start": 8931,
+        "duration": 32,
+        "interactionId": 5591
+      },
+      {
+        "name": "keydown",
+        "start": 8932,
+        "duration": 32,
+        "interactionId": 5598
+      },
+      {
+        "name": "keypress",
+        "start": 8932,
+        "duration": 32,
+        "interactionId": 5598
+      },
+      {
+        "name": "keyup",
+        "start": 8941,
+        "duration": 32,
+        "interactionId": 5598
+      },
+      {
+        "name": "keydown",
+        "start": 8944,
+        "duration": 32,
+        "interactionId": 5605
+      },
+      {
+        "name": "keypress",
+        "start": 8944,
+        "duration": 32,
+        "interactionId": 5605
+      },
+      {
+        "name": "keyup",
+        "start": 8951,
+        "duration": 24,
+        "interactionId": 5605
+      }
+    ],
+    "focus": "Search posts..."
+  },
+  "select": {
+    "label": "select-row",
+    "path": "/posts",
+    "ms": 557,
+    "newScriptKB": 0,
+    "scripts": [],
+    "longtasks": [],
+    "cls": 0,
+    "events": [
+      {
+        "name": "pointerdown",
+        "start": 10182,
+        "duration": 136,
+        "interactionId": 5612
+      },
+      {
+        "name": "pointerup",
+        "start": 10182,
+        "duration": 136,
+        "interactionId": 5612
+      },
+      {
+        "name": "click",
+        "start": 10182,
+        "duration": 136,
+        "interactionId": 5612
+      }
+    ]
+  }
+}

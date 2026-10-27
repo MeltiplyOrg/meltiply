@@ -136,30 +136,36 @@ export default function WorkspaceSettings() {
   }, [centerActiveSection]);
 
   // Self-hosted fonts widen the section labels after the first layout pass, and
-  // the dialog/viewport can resize the rail without a window resize event.
-  // Observe the rail and its active button so centering follows both.
+  // the dialog/viewport can resize the rail without a window resize event. Every
+  // section button is observed: a label change on any tab shifts the active tab's
+  // position even when the rail box and the active label keep their own size.
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
     const railElement = navRef.current;
     if (!railElement) return;
     const observer = new ResizeObserver(centerActiveSection);
     observer.observe(railElement);
-    const activeSection = railElement.querySelector<HTMLElement>('[aria-current="page"]');
-    if (activeSection) observer.observe(activeSection);
+    for (const sectionButton of railElement.querySelectorAll<HTMLElement>("[data-sidebar-item]")) {
+      observer.observe(sectionButton);
+    }
     return () => observer.disconnect();
   }, [centerActiveSection, section, language]);
 
-  // `document.fonts` is absent in jsdom; when present, its initial readiness can
-  // arrive after layout settled, so re-center then (never after unmount).
+  // `document.fonts` is absent in jsdom. `ready` can resolve before the request
+  // that widens these labels, so the loading event is the late-growth trigger;
+  // `ready` remains a cheap retry for browsers that only settle once.
   useEffect(() => {
     const fonts: FontFaceSet | undefined = document.fonts;
-    if (!fonts?.ready) return;
+    if (!fonts) return;
+    const canListen = typeof fonts.addEventListener === "function";
+    if (canListen) fonts.addEventListener("loadingdone", centerActiveSection);
     let cancelled = false;
     void fonts.ready.then(() => {
       if (!cancelled) centerActiveSection();
     });
     return () => {
       cancelled = true;
+      if (canListen) fonts.removeEventListener("loadingdone", centerActiveSection);
     };
   }, [centerActiveSection]);
 

@@ -83,7 +83,12 @@ class TestResizeObserver implements ResizeObserver {
     this.targets.clear();
   }
 
-  notify(): void {
+  /**
+   * Delivers the callback only when the target is actually observed, so the
+   * test proves every section button is registered rather than just the active one.
+   */
+  notifyFor(target: Element): void {
+    if (!this.targets.has(target)) return;
     this.callback([], this);
   }
 }
@@ -197,7 +202,7 @@ describe("settings section rail", () => {
     expect(nav.scrollLeft).toBe(250);
   });
 
-  it("re-centers after late label growth observed by ResizeObserver", () => {
+  it("re-centers when an observed non-active section label changes size", () => {
     rail.clientWidth = 390;
     rail.scrollWidth = 402;
     renderSettings();
@@ -206,8 +211,9 @@ describe("settings section rail", () => {
     // Security's 155px center clamps to the 12px range before the font loads.
     expect(nav.scrollLeft).toBe(12);
 
+    const accountButton = screen.getByRole("button", { name: "Account" });
     rail.scrollWidth = 526;
-    for (const observer of resizeObservers) observer.notify();
+    for (const observer of resizeObservers) observer.notifyFor(accountButton);
 
     // The grown rail can finally reach the clamped 136px position.
     expect(nav.scrollLeft).toBe(136);

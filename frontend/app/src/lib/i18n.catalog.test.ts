@@ -42,6 +42,9 @@ const allowedDynamicTranslationExpressions: Record<string, true> = {
   "RANGE_LABELS[range]": true,
   "status.message": true,
   "titles[status.kind]": true,
+  // The shell's page title is the canonical destination's catalogue label; the
+  // roster owns the finite set of keys, so this reflects an already-reviewed list.
+  "workspaceNavItem(currentView).label": true,
 };
 
 async function sourceFiles(directory: string): Promise<string[]> {

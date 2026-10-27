@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo } from "react";
 import { Skeleton } from "@meltiply/ui/skeleton";
-import type { WorkspaceView } from "@/components/layout/navigation-shell";
+import type { WorkspaceView } from "@/lib/navigation";
 import { useI18n } from "@/lib/i18n";
 import type { PostDrawerSurface } from "./posts-drawer";
 

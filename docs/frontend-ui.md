@@ -45,7 +45,9 @@ Geist is the working face; Geist Mono is for code, identifiers, and shortcuts. I
 
 ## Navigation, search, and filters
 
-`SidebarNav`, `MobileNavigationSidebar`, and `NavigationShell` own the rail, header, mobile navigation layer, Settings/help/account access, and workspace context. `WORKSPACE_NAV_ITEMS` supplies supported destinations in Posts → Analytics → Channels → Queues order. Each destination has one entry; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
+`frontend/app/src/lib/navigation.ts` owns the canonical destination roster (`WORKSPACE_NAV_ITEMS`) and route resolution. It marks Posts → Analytics → Channels → Queues as `primary` destinations and Settings as the `utility` footer destination, so the rail, mobile drawer, jump search, and header title all read one record with no duplicated labels or route fallbacks. Each destination has one entry; view selection and Brand Profile scope belong to collections. Workspace identity is read-only.
+
+`SidebarNav`, `MobileNavigationSidebar`, and `NavigationShell` own the rail, header, mobile navigation layer, Settings/help/account access, and workspace context.
 
 The phone navigation panel is `MobileNavigationSidebar`: the same `SidebarNav` as the desktop rail, positioned as a fixed left-edge layer over the workspace with a fading scrim, sliding in from the left. It renders `collapsible={false}` instead of a reduced copy of its destinations. The same help link, identity, Account settings, palette choices, and sign-out actions remain available.
 

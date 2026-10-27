@@ -772,6 +772,28 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     path: testInfo.outputPath("channels-mobile.png"),
     fullPage: true,
   });
+  // Native reduced motion owns the low-motion contract: the shared drawer CSS
+  // shortens the panel animation without any application motion preference.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mobileMenu.click();
+  const reducedMotionNavigation = page.getByRole("dialog", {
+    name: "Workspace navigation",
+    exact: true,
+  });
+  await expect(reducedMotionNavigation).toBeVisible();
+  await expect
+    .poll(() =>
+      reducedMotionNavigation.evaluate((element) => {
+        const duration = getComputedStyle(element).animationDuration;
+        return duration.endsWith("ms")
+          ? Number.parseFloat(duration) / 1000
+          : Number.parseFloat(duration);
+      }),
+    )
+    .toBeLessThan(0.05);
+  await page.keyboard.press("Escape");
+  await expect(reducedMotionNavigation).toBeHidden();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await mobileMenu.click();
   await page
     .getByRole("dialog", { name: "Workspace navigation", exact: true })
@@ -900,7 +922,11 @@ test("keeps navigation focus and reconnect assignment correct in both palettes",
     await page.keyboard.press("Tab");
     await expect(close).toBeFocused();
     await account.click();
-    await expect(page.getByRole("menu", { name: "Account menu", exact: true })).toBeVisible();
+    const accountMenu = page.getByRole("menu", { name: "Account menu", exact: true });
+    await expect(accountMenu).toBeVisible();
+    await accountMenu.getByRole("menuitemradio", { name: "Dark", exact: true }).click();
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    await accountMenu.getByRole("menuitemradio", { name: "System", exact: true }).click();
     await page.keyboard.press("Escape");
     await expect(account).toBeFocused();
     await expect(navigation).toBeVisible();

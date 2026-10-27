@@ -8,7 +8,7 @@ import {
   CenterDialogDescription,
   CenterDialogTitle,
 } from "@meltiply/ui/center-dialog";
-import { WORKSPACE_NAV_ITEMS, type WorkspaceView } from "@/components/primitives/sidebar-nav";
+import { WORKSPACE_NAV_ITEMS, type WorkspaceView } from "@/lib/navigation";
 import { useWorkspace } from "@/context/workspace.context";
 import { useI18n } from "@/lib/i18n";
 

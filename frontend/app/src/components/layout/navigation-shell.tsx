@@ -2,7 +2,8 @@ import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Menu, Search } from "lucide-react";
 import { useWorkspace } from "@/context/workspace.context";
-import { SidebarNav, type WorkspaceView } from "@/components/primitives/sidebar-nav";
+import { SidebarNav } from "@/components/primitives/sidebar-nav";
+import { workspaceNavItem, type WorkspaceView } from "@/lib/navigation";
 import { Button } from "@meltiply/ui/button";
 import { BrandMark } from "@meltiply/ui/brand-mark";
 import { Skeleton } from "@meltiply/ui/skeleton";
@@ -11,7 +12,6 @@ import { Toaster } from "@meltiply/ui/sileo";
 import { formatHotkey, hotkeys, useHotkey } from "@/lib/hotkeys";
 import { useI18n } from "@/lib/i18n";
 import { WorkspaceSearch } from "./workspace-search";
-export type { WorkspaceView };
 
 interface NavigationShellProps {
   currentView: WorkspaceView;
@@ -38,13 +38,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
     onNavigate(view, options);
     setMobileMenuOpen(false);
   };
-  const pageTitles: Record<WorkspaceView, string> = {
-    posts: t("Posts"),
-    analytics: t("Analytics"),
-    channels: t("Channels"),
-    queues: t("Queues"),
-    settings: t("Settings"),
-  };
+  const pageTitle = t(workspaceNavItem(currentView).label);
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-page pt-(--safe-area-top) pr-(--safe-area-right) pl-(--safe-area-left) text-ink antialiased">
       <a
@@ -81,7 +75,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
               </span>
             )}
             <ChevronRight className="hidden size-3 shrink-0 text-ink-3 sm:block" />
-            <span className="font-medium">{pageTitles[currentView]}</span>
+            <span className="font-medium">{pageTitle}</span>
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <Button

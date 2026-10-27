@@ -122,15 +122,6 @@ export function morphHeightEffect(element: HTMLElement, previousHeight?: number)
   return playEffect(element, [{ height: `${previousHeight}px` }, { height: `${nextHeight}px` }]);
 }
 
-/**
- * Grows an element vertically from a compressed baseline (`scaleY(0.85)` to
- * `scaleY(1)`). The consumer owns `transform-origin` — e.g. the landing's
- * `.bar-chart` bars pin `bottom` in CSS.
- */
-export function riseEffect(element: Element, delay = 0): Animation | null {
-  return playEffect(element, [{ transform: "scaleY(0.85)" }, { transform: "scaleY(1)" }], delay);
-}
-
 /** Minimal native View Transition surface; kept structural so supported browsers gain it without a lib-version type dependency. */
 interface ViewTransitionLike {
   finished: Promise<void>;

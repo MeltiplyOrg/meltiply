@@ -1,4 +1,4 @@
-import { lazy, StrictMode, Suspense } from "react";
+import { lazy, StrictMode, Suspense, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router";
 
@@ -13,8 +13,6 @@ import { isDevMode, isUiPreview } from "@/lib/env";
 import { installFrontendErrorLogging } from "@/lib/frontend-telemetry";
 import { AppRouter } from "@/app-router";
 import favicon from "@meltiply/ui/favicon.svg?url";
-import { startPreview } from "./preview/browser";
-import { PreviewControls } from "./preview/controls";
 
 // Consent defaults are applied by the inline bootstrap before React. Load the
 // interactive notice separately so its toast animation dependencies do not block
@@ -31,9 +29,17 @@ const DevBox = isDevMode()
     })
   : null;
 
-/** Starts preview interception before any router/session work; production statically excludes the preview module. */
+/** Loads preview modules only in ui-preview mode and installs interception before router/session work; ordinary development never requests the preview graph. */
 async function bootstrap(): Promise<void> {
-  if (isUiPreview()) await startPreview();
+  let previewControls: ReactNode = null;
+  if (isUiPreview()) {
+    const [{ startPreview }, { PreviewControls }] = await Promise.all([
+      import("./preview/browser"),
+      import("./preview/controls"),
+    ]);
+    await startPreview();
+    previewControls = <PreviewControls />;
+  }
   /** A data router lets security enrollment block SPA departures, including browser history. */
   const router = createBrowserRouter([
     { path: "*", element: <AppRouter />, errorElement: <FrontendErrorFallback /> },
@@ -57,7 +63,7 @@ async function bootstrap(): Promise<void> {
             <RouterProvider router={router} />
             {DevBox && (
               <Suspense fallback={null}>
-                <DevBox previewControls={isUiPreview() ? <PreviewControls /> : undefined} />
+                <DevBox previewControls={previewControls} />
               </Suspense>
             )}
           </FrontendErrorBoundary>

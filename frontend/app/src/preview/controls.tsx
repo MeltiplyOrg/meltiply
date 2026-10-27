@@ -65,7 +65,7 @@ export function PreviewControls() {
             <SelectTrigger aria-label={t("Preview scenario")}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="z-[2147483001]">
+            <SelectContent className="z-(--z-devbox-overlay)">
               {previewScenarios.map((value) => (
                 <SelectItem key={value} value={value}>
                   <code>{value}</code>
@@ -86,7 +86,7 @@ export function PreviewControls() {
             <SelectTrigger aria-label={t("Preview operation")}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="z-[2147483001]">
+            <SelectContent className="z-(--z-devbox-overlay)">
               <SelectItem value="*">*</SelectItem>
               {contract.operations.map((entry) => (
                 <SelectItem key={entry.operationId} value={entry.operationId}>
@@ -104,7 +104,7 @@ export function PreviewControls() {
             <SelectTrigger aria-label={t("Preview response")}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="z-[2147483001]">
+            <SelectContent className="z-(--z-devbox-overlay)">
               {statuses.map((value) => (
                 <SelectItem key={value} value={value}>
                   <code>{value}</code>
@@ -119,7 +119,7 @@ export function PreviewControls() {
             <SelectTrigger aria-label={t("Preview route")}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="z-[2147483001]">
+            <SelectContent className="z-(--z-devbox-overlay)">
               {contract.routes.map((value) => (
                 <SelectItem key={value} value={value}>
                   <code>{value}</code>

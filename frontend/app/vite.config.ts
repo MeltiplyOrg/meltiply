@@ -112,19 +112,28 @@ const devOnlyStubModules: Readonly<Record<string, string>> = {
 };
 
 /**
- * Replaces development-only entries in builds and excludes the entire preview
- * dependency graph unless building the dedicated ui-preview mode. Static
- * imports therefore cannot ship MSW or synthetic identities in production.
+ * Excludes preview entry graphs outside ui-preview mode, including Vite's
+ * development dependency scanner. Ordinary development retains its tools;
+ * deployed builds additionally strip tooling and local sign-in credentials.
  *
- * @param uiPreview Whether this is the isolated synthetic preview build; defaults to false.
- * @returns Vite plugin substituting build-only modules without affecting development.
+ * @param uiPreview Whether preview modules are enabled.
+ * @param building Whether Vite is emitting a deployed artifact.
+ * @returns Module substitutions appropriate to the active command and mode.
  */
-function devOnlyStubPlugin(uiPreview = false): Plugin {
+function devOnlyStubPlugin(uiPreview: boolean, building: boolean): Plugin {
   return {
     name: "dev-only-stub",
-    apply: "build" as const,
-    // The `@/` alias resolves the specifier before `resolveId` hooks run, so
-    // match the resolved absolute path in `load` instead.
+    enforce: "pre",
+    // Virtual entry ids keep the dependency scanner from reading preview-only
+    // files directly; the regular load hook supplies their inactive exports.
+    resolveId(id) {
+      const normalized = id.replace(/\\/g, "/").replace(/\.(tsx?|jsx?)$/, "");
+      if (
+        !uiPreview &&
+        (normalized.endsWith("/preview/browser") || normalized.endsWith("/preview/controls"))
+      )
+        return `\0${normalized}`;
+    },
     load(id: string) {
       const normalized = id.replace(/\\/g, "/").replace(/\.(tsx?|jsx?)$/, "");
       if (!uiPreview && normalized.endsWith("/preview/browser")) {
@@ -133,6 +142,7 @@ function devOnlyStubPlugin(uiPreview = false): Plugin {
       if (!uiPreview && normalized.endsWith("/preview/controls")) {
         return "export const PreviewControls = () => null;";
       }
+      if (!building) return null;
       if (uiPreview && !normalized.endsWith("/lib/dev-sign-in")) return null;
       const stub = Object.entries(devOnlyStubModules).find(([suffix]) =>
         normalized.endsWith(suffix),
@@ -165,7 +175,7 @@ function themeBootstrapPlugin(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const uiPreview = mode === "ui-preview";
   const rootFileEnv = uiPreview ? {} : parseEnvFile(rootEnvFile);
   const publicEnv = Object.fromEntries(
@@ -216,7 +226,7 @@ export default defineConfig(({ mode }) => {
       rootEnvReloadPlugin(),
       canonicalFrontendOriginPlugin(frontendUrl),
       themeBootstrapPlugin(),
-      devOnlyStubPlugin(uiPreview),
+      devOnlyStubPlugin(uiPreview, command === "build"),
     ]),
     server: {
       host: process.env.FRONTEND_DEV_HOST ?? "127.0.0.1",

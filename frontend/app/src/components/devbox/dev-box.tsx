@@ -379,7 +379,7 @@ export function DevBox({
         role="region"
         aria-label="Meltiply DevBox"
         className={cn(
-          "fixed z-[2147483000] font-sans text-ink",
+          "fixed z-(--z-devbox) font-sans text-ink",
           state.position === null && "bottom-4 left-4",
           state.collapsed
             ? "rounded-full border border-tooltip-border bg-tooltip-bg text-tooltip-fg shadow-overlay"

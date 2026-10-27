@@ -3,16 +3,19 @@ import { mkdir, readdir, readFile } from "node:fs/promises";
 import { chromium, expect } from "@playwright/test";
 
 const origin = "http://127.0.0.1:4173";
+const developmentOrigin = "http://127.0.0.1:4174";
 await mkdir("artifacts/ui-preview", { recursive: true });
-for (let attempt = 0; ; attempt++) {
-  try {
-    await fetch(origin);
-    break;
-  } catch (error) {
-    if (attempt >= 60) throw error;
-    const { promise, resolve } = Promise.withResolvers();
-    setTimeout(resolve, 1000);
-    await promise;
+for (const serverOrigin of [origin, developmentOrigin]) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fetch(serverOrigin);
+      break;
+    } catch (error) {
+      if (attempt >= 60) throw error;
+      const { promise, resolve } = Promise.withResolvers();
+      setTimeout(resolve, 1000);
+      await promise;
+    }
   }
 }
 const direct = await fetch(`${origin}/api/v1/users/me`);
@@ -29,6 +32,25 @@ async function openPreviewControls(page) {
 }
 const browser = await chromium.launch();
 try {
+  // Ordinary development must boot without requesting any preview module or its virtual manifest, even without a backend.
+  const developmentPage = await browser.newPage();
+  try {
+    const previewRequests = [];
+    developmentPage.on("request", (request) => {
+      if (new URL(request.url()).pathname.startsWith("/src/preview/"))
+        previewRequests.push(request.url());
+    });
+    await developmentPage.route(/\/api(?:\/|$)/, (route) => route.abort());
+    await developmentPage.goto(developmentOrigin);
+    await developmentPage.getByRole("button", { name: "Expand DevBox", exact: true }).click();
+    await expect(
+      developmentPage.getByRole("tab", { name: "Skeletons", exact: true }),
+    ).toBeVisible();
+    await expect(developmentPage.getByRole("tab", { name: "Preview", exact: true })).toHaveCount(0);
+    assert.deepEqual(previewRequests, [], "ordinary development must not load preview modules");
+  } finally {
+    await developmentPage.close();
+  }
   // Block application modules to prove transferred palettes commit before React can hydrate, without consuming preview parameters.
   const shellContext = await browser.newContext({ colorScheme: "light" });
   try {
@@ -164,8 +186,33 @@ try {
   );
   assert.equal(reset.default_text, original.default_text);
 
-  // The route list comes from the real router; adding a literal frontend route automatically extends this browser smoke.
   let dialog = await openPreviewControls(page);
+  // Every body-portalled selector must remain clickable above the dock in both palettes and viewport sizes.
+  await dialog.getByRole("combobox", { name: "Preview operation", exact: true }).click();
+  await page.getByRole("option", { name: "GET listPosts", exact: true }).click();
+  for (const dark of [false, true])
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(
+        (enabled) => document.documentElement.classList.toggle("dark", enabled),
+        dark,
+      );
+      for (const [label, value] of [
+        ["Preview scenario", "populated"],
+        ["Preview operation", "GET listPosts"],
+        ["Preview response", "default"],
+        ["Preview route", "/posts"],
+      ]) {
+        await dialog.getByRole("combobox", { name: label, exact: true }).click();
+        await page.screenshot({
+          path: `artifacts/ui-preview/layer-${label.replace(/\W+/g, "-").toLowerCase()}-${dark ? "dark" : "light"}-${width}.png`,
+        });
+        await page.getByRole("option", { name: value, exact: true }).click();
+      }
+    }
+  await dialog.getByRole("combobox", { name: "Preview operation", exact: true }).click();
+  await page.getByRole("option", { name: "*", exact: true }).click();
+  // The route list comes from the real router; adding a literal frontend route automatically extends this browser smoke.
   await dialog.getByRole("combobox", { name: "Preview route", exact: true }).click();
   const routes = await page.getByRole("option").allTextContents();
   await page.keyboard.press("Escape");

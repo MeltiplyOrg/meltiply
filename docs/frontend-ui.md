@@ -247,7 +247,9 @@ second demo UI. The build excludes this module graph from production.
 
 Build from the repository root with
 `bun run --filter frontend-app build:ui-preview`. The output is
-`frontend/app/dist/ui-preview`; MSW starts before the router and session reads.
+`frontend/app/dist/ui-preview`; preview modules load dynamically only in this
+mode, and MSW starts before router/session reads. Ordinary development does not
+request the preview module graph or its virtual manifest.
 
 `frontend/app/preview-contract.ts` compiles the existing
 [`openapi.yaml`](../packages/contracts/openapi.yaml) and
@@ -283,6 +285,8 @@ parameters; OAuth opens the local assignment screen rather than a Provider.
 UI previews count as development builds and expose the canonical **DevBox**.
 They retain the shared before-paint theme bootstrap used by production, so
 transferred palette choices apply before the application module graph loads.
+The dock uses the shared `--z-devbox` layer; its body-portalled selects use
+`--z-devbox-overlay`, derived one level above the dock in the shared token owner.
 Expand its bottom-left pill and choose **Preview**. The tab owns the scenario,
 operation, response, and route controls; there is no separate floating notice
 or preview dialog. Select an outcome, optionally scope it to an operation,

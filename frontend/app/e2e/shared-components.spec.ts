@@ -390,6 +390,16 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
   await expect(actionRegion).toBeVisible();
   await expect(submitAction).toBeInViewport({ ratio: 1 });
   await expect(deleteTrigger).toBeInViewport({ ratio: 1 });
+  // The viewport changed while the dialog stayed mounted; wait for the measured
+  // reserve to follow the region before capturing the exact contract.
+  await expect
+    .poll(() =>
+      editor.evaluate((element) => {
+        const region = element.querySelector<HTMLElement>("[data-brand-profile-dialog-actions]");
+        return Boolean(region && element.style.scrollPaddingBottom === `${region.offsetHeight}px`);
+      }),
+    )
+    .toBe(true);
 
   const pinnedContract = await editor.evaluate((element) => {
     const region = element.querySelector<HTMLElement>("[data-brand-profile-dialog-actions]");
@@ -403,6 +413,7 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
       contentRight: box.right - parseFloat(surface.paddingRight) - 0.5,
       minSwatchLeft: Math.min(...rects.map((rect) => rect.left)),
       maxSwatchRight: Math.max(...rects.map((rect) => rect.right)),
+      regionHeight: region?.offsetHeight ?? 0,
       swatchCount: swatches.length,
       scrollPaddingBottom: element.style.scrollPaddingBottom,
       scrollTop: element.scrollTop,
@@ -415,8 +426,9 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
   // Opaque surface: the scrolling palette must not read through the actions.
   expect(pinnedContract.backgroundColor).toMatch(/^rgb/);
   expect(pinnedContract.backgroundColor).not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)$/);
-  // The registered focus reserve matches the pinned block's rendered height.
-  expect(pinnedContract.scrollPaddingBottom).toMatch(/^\d+(?:\.\d+)?px$/);
+  // The focus reserve is exactly the pinned block's rendered height, not merely
+  // a pixel-shaped string.
+  expect(pinnedContract.scrollPaddingBottom).toBe(`${pinnedContract.regionHeight}px`);
 
   await editor.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
@@ -445,16 +457,18 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
     path: testInfo.outputPath("shared-components-dialog-pinned-320x568.png"),
   });
 
-  // Arrow keys move focus and selection without landing underneath the block.
-  const checkedSwatch = editor.locator('[role="radio"][aria-checked="true"]');
-  const previousColor = await checkedSwatch.getAttribute("title");
-  await checkedSwatch.focus();
-  await page.keyboard.press("ArrowRight");
-  await expect
-    .poll(() => editor.locator('[role="radio"][aria-checked="true"]').getAttribute("title"))
-    .not.toBe(previousColor);
-  const selectedSwatch = editor.locator('[role="radio"][aria-checked="true"]');
-  await expect(selectedSwatch).toBeFocused();
+  // From the top of the dialog, End jumps to the last swatch. Focus scrolling
+  // must leave that swatch above the pinned region rather than underneath it.
+  await editor.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  const swatches = editor.getByRole("radio");
+  await swatches.first().focus();
+  await expect.poll(() => editor.evaluate((element) => element.scrollTop)).toBe(0);
+  await page.keyboard.press("End");
+  const lastSwatch = swatches.last();
+  await expect(lastSwatch).toBeChecked();
+  await expect(lastSwatch).toBeFocused();
   await expect
     .poll(() =>
       editor.evaluate((element) => {

@@ -83,7 +83,7 @@ function frontendRoutes(): string[] {
   return [...routes];
 }
 
-/** Compiles every documented operation from the existing spec/example catalog. Missing or mismatched examples fail the build instead of silently losing preview coverage. */
+/** Compiles documented transport outcomes, then overlays tenant-scoped public data from the disposable SQL seed compiler. Catalog mismatches, invalid JSON, or seed-process failures abort the build; filesystem and database work never enters the browser graph. */
 async function compileContract(): Promise<PreviewContract> {
   const source = Schema.decodeUnknownSync(previewObjectSchema)(
     YAML.parse(readFileSync(specificationPath, "utf8"), { merge: true }),
@@ -180,8 +180,9 @@ async function compileContract(): Promise<PreviewContract> {
       fixtures: previewObjectSchema,
     }),
   )(JSON.parse(stdout));
+  const operationsById = new Map(operations.map((operation) => [operation.operationId, operation]));
   for (const [operationId, body] of Object.entries(seed.responses)) {
-    const operation = operations.find((operation) => operation.operationId === operationId);
+    const operation = operationsById.get(operationId);
     if (!operation) throw new Error(`Seed projection has no documented operation: ${operationId}`);
     operation.success = { ...operation.success, body };
     operation.responses = operation.responses.map((response) =>

@@ -56,8 +56,6 @@
   --sileo-state-warning-tint: var(--orange-tint);
   --sileo-state-info: var(--accent-ink);
   --sileo-state-info-tint: var(--accent-tint);
-  --sileo-state-action: var(--accent-ink);
-  --sileo-state-action-tint: var(--accent-tint);
 }
 
 :root:is(.dark, [data-theme="dark"]) {

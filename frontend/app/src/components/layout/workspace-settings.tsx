@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import {
   LogOut,
   Languages,
@@ -45,7 +45,11 @@ function PreviewLines() {
  *
  * The section rail marks its rows as `data-sidebar-item` targets so the shared
  * `SidebarGlideHighlight` pill owns the hover background here too, exactly as in
- * the workspace rail.
+ * the workspace rail. The rail centers the reloadable route's active section on
+ * mount, section or language change, resize, late label growth, and when the
+ * section roster resolves (Administration can appear after the workspace loads);
+ * changing sections also returns the content pane to its top while a language
+ * change leaves its position alone.
  */
 export default function WorkspaceSettings() {
   const { requestedTheme, setTheme } = useTheme();
@@ -99,6 +103,84 @@ export default function WorkspaceSettings() {
   const current = sections[section];
   const handleSignOut = useWorkspaceSignOut();
   const navRef = useRef<HTMLElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Centers the active section button inside the horizontal Settings rail.
+   *
+   * Writes the rail's own `scrollLeft` rather than calling `scrollIntoView`, so
+   * centering a tab can never move the vertically scrolling page. The offset is
+   * clamped to the rail's scrollable range, and a rail that does not scroll
+   * horizontally (the desktop vertical rail) is left untouched.
+   */
+  const centerActiveSection = useCallback(() => {
+    const railElement = navRef.current;
+    if (!railElement) return;
+    const maxScrollLeft = railElement.scrollWidth - railElement.clientWidth;
+    if (maxScrollLeft <= 0) return;
+    const activeSection = railElement.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!activeSection) return;
+    const centeredOffset =
+      activeSection.offsetLeft + activeSection.offsetWidth / 2 - railElement.clientWidth / 2;
+    railElement.scrollLeft = Math.min(Math.max(centeredOffset, 0), maxScrollLeft);
+  }, []);
+
+  // A reload or history entry mounts with its section already selected, so
+  // center before paint. Label widths change with the language, a resized rail
+  // moves the scrollable range, and the section roster can gain Administration
+  // after the workspace resolves, so all re-run the same centering.
+  useLayoutEffect(() => {
+    centerActiveSection();
+  }, [canManageSettings, centerActiveSection, section, language]);
+
+  useEffect(() => {
+    window.addEventListener("resize", centerActiveSection);
+    return () => window.removeEventListener("resize", centerActiveSection);
+  }, [centerActiveSection]);
+
+  // Self-hosted fonts widen the section labels after the first layout pass, the
+  // dialog/viewport can resize the rail without a window resize event, and a
+  // late-capability Administration button changes the roster. Every section
+  // button is observed: a label change on any tab shifts the active tab's
+  // position even when the rail box and the active label keep their own size.
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const railElement = navRef.current;
+    if (!railElement) return;
+    const observer = new ResizeObserver(centerActiveSection);
+    observer.observe(railElement);
+    for (const sectionButton of railElement.querySelectorAll<HTMLElement>("[data-sidebar-item]")) {
+      observer.observe(sectionButton);
+    }
+    return () => observer.disconnect();
+  }, [canManageSettings, centerActiveSection, section, language]);
+
+  // `document.fonts` is absent in jsdom. `ready` can resolve before the request
+  // that widens these labels, so the loading event is the late-growth trigger;
+  // `ready` remains a cheap retry for browsers that only settle once.
+  useEffect(() => {
+    const fonts: FontFaceSet | undefined = document.fonts;
+    if (!fonts) return;
+    const canListen = typeof fonts.addEventListener === "function";
+    if (canListen) fonts.addEventListener("loadingdone", centerActiveSection);
+    let cancelled = false;
+    void fonts.ready.then(() => {
+      if (!cancelled) centerActiveSection();
+    });
+    return () => {
+      cancelled = true;
+      if (canListen) fonts.removeEventListener("loadingdone", centerActiveSection);
+    };
+  }, [centerActiveSection]);
+
+  // Section changes open the new form at its own top; a language change keeps the
+  // reader's position in the current form.
+  const previousSectionRef = useRef(section);
+  useLayoutEffect(() => {
+    if (previousSectionRef.current === section) return;
+    previousSectionRef.current = section;
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+  }, [section]);
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-surface md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
       <nav
@@ -134,8 +216,9 @@ export default function WorkspaceSettings() {
         })}
       </nav>
       <div
+        ref={contentRef}
         className={cn(
-          "min-h-0 min-w-0 px-4 pb-20 pt-6 sm:px-10 sm:pt-8",
+          "min-h-0 min-w-0 px-4 pb-20 pt-5 sm:px-6 sm:pt-6",
           section === "administration" ? "overflow-hidden" : "overflow-y-auto",
         )}
       >

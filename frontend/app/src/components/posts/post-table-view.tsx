@@ -47,28 +47,87 @@ export interface PostTableViewProps extends PostSelectionProps {
  * a whole group collapse. Padding therefore belongs to the layer, and `className`
  * carries it plus whatever layout that column's content needs.
  *
+ * @param props.selectionCell - Applies the coarse-pointer selection-cell geometry.
  * @param props.className - Layout and padding for the content layer.
  * @param props.onClick - Cell-local handler, e.g. stopping row navigation.
  * @param props.children - Real cell content.
  * @returns The cell with its animated content layer.
  */
 function PostRowCell({
+  selectionCell = false,
   className,
   onClick,
   children,
 }: {
+  selectionCell?: boolean;
   className?: string;
   onClick?: React.MouseEventHandler<HTMLTableCellElement>;
   children: React.ReactNode;
 }) {
   return (
-    <TableCell data-post-cell="" onClick={onClick}>
+    <TableCell
+      data-post-cell=""
+      data-post-selection-cell={selectionCell ? "" : undefined}
+      className={selectionCell ? POST_SELECTION_CELL_CLASS : undefined}
+      onClick={onClick}
+    >
       <div data-post-row-content="" className={className}>
         {children}
       </div>
     </TableCell>
   );
 }
+
+/**
+ * Selection checkbox for a Post row or the select-all header.
+ *
+ * Fine pointers keep the shared 16px native checkbox. On coarse pointers the
+ * label becomes an absolutely positioned overlay that fills the whole cell, so
+ * the row and header provide a 44px-tall selection target without changing the
+ * checkbox's own size or the fine-pointer table density. The wrapper stays local
+ * to the Posts table because only this table's first column opts into a
+ * full-cell target.
+ *
+ * @param props.checked - Whether the row (or every visible row) is selected.
+ * @param props.disabled - Blocks toggling while a bulk action or empty collection forbids it.
+ * @param props.label - Accessible name for the checkbox.
+ * @param props.onChange - Toggles the owning row or the visible selection.
+ * @returns The labelled checkbox.
+ */
+function PostSelectionCheckbox({
+  checked,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean | undefined;
+  label: string;
+  onChange: () => void;
+}) {
+  return (
+    <label className="flex items-center justify-center pointer-coarse:absolute pointer-coarse:inset-0">
+      <Input
+        type="checkbox"
+        aria-label={label}
+        checked={checked}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    </label>
+  );
+}
+
+/**
+ * Marks the first cell as the Post selection target.
+ *
+ * `globals.css` owns the token-backed coarse-pointer height
+ * (`--post-selection-row-h`) for `[data-post-selection-cell]`; the later
+ * collapsed-row rule still zeroes `--post-row-h` during a group collapse. The
+ * cell is already positioned by the row hook, so `relative` anchors the
+ * full-cell label on both pointer types.
+ */
+const POST_SELECTION_CELL_CLASS = "relative";
 
 /**
  * Publish-date column formatters.
@@ -158,12 +217,15 @@ const PostTableRow = React.memo(function PostTableRow({
         onViewDetails(post.id);
       }}
     >
-      <PostRowCell className="pl-4 pr-2 sm:pl-6" onClick={(event) => event.stopPropagation()}>
-        <Input
-          type="checkbox"
-          aria-label={t("Select post")}
+      <PostRowCell
+        selectionCell
+        className="pl-4 pr-2 sm:pl-6"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <PostSelectionCheckbox
           checked={selected}
           disabled={selectionDisabled}
+          label={t("Select post")}
           onChange={() => onToggleSelection(post.id)}
         />
       </PostRowCell>
@@ -265,7 +327,7 @@ function PostRowSkeleton({
 }) {
   return (
     <TableRow data-post-row="" aria-hidden="true">
-      <PostRowCell className="pl-4 pr-2 sm:pl-6">
+      <PostRowCell selectionCell className="pl-4 pr-2 sm:pl-6">
         <Skeleton className="size-4" />
       </PostRowCell>
       <PostRowCell className="min-w-0 gap-2 px-2">
@@ -388,12 +450,15 @@ export const PostTableView = React.memo(function PostTableView({
         </colgroup>
         <TableHeader>
           <TableRow>
-            <TableHead>
-              <Input
-                type="checkbox"
-                aria-label={t("Select all visible posts")}
+            {/* The header cell is `sticky`, which is already a positioned
+                ancestor: the coarse-pointer label fills this cell without a
+                `relative` utility, which would replace `sticky` during class
+                merging and unpin the header. */}
+            <TableHead className="pointer-coarse:h-11">
+              <PostSelectionCheckbox
                 checked={allSelected}
                 disabled={selectionDisabled || selectableIds.length === 0}
+                label={t("Select all visible posts")}
                 onChange={() => onSetSelection(selectableIds, !allSelected)}
               />
             </TableHead>

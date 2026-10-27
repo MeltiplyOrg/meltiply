@@ -40,6 +40,7 @@ function validateAndNormalizeApiBaseUrl(value: unknown): string {
  */
 export type DevModeSource = {
   DEV?: boolean | undefined;
+  MODE?: string | undefined;
 };
 
 export type PublicEnv = {
@@ -77,15 +78,16 @@ export function getApiBaseUrl(source?: PublicEnvSource): string {
 }
 
 /**
- * Reports whether the frontend bundle is running in Vite development mode.
- * Gates dev-only tooling (e.g. the Agentation inspector) behind a single
- * environment accessor instead of scattered `import.meta.env.DEV` reads.
+ * Reports whether developer tooling is available in local development or the
+ * isolated UI preview. Production/staging builds remain disabled; runtime
+ * URLs and browser state cannot opt into developer mode.
  *
  * @param source Optional override dictionary; defaults to `import.meta.env`.
- * @returns `true` when the app runs in development mode.
+ * @returns `true` for Vite development or the dedicated ui-preview build.
  */
 export function isDevMode(source?: DevModeSource): boolean {
-  return (source === undefined ? import.meta.env.DEV : source.DEV) === true;
+  const environment = source ?? import.meta.env;
+  return environment.DEV === true || environment.MODE === "ui-preview";
 }
 
 /** Identifies the dedicated synthetic UI build; runtime URLs and user input cannot enable this mode. */

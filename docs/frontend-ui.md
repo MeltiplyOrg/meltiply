@@ -255,13 +255,23 @@ fail the build, following the existing contract catalog requirement.
 No duplicate seed dataset or endpoint-handler list is maintained. Database seeds
 remain integration-test infrastructure, not a source of browser records.
 
+`preview/workspace.ts` expands those templates into a deterministic editorial
+Workspace: three Brand Profiles, every canonical Platform, 72 Posts spanning
+draft and Distribution lifecycles, weekly Queues, related calendar events,
+multi-day analytics, and administration lists. Identifiers and foreign keys
+stay linked; dates move together relative to today. This generator varies
+content and outcomes, not API shapes or database seeds.
+
 The route picker is extracted structurally from the real `app-router.tsx` literal
 Route declarations. It includes sign-in, Channel assignment, invitations,
 Settings, and the dashboard routes. Standalone handoffs receive synthetic query
 parameters; OAuth opens the local assignment screen rather than a Provider.
 
-Open **Preview controls** from the persistent notice. Select an outcome, optionally
-scope it to an operation, choose an exact documented HTTP response, and pick a
+UI previews count as development builds and expose the canonical **DevBox**.
+Expand its bottom-left pill and choose **Preview**. The tab owns the scenario,
+operation, response, and route controls; there is no separate floating notice
+or preview dialog. Select an outcome, optionally scope it to an operation,
+choose an exact documented HTTP response, and pick a
 frontend route. **Apply preview** reloads with shareable URL parameters and fresh
 browser state; **Reset preview** removes those overrides. Scenario and operation
 identifiers are technical codes; control labels follow the interface language.

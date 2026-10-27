@@ -72,9 +72,12 @@ describe("public env parsing", () => {
 });
 
 describe("dev mode accessor", () => {
-  it("reports development mode only for an explicit true flag", () => {
+  it("enables tooling in local development and isolated previews, not production or staging", () => {
     expect(isDevMode({ DEV: true })).toBe(true);
     expect(isDevMode({ DEV: false })).toBe(false);
+    expect(isDevMode({ DEV: false, MODE: "ui-preview" })).toBe(true);
+    expect(isDevMode({ DEV: false, MODE: "production" })).toBe(false);
+    expect(isDevMode({ DEV: false, MODE: "staging" })).toBe(false);
     expect(isDevMode({})).toBe(false);
   });
 });

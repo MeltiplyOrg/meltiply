@@ -14,7 +14,7 @@ import { installFrontendErrorLogging } from "@/lib/frontend-telemetry";
 import { AppRouter } from "@/app-router";
 import favicon from "@meltiply/ui/favicon.svg?url";
 import { startPreview } from "./preview/browser";
-import { PreviewNotice } from "./preview/notice";
+import { PreviewControls } from "./preview/controls";
 
 // Consent defaults are applied by the inline bootstrap before React. Load the
 // interactive notice separately so its toast animation dependencies do not block
@@ -55,10 +55,9 @@ async function bootstrap(): Promise<void> {
               <CookieNotice policyUrl="https://meltiply.com/docs/cookies" />
             </Suspense>
             <RouterProvider router={router} />
-            {isUiPreview() && <PreviewNotice />}
             {DevBox && (
               <Suspense fallback={null}>
-                <DevBox />
+                <DevBox previewControls={isUiPreview() ? <PreviewControls /> : undefined} />
               </Suspense>
             )}
           </FrontendErrorBoundary>

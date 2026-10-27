@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { previewObjectSchema } from "./contract-types";
 import type { PreviewObject, PreviewOperation, PreviewResponse } from "./contract-types";
 import { mergeExample } from "./values";
 
@@ -34,8 +36,17 @@ export function createPreviewState(
       )
         continue;
       const items: PreviewObject[] = [];
-      for (const item of value)
-        if (item !== null && typeof item === "object" && !Array.isArray(item)) items.push(item);
+      for (const item of value) {
+        if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+        items.push(item);
+        if (Array.isArray(item.attachments)) {
+          const attachments = Schema.decodeUnknownSync(
+            Schema.Array(Schema.Struct({ asset: previewObjectSchema })),
+          )(item.attachments);
+          for (const { asset } of attachments)
+            if (typeof asset.id === "string") assets.set(asset.id, asset);
+        }
+      }
       collections.push({ path: operation.path, field, envelope: body, items });
       break;
     }
@@ -67,7 +78,7 @@ export function createPreviewState(
     if (operation.method === "get" && suffix === "") {
       const query = new URL(request.url).searchParams;
       const filtered = collection.items.filter((item) =>
-        ["brand_profile_id", "status"].every(
+        ["brand_profile_id", "post_id", "platform_account_id", "status"].every(
           (key) => !query.has(key) || item[key] === query.get(key),
         ),
       );
@@ -84,7 +95,9 @@ export function createPreviewState(
         status: operation.success.status,
         body: {
           ...collection.envelope,
-          [collection.field]: filtered.slice(offset, offset + limit),
+          [collection.field]: Object.hasOwn(collection.envelope, "limit")
+            ? filtered.slice(offset, offset + limit)
+            : filtered,
           ...(Object.hasOwn(collection.envelope, "has_more")
             ? { has_more: offset + limit < filtered.length, limit, offset }
             : {}),
@@ -96,6 +109,10 @@ export function createPreviewState(
     if (operation.method === "delete" && parameter) {
       if (!item) return { status: 404 };
       collection.items.splice(collection.items.indexOf(item), 1);
+      if (typeof item.id === "string")
+        for (const related of collections)
+          for (let index = related.items.length - 1; index >= 0; index--)
+            if (related.items[index]?.post_id === item.id) related.items.splice(index, 1);
       return {
         status: operation.success.status,
         ...(operation.success.body === undefined ? {} : { body: item }),

@@ -18,6 +18,15 @@ for (let attempt = 0; ; attempt++) {
 const direct = await fetch(`${origin}/api/v1/users/me`);
 assert.equal(direct.status, 503, "the Worker has no API when browser interception is absent");
 assert.match(direct.headers.get("content-security-policy"), /connect-src 'self'/);
+
+/** Opens the canonical developer dock and its preview-only tab, including after scenario reloads reset consent-free dock state. */
+async function openPreviewControls(page) {
+  const expand = page.getByRole("button", { name: "Expand DevBox", exact: true });
+  await expect(page.getByRole("region", { name: "Meltiply DevBox", exact: true })).toBeVisible();
+  if (await expand.isVisible()) await expand.click();
+  await page.getByRole("tab", { name: "Preview", exact: true }).click();
+  return page.getByRole("region", { name: "Preview controls", exact: true });
+}
 const browser = await chromium.launch();
 try {
   const context = await browser.newContext();
@@ -125,15 +134,13 @@ try {
   assert.equal(reset.default_text, original.default_text);
 
   // The route list comes from the real router; adding a literal frontend route automatically extends this browser smoke.
-  await page.getByRole("button", { name: "Preview controls", exact: true }).click();
-  let dialog = page.getByRole("dialog", { name: "Preview controls", exact: true });
+  let dialog = await openPreviewControls(page);
   await dialog.getByRole("combobox", { name: "Preview route", exact: true }).click();
   const routes = await page.getByRole("option").allTextContents();
   await page.keyboard.press("Escape");
-  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Collapse DevBox", exact: true }).click();
   for (const route of routes) {
-    await page.getByRole("button", { name: "Preview controls", exact: true }).click();
-    dialog = page.getByRole("dialog", { name: "Preview controls", exact: true });
+    dialog = await openPreviewControls(page);
     await dialog.getByRole("combobox", { name: "Preview route", exact: true }).click();
     await page.getByRole("option", { name: route, exact: true }).click();
     await dialog.getByRole("combobox", { name: "Preview scenario", exact: true }).click();
@@ -181,8 +188,7 @@ try {
 
   // Apply an empty state through the real controls, including a scoped operation. No query-cache or auth state may leak across the reload.
   await page.goto(`${origin}/posts`);
-  await page.getByRole("button", { name: "Preview controls", exact: true }).click();
-  dialog = page.getByRole("dialog", { name: "Preview controls", exact: true });
+  dialog = await openPreviewControls(page);
   await dialog.getByRole("combobox", { name: "Preview scenario", exact: true }).click();
   await page.getByRole("option", { name: "empty", exact: true }).click();
   await dialog.getByRole("combobox", { name: "Preview operation", exact: true }).click();
@@ -210,7 +216,7 @@ try {
     await page.goto(
       `${origin}${route}?previewScenario=${scenario}&previewOperation=${scenario === "channel-expired" ? "listPlatformAccounts" : "listPosts"}`,
     );
-    await expect(page.getByRole("button", { name: "Preview controls", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Expand DevBox", exact: true })).toBeVisible();
     if (scenario === "loading")
       await expect(page.getByRole("status").filter({ hasText: "Loading posts…" })).toBeVisible();
     else if (["server-error", "permission-denied"].includes(scenario))
@@ -290,7 +296,7 @@ async function inspectProduction(directory) {
     else if (/\.(js|html)$/.test(entry.name))
       assert.doesNotMatch(
         await readFile(path, "utf8"),
-        /alpha-admin@example\.test|mockServiceWorker\.js|preview_unhandled/,
+        /alpha-admin@example\.test|alpha@meltiply\.local|MeltiplyLocal1!|mockServiceWorker\.js|preview_unhandled|Expand DevBox/,
       );
   }
 }

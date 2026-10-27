@@ -12,6 +12,7 @@ import { emptyValue, scenarioValue } from "./values";
 import { createPreviewUploads } from "./uploads";
 import { createPreviewState } from "./state";
 
+import { populatePreviewWorkspace } from "./workspace";
 const bootstrapOperations: Record<string, true> = {
   getAuthSession: true,
   getSetupStatus: true,
@@ -37,23 +38,29 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
   const fixtures = Schema.decodeUnknownSync(previewObjectSchema)(
     scenarioValue(contract.fixtures, options, now),
   );
-  const operations = contract.operations.map((operation): PreviewOperation => ({
-    ...operation,
-    success: {
-      status: operation.success.status,
-      ...(operation.success.body === undefined
-        ? {}
-        : { body: scenarioValue(operation.success.body, options, now) }),
-    },
-    errors: operation.errors.map((response) => ({
-      status: response.status,
-      ...(response.body === undefined ? {} : { body: scenarioValue(response.body, options, now) }),
-    })),
-    responses: operation.responses.map((response) => ({
-      status: response.status,
-      ...(response.body === undefined ? {} : { body: scenarioValue(response.body, options, now) }),
-    })),
-  }));
+  const operations = populatePreviewWorkspace(contract.operations, contract.fixtures).map(
+    (operation): PreviewOperation => ({
+      ...operation,
+      success: {
+        status: operation.success.status,
+        ...(operation.success.body === undefined
+          ? {}
+          : { body: scenarioValue(operation.success.body, options, now) }),
+      },
+      errors: operation.errors.map((response) => ({
+        status: response.status,
+        ...(response.body === undefined
+          ? {}
+          : { body: scenarioValue(response.body, options, now) }),
+      })),
+      responses: operation.responses.map((response) => ({
+        status: response.status,
+        ...(response.body === undefined
+          ? {}
+          : { body: scenarioValue(response.body, options, now) }),
+      })),
+    }),
+  );
   const uploads = createPreviewUploads(
     Schema.decodeUnknownSync(previewObjectSchema)(fixtures.asset),
     Schema.decodeUnknownSync(previewObjectSchema)(fixtures.upload_session),

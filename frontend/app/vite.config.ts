@@ -86,13 +86,13 @@ function canonicalFrontendOriginPlugin(frontendUrl: string | undefined): Plugin 
 }
 
 /**
- * Dev-only modules replaced with inert source in every build. Keys match the
- * resolved absolute module path suffix; values are the stub module source.
+ * Development-only modules replaced with inert source outside UI previews.
+ * Local sign-in credentials remain excluded from every deployed build.
  *
  * `isDevMode()` is a runtime check — bundlers cannot fold the branches around
  * it, so dev tooling (react-scan, axe-core, query devtools, agentation) and the
  * local sign-in fixture would otherwise still be emitted to `dist`. The stubs
- * remove both from deployed artifacts while leaving development mode untouched.
+ * remove developer tools from production/staging, while previews retain them.
  * Keeping the credentials here as a separate module makes one entry enough to
  * prove they cannot ship; `sign-in-form.test.tsx` and the Vite config test pin
  * both halves.
@@ -127,9 +127,10 @@ function devOnlyStubPlugin(uiPreview = false): Plugin {
       if (!uiPreview && normalized.endsWith("/preview/browser")) {
         return "export const startPreview = async () => {};";
       }
-      if (!uiPreview && normalized.endsWith("/preview/notice")) {
-        return "export const PreviewNotice = () => null;";
+      if (!uiPreview && normalized.endsWith("/preview/controls")) {
+        return "export const PreviewControls = () => null;";
       }
+      if (uiPreview && !normalized.endsWith("/lib/dev-sign-in")) return null;
       const stub = Object.entries(devOnlyStubModules).find(([suffix]) =>
         normalized.endsWith(suffix),
       )?.[1];

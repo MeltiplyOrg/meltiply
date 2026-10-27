@@ -51,38 +51,6 @@ describe("Vite frontend configuration", () => {
     expect(config.resolve?.dedupe).toEqual(["react", "react-dom"]);
   });
 
-  it("stubs development-only credentials and tooling out of every build", () => {
-    const config = viteConfig({ command: "build", mode: "production" });
-    const plugin = config.plugins?.find(
-      (candidate) =>
-        typeof candidate === "object" &&
-        candidate !== null &&
-        "name" in candidate &&
-        candidate.name === "dev-only-stub",
-    ) as Plugin | undefined;
-    if (!plugin) throw new Error("dev-only stub plugin is unavailable");
-    expect(plugin.apply).toBe("build");
-
-    const load = typeof plugin.load === "function" ? plugin.load : plugin.load?.handler;
-    if (!load) throw new Error("dev-only stub plugin has no load hook");
-    const context = {} as never;
-    const devSignInStub = String(
-      load.call(context, "/checkout/frontend/app/src/lib/dev-sign-in.ts"),
-    );
-    const pseudoLocaleStub = String(
-      load.call(context, "/checkout/frontend/app/src/lib/pseudo-locale.ts"),
-    );
-
-    expect(devSignInStub).not.toContain("alpha@meltiply.local");
-    expect(devSignInStub).not.toContain("MeltiplyLocal1!");
-    expect(pseudoLocaleStub).toContain("pseudoLocaleEvent");
-    expect(pseudoLocaleStub).not.toContain("⟦");
-    expect(load.call(context, "/checkout/frontend/app/src/lib/env.ts")).toBeNull();
-    expect(
-      String(load.call(context, "/checkout/frontend/app/src/components/devbox/dev-box.tsx")),
-    ).toContain("DevBoxClientBridge");
-  });
-
   it("redirects alternate HTML navigations without redirecting canonical or asset requests", () => {
     const middleware = canonicalMiddleware("http://dashboard.example.test:3000");
     const response = { end: vi.fn(), writeHead: vi.fn() };

@@ -1,8 +1,6 @@
 name: UI preview verification
 
 on:
-  push:
-    branches: ["verify/ui-preview-seed"]
   pull_request:
     paths:
       - "frontend/app/**"

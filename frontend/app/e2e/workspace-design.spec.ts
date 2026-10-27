@@ -368,10 +368,13 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
   await expect(page.getByRole("table", { name: "Connected accounts" })).toBeVisible();
   await expect(page.getByRole("row").filter({ hasText: "Studio Instagram" })).toBeVisible();
-  const connectionFilters = page.getByRole("group", { name: "Connection status", exact: true });
-  await connectionFilters.getByRole("button", { name: "Expired", exact: true }).click();
+  const connectionFilters = page.getByRole("radiogroup", {
+    name: "Connection status",
+    exact: true,
+  });
+  await connectionFilters.getByRole("radio", { name: "Expired", exact: true }).click();
   await expect(page.getByText("No accounts match the active filters.")).toBeVisible();
-  await connectionFilters.getByRole("button", { name: "All statuses", exact: true }).click();
+  await connectionFilters.getByRole("radio", { name: "All statuses", exact: true }).click();
   await expect(page.getByRole("row").filter({ hasText: "Studio Threads" })).toBeVisible();
   const connectionCell = page
     .getByRole("row")
@@ -633,14 +636,14 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect(
     page.locator("aside").getByRole("button", { name: "Calendar", exact: true }),
   ).toHaveCount(0);
-  const viewSelector = page.getByRole("group", { name: "Post view", exact: true });
-  await expect(viewSelector.getByRole("button")).toHaveText(["Table", "Calendar", "Grid"]);
+  const viewSelector = page.getByRole("radiogroup", { name: "Post view", exact: true });
+  await expect(viewSelector.getByRole("radio")).toHaveText(["Table", "Calendar", "Grid"]);
   // Directory filter reset returned to aggregate scope; scheduling needs one real owner.
   await activeBrandProfileName(page);
   for (const view of ["Grid", "Calendar", "Table"] as const) {
-    const viewButton = viewSelector.getByRole("button", { name: view, exact: true });
+    const viewButton = viewSelector.getByRole("radio", { name: view, exact: true });
     await viewButton.click();
-    await expect(viewButton).toHaveAttribute("aria-pressed", "true");
+    await expect(viewButton).toHaveAttribute("aria-checked", "true");
     if (view === "Table") {
       const postsTable = page.getByRole("table", { name: "Posts table", exact: true });
       await expect(
@@ -662,8 +665,11 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     });
     if (view === "Calendar") {
       const calendar = page.getByRole("region", { name: "Publishing calendar", exact: true });
-      const period = calendar.getByRole("group", { name: "Calendar period", exact: true });
-      await period.getByRole("button", { name: "Week", exact: true }).click();
+      const period = calendar.getByRole("radiogroup", {
+        name: "Calendar period",
+        exact: true,
+      });
+      await period.getByRole("radio", { name: "Week", exact: true }).click();
       const currentWeek = await calendar.getByRole("heading").innerText();
       await calendar.getByRole("button", { name: "Next week", exact: true }).click();
       await expect(calendar.getByRole("heading")).not.toHaveText(currentWeek);
@@ -674,7 +680,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
         path: testInfo.outputPath("posts-calendar-week-desktop.png"),
         fullPage: true,
       });
-      await period.getByRole("button", { name: "Month", exact: true }).click();
+      await period.getByRole("radio", { name: "Month", exact: true }).click();
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       const dateLabel = new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(tomorrow);
@@ -735,7 +741,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   });
   await page.keyboard.press("Escape");
   await expect(inspector).toBeHidden();
-  await viewSelector.getByRole("button", { name: "Calendar", exact: true }).click();
+  await viewSelector.getByRole("radio", { name: "Calendar", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Publishing calendar", exact: true }),
   ).toBeVisible();
@@ -745,8 +751,8 @@ test("keeps publishing work reachable through the redesigned workspace", async (
     fullPage: true,
   });
   await page
-    .getByRole("group", { name: "Calendar period", exact: true })
-    .getByRole("button", { name: "Week", exact: true })
+    .getByRole("radiogroup", { name: "Calendar period", exact: true })
+    .getByRole("radio", { name: "Week", exact: true })
     .click();
   await page.screenshot({
     animations: "disabled",
@@ -756,7 +762,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
-  await viewSelector.getByRole("button", { name: "Table", exact: true }).click();
+  await viewSelector.getByRole("radio", { name: "Table", exact: true }).click();
   await mobileMenu.click();
   const mobileNavigation = page.getByRole("dialog", { name: "Workspace navigation", exact: true });
   await mobileNavigation.getByRole("button", { name: "Channels", exact: true }).click();

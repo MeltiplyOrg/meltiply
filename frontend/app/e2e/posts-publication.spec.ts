@@ -267,8 +267,8 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
   const when = new Date(Date.now() + minutesFromNow * 60_000);
   const pad = (value: number) => String(value).padStart(2, "0");
   await page
-    .getByRole("group", { name: "Publishing", exact: true })
-    .getByRole("button", { name: "Schedule", exact: true })
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: "Schedule", exact: true })
     .click();
   const picker = page.getByRole("group", { name: "Date & time", exact: true });
   await picker.getByRole("button", { name: /^Date / }).click();
@@ -612,11 +612,11 @@ test("shows the same Post and order in Table, Grid, Calendar, and Details", asyn
   await page.getByRole("menuitem", { name: "Time: Oldest first", exact: true }).click();
   expect(await captionsInReadingOrder(page, captions)).toEqual(captions);
 
-  await page.getByRole("button", { name: /^grid$/i }).click();
+  await page.getByRole("radio", { name: /^grid$/i }).click();
   await expect(page.getByText(captions[0]!, { exact: true })).toBeVisible();
   expect(await captionsInReadingOrder(page, captions)).toEqual(captions);
 
-  await page.getByRole("button", { name: /^calendar$/i }).click();
+  await page.getByRole("radio", { name: /^calendar$/i }).click();
   await page
     .getByRole("group")
     .filter({ has: page.getByText(captions[0]!, { exact: true }) })
@@ -628,8 +628,8 @@ test("shows the same Post and order in Table, Grid, Calendar, and Details", asyn
   await closePostDetails(page);
 
   await page
-    .getByRole("group", { name: "Post view", exact: true })
-    .getByRole("button", { name: /^table$/i })
+    .getByRole("radiogroup", { name: "Post view", exact: true })
+    .getByRole("radio", { name: /^table$/i })
     .click();
   await expect(page.getByText(captions[0]!, { exact: true })).toBeVisible();
   expect(await captionsInReadingOrder(page, captions)).toEqual(captions);

@@ -65,7 +65,11 @@ const acceptanceProjects = [
   },
   {
     name: "workspace",
-    testMatch: ["**/workspace-design.spec.ts", "**/analytics.spec.ts"],
+    testMatch: [
+      "**/workspace-design.spec.ts",
+      "**/analytics.spec.ts",
+      "**/shared-components.spec.ts",
+    ],
     use: { ...devices["Desktop Chrome"] },
   },
   {

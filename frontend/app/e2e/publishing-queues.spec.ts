@@ -122,8 +122,8 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
       .locator(`#channel-override-text-${provisioned.channels[0]!.id}`)
       .fill(override);
     await composer
-      .getByRole("group", { name: "Publishing", exact: true })
-      .getByRole("button", { name: "Queue", exact: true })
+      .getByRole("radiogroup", { name: "Publishing", exact: true })
+      .getByRole("radio", { name: "Queue", exact: true })
       .click();
     await composer.getByRole("combobox", { name: "Publishing Queue", exact: true }).click();
     await page.getByRole("option", { name: queueName, exact: true }).click();

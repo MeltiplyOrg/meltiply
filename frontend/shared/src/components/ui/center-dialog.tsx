@@ -3,7 +3,9 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 import { useCenterDialogMorph } from "./center-dialog-motion";
+import { useDialogOpenerFocus } from "./dialog-opener-focus";
 import { Button } from "./button";
+import { dialogChrome } from "./dialog-chrome";
 
 /**
  * Unstyled focus containment for modal layers that own their own geometry.
@@ -48,18 +50,22 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     data-dialog-backdrop=""
-    className={cn(
-      "fixed inset-0 z-50 bg-overlay/80 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className,
-    )}
+    className={cn(dialogChrome.backdrop, className)}
     {...props}
   />
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
-export type CenterDialogContentProps = React.ComponentPropsWithoutRef<
+export interface CenterDialogContentProps extends React.ComponentPropsWithoutRef<
   typeof DialogPrimitive.Content
->;
+> {
+  /**
+   * Accessible name for the canonical close button. Callers pass their
+   * localized label; the default keeps standalone usage understandable.
+   * @defaultValue `"Close"`
+   */
+  closeLabel?: string;
+}
 
 /**
  * Centered modal that morphs between the two boxes when it hands off to or from
@@ -71,35 +77,53 @@ export type CenterDialogContentProps = React.ComponentPropsWithoutRef<
  * callers customize content and layout without duplicating the primitive.
  * The surface bounds itself to the dynamic viewport and owns native overflow;
  * short screens and software-keyboard resizes never put form actions offscreen.
+ *
+ * Shares `dialogChrome` with `CenterAlertDialogContent`; only the width differs.
+ * This ordinary Dialog primitive keeps outside-click and Escape dismissal,
+ * while the destructive AlertDialog variant blocks outside dismissal. The
+ * canonical ghost icon Button carries the caller's localized close label.
+ * Controlled callers restore focus to the element that opened the dialog even
+ * without a `CenterDialogTrigger`.
  */
 export const CenterDialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   CenterDialogContentProps
->(({ className, children, ...props }, ref) => {
-  const boxRef = useCenterDialogMorph(ref);
-  return (
-    <DialogPortal>
-      <DialogOverlay />
-      <DialogPrimitive.Content
-        ref={boxRef}
-        className={cn(
-          "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] content-start translate-x-[-50%] translate-y-[-50%] gap-4 overflow-x-hidden overflow-y-auto overscroll-contain rounded-window border border-border bg-background p-4 shadow-lg sm:p-6",
-          "dialog-bottom-popup",
-          className,
-        )}
-        data-dialog-surface=""
-        data-lenis-prevent=""
-        {...props}
-      >
-        {children}
-        <DialogPrimitive.Close className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-sm opacity-70 ring-offset-background transition-opacity pointer-coarse:size-11 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-          <X className="size-4" />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
-      </DialogPrimitive.Content>
-    </DialogPortal>
-  );
-});
+>(
+  (
+    { className, children, closeLabel = "Close", onOpenAutoFocus, onCloseAutoFocus, ...props },
+    ref,
+  ) => {
+    const boxRef = useCenterDialogMorph(ref);
+    const openerFocus = useDialogOpenerFocus(onOpenAutoFocus, onCloseAutoFocus);
+    return (
+      <DialogPortal>
+        <DialogOverlay />
+        <DialogPrimitive.Content
+          ref={boxRef}
+          className={cn(dialogChrome.surface, "max-w-lg", className)}
+          data-dialog-surface=""
+          data-lenis-prevent=""
+          {...props}
+          onOpenAutoFocus={openerFocus.onOpenAutoFocus}
+          onCloseAutoFocus={openerFocus.onCloseAutoFocus}
+        >
+          {children}
+          <DialogPrimitive.Close asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={closeLabel}
+              className="absolute right-2 top-2 size-8 pointer-coarse:size-11"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </Button>
+          </DialogPrimitive.Close>
+        </DialogPrimitive.Content>
+      </DialogPortal>
+    );
+  },
+);
 CenterDialogContent.displayName = DialogPrimitive.Content.displayName;
 
 /**
@@ -167,7 +191,8 @@ export function NavigationDialogContent({
 }
 
 /**
- * Header section of a dialog containing title and description elements with responsive alignment.
+ * Header section of a dialog containing title and description elements with
+ * left alignment at every width, matching `CenterAlertDialogHeader`.
  *
  * @param className - Class overrides for header alignment and spacing.
  * @param props - HTML div attributes forwarded to the header container.
@@ -176,7 +201,7 @@ export const CenterDialogHeader = ({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex flex-col gap-1.5 text-center sm:text-left", className)} {...props} />
+  <div className={cn(dialogChrome.header, className)} {...props} />
 );
 CenterDialogHeader.displayName = "CenterDialogHeader";
 
@@ -192,10 +217,7 @@ export const CenterDialogFooter = ({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
-    {...props}
-  />
+  <div className={cn(dialogChrome.footer, className)} {...props} />
 );
 CenterDialogFooter.displayName = "CenterDialogFooter";
 
@@ -212,11 +234,7 @@ export const CenterDialogTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title
-    ref={ref}
-    className={cn("text-lg font-semibold leading-none tracking-tight text-foreground", className)}
-    {...props}
-  />
+  <DialogPrimitive.Title ref={ref} className={cn(dialogChrome.title, className)} {...props} />
 ));
 CenterDialogTitle.displayName = DialogPrimitive.Title.displayName;
 
@@ -235,7 +253,7 @@ export const CenterDialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn("text-sm text-muted-foreground", className)}
+    className={cn(dialogChrome.description, className)}
     {...props}
   />
 ));

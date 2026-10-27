@@ -164,7 +164,7 @@ function BrandProfileDialogForm({
   ]);
 
   return (
-    <CenterDialogContent>
+    <CenterDialogContent closeLabel={t("Close")}>
       <CenterDialogHeader>
         <CenterDialogTitle>
           {isEditing ? t("Update Brand Profile") : t("Create Brand Profile")}

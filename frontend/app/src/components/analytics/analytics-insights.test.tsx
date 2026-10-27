@@ -178,18 +178,18 @@ describe("analytics insights dashboard components", () => {
     expect(table.getByRole("columnheader", { name: "Comments" })).toBeInTheDocument();
     expect(table.getByRole("columnheader", { name: "Shares" })).toBeInTheDocument();
     expect(table.getByRole("row", { name: /Oct 12/ })).toHaveTextContent("600");
-    expect(screen.queryByRole("group", { name: "Metrics" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Month" }));
+    expect(screen.queryByRole("radiogroup", { name: "Metrics" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Month" }));
     expect(table.getAllByRole("row")).toHaveLength(2);
     expect(
       within(table.getAllByRole("row")[1]!)
         .getAllByRole("cell")
         .map((cell) => cell.textContent),
     ).toEqual(["600", "60", "6", "9"]);
-    fireEvent.click(screen.getByRole("button", { name: "Day" }));
-    fireEvent.click(screen.getByRole("button", { name: "Week" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Day" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Week" }));
     expect(table.getByRole("row", { name: /Oct 12/ })).toHaveTextContent("600");
-    expect(screen.getByRole("button", { name: "Week" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("radio", { name: "Week" })).toHaveAttribute("aria-checked", "true");
   });
 
   it("renders the 7x24 best time heatmap and identifies the best slot", () => {

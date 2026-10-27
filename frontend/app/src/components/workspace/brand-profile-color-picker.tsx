@@ -82,21 +82,23 @@ export function BrandProfileColorPicker({
   const columnStep = paletteColumnStep(layout);
 
   // Measure before paint so the first frame already uses the arrangement that
-  // fits; observing the root reflows the palette when the dialog resizes. The
-  // padding is read from the rendered element because `p-3` is rem-based, and
-  // the root font size is passed so the rem thresholds scale with the CSS. The
-  // dialog's content width is the cap: a narrow dialog can be narrower than the
-  // picker's intrinsic width, and choosing columns from the expanded picker
-  // would clip the palette at high zoom.
+  // fits; observing both the root and its dialog reflows the palette when either
+  // changes. The padding is read from the rendered element because `p-3` is
+  // rem-based, and the root font size is passed so the rem thresholds scale
+  // with the CSS. The dialog's content width is the cap: a narrow dialog can be
+  // narrower than the picker's intrinsic width, and choosing columns from the
+  // expanded picker would clip the palette at high zoom. The dialog itself must
+  // be observed because that cap otherwise prevents the picker from growing
+  // when the dialog expands.
   React.useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
+    const dialog = root.closest<HTMLElement>('[role="dialog"]');
     const measure = () => {
       const rootStyles = getComputedStyle(root);
       const horizontalPadding =
         (parseFloat(rootStyles.paddingLeft) || 0) + (parseFloat(rootStyles.paddingRight) || 0);
       const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      const dialog = root.closest<HTMLElement>('[role="dialog"]');
       const dialogContentWidth = dialog
         ? dialog.clientWidth -
           (parseFloat(getComputedStyle(dialog).paddingLeft) || 0) -
@@ -116,6 +118,7 @@ export function BrandProfileColorPicker({
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(root);
+    if (dialog) observer.observe(dialog);
     return () => observer.disconnect();
   }, []);
 

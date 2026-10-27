@@ -135,6 +135,34 @@ export default function WorkspaceSettings() {
     return () => window.removeEventListener("resize", centerActiveSection);
   }, [centerActiveSection]);
 
+  // Self-hosted fonts widen the section labels after the first layout pass, and
+  // the dialog/viewport can resize the rail without a window resize event.
+  // Observe the rail and its active button so centering follows both.
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const railElement = navRef.current;
+    if (!railElement) return;
+    const observer = new ResizeObserver(centerActiveSection);
+    observer.observe(railElement);
+    const activeSection = railElement.querySelector<HTMLElement>('[aria-current="page"]');
+    if (activeSection) observer.observe(activeSection);
+    return () => observer.disconnect();
+  }, [centerActiveSection, section, language]);
+
+  // `document.fonts` is absent in jsdom; when present, its initial readiness can
+  // arrive after layout settled, so re-center then (never after unmount).
+  useEffect(() => {
+    const fonts: FontFaceSet | undefined = document.fonts;
+    if (!fonts?.ready) return;
+    let cancelled = false;
+    void fonts.ready.then(() => {
+      if (!cancelled) centerActiveSection();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [centerActiveSection]);
+
   // Section changes open the new form at its own top; a language change keeps the
   // reader's position in the current form.
   const previousSectionRef = useRef(section);
@@ -180,7 +208,7 @@ export default function WorkspaceSettings() {
       <div
         ref={contentRef}
         className={cn(
-          "min-h-0 min-w-0 px-4 pb-20 pt-6 sm:px-10",
+          "min-h-0 min-w-0 px-4 pb-20 pt-5 sm:px-6 sm:pt-6",
           section === "administration" ? "overflow-hidden" : "overflow-y-auto",
         )}
       >

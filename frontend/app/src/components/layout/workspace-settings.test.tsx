@@ -57,6 +57,39 @@ const rail = {
   items: RAIL_ITEMS,
 };
 
+const resizeObservers: TestResizeObserver[] = [];
+
+/**
+ * Minimal ResizeObserver stand-in; jsdom does not implement the platform
+ * observer, and the rail test must deliver the callback that a late font load
+ * would trigger in a browser.
+ */
+class TestResizeObserver implements ResizeObserver {
+  private readonly targets = new Set<Element>();
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    resizeObservers.push(this);
+  }
+
+  observe(target: Element): void {
+    this.targets.add(target);
+  }
+
+  unobserve(target: Element): void {
+    this.targets.delete(target);
+  }
+
+  disconnect(): void {
+    this.targets.clear();
+  }
+
+  notify(): void {
+    this.callback([], this);
+  }
+}
+
+const originalResizeObserver = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+
 const METRIC_KEYS = ["clientWidth", "scrollWidth", "offsetLeft", "offsetWidth"] as const;
 const originalMetrics = Object.fromEntries(
   METRIC_KEYS.map((key) => [key, Object.getOwnPropertyDescriptor(HTMLElement.prototype, key)]),
@@ -112,6 +145,8 @@ function renderSettings(): void {
 beforeEach(() => {
   rail.clientWidth = 320;
   rail.scrollWidth = 600;
+  resizeObservers.length = 0;
+  globalThis.ResizeObserver = TestResizeObserver;
   installRailMetrics();
 });
 
@@ -119,6 +154,11 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   restoreLayoutMetrics();
+  if (originalResizeObserver) {
+    Object.defineProperty(globalThis, "ResizeObserver", originalResizeObserver);
+  } else {
+    Reflect.deleteProperty(globalThis, "ResizeObserver");
+  }
 });
 
 describe("settings section rail", () => {
@@ -155,6 +195,22 @@ describe("settings section rail", () => {
 
     // Security: 300 + 100/2 - 200/2 = 250, within the 400px scroll range.
     expect(nav.scrollLeft).toBe(250);
+  });
+
+  it("re-centers after late label growth observed by ResizeObserver", () => {
+    rail.clientWidth = 390;
+    rail.scrollWidth = 402;
+    renderSettings();
+
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    // Security's 155px center clamps to the 12px range before the font loads.
+    expect(nav.scrollLeft).toBe(12);
+
+    rail.scrollWidth = 526;
+    for (const observer of resizeObservers) observer.notify();
+
+    // The grown rail can finally reach the clamped 136px position.
+    expect(nav.scrollLeft).toBe(136);
   });
 
   it("leaves a rail that does not scroll horizontally alone", () => {

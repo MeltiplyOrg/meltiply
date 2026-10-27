@@ -41,12 +41,19 @@ try {
   await page.goto(`${origin}/posts`);
   await expect(page.getByRole("heading", { name: "Posts", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Reject optional", exact: true }).click();
-  const original = await page.evaluate(
-    async () => (await fetch("/api/v1/posts").then((response) => response.json())).posts[0],
+  // Published rows can show frozen Channel copy instead of the current Post text; select a rendered caption without assuming API/display ordering.
+  const candidates = await page.evaluate(
+    async () => (await fetch("/api/v1/posts").then((response) => response.json())).posts,
   );
-  await expect(
-    page.getByRole("button", { name: original.default_text, exact: true }).first(),
-  ).toBeVisible();
+  const captionButtons = page
+    .getByRole("table", { name: "Posts table", exact: true })
+    .getByRole("row")
+    .filter({ has: page.getByRole("checkbox", { name: "Select post", exact: true }) })
+    .getByRole("button");
+  await expect(captionButtons.first()).toBeVisible();
+  const visibleCaptions = await captionButtons.allTextContents();
+  const original = candidates.find((post) => visibleCaptions.includes(post.default_text));
+  assert.ok(original, "the Posts table must render a record from the compiled seed");
 
   // Verify local file effects, not just canned upload responses: uploaded bytes must decode and remain attached after saving.
   const upload = await page.evaluate(

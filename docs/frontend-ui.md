@@ -268,6 +268,9 @@ and timezone-aware Queue assignments are retained. Seed timestamps are preserved
 not shifted on refresh. This is a snapshot of the seed definitions at build time,
 not a connection to a contributor's running or modified database.
 
+Seeded Asset metadata and attachment order are retained; media previews use a
+local placeholder rather than fetching the seed's R2 object keys or remote URLs.
+
 The route picker is extracted structurally from the real `app-router.tsx` literal
 Route declarations. It includes sign-in, Channel assignment, invitations,
 Settings, and the dashboard routes. Standalone handoffs receive synthetic query
@@ -284,7 +287,7 @@ identifiers are technical codes; control labels follow the interface language.
 
 | Scenario                                | Frontend state                                                          |
 | --------------------------------------- | ----------------------------------------------------------------------- |
-| `populated`, `success`                  | Canonical successful responses and sample content                       |
+| `populated`, `success`                  | Seeded Workspace data with canonical transport outcomes                 |
 | `empty`                                 | Empty collections and zero aggregate counters                           |
 | `loading`                               | Requests remain pending until canceled or the page reloads              |
 | `validation-error`                      | Mutation validation failure; reads still populate forms                 |

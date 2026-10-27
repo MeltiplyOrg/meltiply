@@ -1409,9 +1409,6 @@ h2 {
   .header-actions {
     gap: 6px;
   }
-  .header-actions .login-link {
-    display: none;
-  }
   .header-actions .button-small {
     padding-inline: 12px;
     font-size: 12px;

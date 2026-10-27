@@ -23,7 +23,6 @@
   --tracking-page-title: var(--tracking-title);
   --spacing-control: var(--control-height);
   --spacing-control-sm: var(--control-height-sm);
-  --spacing-control-lg: var(--control-height-lg);
   --spacing-sidebar: var(--workspace-sidebar-width);
   --spacing-sidebar-collapsed: var(--workspace-sidebar-collapsed-width);
   --spacing-topbar: var(--workspace-topbar-height);
@@ -64,7 +63,6 @@
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-line-soft: var(--line-soft);
-  --color-grid-line: var(--grid-line);
 
   /* Source brand + semantic ramps */
   --color-accent-ink: var(--accent-ink);

@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { useWorkspace, type ChannelStatusInfo } from "@/context/workspace.context";
 import type { ChannelIntegration } from "@/api/types";
-import type { WorkspaceView } from "@/components/layout/navigation-shell";
+import type { WorkspaceView } from "@/lib/navigation";
 import {
   BrandProfileFilterSelect,
   brandProfileFilterLabel,

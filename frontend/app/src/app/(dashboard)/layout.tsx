@@ -1,10 +1,14 @@
 import { useCallback } from "react";
 import { Outlet, useNavigate } from "react-router";
 
-import { NavigationShell, type WorkspaceView } from "@/components/layout/navigation-shell";
-import { resolveWorkspaceView, workspaceViewPath } from "@/components/primitives/sidebar-nav";
+import { NavigationShell } from "@/components/layout/navigation-shell";
+import {
+  resolveWorkspaceView,
+  usePathname,
+  workspaceViewPath,
+  type WorkspaceView,
+} from "@/lib/navigation";
 import { WorkspaceProvider } from "@/context/workspace.context";
-import { usePathname } from "@/lib/navigation";
 
 import { AppProviders } from "../providers";
 

@@ -1,4 +1,4 @@
-import type { WorkspaceView } from "@/components/primitives/sidebar-nav";
+import type { WorkspaceView } from "@/lib/navigation";
 
 /** Route loaders share the router's import targets and the browser's module cache. */
 const dashboardRouteImports: Record<WorkspaceView, () => Promise<unknown>> = {

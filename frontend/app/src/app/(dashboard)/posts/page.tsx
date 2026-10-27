@@ -1,8 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router";
 
-import type { WorkspaceView } from "@/components/layout/navigation-shell";
-import { workspaceViewPath } from "@/components/primitives/sidebar-nav";
+import { workspaceViewPath, type WorkspaceView } from "@/lib/navigation";
 import { PostsView } from "@/components/posts/posts-view";
 import type { PostStatusFilter, PostViewMode } from "@/components/posts/types";
 import { useSearchParams } from "@/lib/navigation";

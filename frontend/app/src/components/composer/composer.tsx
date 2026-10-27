@@ -10,7 +10,7 @@ import {
 
 import { useWorkspace } from "@/context/workspace.context";
 import { DestinationSelector } from "@/components/workspace/destination-selector";
-import type { WorkspaceView } from "@/components/layout/navigation-shell";
+import type { WorkspaceView } from "@/lib/navigation";
 import { PlatformSettings, providerDescriptorFor, type PostTargetDraft } from "./platform-settings";
 import { ScheduleDateTime } from "./schedule-date-time";
 import { MediaPreview } from "@/components/media/media-preview";

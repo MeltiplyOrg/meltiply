@@ -1,6 +1,5 @@
-import { forwardRef, useRef, useState, type ComponentType } from "react";
+import { forwardRef, useRef, useState } from "react";
 import {
-  ChartColumn,
   CircleHelp,
   ChevronsUpDown,
   LogOut,
@@ -8,10 +7,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  PenSquare,
   Settings,
-  Share2,
-  CalendarClock,
   Sun,
   UserRound,
 } from "lucide-react";
@@ -36,36 +32,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@meltiply/ui/dropdown-menu";
+import { workspaceNavItems, type WorkspaceView } from "@/lib/navigation";
 
-export type WorkspaceView = "posts" | "analytics" | "channels" | "queues" | "settings";
-
-/** Canonical real destinations shared by the rail, mobile drawer, and jump search. */
-export interface WorkspaceNavItem {
-  id: WorkspaceView;
-  path: `/${WorkspaceView}`;
-  label: string;
-  icon: ComponentType<{ className?: string }>;
-}
-
-/** Reference demo routes are deliberately absent; every destination opens a real publishing surface. */
-export const WORKSPACE_NAV_ITEMS: readonly WorkspaceNavItem[] = [
-  { id: "posts", path: "/posts", label: "Posts", icon: PenSquare },
-  { id: "analytics", path: "/analytics", label: "Analytics", icon: ChartColumn },
-  { id: "channels", path: "/channels", label: "Channels", icon: Share2 },
-  { id: "queues", path: "/queues", label: "Queues", icon: CalendarClock },
-  { id: "settings", path: "/settings", label: "Settings", icon: Settings },
-];
-
-/** Resolves the first canonical route segment; unknown paths use the Posts home. */
-export function resolveWorkspaceView(pathname: string): WorkspaceView {
-  const segment = pathname.replace(/^\//, "").split("/")[0] ?? "";
-  return WORKSPACE_NAV_ITEMS.find((item) => item.path === `/${segment}`)?.id ?? "posts";
-}
-
-/** Returns the canonical URL for a supported workspace destination. */
-export function workspaceViewPath(view: WorkspaceView): string {
-  return WORKSPACE_NAV_ITEMS.find((item) => item.id === view)?.path ?? "/posts";
-}
+/** Placements are resolved once: the same canonical roster feeds rail, drawer, and search. */
+const PRIMARY_NAV_ITEMS = workspaceNavItems("primary");
+const UTILITY_NAV_ITEMS = workspaceNavItems("utility");
 
 /**
  * Reference navigation row shared by the desktop rail and mobile drawer; native button/Slot semantics stay intact.
@@ -161,7 +132,7 @@ export function SidebarNav({
   const { requestedTheme, setTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const asideRef = useRef<HTMLElement | null>(null);
-  const name = workspaceName ?? "Meltiply Workspace";
+  const name = workspaceName ?? t("Meltiply Workspace");
   const handleSignOut = useWorkspaceSignOut();
   return (
     <aside
@@ -217,8 +188,7 @@ export function SidebarNav({
           </SidebarNavRow>
         )}
         {!collapsed && <div className={HEADING_CLASS}>{t("Workspace")}</div>}
-        {WORKSPACE_NAV_ITEMS.map((item) => {
-          if (item.id === "settings") return null;
+        {PRIMARY_NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           return (
             <div key={item.id} className="relative">
@@ -254,19 +224,25 @@ export function SidebarNav({
             {!collapsed && t("Help and resources")}
           </a>
         </SidebarNavRow>
-        <SidebarNavRow
-          collapsed={collapsed}
-          active={currentView === "settings"}
-          onClick={() => onNavigate("settings")}
-          onMouseEnter={() => preloadDashboardRoute("settings")}
-          onFocus={() => preloadDashboardRoute("settings")}
-          aria-label={t("Settings")}
-          aria-current={currentView === "settings" ? "page" : undefined}
-          title={collapsed ? t("Settings") : undefined}
-        >
-          <Settings className="size-4" />
-          {!collapsed && t("Settings")}
-        </SidebarNavRow>
+        {UTILITY_NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <SidebarNavRow
+              key={item.id}
+              collapsed={collapsed}
+              active={currentView === item.id}
+              onClick={() => onNavigate(item.id)}
+              onMouseEnter={() => preloadDashboardRoute(item.id)}
+              onFocus={() => preloadDashboardRoute(item.id)}
+              aria-label={t(item.label)}
+              aria-current={currentView === item.id ? "page" : undefined}
+              title={collapsed ? t(item.label) : undefined}
+            >
+              <Icon className="size-4" />
+              {!collapsed && t(item.label)}
+            </SidebarNavRow>
+          );
+        })}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarNavRow

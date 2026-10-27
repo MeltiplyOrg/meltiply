@@ -494,3 +494,52 @@ thead th {
 [data-post-group-row][data-collapsed] [data-post-group-chevron] {
   rotate: -90deg;
 }
+
+/*
+ * Brand Profile color palette (`brand-profile-color-picker.tsx`).
+ *
+ * One rendered set of all 51 swatches reflows by the picker's inline size.
+ * Wide dialogs use the 9/8 honeycomb; medium and phone dialogs switch to flat
+ * column grids so cells stay near the original 42x48px instead of collapsing
+ * into unusable touch targets. `--hex-w` is capped at the original width and
+ * derives the height from the pointy-hexagon aspect. The variables are declared
+ * on this lattice rather than on the picker container, so `100cqw` resolves
+ * against the picker root's content box (its 12px side padding is outside it).
+ */
+[data-brand-color-palette] {
+  --hex-cols: 9;
+  --hex-w: min(2.625rem, calc((100cqw - (var(--hex-cols) - 1) * 0.375rem) / var(--hex-cols)));
+  --hex-h: calc(var(--hex-w) * 8 / 7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+  padding-block: 0.25rem;
+}
+
+[data-brand-color-palette][data-layout="grid-6"] {
+  --hex-cols: 6;
+}
+
+[data-brand-color-palette][data-layout="grid-5"] {
+  --hex-cols: 5;
+}
+
+[data-brand-color-palette][data-layout="honeycomb"] > [data-hex-row] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  margin-top: calc(var(--hex-h) * -0.1875);
+}
+
+[data-brand-color-palette]:not([data-layout="honeycomb"]) {
+  display: grid;
+  grid-template-columns: repeat(var(--hex-cols), var(--hex-w));
+  justify-content: center;
+  gap: 0.375rem;
+}
+
+[data-brand-color-palette]:not([data-layout="honeycomb"]) > [data-hex-row] {
+  display: contents;
+}

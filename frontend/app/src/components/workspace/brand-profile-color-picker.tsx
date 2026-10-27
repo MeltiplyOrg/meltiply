@@ -2,6 +2,11 @@ import * as React from "react";
 import { Button } from "@meltiply/ui/button";
 import { cn } from "@meltiply/ui/utils";
 import { brandProfileColorClass, BRAND_PROFILE_COLORS, type BrandProfileColor } from "@/types";
+import {
+  paletteColumnStep,
+  resolvePaletteLayout,
+  type PaletteLayout,
+} from "./brand-profile-palette-layout";
 
 /** Row segment counts creating the alternating 9 / 8 honeycomb beehive grid across 51 palette colors. */
 const HONEYCOMB_ROW_COUNTS = [9, 8, 9, 8, 9, 8] as const;
@@ -22,37 +27,32 @@ const HONEYCOMB_ROWS: readonly BrandProfileColor[][] = (() => {
 
 /**
  * Soft-rounded pointy-topped hexagon SVG polygon vertex string for a 28x32 viewBox.
- * Rows scale the SVG from the original 42x48 cell down to roughly 21x24 at phone
- * dialog widths, so strokes and the selection check scale with each cell.
+ * Each swatch's SVG scales with its cell, so strokes and the selection check stay
+ * proportional in both the honeycomb and the flat column grids.
  */
 const HEXAGON_POINTS = "14,1.5 26.5,8.75 26.5,23.25 14,30.5 1.5,23.25 1.5,8.75";
 
 /**
- * Fluid honeycomb geometry for the palette's inner lattice.
- *
- * The root picker is an inline-size container; the lattice declares the
- * variables rather than the container itself, so `100cqw` resolves against the
- * picker's content box (12px side padding is outside it). Nine cells plus eight
- * 6px gaps must fit that box, so the subtraction is exactly the gap total,
- * 3rem. Cells cap at the original 42px width and keep the 8/7 pointy-hexagon
- * aspect ratio, which makes the whole 51-swatch palette fit a 320px dialog
- * without clipping while wide dialogs keep the established density.
+ * Picker root padding (`p-3` on both sides). `clientWidth` includes padding but
+ * excludes the border, so subtracting this gives the content width that the
+ * palette's container-query columns must fit.
  */
-const PALETTE_GEOMETRY_CLASS =
-  "[--hex-w:min(2.625rem,calc((100cqw_-_3rem)_/_9))] [--hex-h:calc(var(--hex-w)_*_8_/_7)]";
+const PALETTE_HORIZONTAL_PADDING = 24;
 
 /**
  * Contract-palette color picker designed as an organic, interlocking beehive of hexagonal swatches.
  *
  * Provides an eye-friendly, tactile color-selection matrix for Brand Profile ownership labels.
- * Tessellates the 51 OpenAPI contract colors into 6 centered, alternating rows [9, 8, 9, 8, 9, 8]
- * with rounded vertices and soft surface tile borders to prevent chromatic visual fatigue.
- * Cell geometry follows the dialog's inline size: 6px column gaps and a proportional row
- * overlap keep the lattice interlocked, capped at the original 42x48px cells for wide dialogs.
+ * All 51 OpenAPI contract colors render once and reflow by the dialog's available content width:
+ * wide dialogs keep the 6-row [9, 8, 9, 8, 9, 8] honeycomb with its proportional row overlap,
+ * while medium and phone dialogs switch to flat six- or five-column grids so each swatch keeps
+ * a usable touch target instead of shrinking the lattice. Vertical overflow scrolls inside the
+ * dialog; the palette never widens the name or description fields.
  * Interactive feedback on hover relies exclusively on a smooth cell size-up (scale-110) without
  * any rectangular button background showing behind the pointy-topped hexagonal tile.
  * Implements WAI-ARIA RadioGroup with roving tabindex: arrow, Home, and End keys move both
  * selection and DOM focus to the newly checked swatch so focus never strands on the old one.
+ * Up/Down step by the active column count; Left/Right stay in flat palette order.
  * @param props.value - Currently active contract palette hex color (e.g. '#b91c1c').
  * @param props.onChange - Callback fired with the chosen BrandProfileColor upon swatch activation.
  * @param props.label - Accessible name applied to the root radiogroup element.
@@ -83,12 +83,31 @@ export function BrandProfileColorPicker({
    * swatch explicitly after `onChange` fires.
    */
   const swatchRefs = React.useRef(new Map<BrandProfileColor, HTMLButtonElement>());
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const [layout, setLayout] = React.useState<PaletteLayout>("grid-5");
+  const columnStep = paletteColumnStep(layout);
+
+  // Measure before paint so the first frame already uses the arrangement that
+  // fits; observing the root reflows the palette when the dialog resizes.
+  React.useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const measure = () => {
+      setLayout(resolvePaletteLayout(root.clientWidth - PALETTE_HORIZONTAL_PADDING));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
 
   /**
-   * Handles radiogroup keyboard navigation: arrows step through the flat palette (Up/Down by
-   * one honeycomb column pitch of 8), Home/End jump to the ends. Each handled key selects the
-   * target color via `onChange` and moves DOM focus to its swatch, keeping focus on the checked
-   * radio as the roving tabindex re-renders. Unhandled keys pass through untouched.
+   * Handles radiogroup keyboard navigation: Left/Right step through the flat palette,
+   * Up/Down step by the active column count, and Home/End jump to the ends. Each
+   * handled key selects the target color via `onChange` and moves DOM focus to its
+   * swatch, keeping focus on the checked radio as the roving tabindex re-renders.
+   * Unhandled keys pass through untouched.
    */
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const currentIndex = BRAND_PROFILE_COLORS.indexOf(value);
@@ -102,10 +121,10 @@ export function BrandProfileColorPicker({
       nextIndex = (currentIndex - 1 + BRAND_PROFILE_COLORS.length) % BRAND_PROFILE_COLORS.length;
       event.preventDefault();
     } else if (event.key === "ArrowDown") {
-      nextIndex = Math.min(BRAND_PROFILE_COLORS.length - 1, currentIndex + 8);
+      nextIndex = Math.min(BRAND_PROFILE_COLORS.length - 1, currentIndex + columnStep);
       event.preventDefault();
     } else if (event.key === "ArrowUp") {
-      nextIndex = Math.max(0, currentIndex - 8);
+      nextIndex = Math.max(0, currentIndex - columnStep);
       event.preventDefault();
     } else if (event.key === "Home") {
       nextIndex = 0;
@@ -126,17 +145,18 @@ export function BrandProfileColorPicker({
 
   return (
     <div
+      ref={rootRef}
       className="flex w-full min-w-0 flex-col items-center gap-2.5 overflow-hidden rounded-control border border-line bg-surface/60 p-3 @container"
       role="radiogroup"
       aria-label={label}
       onKeyDown={handleKeyDown}
     >
-      <div className={cn("flex flex-col items-center py-1", PALETTE_GEOMETRY_CLASS)}>
+      {/* `globals.css` owns this lattice's responsive geometry: `data-layout`
+          selects the 9/8 honeycomb or the flat six/five-column grids, and the
+          container-query variables derive every cell from the picker width. */}
+      <div data-brand-color-palette data-layout={layout}>
         {HONEYCOMB_ROWS.map((row, rowIndex) => (
-          <div
-            key={rowIndex}
-            className="flex items-center justify-center gap-1.5 -mt-[calc(var(--hex-h)_*_0.1875)]"
-          >
+          <div key={rowIndex} data-hex-row>
             {row.map((color) => {
               const isSelected = value === color;
               return (

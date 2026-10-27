@@ -4,7 +4,7 @@ This document owns layout and scroll boundaries for the current Gr8r-adapted int
 
 ## Alignment and scroll contract
 
-Routes share one gutter: 16px on phones and 24px from the small breakpoint. A route's heading, toolbar, and content begin on that same edge; documented maximum widths apply only to prose, forms, and the directory composition, never as a second page inset. Fine-pointer table rows keep the 36px collection density, while coarse-pointer selection targets grow to 44px inside their cell. Each route owns exactly one primary vertical scroller; horizontal scrolling belongs only to the table or calendar canvas, or to a deliberately scrollable segmented track. Settings centers its active section in the rail and returns the content pane to the top when the section changes.
+Routes share one horizontal gutter: 16px on phones and 24px from the small breakpoint. Collection headers and Settings use the same 20px phone / 24px small-breakpoint top padding, so a route's heading, toolbar, and content begin on one edge; documented maximum widths apply only to prose, forms, and the directory composition, never as a second page inset. Settings adds its 220px section rail from 768px, which explains its additional x offset. Fine-pointer table rows keep the 36px collection density, while coarse-pointer selection targets grow to 44px inside their cell. The shell never scrolls: each route owns its explicit scroll regions, with Administration's height-locked tab lists as the documented exception. Horizontal scrolling belongs only to the table or calendar canvas, or to a deliberately scrollable segmented track. Settings centers its active section in the rail and returns the content pane to the top when the section changes.
 
 ## Workspace shell
 
@@ -81,8 +81,8 @@ All sections share one layout; Security does not get a separate width rule.
 
 - Navigation and content use the same surface background.
 - Below 768px, section navigation is a horizontally scrollable row; from 768px it is a 220px rail.
-- The horizontal section rail centers its `aria-current="page"` section with its own `scrollLeft` on mount, on section change (including reload and history navigation), on language change, and on resize; it clamps to the scrollable range and leaves a non-scrolling desktop rail untouched. A section change also returns the content pane to the top, while a language change keeps the reader's position.
-- Settings content keeps the collection pages' **24px** top padding at every width, so its heading aligns with Posts and Channels from the small breakpoint; only the section-specific horizontal inset and maximum width differ.
+- Settings content uses the collection pages' **20px phone / 24px small-breakpoint** top padding and the **16/24px** horizontal gutter, so its heading aligns with Posts and Channels at desktop; the 220px section rail explains its additional x offset.
+- The horizontal section rail centers its `aria-current="page"` section with its own `scrollLeft` on mount, on section change (including reload and history navigation), on language change, and when late label growth or a resize changes the rail geometry; it clamps to the scrollable range and leaves a non-scrolling desktop rail untouched. A section change also returns the content pane to the top, while a language change keeps the reader's position.
 - Appearance, Language, Account, and Security all use one left-aligned **672px maximum** content column with full available width below that limit.
 - Administration uses the directory composition: a centered **1200px** ceiling, a content-width tab strip, and shared **spreadsheet grid tables** for Members and pending invitations. Workspace is a 672px settings form with its seat counts as a compact label/value summary rather than a table. The Administration route is height-locked — only each list scrolls. The Installation Owner is marked by a crown tooltip; their lifecycle control is a toggle and row actions collapse into a three-dot menu. Its Audit tab owns a bounded scroll viewport — a pinned header over 100-entry pages with a paging footer — while the toolbar's search, action, and target filters have fixed widths, Refresh re-reads the current page, and every filter applies server-side across the whole trail.
 - Light, Dark, and System cards are **192px**, wrap, and do not stretch to fill a wide screen.
@@ -97,7 +97,7 @@ Dialog bodies own native scrolling and keep `data-lenis-prevent` where the docum
 
 Centered forms and confirmations have 16px viewport gutters and a maximum height of `100dvh - 32px`; their canonical primitives own native scrolling rather than each caller setting a `vh` ceiling. Jump search retains a shrinkable results viewport between its input and keyboard-help row. The mobile navigation sidebar spans the full viewport height on the left edge.
 
-The Brand Profile dialog's 51-color honeycomb is an inline-size container: cells size from `--hex-w`/`--hex-h`, cap at the original 42×48px, and shrink to about 21×24px so every swatch fits a 320px dialog without clipping while the name and description fields stay inside the surface.
+The Brand Profile dialog's 51-color palette reflows by available content width with a single rendered set of swatches: the 9/8 honeycomb with capped 42×48px cells on wide dialogs, a six-column grid on medium dialogs, and a five-column grid of roughly 41×47px cells on 320px dialogs. Narrow layouts scroll vertically inside the dialog, so every swatch stays reachable and the name and description fields remain inside the surface.
 
 `BulkSelectionBar` is portalled outside clipped collection viewports. Its inverse-ink pill stays 24px above the safe-area edge and within the available viewport width.
 

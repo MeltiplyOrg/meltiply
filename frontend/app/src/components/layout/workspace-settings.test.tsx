@@ -9,11 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { I18nProvider } from "@/lib/i18n";
 import WorkspaceSettings from "./workspace-settings";
 
+const workspace = vi.hoisted(() => ({
+  canManageSettings: false,
+}));
+
 vi.mock("@/context/workspace.context", () => ({
   useWorkspace: () => ({
     user: { id: "u1", name: "Owner", email: "owner@example.test" },
     workspaceName: "Meltiply Workspace",
-    canManageSettings: false,
+    canManageSettings: workspace.canManageSettings,
   }),
 }));
 
@@ -136,18 +140,24 @@ function restoreLayoutMetrics(): void {
   }
 }
 
-/** Renders the Settings route at a reloadable section URL. */
-function renderSettings(): void {
-  render(
+/** Settings route fixture reused by rerenders that change workspace capability. */
+function SettingsRouteFixture() {
+  return (
     <I18nProvider>
       <MemoryRouter initialEntries={["/settings?section=security"]}>
         <WorkspaceSettings />
       </MemoryRouter>
-    </I18nProvider>,
+    </I18nProvider>
   );
 }
 
+/** Renders the Settings route at a reloadable section URL. */
+function renderSettings() {
+  return render(<SettingsRouteFixture />);
+}
+
 beforeEach(() => {
+  workspace.canManageSettings = false;
   rail.clientWidth = 320;
   rail.scrollWidth = 600;
   resizeObservers.length = 0;
@@ -216,6 +226,26 @@ describe("settings section rail", () => {
     for (const observer of resizeObservers) observer.notifyFor(accountButton);
 
     // The grown rail can finally reach the clamped 136px position.
+    expect(nav.scrollLeft).toBe(136);
+  });
+
+  it("re-centers when Administration appears after the workspace resolves", () => {
+    rail.clientWidth = 390;
+    rail.scrollWidth = 402;
+    const { rerender } = renderSettings();
+
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(nav.scrollWidth).toBe(402);
+    // Security's 155px center clamps to the 12px range before Administration exists.
+    expect(nav.scrollLeft).toBe(12);
+    expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
+
+    workspace.canManageSettings = true;
+    rail.scrollWidth = 526;
+    rerender(<SettingsRouteFixture />);
+
+    expect(screen.getByRole("button", { name: "Administration" })).toBeInTheDocument();
+    // The grown roster can finally reach the clamped 136px position.
     expect(nav.scrollLeft).toBe(136);
   });
 

@@ -46,8 +46,10 @@ function PreviewLines() {
  * The section rail marks its rows as `data-sidebar-item` targets so the shared
  * `SidebarGlideHighlight` pill owns the hover background here too, exactly as in
  * the workspace rail. The rail centers the reloadable route's active section on
- * mount, section or language change, and resize; changing sections also returns
- * the content pane to its top while a language change leaves its position alone.
+ * mount, section or language change, resize, late label growth, and when the
+ * section roster resolves (Administration can appear after the workspace loads);
+ * changing sections also returns the content pane to its top while a language
+ * change leaves its position alone.
  */
 export default function WorkspaceSettings() {
   const { requestedTheme, setTheme } = useTheme();
@@ -124,20 +126,22 @@ export default function WorkspaceSettings() {
   }, []);
 
   // A reload or history entry mounts with its section already selected, so
-  // center before paint. Label widths change with the language, and a resized
-  // rail moves the scrollable range, so both re-run the same centering.
+  // center before paint. Label widths change with the language, a resized rail
+  // moves the scrollable range, and the section roster can gain Administration
+  // after the workspace resolves, so all re-run the same centering.
   useLayoutEffect(() => {
     centerActiveSection();
-  }, [centerActiveSection, section, language]);
+  }, [canManageSettings, centerActiveSection, section, language]);
 
   useEffect(() => {
     window.addEventListener("resize", centerActiveSection);
     return () => window.removeEventListener("resize", centerActiveSection);
   }, [centerActiveSection]);
 
-  // Self-hosted fonts widen the section labels after the first layout pass, and
-  // the dialog/viewport can resize the rail without a window resize event. Every
-  // section button is observed: a label change on any tab shifts the active tab's
+  // Self-hosted fonts widen the section labels after the first layout pass, the
+  // dialog/viewport can resize the rail without a window resize event, and a
+  // late-capability Administration button changes the roster. Every section
+  // button is observed: a label change on any tab shifts the active tab's
   // position even when the rail box and the active label keep their own size.
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
@@ -149,7 +153,7 @@ export default function WorkspaceSettings() {
       observer.observe(sectionButton);
     }
     return () => observer.disconnect();
-  }, [centerActiveSection, section, language]);
+  }, [canManageSettings, centerActiveSection, section, language]);
 
   // `document.fonts` is absent in jsdom. `ready` can resolve before the request
   // that widens these labels, so the loading event is the late-growth trigger;

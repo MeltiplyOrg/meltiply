@@ -119,7 +119,7 @@ Use weight and spacing before additional color. Interface glyphs use the canonic
 
 ## Layout
 
-The desktop workspace uses a 252px rail, or 52px when collapsed, from the 1024px breakpoint. The top bar is 46px from 640px and 52px below it. Mobile navigation replaces the rail rather than squeezing it beside content: it is its own left-edge layer over the workspace, reusing the rail's content, and slides in from the left behind a fading scrim. Escape, the scrim, a destination, or reaching the desktop breakpoint closes it. The shared workspace gutter is recorded in frontmatter; feature layouts supply responsive reductions.
+The desktop workspace uses a 252px rail, or 52px when collapsed, from the 1024px breakpoint. The top bar is 46px from 640px and 52px below it. Mobile navigation replaces the rail rather than squeezing it beside content: it is its own left-edge layer over the workspace, reusing the rail's content, and slides in from the left behind a fading scrim. Escape, the scrim, a destination, or reaching the desktop breakpoint closes it. Feature layouts supply responsive gutter reductions.
 
 Posts is one destination with **Table → Calendar → Grid**. Channels follows the Members-style directory composition with matching surfaces and controls. Collection rows use a 40px baseline. Calendar Month/Week retains real date geometry and nested day overflow rather than introducing a second card language.
 

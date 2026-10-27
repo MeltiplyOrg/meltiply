@@ -641,13 +641,14 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
               aria-describedby={
                 brandProfiles.length === 0 ? "add-account-disabled-note" : undefined
               }
+              className="max-sm:px-2"
             >
               <Plus className="size-4" />
               {t("Add account")}
             </Button>
           )}
           {isAdmin && (
-            <Button variant="outline" onClick={() => openProfileEditor()}>
+            <Button variant="outline" onClick={() => openProfileEditor()} className="max-sm:px-2">
               <UserPlus className="size-4" />
               {t("Create Brand Profile")}
             </Button>

@@ -122,6 +122,9 @@ export const PostsToolbar = React.memo(function PostsToolbar({
         ? tStatus(statusFilter[0])
         : t("{count} statuses", { count: statusFilter.length });
   const platformLabel = platformFilterLabel(platformFilter, t);
+  const sortLabel = sortKey === "date-desc" ? t("Newest") : t("Oldest");
+  const groupLabel =
+    groupBy === "status" ? t("Status") : groupBy === "profile" ? t("Brand Profile") : t("None");
   const dateLabel =
     dateFilter === "today"
       ? t("Today")
@@ -144,11 +147,13 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           value={searchQuery}
           onChange={onSearchChange}
           placeholder={t("Search posts...")}
+          className="max-sm:order-1 max-sm:min-w-0 max-sm:flex-1"
         />
         <TopToolbarFilters
           key="filters"
           activeCount={activeCount}
           onClearAll={reset}
+          className="max-sm:order-4"
           fields={[
             {
               id: "platform",
@@ -224,9 +229,16 @@ export const PostsToolbar = React.memo(function PostsToolbar({
         />
         <DropdownMenu key="sort">
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm">
-              <ArrowDownUp className="size-3.5" />
-              {t("Sort:")} {sortKey === "date-desc" ? t("Newest") : t("Oldest")}
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`${t("Sort:")} ${sortLabel}`}
+              className="max-sm:order-5 pointer-coarse:min-w-11 max-sm:justify-center"
+            >
+              <ArrowDownUp className="size-3.5" aria-hidden="true" />
+              <span>
+                {t("Sort:")} {sortLabel}
+              </span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
@@ -241,14 +253,16 @@ export const PostsToolbar = React.memo(function PostsToolbar({
         {viewMode === "table" && (
           <DropdownMenu key="group">
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm">
-                <Rows3 className="size-3.5" />
-                {t("Group:")}{" "}
-                {groupBy === "status"
-                  ? t("Status")
-                  : groupBy === "profile"
-                    ? t("Brand Profile")
-                    : t("None")}
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`${t("Group:")} ${groupLabel}`}
+                className="max-sm:order-6 pointer-coarse:min-w-11 max-sm:justify-center"
+              >
+                <Rows3 className="size-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">
+                  {t("Group:")} {groupLabel}
+                </span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
@@ -267,9 +281,14 @@ export const PostsToolbar = React.memo(function PostsToolbar({
         {viewMode === "table" && (
           <DropdownMenu key="columns">
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm">
-                <Columns3 className="size-3.5" />
-                {t("Columns")}
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={t("Columns")}
+                className="max-sm:order-7 pointer-coarse:min-w-11 max-sm:justify-center"
+              >
+                <Columns3 className="size-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">{t("Columns")}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
@@ -292,20 +311,21 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           value={viewMode}
           onChange={onViewModeChange}
           label={t("Post view")}
-          className="w-full overflow-x-auto sm:ml-auto sm:w-auto"
+          className="overflow-x-auto max-sm:order-2 max-sm:w-auto max-sm:shrink-0 sm:ml-auto sm:w-auto"
           renderOption={(mode) => {
             const Icon = POST_VIEW_OPTIONS[mode].icon;
             return (
               <>
-                <Icon className="size-3.5" />
-                <span>
+                <Icon className="size-3.5" aria-hidden="true" />
+                <span className="sr-only sm:not-sr-only">
                   {mode === "table" ? t("Table") : mode === "grid" ? t("Grid") : t("Calendar")}
                 </span>
               </>
             );
           }}
         />
-        <MorphingControl key="grid-columns" open={viewMode === "grid"}>
+        <div aria-hidden="true" className="hidden h-0 basis-full max-sm:order-3 max-sm:block" />
+        <MorphingControl key="grid-columns" open={viewMode === "grid"} className="max-sm:order-8">
           <div className="flex items-center text-(length:--font-size-micro) tabular-nums">
             <Button
               variant="ghost"
@@ -372,7 +392,15 @@ export const PostsToolbar = React.memo(function PostsToolbar({
  * @param props.open - Whether the selected view uses this control.
  * @param props.children - The control's content, unclipped inside the morphing box.
  */
-function MorphingControl({ open, children }: { open: boolean; children: React.ReactNode }) {
+function MorphingControl({
+  open,
+  children,
+  className,
+}: {
+  open: boolean;
+  children: React.ReactNode;
+  className?: string;
+}) {
   const boxRef = React.useRef<HTMLDivElement>(null);
 
   React.useLayoutEffect(() => {
@@ -450,7 +478,7 @@ function MorphingControl({ open, children }: { open: boolean; children: React.Re
   }, [open]);
 
   return (
-    <div ref={boxRef} data-control-morph>
+    <div ref={boxRef} data-control-morph className={className}>
       <div className="flex items-center">{children}</div>
     </div>
   );

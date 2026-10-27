@@ -105,10 +105,13 @@ export function TopToolbarFilters({
   activeCount,
   fields,
   onClearAll,
+  className,
 }: {
   activeCount: number;
   fields: readonly CollectionFilterField[];
   onClearAll: () => void;
+  /** Optional toolbar-cell placement; the disclosure owns its own surface. */
+  className?: string;
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDetailsElement>(null);
@@ -185,7 +188,7 @@ export function TopToolbarFilters({
     <TooltipProvider>
       <details
         ref={ref}
-        className="group/filter"
+        className={cn("group/filter", className)}
         onToggle={(event) => setOpen(event.currentTarget.open)}
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
@@ -199,7 +202,7 @@ export function TopToolbarFilters({
         }}
       >
         <summary
-          className="flex h-control-sm cursor-pointer list-none items-center gap-1.5 rounded-control px-2 text-xs text-ink-2 hover:bg-hover pointer-coarse:min-h-11 group-open/filter:bg-hover [&::-webkit-details-marker]:hidden"
+          className="flex h-control-sm cursor-pointer list-none items-center justify-center gap-1.5 rounded-control px-2 text-xs text-ink-2 hover:bg-hover pointer-coarse:min-h-11 pointer-coarse:min-w-11 group-open/filter:bg-hover [&::-webkit-details-marker]:hidden"
           onClick={(event) => {
             event.preventDefault();
             if (ref.current?.open === false) {
@@ -216,7 +219,7 @@ export function TopToolbarFilters({
             close();
           }}
         >
-          <ListFilter className="size-3.5" />
+          <ListFilter className="size-3.5" aria-hidden="true" />
           {t("Filter")}
           {activeCount > 0 && (
             <span className="rounded-chip bg-accent-tint px-1 text-(length:--font-size-micro) text-accent-ink">

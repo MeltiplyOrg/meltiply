@@ -718,6 +718,48 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileMenu = page.getByRole("button", { name: "Open navigation menu", exact: true });
   await expect(mobileMenu).toBeVisible();
+
+  // The phone page chrome is two compact rows: title/action with the count
+  // beneath, then search/view with filter/sort/group/columns beneath. Keep the
+  // collection reachable instead of spending the first third on stacked bars.
+  const postsSearch = page.getByRole("textbox", { name: "Search posts...", exact: true });
+  const postView = page.getByRole("radiogroup", { name: "Post view", exact: true });
+  const postsFilterSummary = page
+    .locator("summary")
+    .filter({ hasText: /^Filter/ })
+    .first();
+  const sortButton = page.getByRole("button", { name: /^Sort: / });
+  const groupButton = page.getByRole("button", { name: /^Group: / });
+  const columnsButton = page.getByRole("button", { name: "Columns", exact: true });
+  const [searchBox, viewBox, filterBox, sortBox, groupBox, columnsBox] = await Promise.all([
+    postsSearch.boundingBox(),
+    postView.boundingBox(),
+    postsFilterSummary.boundingBox(),
+    sortButton.boundingBox(),
+    groupButton.boundingBox(),
+    columnsButton.boundingBox(),
+  ]);
+  if (!searchBox || !viewBox || !filterBox || !sortBox || !groupBox || !columnsBox) {
+    throw new Error("posts chrome controls must render before their rows can be verified");
+  }
+  expect(Math.abs(searchBox.y - viewBox.y)).toBeLessThan(6);
+  expect(Math.abs(filterBox.y - sortBox.y)).toBeLessThan(6);
+  expect(Math.abs(sortBox.y - groupBox.y)).toBeLessThan(6);
+  expect(Math.abs(groupBox.y - columnsBox.y)).toBeLessThan(6);
+  const chromeGeometry = await page.evaluate(() => {
+    const main = document.querySelector<HTMLElement>("#workspace-content");
+    const header = main?.querySelector<HTMLElement>("header");
+    const toolbar = main?.querySelector<HTMLElement>('[role="toolbar"]');
+    const table = main?.querySelector<HTMLElement>("table");
+    return {
+      headerHeight: header?.getBoundingClientRect().height ?? Number.POSITIVE_INFINITY,
+      toolbarHeight: toolbar?.getBoundingClientRect().height ?? Number.POSITIVE_INFINITY,
+      tableTop: table?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY,
+    };
+  });
+  expect(chromeGeometry.headerHeight + chromeGeometry.toolbarHeight).toBeLessThanOrEqual(240);
+  expect(chromeGeometry.tableTop).toBeLessThanOrEqual(320);
+
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("posts-dark-mobile.png"),

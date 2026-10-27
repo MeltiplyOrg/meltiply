@@ -281,11 +281,6 @@ async function compileSeedSnapshot(): Promise<SeedSnapshot> {
           JSON.stringify({
             asset: assets[0],
             assets,
-            post: posts[0],
-            user: currentUser,
-            auth_user: authUser,
-            auth_session: session,
-            analytics_snapshots: snapshots,
           }),
         ),
       ),

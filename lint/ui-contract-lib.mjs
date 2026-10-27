@@ -42,7 +42,6 @@ export const CANONICAL_FLAT_OWNERS = Object.freeze({
   popover: "ui",
   sidedialog: "ui",
   select: "ui",
-  separator: "ui",
   sileo: "ui",
   skeleton: "ui",
   switch: "ui",

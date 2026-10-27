@@ -380,9 +380,139 @@ test("keeps centered dialog dismissal and destructive focus distinct", async ({
     path: testInfo.outputPath("shared-components-dialog-phone-320x480.png"),
   });
 
+  // The 51-swatch palette is taller than a phone dialog. The failure text and
+  // the action footer therefore share one opaque, pinned region: visible
+  // without scrolling, while the palette scrolls natively behind it and every
+  // swatch stays reachable at maximum scroll.
+  await page.setViewportSize({ width: 320, height: 568 });
+  const actionRegion = editor.locator("[data-brand-profile-dialog-actions]");
+  const submitAction = editor.getByRole("button", { name: "Update profile", exact: true });
+  await expect(actionRegion).toBeVisible();
+  await expect(submitAction).toBeInViewport({ ratio: 1 });
+  await expect(deleteTrigger).toBeInViewport({ ratio: 1 });
+
+  const pinnedContract = await editor.evaluate((element) => {
+    const region = element.querySelector<HTMLElement>("[data-brand-profile-dialog-actions]");
+    const surface = getComputedStyle(element);
+    const box = element.getBoundingClientRect();
+    const swatches = Array.from(element.querySelectorAll<HTMLElement>('[role="radio"]'));
+    const rects = swatches.map((swatch) => swatch.getBoundingClientRect());
+    return {
+      backgroundColor: region ? getComputedStyle(region).backgroundColor : "",
+      contentLeft: box.left + parseFloat(surface.paddingLeft) + 0.5,
+      contentRight: box.right - parseFloat(surface.paddingRight) - 0.5,
+      minSwatchLeft: Math.min(...rects.map((rect) => rect.left)),
+      maxSwatchRight: Math.max(...rects.map((rect) => rect.right)),
+      swatchCount: swatches.length,
+      scrollPaddingBottom: element.style.scrollPaddingBottom,
+      scrollTop: element.scrollTop,
+    };
+  });
+  expect(pinnedContract.swatchCount).toBe(51);
+  expect(pinnedContract.scrollTop).toBe(0);
+  expect(pinnedContract.minSwatchLeft).toBeGreaterThanOrEqual(pinnedContract.contentLeft);
+  expect(pinnedContract.maxSwatchRight).toBeLessThanOrEqual(pinnedContract.contentRight);
+  // Opaque surface: the scrolling palette must not read through the actions.
+  expect(pinnedContract.backgroundColor).toMatch(/^rgb/);
+  expect(pinnedContract.backgroundColor).not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)$/);
+  // The registered focus reserve matches the pinned block's rendered height.
+  expect(pinnedContract.scrollPaddingBottom).toMatch(/^\d+(?:\.\d+)?px$/);
+
+  await editor.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect
+    .poll(() =>
+      editor.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
+      ),
+    )
+    .toBe(true);
+  const maxScrollContract = await editor.evaluate((element) => {
+    const region = element.querySelector<HTMLElement>("[data-brand-profile-dialog-actions]");
+    const swatches = Array.from(element.querySelectorAll<HTMLElement>('[role="radio"]'));
+    const lastSwatch = swatches.at(-1)?.getBoundingClientRect();
+    return {
+      lastSwatchBottom: lastSwatch?.bottom ?? Number.POSITIVE_INFINITY,
+      regionTop: region?.getBoundingClientRect().top ?? Number.NEGATIVE_INFINITY,
+    };
+  });
+  // At maximum scroll the final swatch rests fully above the pinned region.
+  expect(maxScrollContract.lastSwatchBottom).toBeLessThanOrEqual(maxScrollContract.regionTop + 1);
+  await expect(editor.getByRole("radio").last()).toBeInViewport();
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-dialog-pinned-320x568.png"),
+  });
+
+  // Arrow keys move focus and selection without landing underneath the block.
+  const checkedSwatch = editor.locator('[role="radio"][aria-checked="true"]');
+  const previousColor = await checkedSwatch.getAttribute("title");
+  await checkedSwatch.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect
+    .poll(() => editor.locator('[role="radio"][aria-checked="true"]').getAttribute("title"))
+    .not.toBe(previousColor);
+  const selectedSwatch = editor.locator('[role="radio"][aria-checked="true"]');
+  await expect(selectedSwatch).toBeFocused();
+  await expect
+    .poll(() =>
+      editor.evaluate((element) => {
+        const region = element.querySelector<HTMLElement>("[data-brand-profile-dialog-actions]");
+        const active = document.activeElement as HTMLElement | null;
+        if (!active || !region) return false;
+        return active.getBoundingClientRect().bottom <= region.getBoundingClientRect().top + 1;
+      }),
+    )
+    .toBe(true);
+
+  // The pinned region survives the wider phone and a software-keyboard-height
+  // viewport without moving the primary action out of reach.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(submitAction).toBeInViewport({ ratio: 1 });
+  await expect(deleteTrigger).toBeInViewport({ ratio: 1 });
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-dialog-pinned-390x844.png"),
+  });
+  await page.setViewportSize({ width: 320, height: 400 });
+  await expect(actionRegion).toBeInViewport();
+  await expect(submitAction).toBeInViewport({ ratio: 1 });
+
   await page.keyboard.press("Escape");
   await expect(editor).toBeHidden();
   await expect(editTrigger).toBeFocused();
+
+  // Both palettes keep the pinned surface opaque; the dark pass reloads with
+  // the shared theme cookie so the documented preference path applies.
+  await page.evaluate(() => {
+    localStorage.setItem("meltiply.theme", "dark");
+    document.cookie = "meltiply-theme=dark; Path=/; Max-Age=31536000; SameSite=Lax";
+  });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("tab", { name: /Brand Profiles/ }).click();
+  await editTrigger.click();
+  await expect(editor).toBeVisible();
+  await expect(actionRegion).toBeVisible();
+  await expect(submitAction).toBeInViewport({ ratio: 1 });
+  await expect
+    .poll(() =>
+      editor.locator("[data-brand-profile-dialog-actions]").evaluate((element) => {
+        const fill = getComputedStyle(element).backgroundColor;
+        return fill.startsWith("rgb") && !fill.endsWith(", 0)");
+      }),
+    )
+    .toBe(true);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("shared-components-dialog-pinned-dark-390x844.png"),
+  });
 });
 
 /**

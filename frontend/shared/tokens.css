@@ -62,6 +62,10 @@
   /* Viewport-anchored overlays keep a 1rem breathing edge on the vertical axis. */
   --overlay-max-height: calc(100dvh - 1rem);
 
+  /* DevBox sits above application surfaces; its body-portalled controls derive one layer above the dock. */
+  --z-devbox: 2147483000;
+  --z-devbox-overlay: calc(var(--z-devbox) + 1);
+
   --page: #fbfaf8;
   --canvas: #f4f3f0;
   --surface: #ffffff;

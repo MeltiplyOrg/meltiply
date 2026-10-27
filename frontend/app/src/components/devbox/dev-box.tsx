@@ -110,6 +110,7 @@ const tabLabels: Record<DevBoxTab, string> = {
   benchmark: "Benchmark",
   trace: "Trace",
   helpers: "Helpers",
+  preview: "Preview",
 };
 
 /**
@@ -150,10 +151,10 @@ function clearPageMutations(): void {
  * Unified in-app developer toolbox dock ("Meltiply DevBox").
  *
  * A draggable, collapsible floating dock anchored bottom-left, mounted only in
- * development builds. Hosts four Radix tabs — Skeletons, Benchmark, Trace,
- * Helpers — covering loading-state auditing, render profiling, query/telemetry
- * tracing, design-system/accessibility helpers; `Tabs` supplies the tablist
- * roving-focus keyboard contract the former hand-rolled buttons lacked.
+ * development and isolated UI preview builds. The four standard Radix tabs
+ * cover loading-state auditing, render profiling, query/telemetry tracing,
+ * and design-system/accessibility helpers. An optional Preview tab hosts the
+ * isolated build's scenario controls; the feature owns its browser data.
  * Position, collapsed state, active tab, and latency selection persist across
  * refreshes only after functional consent. The collapsed pill is itself a drag
  * surface: presses inside a small dead zone expand the dock, while real
@@ -168,7 +169,11 @@ function clearPageMutations(): void {
  * Copying Agentation's feedback markdown surfaces the shared Sileo toast so
  * developers see success, or failure with guidance, instead of silence.
  */
-export function DevBox(): React.ReactElement | null {
+export function DevBox({
+  previewControls,
+}: {
+  previewControls?: React.ReactNode;
+}): React.ReactElement | null {
   const [state, setState] = useState<DevBoxState>(readDevBoxState);
   const [functionalConsent, setFunctionalConsent] = useState(() => hasCookieConsent("functional"));
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -179,6 +184,8 @@ export function DevBox(): React.ReactElement | null {
     size: DevBoxSize;
   } | null>(null);
   const queryClient = useSyncExternalStore(subscribeDevBoxQueryClient, getDevBoxQueryClient);
+  const tabs = devBoxTabs.filter((tab) => tab !== "preview" || previewControls);
+  const activeTab = state.tab === "preview" && !previewControls ? "skeletons" : state.tab;
 
   const hasInteractedRef = useRef(false);
   /**
@@ -372,7 +379,7 @@ export function DevBox(): React.ReactElement | null {
         role="region"
         aria-label="Meltiply DevBox"
         className={cn(
-          "fixed z-[2147483000] font-sans text-ink",
+          "fixed z-(--z-devbox) font-sans text-ink",
           state.position === null && "bottom-4 left-4",
           state.collapsed
             ? "rounded-full border border-tooltip-border bg-tooltip-bg text-tooltip-fg shadow-overlay"
@@ -432,7 +439,7 @@ export function DevBox(): React.ReactElement | null {
             </div>
 
             <Tabs
-              value={state.tab}
+              value={activeTab}
               onValueChange={(tab) =>
                 // Radix only emits registered trigger values, so the string is already a DevBoxTab.
                 update({ tab: tab as DevBoxTab })
@@ -440,10 +447,10 @@ export function DevBox(): React.ReactElement | null {
             >
               <TabsList
                 aria-label="DevBox tools"
-                className="h-auto justify-start gap-1 rounded-none border-b border-line bg-transparent px-2 py-1.5 text-inherit"
+                className="h-auto flex-wrap justify-start gap-1 rounded-none border-b border-line bg-transparent px-2 py-1.5 text-inherit"
                 indicatorClassName="inset-y-1.5 rounded-control border-transparent bg-ink shadow-none"
               >
-                {devBoxTabs.map((tab) => (
+                {tabs.map((tab) => (
                   <TabsTrigger
                     key={tab}
                     value={tab}
@@ -484,6 +491,14 @@ export function DevBox(): React.ReactElement | null {
               >
                 <HelpersTab />
               </TabsContent>
+              {previewControls && (
+                <TabsContent
+                  value="preview"
+                  className="mt-0 max-h-[420px] overflow-y-auto p-3 focus-visible:ring-0"
+                >
+                  {previewControls}
+                </TabsContent>
+              )}
             </Tabs>
           </div>
         )}

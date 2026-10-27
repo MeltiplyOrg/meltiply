@@ -1,4 +1,12 @@
 {
+  "Preview controls": "预览控制",
+  "Preview scenario": "预览场景",
+  "Preview operation": "预览操作",
+  "Preview response": "预览响应",
+  "Preview route": "预览路由",
+  "Reset preview": "重置预览",
+  "Apply preview": "应用预览",
+  "UI preview · Synthetic data · Refresh resets changes": "界面预览 · 模拟数据 · 刷新将重置更改",
   "Add slot": "添加时段",
   "Add to Queue": "加入队列",
   "Assigned time": "分配时间",

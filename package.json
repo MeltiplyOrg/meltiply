@@ -23,6 +23,7 @@
     "db:start": "./scripts/cloudflare-local/database.sh start",
     "db:migrate": "./scripts/cloudflare-local/database.sh migrate",
     "db:seed": "./scripts/cloudflare-local/database.sh seed",
+    "preview:seed": "bun scripts/lib/preview-seed.ts",
     "reset": "./scripts/cloudflare-local/reset.sh",
     "contract:lint": "redocly lint meltiply@v1",
     "contract:bundle": "redocly bundle meltiply@v1 --output packages/contracts/dist/openapi.yaml --ext yaml",
@@ -115,10 +116,12 @@
     "pg": "8.22.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.12",
     "@redocly/cli": "2.39.0",
     "@shadcn/lint": "^0.1.0",
     "@shipi18n/cli": "2.16.2",
     "@shipi18n/core": "2.16.2",
+    "effect": "4.0.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "knip": "^6.32.2",
     "lighthouse": "13.4.1",

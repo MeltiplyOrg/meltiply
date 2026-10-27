@@ -1,4 +1,12 @@
 {
+  "Preview controls": "Commandes de l’aperçu",
+  "Preview scenario": "Scénario de l’aperçu",
+  "Preview operation": "Opération de l’aperçu",
+  "Preview response": "Réponse de l’aperçu",
+  "Preview route": "Route de l’aperçu",
+  "Reset preview": "Réinitialiser l’aperçu",
+  "Apply preview": "Appliquer l’aperçu",
+  "UI preview · Synthetic data · Refresh resets changes": "Aperçu de l’interface · Données fictives · Actualiser réinitialise les modifications",
   "Add slot": "Ajouter un créneau",
   "Add to Queue": "Ajouter à la file",
   "Assigned time": "Heure attribuée",

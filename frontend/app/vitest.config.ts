@@ -1,7 +1,9 @@
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite-plus";
+import { previewContractPlugin } from "./preview-contract";
 
 export default defineConfig({
+  plugins: [previewContractPlugin()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

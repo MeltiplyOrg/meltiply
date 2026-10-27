@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin, lazyPlugins } from "vite-plus";
 import { renderThemeBootstrap, themeBootstrapMarker } from "../shared/theme-bootstrap-source";
+import { previewContractPlugin } from "./preview-contract";
 
 // The repo root .env is the single source of truth for frontend public vars:
 // dev-backend.sh already sources it for Wrangler, and here its two public
@@ -89,16 +90,15 @@ function canonicalFrontendOriginPlugin(frontendUrl: string | undefined): Plugin 
 }
 
 /**
- * Dev-only modules replaced with inert source in every build. Keys match the
- * resolved absolute module path suffix; values are the stub module source.
+ * Development-only modules replaced with inert source outside UI previews.
+ * Local sign-in credentials remain excluded from every deployed build.
  *
  * `isDevMode()` is a runtime check — bundlers cannot fold the branches around
  * it, so dev tooling (react-scan, axe-core, query devtools, agentation) and the
  * local sign-in fixture would otherwise still be emitted to `dist`. The stubs
- * remove both from deployed artifacts while leaving development mode untouched.
- * Keeping the credentials here as a separate module makes one entry enough to
- * prove they cannot ship; `sign-in-form.test.tsx` and the Vite config test pin
- * both halves.
+ * remove developer tools from production/staging, while previews retain them.
+ * Keeping credentials in a separate module makes one entry enough to exclude
+ * them; the built-app browser smoke verifies production artifact exclusion.
  */
 const devOnlyStubModules: Readonly<Record<string, string>> = {
   "components/devbox/dev-box":
@@ -112,20 +112,38 @@ const devOnlyStubModules: Readonly<Record<string, string>> = {
 };
 
 /**
- * Vite plugin that resolves every `devOnlyStubModules` entry to its stub for
- * `vite build`, so production artifacts contain no dev tooling or local
- * credentials regardless of minifier behavior.
+ * Excludes preview entry graphs outside ui-preview mode, including Vite's
+ * development dependency scanner. Ordinary development retains its tools;
+ * deployed builds additionally strip tooling and local sign-in credentials.
  *
- * @returns Vite `Plugin` that no-ops the listed development entries.
+ * @param uiPreview Whether preview modules are enabled.
+ * @param building Whether Vite is emitting a deployed artifact.
+ * @returns Module substitutions appropriate to the active command and mode.
  */
-function devOnlyStubPlugin(): Plugin {
+function devOnlyStubPlugin(uiPreview: boolean, building: boolean): Plugin {
   return {
     name: "dev-only-stub",
-    apply: "build" as const,
-    // The `@/` alias resolves the specifier before `resolveId` hooks run, so
-    // match the resolved absolute path in `load` instead.
+    enforce: "pre",
+    // Virtual entry ids keep the dependency scanner from reading preview-only
+    // files directly; the regular load hook supplies their inactive exports.
+    resolveId(id) {
+      const normalized = id.replace(/\\/g, "/").replace(/\.(tsx?|jsx?)$/, "");
+      if (
+        !uiPreview &&
+        (normalized.endsWith("/preview/browser") || normalized.endsWith("/preview/controls"))
+      )
+        return `\0${normalized}`;
+    },
     load(id: string) {
       const normalized = id.replace(/\\/g, "/").replace(/\.(tsx?|jsx?)$/, "");
+      if (!uiPreview && normalized.endsWith("/preview/browser")) {
+        return "export const startPreview = async () => {};";
+      }
+      if (!uiPreview && normalized.endsWith("/preview/controls")) {
+        return "export const PreviewControls = () => null;";
+      }
+      if (!building) return null;
+      if (uiPreview && !normalized.endsWith("/lib/dev-sign-in")) return null;
       const stub = Object.entries(devOnlyStubModules).find(([suffix]) =>
         normalized.endsWith(suffix),
       )?.[1];
@@ -157,8 +175,9 @@ function themeBootstrapPlugin(): Plugin {
   };
 }
 
-export default defineConfig(() => {
-  const rootFileEnv = parseEnvFile(rootEnvFile);
+export default defineConfig(({ mode, command }) => {
+  const uiPreview = mode === "ui-preview";
+  const rootFileEnv = uiPreview ? {} : parseEnvFile(rootEnvFile);
   const publicEnv = Object.fromEntries(
     ["APP_URL"]
       .map((key) => {
@@ -167,7 +186,9 @@ export default defineConfig(() => {
       })
       .filter(([, value]) => value !== undefined),
   );
-  const frontendUrl = process.env.APP_URL?.trim() || rootFileEnv.APP_URL?.trim() || undefined;
+  const frontendUrl = uiPreview
+    ? undefined
+    : process.env.APP_URL?.trim() || rootFileEnv.APP_URL?.trim() || undefined;
   const localApiPort = process.env.WRANGLER_DEV_PORT || rootFileEnv.WRANGLER_DEV_PORT || "8787";
   const localApp =
     frontendUrl !== undefined &&
@@ -176,31 +197,36 @@ export default defineConfig(() => {
     // Statically substitute the whitelisted root .env values into import.meta.env.
     // Launcher-provided values override the file so detected MagicDNS origins
     // and configured ports reach browser code.
-    define: Object.fromEntries(
-      Object.entries(publicEnv).map(([key, value]) => [
-        `import.meta.env.${key}`,
-        JSON.stringify(value),
-      ]),
-    ),
+    define: uiPreview
+      ? { "import.meta.env.APP_URL": JSON.stringify("") }
+      : Object.fromEntries(
+          Object.entries(publicEnv).map(([key, value]) => [
+            `import.meta.env.${key}`,
+            JSON.stringify(value),
+          ]),
+        ),
+    build: uiPreview ? { outDir: "dist/ui-preview" } : {},
     plugins: lazyPlugins(() => [
       react(),
+      uiPreview && previewContractPlugin(),
       // Local builds must reach the Wrangler API process directly; deployed
       // environments omit API_ORIGIN and route through the API service binding.
-      cloudflare({
-        config: (config) =>
-          localApp
-            ? {
-                vars: {
-                  ...config.vars,
-                  API_ORIGIN: `http://127.0.0.1:${localApiPort}`,
-                },
-              }
-            : {},
-      }),
+      !uiPreview &&
+        cloudflare({
+          config: (config) =>
+            localApp
+              ? {
+                  vars: {
+                    ...config.vars,
+                    API_ORIGIN: `http://127.0.0.1:${localApiPort}`,
+                  },
+                }
+              : {},
+        }),
       rootEnvReloadPlugin(),
       canonicalFrontendOriginPlugin(frontendUrl),
       themeBootstrapPlugin(),
-      devOnlyStubPlugin(),
+      devOnlyStubPlugin(uiPreview, command === "build"),
     ]),
     server: {
       host: process.env.FRONTEND_DEV_HOST ?? "127.0.0.1",

@@ -1,4 +1,12 @@
 {
+  "Preview controls": "Vorschau-Steuerung",
+  "Preview scenario": "Vorschau-Szenario",
+  "Preview operation": "Vorschau-Operation",
+  "Preview response": "Vorschau-Antwort",
+  "Preview route": "Vorschau-Route",
+  "Reset preview": "Vorschau zurücksetzen",
+  "Apply preview": "Vorschau anwenden",
+  "UI preview · Synthetic data · Refresh resets changes": "UI-Vorschau · Beispieldaten · Neuladen setzt Änderungen zurück",
   "Add slot": "Zeitfenster hinzufügen",
   "Add to Queue": "Zur Warteschlange hinzufügen",
   "Assigned time": "Zugewiesene Zeit",

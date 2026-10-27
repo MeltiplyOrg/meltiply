@@ -238,3 +238,118 @@ The public document frame (`frontend/public/src/components/layout.astro`) owns o
 Landing and docs serve different jobs: product explanation and reading. `DocumentationSearchTrigger` opens the canonical article-index dialog from both landing and documentation preferences; it is separate from workspace jump search. Its body portal is browser-only so static generation renders the full page without accessing `document`; browser dismissal retains the existing exit and opener-focus lifecycle. Public scrolling/navigation adapters release state during Astro swaps. Native links, keyboard navigation, fragments, and accessibility behavior remain usable.
 
 For each change: read the owner/caller, extend the canonical implementation, migrate callers and guides, and exercise actual states at desktop/phone widths in both palettes. Verify focus, hover, busy, loading, empty, recoverable errors, selection, and nested overflow. Follow the repository's hosted completion gate. Compilation and lint are not visual proof; report only verification actually exercised.
+
+## Isolated pull-request UI previews
+
+`frontend/app/src/preview` supplies synthetic HTTP responses to the **same**
+application routes, auth provider, queries, and shared controls. It is not a
+second demo UI. The build excludes this module graph from production.
+
+Build from the repository root with
+`bun run --filter frontend-app build:ui-preview`. The output is
+`frontend/app/dist/ui-preview`; preview modules load dynamically only in this
+mode, and MSW starts before router/session reads. Ordinary development does not
+request the preview module graph or its virtual manifest.
+
+`frontend/app/preview-contract.ts` compiles the existing
+[`openapi.yaml`](../packages/contracts/openapi.yaml) and
+[`examples/operations.yaml`](../packages/contracts/examples/operations.yaml)
+into a preview-only virtual module. Every documented operation is registered
+automatically. Canonical examples and schema-derived responses provide transport
+outcomes; missing operation examples fail the build under the existing catalog
+requirement.
+
+Workspace data comes from the **same**
+[`seed.sql`](../scripts/cloudflare-local/postgres/seed.sql) used by `bun run db:seed`.
+`scripts/lib/preview-seed.ts` applies the real migrations and seed in disposable,
+in-memory PGlite during the build. It reuses the API's Post, Asset, Channel,
+Queue, and analytics read projections, scopes reads to the seeded Installation
+Owner's shared Workspace, and emits only public JSON records. The database is
+closed after compilation; there is no database server, SQL/Wasm runtime, or
+credential table in the browser/Worker artifact.
+
+Seed changes appear on the next preview build without editing another dataset.
+The seed's IDs, ordered attachments, frozen publications, analytics history,
+and timezone-aware Queue assignments are retained. Seed timestamps are preserved,
+not shifted on refresh. This is a snapshot of the seed definitions at build time,
+not a connection to a contributor's running or modified database.
+
+Seeded Asset metadata and attachment order are retained; media previews use a
+local placeholder rather than fetching the seed's R2 object keys or remote URLs.
+
+The route picker is extracted structurally from the real `app-router.tsx` literal
+Route declarations. It includes sign-in, Channel assignment, invitations,
+Settings, and the dashboard routes. Standalone handoffs receive synthetic query
+parameters; OAuth opens the local assignment screen rather than a Provider.
+
+UI previews count as development builds and expose the canonical **DevBox**.
+They retain the shared before-paint theme bootstrap used by production, so
+transferred palette choices apply before the application module graph loads.
+The dock uses the shared `--z-devbox` layer; its body-portalled selects use
+`--z-devbox-overlay`, derived one level above the dock in the shared token owner.
+Expand its bottom-left pill and choose **Preview**. The tab owns the scenario,
+operation, response, and route controls; there is no separate floating notice
+or preview dialog. Select an outcome, optionally scope it to an operation,
+choose an exact documented HTTP response, and pick a
+frontend route. **Apply preview** reloads with shareable URL parameters and fresh
+browser state; **Reset preview** removes those overrides. Scenario and operation
+identifiers are technical codes; control labels follow the interface language.
+
+| Scenario                                | Frontend state                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| `populated`, `success`                  | Seeded Workspace data with canonical transport outcomes                 |
+| `empty`                                 | Empty collections and zero aggregate counters                           |
+| `loading`                               | Requests remain pending until canceled or the page reloads              |
+| `validation-error`                      | Mutation validation failure; reads still populate forms                 |
+| `server-error`, `permission-denied`     | Data-request failures, with session/workspace bootstrap retained        |
+| `signed-out`, `first-run`, `two-factor` | Sign-in, installation setup, and authenticator challenge journeys       |
+| `viewer`, `editor`                      | Read-only or editorial permissions without Installation Owner authority |
+| `publication-failed`, `channel-expired` | Publishing failures and Channel reconnection states                     |
+
+URL parameters are `previewScenario`, `previewOperation`, and `previewStatus`.
+For example, `/posts?previewScenario=server-error&previewOperation=listPosts`
+keeps the workspace usable while Posts fails. Selecting an explicit operation
+also permits testing bootstrap/auth failures. A selected error never applies
+the corresponding local mutation.
+
+Generic form saves, deletes, sign-in/out, and single-part media uploads operate
+only in browser memory. Uploaded bytes become local Blob URLs, never R2 objects.
+No preview response sends email, changes real credentials, publishes content,
+or invokes background infrastructure. This is frontend scenario testing, not a
+second backend implementation or proof of backend business semantics. A new
+feature-specific multi-request outcome may need a small scenario transformation;
+ordinary UI changes and newly documented endpoints need no duplicate mock data.
+
+The dedicated `wrangler.ui-preview.jsonc` Worker has no service, database, or
+storage bindings. It rejects API/telemetry requests that reach the server.
+Browser handlers also reject unknown API calls, and the preview's CSP limits
+network access to its own origin. Do not add production secrets, an `API`
+binding, or a real backend origin to this Worker.
+
+### Cloudflare Git integration
+
+Create a **separate** Git-connected Worker named `meltiply-ui-preview` in
+Cloudflare Workers & Pages. Keep the repository root as the build root so Bun
+can resolve workspaces. Configure:
+
+| Setting         | Value                                            |
+| --------------- | ------------------------------------------------ |
+| Build command   | `bun run --filter frontend-app build:ui-preview` |
+| Deploy command  | `bun run --cwd frontend/app deploy:ui-preview`   |
+| Preview command | `bun run --cwd frontend/app preview:ui-preview`  |
+| Preview builds  | Enabled for the PR branches you want to review   |
+
+Do not configure `APP_URL` or production credentials. The preview build ignores
+the root `.env` and forces same-origin requests. Enable the Git integration's
+PR comments to receive links on pull requests. Existing Workers Builds projects
+may require Cloudflare's one-time switch to Worker Previews; use this separate
+project rather than changing the application's production deployment.
+See [branch builds](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/)
+and [Preview configuration](https://developers.cloudflare.com/workers/previews/configuration/).
+
+Preview URLs are public by default; synthetic data contains no credentials or
+real records. Use Cloudflare Access if unpublished UI itself is sensitive.
+The hosted `UI preview verification` workflow checks the frontend, deployment
+dry-run, scenario controls, generated frontend routes, auth/role outcomes, local
+uploads/reset, isolation, production exclusion, and desktop/phone screenshots in
+both palettes.

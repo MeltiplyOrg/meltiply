@@ -88,7 +88,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
               ref={searchTriggerRef}
               variant="outline"
               size="sm"
-              className="border-line bg-inset font-normal text-ink-3 shadow-none"
+              className="border-line bg-inset font-normal text-ink-3 shadow-none pointer-coarse:min-w-11"
               onClick={() => setSearchOpen(true)}
               aria-label={t("Search and jump to")}
             >

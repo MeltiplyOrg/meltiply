@@ -33,21 +33,15 @@ const HONEYCOMB_ROWS: readonly BrandProfileColor[][] = (() => {
 const HEXAGON_POINTS = "14,1.5 26.5,8.75 26.5,23.25 14,30.5 1.5,23.25 1.5,8.75";
 
 /**
- * Picker root padding (`p-3` on both sides). `clientWidth` includes padding but
- * excludes the border, so subtracting this gives the content width that the
- * palette's container-query columns must fit.
- */
-const PALETTE_HORIZONTAL_PADDING = 24;
-
-/**
  * Contract-palette color picker designed as an organic, interlocking beehive of hexagonal swatches.
  *
  * Provides an eye-friendly, tactile color-selection matrix for Brand Profile ownership labels.
  * All 51 OpenAPI contract colors render once and reflow by the dialog's available content width:
  * wide dialogs keep the 6-row [9, 8, 9, 8, 9, 8] honeycomb with its proportional row overlap,
- * while medium and phone dialogs switch to flat six- or five-column grids so each swatch keeps
- * a usable touch target instead of shrinking the lattice. Vertical overflow scrolls inside the
- * dialog; the palette never widens the name or description fields.
+ * while narrower dialogs switch to progressively fewer flat columns (six down to one) so each
+ * swatch keeps a usable touch target instead of shrinking the lattice. At 320px the palette uses
+ * four 42x48px columns. Vertical overflow scrolls inside the dialog; the palette never widens the
+ * name or description fields.
  * Interactive feedback on hover relies exclusively on a smooth cell size-up (scale-110) without
  * any rectangular button background showing behind the pointy-topped hexagonal tile.
  * Implements WAI-ARIA RadioGroup with roving tabindex: arrow, Home, and End keys move both
@@ -84,16 +78,39 @@ export function BrandProfileColorPicker({
    */
   const swatchRefs = React.useRef(new Map<BrandProfileColor, HTMLButtonElement>());
   const rootRef = React.useRef<HTMLDivElement>(null);
-  const [layout, setLayout] = React.useState<PaletteLayout>("grid-5");
+  const [layout, setLayout] = React.useState<PaletteLayout>("grid-1");
   const columnStep = paletteColumnStep(layout);
 
   // Measure before paint so the first frame already uses the arrangement that
-  // fits; observing the root reflows the palette when the dialog resizes.
+  // fits; observing the root reflows the palette when the dialog resizes. The
+  // padding is read from the rendered element because `p-3` is rem-based, and
+  // the root font size is passed so the rem thresholds scale with the CSS. The
+  // dialog's content width is the cap: a narrow dialog can be narrower than the
+  // picker's intrinsic width, and choosing columns from the expanded picker
+  // would clip the palette at high zoom.
   React.useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
     const measure = () => {
-      setLayout(resolvePaletteLayout(root.clientWidth - PALETTE_HORIZONTAL_PADDING));
+      const rootStyles = getComputedStyle(root);
+      const horizontalPadding =
+        (parseFloat(rootStyles.paddingLeft) || 0) + (parseFloat(rootStyles.paddingRight) || 0);
+      const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      const dialog = root.closest<HTMLElement>('[role="dialog"]');
+      const dialogContentWidth = dialog
+        ? dialog.clientWidth -
+          (parseFloat(getComputedStyle(dialog).paddingLeft) || 0) -
+          (parseFloat(getComputedStyle(dialog).paddingRight) || 0)
+        : Number.POSITIVE_INFINITY;
+      // A narrow dialog can be narrower than the picker's intrinsic grid. Cap
+      // the rendered picker to the dialog's content box before choosing columns
+      // so a high-zoom palette stays inside the surface instead of inheriting
+      // the expanded dialog grid width.
+      root.style.maxWidth = Number.isFinite(dialogContentWidth)
+        ? `${Math.max(0, dialogContentWidth)}px`
+        : "";
+      const availableWidth = Math.min(root.clientWidth, dialogContentWidth) - horizontalPadding;
+      setLayout(resolvePaletteLayout(availableWidth, rootFontSize));
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
@@ -223,7 +240,7 @@ export function BrandProfileColorPicker({
         ))}
       </div>
 
-      <div className="flex w-full items-center justify-between px-1.5 pt-1.5 border-t border-line/60">
+      <div className="flex w-full flex-wrap items-center justify-between gap-y-1 border-t border-line/60 px-1.5 pt-1.5">
         <div className="flex items-center gap-2">
           <span
             className={cn(

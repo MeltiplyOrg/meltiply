@@ -442,6 +442,7 @@ thead th {
  */
 :root {
   --post-row-h: 2.25rem;
+  --post-selection-row-h: 2.75rem;
   --post-row-collapse-duration: 200ms;
 }
 
@@ -470,6 +471,15 @@ thead th {
   inset: 0;
   display: flex;
   align-items: center;
+}
+
+/* Coarse pointers get a full 44px row for the selection cell only. The
+   collapsed rule below has the same specificity and follows this one, so a
+   collapsing group still zeroes the selection cell's height. */
+@media (pointer: coarse) {
+  [data-post-row] > [data-post-cell][data-post-selection-cell] {
+    --post-row-h: var(--post-selection-row-h);
+  }
 }
 
 [data-post-row][data-collapsed] {
@@ -504,7 +514,9 @@ thead th {
  * into unusable touch targets. `--hex-w` is capped at the original width and
  * derives the height from the pointy-hexagon aspect. The variables are declared
  * on this lattice rather than on the picker container, so `100cqw` resolves
- * against the picker root's content box (its 12px side padding is outside it).
+ * against the picker root's content box (its runtime `p-3` side padding is
+ * outside it). The layout thresholds in `brand-profile-palette-layout.ts` use
+ * the same rem-based gap and capped cell width.
  */
 [data-brand-color-palette] {
   --hex-cols: 9;
@@ -525,6 +537,22 @@ thead th {
   --hex-cols: 5;
 }
 
+[data-brand-color-palette][data-layout="grid-4"] {
+  --hex-cols: 4;
+}
+
+[data-brand-color-palette][data-layout="grid-3"] {
+  --hex-cols: 3;
+}
+
+[data-brand-color-palette][data-layout="grid-2"] {
+  --hex-cols: 2;
+}
+
+[data-brand-color-palette][data-layout="grid-1"] {
+  --hex-cols: 1;
+}
+
 [data-brand-color-palette][data-layout="honeycomb"] > [data-hex-row] {
   display: flex;
   align-items: center;
@@ -535,7 +563,7 @@ thead th {
 
 [data-brand-color-palette]:not([data-layout="honeycomb"]) {
   display: grid;
-  grid-template-columns: repeat(var(--hex-cols), var(--hex-w));
+  grid-template-columns: repeat(var(--hex-cols), minmax(0, var(--hex-w)));
   justify-content: center;
   gap: 0.375rem;
 }

@@ -97,7 +97,7 @@ Dialog bodies own native scrolling and keep `data-lenis-prevent` where the docum
 
 Centered forms and confirmations have 16px viewport gutters and a maximum height of `100dvh - 32px`; their canonical primitives own native scrolling rather than each caller setting a `vh` ceiling. Jump search retains a shrinkable results viewport between its input and keyboard-help row. The mobile navigation sidebar spans the full viewport height on the left edge.
 
-The Brand Profile dialog's 51-color palette reflows by available content width with a single rendered set of swatches: the 9/8 honeycomb with capped 42×48px cells on wide dialogs, a six-column grid on medium dialogs, and a five-column grid of roughly 41×47px cells on 320px dialogs. Narrow layouts scroll vertically inside the dialog, so every swatch stays reachable and the name and description fields remain inside the surface.
+The Brand Profile dialog's 51-color palette reflows by available content width with a single rendered set of swatches: the 9/8 honeycomb with capped 42×48px cells on wide dialogs, a six-column grid on medium dialogs, then progressively fewer columns (five to one) as the dialog narrows. At 320px it uses four 42×48px columns. Narrow layouts scroll vertically inside the dialog, so every swatch stays reachable and the name and description fields remain inside the surface.
 
 `BulkSelectionBar` is portalled outside clipped collection viewports. Its inverse-ink pill stays 24px above the safe-area edge and within the available viewport width.
 

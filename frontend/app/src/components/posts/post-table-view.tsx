@@ -67,6 +67,7 @@ function PostRowCell({
   return (
     <TableCell
       data-post-cell=""
+      data-post-selection-cell={selectionCell ? "" : undefined}
       className={selectionCell ? POST_SELECTION_CELL_CLASS : undefined}
       onClick={onClick}
     >
@@ -118,15 +119,15 @@ function PostSelectionCheckbox({
 }
 
 /**
- * First-cell treatment for Post selection rows.
+ * Marks the first cell as the Post selection target.
  *
- * Post rows take their height from the unlayered `--post-row-h` hook in
- * `globals.css`, which beats a utility `height`. Raising that variable on the
- * cell gives coarse pointers a 44px selection target while fine pointers keep
- * the shared 36px table density. The cell is already positioned by the same
- * hook; `relative` states the anchoring the full-cell label relies on.
+ * `globals.css` owns the token-backed coarse-pointer height
+ * (`--post-selection-row-h`) for `[data-post-selection-cell]`; the later
+ * collapsed-row rule still zeroes `--post-row-h` during a group collapse. The
+ * cell is already positioned by the row hook, so `relative` anchors the
+ * full-cell label on both pointer types.
  */
-const POST_SELECTION_CELL_CLASS = "relative pointer-coarse:[--post-row-h:2.75rem]";
+const POST_SELECTION_CELL_CLASS = "relative";
 
 /**
  * Publish-date column formatters.

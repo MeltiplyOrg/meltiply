@@ -186,8 +186,28 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+
+  // The 24-hour heatmap reflows into the card on phones instead of scrolling.
+  const heatmap = page.locator("[data-best-time-heatmap]");
+  await expect(heatmap).toBeVisible();
+  await expect
+    .poll(() => heatmap.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))
+    .toBe(true);
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("analytics-phone.png"),
+  });
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await expect
+    .poll(() => heatmap.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))
+    .toBe(true);
+  const narrowOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(narrowOverflow).toBeLessThanOrEqual(1);
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("analytics-phone-320.png"),
   });
 });

@@ -793,6 +793,10 @@ export function BestTimeHeatmap({ dashboard }: { dashboard: AnalyticsDashboard }
     new Intl.DateTimeFormat(language, { weekday: "short", timeZone: "UTC" }).format(
       new Date(Date.UTC(2026, 0, 4 + day)),
     );
+  const weekdayNarrowLabel = (day: number) =>
+    new Intl.DateTimeFormat(language, { weekday: "narrow", timeZone: "UTC" }).format(
+      new Date(Date.UTC(2026, 0, 4 + day)),
+    );
   if (dashboard.best_times.length === 0) {
     return <EmptyInsight message={t("No published posts in this range.")} />;
   }
@@ -824,20 +828,27 @@ export function BestTimeHeatmap({ dashboard }: { dashboard: AnalyticsDashboard }
             : t("Not enough measured posts to recommend a time.")}
         </p>
       </div>
-      <div className="overflow-x-auto">
+      <div data-best-time-heatmap="" className="min-w-0 overflow-x-auto">
         <div
           aria-hidden="true"
-          className="mx-auto grid min-w-[640px] max-w-[1100px] grid-cols-[40px_repeat(24,minmax(16px,1fr))] gap-1"
+          className="mx-auto grid w-full min-w-0 grid-cols-[18px_repeat(24,minmax(0,1fr))] gap-x-0.5 gap-y-1 sm:min-w-[640px] sm:max-w-[1100px] sm:grid-cols-[40px_repeat(24,minmax(16px,1fr))] sm:gap-1"
         >
           <span />
           {HOURS.map((hour) => (
-            <span key={hour} className="text-center text-[10px] text-ink-3">
-              {hour % 3 === 0 ? hour : ""}
+            <span
+              key={hour}
+              className="text-center text-(length:--font-size-micro) leading-none text-ink-3 sm:text-[10px]"
+            >
+              <span className="sm:hidden">{hour % 6 === 0 ? hour : ""}</span>
+              <span className="hidden sm:inline">{hour % 3 === 0 ? hour : ""}</span>
             </span>
           ))}
           {WEEKDAYS.map((day) => (
             <div key={day} className="contents">
-              <span className="text-[11px] text-ink-3">{weekdayLabel(day)}</span>
+              <span className="text-(length:--font-size-micro) leading-none text-ink-3">
+                <span className="sm:hidden">{weekdayNarrowLabel(day)}</span>
+                <span className="hidden sm:inline">{weekdayLabel(day)}</span>
+              </span>
               {HOURS.map((hour) => {
                 const cell = cells.get(`${day}:${hour}`);
                 const value = cell ? bestTimeValue(cell, metric) : 0;

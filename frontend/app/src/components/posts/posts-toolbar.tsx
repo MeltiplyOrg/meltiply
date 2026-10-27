@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowDownUp, Columns3, Minus, Plus, Rows3 } from "lucide-react";
+import { ArrowDownUp, ChevronDown, Columns3, Minus, Plus, Rows3 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import {
@@ -8,6 +8,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuCheckboxItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   FilterChecklist,
 } from "@meltiply/ui/dropdown-menu";
 import { FilterSelect } from "@meltiply/ui/select";
@@ -71,6 +73,67 @@ export interface PostsToolbarProps {
   onSortChange: (key: PostSortKey) => void;
   brandProfiles: BrandProfile[];
   unresolvedProfileIds: readonly string[];
+}
+
+/**
+ * Phone-sized view switcher. The desktop segmented track keeps every view
+ * visible; below 640px it becomes a compact dropdown on the filter row so the
+ * view choice does not consume a full toolbar row of its own. The trigger shows
+ * the active view's icon and chevron, with the label added on wider phones.
+ *
+ * @param props.value - Selected collection view.
+ * @param props.onChange - Applies the chosen collection view.
+ */
+function MobilePostViewMenu({
+  value,
+  onChange,
+}: {
+  value: PostCollectionMode;
+  onChange: (mode: PostCollectionMode) => void;
+}) {
+  const { t } = useI18n();
+  const labels: Record<PostCollectionMode, string> = {
+    table: t("Table"),
+    calendar: t("Calendar"),
+    grid: t("Grid"),
+  };
+  const current = POST_VIEW_OPTIONS[value];
+  const CurrentIcon = current.icon;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={`${t("Post view")}: ${labels[value]}`}
+          className="max-sm:order-4 pointer-coarse:min-w-11 max-sm:justify-center sm:hidden"
+        >
+          <CurrentIcon className="size-3.5" aria-hidden="true" />
+          <span className="hidden min-[360px]:inline">{labels[value]}</span>
+          <ChevronDown className="size-3" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuRadioGroup
+          value={value}
+          aria-label={t("Post view")}
+          onValueChange={(next) => {
+            if (next === "table" || next === "calendar" || next === "grid") onChange(next);
+          }}
+        >
+          {POST_COLLECTION_MODES.map((mode) => {
+            const Icon = POST_VIEW_OPTIONS[mode].icon;
+            return (
+              <DropdownMenuRadioItem key={mode} value={mode}>
+                <Icon className="size-3.75" aria-hidden="true" />
+                {labels[mode]}
+              </DropdownMenuRadioItem>
+            );
+          })}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 /** Gr8r Tasks controls composed from the reusable toolbar, filter, selector, and segment implementations. */
@@ -153,7 +216,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           key="filters"
           activeCount={activeCount}
           onClearAll={reset}
-          className="max-sm:order-4"
+          className="max-sm:order-3"
           fields={[
             {
               id: "platform",
@@ -236,7 +299,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
               className="max-sm:order-5 pointer-coarse:min-w-11 max-sm:justify-center"
             >
               <ArrowDownUp className="size-3.5" aria-hidden="true" />
-              <span>
+              <span className="hidden sm:inline">
                 {t("Sort:")} {sortLabel}
               </span>
             </Button>
@@ -311,7 +374,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
           value={viewMode}
           onChange={onViewModeChange}
           label={t("Post view")}
-          className="overflow-x-auto max-sm:order-2 max-sm:w-auto max-sm:shrink-0 sm:ml-auto sm:w-auto"
+          className="max-sm:hidden overflow-x-auto sm:ml-auto sm:w-auto"
           renderOption={(mode) => {
             const Icon = POST_VIEW_OPTIONS[mode].icon;
             return (
@@ -324,7 +387,8 @@ export const PostsToolbar = React.memo(function PostsToolbar({
             );
           }}
         />
-        <div aria-hidden="true" className="hidden h-0 basis-full max-sm:order-3 max-sm:block" />
+        <MobilePostViewMenu value={viewMode} onChange={onViewModeChange} />
+        <div aria-hidden="true" className="hidden h-0 basis-full max-sm:order-2 max-sm:block" />
         <MorphingControl key="grid-columns" open={viewMode === "grid"} className="max-sm:order-8">
           <div className="flex items-center text-(length:--font-size-micro) tabular-nums">
             <Button

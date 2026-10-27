@@ -723,7 +723,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   // beneath, then search/view with filter/sort/group/columns beneath. Keep the
   // collection reachable instead of spending the first third on stacked bars.
   const postsSearch = page.getByRole("textbox", { name: "Search posts...", exact: true });
-  const postView = page.getByRole("radiogroup", { name: "Post view", exact: true });
+  const mobileViewMenu = page.getByRole("button", { name: /^Post view: / });
   const postsFilterSummary = page
     .locator("summary")
     .filter({ hasText: /^Filter/ })
@@ -733,7 +733,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   const columnsButton = page.getByRole("button", { name: "Columns", exact: true });
   const [searchBox, viewBox, filterBox, sortBox, groupBox, columnsBox] = await Promise.all([
     postsSearch.boundingBox(),
-    postView.boundingBox(),
+    mobileViewMenu.boundingBox(),
     postsFilterSummary.boundingBox(),
     sortButton.boundingBox(),
     groupButton.boundingBox(),
@@ -742,10 +742,20 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   if (!searchBox || !viewBox || !filterBox || !sortBox || !groupBox || !columnsBox) {
     throw new Error("posts chrome controls must render before their rows can be verified");
   }
-  expect(Math.abs(searchBox.y - viewBox.y)).toBeLessThan(6);
+  expect(searchBox.y + searchBox.height).toBeLessThan(filterBox.y);
+  expect(Math.abs(filterBox.y - viewBox.y)).toBeLessThan(6);
   expect(Math.abs(filterBox.y - sortBox.y)).toBeLessThan(6);
   expect(Math.abs(sortBox.y - groupBox.y)).toBeLessThan(6);
   expect(Math.abs(groupBox.y - columnsBox.y)).toBeLessThan(6);
+
+  await mobileViewMenu.click();
+  await expect(page.getByRole("menuitemradio")).toHaveCount(3);
+  await expect(page.getByRole("menuitemradio", { name: "Table", exact: true })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toBeHidden();
   const chromeGeometry = await page.evaluate(() => {
     const main = document.querySelector<HTMLElement>("#workspace-content");
     const header = main?.querySelector<HTMLElement>("header");

@@ -109,7 +109,7 @@ function QuerySkeletonFixture() {
 beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
-  writeCookieConsent({ functional: true, analytics: false, marketing: false });
+  writeCookieConsent({ functional: true });
   seedDockState();
 });
 
@@ -310,7 +310,7 @@ describe("DevBox shell", () => {
     globalThis.fetch = base;
     try {
       const { unmount } = renderDevBox();
-      fireEvent.click(screen.getByRole("button", { name: "∞" }));
+      fireEvent.click(screen.getByRole("radio", { name: "∞" }));
       const held = globalThis.fetch("https://api.test/infinite");
 
       expect(base).not.toHaveBeenCalled();
@@ -337,7 +337,7 @@ describe("DevBox shell", () => {
   it("keeps DevBox usable without optional persistence after rejection", () => {
     window.localStorage.setItem("feedback-annotations-/posts", "optional annotation");
     window.sessionStorage.setItem("agentation-session-/posts", "optional session");
-    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    writeCookieConsent({ functional: false });
     window.localStorage.setItem(
       devBoxStorageKey,
       JSON.stringify({
@@ -381,7 +381,7 @@ describe("Skeletons tab", () => {
     registerDevBoxQueryClient(queryClient);
     renderDevBox();
 
-    fireEvent.click(screen.getByRole("button", { name: "Skeleton" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Skeleton" }));
 
     await waitFor(() => {
       expect(queryClient.getQueryCache().find({ queryKey: ["assets"] })?.state.status).toBe(
@@ -391,14 +391,14 @@ describe("Skeletons tab", () => {
     expect(isSkeletonHoldActive()).toBe(true);
     expect(screen.getByText(/Skeleton preview holds workspace reads/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Rendered" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Rendered" }));
 
     await waitFor(() => expect(isSkeletonHoldActive()).toBe(false));
   });
 
   it("applies the selected latency to the network throttle", () => {
     renderDevBox();
-    fireEvent.click(screen.getByRole("button", { name: "1.5s" }));
+    fireEvent.click(screen.getByRole("radio", { name: "1.5s" }));
     expect(getThrottleLatency()).toBe(1500);
   });
 
@@ -410,7 +410,7 @@ describe("Skeletons tab", () => {
       const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
       registerDevBoxQueryClient(queryClient);
       renderDevBox();
-      fireEvent.click(screen.getByRole("button", { name: "Skeleton" }));
+      fireEvent.click(screen.getByRole("radio", { name: "Skeleton" }));
       await waitFor(() => expect(isSkeletonHoldActive()).toBe(true));
 
       // A held GET never reaches the wrapped fetch; a POST passes through.
@@ -439,13 +439,13 @@ describe("Skeletons tab", () => {
       const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
       registerDevBoxQueryClient(queryClient);
       renderDevBox();
-      fireEvent.click(screen.getByRole("button", { name: "Skeleton" }));
+      fireEvent.click(screen.getByRole("radio", { name: "Skeleton" }));
       await waitFor(() => expect(isSkeletonHoldActive()).toBe(true));
 
       const request = globalThis.fetch("https://api.test/release");
       expect(base).not.toHaveBeenCalled();
 
-      fireEvent.click(screen.getByRole("button", { name: "Rendered" }));
+      fireEvent.click(screen.getByRole("radio", { name: "Rendered" }));
 
       await expect(
         Promise.race([
@@ -475,7 +475,7 @@ describe("Skeletons tab", () => {
       renderDevBox();
       expect(await screen.findByTestId("query-result")).toHaveTextContent("Rendered query content");
 
-      fireEvent.click(screen.getByRole("button", { name: "Skeleton" }));
+      fireEvent.click(screen.getByRole("radio", { name: "Skeleton" }));
       await waitFor(() => {
         const state = queryClient.getQueryCache().find({
           queryKey: ["devbox-preview-fixture"],
@@ -489,7 +489,7 @@ describe("Skeletons tab", () => {
         screen.getByText("Skeleton preview holds workspace reads for 1 cached query."),
       ).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Rendered" }));
+      fireEvent.click(screen.getByRole("radio", { name: "Rendered" }));
 
       expect(await screen.findByTestId("query-result")).toHaveTextContent("Rendered query content");
     } finally {

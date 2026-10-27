@@ -144,8 +144,8 @@ async function saveDraft(page: Page): Promise<void> {
  */
 async function choosePublishingMode(page: Page, mode: "Draft" | "Schedule" | "Now"): Promise<void> {
   await page
-    .getByRole("group", { name: "Publishing", exact: true })
-    .getByRole("button", { name: mode, exact: true })
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: mode, exact: true })
     .click();
 }
 

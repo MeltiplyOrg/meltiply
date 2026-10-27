@@ -247,7 +247,7 @@ describe("Composer recovery consent", () => {
    * storage path, so a deep-linked Post must still hydrate and become editable.
    */
   it("stays editable after hydrating a saved Post when functional consent is rejected", async () => {
-    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    writeCookieConsent({ functional: false });
     renderComposer({ initialPostId: hydratedPost.id, post: hydratedPost });
 
     const textarea = composerTextarea();
@@ -282,7 +282,7 @@ describe("Composer recovery consent", () => {
       }),
     );
     act(() => {
-      writeCookieConsent({ functional: true, analytics: false, marketing: false });
+      writeCookieConsent({ functional: true });
     });
 
     await waitFor(() => expect(textarea).toHaveValue("Recovered paragraph"));
@@ -446,7 +446,7 @@ describe("Composer leave guard", () => {
     const textarea = composerTextarea();
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.change(textarea, { target: { value: "Unsaved without functional storage" } });
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Queue" }));
     fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
 
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
@@ -469,7 +469,7 @@ describe("Composer leave guard", () => {
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.change(textarea, { target: { value: "draft" } });
     fireEvent.change(textarea, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Queue" }));
     fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save draft and continue" }));
 
@@ -481,14 +481,14 @@ describe("Composer leave guard", () => {
   });
 
   it("leaves directly when functional recovery can restore the composition", async () => {
-    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    writeCookieConsent({ functional: true });
     const onNavigate = vi.fn();
     renderComposer({ onNavigate });
 
     const textarea = composerTextarea();
     await waitFor(() => expect(textarea).toBeEnabled());
     fireEvent.change(textarea, { target: { value: "Recoverable draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Queue" }));
     fireEvent.click(screen.getByRole("button", { name: "Manage Queues" }));
 
     expect(onNavigate).toHaveBeenCalledWith("queues", undefined);

@@ -9,38 +9,38 @@ This page describes the current behavior of Meltiply's landing site, documentati
 
 ## Your choice
 
-A cookie notice appears until you make a choice. You can accept or reject optional purposes or choose categories separately in that initial prompt. Once a choice is saved, no button, footer link, or other in-product trigger reopens the preferences. Optional purposes are denied unless a valid choice allows them.
+A cookie notice appears until you make a choice. The only optional purpose Meltiply implements is functional storage for remembered preferences and local work recovery. You can allow or reject it, or review it before deciding, in that initial prompt. Once a choice is saved, no button, footer link, or other in-product trigger reopens the preferences. Optional storage is denied unless a valid choice allows it.
 
-Within the docs, navigating between guides keeps the initial notice and any unsaved category choices open without replaying its entrance. Saving a choice shows a brief confirmation that fades out before closing; guide navigation does not restart that deadline. Device-requested reduced motion applies to these transitions.
+Within the docs, navigating between guides keeps the initial notice and any unsaved choice open without replaying its entrance. Saving a choice shows a brief confirmation that fades out before closing; guide navigation does not restart that deadline. Device-requested reduced motion applies to these transitions.
 
-The choice is stored in the essential `meltiply-consent` cookie for **180 days**. It records the versioned choice and its expiry, including when you reject optional purposes. On production Meltiply sites, the choice is shared across eligible `meltiply.com` subdomains; preview or other hostnames may require a separate choice. An invalid or expired record does not allow optional storage or tracking.
+The choice is stored in the essential `meltiply-consent` cookie for **180 days**. It records the versioned choice and its expiry, including when you reject optional purposes. On production Meltiply sites, the choice is shared across eligible `meltiply.com` subdomains; preview or other hostnames may require a separate choice. An invalid or expired record does not allow optional storage.
 
 Rejecting optional consent keeps the essential choice record but removes known optional first-party data on the current origin where the browser allows it. To reset a saved choice, use your browser's site-data controls to remove the `meltiply-consent` cookie and reload; the initial prompt then appears again with optional purposes denied. Other Meltiply origins clean up their known optional data when you next visit or return focus to them. Clearing all site data can also remove sign-in sessions and other preferences; Meltiply does not promise deletion of data controlled by another service.
 
 ## Essential storage
 
-Sign-in, session, and security mechanisms needed to authenticate accounts and protect the service remain active regardless of optional choices. The `meltiply-consent` cookie is also retained so the site can remember whether you accepted or rejected optional purposes. These essential records are not visitor analytics or advertising trackers.
+Sign-in, session, and security mechanisms needed to authenticate accounts and protect the service remain active regardless of optional choices. The `meltiply-consent` cookie is also retained so the site can remember whether you allowed or rejected the optional purpose. These essential records are not visitor analytics or advertising trackers.
 
 ## Functional preferences
 
 Functional storage is optional and is used for convenience and recovery preferences. It is written only after you allow the functional category. Known examples include:
 
 - The `meltiply-theme` cookie, which remembers the selected Light, Dark, or System preference across eligible Meltiply sites for up to one year.
-- Origin-local storage keys `meltiply.theme`, `meltiply.language`, `meltiply.recent-navigation`, and `meltiply.devbox` for theme, language, recent navigation, and developer-tool preferences.
+- Origin-local storage keys `meltiply.theme`, `meltiply.language`, and `meltiply.devbox` for theme, language, and developer-tool preferences.
 - Origin-local storage prefixes `meltiply.composer.v2.*`, `meltiply.upload.v1.*`, and `meltiply.upload.create.v1.*` for in-progress post and upload recovery data. Composer recovery includes selected profiles/channels and saved copy identities so partial multi-profile work can resume.
 
 Without functional consent, theme selection still works for the current page, but is not remembered for later visits. An explicit theme choice follows links between landing, docs, and app without granting consent or writing optional storage at an unconsented destination. The destination applies it before paint and preserves it through hydration and an initial rejection of optional cookies. Initial color scheme follows the device unless explicitly selected. There is no separate stored motion mode. Server-saved Posts and active uploads remain product functionality; only supplemental browser-local recovery is optional.
 
 The local preferences do not have a fixed expiry; withdrawing functional consent removes the known keys and prefixes. The app's essential sign-in and security storage is not removed by that cleanup.
 
-## Analytics and marketing
+## Visitor analytics and advertising
 
-**Analytics** means measurement of visits and use of Meltiply's sites. **Marketing** means advertising, campaign attribution, or remarketing. No visitor-analytics or marketing trackers are currently installed on the landing site, documentation, or app. Choosing either category does not load a vendor, script, or SDK that is not present.
+No visitor-analytics or advertising trackers are installed on the landing site, documentation, or app. Because no such integration exists, the notice does not request consent for one: offering that category would imply tracking that is not present. Adding such a tracker later requires its own explicit choice before anything loads.
 
-Performance analytics and comments are backend capabilities based on reports from social platforms connected to your workspace. The app exposes a read-only **Analytics** page over stored platform metrics; it does not expose an Inbox page. These capabilities are not measurement of visits to Meltiply's public sites, and changing cookie consent does not turn off the provider synchronization behind them.
+Performance analytics and comments are backend capabilities based on reports from social platforms connected to your workspace. The app exposes a read-only **Analytics** page over stored platform metrics; it does not expose an Inbox page. These capabilities are not measurement of visits to Meltiply's public sites, and no cookie choice turns off the provider synchronization behind them.
 
 ## Cookies and equivalent technologies
 
-Cookie choices also govern equivalent optional browser storage and non-cookie tracking used for the same purpose; a technology is not exempt merely because it is not a cookie. Meltiply does not currently add visitor-analytics or advertising integrations, and optional tracking must remain off unless the relevant category is explicitly allowed. Hosting infrastructure may separately process standard technical request records as described in the [Privacy Policy](/docs/privacy).
+Cookie choices also govern equivalent optional browser storage used for the same purpose; a technology is not exempt merely because it is not a cookie. Meltiply does not add visitor-analytics or advertising integrations, so optional browser storage remains off unless functional preferences are explicitly allowed. Hosting infrastructure may separately process standard technical request records as described in the [Privacy Policy](/docs/privacy).
 
 For the current privacy disclosures, see the [Privacy Policy](/docs/privacy).

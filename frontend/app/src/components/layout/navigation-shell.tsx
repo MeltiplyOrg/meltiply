@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Menu, Search } from "lucide-react";
 import { useWorkspace } from "@/context/workspace.context";
@@ -31,6 +31,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
   const { t } = useI18n();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const searchTriggerRef = useRef<HTMLButtonElement>(null);
   useHotkey(hotkeys.commandMenu, () => setSearchOpen((open) => !open));
   /** Keeps mobile dismissal and URL navigation together for every real destination. */
   const handleNavClick = (view: WorkspaceView, options?: { search?: string }) => {
@@ -84,6 +85,7 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <Button
+              ref={searchTriggerRef}
               variant="outline"
               size="sm"
               className="border-line bg-inset font-normal text-ink-3 shadow-none"
@@ -114,7 +116,12 @@ export function NavigationShell({ currentView, onNavigate, children }: Navigatio
         currentView={currentView}
         onNavigate={handleNavClick}
       />
-      <WorkspaceSearch open={searchOpen} onOpenChange={setSearchOpen} onNavigate={handleNavClick} />
+      <WorkspaceSearch
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        onNavigate={handleNavClick}
+        fallbackFocusRef={searchTriggerRef}
+      />
       <Toaster />
     </div>
   );

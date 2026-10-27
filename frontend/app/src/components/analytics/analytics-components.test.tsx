@@ -100,7 +100,7 @@ describe("analytics toolbar", () => {
   it("offers filters and a reload without a single-metric mode", () => {
     const onRefresh = vi.fn();
     render(<AnalyticsToolbar {...toolbarProps} onRefresh={onRefresh} />);
-    expect(screen.queryByRole("group", { name: "Metric" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Metric" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh analytics" }));
     expect(onRefresh).toHaveBeenCalledOnce();
   });

@@ -2,20 +2,28 @@ import { PLATFORM_IDS } from "@meltiply/domain";
 import { reportUnknownContractValue } from "./frontend-telemetry";
 import { translate, type Language } from "./i18n";
 import type { Asset, ConnectionStatus, PlatformAccount } from "@/types";
-import type { StatusPillTone } from "@meltiply/ui/status-pill";
 
 const SUPPORTED_PLATFORMS = PLATFORM_IDS;
 
 export type SupportedPlatform = (typeof SUPPORTED_PLATFORMS)[number];
 
-/** Shared status tones keep Channels cards, account rows, and filter options consistent. */
-export const CONNECTION_TONES: Record<ConnectionStatus, StatusPillTone> = {
-  connected: "green",
-  expiring: "orange",
-  expired: "red",
-  revoked: "red",
-  reconnect_required: "red",
-};
+/**
+ * Contract connection states, kept separate from publication/Distribution
+ * status. The exhaustive record means a new `ConnectionStatus` cannot be added
+ * without extending the filter roster.
+ */
+const CONNECTION_STATUS_ROSTER = {
+  connected: true,
+  expiring: true,
+  expired: true,
+  revoked: true,
+  reconnect_required: true,
+} satisfies Record<ConnectionStatus, true>;
+
+/** Every contract connection state, for the Channels filter options. */
+export const CONNECTION_STATUSES = Object.keys(
+  CONNECTION_STATUS_ROSTER,
+) as readonly ConnectionStatus[];
 
 const oauthOutcomes: Record<string, string> = {
   connected: "{platform} connected successfully.",

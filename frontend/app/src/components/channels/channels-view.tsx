@@ -10,7 +10,7 @@ import {
   useStartPlatformOAuth,
 } from "@/lib/queries";
 import { usePathname, useSearchParams } from "@/lib/navigation";
-import { CONNECTION_TONES, oauthOutcomeMessage, platformDisplayName } from "@/lib/platforms";
+import { CONNECTION_STATUSES, oauthOutcomeMessage, platformDisplayName } from "@/lib/platforms";
 import { Trans, useI18n } from "@/lib/i18n";
 import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import {
@@ -129,15 +129,14 @@ const SUPPORTED_PLATFORMS: PlatformMeta[] = [
 ];
 
 /**
- * Connection-status filter options for the accounts table, derived directly
- * from the contract-keyed `CONNECTION_TONES` record so the option list can
- * never drift from the `ConnectionStatus` union. Labels render through
- * `tStatus` so they share the status translation catalog.
+ * Connection-status filter options for the accounts table, enumerated from the
+ * contract's connection roster. Connection health stays separate from
+ * Distribution publication status, and labels render through `tStatus` so they
+ * share the status translation catalog.
  */
-const CONNECTION_STATUS_OPTIONS = Object.keys(CONNECTION_TONES) as ConnectionStatus[];
 const CONNECTION_FILTER_OPTIONS: readonly ("all" | ConnectionStatus)[] = [
   "all",
-  ...CONNECTION_STATUS_OPTIONS,
+  ...CONNECTION_STATUSES,
 ];
 
 /** Toolbar status filter value: the aggregate sentinel or one contract status. */
@@ -891,7 +890,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         open={isAdmin && addAccountOpen}
         onOpenChange={(open) => setAddAccountOpen(isAdmin && open)}
       >
-        <CenterDialogContent className="max-w-xl">
+        <CenterDialogContent closeLabel={t("Close")} className="max-w-xl">
           <CenterDialogHeader>
             <CenterDialogTitle>{t("Connect social account")}</CenterDialogTitle>
             <CenterDialogDescription>

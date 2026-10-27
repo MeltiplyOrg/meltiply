@@ -1,26 +1,20 @@
 ---
-import {
-  themeCookieName,
-  themeQueryParam,
-  themeStorageKey,
-  themePreferenceAttribute,
-} from "./theme-preference";
+import themeBootstrapRuntime from "./theme-bootstrap.js?raw";
+import { renderThemeBootstrap } from "./theme-bootstrap-source";
 
 /**
- * Before-paint theme bootstrap shared by both public sites. A validated link
- * choice controls this document without granting consent. ConsentBootstrap
- * runs first; optional stores are read/written only with functional consent.
- * The page-intent attribute preserves transferred choices through hydration.
- * A capture-phase click listener — registered before
- * first paint because SSR links are navigable long before any React island
- * hydrates — copies the current explicit choice onto anchors marked
- * `data-theme-link` or targeting a `siteUrls` origin, preserving query and hash.
- * Each run of this script (Astro client-side swaps
- * re-execute it) first dispatches `meltiply:theme-link-reset`, which the
- * previous run's once-listener uses to detach its click handler so listeners
- * never accumulate.
- * `"system"` or no stored choice leaves the OS `prefers-color-scheme`
- * authoritative without pinning the palette.
+ * Before-paint theme bootstrap shared by both public sites. The checked-in
+ * runtime is embedded inline so it runs before paint; `renderThemeBootstrap`
+ * injects the shared preference constants and this host's palette mode.
+ * ConsentBootstrap runs first; optional stores are read/written only with
+ * functional consent. A validated link choice controls this document without
+ * granting consent, and the page-intent attribute preserves transferred choices
+ * through hydration. The runtime installs one delegated click listener for
+ * marked anchors and configured `siteUrls` origins, re-reading the current
+ * explicit choice on every click so retargeting never uses a stale palette.
+ * Each run (Astro client-side swaps re-execute this script) first dispatches
+ * `meltiply:theme-link-reset`, letting the previous run detach before the new
+ * listener registers.
  */
 interface Props {
   mode: "class" | "data-theme";
@@ -32,196 +26,10 @@ interface Props {
 }
 
 const { mode, siteUrls = [] } = Astro.props;
+const themeBootstrapScript = renderThemeBootstrap(themeBootstrapRuntime, {
+  mode,
+  siteUrls,
+});
 ---
 
-<script
-  define:vars={{
-    mode,
-    siteUrls,
-    themeCookieName,
-    themeQueryParam,
-    themeStorageKey,
-    themePreferenceAttribute,
-  }}
->
-  // Reads the newest persisted explicit choice: the shared cookie first (the
-  // newest cross-site value), then this origin's localStorage. Initial paint
-  // and later cross-site link clicks share this reader so a click always
-  // carries the current choice rather than the palette resolved at page load.
-  // `null` means nothing explicit was stored, so the OS stays authoritative;
-  // denied cookie or storage access simply skips that store.
-  function readPersistedPreference() {
-    if (!document.documentElement.hasAttribute("data-cookie-functional"))
-      return null;
-    try {
-      var cookiePrefix = themeCookieName + "=";
-      var entries = document.cookie.split(";");
-      for (var index = 0; index < entries.length; index += 1) {
-        var entry = entries[index].trim();
-        if (entry.indexOf(cookiePrefix) === 0) {
-          var value = decodeURIComponent(entry.slice(cookiePrefix.length));
-          if (value === "light" || value === "dark" || value === "system")
-            return value;
-          break;
-        }
-      }
-    } catch (error) {
-      // Denied cookie access falls back to localStorage below.
-    }
-    try {
-      var stored = window.localStorage.getItem(themeStorageKey);
-      return stored === "light" || stored === "dark" || stored === "system"
-        ? stored
-        : null;
-    } catch (error) {
-      // Denied storage leaves the OS palette authoritative.
-      return null;
-    }
-  }
-  // Resolve the explicit preference before first paint: the validated query
-  // parameter wins because it carries the newest cross-site choice, then the
-  // persisted stores. The parameter is stripped below while other params and
-  // the hash survive.
-  var params = new URLSearchParams(window.location.search);
-  var preference = params.get(themeQueryParam);
-  if (
-    preference !== "light" &&
-    preference !== "dark" &&
-    preference !== "system"
-  ) {
-    preference = null;
-  }
-  if (preference === null) {
-    // Astro swaps inherit explicit page intent from the outgoing root.
-    var pagePreference = document.documentElement.getAttribute(
-      themePreferenceAttribute,
-    );
-    if (
-      pagePreference === "light" ||
-      pagePreference === "dark" ||
-      pagePreference === "system"
-    )
-      preference = pagePreference;
-  }
-  if (preference === null) {
-    preference = readPersistedPreference();
-  }
-  // Persist only with functional consent; otherwise the transferred choice
-  // lives exclusively in the document and never enables optional storage.
-  if (
-    preference !== null &&
-    document.documentElement.hasAttribute("data-cookie-functional")
-  ) {
-    try {
-      window.localStorage.setItem(themeStorageKey, preference);
-    } catch (error) {
-      // Storage denial keeps the resolved palette for this page only.
-    }
-    try {
-      var host = window.location.hostname;
-      var domain =
-        host === "meltiply.com" || host.endsWith(".meltiply.com")
-          ? "; Domain=meltiply.com"
-          : "";
-      document.cookie =
-        themeCookieName +
-        "=" +
-        preference +
-        "; Path=/; Max-Age=31536000; SameSite=Lax; Secure" +
-        domain;
-    } catch (error) {
-      // Denied cookie writes still leave localStorage persisted.
-    }
-  }
-  // Strip only the transfer parameter so other query params and the hash
-  // survive into the address bar and analytics.
-  if (params.get(themeQueryParam) !== null) {
-    params.delete(themeQueryParam);
-    var query = params.toString();
-    try {
-      window.history.replaceState(
-        null,
-        "",
-        window.location.pathname +
-          (query === "" ? "" : "?" + query) +
-          window.location.hash,
-      );
-    } catch (error) {
-      // Environments without history access keep the parameter harmlessly.
-    }
-  }
-  var prefersDark = false;
-  try {
-    prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-  } catch (error) {
-    // No media query support means the light default.
-  }
-  var dark = preference === "dark" || (preference !== "light" && prefersDark);
-  var root = document.documentElement;
-  if (preference !== null)
-    root.setAttribute(themePreferenceAttribute, preference);
-  else root.removeAttribute(themePreferenceAttribute);
-  root.style.colorScheme = dark ? "dark" : "light";
-  if (mode === "class") {
-    root.classList.toggle("dark", dark);
-    root.removeAttribute("data-theme");
-  } else {
-    root.dataset.theme = dark ? "dark" : "light";
-    root.classList.remove("dark");
-  }
-  // Transfer the current choice across origins: SSR links are navigable well
-  // before any hydrated island could install a listener, so this capture-phase
-  // handler is registered here, before first paint. Live explicit page intent
-  // takes precedence; consent-gated stores are the fallback.
-  // only touches anchors marked `data-theme-link` or targeting a configured
-  // site origin; the target's existing query and hash are preserved.
-  var siteOrigins = {};
-  for (var siteIndex = 0; siteIndex < siteUrls.length; siteIndex += 1) {
-    try {
-      siteOrigins[new URL(siteUrls[siteIndex]).origin] = true;
-    } catch (error) {
-      // Skip entries that are not absolute URLs.
-    }
-  }
-  var onThemeLinkClick = function (event) {
-    var anchor =
-      event.target instanceof Element ? event.target.closest("a[href]") : null;
-    if (anchor === null) return;
-    var url;
-    try {
-      url = new URL(anchor.href);
-    } catch (error) {
-      return;
-    }
-    if (url.protocol !== "http:" && url.protocol !== "https:") return;
-    if (
-      !anchor.hasAttribute("data-theme-link") &&
-      siteOrigins[url.origin] !== true
-    ) {
-      return;
-    }
-    var current = document.documentElement.getAttribute(
-      themePreferenceAttribute,
-    );
-    if (current !== "light" && current !== "dark" && current !== "system") {
-      current = readPersistedPreference();
-    }
-    if (current === null) url.searchParams.delete(themeQueryParam);
-    else url.searchParams.set(themeQueryParam, current);
-    anchor.href = url.toString();
-  };
-  // A re-run of this bootstrap (e.g. Astro client-side swaps) must not stack
-  // listeners: dispatching the reset first lets the outgoing run's
-  // once-listener detach its click handler before this run registers its own.
-  document.dispatchEvent(new Event("meltiply:theme-link-reset"));
-  document.addEventListener(
-    "meltiply:theme-link-reset",
-    function () {
-      document.removeEventListener("click", onThemeLinkClick, true);
-    },
-    { once: true },
-  );
-  // Capture phase runs before other handlers that may read or navigate via
-  // this href, and covers anchors added to the DOM later.
-  document.addEventListener("click", onThemeLinkClick, true);
-</script>
+<script is:inline set:html={themeBootstrapScript}></script>

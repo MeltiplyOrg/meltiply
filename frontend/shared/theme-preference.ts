@@ -44,8 +44,8 @@ function isThemePreference(value: string | null): value is ThemePreference {
 
 /**
  * Reads the shared preference cookie. Tolerates `document.cookie` being
- * unavailable and ignores malformed encodings instead of treating them as a
- * stored choice.
+ * unavailable and skips a malformed encoding instead of treating it as the
+ * visitor's choice, so a valid origin-local fallback can still apply.
  */
 function readCookiePreference(): ThemePreference | null {
   try {
@@ -53,8 +53,12 @@ function readCookiePreference(): ThemePreference | null {
       const separator = entry.indexOf("=");
       if (separator === -1) continue;
       if (entry.slice(0, separator).trim() !== themeCookieName) continue;
-      const value = decodeURIComponent(entry.slice(separator + 1).trim());
-      return isThemePreference(value) ? value : null;
+      try {
+        const value = decodeURIComponent(entry.slice(separator + 1).trim());
+        if (isThemePreference(value)) return value;
+      } catch {
+        // One malformed cookie must not hide a valid later record or storage value.
+      }
     }
   } catch {
     // Reading cookies can throw in sandboxed contexts.
@@ -81,17 +85,20 @@ export function readThemePreference(): ThemePreference | null {
   return readCookiePreference() ?? readStoredPreference();
 }
 
+/** Reads only the explicit page intent that the before-paint runtime carried through hydration. */
+export function readThemePreferenceFromDocument(): ThemePreference | null {
+  if (typeof document === "undefined") return null;
+  const page = document.documentElement.getAttribute(themePreferenceAttribute);
+  return isThemePreference(page) ? page : null;
+}
+
 /**
  * Initializes a controller from a validated before-paint navigation choice,
  * then consent-gated stores. The page-only choice survives hydration even when
  * optional storage is forbidden or denied; it never grants cookie consent.
  */
 export function readInitialThemePreference(): ThemePreference | null {
-  const page =
-    typeof document === "undefined"
-      ? null
-      : document.documentElement.getAttribute(themePreferenceAttribute);
-  return isThemePreference(page) ? page : readThemePreference();
+  return readThemePreferenceFromDocument() ?? readThemePreference();
 }
 
 /**
@@ -109,7 +116,7 @@ export function writeThemePreference(preference: ThemePreference): void {
     const host = window.location.hostname;
     const domain =
       host === "meltiply.com" || host.endsWith(".meltiply.com") ? "; Domain=meltiply.com" : "";
-    document.cookie = `${themeCookieName}=${preference}; Path=/; Max-Age=31536000; SameSite=Lax; Secure${domain}`;
+    document.cookie = `${themeCookieName}=${preference}; Path=/; Max-Age=31536000; SameSite=Lax${window.location.protocol === "https:" ? "; Secure" : ""}${domain}`;
   } catch {
     // Cookie writes can be denied; localStorage above still carries the choice.
   }
@@ -123,20 +130,30 @@ export function writeThemePreference(preference: ThemePreference): void {
  * preference changes, so no-op writes never loop; local writes keep the
  * comparison baseline current for subsequent external changes.
  *
- * @param listener Receives the new effective preference, or `null` when every
- *   store was cleared (the OS palette becomes authoritative again).
+ * A cleared store does not erase an explicit page choice while functional
+ * consent remains: that choice still governs the current document and its
+ * marked navigation, matching the before-paint intent attribute. Withdrawing
+ * functional consent does erase it, since persistence is no longer permitted.
+ *
+ * @param listener Receives the new effective preference, or `null` when no
+ *   stored choice remains. A retained page intent can still govern the
+ *   document while functional consent remains.
  * @returns Unsubscribe function removing all listeners.
  */
 export function subscribeThemePreference(
   listener: (preference: ThemePreference | null) => void,
 ): () => void {
   let last = readThemePreference();
+  let functionalConsent = hasCookieConsent("functional");
   const check = () => {
+    const nextFunctionalConsent = hasCookieConsent("functional");
+    const root = document.documentElement;
+    if (functionalConsent && !nextFunctionalConsent) root.removeAttribute(themePreferenceAttribute);
+    functionalConsent = nextFunctionalConsent;
     const next = readThemePreference();
     if (next === last) return;
     last = next;
-    if (next === null) document.documentElement.removeAttribute(themePreferenceAttribute);
-    else document.documentElement.setAttribute(themePreferenceAttribute, next);
+    if (next !== null) root.setAttribute(themePreferenceAttribute, next);
     listener(next);
   };
   const onStorage = (event: StorageEvent) => {

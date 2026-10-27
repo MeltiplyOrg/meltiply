@@ -132,7 +132,7 @@ function apiFor(session: UploadSessionResponse) {
 describe("contract upload sessions", () => {
   beforeEach(() => {
     window.localStorage.clear();
-    writeCookieConsent({ functional: true, analytics: false, marketing: false });
+    writeCookieConsent({ functional: true });
     FakeXMLHttpRequest.statusByUrl.clear();
     FakeXMLHttpRequest.delayByUrl.clear();
     FakeXMLHttpRequest.abortDelayByUrl.clear();
@@ -205,7 +205,7 @@ describe("contract upload sessions", () => {
    * local recovery reads and writes remain entirely disabled.
    */
   it("continues upload without accessing optional recovery storage after rejection", async () => {
-    writeCookieConsent({ functional: false, analytics: false, marketing: false });
+    writeCookieConsent({ functional: false });
     const storage = new MemoryStorage();
     const api = apiFor(
       sessionResponse({

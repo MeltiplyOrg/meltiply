@@ -6,9 +6,23 @@ import { cn } from "@meltiply/ui/utils";
 import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import { useI18n } from "@/lib/i18n";
 import { normalizePostStatus, resolveRowCaption, toLocalDateKey } from "./posts-helpers";
+import { publicationStatusPresentation, PUBLICATION_ICON_TONE } from "./status-presentation";
 import type { CalendarDayCell, PostRow } from "./types";
 import { calendarDateKey } from "./calendar-dates";
 import type { CalendarSlot } from "./calendar-slots";
+
+/**
+ * Dense Week-canvas tint per canonical tone, opaque enough to sit over the hour
+ * lines. The tone travels as `data-tone`, keeping the class list static for the
+ * design-system linter.
+ */
+const CANVAS_CHIP_TONE_CLASS = `
+  border-line bg-surface
+  data-[tone=accent]:border-accent/20 data-[tone=accent]:bg-accent-tint-solid
+  data-[tone=green]:border-green/20 data-[tone=green]:bg-green-tint-solid
+  data-[tone=orange]:border-orange/20 data-[tone=orange]:bg-orange-tint
+  data-[tone=red]:border-red/20 data-[tone=red]:bg-red-tint-solid
+`;
 
 interface GridEntry {
   date: string;
@@ -261,6 +275,7 @@ export function CalendarTimeGrid({
                     if (!post) return null;
                     const caption = resolveRowCaption(post) || t("Untitled post");
                     const status = normalizePostStatus(post);
+                    const { tone, Icon } = publicationStatusPresentation(status);
                     const time = eventTime.format(new Date(post.date));
                     return (
                       <Tooltip key={post.id}>
@@ -268,13 +283,12 @@ export function CalendarTimeGrid({
                           <Button
                             variant="ghost"
                             data-slot-state={slot ? "filled" : undefined}
+                            data-tone={tone}
                             onClick={() => onViewDetails(post.id)}
                             aria-label={`${slot ? `${t("Filled slot")} · ` : ""}${caption} · ${time} · ${tStatus(status)}`}
                             className={cn(
-                              "absolute top-(--event-top) left-(--event-left) z-10 h-12 w-(--event-width) min-w-0 flex-col items-start justify-start gap-0.5 overflow-hidden rounded-control border border-accent/20 bg-accent-tint-solid px-1.5 py-1 text-left text-xs hover:brightness-95 focus-visible:z-30",
-                              status === "published" && "border-green/20 bg-green-tint-solid",
-                              (status === "failed" || status === "needs_reconciliation") &&
-                                "border-red/20 bg-red-tint-solid",
+                              "absolute top-(--event-top) left-(--event-left) z-10 h-12 w-(--event-width) min-w-0 flex-col items-start justify-start gap-0.5 overflow-hidden rounded-control border px-1.5 py-1 text-left text-xs hover:brightness-95 focus-visible:z-30",
+                              CANVAS_CHIP_TONE_CLASS,
                             )}
                             style={
                               {
@@ -285,12 +299,14 @@ export function CalendarTimeGrid({
                             }
                           >
                             <span className="w-full truncate font-medium">{caption}</span>
-                            <time
-                              dateTime={post.date}
-                              className="w-full truncate text-(length:--font-size-micro)"
-                            >
-                              {time} · {tStatus(status)}
-                            </time>
+                            <span className="flex w-full min-w-0 items-center gap-1 text-(length:--font-size-micro)">
+                              <Icon
+                                className={cn("size-2.75 shrink-0", PUBLICATION_ICON_TONE[tone])}
+                              />
+                              <time dateTime={post.date} className="truncate">
+                                {time} · {tStatus(status)}
+                              </time>
+                            </span>
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>

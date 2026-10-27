@@ -29,6 +29,30 @@ async function openPreviewControls(page) {
 }
 const browser = await chromium.launch();
 try {
+  // Block application modules to prove transferred palettes commit before React can hydrate, without consuming preview parameters.
+  const shellContext = await browser.newContext({ colorScheme: "light" });
+  try {
+    await shellContext.route(/\/assets\/.*\.js(?:\?|$)/, (route) => route.abort());
+    const shell = await shellContext.newPage();
+    for (const preference of ["dark", "light"]) {
+      await shell.goto(
+        `${origin}/posts?meltiply-theme=${preference}&previewScenario=empty#theme-review`,
+        { waitUntil: "domcontentloaded" },
+      );
+      if (preference === "dark") await expect(shell.locator("html")).toHaveClass(/\bdark\b/);
+      else await expect(shell.locator("html")).not.toHaveClass(/\bdark\b/);
+      assert.equal(
+        await shell.locator("html").evaluate((root) => getComputedStyle(root).colorScheme),
+        preference,
+      );
+      const url = new URL(shell.url());
+      assert.equal(url.searchParams.has("meltiply-theme"), false);
+      assert.equal(url.searchParams.get("previewScenario"), "empty");
+      assert.equal(url.hash, "#theme-review");
+    }
+  } finally {
+    await shellContext.close();
+  }
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = [];

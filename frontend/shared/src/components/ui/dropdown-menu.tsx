@@ -3,6 +3,11 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronRight } from "lucide-react";
 import { cn } from "@meltiply/ui/utils";
 import { SlidingHighlight } from "../primitives/sliding-highlight";
+import {
+  SEGMENTED_INDICATOR,
+  SEGMENTED_ITEM,
+  SEGMENTED_TRACK,
+} from "../primitives/segmented-chrome";
 /**
  * Root container for dropdown menus built on Radix DropdownMenu.
  *
@@ -44,9 +49,52 @@ export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 /**
  * Container for grouping mutually exclusive {@link DropdownMenuRadioItem} components.
  *
- * Manages controlled (`value`, `onValueChange`) radio selection state.
+ * Manages controlled (`value`, `onValueChange`) radio selection state. The
+ * default variant is a plain Radix group; `segment` renders the shared segmented
+ * track and a dedicated `SlidingHighlight` that travels to the checked item, so
+ * no segment paints its own selected fill. Menu Content's hover pill excludes
+ * these items; Radix still owns menu roving focus and keyboard behavior.
+ *
+ * @param variant - Plain group or a segmented preference row (default `default`).
  */
-export const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
+export const DropdownMenuRadioGroup = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.RadioGroup>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioGroup> & {
+    variant?: "default" | "segment";
+  }
+>(({ className, children, variant = "default", ...props }, ref) => {
+  const groupRef = React.useRef<React.ElementRef<typeof DropdownMenuPrimitive.RadioGroup> | null>(
+    null,
+  );
+  const setRefs = React.useCallback(
+    (node: React.ElementRef<typeof DropdownMenuPrimitive.RadioGroup> | null) => {
+      groupRef.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) ref.current = node;
+    },
+    [ref],
+  );
+
+  return (
+    <DropdownMenuPrimitive.RadioGroup
+      ref={setRefs}
+      className={cn(variant === "segment" && SEGMENTED_TRACK, className)}
+      {...props}
+    >
+      {variant === "segment" && (
+        <SlidingHighlight
+          containerRef={groupRef}
+          itemSelector="[data-segment-item]"
+          activeSelector='[data-segment-item][data-state="checked"]'
+          axis="x"
+          className={SEGMENTED_INDICATOR}
+        />
+      )}
+      {children}
+    </DropdownMenuPrimitive.RadioGroup>
+  );
+});
+DropdownMenuRadioGroup.displayName = DropdownMenuPrimitive.RadioGroup.displayName;
 
 /**
  * Submenu trigger item that reveals a nested {@link DropdownMenuSubContent} on
@@ -118,7 +166,7 @@ const DropdownMenuSubContent = React.forwardRef<
       {highlight && (
         <SlidingHighlight
           containerRef={subContentRef}
-          itemSelector="[data-dropdown-item]"
+          itemSelector="[data-dropdown-item]:not([data-segment-item])"
           deferUntilInteraction
         />
       )}
@@ -176,7 +224,7 @@ export const DropdownMenuContent = React.forwardRef<
         {highlight && (
           <SlidingHighlight
             containerRef={contentRef}
-            itemSelector="[data-dropdown-item]"
+            itemSelector="[data-dropdown-item]:not([data-segment-item])"
             deferUntilInteraction
           />
         )}
@@ -252,7 +300,9 @@ DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displa
 /**
  * Selectable radio option within a {@link DropdownMenuRadioGroup}. The default
  * layout is a menu row with a right-aligned accent check; `segment` joins
- * compact horizontal choices with neutral selected styling. Radix retains menu
+ * compact horizontal choices inside a `segment` group, using the shared segmented
+ * item chrome (24px on fine pointers, the shared 44px coarse minimum) and leaving
+ * the checked fill to that group's travelling highlight. Radix retains menu
  * arrow-key navigation and checked semantics. Callers may prevent selection
  * dismissal for immediate preferences.
  *
@@ -274,10 +324,14 @@ export const DropdownMenuRadioItem = React.forwardRef<
     ref={ref}
     data-dropdown-item
     data-menu-item=""
+    data-segment-item={variant === "segment" ? "" : undefined}
     className={cn(
       "cursor-default select-none",
       variant === "segment"
-        ? "h-6 min-h-6 flex-1 justify-center gap-1 rounded-control px-2 text-xs font-medium text-ink-2 transition-colors focus-visible:ring-2 focus-visible:ring-ring data-[highlighted]:text-ink data-[state=checked]:bg-surface data-[state=checked]:text-ink data-[state=checked]:shadow-btn"
+        ? cn(
+            SEGMENTED_ITEM,
+            "pointer-fine:min-h-6 flex-1 justify-center data-[highlighted]:text-ink data-[state=checked]:text-ink",
+          )
         : "pr-8",
       className,
     )}

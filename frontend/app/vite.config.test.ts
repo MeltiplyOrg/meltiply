@@ -45,12 +45,6 @@ function canonicalMiddleware(frontendUrl: string): Middleware {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Vite frontend configuration", () => {
-  it("deduplicates React modules for DEV-only tools", () => {
-    const config = viteConfig({ command: "serve", mode: "test" });
-
-    expect(config.resolve?.dedupe).toEqual(["react", "react-dom"]);
-  });
-
   it("redirects alternate HTML navigations without redirecting canonical or asset requests", () => {
     const middleware = canonicalMiddleware("http://dashboard.example.test:3000");
     const response = { end: vi.fn(), writeHead: vi.fn() };

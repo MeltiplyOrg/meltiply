@@ -2,54 +2,73 @@ import { describe, expect, it } from "vite-plus/test";
 import type { PostRow } from "./types";
 import { groupPostRows } from "./post-groups";
 
-const rows: PostRow[] = [
-  {
-    id: "published-early",
+/**
+ * Builds one status-only row, so grouping is exercised over the canonical
+ * publication status rather than any view-specific content.
+ */
+function row(id: string, status: string, brandProfileId = "profile-a"): PostRow {
+  return {
+    id,
     date: "2026-02-01T10:00:00Z",
-    status: "published",
+    status,
     channels: [],
-    brandProfileId: "profile-a",
-  },
-  {
-    id: "draft-a",
-    date: "2026-02-01T09:00:00Z",
-    status: "draft",
-    channels: [],
-    brandProfileId: "profile-a",
-  },
-  {
-    id: "unknown",
-    date: "2026-02-01T11:00:00Z",
-    status: "future_provider_status",
-    channels: [],
-    brandProfileId: "missing-profile",
-  },
-  {
-    id: "published-late",
-    date: "2026-02-01T12:00:00Z",
-    status: "published",
-    channels: [],
-    brandProfileId: "profile-a",
-  },
-  {
-    id: "draft-b",
-    date: "2026-02-01T13:00:00Z",
-    status: "draft",
-    channels: [],
-    brandProfileId: "profile-b",
-  },
+    brandProfileId,
+  };
+}
+
+const rows: PostRow[] = [
+  row("published-early", "published"),
+  row("draft-a", "draft"),
+  row("unknown", "future_provider_status"),
+  row("processing", "processing"),
+  row("published-late", "published"),
+  row("draft-b", "draft", "profile-b"),
+  row("needs-reconciliation", "needs_reconciliation"),
+  row("queued", "queued"),
+  row("failed", "failed"),
+  row("awaiting-provider", "awaiting_provider"),
+  row("scheduled", "scheduled"),
+  row("cancel-requested", "cancel_requested"),
+  row("cancelled", "cancelled"),
+  row("superseded-publishing", "publishing"),
 ];
 
 describe("groupPostRows", () => {
-  it("keeps unknown publication outcomes and sorted row order within ordered status groups", () => {
+  it("orders every canonical publication status and coalesces unknown outcomes", () => {
     const groups = groupPostRows(rows, "status", []);
-    expect(groups.map(({ id }) => id)).toEqual(["draft", "published", "future_provider_status"]);
+    expect(groups.map(({ id }) => id)).toEqual([
+      "draft",
+      "scheduled",
+      "queued",
+      "processing",
+      "awaiting_provider",
+      "published",
+      "failed",
+      "needs_reconciliation",
+      "cancel_requested",
+      "cancelled",
+      "unknown",
+    ]);
     expect(groups.map(({ posts }) => posts.map(({ id }) => id))).toEqual([
       ["draft-a", "draft-b"],
+      ["scheduled"],
+      ["queued"],
+      ["processing"],
+      ["awaiting-provider"],
       ["published-early", "published-late"],
-      ["unknown"],
+      ["failed"],
+      ["needs-reconciliation"],
+      ["cancel-requested"],
+      ["cancelled"],
+      ["unknown", "superseded-publishing"],
     ]);
     expect(groups.flatMap(({ posts }) => posts)).toHaveLength(rows.length);
+  });
+
+  it("labels the unknown group for the same neutral badge every surface uses", () => {
+    const unknown = groupPostRows(rows, "status", []).find(({ id }) => id === "unknown");
+
+    expect(unknown).toMatchObject({ label: "unknown", status: "unknown" });
   });
 
   it("retains every row in input order when grouping is disabled", () => {

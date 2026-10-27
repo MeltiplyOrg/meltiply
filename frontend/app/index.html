@@ -24,95 +24,14 @@
         typeof consentValue.expires === "number" &&
         Number.isFinite(consentValue.expires) &&
         consentValue.expires > Date.now() &&
-        typeof consentValue.functional === "boolean" &&
-        typeof consentValue.analytics === "boolean" &&
-        typeof consentValue.marketing === "boolean";
+        typeof consentValue.functional === "boolean";
       var functional = decided && consentValue.functional === true;
       root.toggleAttribute("data-cookie-decided", Boolean(decided));
       root.toggleAttribute("data-cookie-functional", Boolean(functional));
-
-      var params = new URLSearchParams(window.location.search);
-      var transferredTheme = params.get("meltiply-theme");
-      if (
-        transferredTheme !== "light" &&
-        transferredTheme !== "dark" &&
-        transferredTheme !== "system"
-      ) {
-        transferredTheme = null;
-      }
-      if (params.has("meltiply-theme")) {
-        params.delete("meltiply-theme");
-        var query = params.toString();
-        try {
-          window.history.replaceState(
-            null,
-            "",
-            window.location.pathname + (query ? "?" + query : "") + window.location.hash,
-          );
-        } catch (error) {
-          // The unused transfer parameter is harmless if history cannot be changed.
-        }
-      }
-
-      var storedTheme = transferredTheme;
-      if (functional) {
-        // Resolve intent before optional persistence: blocked writes must not
-        // discard a transferred choice or a valid shared cookie preference.
-        if (storedTheme === null) {
-          try {
-            var themeEntry = document.cookie
-              .split(";")
-              .find((item) => item.trim().startsWith("meltiply-theme="));
-            var cookieTheme = themeEntry
-              ? decodeURIComponent(themeEntry.trim().slice("meltiply-theme=".length))
-              : null;
-            storedTheme =
-              cookieTheme === "light" || cookieTheme === "dark" || cookieTheme === "system"
-                ? cookieTheme
-                : window.localStorage.getItem("meltiply.theme");
-          } catch (error) {
-            // Unavailable preference reads leave the OS palette authoritative.
-          }
-        }
-        if (storedTheme === "light" || storedTheme === "dark" || storedTheme === "system") {
-          try {
-            window.localStorage.setItem("meltiply.theme", storedTheme);
-          } catch (error) {
-            // Recovery storage is optional; retain the resolved current-page choice.
-          }
-          try {
-            var themeDomain =
-              location.hostname === "meltiply.com" || location.hostname.endsWith(".meltiply.com")
-                ? "; Domain=meltiply.com"
-                : "";
-            var themeSecure = location.protocol === "https:" ? "; Secure" : "";
-            document.cookie =
-              "meltiply-theme=" +
-              storedTheme +
-              "; Path=/; Max-Age=31536000; SameSite=Lax" +
-              themeSecure +
-              themeDomain;
-          } catch (error) {
-            // A denied cookie write must not undo the choice or the local write.
-          }
-        }
-      }
-
-      var prefersDark = false;
-      try {
-        prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      } catch (error) {
-        // Unsupported media queries use the light palette.
-      }
-      root.classList.toggle(
-        "dark",
-        storedTheme === "dark" || (storedTheme !== "light" && prefersDark),
-      );
-      root.style.colorScheme = root.classList.contains("dark") ? "dark" : "light";
-      if (storedTheme === "light" || storedTheme === "dark" || storedTheme === "system") {
-        root.setAttribute("data-theme-preference", storedTheme);
-      }
     </script>
+    <!-- The shared before-paint runtime is injected by `meltiply-theme-bootstrap`
+         in vite.config.ts from `frontend/shared/theme-bootstrap.js`. -->
+    <!-- meltiply-theme-bootstrap -->
     <link rel="stylesheet" href="/src/app/globals.css" />
     <title>Meltiply</title>
   </head>

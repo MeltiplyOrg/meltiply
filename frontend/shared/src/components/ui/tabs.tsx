@@ -1,6 +1,11 @@
 import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { SlidingHighlight } from "../primitives/sliding-highlight";
+import {
+  SEGMENTED_INDICATOR,
+  SEGMENTED_ITEM,
+  SEGMENTED_TRACK,
+} from "../primitives/segmented-chrome";
 import { cn } from "@meltiply/ui/utils";
 
 /** Radix owns tab selection, arrow-key navigation, and tab/panel relationships. */
@@ -16,13 +21,12 @@ type TabsListProps = React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> &
   indicatorClassName?: string;
 };
 const listStyles = {
-  segment:
-    "relative inline-flex h-7 items-center justify-center gap-0.5 rounded-control bg-hover-2 p-0.5",
-  line: "relative flex h-10 items-center justify-start gap-6 border-b border-line",
+  segment: SEGMENTED_TRACK,
+  line: "relative flex min-h-10 items-center justify-start gap-6 border-b border-line",
   navigation: "flex flex-col items-stretch gap-1",
 };
 const indicatorStyles = {
-  segment: "inset-y-0.5 border-transparent bg-surface shadow-btn",
+  segment: SEGMENTED_INDICATOR,
   line: "-bottom-px h-0.5 rounded-none border-transparent bg-accent shadow-none",
 };
 
@@ -30,7 +34,9 @@ const indicatorStyles = {
  * One tab owner supports compact segments, directory underlines, and settings
  * navigation without page CSS. The horizontal variants hand their selection to a
  * shared partial: the highlight travels to the selected trigger instead of each
- * trigger painting the fill in place, so switching sections slides.
+ * trigger painting the fill in place, so switching sections slides. The `line`
+ * strip uses a minimum height so a coarse-pointer trigger (the shared 44px item
+ * minimum) grows the strip instead of being clipped by it.
  */
 export const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,
@@ -80,7 +86,8 @@ export const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "relative z-10 inline-flex h-6 items-center justify-center gap-1 whitespace-nowrap rounded-control px-2.5 text-xs font-medium outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45 data-[state=active]:text-ink group-data-[variant=line]/tabs:h-10 group-data-[variant=line]/tabs:rounded-none group-data-[variant=line]/tabs:border-b-2 group-data-[variant=line]/tabs:border-transparent group-data-[variant=line]/tabs:px-0 group-data-[variant=navigation]/tabs:h-8 group-data-[variant=navigation]/tabs:justify-start group-data-[variant=navigation]/tabs:data-[state=active]:bg-hover-2",
+      SEGMENTED_ITEM,
+      "data-[state=active]:text-ink group-data-[variant=line]/tabs:h-10 group-data-[variant=line]/tabs:rounded-none group-data-[variant=line]/tabs:border-b-2 group-data-[variant=line]/tabs:border-transparent group-data-[variant=line]/tabs:px-0 group-data-[variant=navigation]/tabs:h-8 group-data-[variant=navigation]/tabs:justify-start group-data-[variant=navigation]/tabs:data-[state=active]:bg-hover-2",
       className,
     )}
     {...props}

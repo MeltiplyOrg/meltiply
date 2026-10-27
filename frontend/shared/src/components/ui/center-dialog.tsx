@@ -8,13 +8,6 @@ import { Button } from "./button";
 import { dialogChrome } from "./dialog-chrome";
 
 /**
- * Unstyled focus containment for modal layers that own their own geometry.
- * Shares Radix's focus stack with dialogs and portalled menus; callers control
- * trapping/looping and autofocus to match their open/close lifecycle.
- */
-export { FocusScope } from "@radix-ui/react-focus-scope";
-
-/**
  * Root of the centered dialog type: a compact modal in the middle of the
  * screen that pops up bottom-up. Use it for forms and short focused tasks;
  * large inspection panels use `SideDialog`, confirmations `CenterAlertDialog`.

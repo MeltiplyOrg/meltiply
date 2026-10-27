@@ -169,6 +169,32 @@ describe("SegmentedControl single-select semantics", () => {
     expectSelected("Month");
   });
 
+  it("leaves modified arrow shortcuts to the browser and owner", () => {
+    const onSelect = vi.fn();
+    render(<GroupingSelector onSelect={onSelect} />);
+    const group = screen.getByRole("radiogroup", { name: "Group by" });
+    const week = within(group).getByRole("radio", { name: "Week" });
+    week.focus();
+
+    for (const modifier of ["altKey", "ctrlKey", "metaKey"] as const) {
+      expect(fireEvent.keyDown(week, { key: "ArrowRight", [modifier]: true })).toBe(true);
+      expect(week).toHaveAttribute("aria-checked", "true");
+      expect(week).toHaveFocus();
+      expect(onSelect).not.toHaveBeenCalled();
+    }
+
+    // The unmodified key still selects, proving the guard is limited to shortcuts.
+    expect(fireEvent.keyDown(week, { key: "ArrowRight" })).toBe(false);
+    expect(within(group).getByRole("radio", { name: "Month" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(onSelect).toHaveBeenCalledWith(
+      "month",
+      within(group).getByRole("radio", { name: "Month" }),
+    );
+  });
+
   it("renders custom option content without changing selection", () => {
     render(
       <SegmentedControl

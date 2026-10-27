@@ -86,6 +86,36 @@ function ControlledDialog(): React.ReactElement {
   );
 }
 
+/**
+ * Controlled dialog whose owner deliberately focuses a field during the
+ * open-autofocus event, so the original opener must still own restoration.
+ */
+function CallerDirectedDialog(): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  const fieldRef = React.useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open directed profile
+      </button>
+      <CenterDialog open={open} onOpenChange={setOpen}>
+        <CenterDialogContent
+          aria-describedby={undefined}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            fieldRef.current?.focus();
+          }}
+        >
+          <CenterDialogHeader>
+            <CenterDialogTitle>Directed profile</CenterDialogTitle>
+          </CenterDialogHeader>
+          <input ref={fieldRef} aria-label="Directed name" defaultValue="Original" />
+        </CenterDialogContent>
+      </CenterDialog>
+    </>
+  );
+}
+
 /** Destructive confirmation opened from feature state without a Radix trigger. */
 function ControlledDestructiveDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
@@ -178,6 +208,27 @@ describe("ordinary centered dialog dismissal", () => {
     });
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: "Controlled name" })).toHaveFocus();
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(opener).toHaveFocus();
+  });
+
+  it("keeps the original opener when the caller directs initial focus", async () => {
+    render(<CallerDirectedDialog />);
+    const opener = screen.getByRole("button", { name: "Open directed profile" });
+    await act(async () => {
+      opener.focus();
+      fireEvent.click(opener);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Directed name" })).toHaveFocus();
     });
 
     await act(async () => {

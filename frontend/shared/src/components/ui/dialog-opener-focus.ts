@@ -11,13 +11,13 @@ type FocusEventHandler = (event: Event) => void;
  * Meltiply centered dialog is opened from controlled state (a row action, a
  * menu item, or a toolbar button), so without this hook the primitive prevents
  * its own unmount fallback and clears focus to the body. The opener is captured
- * during Radix's open-autofocus event, before the initial field takes focus, and
- * a still-connected opener is focused without scrolling the surface underneath.
- * When the call site does use a trigger, that trigger is the captured element,
- * so behavior is identical.
+ * before the caller's open-autofocus handler runs, so a caller-directed focus
+ * inside the dialog cannot replace it, and a still-connected opener is focused
+ * without scrolling the surface underneath. When the call site does use a
+ * trigger, that trigger is the captured element, so behavior is identical.
  *
- * Caller handlers run first: an open handler's `preventDefault` still suppresses
- * the primitive's initial focus, and a close handler that already prevented the
+ * Caller handlers still run: an open handler's `preventDefault` suppresses the
+ * primitive's initial focus, and a close handler that already prevented the
  * event keeps ownership of focus.
  *
  * @param onOpenAutoFocus - Caller's Radix open-autofocus handler.
@@ -32,11 +32,13 @@ export function useDialogOpenerFocus(
 
   const handleOpenAutoFocus = React.useCallback<FocusEventHandler>(
     (event) => {
-      onOpenAutoFocus?.(event);
+      // Capture first: the caller may intentionally focus a field inside the
+      // dialog, which must not become the opener.
       const active = document.activeElement;
       // A body focus means the owner opened the dialog programmatically; leave
       // focus restoration to the primitive's own trigger when one exists.
       openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+      onOpenAutoFocus?.(event);
     },
     [onOpenAutoFocus],
   );

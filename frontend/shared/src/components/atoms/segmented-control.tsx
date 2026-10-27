@@ -67,11 +67,15 @@ export function SegmentedControl<T extends string>({
   };
 
   /**
-   * Wrapping radio-group keys. The event is delegated from the track so items
-   * need no handlers of their own; pointer clicks keep native button focus.
+   * Wrapping radio-group keys. Bare Arrow/Home/End keys select and move focus;
+   * modified shortcuts (Alt/Ctrl/Meta) are left to the browser and owner, so a
+   * browser back/forward or word-navigation gesture keeps its meaning. The event
+   * is delegated from the track so items need no handlers of their own; pointer
+   * clicks keep native button focus.
    */
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (options.length === 0) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const currentIndex = options.indexOf(value);
     const fromIndex = currentIndex === -1 ? tabStopIndex : currentIndex;
     let nextIndex: number;

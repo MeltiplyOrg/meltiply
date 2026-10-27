@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.63.0",
+    "@electric-sql/pglite": "0.5.12",
     "@lhci/cli": "0.15.1",
     "@playwright/test": "1.64.0",
     "@tailwindcss/postcss": "^4",

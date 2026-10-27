@@ -17,6 +17,24 @@ const profileId = "00000000-0000-4000-8000-000000000111";
 
 /** Exercises browser-preview behavior through HTTP, including scenario scope, read-after-edit/reset, authentication, and fail-closed misses. */
 describe("contract-driven UI preview HTTP boundary", () => {
+  it("retains the database seed's ordered composition separately from its frozen publication", async () => {
+    const response = await fetch(`${origin}/api/v1/posts/49000000-0000-4000-8000-000000000001`);
+    expect(response.status).toBe(200);
+    const post: Post = await response.json();
+    expect(post.attachments.map((attachment) => attachment.asset_id)).toEqual([
+      "d7000000-0000-4000-8000-000000000001",
+      "d7000000-0000-4000-8000-000000000002",
+      "d7000000-0000-4000-8000-000000000003",
+    ]);
+    const published = post.distributions.find(
+      (distribution) => distribution.status === "published",
+    );
+    expect(published?.publication?.media.map((media) => media.asset_id)).toEqual([
+      "d7000000-0000-4000-8000-000000000001",
+      "d7000000-0000-4000-8000-000000000002",
+    ]);
+  });
+
   it("returns empty collections without removing the authenticated workspace shell", async () => {
     server.resetHandlers(...createPreviewHandlers({ scenario: "empty" }));
     const session = await fetch(`${origin}/api/auth/get-session`).then((response) =>

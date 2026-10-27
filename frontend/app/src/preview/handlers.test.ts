@@ -40,12 +40,23 @@ describe("contract-driven UI preview HTTP boundary", () => {
       "d7000000-0000-4000-8000-000000000003",
     ]);
     const published = post.distributions.find(
-      (distribution) => distribution.status === "published",
+      (distribution) => distribution.id === "f8000000-0000-4000-8000-000000000101",
     );
     expect(published?.publication?.media.map((media) => media.asset_id)).toEqual([
       "d7000000-0000-4000-8000-000000000001",
       "d7000000-0000-4000-8000-000000000002",
     ]);
+  });
+
+  it("keeps one Channel's analytics history separate from other Distributions", async () => {
+    const distributionId = "f8000000-0000-4000-8000-000000000101";
+    const response = await fetch(`${origin}/api/v1/analytics/${distributionId}`);
+    expect(response.status).toBe(200);
+    const body: { snapshots: { distribution_id: string; views: number }[] } = await response.json();
+    expect(body.snapshots.some((snapshot) => snapshot.views > 0)).toBe(true);
+    expect(new Set(body.snapshots.map((snapshot) => snapshot.distribution_id))).toEqual(
+      new Set([distributionId]),
+    );
   });
 
   it("returns empty collections without removing the authenticated workspace shell", async () => {

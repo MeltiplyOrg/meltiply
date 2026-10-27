@@ -8,6 +8,7 @@ on:
       - "frontend/app/**"
       - "frontend/shared/**"
       - "packages/contracts/**"
+      - "packages/domain/**"
       - "packages/database/migrations/**"
       - "packages/providers/**"
       - "workers/api/src/**"

@@ -30,7 +30,7 @@ export function WorkspaceSurface({
 }: WorkspaceSurfaceProps) {
   return (
     <div className={cn("flex size-full min-h-0 min-w-0 flex-col bg-surface", className)}>
-      <header className="flex shrink-0 flex-col gap-1 px-4 pb-3 pt-5 sm:px-6 sm:pt-6">
+      <header className="flex shrink-0 flex-col gap-1 px-4 pb-2 pt-4 sm:px-6 sm:pb-3 sm:pt-6">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
           <div className="min-w-0 flex-1">
             <h1 className="m-0 text-(length:--text-title) font-semibold leading-tight tracking-page-title">

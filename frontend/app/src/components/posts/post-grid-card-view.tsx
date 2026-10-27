@@ -33,7 +33,7 @@ export interface PostGridCardViewProps extends PostSelectionProps {
   onViewDetails: (postId: string) => void;
 }
 
-const GRID_VIEWPORT_CLASS = "min-h-0 flex-1 overflow-y-auto px-4 pb-24 pt-3.5 sm:px-6";
+const GRID_VIEWPORT_CLASS = "min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3.5 sm:px-6";
 
 /**
  * Media Grid composed from canonical Post cards with real attachment previews.

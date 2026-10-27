@@ -427,7 +427,7 @@ export const PostTableView = React.memo(function PostTableView({
   return (
     <div
       ref={scrollRef}
-      className={cn("min-h-0 flex-1 overflow-auto pb-24", selectedIds.size > 0 && "pb-32")}
+      className={cn("min-h-0 flex-1 overflow-auto pb-6", selectedIds.size > 0 && "pb-32")}
     >
       <Table
         variant="spreadsheet"

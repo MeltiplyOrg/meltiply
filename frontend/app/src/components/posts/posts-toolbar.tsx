@@ -204,7 +204,7 @@ export const PostsToolbar = React.memo(function PostsToolbar({
   };
   return (
     <>
-      <TopToolbar>
+      <TopToolbar className="max-sm:justify-between max-sm:py-1.5">
         <TopToolbarSearch
           key="search"
           value={searchQuery}

@@ -794,7 +794,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
           <div
             ref={accountsScrollRef}
             className={cn(
-              "min-h-0 flex-1 overflow-auto px-4 pb-24 sm:px-6",
+              "min-h-0 flex-1 overflow-auto px-4 pb-6 sm:px-6",
               selectedIds.size > 0 && "pb-32",
             )}
           >
@@ -853,7 +853,7 @@ export function ChannelsView({ initialTab }: ChannelsViewProps = {}) {
         <TabsContent
           value="profiles"
           ref={profilesScrollRef}
-          className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 pb-24 pt-3.5 sm:px-6"
+          className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3.5 sm:px-6"
         >
           <BrandProfileDirectory
             profiles={brandProfiles}

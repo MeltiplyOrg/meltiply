@@ -905,5 +905,7 @@
   "Actions for {name}": "针对 {name} 的操作",
   "Current time: {time}": "当前时间：{time}",
   "Next in this view": "此视图中的下一篇",
-  "No upcoming Posts in this view.": "此视图中暂无即将发布的 Post。"
+  "No upcoming Posts in this view.": "此视图中暂无即将发布的 Post。",
+  "Creating…": "正在创建…",
+  "Updating…": "正在更新…"
 }

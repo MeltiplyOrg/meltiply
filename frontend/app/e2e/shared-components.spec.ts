@@ -227,6 +227,21 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
     path: testInfo.outputPath("shared-components-posts-phone-320x568.png"),
     fullPage: true,
   });
+
+  // A preference changed while the page is open re-renders the highlight store;
+  // the next selection commits without rendered travel.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    return promise;
+  });
+  const liveReduced = await sampleHighlightTravel(page, postView, tableRadio);
+  expect(liveReduced.changed).toBe(true);
+  expect(liveReduced.travelledFrames).toBe(0);
+  expect(liveReduced.finalSample.scaleX).toBeCloseTo(1, 2);
+  expect(liveReduced.finalSample.translateX).toBeCloseTo(0, 1);
+  await expect(tableRadio).toBeChecked();
 });
 
 /**

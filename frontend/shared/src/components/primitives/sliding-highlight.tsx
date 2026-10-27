@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { LazyMotion, domAnimation, m, useReducedMotion } from "motion/react";
+import { LazyMotion, domAnimation, m } from "motion/react";
 import { cn } from "@meltiply/ui/utils";
+import { useReducedMotionPreference } from "./use-reduced-motion";
 
 /**
  * Attributes that name the active item. Every consumer family writes one of
@@ -110,9 +111,9 @@ export interface SlidingHighlightProps {
  * Only transforms animate, so travel stays off the layout path, and a selection
  * that lands mid-flight retargets the running spring instead of jumping. Items
  * must paint above the highlight (`relative z-10`). When the operating system
- * asks for reduced motion, travel commits instantly while the opacity fade still
- * marks appearance and disappearance, so selection keeps working without a
- * spring.
+ * asks for reduced motion — including a change made while the page is open —
+ * travel commits instantly while the opacity fade still marks appearance and
+ * disappearance, so selection keeps working without a spring.
  *
  * @param props - Tracked container, item/active selectors, travel axis, and styling.
  * @returns An absolutely positioned motion element rendered behind the items.
@@ -125,7 +126,7 @@ export function SlidingHighlight({
   deferUntilInteraction = false,
   className,
 }: SlidingHighlightProps) {
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = useReducedMotionPreference();
   const travelTransition = prefersReducedMotion ? NO_TRAVEL : TRAVEL_SPRING;
   const [box, setBox] = useState<ItemBox | null>(null);
   const [travel, setTravel] = useState<Travel>(SETTLED);

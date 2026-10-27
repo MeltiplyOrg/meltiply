@@ -29,6 +29,7 @@
     "./status-pill": "./src/components/atoms/status-pill.tsx",
     "./rolling-count": "./src/components/atoms/rolling-count.tsx",
     "./sliding-highlight": "./src/components/primitives/sliding-highlight.tsx",
+    "./use-reduced-motion": "./src/components/primitives/use-reduced-motion.ts",
     "./public/brand-mark": "./src/components/public/brand-mark.astro",
     "./cookie-consent": "./cookie-consent.ts",
     "./cookie-notice": "./src/components/ui/cookie-notice.tsx",

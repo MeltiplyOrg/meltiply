@@ -45,8 +45,6 @@ rounded:
   control: "6px"
   card: "8px"
   window: "10px"
-spacing:
-  workspace-gutter: "24px"
 components:
   button-primary:
     backgroundColor: "{colors.accent}"

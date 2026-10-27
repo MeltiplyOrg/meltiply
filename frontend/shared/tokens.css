@@ -85,15 +85,11 @@
   --accent: #4b5bd6;
   --accent-ink: #4b5bd6;
   --accent-tint: color-mix(in srgb, var(--accent) 10%, transparent);
-  --accent-line: color-mix(in srgb, var(--accent) 38%, transparent);
   --on-accent: #ffffff;
   --green: #25754b;
   --orange: #8f5e0e;
   --red: #b23c30;
-  --blue: #3570c4;
-  --violet: #7652c2;
   --teal: #1e8580;
-  --rose: #bc4270;
   --gray: #8a867e;
   --green-tint: color-mix(in srgb, var(--green) 11%, transparent);
   --orange-tint: color-mix(in srgb, var(--orange) 12%, transparent);
@@ -130,12 +126,9 @@
   --radius-window: 10px;
   --workspace-sidebar-width: 252px;
   --workspace-topbar-height: 46px;
-  --workspace-gutter: 24px;
   --control-height: 30px;
   --control-height-sm: 26px;
-  --control-height-lg: 36px;
   --workspace-sidebar-collapsed-width: 52px;
-  --collection-row-height: 40px;
 
   --background: var(--page);
   --foreground: var(--ink);
@@ -180,10 +173,7 @@
   --green: #5cba86;
   --orange: #d8a443;
   --red: #e57d70;
-  --blue: #72a5ea;
-  --violet: #a98deb;
   --teal: #58c0b6;
-  --rose: #e68aab;
   --gray: #8f8b84;
   --overlay: #000000;
   --ink-inverse: var(--canvas);

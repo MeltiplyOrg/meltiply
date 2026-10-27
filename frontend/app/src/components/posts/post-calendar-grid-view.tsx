@@ -1,16 +1,7 @@
 import React, { useMemo, useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import { transitionViewEffect } from "@meltiply/ui/effects";
-import {
-  AlertCircle,
-  ChevronLeft,
-  ChevronRight,
-  CircleCheck,
-  CircleX,
-  Clock,
-  FileText,
-  Plus,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import { SegmentedControl } from "@meltiply/ui/segmented-control";
 import { Skeleton } from "@meltiply/ui/skeleton";
@@ -19,11 +10,25 @@ import { cn } from "@meltiply/ui/utils";
 import { useI18n } from "@/lib/i18n";
 import { normalizePostStatus, resolveRowCaption, toLocalDateKey } from "./posts-helpers";
 import { StatusBadge } from "./status-badge";
+import { publicationStatusPresentation, PUBLICATION_ICON_TONE } from "./status-presentation";
 import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import type { PostRow, CalendarDayCell } from "./types";
 import { CalendarTimeGrid } from "./calendar-time-grid";
 import { calendarDateKey, type CalendarPeriod } from "./calendar-dates";
 import type { CalendarSlot } from "./calendar-slots";
+
+/**
+ * Month-chip tint per canonical tone. The tone travels as `data-tone`, so the
+ * class list stays statically analyzable by the design-system linter; neutral
+ * remains legible without implying a schedule.
+ */
+const MONTH_CHIP_TONE_CLASS = `
+  border-line bg-inset hover:bg-inset/70
+  data-[tone=accent]:border-accent/20 data-[tone=accent]:bg-accent-tint data-[tone=accent]:hover:bg-accent-tint/70
+  data-[tone=green]:border-green/20 data-[tone=green]:bg-green-tint data-[tone=green]:hover:bg-green-tint/70
+  data-[tone=orange]:border-orange/20 data-[tone=orange]:bg-orange-tint data-[tone=orange]:hover:bg-orange-tint/70
+  data-[tone=red]:border-red/20 data-[tone=red]:bg-red-tint data-[tone=red]:hover:bg-red-tint/70
+`;
 
 export interface PostCalendarGridViewProps {
   posts: PostRow[];
@@ -258,41 +263,26 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
   function renderPostChip(row: PostRow) {
     const caption = resolveRowCaption(row) || t("Untitled post");
     const status = normalizePostStatus(row);
-    const published = status === "published";
-    const failed = status === "failed" || status === "needs_reconciliation";
-    const Icon = published
-      ? CircleCheck
-      : failed
-        ? AlertCircle
-        : status === "draft"
-          ? FileText
-          : status === "cancelled"
-            ? CircleX
-            : Clock;
+    const { tone, Icon } = publicationStatusPresentation(status);
     return (
       <Tooltip key={row.id}>
         <TooltipTrigger asChild>
           <Button
             variant="ghost"
+            data-tone={tone}
             onClick={() => onViewDetails(row.id)}
             className={cn(
               "min-w-0 justify-start text-left font-normal",
               mode === "month"
-                ? "h-5.5 gap-1.25 rounded-control border border-accent/20 bg-accent-tint px-1.5 py-0 text-xs hover:bg-accent-tint/70"
+                ? cn(
+                    "h-5.5 gap-1.25 rounded-control border px-1.5 py-0 text-xs",
+                    MONTH_CHIP_TONE_CLASS,
+                  )
                 : "h-auto flex-col items-stretch gap-1.25 whitespace-normal rounded-control border border-line bg-surface px-2 py-1.75 hover:border-line-strong",
-              published &&
-                mode === "month" &&
-                "border-green/20 bg-green-tint hover:bg-green-tint/70",
-              failed && mode === "month" && "border-red/20 bg-red-tint hover:bg-red-tint/70",
             )}
           >
             <span className="flex min-w-0 items-center gap-1.25">
-              <Icon
-                className={cn(
-                  "size-2.75 shrink-0",
-                  published ? "text-green" : failed ? "text-red" : "text-accent",
-                )}
-              />
+              <Icon className={cn("size-2.75 shrink-0", PUBLICATION_ICON_TONE[tone])} />
               <span
                 className={cn(
                   mode === "month"
@@ -550,88 +540,7 @@ export const PostCalendarGridView = React.memo(function PostCalendarGridView({
                           ) : mode === "month" && timeline ? (
                             monthEntries.slice(0, 3)
                           ) : (
-                            dayPosts.map((row) => {
-                              const caption = resolveRowCaption(row) || t("Untitled post");
-                              const status = normalizePostStatus(row);
-                              const published = status === "published";
-                              const failed =
-                                status === "failed" || status === "needs_reconciliation";
-                              const Icon = published
-                                ? CircleCheck
-                                : failed
-                                  ? AlertCircle
-                                  : status === "draft"
-                                    ? FileText
-                                    : status === "cancelled"
-                                      ? CircleX
-                                      : Clock;
-                              return (
-                                <Tooltip key={row.id}>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      onClick={() => onViewDetails(row.id)}
-                                      className={cn(
-                                        "min-w-0 justify-start text-left font-normal",
-                                        mode === "month"
-                                          ? "h-5.5 gap-1.25 rounded-control border border-accent/20 bg-accent-tint px-1.5 py-0 text-xs hover:bg-accent-tint/70"
-                                          : "h-auto flex-col items-stretch gap-1.25 whitespace-normal rounded-control border border-line bg-surface px-2 py-1.75 hover:border-line-strong",
-                                        published &&
-                                          mode === "month" &&
-                                          "border-green/20 bg-green-tint hover:bg-green-tint/70",
-                                        failed &&
-                                          mode === "month" &&
-                                          "border-red/20 bg-red-tint hover:bg-red-tint/70",
-                                      )}
-                                    >
-                                      <span className="flex min-w-0 items-center gap-1.25">
-                                        <Icon
-                                          className={cn(
-                                            "size-2.75 shrink-0",
-                                            published
-                                              ? "text-green"
-                                              : failed
-                                                ? "text-red"
-                                                : "text-accent",
-                                          )}
-                                        />
-                                        <span
-                                          className={cn(
-                                            mode === "month"
-                                              ? "truncate"
-                                              : "line-clamp-2 text-(length:--font-size-control) font-medium leading-snug",
-                                          )}
-                                        >
-                                          {timeline && (
-                                            <time
-                                              dateTime={row.date}
-                                              className="mr-1 font-medium tabular-nums"
-                                            >
-                                              {timeLabel.format(new Date(row.date))}
-                                            </time>
-                                          )}
-                                          {caption}
-                                        </span>
-                                      </span>
-                                      {mode === "week" && (
-                                        <span className="flex flex-wrap items-center gap-1.5 text-(length:--font-size-micro) text-ink-3">
-                                          <StatusBadge status={status} />
-                                          <time dateTime={row.date}>
-                                            {new Date(row.date).toLocaleTimeString(language, {
-                                              hour: "2-digit",
-                                              minute: "2-digit",
-                                            })}
-                                          </time>
-                                        </span>
-                                      )}
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    {caption} · {tStatus(status)}
-                                  </TooltipContent>
-                                </Tooltip>
-                              );
-                            })
+                            dayPosts.map((row) => renderPostChip(row))
                           )}
                           {!isLoading &&
                             mode === "month" &&

@@ -27,8 +27,8 @@ import { useRetryDistribution, useUpdateScheduledDistribution } from "@/lib/quer
 import { useI18n } from "@/lib/i18n";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { platformDisplayName } from "@/lib/platforms";
+import { isCancellablePublicationStatus } from "@/lib/publication-status";
 import {
-  isCancellableStatus,
   resolveCancellableDistributionIds,
   resolvePostAnalytics,
   resolveRowCaption,
@@ -115,7 +115,7 @@ function ChannelOutcomeRow({
   const provider = item.integration?.providerIdentifier ?? distribution?.platform ?? "";
   const scheduledLabel = formatPostDate(distribution?.scheduled_at);
   const publishedLabel = formatPostDate(distribution?.published_at);
-  const cancellable = distribution ? isCancellableStatus(status) : false;
+  const cancellable = distribution ? isCancellablePublicationStatus(status) : false;
   const attachmentSelection = item.target?.attachment_ids ?? null;
   // Only a pending target narrows against the current Post; a claimed
   // Channel's frozen media count is not comparable to the edited Post's, and

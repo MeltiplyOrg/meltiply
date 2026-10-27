@@ -76,6 +76,7 @@ import {
 import { createAssetUpload, type AssetUploadStatus, type AssetUploadTask } from "@/lib/upload";
 import { RollingCount } from "@meltiply/ui/rolling-count";
 import { platformDisplayName } from "@/lib/platforms";
+import { resolvePublicationStatus } from "@/lib/publication-status";
 import { Trans, useI18n } from "@/lib/i18n";
 import { ApiError } from "@/lib/api";
 import { userFacingErrorMessage } from "@/lib/frontend-errors";
@@ -2790,7 +2791,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                   >
                     {distribution && (
                       <p className="text-(length:--font-size-micro) text-ink-3">
-                        {tStatus(distribution.status)}
+                        {tStatus(resolvePublicationStatus(distribution.status))}
                       </p>
                     )}
                     <div className="flex flex-col gap-2">

@@ -1,12 +1,8 @@
 import type { ChannelIntegration, MediaItem } from "@/api/types";
 import type { Distribution, Post, PostTarget } from "@/types";
+import { summarizePublicationStatuses } from "@/lib/publication-status";
 import type { ChannelMediaItem, PostDetailItem, PostRow } from "./types";
-import {
-  resolveChannelMedia,
-  resolveChannelText,
-  resolvePostDisplayDate,
-  summarizeChannelStatuses,
-} from "./posts-helpers";
+import { resolveChannelMedia, resolveChannelText, resolvePostDisplayDate } from "./posts-helpers";
 
 type IntegrationById = Map<string, ChannelIntegration>;
 /**
@@ -105,7 +101,7 @@ export function toPostRow(post: Post, integrationById: IntegrationById): PostRow
     status:
       post.status === "draft"
         ? "draft"
-        : summarizeChannelStatuses(
+        : summarizePublicationStatuses(
             channels.filter((c) => c.distribution !== undefined).map((c) => c.status),
             "scheduled",
           ),

@@ -5,7 +5,6 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from "@
 import {
   activeBrandProfileName,
   controlledProviderAccountId,
-  closeComposer,
   editPostFromRow,
   provisionControlledChannels,
   readControlledMedia,
@@ -134,13 +133,11 @@ async function returnToPosts(page: Page): Promise<void> {
   });
   await expect(page.getByRole("alert")).toHaveCount(0);
   const composer = page.getByRole("dialog", { name: /^(?:new post|edit post)$/i });
-  // A successful submission closes the panel itself. Its exit transition keeps
-  // the dialog visible for a moment, and clicking a dialog that is already
-  // detaching would retry a locator that can never resolve again, so wait the
-  // dismissal out and close only a composition that is still standing.
-  await composer.waitFor({ state: "hidden", timeout: 10_000 }).catch(async () => {
-    await closeComposer(page);
-  });
+  // A successful submission closes the panel itself. Its submit button stays
+  // enabled while saving, so dismissing the panel here would abort an in-flight
+  // write — and the reload this helper's caller performs would cancel it outright.
+  // Wait for the panel's own dismissal and let a stuck save fail loudly instead.
+  await composer.waitFor({ state: "hidden", timeout: 120_000 });
   await waitForWorkspace(page);
 }
 

@@ -69,10 +69,27 @@ class AutomationAcceptanceEntrypoint extends AutomationEntrypoint {
   /**
    * Delegates HTTP requests (health checks) to the acceptance handler.
    *
+   * `POST /__test__/scheduled` runs one scheduled dispatcher pass on demand:
+   * Wrangler never fires cron triggers in local development, so the acceptance
+   * journey asks for it through this route. The production dispatcher still
+   * performs the due-work scan, retry policy, and queue relay; only the trigger
+   * is supplied by the test, and stored instants are never rewritten.
+   *
    * @param request - Incoming HTTP request.
-   * @returns Response produced by the production automation handler.
+   * @returns Response produced by the production automation handler, or the
+   *   empty success response of the on-demand scheduled pass.
    */
-  override fetch(request: Request) {
+  override async fetch(request: Request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/__test__/scheduled" && request.method === "POST") {
+      const cron = url.searchParams.get("cron") ?? "0 * * * *";
+      await this.acceptanceHandler.scheduled!(
+        { cron, noRetry() {}, scheduledTime: Date.now() },
+        this.env,
+        this.ctx,
+      );
+      return new Response(null, { status: 204 });
+    }
     const handler = this.acceptanceHandler.fetch!;
     return handler(request as Parameters<typeof handler>[0], this.env, this.ctx);
   }
@@ -95,26 +112,6 @@ class AutomationAcceptanceEntrypoint extends AutomationEntrypoint {
    */
   override scheduled(controller: ScheduledController) {
     return this.acceptanceHandler.scheduled!(controller, this.env, this.ctx);
-  }
-
-  /**
-   * Runs one scheduled dispatcher pass on demand.
-   *
-   * Wrangler never fires cron triggers in local development, so the acceptance
-   * browser journey asks the API Worker to call this through the existing service
-   * binding. The production dispatcher still performs the due-work scan, retry
-   * policy and queue relay; only the trigger is supplied by the test, and stored
-   * instants are never rewritten.
-   *
-   * @param cron - Cron expression reported to the dispatcher; hourly by default.
-   * @returns Promise resolving once every due scheduled unit completes.
-   */
-  async runScheduledWork(cron = "0 * * * *"): Promise<void> {
-    await this.acceptanceHandler.scheduled!(
-      { cron, noRetry() {}, scheduledTime: Date.now() },
-      this.env,
-      this.ctx,
-    );
   }
 }
 

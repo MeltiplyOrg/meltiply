@@ -84,19 +84,27 @@ function requireCount(value: unknown, field: string): number {
 const automationScheduledRoute = "/__test__/automation/scheduled";
 
 /**
- * Invokes the Automation Worker's on-demand scheduled runner through a service
+ * Invokes the Automation Worker's on-demand scheduled route through a service
  * binding, without asserting the binding's production shape.
+ *
+ * The binding is a Fetcher at runtime; its declared type only names the RPC
+ * methods the application uses, so the runtime capability is checked here.
  *
  * @param binding - Runtime `AUTOMATION` binding, or undefined when unbound.
  * @param cron - Cron expression the dispatcher should report.
- * @returns True when the runner was invoked; false when the binding cannot.
+ * @returns True when the scheduled pass ran; false when the binding cannot run it.
  */
 async function runAutomationScheduledWork(binding: unknown, cron: string): Promise<boolean> {
-  if (!binding || typeof binding !== "object" || !("runScheduledWork" in binding)) return false;
-  const runner = binding.runScheduledWork;
-  if (typeof runner !== "function") return false;
-  await runner.call(binding, cron);
-  return true;
+  if (!binding || typeof binding !== "object" || !("fetch" in binding)) return false;
+  const forward = binding.fetch;
+  if (typeof forward !== "function") return false;
+  const response = await forward.call(
+    binding,
+    new Request(`https://automation.internal/__test__/scheduled?cron=${encodeURIComponent(cron)}`, {
+      method: "POST",
+    }),
+  );
+  return response.status === 204;
 }
 
 /**

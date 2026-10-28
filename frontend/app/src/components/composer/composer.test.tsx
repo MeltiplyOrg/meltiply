@@ -539,8 +539,8 @@ describe("Composer provider publication choices", () => {
         ],
       },
     });
-    expect(await screen.findByRole("combobox", { name: "Visibility" })).toHaveTextContent(
-      "Unlisted",
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveTextContent("Unlisted"),
     );
     expect(screen.getByRole("combobox", { name: "Made for kids" })).toHaveTextContent("Yes");
   });
@@ -576,5 +576,55 @@ describe("Composer provider publication choices", () => {
       brandProfiles: composerProfiles,
     });
     expect(await screen.findByRole("combobox", { name: "Privacy Level" })).toBeDisabled();
+  });
+
+  it("clears a saved interaction when the creator no longer permits it", async () => {
+    const account = { ...instagramAccount, platform: "tiktok" as const };
+    renderComposer({
+      accounts: [account],
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      requirements: {
+        platform: "tiktok",
+        creator: { display_name: "Creator", username: "creator", avatar_url: null },
+        comment_allowed: false,
+        duet_allowed: false,
+        stitch_allowed: false,
+        max_video_duration_sec: 60,
+        privacy_levels: ["SELF_ONLY"],
+      },
+      post: {
+        ...hydratedPost,
+        brand_profile_id: account.brand_profile_id,
+        targets: [
+          {
+            platform_account_id: account.id,
+            attachment_ids: null,
+            title_override: null,
+            description_override: null,
+            hashtags: [],
+            provider_options: {
+              tiktok: {
+                privacy_level: "SELF_ONLY",
+                allow_comment: true,
+                allow_duet: true,
+                allow_stitch: true,
+                brand_content: false,
+                brand_organic: false,
+                is_ai_generated: false,
+                music_usage_confirmed: true,
+              },
+            },
+          },
+        ],
+      },
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    for (const name of ["Comments", "Duet", "Stitch"]) {
+      expect(screen.getByRole("switch", { name, exact: true })).not.toBeChecked();
+      expect(screen.getByRole("switch", { name, exact: true })).toBeDisabled();
+    }
+    fireEvent.click(screen.getByRole("radio", { name: "Now", exact: true }));
+    expect(screen.getByRole("button", { name: "Publish Now", exact: true })).toBeEnabled();
   });
 });

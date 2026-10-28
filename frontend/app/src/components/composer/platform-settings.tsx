@@ -93,6 +93,7 @@ interface ProviderSpec<S> {
     target: PostTargetDraft,
     settings: Partial<S>,
     mediaKinds: readonly ("image" | "video")[],
+    requirements: TikTokPublishingRequirements | null,
   ) => void;
   /**
    * Rebuilds the raw settings map from a persisted Post target so an edited
@@ -118,6 +119,7 @@ export interface ProviderDescriptor {
     target: PostTargetDraft,
     settings: Record<string, unknown>,
     mediaKinds: readonly ("image" | "video")[],
+    requirements: TikTokPublishingRequirements | null,
   ) => void;
   readTarget?: (target: PostTargetDraft) => Record<string, unknown>;
   validate?: (context: ProviderValidationContext<Record<string, unknown>>) => string[];
@@ -152,7 +154,8 @@ function defineProviderDescriptor<S>(spec: ProviderSpec<S>): ProviderDescriptor 
     read,
     Editor: ErasedEditor,
     applyTarget: applyTarget
-      ? (target, settings, mediaKinds) => applyTarget(target, read(settings), mediaKinds)
+      ? (target, settings, mediaKinds, requirements) =>
+          applyTarget(target, read(settings), mediaKinds, requirements)
       : undefined,
     readTarget: readTarget ? (target) => ({ ...readTarget(target) }) : undefined,
     validate: validate
@@ -395,7 +398,7 @@ function TikTokEditor({
               <span className="min-w-0 text-xs font-medium text-ink">{toggle.label}</span>
               <Switch
                 id={`${fieldId}-${toggle.field}`}
-                checked={toggle.checked}
+                checked={toggle.checked && !toggle.disabled}
                 disabled={toggle.disabled}
                 onCheckedChange={(checked) => update(toggle.field, checked)}
               />
@@ -434,7 +437,7 @@ function TikTokEditor({
             <Switch
               id={`${fieldId}-brand`}
               checked={tt.brand_content ?? false}
-              disabled={tt.privacy_level === "SELF_ONLY"}
+              disabled={tt.privacy_level === "SELF_ONLY" && tt.brand_content !== true}
               onCheckedChange={(checked) => update("brand_content", checked)}
             />
           </label>
@@ -574,7 +577,7 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
 
     read: (settings) => settings as Partial<TikTokComposerSettings>,
     Editor: TikTokEditor,
-    applyTarget: (target, tt, mediaKinds) => {
+    applyTarget: (target, tt, mediaKinds, requirements) => {
       const title = tt.title?.trim();
       if (title) target.title_override = title;
       if (!tt.privacy_level) return;
@@ -583,9 +586,9 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       target.provider_options = {
         tiktok: {
           privacy_level: tt.privacy_level,
-          allow_comment: tt.comment ?? false,
-          allow_duet: !photo && (tt.duet ?? false),
-          allow_stitch: !photo && (tt.stitch ?? false),
+          allow_comment: (requirements?.comment_allowed ?? true) && (tt.comment ?? false),
+          allow_duet: !photo && (requirements?.duet_allowed ?? true) && (tt.duet ?? false),
+          allow_stitch: !photo && (requirements?.stitch_allowed ?? true) && (tt.stitch ?? false),
           brand_content: disclose && (tt.brand_content ?? false),
           brand_organic: disclose && (tt.brand_organic ?? false),
           is_ai_generated: !photo && (tt.is_ai_generated ?? false),
@@ -611,9 +614,8 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         disclose: options.brand_content || options.brand_organic,
       };
     },
-    validate: ({ channelName, settings: tt, requirements, mediaKinds, t }) => {
+    validate: ({ channelName, settings: tt, requirements, t }) => {
       const errors: string[] = [];
-      const photo = mediaKinds.includes("image");
       const disclose = tt.disclose ?? Boolean(tt.brand_content || tt.brand_organic);
       if (!requirements) {
         errors.push(
@@ -636,17 +638,6 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
               name: channelName,
             }),
           );
-        }
-        if (tt.comment === true && !requirements.comment_allowed) {
-          errors.push(
-            t("{name}: comments are not allowed for this creator.", { name: channelName }),
-          );
-        }
-        if (!photo && tt.duet === true && !requirements.duet_allowed) {
-          errors.push(t("{name}: duet is not allowed for this creator.", { name: channelName }));
-        }
-        if (!photo && tt.stitch === true && !requirements.stitch_allowed) {
-          errors.push(t("{name}: stitch is not allowed for this creator.", { name: channelName }));
         }
       }
       return errors;

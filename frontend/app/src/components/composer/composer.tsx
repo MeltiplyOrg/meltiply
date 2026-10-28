@@ -1379,6 +1379,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         attachmentsForChannel(channel.id).flatMap((attachment) =>
           attachment.assetType ? [attachment.assetType] : [],
         ),
+        tiktokRequirements[channel.id] ?? null,
       );
       // `null` means "inherit the shared caption"; an enabled override stays a
       // string even when blank, because a blank caption is a real choice that
@@ -1388,7 +1389,13 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       if (attachmentIds) target.attachment_ids = [...attachmentIds];
       return target;
     });
-  }, [attachmentOverrides, attachmentsForChannel, channelOverrides, selectedChannels]);
+  }, [
+    attachmentOverrides,
+    attachmentsForChannel,
+    channelOverrides,
+    selectedChannels,
+    tiktokRequirements,
+  ]);
 
   /**
    * Merges partial override updates (custom caption, override enablement, or

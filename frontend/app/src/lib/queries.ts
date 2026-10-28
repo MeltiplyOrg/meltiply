@@ -226,10 +226,7 @@ export const mutationInvalidations = {
   retryDistribution: () => [queryKeys.posts(), queryKeys.distributions(), queryKeys.calendar()],
   createBrandProfile: () => [queryKeys.brandProfiles()],
   updateBrandProfile: () => [queryKeys.brandProfiles()],
-  deleteBrandProfile: () => [
-    queryKeys.brandProfiles(),
-    ...brandProfileResourceInvalidations(),
-  ],
+  deleteBrandProfile: () => [queryKeys.brandProfiles(), ...brandProfileResourceInvalidations()],
   workspaceSettings: () => [
     queryKeys.installation(),
     queryKeys.workspaceMembers(),

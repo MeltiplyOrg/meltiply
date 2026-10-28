@@ -27,6 +27,11 @@ async function openPreviewControls(page) {
   const expand = page.getByRole("button", { name: "Expand DevBox", exact: true });
   await expect(page.getByRole("region", { name: "Meltiply DevBox", exact: true })).toBeVisible();
   if (await expand.isVisible()) await expand.click();
+  const devbox = page.getByRole("region", { name: "Meltiply DevBox", exact: true });
+  const tabRows = await devbox
+    .getByRole("tab")
+    .evaluateAll((tabs) => new Set(tabs.map((tab) => tab.offsetTop)).size);
+  assert.equal(tabRows, 1, "DevBox tabs must stay on one row");
   await page.getByRole("tab", { name: "Preview", exact: true }).click();
   return page.getByRole("region", { name: "Preview controls", exact: true });
 }

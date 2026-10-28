@@ -404,10 +404,13 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
           : t("melti-cli is asking to use your Meltiply Workspace from a terminal.");
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-canvas px-4 py-8 sm:px-8 sm:py-12">
+    <main className="flex min-h-screen items-center justify-center bg-canvas px-4 py-8 sm:px-8 sm:py-12 lg:py-4">
       <section
         aria-busy={busy}
-        className="w-full max-w-xl overflow-hidden rounded-window border border-line bg-surface"
+        className={cn(
+          "w-full overflow-hidden rounded-window border border-line bg-surface",
+          review ? "max-w-4xl" : "max-w-xl",
+        )}
       >
         <header className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
           <div className="flex items-center gap-3 text-lg font-semibold tracking-tight text-ink">
@@ -419,69 +422,80 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
             {t("Device authorization")}
           </span>
         </header>
-        <div className="space-y-6 p-6 sm:p-8">
-          {phase.kind === "outcome" ? (
-            <div className="flex items-start gap-3">
-              <span
-                className={cn(
-                  "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
-                  phase.outcome === "approved"
-                    ? "bg-green-tint text-green"
-                    : phase.outcome === "denied"
-                      ? "bg-red-tint text-red"
-                      : "bg-canvas text-ink-3",
-                )}
-              >
-                {phase.outcome === "approved" || phase.outcome === "already-approved" ? (
-                  <CheckCircle2 className="size-4" aria-hidden="true" />
-                ) : (
-                  <XCircle className="size-4" aria-hidden="true" />
-                )}
-              </span>
-              <div className="space-y-2">
-                <h1
-                  ref={headingRef}
-                  tabIndex={-1}
-                  className="text-(length:--text-title) leading-8 font-semibold tracking-page-title text-ink"
+        <div
+          className={cn(
+            "space-y-6 p-6 sm:p-8",
+            review &&
+              "lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8 lg:gap-y-5 lg:space-y-0 lg:p-5",
+          )}
+        >
+          <div className={cn("space-y-6", review && "lg:col-span-2 lg:space-y-3")}>
+            {phase.kind === "outcome" ? (
+              <div className="flex items-start gap-3">
+                <span
+                  className={cn(
+                    "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
+                    phase.outcome === "approved"
+                      ? "bg-green-tint text-green"
+                      : phase.outcome === "denied"
+                        ? "bg-red-tint text-red"
+                        : "bg-canvas text-ink-3",
+                  )}
                 >
-                  {heading}
-                </h1>
+                  {phase.outcome === "approved" || phase.outcome === "already-approved" ? (
+                    <CheckCircle2 className="size-4" aria-hidden="true" />
+                  ) : (
+                    <XCircle className="size-4" aria-hidden="true" />
+                  )}
+                </span>
+                <div className="space-y-2">
+                  <h1
+                    ref={headingRef}
+                    tabIndex={-1}
+                    className="text-(length:--text-title) leading-8 font-semibold tracking-page-title text-ink"
+                  >
+                    {heading}
+                  </h1>
+                  <p className="text-sm leading-relaxed text-ink-2">{intro}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2.5">
+                  {phase.kind === "checking" && (
+                    <Loader2
+                      className="size-4 shrink-0 animate-spin text-ink-3"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <h1
+                    ref={headingRef}
+                    tabIndex={-1}
+                    className="text-(length:--text-title) leading-8 font-semibold tracking-page-title text-ink"
+                  >
+                    {heading}
+                  </h1>
+                </div>
                 <p className="text-sm leading-relaxed text-ink-2">{intro}</p>
               </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2.5">
-                {phase.kind === "checking" && (
-                  <Loader2 className="size-4 shrink-0 animate-spin text-ink-3" aria-hidden="true" />
-                )}
-                <h1
-                  ref={headingRef}
-                  tabIndex={-1}
-                  className="text-(length:--text-title) leading-8 font-semibold tracking-page-title text-ink"
-                >
-                  {heading}
-                </h1>
-              </div>
-              <p className="text-sm leading-relaxed text-ink-2">{intro}</p>
-            </div>
-          )}
+            )}
 
-          {error && (
-            <div className="space-y-3">
-              <Alert variant="destructive">{error.message}</Alert>
-              {error.action === "session" && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => navigate(signInPath, { replace: true })}
-                >
-                  {t("Sign in again")}
-                </Button>
-              )}
-            </div>
-          )}
+            {error && (
+              <div className="space-y-3">
+                <Alert variant="destructive">{error.message}</Alert>
+                {error.action === "session" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => navigate(signInPath, { replace: true })}
+                  >
+                    {t("Sign in again")}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
 
           {phase.kind === "enter" && (
             <form
@@ -519,139 +533,149 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
           )}
 
           {review && (
-            <div className="space-y-5">
-              <div className="rounded-card border border-line bg-canvas px-4 py-5 text-center">
-                <p className="text-xs font-medium text-ink-3">{t("Code in your terminal")}</p>
-                <code className="mt-1.5 block break-all font-mono text-2xl font-semibold tracking-widest text-ink">
-                  {review.user_code}
-                </code>
-                <p className="mt-2 text-xs leading-relaxed text-ink-3">
-                  {t("Compare this with the code shown by melti-cli. Only approve if they match.")}
-                </p>
-                <p className="mt-1 text-xs leading-relaxed text-ink-3">
-                  {t("This request expires ten minutes after it was created.")}
-                </p>
-              </div>
-
-              <dl className="divide-y divide-line overflow-hidden rounded-card border border-line text-sm">
-                <div className="flex items-baseline justify-between gap-3 px-3 py-2.5">
-                  <dt className="text-xs text-ink-3">{t("Requesting client")}</dt>
-                  <dd className="min-w-0 truncate font-mono font-medium text-ink">
-                    {review.client_id}
-                  </dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-3 px-3 py-2.5">
-                  <dt className="text-xs text-ink-3">{t("Approving account")}</dt>
-                  <dd className="min-w-0 truncate font-medium text-ink">
-                    {user?.email ?? t("Current account")}
-                  </dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-3 px-3 py-2.5">
-                  <dt className="text-xs text-ink-3">{t("Workspace")}</dt>
-                  <dd className="min-w-0 truncate font-medium text-ink">{workspaceName}</dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-3 px-3 py-2.5">
-                  <dt className="text-xs text-ink-3">{t("Workspace role")}</dt>
-                  <dd className="min-w-0 truncate font-medium text-ink">{roleLabel}</dd>
-                </div>
-              </dl>
-
-              <p className="text-xs leading-relaxed text-ink-3">
-                {t(
-                  "If this is not the account you meant to authorize, deny the request and run melti-cli auth login again.",
-                )}
-              </p>
-
-              <div className="space-y-2">
-                <h2 className="text-sm font-medium text-ink">{t("Access granted to melti-cli")}</h2>
-                <p className="text-xs leading-relaxed text-ink-2">
-                  {t(
-                    "melti-cli acts with your current Workspace permissions. It cannot do more than you can, and it never receives your password.",
-                  )}
-                </p>
-                {currentUser.isPending ? (
-                  <div className="space-y-2" role="status">
-                    <Skeleton className="h-3.5 w-3/4" />
-                    <Skeleton className="h-3.5 w-2/3" />
-                    <span className="sr-only">{t("Reading Workspace access…")}</span>
-                  </div>
-                ) : permissions.length > 0 ? (
-                  <ul className="grid gap-x-6 gap-y-1.5 text-sm text-ink-2 sm:grid-cols-2">
-                    {permissions.map((permission) => (
-                      <li key={permission} className="flex items-start gap-2">
-                        <CheckCircle2
-                          className="mt-0.5 size-3.5 shrink-0 text-green"
-                          aria-hidden="true"
-                        />
-                        <span>{permission}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm leading-relaxed text-ink-2">
+            <>
+              <div className="space-y-5">
+                <div className="rounded-card border border-line bg-canvas px-4 py-5 text-center">
+                  <p className="text-xs font-medium text-ink-3">{t("Code in your terminal")}</p>
+                  <code className="mt-1.5 block break-all font-mono text-2xl font-semibold tracking-widest text-ink">
+                    {review.user_code}
+                  </code>
+                  <p className="mt-2 text-xs leading-relaxed text-ink-3">
                     {t(
-                      "Your current Workspace access still applies. Detailed permissions could not be loaded.",
+                      "Compare this with the code shown by melti-cli. Only approve if they match.",
                     )}
                   </p>
-                )}
-              </div>
+                  <p className="mt-1 text-xs leading-relaxed text-ink-3">
+                    {t("This request expires ten minutes after it was created.")}
+                  </p>
+                </div>
 
-              {review.client_id && !supportedClient && (
-                <Alert variant="destructive">
-                  {t(
-                    "This client is not supported. Deny the request and check that melti-cli is up to date.",
-                  )}
-                </Alert>
-              )}
+                <dl className="divide-y divide-line overflow-hidden rounded-card border border-line text-sm">
+                  <div className="flex items-baseline justify-between gap-3 px-3 py-2.5">
+                    <dt className="text-xs text-ink-3">{t("Requesting client")}</dt>
+                    <dd className="min-w-0 truncate font-mono font-medium text-ink">
+                      {review.client_id}
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-3 px-3 py-2.5">
+                    <dt className="text-xs text-ink-3">{t("Approving account")}</dt>
+                    <dd className="min-w-0 truncate font-medium text-ink">
+                      {user?.email ?? t("Current account")}
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-3 px-3 py-2.5">
+                    <dt className="text-xs text-ink-3">{t("Workspace")}</dt>
+                    <dd className="min-w-0 truncate font-medium text-ink">{workspaceName}</dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-3 px-3 py-2.5">
+                    <dt className="text-xs text-ink-3">{t("Workspace role")}</dt>
+                    <dd className="min-w-0 truncate font-medium text-ink">{roleLabel}</dd>
+                  </div>
+                </dl>
 
-              <Alert variant="warning">
-                <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                <p>
+                <p className="text-xs leading-relaxed text-ink-3">
                   {t(
-                    "Approve only if you started melti-cli auth login on a device you control. Never approve a code someone sent you: approval gives that terminal access to your Workspace.",
+                    "If this is not the account you meant to authorize, deny the request and run melti-cli auth login again.",
                   )}
                 </p>
-              </Alert>
-
-              <p className="text-xs leading-relaxed text-ink-3">
-                {t("melti-cli is waiting in your terminal. Nothing is granted until you approve.")}
-              </p>
-
-              <label className="flex items-start gap-2.5 text-sm text-ink">
-                <Input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={confirmed}
-                  disabled={busy}
-                  onChange={(event) => setConfirmed(event.target.checked)}
-                />
-                <span>{t("The code in my terminal matches this code.")}</span>
-              </label>
-
-              <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="sm:flex-1"
-                  disabled={busy}
-                  onClick={() => {
-                    void decide("deny");
-                  }}
-                >
-                  {workingDecision === "deny" ? t("Denying…") : t("Deny request")}
-                </Button>
-                <Button
-                  type="button"
-                  className="sm:flex-1"
-                  disabled={busy || !confirmed || !supportedClient}
-                  onClick={() => {
-                    void decide("approve");
-                  }}
-                >
-                  {workingDecision === "approve" ? t("Approving…") : t("Approve melti-cli")}
-                </Button>
               </div>
-            </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <h2 className="text-sm font-medium text-ink">
+                    {t("Access granted to melti-cli")}
+                  </h2>
+                  <p className="text-xs leading-relaxed text-ink-2">
+                    {t(
+                      "melti-cli acts with your current Workspace permissions. It cannot do more than you can, and it never receives your password.",
+                    )}
+                  </p>
+                  {currentUser.isPending ? (
+                    <div className="space-y-2" role="status">
+                      <Skeleton className="h-3.5 w-3/4" />
+                      <Skeleton className="h-3.5 w-2/3" />
+                      <span className="sr-only">{t("Reading Workspace access…")}</span>
+                    </div>
+                  ) : permissions.length > 0 ? (
+                    <ul className="grid gap-x-6 gap-y-1.5 text-sm text-ink-2 sm:grid-cols-2">
+                      {permissions.map((permission) => (
+                        <li key={permission} className="flex items-start gap-2">
+                          <CheckCircle2
+                            className="mt-0.5 size-3.5 shrink-0 text-green"
+                            aria-hidden="true"
+                          />
+                          <span>{permission}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm leading-relaxed text-ink-2">
+                      {t(
+                        "Your current Workspace access still applies. Detailed permissions could not be loaded.",
+                      )}
+                    </p>
+                  )}
+                </div>
+
+                {review.client_id && !supportedClient && (
+                  <Alert variant="destructive">
+                    {t(
+                      "This client is not supported. Deny the request and check that melti-cli is up to date.",
+                    )}
+                  </Alert>
+                )}
+
+                <Alert variant="warning">
+                  <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <p>
+                    {t(
+                      "Approve only if you started melti-cli auth login on a device you control. Never approve a code someone sent you: approval gives that terminal access to your Workspace.",
+                    )}
+                  </p>
+                </Alert>
+
+                <p className="text-xs leading-relaxed text-ink-3">
+                  {t(
+                    "melti-cli is waiting in your terminal. Nothing is granted until you approve.",
+                  )}
+                </p>
+
+                <label className="flex items-start gap-2.5 text-sm text-ink">
+                  <Input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={confirmed}
+                    disabled={busy}
+                    onChange={(event) => setConfirmed(event.target.checked)}
+                  />
+                  <span>{t("The code in my terminal matches this code.")}</span>
+                </label>
+
+                <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="sm:flex-1"
+                    disabled={busy}
+                    onClick={() => {
+                      void decide("deny");
+                    }}
+                  >
+                    {workingDecision === "deny" ? t("Denying…") : t("Deny request")}
+                  </Button>
+                  <Button
+                    type="button"
+                    className="sm:flex-1"
+                    disabled={busy || !confirmed || !supportedClient}
+                    onClick={() => {
+                      void decide("approve");
+                    }}
+                  >
+                    {workingDecision === "approve" ? t("Approving…") : t("Approve melti-cli")}
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </section>

@@ -412,6 +412,15 @@ test("returns a signed-out member to the pending request and requires explicit a
   await expectReview(page, code);
   await captureReview(page, testInfo, "device-consent-desktop-dark", "dark");
 
+  // The review is a single desktop viewport at 1280×720; no page scroll.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(themedVerificationUrl(code.verificationUriComplete, "light"));
+  await expectReview(page, code);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight),
+  ).toBe(true);
+  await captureReview(page, testInfo, "device-consent-desktop-compact", "light");
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(themedVerificationUrl(code.verificationUriComplete, "light"));
   await expectReview(page, code);

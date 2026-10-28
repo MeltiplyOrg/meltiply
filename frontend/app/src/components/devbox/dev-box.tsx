@@ -449,14 +449,14 @@ export function DevBox({
             >
               <TabsList
                 aria-label="DevBox tools"
-                className="h-auto flex-wrap justify-start gap-1 rounded-none border-b border-line bg-transparent px-2 py-1.5 text-inherit"
+                className="h-auto flex-nowrap justify-start gap-1 overflow-x-auto rounded-none border-b border-line bg-transparent px-2 py-1.5 text-inherit"
                 indicatorClassName="inset-y-1.5 rounded-control border-transparent bg-ink shadow-none"
               >
                 {tabs.map((tab) => (
                   <TabsTrigger
                     key={tab}
                     value={tab}
-                    className="rounded-control px-2 py-1 text-[12px] font-medium text-ink-3 transition-colors hover:bg-hover hover:text-ink-2 data-[state=active]:text-surface data-[state=active]:hover:bg-transparent"
+                    className="shrink-0 rounded-control px-1.5 py-1 text-[11px] font-medium whitespace-nowrap text-ink-3 transition-colors hover:bg-hover hover:text-ink-2 data-[state=active]:text-surface data-[state=active]:hover:bg-transparent"
                   >
                     {tabLabels[tab]}
                   </TabsTrigger>

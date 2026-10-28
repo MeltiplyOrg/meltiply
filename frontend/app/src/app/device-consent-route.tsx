@@ -224,11 +224,11 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
       setCode(normalized);
       setConfirmed(false);
       setError(null);
+      setParams({ user_code: normalized }, { replace: true });
       setPhase({ code: normalized, kind: "checking" });
       try {
         const review = await verifyDeviceAuthorization(normalized);
         if (requestSequence.current !== request) return;
-        setParams({ user_code: normalized }, { replace: true });
         if (review.status === "approved") {
           setPhase({ kind: "outcome", outcome: "already-approved" });
           return;

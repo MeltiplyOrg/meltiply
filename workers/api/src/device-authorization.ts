@@ -83,7 +83,7 @@ export function noStore(response: Response): Response {
  * @param description - Human-readable, non-secret explanation.
  * @returns Non-cacheable JSON error response.
  */
-export function deviceErrorResponse(status: number, error: string, description: string): Response {
+function deviceErrorResponse(status: number, error: string, description: string): Response {
   return noStore(Response.json({ error, error_description: description }, { status }));
 }
 

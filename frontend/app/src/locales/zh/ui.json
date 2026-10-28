@@ -952,7 +952,7 @@
   "Access denied": "访问被拒绝",
   "This request was already approved": "此请求已获批准",
   "This request was already denied": "此请求已被拒绝",
-  "Return to your terminal. melti-cli now has its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.": "请返回终端。melti-cli 现在拥有独立会话，权限与你当前的工作区访问权限相同。退出 CLI 不会退出此浏览器。",
+  "Return to your terminal to finish signing in. melti-cli receives its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.": "请返回终端完成登录。melti-cli 将获得独立会话，权限与你当前的工作区访问权限相同。退出 CLI 不会退出此浏览器。",
   "melti-cli was not granted access. You can close this page, or run melti-cli auth login again from your terminal.": "未向 melti-cli 授予访问权限。你可以关闭此页面，或在终端中重新运行 melti-cli auth login。",
   "No further action is needed. Run melti-cli auth login if you meant to start a new request.": "无需进一步操作。如果你本想发起新请求，请运行 melti-cli auth login。",
   "Run melti-cli auth login from your terminal to start a new request.": "请在终端中运行 melti-cli auth login 以发起新请求。",

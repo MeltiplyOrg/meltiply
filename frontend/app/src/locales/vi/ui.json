@@ -952,7 +952,7 @@
   "Access denied": "Truy cập bị từ chối",
   "This request was already approved": "Yêu cầu này đã được phê duyệt trước đó",
   "This request was already denied": "Yêu cầu này đã bị từ chối trước đó",
-  "Return to your terminal. melti-cli now has its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.": "Quay lại terminal. melti-cli hiện có phiên riêng với quyền truy cập không gian làm việc hiện tại của bạn. Đăng xuất khỏi CLI sẽ không đăng xuất trình duyệt này.",
+  "Return to your terminal to finish signing in. melti-cli receives its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.": "Quay lại terminal để hoàn tất đăng nhập. melti-cli nhận phiên riêng với quyền truy cập không gian làm việc hiện tại của bạn. Đăng xuất khỏi CLI sẽ không đăng xuất trình duyệt này.",
   "melti-cli was not granted access. You can close this page, or run melti-cli auth login again from your terminal.": "melti-cli không được cấp quyền truy cập. Bạn có thể đóng trang này hoặc chạy lại melti-cli auth login trong terminal.",
   "No further action is needed. Run melti-cli auth login if you meant to start a new request.": "Không cần thêm thao tác nào. Chạy melti-cli auth login nếu bạn muốn bắt đầu yêu cầu mới.",
   "Run melti-cli auth login from your terminal to start a new request.": "Chạy melti-cli auth login trong terminal để bắt đầu yêu cầu mới.",

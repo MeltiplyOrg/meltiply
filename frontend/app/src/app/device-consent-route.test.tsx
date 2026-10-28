@@ -10,7 +10,7 @@ const state = vi.hoisted(() => ({
   approve: null as null | (() => Response | Promise<Response>),
   auth: {
     isSignedIn: true,
-    signOut: vi.fn(),
+    signOut: vi.fn(async () => undefined),
     user: {
       email: "owner@meltiply.local",
       id: "user-1",
@@ -32,7 +32,6 @@ const state = vi.hoisted(() => ({
     },
     isPending: false,
   },
-  deny: null as null | (() => Response | Promise<Response>),
   review: null as null | (() => Response | Promise<Response>),
   reviewCalls: 0,
 }));
@@ -113,7 +112,7 @@ function installDeviceFetch(): string[] {
       return state.approve ? state.approve() : jsonResponse({ success: true });
     }
     if (url.endsWith("/api/auth/device/deny")) {
-      return state.deny ? state.deny() : jsonResponse({ success: true });
+      return jsonResponse({ success: true });
     }
     if (url.includes("/api/auth/device?user_code=")) {
       state.reviewCalls += 1;
@@ -187,7 +186,6 @@ afterEach(() => {
     is_installation_owner: false,
   };
   state.currentUser.isPending = false;
-  state.deny = null;
   state.review = null;
   state.reviewCalls = 0;
 });
@@ -228,7 +226,7 @@ describe("device consent route", () => {
 
     const approve = screen.getByRole("button", { name: "Approve melti-cli" });
     expect(approve).toBeDisabled();
-    expect(methods).toEqual(["GET"]);
+    expect(methods.filter((method) => method === "POST")).toEqual([]);
 
     confirmMatchingCode();
     expect(approve).toBeEnabled();
@@ -249,7 +247,7 @@ describe("device consent route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find request" }));
 
     await screen.findByText("ABCD2345", { selector: "code" });
-    expect(methods).toEqual(["GET"]);
+    expect(methods.filter((method) => method === "POST")).toEqual([]);
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent("/device?user_code=ABCD2345"),
     );
@@ -263,7 +261,7 @@ describe("device consent route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Deny request" }));
 
     await screen.findByRole("heading", { name: "Access denied" });
-    expect(methods).toContain("POST");
+    expect(methods.filter((method) => method === "POST")).toHaveLength(1);
   });
 
   it("shows the current Workspace access without inventing write authority for Viewers", async () => {

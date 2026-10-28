@@ -61,7 +61,6 @@ type ConsentErrorKind =
 interface ConsentError {
   kind: ConsentErrorKind;
   message: string;
-  retryAfterSeconds?: number;
 }
 
 /**
@@ -92,7 +91,6 @@ function consentErrorFor(
             message: t("Too many attempts. Wait {seconds} seconds and try again.", {
               seconds: cause.retryAfterSeconds,
             }),
-            retryAfterSeconds: cause.retryAfterSeconds,
           };
     }
     if (cause.code === "unauthorized" || cause.status === 401) {
@@ -375,7 +373,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
       : phase.kind === "outcome"
         ? phase.outcome === "approved"
           ? t(
-              "Return to your terminal. melti-cli now has its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.",
+              "Return to your terminal to finish signing in. melti-cli receives its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.",
             )
           : phase.outcome === "denied"
             ? t(

@@ -952,7 +952,7 @@
   "Access denied": "Access denied",
   "This request was already approved": "This request was already approved",
   "This request was already denied": "This request was already denied",
-  "Return to your terminal. melti-cli now has its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.": "Return to your terminal. melti-cli now has its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.",
+  "Return to your terminal to finish signing in. melti-cli receives its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.": "Return to your terminal to finish signing in. melti-cli receives its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.",
   "melti-cli was not granted access. You can close this page, or run melti-cli auth login again from your terminal.": "melti-cli was not granted access. You can close this page, or run melti-cli auth login again from your terminal.",
   "No further action is needed. Run melti-cli auth login if you meant to start a new request.": "No further action is needed. Run melti-cli auth login if you meant to start a new request.",
   "Run melti-cli auth login from your terminal to start a new request.": "Run melti-cli auth login from your terminal to start a new request.",

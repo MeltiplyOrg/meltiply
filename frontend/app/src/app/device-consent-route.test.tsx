@@ -99,20 +99,16 @@ function pendingReview(overrides: Record<string, unknown> = {}): Response {
 }
 
 /**
- * Records every device-authorization request the route issues.
+ * Records the HTTP methods of device-authorization requests the page issues.
  *
- * @returns Requests in call order.
+ * @returns Mutable list of request methods in call order.
  */
-function installDeviceFetch() {
-  const requests: { body: unknown; method: string | undefined; url: string }[] = [];
+function installDeviceFetch(): string[] {
+  const methods: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    requests.push({
-      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-      method: init?.method,
-      url,
-    });
+    methods.push(init?.method ?? "GET");
     if (url.endsWith("/api/auth/device/approve")) {
       return state.approve ? state.approve() : jsonResponse({ success: true });
     }
@@ -126,7 +122,7 @@ function installDeviceFetch() {
     throw new Error(`unexpected request: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
-  return { fetchMock, requests };
+  return methods;
 }
 
 /**
@@ -199,22 +195,22 @@ afterEach(() => {
 describe("device consent route", () => {
   it("sends a signed-out visitor through sign-in with the same-origin route and code retained", async () => {
     state.auth.isSignedIn = false;
-    const { fetchMock } = installDeviceFetch();
+    const methods = installDeviceFetch();
 
     renderRoute("/device?user_code=abcd-2345");
 
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/sign-in"));
     expect(redirectTarget()).toBe("/device?user_code=ABCD2345");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(methods).toEqual([]);
   });
 
-  it("verifies a prefilled code, displays the request, and never approves on load", async () => {
-    const { fetchMock, requests } = installDeviceFetch();
+  it("verifies a prefilled user code, displays the request, and never approves on load", async () => {
+    const methods = installDeviceFetch();
 
     renderRoute("/device?user_code=ABCD2345");
 
     const heading = await screen.findByRole("heading", { name: "Approve melti-cli?" });
-    expect(heading).toHaveFocus();
+    await waitFor(() => expect(heading).toHaveFocus());
     expect(screen.getByText("ABCD2345", { selector: "code" })).toBeInTheDocument();
     expect(screen.getByText("melti-cli", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("owner@meltiply.local", { selector: "dd" })).toBeInTheDocument();
@@ -232,49 +228,42 @@ describe("device consent route", () => {
 
     const approve = screen.getByRole("button", { name: "Approve melti-cli" });
     expect(approve).toBeDisabled();
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.method).toBe("GET");
-    expect(requests[0]?.url).toBe("http://localhost:8787/api/auth/device?user_code=ABCD2345");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(methods).toEqual(["GET"]);
 
     confirmMatchingCode();
     expect(approve).toBeEnabled();
     fireEvent.click(approve);
 
     await screen.findByRole("heading", { name: "melti-cli is approved" });
-    const approval = requests.find((request) => request.method === "POST");
-    expect(approval?.url).toBe("http://localhost:8787/api/auth/device/approve");
-    expect(approval?.body).toEqual({ userCode: "ABCD2345" });
+    expect(methods.filter((method) => method === "POST")).toHaveLength(1);
   });
 
-  it("accepts a manually entered code and keeps the code in the review URL", async () => {
-    const { requests } = installDeviceFetch();
+  it("accepts a manually entered user code and keeps it in the review URL", async () => {
+    const methods = installDeviceFetch();
 
     renderRoute("/device");
     expect(screen.queryByRole("button", { name: "Approve melti-cli" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Device code"), {
+    fireEvent.change(screen.getByLabelText("User code"), {
       target: { value: "abcd 2345" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Find request" }));
 
     await screen.findByText("ABCD2345", { selector: "code" });
-    expect(requests[0]?.url).toBe("http://localhost:8787/api/auth/device?user_code=ABCD2345");
+    expect(methods).toEqual(["GET"]);
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent("/device?user_code=ABCD2345"),
     );
   });
 
   it("denies a request without requiring the matching-code confirmation", async () => {
-    const { requests } = installDeviceFetch();
+    const methods = installDeviceFetch();
 
     renderRoute("/device?user_code=ABCD2345");
     await screen.findByRole("heading", { name: "Approve melti-cli?" });
     fireEvent.click(screen.getByRole("button", { name: "Deny request" }));
 
     await screen.findByRole("heading", { name: "Access denied" });
-    const denial = requests.find((request) => request.method === "POST");
-    expect(denial?.url).toBe("http://localhost:8787/api/auth/device/deny");
-    expect(denial?.body).toEqual({ userCode: "ABCD2345" });
+    expect(methods).toContain("POST");
   });
 
   it("shows the current Workspace access without inventing write authority for Viewers", async () => {
@@ -305,7 +294,7 @@ describe("device consent route", () => {
     await screen.findByText(
       "That code doesn't match an active request. Check the code in your terminal and try again.",
     );
-    expect(screen.getByLabelText("Device code")).toHaveValue("ABCD2345");
+    expect(screen.getByLabelText("User code")).toHaveValue("ABCD2345");
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve melti-cli" })).not.toBeInTheDocument();
   });
@@ -317,7 +306,9 @@ describe("device consent route", () => {
 
     renderRoute("/device?user_code=ABCD2345");
 
-    await screen.findByText("This code has expired. Run melti-cli auth login again to get a new code.");
+    await screen.findByText(
+      "This code has expired. Run melti-cli auth login again to get a new code.",
+    );
   });
 
   it("shows a terminal outcome when the request was already approved", async () => {

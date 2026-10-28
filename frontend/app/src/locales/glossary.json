@@ -11,6 +11,8 @@
   },
   "keepVerbatim": {
     "Meltiply": "Product name",
+    "melti-cli": "Command-line executable name",
+    "melti-cli auth login": "Command-line authorization command; never translate",
     "MELTIPLY": "Wordmark",
     "TikTok": "Platform name",
     "YouTube": "Platform name",

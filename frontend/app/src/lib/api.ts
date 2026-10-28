@@ -746,7 +746,7 @@ export function getAssetPreviewUrl(
  * @param options Request options including optional abort signal.
  * @returns Effect resolving to the presigned download URL response.
  */
-export function getAssetDownloadUrl(
+function getAssetDownloadUrl(
   workspaceId: string | null,
   id: string,
   options?: ApiRequestOptions,

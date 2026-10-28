@@ -12,12 +12,9 @@ import {
   type OAuthConnection,
   type OAuthExchangeResult,
   type ProviderPublicationRequirements,
-  type ProviderPublishOptions,
   type ProviderRegistry,
   type TikTokPrivacyLevel,
-  type TikTokPublishOptions,
   type YouTubePrivacyStatus,
-  type YouTubePublishOptions,
 } from "@meltiply/providers";
 import { errorDiagnostic, log } from "@meltiply/observability";
 import { createObjectStoreFromEnv, type ConfiguredObjectStore } from "@meltiply/storage";
@@ -30,7 +27,12 @@ import {
 } from "./audit";
 import type { BrandProfileApiService } from "./brand-profile-service";
 import type { AssetApiService } from "./asset-types";
-import type { PostApiService, PostTargetInput, SchedulePostInput } from "./post-types";
+import type {
+  PostApiService,
+  PostProviderOptions,
+  PostTargetInput,
+  SchedulePostInput,
+} from "./post-types";
 import type { PublishingQueueApiService } from "./publishing-queue-service";
 import { registerPublishingQueueRoutes } from "./publishing-queue-routes";
 import type { StorageService } from "./effect/services/storage";
@@ -249,18 +251,17 @@ const YOUTUBE_PRIVACY_STATUSES: Record<YouTubePrivacyStatus, true> = {
 };
 
 /**
- * Validates and normalizes platform-specific publishing options from an HTTP request body.
+ * Validates and normalizes saved Provider choices from a Post request body.
  *
- * Delegates each whitelisted provider subtree (`tiktok`, `youtube`) to a strict parser
- * that rejects unknown keys and malformed values before the request reaches scheduling.
- * Cross-platform compatibility is enforced later by `validatePublishInput` at the
- * distribution service seam, where the target platform is known.
+ * Unknown keys and malformed supplied values are rejected, while unanswered
+ * audience/privacy choices remain absent for drafts. Scheduling checks
+ * completeness separately before creating strict publication options.
  *
  * @param body - Raw request payload record.
- * @returns Structured `ProviderPublishOptions` or undefined if omitted.
+ * @returns Structured Post options or undefined if omitted.
  * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
  */
-function providerOptionsField(body: Record<string, unknown>): ProviderPublishOptions | undefined {
+function providerOptionsField(body: Record<string, unknown>): PostProviderOptions | undefined {
   const value = body.provider_options;
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -277,14 +278,14 @@ function providerOptionsField(body: Record<string, unknown>): ProviderPublishOpt
 /**
  * Validates and normalizes the `provider_options.tiktok` subtree.
  *
- * Enforces the strict key whitelist, the creator privacy-level enum, boolean
- * interaction flags, and the mandatory music-usage confirmation TikTok requires.
+ * Enforces the strict key whitelist, optional creator privacy enum, boolean
+ * interaction/disclosure flags, and mandatory music-usage confirmation.
  *
  * @param value - Raw `provider_options.tiktok` value from the request payload.
- * @returns Normalized `TikTokPublishOptions` with camelCase fields.
+ * @returns Saved TikTok choices with camelCase fields; privacy may be unanswered.
  * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
  */
-function tiktokOptionsField(value: unknown): TikTokPublishOptions {
+function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["tiktok"]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new CoreApiError(400, "validation_error", "provider_options.tiktok must be an object.");
   }
@@ -298,6 +299,7 @@ function tiktokOptionsField(value: unknown): TikTokPublishOptions {
     "brand_organic",
     "is_ai_generated",
     "music_usage_confirmed",
+    "disclose_commercial_content",
   ]);
   const privacyLevel = tiktok.privacy_level;
   const booleanKeys = [
@@ -309,8 +311,11 @@ function tiktokOptionsField(value: unknown): TikTokPublishOptions {
     "is_ai_generated",
   ] as const;
   if (
-    typeof privacyLevel !== "string" ||
-    !TIKTOK_PRIVACY_LEVELS.has(privacyLevel as TikTokPrivacyLevel) ||
+    (privacyLevel !== undefined &&
+      (typeof privacyLevel !== "string" ||
+        !TIKTOK_PRIVACY_LEVELS.has(privacyLevel as TikTokPrivacyLevel))) ||
+    (tiktok.disclose_commercial_content !== undefined &&
+      typeof tiktok.disclose_commercial_content !== "boolean") ||
     booleanKeys.some((key) => typeof tiktok[key] !== "boolean") ||
     tiktok.music_usage_confirmed !== true
   ) {
@@ -324,24 +329,26 @@ function tiktokOptionsField(value: unknown): TikTokPublishOptions {
     brandOrganic: tiktok.brand_organic as boolean,
     isAiGenerated: tiktok.is_ai_generated as boolean,
     musicUsageConfirmed: true,
-    privacyLevel: privacyLevel as TikTokPrivacyLevel,
+    ...(privacyLevel !== undefined ? { privacyLevel: privacyLevel as TikTokPrivacyLevel } : {}),
+    ...(typeof tiktok.disclose_commercial_content === "boolean"
+      ? { discloseCommercialContent: tiktok.disclose_commercial_content }
+      : {}),
   };
 }
 
 /**
  * Validates and normalizes the `provider_options.youtube` subtree.
  *
- * Requires the explicit `made_for_kids` COPPA declaration whenever YouTube options
- * are supplied and accepts an optional `privacy_status` visibility enum; the
- * provider adapter applies its established public default when it is omitted.
- * Enum membership uses `Object.hasOwn` so inherited `Object.prototype` names
- * (e.g. `toString`, `constructor`) can never satisfy the whitelist.
+ * Accepts an unanswered audience declaration in a draft without substituting
+ * false. Supplied audience and visibility values remain strictly validated;
+ * scheduling requires the explicit audience before creating delivery work.
+ * Enum membership rejects inherited Object.prototype names.
  *
  * @param value - Raw `provider_options.youtube` value from the request payload.
- * @returns Normalized `YouTubePublishOptions` with camelCase fields.
+ * @returns Saved YouTube choices with camelCase fields.
  * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
  */
-function youtubeOptionsField(value: unknown): YouTubePublishOptions {
+function youtubeOptionsField(value: unknown): NonNullable<PostProviderOptions["youtube"]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new CoreApiError(400, "validation_error", "provider_options.youtube must be an object.");
   }
@@ -349,7 +356,7 @@ function youtubeOptionsField(value: unknown): YouTubePublishOptions {
   onlyKeys(youtube, ["made_for_kids", "privacy_status"]);
   const privacyStatus = youtube.privacy_status;
   if (
-    typeof youtube.made_for_kids !== "boolean" ||
+    (youtube.made_for_kids !== undefined && typeof youtube.made_for_kids !== "boolean") ||
     (privacyStatus !== undefined &&
       (typeof privacyStatus !== "string" ||
         !Object.hasOwn(YOUTUBE_PRIVACY_STATUSES, privacyStatus)))
@@ -357,7 +364,7 @@ function youtubeOptionsField(value: unknown): YouTubePublishOptions {
     throw new CoreApiError(400, "validation_error", "provider_options.youtube is invalid.");
   }
   return {
-    madeForKids: youtube.made_for_kids,
+    ...(typeof youtube.made_for_kids === "boolean" ? { madeForKids: youtube.made_for_kids } : {}),
     ...(privacyStatus !== undefined
       ? { privacyStatus: privacyStatus as YouTubePrivacyStatus }
       : {}),

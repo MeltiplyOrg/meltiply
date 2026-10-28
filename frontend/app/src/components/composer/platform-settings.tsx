@@ -514,14 +514,14 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       if (title) target.title_override = title;
       const tags = (yt.tags ?? []).map((tag) => tag.label).filter(Boolean);
       if (tags.length > 0) target.hashtags = tags;
-      if (yt.selfDeclaredMadeForKids !== undefined) {
-        target.provider_options = {
-          youtube: {
-            made_for_kids: yt.selfDeclaredMadeForKids === "yes",
-            privacy_status: yt.type ?? "public",
-          },
-        };
-      }
+      target.provider_options = {
+        youtube: {
+          ...(yt.selfDeclaredMadeForKids !== undefined
+            ? { made_for_kids: yt.selfDeclaredMadeForKids === "yes" }
+            : {}),
+          privacy_status: yt.type ?? "public",
+        },
+      };
     },
     // Rehydrate the same contract fields the controls save, including false audience.
     readTarget: (target) => {
@@ -530,11 +530,12 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         title: target.title_override ?? undefined,
         tags: hashtags.map((tag) => ({ value: tag, label: tag })),
         type: target.provider_options?.youtube?.privacy_status ?? "public",
-        selfDeclaredMadeForKids: target.provider_options?.youtube
-          ? target.provider_options.youtube.made_for_kids
-            ? "yes"
-            : "no"
-          : undefined,
+        selfDeclaredMadeForKids:
+          target.provider_options?.youtube?.made_for_kids !== undefined
+            ? target.provider_options.youtube.made_for_kids
+              ? "yes"
+              : "no"
+            : undefined,
       };
     },
     validate: ({ channelName, settings: yt, capability, t }) => {
@@ -580,17 +581,17 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
     applyTarget: (target, tt, mediaKinds, requirements) => {
       const title = tt.title?.trim();
       if (title) target.title_override = title;
-      if (!tt.privacy_level) return;
       const photo = mediaKinds.includes("image");
       const disclose = tt.disclose ?? Boolean(tt.brand_content || tt.brand_organic);
       target.provider_options = {
         tiktok: {
-          privacy_level: tt.privacy_level,
+          ...(tt.privacy_level ? { privacy_level: tt.privacy_level } : {}),
           allow_comment: (requirements?.comment_allowed ?? true) && (tt.comment ?? false),
           allow_duet: !photo && (requirements?.duet_allowed ?? true) && (tt.duet ?? false),
           allow_stitch: !photo && (requirements?.stitch_allowed ?? true) && (tt.stitch ?? false),
           brand_content: disclose && (tt.brand_content ?? false),
           brand_organic: disclose && (tt.brand_organic ?? false),
+          disclose_commercial_content: disclose,
           is_ai_generated: !photo && (tt.is_ai_generated ?? false),
           music_usage_confirmed: true,
         },
@@ -611,7 +612,8 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         brand_content: options.brand_content,
         brand_organic: options.brand_organic,
         is_ai_generated: options.is_ai_generated,
-        disclose: options.brand_content || options.brand_organic,
+        disclose:
+          options.disclose_commercial_content ?? (options.brand_content || options.brand_organic),
       };
     },
     validate: ({ channelName, settings: tt, requirements, t }) => {

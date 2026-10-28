@@ -5017,6 +5017,75 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
+  it.each(["youtube", "tiktok"] as const)(
+    "retains incomplete %s draft choices without accepting them for delivery",
+    async (platform) => {
+      const posts = postServiceWith(platform);
+      const accountId = platform === "youtube" ? alphaYoutubeAccountId : alphaTiktokAccountId;
+      const prefix = `integration-post-incomplete-${platform}`;
+      const target: PostTargetInput = {
+        platformAccountId: accountId,
+        providerOptions:
+          platform === "youtube"
+            ? { youtube: { privacyStatus: "private" } }
+            : {
+                tiktok: {
+                  allowComment: false,
+                  allowDuet: false,
+                  allowStitch: false,
+                  brandContent: false,
+                  brandOrganic: false,
+                  discloseCommercialContent: true,
+                  isAiGenerated: false,
+                  musicUsageConfirmed: true,
+                  privacyLevel: "PUBLIC_TO_EVERYONE",
+                },
+              },
+      };
+      const draft = await createAlphaPost(
+        posts,
+        { attachmentIds: [alphaAssetId], targets: [target] },
+        `${prefix}-draft`,
+      );
+      try {
+        const reopened = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
+        expect(reopened.targets[0]?.provider_options).toEqual(
+          platform === "youtube"
+            ? { youtube: { privacy_status: "private" } }
+            : {
+                tiktok: {
+                  allow_comment: false,
+                  allow_duet: false,
+                  allow_stitch: false,
+                  brand_content: false,
+                  brand_organic: false,
+                  disclose_commercial_content: true,
+                  is_ai_generated: false,
+                  music_usage_confirmed: true,
+                  privacy_level: "PUBLIC_TO_EVERYONE",
+                },
+              },
+        );
+        await expect(
+          Effect.runPromise(
+            posts.schedulePost(
+              env,
+              alpha,
+              draft.value.id,
+              { brandProfileId: alphaBrandProfileId, scheduledAt: null },
+              `${prefix}-schedule`,
+            ),
+          ),
+        ).rejects.toMatchObject({ code: "validation_error", status: 422 });
+        const unchanged = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
+        expect(unchanged.distributions).toEqual([]);
+        expect(unchanged.targets).toEqual(reopened.targets);
+      } finally {
+        await purgeIntegrationPosts([draft.value.id], [`${prefix}-draft`, `${prefix}-schedule`]);
+      }
+    },
+  );
+
   // TikTok requires explicit creator choices on every publish, so a Channel
   // that omits them or states a contradictory combination is refused before any
   // work is created, and typed accepted choices survive into the durable row.

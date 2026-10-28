@@ -96,6 +96,11 @@ separate acceptance requirements.
   transport queue and automation consumer, with a controlled external Provider.
   It cannot establish real Meta/TikTok/Google acceptance.
 
+Saved Post options and complete Distribution publication options have distinct
+contracts. Drafts retain unanswered YouTube audience/TikTok privacy and the
+commercial-disclosure gate even without a selected subtype. Scheduling rejects
+incomplete choices and strips the draft-only disclosure gate before delivery.
+
 ## Platform constraints outside application verification
 
 TikTok requires creator information when rendering its posting UI, privacy selected

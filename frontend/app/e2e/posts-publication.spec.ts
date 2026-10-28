@@ -143,8 +143,8 @@ async function returnToPosts(page: Page): Promise<void> {
 }
 
 /**
- * Saves the open composition as a draft, waits for that write to commit, and
- * dismisses the panel.
+ * Saves a new or reopened composition as a draft, waits for that write to commit,
+ * and dismisses the panel. Reopened drafts label the pinned action "Save".
  *
  * Unlike Schedule and Publish Now, saving a draft is a checkpoint: the composer
  * deliberately stays open so the creator can keep editing. Dismissing it earlier
@@ -152,7 +152,7 @@ async function returnToPosts(page: Page): Promise<void> {
  * cancel it, so the saved confirmation is the signal that the write landed.
  */
 async function saveDraftAndLeave(page: Page): Promise<void> {
-  await page.getByRole("button", { name: /save draft/i }).click();
+  await page.getByRole("button", { name: /^(?:save|save draft)$/i }).click();
   await expect(page.getByText(/saved to your workspace at/i)).toBeVisible({
     timeout: 120_000,
   });
@@ -956,6 +956,9 @@ test("preserves provider choices through drafts and publishes photo and video ta
   await attachChannels(page, request, profileName, [youtube, tiktok]);
   await openComposer(page);
   const caption = `Provider settings ${Date.now()}`;
+  // This isolated Brand Profile owns exactly one Post; a Channel title may
+  // replace the shared caption in the row preview.
+  const savedRow = page.getByRole("row").filter({ has: page.getByTitle("View details") });
   await composerTextarea(page).fill(caption);
   await attachMedia(page, [imageAttachment, videoAttachment]);
   await toggleChannelAttachment(page, youtube.displayName, 1, imageAttachment.name);
@@ -963,8 +966,6 @@ test("preserves provider choices through drafts and publishes photo and video ta
   const youtubePanel = page.getByRole("region", { name: youtube.displayName, exact: true });
   const tiktokPanel = page.getByRole("region", { name: tiktok.displayName, exact: true });
   await youtubePanel.getByRole("textbox", { name: /Video Title/ }).fill("A deliberate video title");
-  await youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }).click();
-  await page.getByRole("option", { name: "No, not made for kids", exact: true }).click();
   await youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }).click();
   await page.getByRole("option", { name: "Unlisted", exact: true }).click();
   await expect(
@@ -981,6 +982,28 @@ test("preserves provider choices through drafts and publishes photo and video ta
   await tiktokPanel
     .getByRole("switch", { name: "Disclose commercial content", exact: true })
     .click();
+
+  // A draft may stop between required answers. Neither the chosen visibility
+  // nor the disclosure gate may disappear just because audience/subtype is unset.
+  await saveDraftAndLeave(page);
+  await reloadPostsWorkspace(page);
+  await expect(savedRow).toHaveCount(1);
+  await editPostFromRow(page, savedRow);
+  await expect(composerTextarea(page)).toHaveValue(caption);
+  await expect
+    .soft(youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }))
+    .toContainText("Unlisted");
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }),
+  ).toContainText("Choose an audience");
+  await expect
+    .soft(tiktokPanel.getByRole("switch", { name: "Disclose commercial content", exact: true }))
+    .toBeChecked();
+  await expect(
+    tiktokPanel.getByRole("switch", { name: "Brand Content", exact: true }),
+  ).not.toBeChecked();
+  await youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }).click();
+  await page.getByRole("option", { name: "No, not made for kids", exact: true }).click();
   await page
     .getByRole("radiogroup", { name: "Publishing", exact: true })
     .getByRole("radio", { name: "Now", exact: true })
@@ -999,7 +1022,9 @@ test("preserves provider choices through drafts and publishes photo and video ta
     .click();
   await saveDraftAndLeave(page);
   await reloadPostsWorkspace(page);
-  await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
+  await expect(savedRow).toHaveCount(1);
+  await editPostFromRow(page, savedRow);
+  await expect(composerTextarea(page)).toHaveValue(caption);
   await expect(
     youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }),
   ).toContainText("No");
@@ -1051,6 +1076,7 @@ test("preserves provider choices through drafts and publishes photo and video ta
       allowStitch: false,
     },
   });
+  expect(photoCopy!.providerOptions).not.toHaveProperty("tiktok.discloseCommercialContent");
   expect(videoCopy!.media.map((item) => item.contentType)).toEqual(["video/mp4"]);
   expect(photoCopy!.media).toHaveLength(1);
   expect(photoCopy!.media[0]!.contentType).toMatch(/^image\/(?:jpeg|webp)$/);

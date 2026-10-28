@@ -2584,7 +2584,7 @@ export interface components {
             title_override: string | null;
             description_override: string | null;
             hashtags: string[];
-            provider_options: components["schemas"]["ProviderPublishOptions"] | null;
+            provider_options: components["schemas"]["PostProviderOptions"] | null;
             attachment_ids: string[] | null;
         };
         /**
@@ -2731,7 +2731,7 @@ export interface components {
             title_override?: string | null;
             description_override?: string | null;
             hashtags?: string[];
-            provider_options?: components["schemas"]["ProviderPublishOptions"] | null;
+            provider_options?: components["schemas"]["PostProviderOptions"] | null;
             attachment_ids?: string[] | null;
         };
         /**
@@ -2935,6 +2935,42 @@ export interface components {
         YouTubePublishOptions: {
             made_for_kids: boolean;
             privacy_status?: components["schemas"]["YouTubePrivacyStatus"];
+        };
+        /**
+         * @description Saved creator choices. Privacy may remain unanswered in a draft.
+         *     disclose_commercial_content retains the disclosure gate independently
+         *     of its subtypes; when true, scheduling requires at least one subtype.
+         *     Scheduling requires privacy and removes the draft-only disclosure gate
+         *     before creating complete TikTokPublishOptions for a Distribution.
+         */
+        TikTokPostOptions: {
+            privacy_level?: components["schemas"]["TikTokPrivacyLevel"];
+            allow_comment: boolean;
+            allow_duet: boolean;
+            allow_stitch: boolean;
+            brand_content: boolean;
+            brand_organic: boolean;
+            disclose_commercial_content?: boolean;
+            is_ai_generated: boolean;
+            /** @constant */
+            music_usage_confirmed: true;
+        };
+        /**
+         * @description Saved audience and visibility choices. An omitted made_for_kids is an
+         *     unanswered audience question, not false. Scheduling requires an explicit
+         *     boolean before creating YouTubePublishOptions for a Distribution.
+         */
+        YouTubePostOptions: {
+            made_for_kids?: boolean;
+            privacy_status?: components["schemas"]["YouTubePrivacyStatus"];
+        };
+        /**
+         * @description Provider choices saved on a Post, including incomplete drafts.
+         *     Scheduling validates completeness before creating publication options.
+         */
+        PostProviderOptions: {
+            tiktok?: components["schemas"]["TikTokPostOptions"];
+            youtube?: components["schemas"]["YouTubePostOptions"];
         };
         ProviderPublishOptions: {
             tiktok?: components["schemas"]["TikTokPublishOptions"];

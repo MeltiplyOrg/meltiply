@@ -1,0 +1,1038 @@
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import { createJwtVerifier, jwtClaims, type JwtIdentity } from "@meltiply/auth";
+
+import { activeIdentity } from "../src/auth-policy";
+import { createApiApp } from "../src/app";
+import { betterAuthFor, checkAuthRateLimit } from "../src/better-auth";
+import { systemPoolFor } from "../src/database";
+import type { ApiWorkerEnv } from "../src/env";
+
+/**
+ * Drives the complete melti-cli device-authorization lifecycle through the real
+ * production composition: the Hono API app, `betterAuthFor` →
+ * `createBetterAuth` → installed Better Auth device-authorization, bearer, JWT,
+ * and two-factor plugins, the database-backed auth rate limiter, and the
+ * tenant API authorization pipeline.
+ *
+ * The auth endpoints use the public migrated Better Auth tables so the seeded
+ * Workspace members can sign in with their real credentials; the tenant API
+ * assertions use the RLS-authenticated role from `MELTIPLY_DATABASE_TEST_URL`.
+ * No plugin internals, private calls, or source text are asserted — every
+ * expectation is an HTTP result or a subsequently allowed/denied HTTP request.
+ *
+ * Fixture isolation: device codes and auth rate-limit rows are cleared around
+ * each case, sessions created by a case are deleted afterwards, and the two
+ * dedicated accounts are removed in `afterAll`. The seeded Workspace members
+ * and their content are never mutated.
+ */
+
+const authenticatedConnectionString = process.env.MELTIPLY_DATABASE_TEST_URL;
+if (!authenticatedConnectionString) {
+  throw new Error("MELTIPLY_DATABASE_TEST_URL is required for PostgreSQL integration suites");
+}
+
+/** Privileged local role retained for Better Auth tables and fixture setup. */
+const systemConnectionString =
+  "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
+
+/** Canonical installation origin used for auth requests and verification links. */
+const authOrigin = "http://auth.test";
+/** Trusted browser origin used for credentialed sign-in and consent requests. */
+const appOrigin = "http://app.test";
+const seedPassword = "MeltiplyLocal1!";
+/** Same scrypt hash the local seed uses for every fixture member. */
+const seedPasswordHash =
+  "0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d:51ebb76380734dbeaa0619246752b97221ef1ebff0304296c848df2b68974f91a7c07a7d5f2abd36638784a22f8161967d2b7d089c2b5e1b4fe65d72f9977914";
+const authSecret = "meltiply-local-auth-secret-32-chars-long";
+const seededProfileId = "c0000000-0000-4000-8000-000000000001";
+const gammaAuthUserId = "auth_user_local_gamma";
+const gammaEmail = "gamma@meltiply.local";
+const deltaAuthUserId = "auth_user_local_delta";
+const deltaEmail = "delta@meltiply.local";
+
+/**
+ * Dedicated auth fixtures for lifecycle cases that must not mutate seeded
+ * members. Both use the seeded password hash, so the real sign-in endpoint
+ * issues the browser session rather than a synthetic cookie.
+ */
+const suspendedAuthUserId = "auth_user_device_suspended";
+const suspendedEmail = "device-suspended@meltiply.local";
+const suspendedInternalUserId = "10000000-0000-4000-8000-00000000d001";
+const rateLimitAuthUserId = "auth_user_device_rate_limit";
+const rateLimitEmail = "device-rate-limit@meltiply.local";
+const rateLimitInternalUserId = "10000000-0000-4000-8000-00000000d002";
+
+const trackedAuthUserIds = [
+  "auth_user_local_alpha",
+  "auth_user_local_beta",
+  gammaAuthUserId,
+  deltaAuthUserId,
+  "auth_user_local_epsilon",
+  suspendedAuthUserId,
+  rateLimitAuthUserId,
+];
+
+const env = {
+  ALLOWED_ORIGINS: appOrigin,
+  APP_URL: authOrigin,
+  AUTH_SETUP_SECRET: `${crypto.randomUUID()}${crypto.randomUUID()}`,
+  AUTOMATION: {
+    relayOutbox: async () => ({ claimed: 0, dead: 0, failed: 0, published: 0 }),
+    requestCommentsSync: async () => 0,
+  },
+  BETTER_AUTH_SECRET: authSecret,
+  DB_AUTHENTICATED: { connectionString: authenticatedConnectionString } as Hyperdrive,
+  DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
+  ENVIRONMENT: "test",
+  TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+  VERSION: "1.0.0-target.0",
+} satisfies ApiWorkerEnv;
+
+/** Lazily resolves the installed signing key once, mirroring the API verifier. */
+let localJwtVerifier: ((token: string) => Promise<JwtIdentity>) | undefined;
+
+/**
+ * Builds a JWT verifier from the live `/jwks` response instead of the network,
+ * so the API request assertions exercise real signature/issuer/audience checks.
+ *
+ * @returns Verifier bound to the installation origin.
+ */
+async function jwtVerifier(): Promise<(token: string) => Promise<JwtIdentity>> {
+  if (localJwtVerifier) return localJwtVerifier;
+  const auth = await betterAuthFor(env);
+  const published = recordOf(
+    await (await auth.handler(new Request(`${authOrigin}/api/auth/jwks`))).json(),
+  );
+  if (!Array.isArray(published.keys)) throw new Error("Expected published verification keys");
+  const publicKey = recordOf(published.keys[0]);
+  if (publicKey.kty !== "OKP" || publicKey.crv !== "Ed25519" || typeof publicKey.x !== "string")
+    throw new Error("Unexpected auth signing algorithm");
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    { kty: publicKey.kty, crv: publicKey.crv, x: publicKey.x },
+    { name: "Ed25519" },
+    false,
+    ["verify"],
+  );
+  localJwtVerifier = createJwtVerifier(
+    { audience: authOrigin, issuer: authOrigin },
+    async () => key,
+  );
+  return localJwtVerifier;
+}
+
+const app = createApiApp({
+  verifyJwtToken: async (requestEnv, token) =>
+    activeIdentity(requestEnv, await (await jwtVerifier())(token)),
+});
+
+/**
+ * Narrows untrusted JSON to a plain record without unchecked `any` access.
+ *
+ * @param value - Parsed JSON value.
+ * @returns A record view of the object.
+ */
+function recordOf(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`expected JSON object, received ${typeof value}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Reads a required string field from an untrusted JSON object.
+ *
+ * @param value - Record to inspect.
+ * @param key - Field name.
+ * @returns The string value.
+ */
+function stringField(value: Record<string, unknown>, key: string): string {
+  const field = value[key];
+  if (typeof field !== "string") throw new Error(`expected string ${key}`);
+  return field;
+}
+
+/**
+ * Reads a required numeric field from an untrusted JSON object.
+ *
+ * @param value - Record to inspect.
+ * @param key - Field name.
+ * @returns The number value.
+ */
+function numberField(value: Record<string, unknown>, key: string): number {
+  const field = value[key];
+  if (typeof field !== "number" || !Number.isFinite(field)) throw new Error(`expected number ${key}`);
+  return field;
+}
+
+/**
+ * Extracts the session cookie pair from a response's separate Set-Cookie headers.
+ *
+ * @param response - Sign-in response.
+ * @returns `name=value` cookie pair for the session token.
+ */
+function sessionCookiePair(response: Response): string {
+  const header = response.headers.getSetCookie().find((entry) => entry.includes("session_token="));
+  if (!header) throw new Error("response must set the session cookie");
+  return header.split(";")[0]!;
+}
+
+/**
+ * Sends a request through the production app with an installation-origin URL.
+ *
+ * @param path - Path under the auth surface.
+ * @param init - Fetch initializer.
+ * @param host - Absolute origin to exercise forwarded-origin behavior.
+ * @returns HTTP response.
+ */
+function authRequest(path: string, init: RequestInit = {}, host = authOrigin): Promise<Response> {
+  return app.request(`${host}${path}`, init, env);
+}
+
+/**
+ * Posts JSON to an auth endpoint as a browser would.
+ *
+ * @param path - Auth path.
+ * @param body - JSON body.
+ * @param options - Cookie, origin, and client IP overrides.
+ * @returns HTTP response.
+ */
+function authPostJson(
+  path: string,
+  body: Record<string, unknown>,
+  options: { cookie?: string; ip?: string; origin?: string | null } = {},
+): Promise<Response> {
+  const headers: Record<string, string> = {
+    "CF-Connecting-IP": options.ip ?? randomIp(),
+    "Content-Type": "application/json",
+  };
+  if (options.cookie) headers.Cookie = options.cookie;
+  if (options.origin !== null) headers.Origin = options.origin ?? appOrigin;
+  return authRequest(path, { body: JSON.stringify(body), headers, method: "POST" });
+}
+
+/**
+ * Returns a unique client IP so per-IP auth budgets from earlier cases never
+ * bleed into the next one.
+ *
+ * @returns IPv6 documentation-range address.
+ */
+function randomIp(): string {
+  return `2001:db8:${crypto.randomUUID().slice(0, 4)}::${Math.floor(Math.random() * 0xffff)}`;
+}
+
+/**
+ * Signs a seeded or dedicated credential account in through the real endpoint.
+ *
+ * @param email - Account email.
+ * @param ip - Optional client IP override.
+ * @returns Browser cookie and decoded user identity.
+ */
+async function signIn(
+  email: string,
+  ip = randomIp(),
+): Promise<{ cookie: string; userId: string; response: Response }> {
+  const response = await authPostJson(
+    "/api/auth/sign-in/email",
+    { email, password: seedPassword },
+    { ip },
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  const body = recordOf(await response.json());
+  const user = recordOf(body.user);
+  return {
+    cookie: sessionCookiePair(response),
+    response,
+    userId: stringField(user, "id"),
+  };
+}
+
+/**
+ * Requests a device code through the public HTTP contract.
+ *
+ * @param options - Optional client id, body overrides, client IP, and host.
+ * @returns Issued device-code payload and status.
+ */
+async function issueDeviceCode(
+  options: {
+    body?: Record<string, unknown>;
+    clientId?: string;
+    host?: string;
+    ip?: string;
+    origin?: string | null;
+  } = {},
+): Promise<{ body: Record<string, unknown>; response: Response }> {
+  const response = await authPostJson(
+    "/api/auth/device/code",
+    {
+      client_id: options.clientId ?? "melti-cli",
+      ...options.body,
+    },
+    { ip: options.ip, origin: options.origin },
+  );
+  return { body: response.ok ? recordOf(await response.json()) : {}, response };
+}
+
+/**
+ * Verifies/claims a user code with the browser session.
+ *
+ * @param cookie - Browser session cookie.
+ * @param userCode - User-facing code.
+ * @param ip - Optional client IP override.
+ * @returns HTTP response.
+ */
+function verifyDeviceCode(cookie: string | undefined, userCode: string, ip = randomIp()) {
+  const headers: Record<string, string> = { "CF-Connecting-IP": ip };
+  if (cookie) headers.Cookie = cookie;
+  return authRequest(`/api/auth/device?user_code=${encodeURIComponent(userCode)}`, { headers });
+}
+
+/**
+ * Approves or denies a device request with the browser session.
+ *
+ * @param cookie - Browser session cookie.
+ * @param decision - Approval or denial.
+ * @param userCode - User-facing code.
+ * @param ip - Optional client IP override.
+ * @returns HTTP response.
+ */
+function decideDeviceCode(
+  cookie: string | undefined,
+  decision: "approve" | "deny",
+  userCode: string,
+  ip = randomIp(),
+) {
+  return authPostJson(
+    `/api/auth/device/${decision}`,
+    { userCode },
+    { cookie, ip, origin: appOrigin },
+  );
+}
+
+/**
+ * Redeems a device code for the raw CLI session credential.
+ *
+ * @param deviceCode - Secret device code.
+ * @param options - Optional client id and client IP.
+ * @returns HTTP response.
+ */
+function redeemDeviceCode(
+  deviceCode: string,
+  options: { clientId?: string; ip?: string } = {},
+): Promise<Response> {
+  return authPostJson(
+    "/api/auth/device/token",
+    {
+      client_id: options.clientId ?? "melti-cli",
+      device_code: deviceCode,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+    },
+    { ip: options.ip, origin: appOrigin },
+  );
+}
+
+/**
+ * Reads the RFC-style `error` and `error_description` fields.
+ *
+ * @param response - Token or verification error response.
+ * @returns Decoded error fields.
+ */
+async function deviceError(response: Response): Promise<{ error: string; description: string }> {
+  const body = recordOf(await response.json());
+  return {
+    description: stringField(body, "error_description"),
+    error: stringField(body, "error"),
+  };
+}
+
+/**
+ * Calls get-session with the CLI session credential as a bearer token.
+ *
+ * @param token - Raw or signed CLI session credential.
+ * @param ip - Optional client IP override.
+ * @returns HTTP response.
+ */
+function getSessionWithBearer(token: string, ip = randomIp()): Promise<Response> {
+  return authRequest("/api/auth/get-session", {
+    headers: { Authorization: `Bearer ${token}`, "CF-Connecting-IP": ip },
+  });
+}
+
+/**
+ * Calls get-session with the browser cookie.
+ *
+ * @param cookie - Browser session cookie.
+ * @returns HTTP response.
+ */
+function getSessionWithCookie(cookie: string): Promise<Response> {
+  return authRequest("/api/auth/get-session", {
+    headers: { Cookie: cookie, "CF-Connecting-IP": randomIp() },
+  });
+}
+
+/**
+ * Signs the CLI session out through the bearer transport.
+ *
+ * @param token - CLI session credential.
+ * @param ip - Optional client IP override.
+ * @returns HTTP response.
+ */
+function signOutWithBearer(token: string, ip = randomIp()): Promise<Response> {
+  return app.request(
+    `${authOrigin}/api/auth/sign-out`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "CF-Connecting-IP": ip,
+        Origin: appOrigin,
+      },
+      method: "POST",
+    },
+    env,
+  );
+}
+
+/**
+ * Issues a request to the tenant API with the supplied Authorization header.
+ *
+ * @param path - `/api/v1` path.
+ * @param authorization - Raw Authorization header value.
+ * @param init - Optional method/body/headers.
+ * @returns HTTP response.
+ */
+function tenantRequest(
+  path: string,
+  authorization: string,
+  init: { body?: string; headers?: Record<string, string>; method?: string } = {},
+): Promise<Response> {
+  return app.request(
+    path,
+    {
+      body: init.body,
+      headers: {
+        Authorization: authorization,
+        "CF-Connecting-IP": randomIp(),
+        "Content-Type": "application/json",
+        Origin: appOrigin,
+        ...init.headers,
+      },
+      method: init.method ?? "GET",
+    },
+    env,
+  );
+}
+
+/**
+ * Inserts one dedicated credential account and its internal member row using
+ * the same password hash as the local seed.
+ *
+ * @param input - Auth subject, internal id, and email.
+ * @returns Nothing.
+ */
+async function createDedicatedAccount(input: {
+  authUserId: string;
+  email: string;
+  internalId: string;
+}): Promise<void> {
+  const pool = systemPoolFor(env);
+  await pool.query(
+    `INSERT INTO "user" (id, name, email, "emailVerified")
+     VALUES ($1, $2, $3, TRUE)
+     ON CONFLICT (id) DO UPDATE
+     SET name = EXCLUDED.name, email = EXCLUDED.email, "emailVerified" = TRUE`,
+    [input.authUserId, "Device Fixture", input.email],
+  );
+  await pool.query(
+    `INSERT INTO "account" (id, "accountId", "providerId", "userId", password)
+     VALUES ($1, $2, 'credential', $3, $4)
+     ON CONFLICT (id) DO UPDATE
+     SET password = EXCLUDED.password, "updatedAt" = now()`,
+    [`${input.authUserId}_account`, input.authUserId, input.authUserId, seedPasswordHash],
+  );
+  await pool.query(
+    `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
+     VALUES ($1, $2, $3, 'Device Fixture', FALSE)
+     ON CONFLICT (id) DO UPDATE
+     SET auth_user_id = EXCLUDED.auth_user_id, email = EXCLUDED.email`,
+    [input.internalId, input.authUserId, input.email],
+  );
+}
+
+/**
+ * Removes a dedicated fixture account and everything cascading from it.
+ *
+ * @param authUserId - Auth subject id.
+ */
+async function deleteDedicatedAccount(authUserId: string): Promise<void> {
+  const pool = systemPoolFor(env);
+  await pool.query(`DELETE FROM users WHERE auth_user_id = $1`, [authUserId]);
+  await pool.query(`DELETE FROM "user" WHERE id = $1`, [authUserId]);
+}
+
+/** Records session ids that pre-date a case so only the case's sessions are removed. */
+let priorSessionIds: string[] = [];
+
+/**
+ * Reads all session ids for the tracked auth users.
+ *
+ * @returns Session ids.
+ */
+async function trackedSessionIds(): Promise<string[]> {
+  const result = await systemPoolFor(env).query<{ id: string }>(
+    `SELECT id FROM "session" WHERE "userId" = ANY($1::text[])`,
+    [trackedAuthUserIds],
+  );
+  return result.rows.map((row) => row.id);
+}
+
+beforeAll(async () => {
+  const url = new URL(systemConnectionString);
+  if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply")
+    throw new Error("Device auth tests require the isolated local database.");
+  await createDedicatedAccount({
+    authUserId: rateLimitAuthUserId,
+    email: rateLimitEmail,
+    internalId: rateLimitInternalUserId,
+  });
+  await createDedicatedAccount({
+    authUserId: suspendedAuthUserId,
+    email: suspendedEmail,
+    internalId: suspendedInternalUserId,
+  });
+});
+
+beforeEach(async () => {
+  const pool = systemPoolFor(env);
+  const present = await pool.query<{ present: boolean }>(
+    `SELECT to_regclass('public."deviceCode"') IS NOT NULL AS present`,
+  );
+  if (present.rows[0]?.present) await pool.query(`DELETE FROM "deviceCode"`);
+  await pool.query(`DELETE FROM auth_rate_limits`);
+  await pool.query(`UPDATE users SET suspended_at = NULL, suspension_reason = NULL
+    WHERE id = ANY($1::uuid[])`, [[suspendedInternalUserId, rateLimitInternalUserId]]);
+  priorSessionIds = await trackedSessionIds();
+});
+
+afterEach(async () => {
+  const pool = systemPoolFor(env);
+  await pool.query(
+    `DELETE FROM "session"
+     WHERE "userId" = ANY($1::text[])
+       AND NOT (id = ANY($2::text[]))`,
+    [trackedAuthUserIds, priorSessionIds],
+  );
+  await pool.query(`UPDATE users SET suspended_at = NULL, suspension_reason = NULL
+    WHERE id = ANY($1::uuid[])`, [[suspendedInternalUserId, rateLimitInternalUserId]]);
+});
+
+afterAll(async () => {
+  for (const authUserId of [suspendedAuthUserId, rateLimitAuthUserId]) {
+    await deleteDedicatedAccount(authUserId);
+  }
+});
+
+describe("device code issuance contract", () => {
+  it("issues an unpredictable code bound to melti-cli with absolute same-origin verification links", async () => {
+    const { body, response } = await issueDeviceCode({ host: "http://api.internal.test" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+
+    const deviceCode = stringField(body, "device_code");
+    const userCode = stringField(body, "user_code");
+    expect(deviceCode.length).toBeGreaterThanOrEqual(32);
+    expect(deviceCode).not.toBe(userCode);
+    expect(numberField(body, "expires_in")).toBe(600);
+    expect(numberField(body, "interval")).toBe(5);
+    expect(stringField(body, "verification_uri")).toBe(`${authOrigin}/device`);
+
+    const complete = new URL(stringField(body, "verification_uri_complete"));
+    expect(complete.origin).toBe(authOrigin);
+    expect(complete.pathname).toBe("/device");
+    expect(complete.searchParams.get("user_code")).toBe(userCode);
+    expect(complete.toString()).not.toContain(deviceCode);
+  });
+
+  it("rejects unsupported clients, pre-bound users, non-JSON bodies, and untrusted origins", async () => {
+    const wrongClient = await issueDeviceCode({ clientId: "some-other-cli" });
+    expect(wrongClient.response.status).toBe(400);
+    expect(await deviceError(wrongClient.response)).toMatchObject({ error: "invalid_client" });
+
+    const prebound = await issueDeviceCode({
+      body: { user_id: gammaAuthUserId },
+    });
+    expect(prebound.response.status).toBe(400);
+    expect(await deviceError(prebound.response)).toMatchObject({ error: "invalid_request" });
+
+    const form = await authRequest("/api/auth/device/code", {
+      body: "client_id=melti-cli",
+      headers: {
+        "CF-Connecting-IP": randomIp(),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      method: "POST",
+    });
+    expect(form.status).toBe(400);
+    expect(await deviceError(form)).toMatchObject({ error: "invalid_request" });
+
+    const untrusted = await issueDeviceCode({ origin: "http://evil.test" });
+    expect(untrusted.response.status).toBe(403);
+  });
+
+  it("ignores request-provided scopes instead of treating them as granted capabilities", async () => {
+    const { body } = await issueDeviceCode({ body: { scope: "admin write" } });
+    const { cookie } = await signIn(gammaEmail);
+    const verified = await verifyDeviceCode(cookie, stringField(body, "user_code"));
+    expect(verified.status).toBe(200);
+    const review = recordOf(await verified.json());
+    expect(review.client_id).toBe("melti-cli");
+    expect(review.scope === undefined || review.scope === "").toBe(true);
+  });
+});
+
+describe("browser verification and consent ownership", () => {
+  it("claims, approves, and redeems exactly once while binding approval to the verifying session", async () => {
+    const first = await signIn(gammaEmail);
+    const second = await signIn(gammaEmail);
+    expect(first.userId).toBe(second.userId);
+    expect(first.cookie).not.toBe(second.cookie);
+
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    const deviceCode = stringField(body, "device_code");
+
+    const verified = await verifyDeviceCode(first.cookie, userCode);
+    expect(verified.status).toBe(200);
+    const review = recordOf(await verified.json());
+    expect(review).toMatchObject({ client_id: "melti-cli", status: "pending", user_code: userCode });
+
+    // A second browser session for the same member cannot consent for the
+    // session that verified the code, even though Better Auth binds ownership
+    // to the member.
+    const sameMemberOtherSession = await decideDeviceCode(second.cookie, "approve", userCode);
+    expect(sameMemberOtherSession.status).toBe(403);
+    expect(await deviceError(sameMemberOtherSession)).toMatchObject({ error: "access_denied" });
+
+    const approved = await decideDeviceCode(first.cookie, "approve", userCode);
+    expect(approved.status).toBe(200);
+    expect(await approved.json()).toEqual({ success: true });
+
+    const redeemed = await redeemDeviceCode(deviceCode);
+    expect(redeemed.status).toBe(200);
+    expect(redeemed.headers.get("cache-control")).toContain("no-store");
+    const token = recordOf(await redeemed.json());
+    expect(token.token_type).toBe("Bearer");
+    expect(token.scope).toBe("");
+    expect(numberField(token, "expires_in")).toBeGreaterThan(0);
+    expect(typeof token.access_token).toBe("string");
+
+    const replay = await redeemDeviceCode(deviceCode);
+    expect(replay.status).toBe(400);
+    expect(await deviceError(replay)).toMatchObject({ error: "invalid_grant" });
+  });
+
+  it("refuses approval from a different member and never claims their verification view", async () => {
+    const gamma = await signIn(gammaEmail);
+    const delta = await signIn(deltaEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+
+    const gammaView = await verifyDeviceCode(gamma.cookie, userCode);
+    expect(gammaView.status).toBe(200);
+
+    const deltaView = await verifyDeviceCode(delta.cookie, userCode);
+    expect(deltaView.status).toBe(200);
+    const unclaimedView = recordOf(await deltaView.json());
+    expect(unclaimedView.status).toBe("pending");
+    expect(unclaimedView.client_id).toBeUndefined();
+
+    const deltaDecision = await decideDeviceCode(delta.cookie, "approve", userCode);
+    expect(deltaDecision.status).toBe(403);
+    expect(await deviceError(deltaDecision)).toMatchObject({ error: "access_denied" });
+
+    expect((await decideDeviceCode(gamma.cookie, "approve", userCode)).status).toBe(200);
+  });
+
+  it("requires an authenticated browser session for approval, denial, and claims", async () => {
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+
+    const anonymousView = await verifyDeviceCode(undefined, userCode);
+    expect(anonymousView.status).toBe(200);
+    const anonymousReview = recordOf(await anonymousView.json());
+    expect(anonymousReview.status).toBe("pending");
+    expect(anonymousReview.client_id).toBeUndefined();
+
+    for (const decision of ["approve", "deny"] as const) {
+      const response = await decideDeviceCode(undefined, decision, userCode);
+      expect(response.status).toBe(401);
+      expect(await deviceError(response)).toMatchObject({ error: "unauthorized" });
+    }
+
+    const { body: pending } = await issueDeviceCode();
+    const pendingToken = await redeemDeviceCode(stringField(pending, "device_code"));
+    expect(pendingToken.status).toBe(400);
+    expect(await deviceError(pendingToken)).toMatchObject({ error: "authorization_pending" });
+  });
+
+  it("denies access, reports access_denied once, and rejects malformed or unknown codes", async () => {
+    const { cookie } = await signIn(gammaEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    const deviceCode = stringField(body, "device_code");
+
+    expect((await verifyDeviceCode(cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(cookie, "deny", userCode)).status).toBe(200);
+
+    const denied = await redeemDeviceCode(deviceCode);
+    expect(denied.status).toBe(400);
+    expect(await deviceError(denied)).toMatchObject({ error: "access_denied" });
+
+    const replay = await redeemDeviceCode(deviceCode);
+    expect(replay.status).toBe(400);
+    expect(await deviceError(replay)).toMatchObject({ error: "invalid_grant" });
+
+    const malformedView = await verifyDeviceCode(cookie, "NOT-A-CODE");
+    expect(malformedView.status).toBe(400);
+    expect(await deviceError(malformedView)).toMatchObject({ error: "invalid_request" });
+
+    const unknown = await redeemDeviceCode(`unknown-${crypto.randomUUID()}`);
+    expect(unknown.status).toBe(400);
+    expect(await deviceError(unknown)).toMatchObject({ error: "invalid_grant" });
+  });
+
+  it("expires pending authorization without minting a session", async () => {
+    const { cookie } = await signIn(gammaEmail);
+    const expiredViewCode = await issueDeviceCode();
+    const expiredTokenCode = await issueDeviceCode();
+    const pool = systemPoolFor(env);
+    await pool.query(
+      `UPDATE "deviceCode" SET "expiresAt" = now() - interval '1 second'
+       WHERE "deviceCode" = ANY($1::text[])`,
+      [
+        [
+          stringField(expiredViewCode.body, "device_code"),
+          stringField(expiredTokenCode.body, "device_code"),
+        ],
+      ],
+    );
+
+    const expiredView = await verifyDeviceCode(
+      cookie,
+      stringField(expiredViewCode.body, "user_code"),
+    );
+    expect(expiredView.status).toBe(400);
+    expect(await deviceError(expiredView)).toMatchObject({ error: "expired_token" });
+
+    const expiredToken = await redeemDeviceCode(stringField(expiredTokenCode.body, "device_code"));
+    expect(expiredToken.status).toBe(400);
+    expect(await deviceError(expiredToken)).toMatchObject({ error: "expired_token" });
+  });
+
+  it("reports slow_down for polling faster than the advertised interval", async () => {
+    const { body } = await issueDeviceCode();
+    const deviceCode = stringField(body, "device_code");
+    const ip = randomIp();
+
+    const first = await redeemDeviceCode(deviceCode, { ip });
+    expect(first.status).toBe(400);
+    expect(await deviceError(first)).toMatchObject({ error: "authorization_pending" });
+
+    const tooFast = await redeemDeviceCode(deviceCode, { ip });
+    expect(tooFast.status).toBe(400);
+    expect(await deviceError(tooFast)).toMatchObject({ error: "slow_down" });
+  });
+
+  it("rejects a token request bound to a different client", async () => {
+    const { body } = await issueDeviceCode();
+    const response = await redeemDeviceCode(stringField(body, "device_code"), {
+      clientId: "another-client",
+    });
+    expect(response.status).toBe(400);
+    expect(await deviceError(response)).toMatchObject({ error: "invalid_grant" });
+  });
+
+  it("allows only one of two concurrent redemptions", async () => {
+    const { cookie } = await signIn(gammaEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    const deviceCode = stringField(body, "device_code");
+    expect((await verifyDeviceCode(cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(cookie, "approve", userCode)).status).toBe(200);
+
+    const responses = await Promise.all([
+      redeemDeviceCode(deviceCode),
+      redeemDeviceCode(deviceCode),
+    ]);
+    const statuses = responses.map((response) => response.status).sort();
+    expect(statuses).toEqual([200, 400]);
+    const rejection = responses.find((response) => response.status === 400)!;
+    expect(await deviceError(rejection)).toMatchObject({ error: "invalid_grant" });
+  });
+});
+
+describe("native session transport and revocation", () => {
+  it("mints CLI JWTs, renews the session, and keeps the browser session after CLI sign-out", async () => {
+    const browser = await signIn(gammaEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
+
+    const redeemed = await redeemDeviceCode(stringField(body, "device_code"));
+    expect(redeemed.status).toBe(200);
+    const accessToken = stringField(recordOf(await redeemed.json()), "access_token");
+
+    const sessionResponse = await getSessionWithBearer(accessToken);
+    expect(sessionResponse.status).toBe(200);
+    expect(sessionResponse.headers.get("cache-control")).toContain("no-store");
+    const session = recordOf(await sessionResponse.json());
+    const sessionUser = recordOf(session.session);
+    expect(stringField(recordOf(session.user), "id")).toBe(browser.userId);
+    expect(stringField(recordOf(session.user), "email")).toBe(gammaEmail);
+
+    const jwt = sessionResponse.headers.get("set-auth-jwt");
+    expect(jwt).toBeTruthy();
+    const payload = recordOf(JSON.parse(Buffer.from(jwt!.split(".")[1]!, "base64url").toString()));
+    expect(payload.sub).toBe(browser.userId);
+    expect(payload.email).toBe(gammaEmail);
+    expect(typeof jwtClaims(payload).sessionId).toBe("string");
+
+    // Force the renewal branch: the session is inside its update window, so
+    // get-session extends it and the bearer plugin exposes the replacement
+    // credential without rotating the member.
+    const sessionId = stringField(sessionUser, "id");
+    await systemPoolFor(env).query(
+      `UPDATE "session" SET "expiresAt" = now() + interval '1 hour' WHERE id = $1`,
+      [sessionId],
+    );
+    const renewed = await getSessionWithBearer(accessToken);
+    expect(renewed.status).toBe(200);
+    const renewedUser = recordOf(recordOf(await renewed.json()).user);
+    expect(stringField(renewedUser, "id")).toBe(browser.userId);
+    const replacement = renewed.headers.get("set-auth-token");
+    expect(replacement).toBeTruthy();
+    expect(renewed.headers.get("set-auth-jwt")).toBeTruthy();
+    const replacementSession = await getSessionWithBearer(replacement!);
+    expect(replacementSession.status).toBe(200);
+
+    // The JWT authorizes an ordinary tenant request; the raw session
+    // credential and browser cookies do not.
+    const authorized = await tenantRequest("/api/v1/posts", `Bearer ${jwt}`);
+    expect(authorized.status).toBe(200);
+    const rawCredential = await tenantRequest("/api/v1/posts", `Bearer ${accessToken}`);
+    expect(rawCredential.status).toBe(401);
+    const cookieCredential = await app.request(
+      "/api/v1/posts",
+      { headers: { Cookie: browser.cookie, "CF-Connecting-IP": randomIp(), Origin: appOrigin } },
+      env,
+    );
+    expect(cookieCredential.status).toBe(401);
+
+    const signOut = await signOutWithBearer(accessToken);
+    expect(signOut.status).toBe(200);
+
+    const revokedSession = await getSessionWithBearer(accessToken);
+    expect(revokedSession.status).toBe(200);
+    expect(await revokedSession.json()).toBeNull();
+    expect(await (await getSessionWithBearer(replacement!)).json()).toBeNull();
+
+    const revoked = await tenantRequest("/api/v1/posts", `Bearer ${jwt}`);
+    expect(revoked.status).toBe(401);
+
+    const browserStillLive = await getSessionWithCookie(browser.cookie);
+    expect(browserStillLive.status).toBe(200);
+    expect(stringField(recordOf(recordOf(await browserStillLive.json()).user), "email")).toBe(
+      gammaEmail,
+    );
+  });
+
+  it("keeps Viewer read-only and Editor write access for CLI sessions", async () => {
+    const delta = await signIn(deltaEmail);
+    const viewerCode = await issueDeviceCode();
+    expect(
+      (await verifyDeviceCode(delta.cookie, stringField(viewerCode.body, "user_code"))).status,
+    ).toBe(200);
+    expect(
+      (
+        await decideDeviceCode(
+          delta.cookie,
+          "approve",
+          stringField(viewerCode.body, "user_code"),
+        )
+      ).status,
+    ).toBe(200);
+    const viewerTokenResponse = await redeemDeviceCode(
+      stringField(viewerCode.body, "device_code"),
+    );
+    expect(viewerTokenResponse.status).toBe(200);
+    const viewerToken = stringField(
+      recordOf(await viewerTokenResponse.json()),
+      "access_token",
+    );
+    const viewerSession = await getSessionWithBearer(viewerToken);
+    const viewerJwt = viewerSession.headers.get("set-auth-jwt");
+    expect(viewerJwt).toBeTruthy();
+
+    expect((await tenantRequest("/api/v1/posts", `Bearer ${viewerJwt}`)).status).toBe(200);
+    const viewerMutation = await tenantRequest("/api/v1/posts", `Bearer ${viewerJwt}`, {
+      body: JSON.stringify({ brand_profile_id: seededProfileId, title: "Viewer draft" }),
+      headers: { "Idempotency-Key": `device-viewer-${crypto.randomUUID()}` },
+      method: "POST",
+    });
+    expect(viewerMutation.status).toBe(403);
+
+    const gamma = await signIn(gammaEmail);
+    const editorCode = await issueDeviceCode();
+    expect(
+      (await verifyDeviceCode(gamma.cookie, stringField(editorCode.body, "user_code"))).status,
+    ).toBe(200);
+    expect(
+      (
+        await decideDeviceCode(
+          gamma.cookie,
+          "approve",
+          stringField(editorCode.body, "user_code"),
+        )
+      ).status,
+    ).toBe(200);
+    const editorTokenResponse = await redeemDeviceCode(
+      stringField(editorCode.body, "device_code"),
+    );
+    expect(editorTokenResponse.status).toBe(200);
+    const editorToken = stringField(
+      recordOf(await editorTokenResponse.json()),
+      "access_token",
+    );
+    const editorJwt = (await getSessionWithBearer(editorToken)).headers.get("set-auth-jwt");
+    expect(editorJwt).toBeTruthy();
+
+    const created = await tenantRequest("/api/v1/posts", `Bearer ${editorJwt}`, {
+      body: JSON.stringify({
+        brand_profile_id: seededProfileId,
+        default_text: "CLI editor draft",
+        title: `Device editor ${crypto.randomUUID().slice(0, 8)}`,
+      }),
+      headers: { "Idempotency-Key": `device-editor-${crypto.randomUUID()}` },
+      method: "POST",
+    });
+    expect(created.status).toBe(201);
+    const postId = stringField(recordOf(await created.json()), "id");
+    const deleted = await tenantRequest(`/api/v1/posts/${postId}`, `Bearer ${editorJwt}`, {
+      body: JSON.stringify({ brand_profile_id: seededProfileId }),
+      headers: { "Idempotency-Key": `device-editor-delete-${postId}` },
+      method: "DELETE",
+    });
+    expect(deleted.status).toBe(200);
+  });
+
+  it("does not issue a CLI session after the approving member is suspended", async () => {
+    const suspended = await signIn(suspendedEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    expect((await verifyDeviceCode(suspended.cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(suspended.cookie, "approve", userCode)).status).toBe(200);
+
+    await systemPoolFor(env).query(
+      `UPDATE users SET suspended_at = now(), suspension_reason = 'Device test'
+       WHERE id = $1`,
+      [suspendedInternalUserId],
+    );
+    const sessionsBefore = await systemPoolFor(env).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [suspendedAuthUserId],
+    );
+
+    const denied = await redeemDeviceCode(stringField(body, "device_code"));
+    expect(denied.status).toBeGreaterThanOrEqual(400);
+    expect(denied.status).not.toBe(200);
+
+    const sessionsAfter = await systemPoolFor(env).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [suspendedAuthUserId],
+    );
+    expect(sessionsAfter.rows[0]?.count).toBe(sessionsBefore.rows[0]?.count);
+  });
+});
+
+describe("distributed device abuse controls", () => {
+  it("budgets code issuance and verification per caller and token polling per device", async () => {
+    const codeIp = randomIp();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const result = await checkAuthRateLimit(env, "device-code", codeRequest(codeIp));
+      expect(result.status, `code attempt ${attempt}`).toBe("ok");
+    }
+    const limitedCode = await checkAuthRateLimit(env, "device-code", codeRequest(codeIp));
+    expect(limitedCode.status).toBe("limited");
+    expect(limitedCode.retryAfterSeconds! > 0).toBe(true);
+    expect(limitedCode.retryAfterSeconds!).toBeLessThanOrEqual(600);
+
+    const deviceIp = randomIp();
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const result = await checkAuthRateLimit(env, "device-token", tokenRequest("device-a", deviceIp));
+      expect(result.status, `poll attempt ${attempt}`).toBe("ok");
+    }
+    const limitedDevice = await checkAuthRateLimit(
+      env,
+      "device-token",
+      tokenRequest("device-a", deviceIp),
+    );
+    expect(limitedDevice.status).toBe("limited");
+    expect(limitedDevice.retryAfterSeconds! > 0).toBe(true);
+    expect(limitedDevice.retryAfterSeconds!).toBeLessThanOrEqual(60);
+
+    const otherDevice = await checkAuthRateLimit(
+      env,
+      "device-token",
+      tokenRequest("device-b", deviceIp),
+    );
+    expect(otherDevice.status).toBe("ok");
+  });
+});
+
+/**
+ * Builds a device-code issuance request for the direct limiter seam.
+ *
+ * @param ip - Caller IP.
+ * @returns Incoming request.
+ */
+function codeRequest(ip: string): Request {
+  return new Request(`${authOrigin}/api/auth/device/code`, {
+    body: JSON.stringify({ client_id: "melti-cli" }),
+    headers: { "CF-Connecting-IP": ip, "Content-Type": "application/json" },
+    method: "POST",
+  });
+}
+
+/**
+ * Builds a device-token polling request for the direct limiter seam.
+ *
+ * @param deviceCode - Secret device code.
+ * @param ip - Caller IP.
+ * @returns Incoming request.
+ */
+function tokenRequest(deviceCode: string, ip: string): Request {
+  return new Request(`${authOrigin}/api/auth/device/token`, {
+    body: JSON.stringify({
+      client_id: "melti-cli",
+      device_code: deviceCode,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+    }),
+    headers: { "CF-Connecting-IP": ip, "Content-Type": "application/json" },
+    method: "POST",
+  });
+}
+
+describe("installation origin policy", () => {
+  it("fails closed on an insecure installation origin outside local development", async () => {
+    await expect(
+      betterAuthFor({
+        ...env,
+        APP_URL: "http://insecure.example",
+        ENVIRONMENT: "staging",
+        MAIL: { send: async () => ({ messageId: "unused" }) },
+        MAIL_FROM_ADDRESS: "no-reply@meltiply.test",
+        MAIL_FROM_NAME: "Meltiply Test",
+      }),
+    ).rejects.toThrow(/HTTPS/);
+  });
+});

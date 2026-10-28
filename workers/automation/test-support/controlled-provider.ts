@@ -27,6 +27,8 @@
 import {
   createInstagramAdapter,
   createThreadsAdapter,
+  createTikTokAdapter,
+  createYouTubeAdapter,
   normalizeProviderFailure,
   ProviderRegistry,
   type OAuthConnection,
@@ -36,6 +38,8 @@ import {
   type ProviderOperationResult,
   type ProviderPublicationLookup,
   type ProviderPublicationStatus,
+  type ProviderPublicationRequirements,
+  type ProviderPublishOptions,
   type ProviderRequestContext,
   type ProviderRetryPolicy,
   type ProviderTransferMode,
@@ -70,8 +74,8 @@ export interface ControlledProviderBucket {
 /** R2 key prefix that namespaces every object this fixture owns. */
 const controlledProviderPrefix = "controlled-provider";
 
-/** Platforms the controlled fixture answers for; both are real Meta adapters. */
-export const controlledProviderPlatforms = ["instagram", "threads"] as const;
+/** Platforms whose real capabilities the controlled fixture exercises. */
+export const controlledProviderPlatforms = ["instagram", "threads", "tiktok", "youtube"] as const;
 
 /** One of the platforms the controlled fixture serves. */
 type ControlledProviderPlatform = (typeof controlledProviderPlatforms)[number];
@@ -107,6 +111,7 @@ export interface ControlledPublication extends ControlledPublicationState {
   /** Provider-side publication identity reported back to the application. */
   publicationId: string;
   publishedAt: string;
+  providerOptions?: ProviderPublishOptions;
 }
 
 /** Per-Channel scripted provider behaviour an acceptance test arms up front. */
@@ -287,7 +292,15 @@ function controlledCapability(platform: Platform): PlatformCapability {
       ? createInstagramAdapter(options)
       : platform === "threads"
         ? createThreadsAdapter(options)
-        : undefined;
+        : platform === "youtube"
+          ? createYouTubeAdapter(options)
+          : platform === "tiktok"
+            ? createTikTokAdapter({
+                ...options,
+                clientKey: fixtureClientId,
+                mediaUrlPrefix: "https://controlled-provider.invalid/media/",
+              })
+            : undefined;
   if (!adapter) {
     throw new TypeError(`controlled provider does not serve ${platform}`);
   }
@@ -429,6 +442,27 @@ function createControlledAdapter(
   return {
     capability: controlledCapability(platform),
 
+    /** Supplies explicit, deterministic creator restrictions only for fixture TikTok accounts. */
+    ...(platform === "tiktok"
+      ? {
+          async getPublicationRequirements(
+            _context: ProviderRequestContext,
+            credentials: ProviderCredentials,
+          ): Promise<ProviderPublicationRequirements> {
+            return {
+              platform: "tiktok",
+              creatorDisplayName: "Acceptance TikTok creator",
+              creatorUsername: requireAccountId(credentials),
+              commentAllowed: true,
+              duetAllowed: true,
+              stitchAllowed: false,
+              maxVideoDurationSeconds: 60,
+              privacyLevels: ["PUBLIC_TO_EVERYONE", "SELF_ONLY"],
+            };
+          },
+        }
+      : {}),
+
     authorizationUrl(input): string {
       const url = new URL("/oauth/authorize", fixtureAuthorizationOrigin);
       url.searchParams.set("client_id", fixtureClientId);
@@ -548,6 +582,7 @@ function createControlledAdapter(
         platform,
         publicationId,
         publishedAt: now().toISOString(),
+        ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
         state: "published",
       };
       await bucket.put(controlledPublicationKey(accountId, publicationId), JSON.stringify(record), {

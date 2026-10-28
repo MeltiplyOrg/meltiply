@@ -686,11 +686,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [recoveryReadNamespace, setRecoveryReadNamespace] = useState<string | null>(null);
   /**
    * Live TikTok publishing requirements reported by a Channel's settings panel.
-   * Imperative scratch data: it is written by a child callback and read only when
-   * a submission is validated, so a ref keeps arriving requirements from
-   * re-rendering every composer surface.
+   * Availability gates publishing as well as validation, so arriving requirements
+   * update state; unchanged records retain identity to avoid notification loops.
    */
-  const tiktokRequirementsRef = useRef<Record<string, TikTokPublishingRequirements | null>>({});
+  const [tiktokRequirements, setTikTokRequirements] = useState<
+    Record<string, TikTokPublishingRequirements | null>
+  >({});
   const [pendingOwnershipAssetIds, setPendingOwnershipAssetIds] = useState<string[] | null>(null);
   const [isDragActive, setDragActive] = useState(false);
   /**
@@ -991,9 +992,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     for (const distribution of post.distributions) {
       if (distribution.platform_account_id) channelIds.add(distribution.platform_account_id);
     }
-    const scheduledAt = post.distributions
-      .map((distribution) => distribution.scheduled_at)
-      .find((value): value is string => Boolean(value));
+    const scheduledAt = post.distributions.find(
+      (distribution) => distribution.status === "scheduled" && distribution.scheduled_at,
+    )?.scheduled_at;
     // The rows are adopted in a deferred callback (the pattern this composer used
     // before the cutover) so hydration never interrupts the commit that first
     // rendered the loading state.
@@ -1003,7 +1004,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setChannelOverrides(overridesFromPost(post, platformByAccountId));
       setAttachmentOverrides(attachmentOverridesFromPost(post));
       setSelectedChannelIds([...channelIds]);
-      if (scheduledAt) setScheduleDate(formatInitialScheduleDate(scheduledAt));
+      if (scheduledAt) {
+        setScheduleDate(formatInitialScheduleDate(scheduledAt));
+        setPublishMode("schedule");
+      }
       if (post.queue_membership) {
         setSelectedQueueId(post.queue_membership.queue_id);
         setPublishMode("queue");
@@ -1315,11 +1319,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    */
   const handleRequirementsChange = useCallback(
     (channelId: string, requirements: TikTokPublishingRequirements | null) => {
-      if (tiktokRequirementsRef.current[channelId] === requirements) return;
-      tiktokRequirementsRef.current = {
-        ...tiktokRequirementsRef.current,
-        [channelId]: requirements,
-      };
+      setTikTokRequirements((previous) =>
+        previous[channelId] === requirements
+          ? previous
+          : { ...previous, [channelId]: requirements },
+      );
     },
     [],
   );
@@ -1372,6 +1376,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       providerDescriptorFor(channel.providerIdentifier)?.applyTarget?.(
         target,
         override?.settings ?? {},
+        attachmentsForChannel(channel.id).flatMap((attachment) =>
+          attachment.assetType ? [attachment.assetType] : [],
+        ),
       );
       // `null` means "inherit the shared caption"; an enabled override stays a
       // string even when blank, because a blank caption is a real choice that
@@ -1381,7 +1388,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       if (attachmentIds) target.attachment_ids = [...attachmentIds];
       return target;
     });
-  }, [attachmentOverrides, channelOverrides, selectedChannels]);
+  }, [attachmentOverrides, attachmentsForChannel, channelOverrides, selectedChannels]);
 
   /**
    * Merges partial override updates (custom caption, override enablement, or
@@ -1799,6 +1806,36 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   );
 
   /**
+   * Provider settings gate every sending mode, but not draft saves. The same
+   * violations drive submission validation and the pinned action's readiness;
+   * each descriptor receives only this Channel's selected media kinds.
+   */
+  const providerValidationErrors = useMemo(
+    () =>
+      selectedChannels.flatMap(
+        (channel) =>
+          providerDescriptorFor(channel.providerIdentifier)?.validate?.({
+            channelName: channel.name,
+            settings: channelOverrides[channel.id]?.settings ?? {},
+            capability: capabilityByPlatform.get(channel.providerIdentifier.toLowerCase()),
+            requirements: tiktokRequirements[channel.id] ?? null,
+            mediaKinds: attachmentsForChannel(channel.id).flatMap((attachment) =>
+              attachment.assetType ? [attachment.assetType] : [],
+            ),
+            t,
+          }) ?? [],
+      ),
+    [
+      selectedChannels,
+      channelOverrides,
+      capabilityByPlatform,
+      tiktokRequirements,
+      attachmentsForChannel,
+      t,
+    ],
+  );
+
+  /**
    * Validates composer state against the Post contract and live Platform
    * capabilities before any mutation runs.
    *
@@ -1867,11 +1904,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       if (capabilitiesQuery.isPending) {
         errors.push(t("Platform publishing limits are still loading; try again in a moment."));
       }
+      errors.push(...providerValidationErrors);
 
       for (const channel of selectedChannels) {
         const name = channel.name;
         const platform = channel.providerIdentifier.toLowerCase();
-        const settings = channelOverrides[channel.id]?.settings ?? {};
         const content = resolvedContentFor(channel.id);
         const capability = capabilityByPlatform.get(platform);
         const channelAttachments = attachmentsForChannel(channel.id);
@@ -1967,19 +2004,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             );
           }
         }
-
-        const descriptor = providerDescriptorFor(channel.providerIdentifier);
-        if (descriptor?.validate) {
-          errors.push(
-            ...descriptor.validate({
-              channelName: name,
-              settings,
-              capability,
-              requirements: tiktokRequirementsRef.current[channel.id] ?? null,
-              t,
-            }),
-          );
-        }
       }
       return errors;
     },
@@ -1988,7 +2012,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       attachmentsForChannel,
       capabilityByPlatform,
       capabilitiesQuery.isPending,
-      channelOverrides,
+      providerValidationErrors,
       resolvedContentFor,
       scheduleDate,
       hasSelectedQueue,
@@ -2325,7 +2349,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     Boolean(postLoadError) ||
     !scope.isSignedIn ||
     ownerProfileId === null ||
-    profileMismatch;
+    profileMismatch ||
+    (publishMode !== "draft" && providerValidationErrors.length > 0);
 
   return (
     <fieldset
@@ -2924,6 +2949,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                     channelName={channel.name}
                     channelId={channel.id}
                     settings={override.settings}
+                    mediaKinds={channelAttachments.flatMap((attachment) =>
+                      attachment.assetType ? [attachment.assetType] : [],
+                    )}
                     onChange={(newSettings) =>
                       handleChannelOverrideChange(channel.id, { settings: newSettings })
                     }
@@ -3077,7 +3105,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           title={
             publishMode === "draft"
               ? t("Saves this post's text, attachments, and channel settings without publishing")
-              : undefined
+              : providerValidationErrors[0]
           }
         >
           {isSubmitting ? (

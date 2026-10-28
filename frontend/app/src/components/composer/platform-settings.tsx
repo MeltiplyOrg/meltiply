@@ -1,5 +1,6 @@
 import React, { useEffect, useId } from "react";
 import { Input } from "@meltiply/ui/input";
+import { Button } from "@meltiply/ui/button";
 import { Switch } from "@meltiply/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@meltiply/ui/select";
 import { useSessionScope } from "@/hooks/use-session-scope";
@@ -32,6 +33,7 @@ interface TikTokComposerSettings extends TikTokSettings {
   brand_content?: boolean;
   brand_organic?: boolean;
   is_ai_generated?: boolean;
+  disclose?: boolean;
 }
 
 /**
@@ -48,6 +50,8 @@ interface ProviderEditorProps<S> {
   update: (key: string, value: unknown) => void;
   /** Live TikTok publishing requirements when the descriptor opted in; otherwise null. */
   requirements: TikTokPublishingRequirements | null;
+  /** Actual attachment kinds for this Channel, not the Post's full media set. */
+  mediaKinds: readonly ("image" | "video")[];
   /** Localized translate function. */
   t: Translate;
 }
@@ -65,6 +69,7 @@ interface ProviderValidationContext<S> {
   capability: PlatformCapability | undefined;
   /** Live TikTok publishing requirements reported by the settings panel. */
   requirements: TikTokPublishingRequirements | null;
+  mediaKinds: readonly ("image" | "video")[];
   /** Localized translate function. */
   t: Translate;
 }
@@ -84,7 +89,11 @@ interface ProviderSpec<S> {
   /** Settings editor panel rendered inside the channel tab. */
   Editor: React.ComponentType<ProviderEditorProps<S>>;
   /** Maps typed settings onto a saved Post target; omit when the provider emits no contract fields. */
-  applyTarget?: (target: PostTargetDraft, settings: Partial<S>) => void;
+  applyTarget?: (
+    target: PostTargetDraft,
+    settings: Partial<S>,
+    mediaKinds: readonly ("image" | "video")[],
+  ) => void;
   /**
    * Rebuilds the raw settings map from a persisted Post target so an edited
    * post rehydrates its provider controls. Fields the provider does not write
@@ -105,7 +114,11 @@ export interface ProviderDescriptor {
   providers: readonly string[];
   read: (settings: Record<string, unknown>) => Record<string, unknown>;
   Editor: React.ComponentType<ProviderEditorProps<Record<string, unknown>>>;
-  applyTarget?: (target: PostTargetDraft, settings: Record<string, unknown>) => void;
+  applyTarget?: (
+    target: PostTargetDraft,
+    settings: Record<string, unknown>,
+    mediaKinds: readonly ("image" | "video")[],
+  ) => void;
   readTarget?: (target: PostTargetDraft) => Record<string, unknown>;
   validate?: (context: ProviderValidationContext<Record<string, unknown>>) => string[];
 }
@@ -130,6 +143,7 @@ function defineProviderDescriptor<S>(spec: ProviderSpec<S>): ProviderDescriptor 
       update={props.update}
       requirements={props.requirements}
       t={props.t}
+      mediaKinds={props.mediaKinds}
     />
   );
   return {
@@ -138,7 +152,7 @@ function defineProviderDescriptor<S>(spec: ProviderSpec<S>): ProviderDescriptor 
     read,
     Editor: ErasedEditor,
     applyTarget: applyTarget
-      ? (target, settings) => applyTarget(target, read(settings))
+      ? (target, settings, mediaKinds) => applyTarget(target, read(settings), mediaKinds)
       : undefined,
     readTarget: readTarget ? (target) => ({ ...readTarget(target) }) : undefined,
     validate: validate
@@ -146,17 +160,6 @@ function defineProviderDescriptor<S>(spec: ProviderSpec<S>): ProviderDescriptor 
       : undefined,
   };
 }
-
-/**
- * Static TikTok privacy levels used as a fallback while the creator's live
- * publishing requirements are loading (or unavailable for the account).
- */
-const FALLBACK_TIKTOK_PRIVACY_LEVELS: TikTokPrivacyLevel[] = [
-  "PUBLIC_TO_EVERYONE",
-  "MUTUAL_FOLLOW_FRIENDS",
-  "FOLLOWER_OF_CREATOR",
-  "SELF_ONLY",
-];
 
 /**
  * Shared panel chrome for a provider settings editor: the bordered card with
@@ -185,9 +188,9 @@ function ProviderPanel({
 }
 
 /**
- * YouTube settings editor: video title (contract `title_override`) and
- * comma-separated tags (contract `hashtags`). Both are the only fields this
- * provider writes, and both round-trip through the Post target.
+ * YouTube settings editor: title/tags plus the existing target's audience and
+ * visibility options. Audience has no implicit answer; visibility retains the
+ * provider's established public default. Every control survives draft reopen.
  */
 function YoutubeEditor({
   channelName,
@@ -242,32 +245,60 @@ function YoutubeEditor({
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleTagsChange(e.target.value)}
           />
         </div>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${fieldId}-visibility`} className="text-xs font-medium text-ink-3">
+            {t("Visibility")}
+          </label>
+          <Select value={yt.type ?? "public"} onValueChange={(value) => update("type", value)}>
+            <SelectTrigger id={`${fieldId}-visibility`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="public">{t("Public")}</SelectItem>
+              <SelectItem value="unlisted">{t("Unlisted")}</SelectItem>
+              <SelectItem value="private">{t("Private")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${fieldId}-audience`} className="text-xs font-medium text-ink-3">
+            {t("Made for kids")}
+          </label>
+          <Select
+            value={yt.selfDeclaredMadeForKids ?? ""}
+            onValueChange={(value) => update("selfDeclaredMadeForKids", value)}
+          >
+            <SelectTrigger id={`${fieldId}-audience`}>
+              <SelectValue placeholder={t("Choose an audience")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="yes">{t("Yes, made for kids")}</SelectItem>
+              <SelectItem value="no">{t("No, not made for kids")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
     </ProviderPanel>
   );
 }
 
 /**
- * TikTok settings editor: post title, creator-scoped privacy level, interaction
- * toggles (duet/stitch/comments gated by live requirements), and disclosure flags.
- *
- * Live `PublishingRequirements` drive the selectable privacy levels and whether
- * the interaction toggles are offered; the static list is the loading fallback.
- * Every switch shares one responsive grid and a full-row label/touch target.
+ * TikTok's creator-scoped controls: no fallback privacy options or implicit
+ * interaction grants. Photo targets hide video-only features and the payload
+ * boundary clears them. Disclosure subtypes and policy guidance follow the
+ * current Direct Post requirements; publishing is the explicit consent action.
  */
 function TikTokEditor({
   channelName,
   settings: tt,
   update,
   requirements,
+  mediaKinds,
   t,
 }: ProviderEditorProps<TikTokComposerSettings>): React.ReactElement {
   const fieldId = useId();
-  const privacyLevels = requirements?.privacy_levels ?? FALLBACK_TIKTOK_PRIVACY_LEVELS;
-  const selectableLevels =
-    tt.privacy_level && !privacyLevels.includes(tt.privacy_level)
-      ? [...privacyLevels, tt.privacy_level]
-      : privacyLevels;
+  const photo = mediaKinds.includes("image");
+  const disclose = tt.disclose ?? Boolean(tt.brand_content || tt.brand_organic);
   const privacyLabels: Record<TikTokPrivacyLevel, string> = {
     PUBLIC_TO_EVERYONE: t("Public to Everyone"),
     MUTUAL_FOLLOW_FRIENDS: t("Friends Only"),
@@ -276,50 +307,41 @@ function TikTokEditor({
   };
   const toggles = [
     {
+      field: "comment",
+      label: t("Comments"),
+      checked: tt.comment ?? false,
+      disabled: !requirements?.comment_allowed,
+      visible: true,
+    },
+    {
       field: "duet",
       label: t("Duet"),
-      checked: tt.duet ?? true,
-      disabled: requirements?.duet_allowed === false,
+      checked: tt.duet ?? false,
+      disabled: !requirements?.duet_allowed,
+      visible: !photo,
     },
     {
       field: "stitch",
       label: t("Stitch"),
-      checked: tt.stitch ?? true,
-      disabled: requirements?.stitch_allowed === false,
-    },
-    {
-      field: "comment",
-      label: t("Comments"),
-      checked: tt.comment ?? true,
-      disabled: requirements?.comment_allowed === false,
-    },
-    {
-      field: "brand_content",
-      label: t("Brand Content"),
-      checked: tt.brand_content ?? false,
-      disabled: false,
-    },
-    {
-      field: "brand_organic",
-      label: t("Organic Brand"),
-      checked: tt.brand_organic ?? false,
-      disabled: false,
+      checked: tt.stitch ?? false,
+      disabled: !requirements?.stitch_allowed,
+      visible: !photo,
     },
     {
       field: "is_ai_generated",
       label: t("AI Generated"),
       checked: tt.is_ai_generated ?? false,
       disabled: false,
+      visible: !photo,
     },
-  ] as const satisfies ReadonlyArray<{
-    field: keyof TikTokComposerSettings;
-    label: string;
-    checked: boolean;
-    disabled: boolean;
-  }>;
-
+  ] as const;
   return (
     <ProviderPanel channelName={channelName} t={t}>
+      {requirements && (
+        <p className="text-xs text-ink-2">
+          {t("Posting as {name}", { name: requirements.creator.display_name })}
+        </p>
+      )}
       <div className="flex flex-col gap-1.5">
         <label htmlFor={`${fieldId}-title`} className="text-xs font-medium text-ink-3">
           {t("Post Title (optional, max 90 characters)")}
@@ -328,49 +350,134 @@ function TikTokEditor({
           id={`${fieldId}-title`}
           placeholder={t("TikTok post title...")}
           value={tt.title ?? ""}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => update("title", e.target.value)}
+          onChange={(event) => update("title", event.target.value)}
           maxLength={90}
         />
       </div>
-
       <div className="flex flex-col gap-1.5">
         <label htmlFor={`${fieldId}-privacy`} className="text-xs font-medium text-ink-3">
           {t("Privacy Level")}
         </label>
         <Select
-          value={tt.privacy_level ?? ""}
-          onValueChange={(val: string) => update("privacy_level", val)}
+          value={
+            tt.privacy_level && requirements?.privacy_levels.includes(tt.privacy_level)
+              ? tt.privacy_level
+              : ""
+          }
+          onValueChange={(value) => update("privacy_level", value)}
+          disabled={!requirements}
         >
           <SelectTrigger id={`${fieldId}-privacy`}>
             <SelectValue placeholder={t("Select privacy")} />
           </SelectTrigger>
           <SelectContent>
-            {selectableLevels.map((level) => (
-              <SelectItem key={level} value={level}>
-                {privacyLabels[level] ?? level}
+            {(requirements?.privacy_levels ?? []).map((level) => (
+              <SelectItem
+                key={level}
+                value={level}
+                disabled={disclose && tt.brand_content === true && level === "SELF_ONLY"}
+              >
+                {privacyLabels[level]}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
-
       <div className="grid grid-cols-1 gap-x-6 @sm:grid-cols-2">
-        {toggles.map((toggle) => (
+        {toggles
+          .filter((toggle) => toggle.visible)
+          .map((toggle) => (
+            <label
+              key={toggle.field}
+              htmlFor={`${fieldId}-${toggle.field}`}
+              className="flex min-h-12 min-w-0 cursor-pointer items-center justify-between gap-3 py-2 has-[:disabled]:cursor-not-allowed"
+            >
+              <span className="min-w-0 text-xs font-medium text-ink">{toggle.label}</span>
+              <Switch
+                id={`${fieldId}-${toggle.field}`}
+                checked={toggle.checked}
+                disabled={toggle.disabled}
+                onCheckedChange={(checked) => update(toggle.field, checked)}
+              />
+            </label>
+          ))}
+      </div>
+      <label
+        htmlFor={`${fieldId}-disclose`}
+        className="flex min-h-12 items-center justify-between gap-3"
+      >
+        <span className="text-xs font-medium text-ink">{t("Disclose commercial content")}</span>
+        <Switch
+          id={`${fieldId}-disclose`}
+          checked={disclose}
+          onCheckedChange={(checked) => update("disclose", checked)}
+        />
+      </label>
+      {disclose && (
+        <div className="flex flex-col gap-2">
           <label
-            key={toggle.field}
-            htmlFor={`${fieldId}-${toggle.field}`}
-            className="flex min-h-12 min-w-0 cursor-pointer items-center justify-between gap-3 py-2 has-[:disabled]:cursor-not-allowed"
+            htmlFor={`${fieldId}-organic`}
+            className="flex min-h-12 items-center justify-between gap-3"
           >
-            <span className="min-w-0 text-xs font-medium text-ink">{toggle.label}</span>
+            <span className="text-xs font-medium text-ink">{t("Organic Brand")}</span>
             <Switch
-              id={`${fieldId}-${toggle.field}`}
-              checked={toggle.checked}
-              disabled={toggle.disabled}
-              onCheckedChange={(checked) => update(toggle.field, checked)}
+              id={`${fieldId}-organic`}
+              checked={tt.brand_organic ?? false}
+              onCheckedChange={(checked) => update("brand_organic", checked)}
             />
           </label>
-        ))}
-      </div>
+          <label
+            htmlFor={`${fieldId}-brand`}
+            className="flex min-h-12 items-center justify-between gap-3"
+          >
+            <span className="text-xs font-medium text-ink">{t("Brand Content")}</span>
+            <Switch
+              id={`${fieldId}-brand`}
+              checked={tt.brand_content ?? false}
+              disabled={tt.privacy_level === "SELF_ONLY"}
+              onCheckedChange={(checked) => update("brand_content", checked)}
+            />
+          </label>
+          <p className="text-xs text-ink-3">{t("Branded content cannot be private.")}</p>
+          {!tt.brand_content && !tt.brand_organic && (
+            <p className="text-xs text-red">{t("Choose your brand, branded content, or both.")}</p>
+          )}
+          {(tt.brand_content || tt.brand_organic) && (
+            <p className="text-xs text-ink-2">
+              {tt.brand_content
+                ? t("Your post will be labeled Paid partnership.")
+                : t("Your post will be labeled Promotional content.")}
+            </p>
+          )}
+        </div>
+      )}
+      <p className="text-xs text-ink-2">
+        {t("By posting, you agree to TikTok's")}{" "}
+        {disclose && tt.brand_content && (
+          <>
+            <a
+              className="text-accent-ink underline"
+              href="https://www.tiktok.com/legal/page/global/bc-policy/en"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t("Branded Content Policy")}
+            </a>
+            {" · "}
+          </>
+        )}
+        <a
+          className="text-accent-ink underline"
+          href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {t("Music Usage Confirmation")}
+        </a>
+      </p>
+      <p className="text-xs text-ink-3">
+        {t("TikTok may take a few minutes to process your post.")}
+      </p>
     </ProviderPanel>
   );
 }
@@ -404,14 +511,27 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       if (title) target.title_override = title;
       const tags = (yt.tags ?? []).map((tag) => tag.label).filter(Boolean);
       if (tags.length > 0) target.hashtags = tags;
+      if (yt.selfDeclaredMadeForKids !== undefined) {
+        target.provider_options = {
+          youtube: {
+            made_for_kids: yt.selfDeclaredMadeForKids === "yes",
+            privacy_status: yt.type ?? "public",
+          },
+        };
+      }
     },
-    // Rebuilds the YouTube controls from the persisted target: `title_override`
-    // and `hashtags` are the only fields this provider writes.
+    // Rehydrate the same contract fields the controls save, including false audience.
     readTarget: (target) => {
       const hashtags = target.hashtags ?? [];
       return {
         title: target.title_override ?? undefined,
         tags: hashtags.map((tag) => ({ value: tag, label: tag })),
+        type: target.provider_options?.youtube?.privacy_status ?? "public",
+        selfDeclaredMadeForKids: target.provider_options?.youtube
+          ? target.provider_options.youtube.made_for_kids
+            ? "yes"
+            : "no"
+          : undefined,
       };
     },
     validate: ({ channelName, settings: yt, capability, t }) => {
@@ -422,6 +542,11 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
           t("{name}: YouTube requires a video title between 2 and 100 characters.", {
             name: channelName,
           }),
+        );
+      }
+      if (yt.selfDeclaredMadeForKids === undefined) {
+        errors.push(
+          t("{name}: choose whether this video is made for kids.", { name: channelName }),
         );
       }
       const tags = yt.tags ?? [];
@@ -449,19 +574,21 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
 
     read: (settings) => settings as Partial<TikTokComposerSettings>,
     Editor: TikTokEditor,
-    applyTarget: (target, tt) => {
+    applyTarget: (target, tt, mediaKinds) => {
       const title = tt.title?.trim();
       if (title) target.title_override = title;
+      if (!tt.privacy_level) return;
+      const photo = mediaKinds.includes("image");
+      const disclose = tt.disclose ?? Boolean(tt.brand_content || tt.brand_organic);
       target.provider_options = {
         tiktok: {
-          // Validated non-empty before submit; the fallback only satisfies the type.
-          privacy_level: tt.privacy_level ?? "PUBLIC_TO_EVERYONE",
-          allow_comment: tt.comment ?? true,
-          allow_duet: tt.duet ?? true,
-          allow_stitch: tt.stitch ?? true,
-          brand_content: tt.brand_content ?? false,
-          brand_organic: tt.brand_organic ?? false,
-          is_ai_generated: tt.is_ai_generated ?? false,
+          privacy_level: tt.privacy_level,
+          allow_comment: tt.comment ?? false,
+          allow_duet: !photo && (tt.duet ?? false),
+          allow_stitch: !photo && (tt.stitch ?? false),
+          brand_content: disclose && (tt.brand_content ?? false),
+          brand_organic: disclose && (tt.brand_organic ?? false),
+          is_ai_generated: !photo && (tt.is_ai_generated ?? false),
           music_usage_confirmed: true,
         },
       };
@@ -481,10 +608,24 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         brand_content: options.brand_content,
         brand_organic: options.brand_organic,
         is_ai_generated: options.is_ai_generated,
+        disclose: options.brand_content || options.brand_organic,
       };
     },
-    validate: ({ channelName, settings: tt, requirements, t }) => {
+    validate: ({ channelName, settings: tt, requirements, mediaKinds, t }) => {
       const errors: string[] = [];
+      const photo = mediaKinds.includes("image");
+      const disclose = tt.disclose ?? Boolean(tt.brand_content || tt.brand_organic);
+      if (!requirements) {
+        errors.push(
+          t("{name}: load TikTok creator information before publishing.", { name: channelName }),
+        );
+      }
+      if (disclose && !tt.brand_content && !tt.brand_organic) {
+        errors.push(t("Choose your brand, branded content, or both."));
+      }
+      if (disclose && tt.brand_content && tt.privacy_level === "SELF_ONLY") {
+        errors.push(t("Branded content cannot be private."));
+      }
       if (!tt.privacy_level) {
         errors.push(t("{name}: choose a TikTok privacy level.", { name: channelName }));
       }
@@ -496,15 +637,15 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
             }),
           );
         }
-        if ((tt.comment ?? true) && !requirements.comment_allowed) {
+        if (tt.comment === true && !requirements.comment_allowed) {
           errors.push(
             t("{name}: comments are not allowed for this creator.", { name: channelName }),
           );
         }
-        if ((tt.duet ?? true) && !requirements.duet_allowed) {
+        if (!photo && tt.duet === true && !requirements.duet_allowed) {
           errors.push(t("{name}: duet is not allowed for this creator.", { name: channelName }));
         }
-        if ((tt.stitch ?? true) && !requirements.stitch_allowed) {
+        if (!photo && tt.stitch === true && !requirements.stitch_allowed) {
           errors.push(t("{name}: stitch is not allowed for this creator.", { name: channelName }));
         }
       }
@@ -539,6 +680,7 @@ interface PlatformSettingsProps {
   /** Platform account id — required to fetch live TikTok publishing requirements. */
   channelId: string;
   settings: Record<string, unknown>;
+  mediaKinds?: readonly ("image" | "video")[];
   onChange: (newSettings: Record<string, unknown>) => void;
   /**
    * Reports the creator's live TikTok publishing requirements to the parent composer
@@ -557,11 +699,9 @@ interface PlatformSettingsProps {
  * Resolves the channel's provider to its typed descriptor in
  * `PROVIDER_DESCRIPTORS` and renders that descriptor's editor — provider
  * branching and settings narrowing live behind the descriptor boundary rather
- * than in this component. Only a subset of settings persist through the Post
- * target — TikTok options map to `provider_options.tiktok`, YouTube title/tags
- * map to `title_override`/`hashtags`. Every control in a descriptor's editor is
- * persisted by its `applyTarget`, and the descriptor's `readTarget` performs the
- * reverse mapping when an edited post rehydrates these controls.
+ * than in this component. YouTube title/tags and audience/visibility, and TikTok
+ * creator options, persist through the existing target contract.
+ * The descriptor's `readTarget` restores the same controls when editing.
  *
  * For descriptors marked `usesRequirements` (TikTok) the editor fetches live
  * `PublishingRequirements` and reports them upward via `onRequirementsChange`
@@ -578,6 +718,7 @@ export function PlatformSettings({
   provider,
   channelName,
   channelId,
+  mediaKinds = [],
   settings,
   onChange,
   onRequirementsChange,
@@ -598,6 +739,15 @@ export function PlatformSettings({
     onRequirementsChange?.(channelId, usesRequirements ? requirements : null);
   }, [channelId, usesRequirements, requirements, onRequirementsChange]);
 
+  const validation =
+    descriptor?.validate?.({
+      channelName,
+      settings,
+      capability: undefined,
+      requirements,
+      mediaKinds,
+      t,
+    }) ?? [];
   if (!descriptor) return null;
 
   // Merges one key into the raw settings map and reports the change upward.
@@ -610,12 +760,33 @@ export function PlatformSettings({
 
   const Editor = descriptor.Editor;
   return (
-    <Editor
-      channelName={channelName}
-      settings={settings}
-      update={update}
-      requirements={requirements}
-      t={t}
-    />
+    <>
+      <Editor
+        channelName={channelName}
+        settings={settings}
+        update={update}
+        requirements={requirements}
+        mediaKinds={mediaKinds}
+        t={t}
+      />
+      {usesRequirements && !requirements && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={requirementsQuery.isFetching}
+          onClick={() => void requirementsQuery.refetch()}
+        >
+          {t("Load TikTok creator information")}
+        </Button>
+      )}
+      {validation.length > 0 && (
+        <ul className="list-disc pl-4 text-xs text-ink-3">
+          {validation.map((message) => (
+            <li key={message}>{message}</li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

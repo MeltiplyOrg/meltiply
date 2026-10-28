@@ -29,11 +29,12 @@ export interface ControlledPublication {
   platform: string;
   publicationId: string;
   publishedAt: string;
+  providerOptions?: unknown;
   state: "cancelled" | "published";
 }
 
 /** Platforms the controlled Provider serves. */
-export type ControlledPlatform = "instagram" | "threads";
+export type ControlledPlatform = "instagram" | "threads" | "tiktok" | "youtube";
 
 /** A Channel the acceptance run asks the fixture to provision. */
 export interface ControlledChannelSpec {

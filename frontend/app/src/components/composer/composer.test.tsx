@@ -10,7 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { AppAuthProvider, useMeltiplyAuth } from "@/components/auth/auth-provider";
 import { WorkspaceProvider } from "@/context/workspace.context";
 import { createAssetUpload, type AssetUploadTask } from "@/lib/upload";
-import type { Asset, BrandProfile, PlatformAccount, Post, TikTokPublishingRequirements } from "@/types";
+import type {
+  Asset,
+  BrandProfile,
+  PlatformAccount,
+  Post,
+  TikTokPublishingRequirements,
+} from "@/types";
 
 import { Composer, type ComposerProps } from "./composer";
 import { authClient } from "@/lib/auth-client";
@@ -521,22 +527,30 @@ describe("Composer provider publication choices", () => {
       post: {
         ...hydratedPost,
         brand_profile_id: account.brand_profile_id,
-        targets: [{
-          platform_account_id: account.id,
-          attachment_ids: null,
-          title_override: "A saved video",
-          description_override: null,
-          hashtags: [],
-          provider_options: { youtube: { made_for_kids: true, privacy_status: "unlisted" } },
-        }],
+        targets: [
+          {
+            platform_account_id: account.id,
+            attachment_ids: null,
+            title_override: "A saved video",
+            description_override: null,
+            hashtags: [],
+            provider_options: { youtube: { made_for_kids: true, privacy_status: "unlisted" } },
+          },
+        ],
       },
     });
-    expect(await screen.findByRole("combobox", { name: "Visibility" })).toHaveTextContent("Unlisted");
+    expect(await screen.findByRole("combobox", { name: "Visibility" })).toHaveTextContent(
+      "Unlisted",
+    );
     expect(screen.getByRole("combobox", { name: "Made for kids" })).toHaveTextContent("Yes");
   });
 
   it("requires TikTok interaction opt-in instead of granting it implicitly", async () => {
-    const account = { ...instagramAccount, platform: "tiktok" as const, brand_profile_id: "profile-a" };
+    const account = {
+      ...instagramAccount,
+      platform: "tiktok" as const,
+      brand_profile_id: "profile-a",
+    };
     renderComposer({
       accounts: [account],
       brandProfiles: composerProfiles,

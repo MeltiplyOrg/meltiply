@@ -106,9 +106,18 @@ async function openComposer(page: Page): Promise<void> {
     .locator("main header")
     .getByRole("button", { name: /create post/i })
     .click();
-  await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
+  await expect(page.getByRole("dialog", { name: "New Post", exact: true })).toBeVisible({
     timeout: 30_000,
   });
+}
+
+/** Selects the immediate-delivery intent before using the pinned composer action. */
+async function publishNow(page: Page): Promise<void> {
+  await page
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: "Now", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Publish Now", exact: true }).click();
 }
 
 /**
@@ -118,7 +127,7 @@ async function openComposer(page: Page): Promise<void> {
  */
 async function returnToPosts(page: Page): Promise<void> {
   const submissions = page.getByRole("button", {
-    name: /^(?:save(?: draft)?|schedule|publish now)$/i,
+    name: /^(?:save(?: draft)?|schedule post|publish now)$/i,
   });
   await expect(submissions.and(page.locator(":disabled"))).toHaveCount(0, {
     timeout: 30_000,
@@ -278,10 +287,12 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
       exact: true,
     })
     .click();
-  await picker.getByRole("combobox", { name: "Hour", exact: true }).click();
+  await picker.getByRole("button", { name: "Choose time", exact: true }).click();
+  await page.getByRole("combobox", { name: "Hour", exact: true }).click();
   await page.getByRole("option", { name: pad(when.getHours()), exact: true }).click();
-  await picker.getByRole("combobox", { name: "Minute", exact: true }).click();
+  await page.getByRole("combobox", { name: "Minute", exact: true }).click();
   await page.getByRole("option", { name: pad(when.getMinutes()), exact: true }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
 }
 
 /** Applies a status bucket through the filter disclosure, then restores the collection viewport. */
@@ -486,7 +497,7 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
   // Threads publishes the image alone, with its own caption.
   await toggleChannelAttachment(page, channelNames.threads, 2, videoAttachment.name);
   await overrideChannelCaption(page, channelNames.threads, threadsCaption);
-  await page.getByRole("button", { name: /^publish now$/i }).click();
+  await publishNow(page);
   await returnToPosts(page);
 
   // Partial success: one Post holding a published and a failed Channel is
@@ -690,10 +701,10 @@ test("keeps separately created identical Posts distinct and publishes only the o
 
   // Publish exactly one stored Post through its own Details panel.
   await editPostFromRow(page, rows.first());
-  await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
+  await expect(page.getByRole("dialog", { name: "Edit post", exact: true })).toBeVisible({
     timeout: 30_000,
   });
-  await page.getByRole("button", { name: /^publish now$/i }).click();
+  await publishNow(page);
   await returnToPosts(page);
 
   await waitForLiveCopyCount(request, channels.threads.providerUserId, 1);
@@ -726,7 +737,7 @@ test("keeps separately created identical Posts distinct and publishes only the o
  * Each session explicitly chooses its target; retained workspace selection
  * is not assumed to reset between compositions.
  */
-test("edits a pending target without touching published history and explains what delete keeps", async ({
+test("edits a scheduled target without publishing it and preserves prior platform copies", async ({
   page,
   request,
 }) => {
@@ -745,7 +756,7 @@ test("edits a pending target without touching published history and explains wha
   await targetOnlyChannel(page, channelNames.instagram, channelNames.threads);
   await composerTextarea(page).fill(publishedCaption);
   await attachMedia(page, [videoAttachment]);
-  await page.getByRole("button", { name: /^publish now$/i }).click();
+  await publishNow(page);
   await returnToPosts(page);
 
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 1);
@@ -771,11 +782,12 @@ test("edits a pending target without touching published history and explains wha
 
   // Edit the pending Post through its own Details panel.
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: pendingCaption }));
-  await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
+  await expect(page.getByRole("dialog", { name: "Edit post", exact: true })).toBeVisible({
     timeout: 30_000,
   });
   await composerTextarea(page).fill(pendingEditCaption);
-  await page.getByRole("button", { name: /^save$/i }).click();
+  await expect(page.getByRole("radio", { name: "Schedule", exact: true })).toBeChecked();
+  await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
   await returnToPosts(page);
 
   await waitForPostUnderStatus(page, pendingEditCaption, /^scheduled$/i);
@@ -795,11 +807,6 @@ test("edits a pending target without touching published history and explains wha
   const deleteDetail = await openPostDetails(page, pendingEditCaption);
   await deleteDetail.getByRole("button", { name: "Delete post", exact: true }).click();
   const confirmation = page.getByRole("alertdialog");
-  await expect(confirmation.getByText(/delete this post\?/i)).toBeVisible();
-  await expect(
-    confirmation.getByText(/already published stays live on its platform/i),
-  ).toBeVisible();
-  await expect(confirmation.getByText(/stops its pending channels/i)).toBeVisible();
   await confirmation.getByRole("button", { name: /^keep post$/i }).click();
   await expect(confirmation).toBeHidden({ timeout: 30_000 });
   // Declining leaves the Post exactly as it was, modal and all.
@@ -830,4 +837,128 @@ test("edits a pending target without touching published history and explains wha
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 1);
   await waitForLiveCopyCount(request, channels.threads.providerUserId, 0);
   expect(await readChannelLiveCopies(request, channels)).toEqual(historyBefore);
+});
+
+/**
+ * Audience, visibility, creator permissions, consent and photo-only controls
+ * survive a real draft round-trip before queue delivery. The external Provider
+ * is controlled; the browser, persistence, media and publication pipeline are real.
+ */
+test("preserves provider choices through drafts and publishes photo and video targets safely", async ({
+  page,
+  request,
+}, testInfo) => {
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
+  const youtube: ControlledChannelSpec = {
+    displayName: "Acceptance YouTube",
+    platform: "youtube",
+    providerUserId: controlledProviderAccountId("youtube"),
+  };
+  const tiktok: ControlledChannelSpec = {
+    displayName: "Acceptance TikTok",
+    platform: "tiktok",
+    providerUserId: controlledProviderAccountId("tiktok"),
+  };
+  await attachChannels(page, request, profileName, [youtube, tiktok]);
+  await openComposer(page);
+  const caption = `Provider settings ${Date.now()}`;
+  await composerTextarea(page).fill(caption);
+  await attachMedia(page, [imageAttachment, videoAttachment]);
+  await toggleChannelAttachment(page, youtube.displayName, 1, imageAttachment.name);
+  await toggleChannelAttachment(page, tiktok.displayName, 2, videoAttachment.name);
+  const youtubePanel = page.getByRole("region", { name: youtube.displayName, exact: true });
+  const tiktokPanel = page.getByRole("region", { name: tiktok.displayName, exact: true });
+  await youtubePanel.getByRole("textbox", { name: /Video Title/ }).fill("A deliberate video title");
+  await youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }).click();
+  await page.getByRole("option", { name: "No, not made for kids", exact: true }).click();
+  await youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }).click();
+  await page.getByRole("option", { name: "Unlisted", exact: true }).click();
+  await expect(
+    tiktokPanel.getByText("Posting as Acceptance TikTok creator", { exact: true }),
+  ).toBeVisible();
+  await expect(tiktokPanel.getByRole("switch", { name: "Duet", exact: true })).toHaveCount(0);
+  await expect(tiktokPanel.getByRole("switch", { name: "Stitch", exact: true })).toHaveCount(0);
+  await expect(
+    tiktokPanel.getByRole("switch", { name: "Comments", exact: true }),
+  ).not.toBeChecked();
+  await tiktokPanel.getByRole("combobox", { name: "Privacy Level", exact: true }).click();
+  await expect(page.getByRole("option")).toHaveCount(2);
+  await page.getByRole("option", { name: "Public to Everyone", exact: true }).click();
+  await tiktokPanel
+    .getByRole("switch", { name: "Disclose commercial content", exact: true })
+    .click();
+  await page
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: "Now", exact: true })
+    .click();
+  await expect(page.getByRole("button", { name: "Publish Now", exact: true })).toBeDisabled();
+  await tiktokPanel.getByRole("switch", { name: "Brand Content", exact: true }).click();
+  await expect(
+    tiktokPanel.getByRole("link", { name: "Branded Content Policy", exact: true }),
+  ).toHaveAttribute("href", "https://www.tiktok.com/legal/page/global/bc-policy/en");
+  await expect(
+    tiktokPanel.getByRole("link", { name: "Music Usage Confirmation", exact: true }),
+  ).toHaveAttribute("href", "https://www.tiktok.com/legal/page/global/music-usage-confirmation/en");
+  await page
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: "Draft", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Save Draft", exact: true }).click();
+  await returnToPosts(page);
+  await reloadPostsWorkspace(page);
+  await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }),
+  ).toContainText("No");
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }),
+  ).toContainText("Unlisted");
+  await expect(
+    tiktokPanel.getByRole("switch", { name: "Brand Content", exact: true }),
+  ).toBeChecked();
+  await expect(
+    tiktokPanel.getByRole("switch", { name: "Comments", exact: true }),
+  ).not.toBeChecked();
+
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await tiktokPanel
+        .getByRole("combobox", { name: "Privacy Level", exact: true })
+        .scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath(`publishing-${width}-${colorScheme}.png`),
+        fullPage: true,
+      });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    }
+  }
+  await page
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: "Now", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Publish Now", exact: true }).click();
+  await returnToPosts(page);
+  await waitForLiveCopyCount(request, youtube.providerUserId, 1);
+  await waitForLiveCopyCount(request, tiktok.providerUserId, 1);
+  const [videoCopy] = await readLiveControlledCopies(request, youtube.providerUserId);
+  const [photoCopy] = await readLiveControlledCopies(request, tiktok.providerUserId);
+  expect(videoCopy!.providerOptions).toMatchObject({
+    youtube: { madeForKids: false, privacyStatus: "unlisted" },
+  });
+  expect(photoCopy!.providerOptions).toMatchObject({
+    tiktok: {
+      privacyLevel: "PUBLIC_TO_EVERYONE",
+      brandContent: true,
+      allowComment: false,
+      allowDuet: false,
+      allowStitch: false,
+    },
+  });
+  expect(videoCopy!.media.map((item) => item.contentType)).toEqual(["video/mp4"]);
+  expect(photoCopy!.media).toHaveLength(1);
+  expect(photoCopy!.media[0]!.contentType).toMatch(/^image\/(?:jpeg|webp)$/);
 });

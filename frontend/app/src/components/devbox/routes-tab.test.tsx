@@ -30,12 +30,11 @@ describe("Routes tab", () => {
 
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith(destination));
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      new URL("/api/auth/device/code", window.location.origin).href,
-    );
-    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
-      client_id: "melti-cli",
-    });
+    const call = fetchMock.mock.calls[0];
+    if (!call) throw new Error("Expected one device-code request");
+    const [input, init] = call;
+    expect(String(input)).toBe(new URL("/api/auth/device/code", window.location.origin).href);
+    expect(JSON.parse(String(init?.body))).toEqual({ client_id: "melti-cli" });
   });
 
   it("reports a failed request without leaving the current page", async () => {

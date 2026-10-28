@@ -189,12 +189,11 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
     .getByRole("button", { name: queueName, exact: true })
     .click();
   const memberships = page.getByRole("region", { name: "Queue Posts", exact: true });
-  // A Week-canvas chip is named by its caption, formatted time, and status, so
-  // its caption is what survives reload and identifies the reserved Post; the
-  // API read below proves the assigned instant itself.
-  for (const post of queuedPosts) {
+  // A Week-canvas chip is named by the caption that Channel publishes — the
+  // per-Channel override, not the Post's shared text — plus its time and status.
+  for (const [index, post] of queuedPosts.entries()) {
     await expect(
-      memberships.getByRole("button", { name: new RegExp(post.default_text!) }),
+      memberships.getByRole("button", { name: `Queue Channel caption ${index}` }),
     ).toBeVisible();
     const read = await request.get(`${apiOrigin}/api/v1/posts/${post.id}`, { headers });
     expect(read.status()).toBe(200);
@@ -236,9 +235,7 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
         await expect(phonePicker).toBeHidden();
         await phoneEditor.getByRole("button", { name: "Close", exact: true }).click();
         await expect(phoneEditor).toBeHidden();
-        await memberships
-          .getByRole("button", { name: new RegExp(queuedPosts[1]!.default_text!) })
-          .click();
+        await memberships.getByRole("button", { name: "Queue Channel caption 1" }).click();
         const phonePost = page.getByRole("dialog", { name: "Post details", exact: true });
         await expect(phonePost).toContainText(`Queue acceptance composition 1 ${queueName}`);
         await phonePost.getByRole("button", { name: "Close", exact: true }).click();
@@ -251,9 +248,7 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
     }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await memberships
-    .getByRole("button", { name: new RegExp(queuedPosts[1]!.default_text!) })
-    .click();
+  await memberships.getByRole("button", { name: "Queue Channel caption 1" }).click();
   await page
     .getByRole("dialog", { name: "Post details", exact: true })
     .getByRole("button", { name: "Remove from Queue", exact: true })

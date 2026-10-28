@@ -383,7 +383,20 @@ async function waitForPostUnderStatus(
   await expect
     .poll(
       async () => {
+        // The reload drops the workspace scope, so reselecting the Brand Profile
+        // issues the scoped collection read. Waiting for that response — instead
+        // of guessing a delay — makes the counted rows the loaded ones rather
+        // than the skeleton table, which never carries a caption.
+        const scopedCollection = page.waitForResponse(
+          (response) =>
+            response.url().includes("/api/v1/posts?") &&
+            response.url().includes("brand_profile_id=") &&
+            response.request().method() === "GET" &&
+            response.status() === 200,
+          { timeout: 30_000 },
+        );
         await reloadPostsWorkspace(page);
+        await scopedCollection;
         await filterPostsByStatus(page, status);
         return page.getByRole("row").filter({ hasText: caption }).count();
       },

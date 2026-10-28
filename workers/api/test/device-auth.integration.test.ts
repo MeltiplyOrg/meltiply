@@ -1,9 +1,12 @@
+import { createHmac } from "node:crypto";
+
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import { createJwtVerifier, jwtClaims, type JwtIdentity } from "@meltiply/auth";
 
 import { activeIdentity } from "../src/auth-policy";
 import { createApiApp } from "../src/app";
 import { betterAuthFor } from "../src/better-auth";
+import { CoreApiError } from "../src/core-types";
 import { systemPoolFor } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 
@@ -52,8 +55,10 @@ const deltaEmail = "delta@meltiply.local";
 
 /**
  * Dedicated auth fixtures for lifecycle cases that must not mutate seeded
- * members. Both use the seeded password hash, so the real sign-in endpoint
- * issues the browser session rather than a synthetic cookie.
+ * members. All use the seeded password hash, so the real sign-in endpoint
+ * issues the browser session rather than a synthetic cookie, and each joins the
+ * shared Workspace so token eligibility is decided by the policy under test
+ * rather than by missing membership.
  */
 const suspendedAuthUserId = "auth_user_device_suspended";
 const suspendedEmail = "device-suspended@meltiply.local";
@@ -61,6 +66,28 @@ const suspendedInternalUserId = "10000000-0000-4000-8000-00000000d001";
 const rateLimitAuthUserId = "auth_user_device_rate_limit";
 const rateLimitEmail = "device-rate-limit@meltiply.local";
 const rateLimitInternalUserId = "10000000-0000-4000-8000-00000000d002";
+const twoFactorAuthUserId = "auth_user_device_two_factor";
+const twoFactorEmail = "device-two-factor@meltiply.local";
+const twoFactorInternalUserId = "10000000-0000-4000-8000-00000000d003";
+const unverifiedAuthUserId = "auth_user_device_unverified";
+const unverifiedEmail = "device-unverified@meltiply.local";
+const unverifiedInternalUserId = "10000000-0000-4000-8000-00000000d004";
+const securityAuthUserId = "auth_user_device_security";
+const securityEmail = "device-security@meltiply.local";
+const securityInternalUserId = "10000000-0000-4000-8000-00000000d005";
+
+/** The single shared Workspace, resolved by `deviceSessionEligibility`. */
+const sharedOrganizationId = "20000000-0000-4000-8000-000000000005";
+/** Seeded member password reused by every dedicated fixture. */
+const dedicatedPassword = seedPassword;
+
+const dedicatedAccounts = [
+  { authUserId: suspendedAuthUserId, email: suspendedEmail, internalId: suspendedInternalUserId },
+  { authUserId: rateLimitAuthUserId, email: rateLimitEmail, internalId: rateLimitInternalUserId },
+  { authUserId: twoFactorAuthUserId, email: twoFactorEmail, internalId: twoFactorInternalUserId },
+  { authUserId: unverifiedAuthUserId, email: unverifiedEmail, internalId: unverifiedInternalUserId },
+  { authUserId: securityAuthUserId, email: securityEmail, internalId: securityInternalUserId },
+] as const;
 
 const trackedAuthUserIds = [
   "auth_user_local_alpha",
@@ -68,8 +95,7 @@ const trackedAuthUserIds = [
   gammaAuthUserId,
   deltaAuthUserId,
   "auth_user_local_epsilon",
-  suspendedAuthUserId,
-  rateLimitAuthUserId,
+  ...dedicatedAccounts.map((account) => account.authUserId),
 ];
 
 const env = {
@@ -87,6 +113,28 @@ const env = {
   TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
   VERSION: "1.0.0-target.0",
 } satisfies ApiWorkerEnv;
+
+/**
+ * Deployed-policy composition over the same database: HTTPS installation
+ * origin, required mailbox verification, and a recording mail binding. Only
+ * requests that need the stricter policy use this environment; lifecycle cases
+ * reuse the local test composition above.
+ */
+const verifiedMailBinding: SendEmail = {
+  send: async () => ({ messageId: "device-verification-test" }),
+};
+const verificationOrigin = "https://auth.test";
+const verificationAppOrigin = "https://app.test";
+const verificationEnv = {
+  ...env,
+  ALLOWED_ORIGINS: verificationAppOrigin,
+  APP_URL: verificationOrigin,
+  ENVIRONMENT: "staging",
+  MAIL: verifiedMailBinding,
+  MAIL_FROM_ADDRESS: "no-reply@meltiply.test",
+  MAIL_FROM_NAME: "Meltiply Test",
+} satisfies ApiWorkerEnv;
+const verificationApp = createApiApp();
 
 /** Lazily resolves the installed signing key once, mirroring the API verifier. */
 let localJwtVerifier: ((token: string) => Promise<JwtIdentity>) | undefined;
@@ -122,8 +170,21 @@ async function jwtVerifier(): Promise<(token: string) => Promise<JwtIdentity>> {
 }
 
 const app = createApiApp({
-  verifyJwtToken: async (requestEnv, token) =>
-    activeIdentity(requestEnv, await (await jwtVerifier())(token)),
+  // The production default verifier maps signature/issuer/audience failures to
+  // the authenticated 401 envelope; this seam supplies the same key source
+  // without a network round-trip and must preserve that normalization so a
+  // malformed bearer (including a raw CLI session credential) cannot surface as
+  // an unhandled 500. `activeIdentity` still performs the live-session and
+  // membership checks after signature verification.
+  verifyJwtToken: async (requestEnv, token) => {
+    let identity: JwtIdentity;
+    try {
+      identity = await (await jwtVerifier())(token);
+    } catch {
+      throw new CoreApiError(401, "authentication_required", "Authentication is required.");
+    }
+    return activeIdentity(requestEnv, identity);
+  },
 });
 
 /**
@@ -178,6 +239,21 @@ function sessionCookiePair(response: Response): string {
 }
 
 /**
+ * Joins every cookie pair a response sets, preserving an in-progress two-factor
+ * challenge as well as any session cookie.
+ *
+ * @param response - Auth response that may set challenge or session cookies.
+ * @returns Cookie header value, or an empty string when none were set.
+ */
+function cookieHeaderFor(response: Response): string {
+  return response.headers
+    .getSetCookie()
+    .map((entry) => entry.split(";")[0]!)
+    .filter(Boolean)
+    .join("; ");
+}
+
+/**
  * Sends a request through the production app with an installation-origin URL.
  *
  * @param path - Path under the auth surface.
@@ -186,7 +262,7 @@ function sessionCookiePair(response: Response): string {
  * @returns HTTP response.
  */
 function authRequest(path: string, init: RequestInit = {}, host = authOrigin): Promise<Response> {
-  return app.request(`${host}${path}`, init, env);
+  return Promise.resolve(app.request(`${host}${path}`, init, env));
 }
 
 /**
@@ -219,6 +295,58 @@ function authPostJson(
  */
 function randomIp(): string {
   return `2001:db8:${crypto.randomUUID().slice(0, 4)}::${Math.floor(Math.random() * 0xffff)}`;
+}
+
+/**
+ * Posts JSON through the deployed-policy composition, used only where required
+ * mailbox verification changes the outcome.
+ *
+ * @param path - Auth path.
+ * @param body - JSON body.
+ * @param options - Optional cookie and client IP.
+ * @returns HTTP response.
+ */
+function verificationPostJson(
+  path: string,
+  body: Record<string, unknown>,
+  options: { cookie?: string; ip?: string } = {},
+): Promise<Response> {
+  const headers: Record<string, string> = {
+    "CF-Connecting-IP": options.ip ?? randomIp(),
+    "Content-Type": "application/json",
+    Origin: verificationAppOrigin,
+  };
+  if (options.cookie) headers.Cookie = options.cookie;
+  return Promise.resolve(
+    verificationApp.request(
+      `${verificationOrigin}${path}`,
+      { body: JSON.stringify(body), headers, method: "POST" },
+      verificationEnv,
+    ),
+  );
+}
+
+/**
+ * Generates the current six-digit authenticator code for an enrollment URI
+ * without logging or retaining the shared secret.
+ *
+ * @param uri - `otpauth://` enrollment URI returned by the two-factor plugin.
+ * @returns Six-digit TOTP for the current thirty-second window.
+ */
+function totpCode(uri: string): string {
+  const secret = new URL(uri).searchParams.get("secret");
+  if (!secret) throw new Error("Expected an authenticator enrollment secret");
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const character of secret.toUpperCase().replace(/=+$/, "")) {
+    bits += alphabet.indexOf(character).toString(2).padStart(5, "0");
+  }
+  const key = Buffer.from(bits.match(/.{8}/g)?.map((byte) => Number.parseInt(byte, 2)) ?? []);
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)));
+  const digest = createHmac("sha1", key).update(counter).digest();
+  const offset = digest[digest.length - 1]! & 15;
+  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
 }
 
 /**
@@ -381,17 +509,19 @@ function getSessionWithCookie(cookie: string): Promise<Response> {
  * @returns HTTP response.
  */
 function signOutWithBearer(token: string, ip = randomIp()): Promise<Response> {
-  return app.request(
-    `${authOrigin}/api/auth/sign-out`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "CF-Connecting-IP": ip,
-        Origin: appOrigin,
+  return Promise.resolve(
+    app.request(
+      `${authOrigin}/api/auth/sign-out`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "CF-Connecting-IP": ip,
+          Origin: appOrigin,
+        },
+        method: "POST",
       },
-      method: "POST",
-    },
-    env,
+      env,
+    ),
   );
 }
 
@@ -408,42 +538,50 @@ function tenantRequest(
   authorization: string,
   init: { body?: string; headers?: Record<string, string>; method?: string } = {},
 ): Promise<Response> {
-  return app.request(
-    path,
-    {
-      body: init.body,
-      headers: {
-        Authorization: authorization,
-        "CF-Connecting-IP": randomIp(),
-        "Content-Type": "application/json",
-        Origin: appOrigin,
-        ...init.headers,
+  return Promise.resolve(
+    app.request(
+      path,
+      {
+        body: init.body,
+        headers: {
+          Authorization: authorization,
+          "CF-Connecting-IP": randomIp(),
+          "Content-Type": "application/json",
+          Origin: appOrigin,
+          ...init.headers,
+        },
+        method: init.method ?? "GET",
       },
-      method: init.method ?? "GET",
-    },
-    env,
+      env,
+    ),
   );
 }
 
 /**
- * Inserts one dedicated credential account and its internal member row using
- * the same password hash as the local seed.
+ * Inserts one dedicated credential account, its internal member row, and its
+ * shared-Workspace membership using the same password hash as the local seed.
+ * Re-running resets mutable policy state so a retried suite starts clean.
  *
- * @param input - Auth subject, internal id, and email.
+ * @param input - Auth subject, internal id, email, mailbox verification, and role.
  * @returns Nothing.
  */
 async function createDedicatedAccount(input: {
   authUserId: string;
   email: string;
   internalId: string;
+  emailVerified?: boolean;
+  role?: "admin" | "editor" | "viewer";
 }): Promise<void> {
   const pool = systemPoolFor(env);
   await pool.query(
-    `INSERT INTO "user" (id, name, email, "emailVerified")
-     VALUES ($1, $2, $3, TRUE)
+    `INSERT INTO "user" (id, name, email, "emailVerified", "twoFactorEnabled")
+     VALUES ($1, $2, $3, $4, FALSE)
      ON CONFLICT (id) DO UPDATE
-     SET name = EXCLUDED.name, email = EXCLUDED.email, "emailVerified" = TRUE`,
-    [input.authUserId, "Device Fixture", input.email],
+     SET name = EXCLUDED.name,
+         email = EXCLUDED.email,
+         "emailVerified" = EXCLUDED."emailVerified",
+         "twoFactorEnabled" = FALSE`,
+    [input.authUserId, "Device Fixture", input.email, input.emailVerified ?? true],
   );
   await pool.query(
     `INSERT INTO "account" (id, "accountId", "providerId", "userId", password)
@@ -453,12 +591,23 @@ async function createDedicatedAccount(input: {
     [`${input.authUserId}_account`, input.authUserId, input.authUserId, seedPasswordHash],
   );
   await pool.query(
-    `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner)
-     VALUES ($1, $2, $3, 'Device Fixture', FALSE)
+    `INSERT INTO users (id, auth_user_id, email, display_name, installation_owner, suspended_at, suspension_reason)
+     VALUES ($1, $2, $3, 'Device Fixture', FALSE, NULL, NULL)
      ON CONFLICT (id) DO UPDATE
-     SET auth_user_id = EXCLUDED.auth_user_id, email = EXCLUDED.email`,
+     SET auth_user_id = EXCLUDED.auth_user_id,
+         email = EXCLUDED.email,
+         suspended_at = NULL,
+         suspension_reason = NULL`,
     [input.internalId, input.authUserId, input.email],
   );
+  await pool.query(
+    `INSERT INTO org_members (id, org_id, user_id, role)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+    [crypto.randomUUID(), sharedOrganizationId, input.internalId, input.role ?? "editor"],
+  );
+  await pool.query(`DELETE FROM "session" WHERE "userId" = $1`, [input.authUserId]);
+  await pool.query(`DELETE FROM "twoFactor" WHERE "userId" = $1`, [input.authUserId]);
 }
 
 /**
@@ -502,16 +651,9 @@ beforeAll(async () => {
   const url = new URL(systemConnectionString);
   if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply")
     throw new Error("Device auth tests require the isolated local database.");
-  await createDedicatedAccount({
-    authUserId: rateLimitAuthUserId,
-    email: rateLimitEmail,
-    internalId: rateLimitInternalUserId,
-  });
-  await createDedicatedAccount({
-    authUserId: suspendedAuthUserId,
-    email: suspendedEmail,
-    internalId: suspendedInternalUserId,
-  });
+  for (const account of dedicatedAccounts) {
+    await createDedicatedAccount(account);
+  }
 });
 
 beforeEach(async () => {
@@ -522,7 +664,27 @@ beforeEach(async () => {
   if (present.rows[0]?.present) await pool.query(`DELETE FROM "deviceCode"`);
   await pool.query(`DELETE FROM auth_rate_limits`);
   await pool.query(`UPDATE users SET suspended_at = NULL, suspension_reason = NULL
-    WHERE id = ANY($1::uuid[])`, [[suspendedInternalUserId, rateLimitInternalUserId]]);
+    WHERE id = ANY($1::uuid[])`, [
+    [suspendedInternalUserId, rateLimitInternalUserId, twoFactorInternalUserId, unverifiedInternalUserId, securityInternalUserId],
+  ]);
+  // Reset mutable auth policy state a prior case may have exercised, then drop
+  // every session it created so each case starts from the seeded baseline.
+  await pool.query(
+    `UPDATE "user" SET "emailVerified" = TRUE, "twoFactorEnabled" = FALSE
+     WHERE id = ANY($1::text[])`,
+    [dedicatedAccounts.map((account) => account.authUserId)],
+  );
+  await pool.query(
+    `UPDATE "account" SET password = $2, "updatedAt" = now()
+     WHERE "userId" = ANY($1::text[])`,
+    [dedicatedAccounts.map((account) => account.authUserId), seedPasswordHash],
+  );
+  await pool.query(`DELETE FROM "twoFactor" WHERE "userId" = ANY($1::text[])`, [
+    dedicatedAccounts.map((account) => account.authUserId),
+  ]);
+  await pool.query(`DELETE FROM "session" WHERE "userId" = ANY($1::text[])`, [
+    dedicatedAccounts.map((account) => account.authUserId),
+  ]);
   priorSessionIds = await trackedSessionIds();
 });
 
@@ -535,12 +697,14 @@ afterEach(async () => {
     [trackedAuthUserIds, priorSessionIds],
   );
   await pool.query(`UPDATE users SET suspended_at = NULL, suspension_reason = NULL
-    WHERE id = ANY($1::uuid[])`, [[suspendedInternalUserId, rateLimitInternalUserId]]);
+    WHERE id = ANY($1::uuid[])`, [
+    [suspendedInternalUserId, rateLimitInternalUserId, twoFactorInternalUserId, unverifiedInternalUserId, securityInternalUserId],
+  ]);
 });
 
 afterAll(async () => {
-  for (const authUserId of [suspendedAuthUserId, rateLimitAuthUserId]) {
-    await deleteDedicatedAccount(authUserId);
+  for (const account of dedicatedAccounts) {
+    await deleteDedicatedAccount(account.authUserId);
   }
 });
 
@@ -591,15 +755,6 @@ describe("device code issuance contract", () => {
     expect(untrusted.response.status).toBe(403);
   });
 
-  it("ignores request-provided scopes instead of treating them as granted capabilities", async () => {
-    const { body } = await issueDeviceCode({ body: { scope: "admin write" } });
-    const { cookie } = await signIn(gammaEmail);
-    const verified = await verifyDeviceCode(cookie, stringField(body, "user_code"));
-    expect(verified.status).toBe(200);
-    const review = recordOf(await verified.json());
-    expect(review.client_id).toBe("melti-cli");
-    expect(review.scope === undefined || review.scope === "").toBe(true);
-  });
 });
 
 describe("browser verification and consent ownership", () => {
@@ -904,9 +1059,39 @@ describe("native session transport and revocation", () => {
     );
   });
 
+  it("reports an expired CLI session as unusable", async () => {
+    const browser = await signIn(securityEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
+    const redeemed = await redeemDeviceCode(stringField(body, "device_code"));
+    expect(redeemed.status).toBe(200);
+    const accessToken = stringField(recordOf(await redeemed.json()), "access_token");
+    const sessionResponse = await getSessionWithBearer(accessToken);
+    expect(sessionResponse.status).toBe(200);
+    const jwt = sessionResponse.headers.get("set-auth-jwt");
+    expect(jwt).toBeTruthy();
+    const sessionId = stringField(recordOf(recordOf(await sessionResponse.json()).session), "id");
+
+    // Expiry is a session-store fact; the HTTP surface must report it as no
+    // usable grant rather than a successful session.
+    await systemPoolFor(env).query(
+      `UPDATE "session" SET "expiresAt" = now() - interval '1 second' WHERE id = $1`,
+      [sessionId],
+    );
+    const expiredSession = await getSessionWithBearer(accessToken);
+    expect(expiredSession.status).toBe(200);
+    expect(await expiredSession.json()).toBeNull();
+    expect((await tenantRequest("/api/v1/posts", `Bearer ${jwt}`)).status).toBe(401);
+    expect(await (await getSessionWithCookie(browser.cookie)).json()).toBeNull();
+  });
+
   it("keeps Viewer read-only and Editor write access for CLI sessions", async () => {
     const delta = await signIn(deltaEmail);
-    const viewerCode = await issueDeviceCode();
+    // A request-supplied scope is not an authority grant: the viewer completes
+    // the flow with an "admin write" request but retains only their real role.
+    const viewerCode = await issueDeviceCode({ body: { scope: "admin write" } });
     expect(
       (await verifyDeviceCode(delta.cookie, stringField(viewerCode.body, "user_code"))).status,
     ).toBe(200);
@@ -985,6 +1170,26 @@ describe("native session transport and revocation", () => {
 
   it("does not issue a CLI session after the approving member is suspended", async () => {
     const suspended = await signIn(suspendedEmail);
+    // The fixture is an eligible shared-Workspace member before suspension, so
+    // the later denial is attributable to suspension rather than missing access.
+    const activeCode = await issueDeviceCode();
+    expect(
+      (await verifyDeviceCode(suspended.cookie, stringField(activeCode.body, "user_code"))).status,
+    ).toBe(200);
+    expect(
+      (
+        await decideDeviceCode(
+          suspended.cookie,
+          "approve",
+          stringField(activeCode.body, "user_code"),
+        )
+      ).status,
+    ).toBe(200);
+    const activeRedemption = await redeemDeviceCode(stringField(activeCode.body, "device_code"));
+    expect(activeRedemption.status).toBe(200);
+    const activeToken = stringField(recordOf(await activeRedemption.json()), "access_token");
+    expect((await getSessionWithBearer(activeToken)).status).toBe(200);
+
     const { body } = await issueDeviceCode();
     const userCode = stringField(body, "user_code");
     expect((await verifyDeviceCode(suspended.cookie, userCode)).status).toBe(200);
@@ -1009,6 +1214,151 @@ describe("native session transport and revocation", () => {
       [suspendedAuthUserId],
     );
     expect(sessionsAfter.rows[0]?.count).toBe(sessionsBefore.rows[0]?.count);
+  });
+});
+
+describe("existing credential policy", () => {
+  it("requires the configured second factor before a CLI session can be approved", async () => {
+    const enrollment = await signIn(twoFactorEmail);
+    const enable = await authPostJson(
+      "/api/auth/two-factor/enable",
+      { password: dedicatedPassword },
+      { cookie: enrollment.cookie },
+    );
+    expect(enable.status, await enable.clone().text()).toBe(200);
+    const pending = recordOf(await enable.json());
+    const totpURI = stringField(pending, "totpURI");
+    expect(Array.isArray(pending.backupCodes)).toBe(true);
+    const confirmedEnrollment = await authPostJson(
+      "/api/auth/two-factor/verify-totp",
+      { code: totpCode(totpURI), trustDevice: false },
+      { cookie: enrollment.cookie },
+    );
+    expect(confirmedEnrollment.status, await confirmedEnrollment.clone().text()).toBe(200);
+
+    // Enabling the factor revoked the enrollment session, so a fresh password
+    // sign-in must challenge before any session exists to consent with.
+    const challenge = await authPostJson("/api/auth/sign-in/email", {
+      email: twoFactorEmail,
+      password: dedicatedPassword,
+    });
+    expect(challenge.status, await challenge.clone().text()).toBe(200);
+    expect(recordOf(await challenge.json()).twoFactorRedirect).toBe(true);
+    expect(await (await getSessionWithCookie(cookieHeaderFor(challenge))).json()).toBeNull();
+    const challengeCookies = cookieHeaderFor(challenge);
+    expect(challengeCookies).not.toBe("");
+
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    // A password-only challenge cannot claim or approve the pending request.
+    expect((await decideDeviceCode(undefined, "approve", userCode)).status).toBe(401);
+
+    // A wrong factor does not mint a session; a fresh challenge with the right
+    // code does, and only then can the device request be approved.
+    const wrongChallenge = await authPostJson("/api/auth/sign-in/email", {
+      email: twoFactorEmail,
+      password: dedicatedPassword,
+    });
+    expect(wrongChallenge.status).toBe(200);
+    const rejectedFactor = await authPostJson(
+      "/api/auth/two-factor/verify-totp",
+      { code: "000000", trustDevice: false },
+      { cookie: cookieHeaderFor(wrongChallenge), ip: randomIp() },
+    );
+    expect(rejectedFactor.status).toBeGreaterThanOrEqual(400);
+    expect(await (await getSessionWithCookie(cookieHeaderFor(rejectedFactor))).json()).toBeNull();
+
+    const verified = await authPostJson(
+      "/api/auth/two-factor/verify-totp",
+      { code: totpCode(totpURI), trustDevice: false },
+      { cookie: challengeCookies },
+    );
+    expect(verified.status, await verified.clone().text()).toBe(200);
+    const cookie = sessionCookiePair(verified);
+
+    expect((await verifyDeviceCode(cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(cookie, "approve", userCode)).status).toBe(200);
+    const redeemed = await redeemDeviceCode(stringField(body, "device_code"));
+    expect(redeemed.status).toBe(200);
+    const accessToken = stringField(recordOf(await redeemed.json()), "access_token");
+    const deviceSession = await getSessionWithBearer(accessToken);
+    expect(deviceSession.status).toBe(200);
+    expect(stringField(recordOf(recordOf(await deviceSession.json()).user), "email")).toBe(
+      twoFactorEmail,
+    );
+  });
+
+  it("enforces required mailbox verification before releasing a CLI session", async () => {
+    // Local test composition allows the unverified fixture to sign in; the
+    // deployed policy composition below is the authority that rejects it.
+    const browser = await signIn(unverifiedEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
+
+    await systemPoolFor(env).query(
+      `UPDATE "user" SET "emailVerified" = FALSE WHERE id = $1`,
+      [unverifiedAuthUserId],
+    );
+
+    const blockedSignIn = await verificationPostJson("/api/auth/sign-in/email", {
+      email: unverifiedEmail,
+      password: dedicatedPassword,
+    });
+    expect(blockedSignIn.status).toBe(403);
+    expect(await blockedSignIn.json()).toMatchObject({ code: "EMAIL_NOT_VERIFIED" });
+    expect(await (await getSessionWithCookie(cookieHeaderFor(blockedSignIn))).json()).toBeNull();
+
+    const sessionsBefore = await systemPoolFor(env).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [unverifiedAuthUserId],
+    );
+    const denied = await verificationPostJson("/api/auth/device/token", {
+      client_id: "melti-cli",
+      device_code: stringField(body, "device_code"),
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+    });
+    expect(denied.status).toBe(403);
+    expect(await deviceError(denied)).toMatchObject({ error: "access_denied" });
+    const sessionsAfter = await systemPoolFor(env).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [unverifiedAuthUserId],
+    );
+    expect(sessionsAfter.rows[0]?.count).toBe(sessionsBefore.rows[0]?.count);
+  });
+
+  it("revokes an issued CLI session when the existing security policy revokes sessions", async () => {
+    const browser = await signIn(securityEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
+    const redeemed = await redeemDeviceCode(stringField(body, "device_code"));
+    expect(redeemed.status).toBe(200);
+    const accessToken = stringField(recordOf(await redeemed.json()), "access_token");
+    const sessionResponse = await getSessionWithBearer(accessToken);
+    expect(sessionResponse.status).toBe(200);
+    const jwt = sessionResponse.headers.get("set-auth-jwt");
+    expect(jwt).toBeTruthy();
+    expect((await tenantRequest("/api/v1/posts", `Bearer ${jwt}`)).status).toBe(200);
+
+    const changed = await authPostJson(
+      "/api/auth/change-password",
+      {
+        currentPassword: dedicatedPassword,
+        newPassword: crypto.randomUUID(),
+        revokeOtherSessions: true,
+      },
+      { cookie: browser.cookie },
+    );
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    const revokedSession = await getSessionWithBearer(accessToken);
+    expect(revokedSession.status).toBe(200);
+    expect(await revokedSession.json()).toBeNull();
+    expect((await tenantRequest("/api/v1/posts", `Bearer ${jwt}`)).status).toBe(401);
+    expect(await (await getSessionWithCookie(browser.cookie)).json()).toBeNull();
   });
 });
 

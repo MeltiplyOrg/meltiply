@@ -13,6 +13,7 @@ on:
           - cloudflare-integration
           - cloudflare-extended
           - cloudflare-full
+          - device-authorization
           - object-storage
           - publishing-queues
           - portable-caching
@@ -72,7 +73,7 @@ jobs:
           bun build scripts/selfhost/queue-capacity-check.ts --target=node --external miniflare --external pg --external effect --external zod --outfile=scripts/selfhost/.queue-capacity-check.mjs
           QUEUE_CAPACITY_BUNDLE=artifacts/queue-capacity-worker/queue-capacity.js node scripts/selfhost/.queue-capacity-check.mjs
       - name: Prepare full gate database
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Exercise every provider connection through real state and persistence
 
@@ -86,7 +87,7 @@ jobs:
             --outfile=scripts/selfhost/.oauth-connection-check.mjs
           node scripts/selfhost/.oauth-connection-check.mjs
       - name: Validate complete application contract
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
         run: bun run cloudflare:check
       - name: Observe cold, warm, concurrent, and lifecycle cache behavior in workerd
         if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
@@ -113,6 +114,200 @@ jobs:
       - name: Check changed React code diagnostics
         if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: npx --yes react-doctor@0.9.18 frontend/app --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+      - name: Start fresh device authorization acceptance database
+        if: inputs.lane == 'device-authorization'
+        # Integration suites deliberately exhaust fixture quotas and browser
+        # acceptance must start from the deterministic seed.
+        run: bash scripts/cloudflare-local/database.sh reset
+      - name: Install device authorization browser
+        if: inputs.lane == 'device-authorization'
+        run: bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Review changed device authorization React code
+        if: inputs.lane == 'device-authorization'
+        working-directory: frontend/app
+        run: |
+          git fetch origin ${{ github.event.repository.default_branch }}:refs/remotes/origin/${{ github.event.repository.default_branch }}
+          npx --yes react-doctor@0.9.18 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+      - name: Start real device authorization stack
+        if: inputs.lane == 'device-authorization'
+        env:
+          APP_URL: http://127.0.0.1:3000
+          WRANGLER_DEV_ALLOWED_ORIGINS: http://127.0.0.1:3000
+          WRANGLER_DEV_APP_URL: http://127.0.0.1:3000
+          WRANGLER_DEV_ENABLE_CONTAINERS: "false"
+        run: |
+          mkdir -p artifacts/device-auth
+          # Build with the loopback application origin so the preview Worker
+          # proxies /api/* to the local API origin instead of a deployed service
+          # binding. The full gate's build has no APP_URL and is not reusable.
+          bun run --cwd frontend/app build:production
+          setsid ./scripts/cloudflare-local/dev-backend.sh >artifacts/device-auth/backend.log 2>&1 &
+          echo $! > "$RUNNER_TEMP/device-backend.pid"
+          setsid bun run --cwd frontend/app --no-install vp preview --host 127.0.0.1 --port 3000 --strictPort >artifacts/device-auth/frontend.log 2>&1 &
+          echo $! > "$RUNNER_TEMP/device-frontend.pid"
+          backend_ready=false
+          for _ in $(seq 1 180); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:8787/api/v1/health >/dev/null 2>&1; then backend_ready=true; break; fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/device-backend.pid")" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$backend_ready" != true ]; then
+            cat artifacts/device-auth/backend.log >&2
+            exit 1
+          fi
+          frontend_ready=false
+          for _ in $(seq 1 120); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:3000/ >/dev/null 2>&1; then frontend_ready=true; break; fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/device-frontend.pid")" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$frontend_ready" != true ]; then
+            cat artifacts/device-auth/frontend.log >&2
+            exit 1
+          fi
+      - name: Exercise device consent and CLI browser independence
+        if: inputs.lane == 'device-authorization'
+        env:
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+          MELTIPLY_E2E_API_BASE_URL: http://127.0.0.1:8787
+          MELTIPLY_E2E_REUSE_SERVERS: "1"
+        run: bun run --cwd frontend/app test:e2e e2e/device-consent.spec.ts --project chromium
+      - name: Exercise the CLI device protocol against the running installation
+        if: inputs.lane == 'device-authorization'
+        run: |
+          cat > "$RUNNER_TEMP/device-auth-smoke.mjs" <<'NODE'
+          import assert from "node:assert/strict";
+
+          // Real runtime smoke against the proxied application origin and the
+          // production-composed Worker/Better Auth/PostgreSQL stack. The script
+          // exists only for this hosted step; no credential or device code is
+          // printed or uploaded.
+          const origin = "http://127.0.0.1:3000";
+          const email = "gamma@meltiply.local";
+          const password = "MeltiplyLocal1!";
+          const ip = "2001:db8:aca1::51";
+          const json = async (response) => JSON.parse(await response.text());
+          const headers = (extra = {}) => ({
+            "cf-connecting-ip": ip,
+            "content-type": "application/json",
+            Origin: origin,
+            ...extra,
+          });
+          const post = (path, body, extra = {}) =>
+            fetch(`${origin}${path}`, {
+              body: JSON.stringify(body),
+              headers: headers(extra),
+              method: "POST",
+            });
+
+          const codeResponse = await post("/api/auth/device/code", { client_id: "melti-cli" });
+          assert.equal(codeResponse.status, 200, "device code issuance must succeed");
+          assert.match(codeResponse.headers.get("cache-control") ?? "", /no-store/);
+          const code = await json(codeResponse);
+          assert.equal(typeof code.device_code, "string");
+          assert.equal(typeof code.user_code, "string");
+          assert.equal(code.expires_in, 600);
+          assert.equal(code.interval, 5);
+          assert.equal(new URL(code.verification_uri).origin, origin);
+          assert.ok(!code.verification_uri_complete.includes(code.device_code));
+
+          const signIn = await post("/api/auth/sign-in/email", { email, password });
+          assert.equal(signIn.status, 200, "fixture sign-in must succeed");
+          const cookie = signIn.headers
+            .getSetCookie()
+            .map((entry) => entry.split(";")[0])
+            .filter(Boolean)
+            .join("; ");
+          assert.ok(cookie.includes("session_token"), "sign-in must set a session cookie");
+
+          const verify = await fetch(
+            `${origin}/api/auth/device?user_code=${encodeURIComponent(code.user_code)}`,
+            { headers: headers({ Cookie: cookie }) },
+          );
+          assert.equal(verify.status, 200, "browser verification must claim the request");
+          const review = await json(verify);
+          assert.equal(review.status, "pending");
+          assert.equal(review.client_id, "melti-cli");
+
+          const approve = await post(
+            "/api/auth/device/approve",
+            { userCode: code.user_code },
+            { Cookie: cookie },
+          );
+          assert.equal(approve.status, 200, "explicit approval must succeed");
+
+          const tokenResponse = await post("/api/auth/device/token", {
+            client_id: "melti-cli",
+            device_code: code.device_code,
+            grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          });
+          assert.equal(tokenResponse.status, 200, "approved token redemption must succeed");
+          const token = await json(tokenResponse);
+          assert.equal(token.token_type, "Bearer");
+          assert.equal(typeof token.access_token, "string");
+
+          const session = await fetch(`${origin}/api/auth/get-session`, {
+            headers: headers({ Authorization: `Bearer ${token.access_token}` }),
+          });
+          assert.equal(session.status, 200, "CLI session transport must resolve");
+          const sessionBody = await json(session);
+          assert.equal(sessionBody.user.email, email);
+          const jwt = session.headers.get("set-auth-jwt");
+          assert.ok(jwt, "get-session must expose the short-lived API JWT");
+
+          const authorized = await fetch(`${origin}/api/v1/posts`, {
+            headers: headers({ Authorization: `Bearer ${jwt}` }),
+          });
+          assert.equal(authorized.status, 200, "the CLI JWT must authorize the core API");
+          const rawCredential = await fetch(`${origin}/api/v1/posts`, {
+            headers: headers({ Authorization: `Bearer ${token.access_token}` }),
+          });
+          assert.equal(rawCredential.status, 401, "the raw session credential must not authorize");
+
+          const signOut = await fetch(`${origin}/api/auth/sign-out`, {
+            headers: headers({ Authorization: `Bearer ${token.access_token}` }),
+            method: "POST",
+          });
+          assert.equal(signOut.status, 200, "CLI sign-out must revoke its session");
+          const revoked = await fetch(`${origin}/api/auth/get-session`, {
+            headers: headers({ Authorization: `Bearer ${token.access_token}` }),
+          });
+          assert.equal(revoked.status, 200);
+          assert.equal(await json(revoked), null, "the revoked CLI session must be unusable");
+          const revokedJwt = await fetch(`${origin}/api/v1/posts`, {
+            headers: headers({ Authorization: `Bearer ${jwt}` }),
+          });
+          assert.equal(revokedJwt.status, 401, "the minted JWT must fail after revocation");
+
+          const browserSession = await fetch(`${origin}/api/auth/get-session`, {
+            headers: headers({ Cookie: cookie }),
+          });
+          assert.equal(browserSession.status, 200);
+          assert.equal(
+            (await json(browserSession)).user.email,
+            email,
+            "CLI sign-out must not revoke the approving browser session",
+          );
+
+          console.log(
+            "device-auth smoke: code, claim, approval, redemption, JWT authorization, and revocation verified",
+          );
+          NODE
+          node "$RUNNER_TEMP/device-auth-smoke.mjs"
+          rm -f "$RUNNER_TEMP/device-auth-smoke.mjs"
+      - name: Stop device authorization stack
+        if: always() && inputs.lane == 'device-authorization'
+        run: |
+          if [ -f "$RUNNER_TEMP/device-frontend.pid" ]; then
+            pid="$(cat "$RUNNER_TEMP/device-frontend.pid")"
+            kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+            rm -f "$RUNNER_TEMP/device-frontend.pid"
+          fi
+          if [ -f "$RUNNER_TEMP/device-backend.pid" ]; then
+            pid="$(cat "$RUNNER_TEMP/device-backend.pid")"
+            kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+            rm -f "$RUNNER_TEMP/device-backend.pid"
+          fi
       - name: Exercise navigation focus and reconnect assignment in the browser
         if: inputs.lane == 'cloudflare-full'
         env:

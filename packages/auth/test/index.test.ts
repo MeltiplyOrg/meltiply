@@ -387,7 +387,18 @@ describe("Better Auth device protocol HTTP composition", () => {
     const email = "device-user@example.test";
     const auth = await createBetterAuth({
       baseURL: origin,
-      database: memoryAdapter({}),
+      // The installed memory adapter allocates records per pre-declared model;
+      // an empty map fails the first insert with "Model user not found".
+      database: memoryAdapter({
+        account: [],
+        deviceCode: [],
+        jwks: [],
+        rateLimit: [],
+        session: [],
+        twoFactor: [],
+        user: [],
+        verification: [],
+      }),
       deviceAuthorization: {
         clientId: "melti-cli",
         expiresIn: "10m",

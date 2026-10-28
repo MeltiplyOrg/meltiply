@@ -5,6 +5,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from "@
 import {
   activeBrandProfileName,
   controlledProviderAccountId,
+  closeComposer,
   editPostFromRow,
   provisionControlledChannels,
   readControlledMedia,
@@ -138,6 +139,24 @@ async function returnToPosts(page: Page): Promise<void> {
   // write — and the reload this helper's caller performs would cancel it outright.
   // Wait for the panel's own dismissal and let a stuck save fail loudly instead.
   await composer.waitFor({ state: "hidden", timeout: 120_000 });
+  await waitForWorkspace(page);
+}
+
+/**
+ * Saves the open composition as a draft, waits for that write to commit, and
+ * dismisses the panel.
+ *
+ * Unlike Schedule and Publish Now, saving a draft is a checkpoint: the composer
+ * deliberately stays open so the creator can keep editing. Dismissing it earlier
+ * would leave the save in flight, and the reload the caller performs next would
+ * cancel it, so the saved confirmation is the signal that the write landed.
+ */
+async function saveDraftAndLeave(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /save draft/i }).click();
+  await expect(page.getByText(/saved to your workspace at/i)).toBeVisible({
+    timeout: 120_000,
+  });
+  await closeComposer(page);
   await waitForWorkspace(page);
 }
 
@@ -753,8 +772,7 @@ test("keeps separately created identical Posts distinct and publishes only the o
     // reopened composer hydrates from.
     await targetOnlyChannel(page, channelNames.threads, channelNames.instagram);
     await composerTextarea(page).fill(caption);
-    await page.getByRole("button", { name: /save draft/i }).click();
-    await returnToPosts(page);
+    await saveDraftAndLeave(page);
   }
 
   const rows = page.getByRole("row").filter({ hasText: caption });
@@ -979,8 +997,7 @@ test("preserves provider choices through drafts and publishes photo and video ta
     .getByRole("radiogroup", { name: "Publishing", exact: true })
     .getByRole("radio", { name: "Draft", exact: true })
     .click();
-  await page.getByRole("button", { name: "Save Draft", exact: true }).click();
-  await returnToPosts(page);
+  await saveDraftAndLeave(page);
   await reloadPostsWorkspace(page);
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
   await expect(

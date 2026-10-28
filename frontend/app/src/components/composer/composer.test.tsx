@@ -536,15 +536,13 @@ describe("Composer provider publication choices", () => {
   });
 
   it("requires TikTok interaction opt-in instead of granting it implicitly", async () => {
-    const account = { ...instagramAccount, platform: "tiktok" as const };
+    const account = { ...instagramAccount, platform: "tiktok" as const, brand_profile_id: "profile-a" };
     renderComposer({
       accounts: [account],
       brandProfiles: composerProfiles,
       requirements: {
         platform: "tiktok",
-        creator_display_name: "Creator",
-        creator_username: "creator",
-        creator_avatar_url: null,
+        creator: { display_name: "Creator", username: "creator", avatar_url: null },
         comment_allowed: true,
         duet_allowed: false,
         stitch_allowed: true,
@@ -552,7 +550,6 @@ describe("Composer provider publication choices", () => {
         privacy_levels: ["SELF_ONLY"],
       },
     });
-    await fireEvent.click(await screen.findByRole("button", { name: "switch-profile" }));
     await waitFor(() => expect(screen.getByRole("switch", { name: "Comments" })).not.toBeChecked());
     expect(screen.getByRole("switch", { name: "Duet" })).not.toBeChecked();
     expect(screen.getByRole("switch", { name: "Duet" })).toBeDisabled();
@@ -561,10 +558,9 @@ describe("Composer provider publication choices", () => {
 
   it("does not offer invented TikTok privacy choices when creator information is unavailable", async () => {
     renderComposer({
-      accounts: [{ ...instagramAccount, platform: "tiktok" }],
+      accounts: [{ ...instagramAccount, platform: "tiktok", brand_profile_id: "profile-a" }],
       brandProfiles: composerProfiles,
     });
-    fireEvent.click(await screen.findByRole("button", { name: "switch-profile" }));
     expect(await screen.findByRole("combobox", { name: "Privacy Level" })).toBeDisabled();
   });
 });

@@ -47,8 +47,10 @@ jobs:
       - name: Exercise publishing regressions
         if: inputs.lane == 'publishing-flow'
         run: |
-          bun run --cwd frontend/app test src/components/composer/composer.test.tsx --coverage.enabled=false
-          bun run --cwd packages/providers test test/youtube.test.ts --coverage.enabled=false
+          status=0
+          bun run --cwd frontend/app test src/components/composer/composer.test.tsx --coverage.enabled=false || status=1
+          bun run --cwd packages/providers test test/youtube.test.ts --coverage.enabled=false || status=1
+          exit "$status"
       - name: Prepare publishing acceptance
         if: inputs.lane == 'publishing-flow'
         run: |

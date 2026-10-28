@@ -170,17 +170,18 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
     throw new Error("APP_URL must use HTTP or HTTPS");
   }
   // Browsers and DNS resolvers treat localhost and *.localhost as loopback.
-  // HTTP is permitted only when both the host is loopback and this is a
-  // local/test environment; deployed environments always require HTTPS.
+  // Plain HTTP is a loopback-only affordance: it must never carry credentials
+  // or consent links over a network, so a non-loopback origin always requires
+  // HTTPS regardless of the environment label. Loopback stays usable for
+  // self-hosted local installs that terminate TLS at their own gateway.
   const loopback =
     url.hostname === "localhost" ||
     url.hostname.endsWith(".localhost") ||
     url.hostname === "127.0.0.1" ||
     url.hostname === "::1" ||
     url.hostname === "[::1]";
-  const localLoopback = (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test") && loopback;
-  if (url.protocol === "http:" && !localLoopback) {
-    throw new Error("APP_URL must use HTTPS outside loopback-only local/test development");
+  if (url.protocol === "http:" && !loopback) {
+    throw new Error("APP_URL must use HTTPS outside loopback-only development");
   }
   return url.origin;
 }

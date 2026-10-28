@@ -1469,7 +1469,7 @@ describe("distributed device abuse controls", () => {
 });
 
 describe("installation origin policy", () => {
-  it("fails closed on an insecure installation origin outside local development", async () => {
+  it("fails closed on a non-loopback plaintext installation origin", async () => {
     await expect(
       betterAuthFor({
         ...env,
@@ -1479,16 +1479,23 @@ describe("installation origin policy", () => {
     ).rejects.toThrow(/HTTPS/);
   });
 
-  it("allows insecure origins only for local/test loopback hosts", () => {
+  it("allows plain HTTP only for loopback installation origins", () => {
     expect(applicationOrigin({ ...env, APP_URL: "http://127.0.0.1:8787" })).toBe(
       "http://127.0.0.1:8787",
     );
+    expect(
+      applicationOrigin({
+        ...env,
+        APP_URL: "http://localhost:8080",
+        ENVIRONMENT: "staging",
+      }),
+    ).toBe("http://localhost:8080");
     expect(() => applicationOrigin({ ...env, APP_URL: "http://auth.test" })).toThrow(/HTTPS/);
     expect(() =>
       applicationOrigin({
         ...env,
-        APP_URL: "http://127.0.0.1:8787",
-        ENVIRONMENT: "staging",
+        APP_URL: "http://insecure.example",
+        ENVIRONMENT: "local",
       }),
     ).toThrow(/HTTPS/);
   });

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { components } from "@meltiply/contracts/schema";
 import { expect, test } from "@playwright/test";
 import {
+  acceptanceApiUrl,
   activeBrandProfileName,
   closeComposer,
   controlledProviderAccountId,
@@ -273,7 +274,7 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
         // the real scheduled dispatcher at wall-clock time. Stored due times are
         // never changed, and repeated ticks exercise the normal idempotent relay.
         if (Date.now() >= firstInstant.getTime()) {
-          const tick = await request.post(`${apiOrigin}/__test__/automation/scheduled`, {
+          const tick = await request.post(acceptanceApiUrl("/__test__/automation/scheduled"), {
             headers,
             timeout: 120_000,
           });

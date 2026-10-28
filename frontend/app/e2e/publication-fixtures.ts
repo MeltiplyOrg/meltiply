@@ -104,6 +104,21 @@ function fixtureUrl(path: string): string {
 }
 
 /**
+ * Builds an absolute URL for an acceptance-only route served by the API Worker
+ * itself, outside the browser-visible `/api/v1` namespace.
+ *
+ * The page reaches the API through the frontend dev proxy, which forwards only
+ * application paths, so fixture-only endpoints must be requested from the API
+ * origin directly.
+ *
+ * @param path - Endpoint path beginning with a slash.
+ * @returns Absolute URL on the local API origin.
+ */
+export function acceptanceApiUrl(path: string): string {
+  return `${controlledProviderOrigin()}${path}`;
+}
+
+/**
  * Mints a unique provider-side account identity for one fixture Channel.
  *
  * The controlled Provider keys every durable publication record by this value,

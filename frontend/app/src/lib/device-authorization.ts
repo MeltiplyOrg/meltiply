@@ -4,7 +4,7 @@ import { authClient } from "./auth-client";
  * Verification state reported by Better Auth's device-authorization plugin.
  * `pending` still allows a decision; `approved` and `denied` are terminal.
  */
-export type DeviceAuthorizationStatus = "approved" | "denied" | "pending";
+type DeviceAuthorizationStatus = "approved" | "denied" | "pending";
 
 /**
  * Reviewable device request returned to the browser session that claimed it.

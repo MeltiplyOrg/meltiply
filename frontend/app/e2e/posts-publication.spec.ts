@@ -311,10 +311,12 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
 async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
   const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
   const panel = page.getByRole("group", { name: "Filters", exact: true });
-  // The surface keeps its content mounted while it animates out, so the open
-  // state — not a bounding box — decides whether the panel still needs opening.
-  if ((await panel.getAttribute("data-state")) !== "open") await disclosure.click();
-  await expect(panel).toHaveAttribute("data-state", "open");
+  // A closed disclosure hides its panel from role queries entirely, so reading
+  // `data-state` first would wait forever for an element that cannot appear.
+  // `count()` never waits; only an already-open panel can be inspected further.
+  if ((await panel.count()) === 0) await disclosure.click();
+  else if ((await panel.getAttribute("data-state")) !== "open") await disclosure.click();
+  await expect(panel).toBeVisible();
   const addStatus = page.getByRole("button", { name: "Add Post status filter", exact: true });
   const removeStatus = page.getByRole("button", {
     name: "Remove Post status filter",
@@ -330,7 +332,10 @@ async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
   if (!(await option.isChecked())) await option.click();
   await expect(option).toBeChecked();
   await page.keyboard.press("Escape");
-  if ((await panel.getAttribute("data-state")) === "open") await disclosure.click();
+  // Escape can close the panel itself when the menu released the key first.
+  if ((await panel.count()) > 0 && (await panel.getAttribute("data-state")) === "open") {
+    await disclosure.click();
+  }
   await expect(panel).toBeHidden();
 }
 
@@ -338,15 +343,18 @@ async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
 async function clearPostStatusFilter(page: Page): Promise<void> {
   const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
   const panel = page.getByRole("group", { name: "Filters", exact: true });
-  if ((await panel.getAttribute("data-state")) !== "open") await disclosure.click();
-  await expect(panel).toHaveAttribute("data-state", "open");
+  if ((await panel.count()) === 0) await disclosure.click();
+  else if ((await panel.getAttribute("data-state")) !== "open") await disclosure.click();
+  await expect(panel).toBeVisible();
   const removeStatus = page.getByRole("button", {
     name: "Remove Post status filter",
     exact: true,
   });
   if ((await removeStatus.count()) > 0) await removeStatus.click();
   await expect(removeStatus).toHaveCount(0);
-  if ((await panel.getAttribute("data-state")) === "open") await disclosure.click();
+  if ((await panel.count()) > 0 && (await panel.getAttribute("data-state")) === "open") {
+    await disclosure.click();
+  }
   await expect(panel).toBeHidden();
 }
 

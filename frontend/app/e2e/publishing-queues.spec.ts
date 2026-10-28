@@ -44,8 +44,22 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
     name: "Search timezones…",
     exact: true,
   });
+  // Search and selection are proven with a zone other than the UTC default:
+  // pressing the already-selected zone reports no change, so the panel stays
+  // open and the assertion below would test nothing.
+  await timezoneSearch.fill("reykjavik");
+  await page.getByRole("option", { name: "Atlantic/Reykjavik", exact: true }).click();
+  await expect(editor.getByRole("button", { name: /^Queue timezone:/ })).toHaveAttribute(
+    "aria-label",
+    "Queue timezone: Atlantic/Reykjavik",
+  );
+  await editor.getByRole("button", { name: /^Queue timezone:/ }).click();
   await timezoneSearch.fill("utc");
   await page.getByRole("option", { name: "UTC", exact: true }).click();
+  await expect(editor.getByRole("button", { name: /^Queue timezone:/ })).toHaveAttribute(
+    "aria-label",
+    "Queue timezone: UTC",
+  );
   await expect(timezoneSearch).toBeHidden();
   // Allow the real media processor and two submissions to settle before due work.
   const firstInstant = new Date(Math.ceil((Date.now() + 240_000) / 60_000) * 60_000);

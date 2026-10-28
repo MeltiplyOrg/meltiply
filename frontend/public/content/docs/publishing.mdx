@@ -71,7 +71,7 @@ Inspecting another Post does not discard your open composition: its text, settin
 
 ## Draft, Queue, Schedule, or Publish Now
 
-- **Save Draft** — stores the post text without sending it anywhere. No channel selection is needed. Drafts appear in the **Draft** status filter in Posts and can be edited, scheduled, or deleted later. Saving a draft for a post that was scheduled cancels its pending deliveries.
+- **Save Draft** — stores the post text without sending it anywhere. No channel selection is needed. Drafts appear in the **Drafts** status filter in Posts and can be edited, scheduled, or deleted later. Saving a draft for a post that was scheduled cancels its pending deliveries.
 - **Queue** — assigns the next free future slot from a named weekly plan in the Post's single owning Brand Profile. Select a Queue, not a date and time. Text, media, selected Channels, and their settings remain part of the same Post.
 - **Schedule** — queues the post for the date and time in the picker. Reopening a manually scheduled Post retains **Schedule** and its pending delivery time; saving edits does not silently turn it into a draft.
 - **Publish Now** — queues the post for immediate delivery to every selected channel.
@@ -144,7 +144,7 @@ Queue-assigned work uses the same durable Schedule, Due work, Outbox, and Provid
 
 ## Post statuses
 
-Each post shows a status per channel in the post details (open any post to see them). The group badge and collection status filter summarize the most urgent channel state: a Post with one published Channel and one failed Channel appears under **Failed**. Details retains both independent outcomes; retrying the failed Channel does not publish the successful one again.
+Each post shows a status per channel in the post details (open any post to see them). The group badge summarizes the most urgent channel state, while the status filter matches any channel in that bucket: a Post with one published and one failed channel appears under both **Published** and **Failed**, and its row badge reads **Failed**. Details retains both independent outcomes; retrying the failed channel does not publish the successful one again.
 
 | Status                                  | Meaning                                                                                                   |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------- |

@@ -295,16 +295,30 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
   await page.getByRole("button", { name: "Done", exact: true }).click();
 }
 
-/** Applies a status bucket through the filter disclosure, then restores the collection viewport. */
+/**
+ * Applies one status bucket through the filter disclosure, leaving the panel
+ * closed again.
+ *
+ * The disclosure's rows mount with the panel, so row existence is decided with
+ * `count()` after the panel becomes visible. Probing `isVisible()` immediately
+ * after opening races the disclosure's open transition and can skip adding the
+ * row, which then leaves the menu trigger absent for the rest of the poll.
+ */
 async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
   const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
-  await disclosure.click();
+  const panel = page.getByRole("group", { name: "Filters", exact: true });
+  // The surface keeps its content mounted while it animates out, so the open
+  // state — not a bounding box — decides whether the panel still needs opening.
+  if ((await panel.getAttribute("data-state")) !== "open") await disclosure.click();
+  await expect(panel).toHaveAttribute("data-state", "open");
   const addStatus = page.getByRole("button", { name: "Add Post status filter", exact: true });
-  if (await addStatus.isVisible()) await addStatus.click();
-  const trigger = page
-    .getByRole("button", { name: "Remove Post status filter", exact: true })
-    .locator("..")
-    .locator('button[aria-haspopup="menu"]');
+  const removeStatus = page.getByRole("button", {
+    name: "Remove Post status filter",
+    exact: true,
+  });
+  if ((await removeStatus.count()) === 0) await addStatus.click();
+  await expect(removeStatus).toBeVisible();
+  const trigger = removeStatus.locator("..").locator('button[aria-haspopup="menu"]');
   await trigger.click();
   const menu = page.getByRole("menu", { name: "Post status", exact: true });
   await menu.getByRole("menuitemcheckbox", { name: "All statuses", exact: true }).click();
@@ -312,19 +326,41 @@ async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
   if (!(await option.isChecked())) await option.click();
   await expect(option).toBeChecked();
   await page.keyboard.press("Escape");
-  await disclosure.click();
-  await expect(page.getByRole("group", { name: "Filters", exact: true })).toBeHidden();
+  if ((await panel.getAttribute("data-state")) === "open") await disclosure.click();
+  await expect(panel).toBeHidden();
 }
 
-/** Restores all status buckets using the same user-visible filtering flow. */
+/** Removes the status row, restoring the unfiltered collection. */
 async function clearPostStatusFilter(page: Page): Promise<void> {
-  await filterPostsByStatus(page, /^all statuses$/i);
+  const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
+  const panel = page.getByRole("group", { name: "Filters", exact: true });
+  if ((await panel.getAttribute("data-state")) !== "open") await disclosure.click();
+  await expect(panel).toHaveAttribute("data-state", "open");
+  const removeStatus = page.getByRole("button", {
+    name: "Remove Post status filter",
+    exact: true,
+  });
+  if ((await removeStatus.count()) > 0) await removeStatus.click();
+  await expect(removeStatus).toHaveCount(0);
+  if ((await panel.getAttribute("data-state")) === "open") await disclosure.click();
+  await expect(panel).toBeHidden();
 }
 
 /**
- * Reloads until the Post appears in its aggregate status bucket, then clears
- * the filter. Failed takes precedence over published for mixed outcomes;
- * independent Channel states are asserted in Details and at the Provider.
+ * Reloads and re-filters until the Post carrying `caption` matches `status`,
+ * then clears the filter.
+ *
+ * Publication is asynchronous by construction — the schedule write commits, the
+ * outbox relays, a worker claims the job, the Provider is called, and the outcome
+ * is recorded — so the run observes it the way a creator does: by watching the
+ * list until the Channel outcome it is waiting for is there. The filter matches
+ * any Channel in the bucket, so one Post can legitimately appear under Published
+ * and Failed at once; its single row still aggregates to the most urgent outcome.
+ *
+ * @param page - Playwright page bound to the `/posts` list.
+ * @param caption - Unique text or pattern matching this Post's channel previews.
+ * @param status - Toolbar status bucket one of the Post's Channels must match.
+ * @param timeout - How long to keep reloading before failing.
  */
 async function waitForPostUnderStatus(
   page: Page,
@@ -489,8 +525,10 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
   await publishNow(page);
   await returnToPosts(page);
 
-  // Failed is the aggregate status until the unsuccessful Channel is retried.
-  // Details and Provider records below prove the independent outcomes.
+  // Partial success: a Post with one published and one failed Channel matches
+  // both buckets, while its row still summarizes as Failed. The row previews a
+  // frozen channel caption; account order may put either target first.
+  await waitForPostUnderStatus(page, postCaption, /^published$/i);
   await waitForPostUnderStatus(page, postCaption, /^failed$/i);
 
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 1);
@@ -530,10 +568,12 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
   ).toBeVisible();
   // Each Channel row carries its own timestamps rather than one Post-wide stamp.
   const firstPublishedStamp = await detail
+    .getByRole("article", { name: channelNames.instagram, exact: true })
     .locator("dt")
     .filter({ hasText: /^Published:$/ })
     .locator("xpath=following-sibling::dd[1]")
     .innerText();
+  expect(firstPublishedStamp.trim()).not.toBe("");
 
   // The creator retries only the failed Channel.
   await detail.getByRole("button", { name: /^retry$/i }).click();
@@ -567,13 +607,21 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
     2,
   );
   await expect(converged.getByRole("article").getByText("Failed", { exact: true })).toHaveCount(0);
-  const publishedStamps = await converged
-    .locator("dt")
-    .filter({ hasText: /^Published:$/ })
-    .locator("xpath=following-sibling::dd[1]")
-    .allInnerTexts();
-  expect(publishedStamps).toHaveLength(2);
-  expect(publishedStamps[0]).toBe(firstPublishedStamp);
+  // The first Channel's instant is untouched, and the retried Channel records
+  // its own moment instead of inheriting the earlier one.
+  expect(
+    await converged
+      .getByRole("article", { name: channelNames.instagram, exact: true })
+      .locator("dt")
+      .filter({ hasText: /^Published:$/ })
+      .locator("xpath=following-sibling::dd[1]")
+      .innerText(),
+  ).toBe(firstPublishedStamp);
+  await expect(
+    converged
+      .getByRole("article", { name: channelNames.threads, exact: true })
+      .getByText("Published", { exact: true }),
+  ).toBeVisible();
 });
 
 /**
@@ -681,6 +729,18 @@ test("keeps separately created identical Posts distinct and publishes only the o
 
   const rows = page.getByRole("row").filter({ hasText: caption });
   await expect(rows).toHaveCount(2, { timeout: 60_000 });
+  // Each row prints the abbreviated tail of its own stable Post id and keeps the
+  // full id on the span's `title`, so two different ids prove two identities
+  // rather than one row rendered twice.
+  const recordIds = await rows.evaluateAll((elements) =>
+    elements.map(
+      (element) =>
+        [...element.querySelectorAll("span[title]")]
+          .map((span) => span.getAttribute("title") ?? "")
+          .find((title) => /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(title)) ?? "",
+    ),
+  );
+  expect(new Set(recordIds).size).toBe(2);
 
   // Nothing reached a Platform just by saving two drafts.
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 0);
@@ -702,7 +762,7 @@ test("keeps separately created identical Posts distinct and publishes only the o
   expect(threadsLive[0]!.media).toEqual([]);
 
   // The sibling Post is still a draft, so the identical pair never collapsed.
-  await filterPostsByStatus(page, /^draft$/i);
+  await filterPostsByStatus(page, /^drafts$/i);
   await expect(page.getByRole("row").filter({ hasText: caption })).toHaveCount(1, {
     timeout: 180_000,
   });

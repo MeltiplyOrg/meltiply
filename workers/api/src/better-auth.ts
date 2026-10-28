@@ -322,12 +322,7 @@ export async function checkAuthRateLimit(
   const ipSubject = `ip:${await sha256Hex(ip ?? "unknown")}`;
 
   if (action === "device-token") {
-    const callerRetryAfter = await authRateLimitHit(
-      env,
-      action,
-      ipSubject,
-      DEVICE_TOKEN_IP_RULE,
-    );
+    const callerRetryAfter = await authRateLimitHit(env, action, ipSubject, DEVICE_TOKEN_IP_RULE);
     if (callerRetryAfter !== null) {
       return { retryAfterSeconds: callerRetryAfter, status: "limited" };
     }

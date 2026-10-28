@@ -320,11 +320,7 @@ export async function deviceTokenRequest(
   const body = await requestJsonRecord(request);
   const deviceCode = body?.device_code;
   let claimSession: { id: string; userId: string } | undefined;
-  if (
-    body?.client_id === DEVICE_CLIENT_ID &&
-    typeof deviceCode === "string" &&
-    deviceCode
-  ) {
+  if (body?.client_id === DEVICE_CLIENT_ID && typeof deviceCode === "string" && deviceCode) {
     // Exception: pg cannot be loaded in workerd unit-test isolates.
     const { systemPoolFor } = await import("./database");
     const pool = systemPoolFor(env);

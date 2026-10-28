@@ -178,8 +178,7 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
     url.hostname === "127.0.0.1" ||
     url.hostname === "::1" ||
     url.hostname === "[::1]";
-  const localLoopback =
-    (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test") && loopback;
+  const localLoopback = (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test") && loopback;
   if (url.protocol === "http:" && !localLoopback) {
     throw new Error("APP_URL must use HTTPS outside loopback-only local/test development");
   }

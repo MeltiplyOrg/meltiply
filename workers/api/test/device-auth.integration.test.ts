@@ -857,11 +857,7 @@ describe("browser verification and consent ownership", () => {
     const deviceCode = stringField(body, "device_code");
     expect((await verifyDeviceCode(claiming.cookie, userCode)).status).toBe(200);
 
-    const signedOut = await authPostJson(
-      "/api/auth/sign-out",
-      {},
-      { cookie: claiming.cookie },
-    );
+    const signedOut = await authPostJson("/api/auth/sign-out", {}, { cookie: claiming.cookie });
     expect(signedOut.status).toBe(200);
 
     const replacement = await signIn(gammaEmail);
@@ -1476,9 +1472,7 @@ describe("installation origin policy", () => {
     expect(applicationOrigin({ ...env, APP_URL: "http://127.0.0.1:8787" })).toBe(
       "http://127.0.0.1:8787",
     );
-    expect(() =>
-      applicationOrigin({ ...env, APP_URL: "http://auth.test" }),
-    ).toThrow(/HTTPS/);
+    expect(() => applicationOrigin({ ...env, APP_URL: "http://auth.test" })).toThrow(/HTTPS/);
     expect(() =>
       applicationOrigin({
         ...env,

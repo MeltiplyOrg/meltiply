@@ -462,6 +462,9 @@ describe("Better Auth device protocol HTTP composition", () => {
     });
     expect(signUp.status).toBe(200);
     const browserCookie = sessionCookie(signUp);
+    if (typeof auth.getSession !== "function") {
+      throw new Error("Better Auth instance must expose its session lookup");
+    }
     expect(await auth.getSession(new Headers({ Cookie: browserCookie }))).toMatchObject({
       session: { id: expect.any(String) },
       user: { id: expect.any(String) },

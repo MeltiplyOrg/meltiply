@@ -134,9 +134,13 @@ async function returnToPosts(page: Page): Promise<void> {
   });
   await expect(page.getByRole("alert")).toHaveCount(0);
   const composer = page.getByRole("dialog", { name: /^(?:new post|edit post)$/i });
-  if (await composer.isVisible().catch(() => false)) {
+  // A successful submission closes the panel itself. Its exit transition keeps
+  // the dialog visible for a moment, and clicking a dialog that is already
+  // detaching would retry a locator that can never resolve again, so wait the
+  // dismissal out and close only a composition that is still standing.
+  await composer.waitFor({ state: "hidden", timeout: 10_000 }).catch(async () => {
     await closeComposer(page);
-  }
+  });
   await waitForWorkspace(page);
 }
 

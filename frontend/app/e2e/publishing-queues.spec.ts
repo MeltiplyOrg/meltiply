@@ -40,10 +40,13 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   const queueName = `Acceptance Queue ${randomUUID().slice(0, 8)}`;
   await editor.getByLabel("Queue name", { exact: true }).fill(queueName);
   await editor.getByRole("button", { name: /^Queue timezone:/ }).click();
-  const timezonePicker = page.getByRole("dialog", { name: "Queue timezone", exact: true });
-  await timezonePicker.getByRole("textbox", { name: "Search timezones…", exact: true }).fill("utc");
-  await timezonePicker.getByRole("option", { name: "UTC", exact: true }).click();
-  await expect(timezonePicker).toBeHidden();
+  const timezoneSearch = editor.getByRole("textbox", {
+    name: "Search timezones…",
+    exact: true,
+  });
+  await timezoneSearch.fill("utc");
+  await page.getByRole("option", { name: "UTC", exact: true }).click();
+  await expect(timezoneSearch).toBeHidden();
   // Allow the real media processor and two submissions to settle before due work.
   const firstInstant = new Date(Math.ceil((Date.now() + 240_000) / 60_000) * 60_000);
   const secondInstant = new Date(firstInstant.getTime() + 60_000);
@@ -77,7 +80,11 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   const apiOrigin = new URL(created.url()).origin;
   const headers = { Authorization: (await created.request().allHeaders())["authorization"]! };
   await expect(editor).toBeHidden();
-  await expect(page.getByRole("heading", { name: queueName, exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Publishing Queues", exact: true })
+      .getByRole("button", { name: queueName, exact: true }),
+  ).toBeVisible();
   await scriptControlledFailures(request, providerAccountId, 1);
 
   const queuedPosts: Schemas["Post"][] = [];
@@ -168,12 +175,12 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
     .getByRole("button", { name: queueName, exact: true })
     .click();
   const memberships = page.getByRole("region", { name: "Queue Posts", exact: true });
-  // <section aria-label> is an accessible region; each reserved instant survives reload.
+  // A Week-canvas chip is named by its caption, formatted time, and status, so
+  // its caption is what survives reload and identifies the reserved Post; the
+  // API read below proves the assigned instant itself.
   for (const post of queuedPosts) {
     await expect(
-      memberships.locator(
-        `[data-hour-canvas] time[datetime="${post.queue_membership!.assigned_at}"]`,
-      ),
+      memberships.getByRole("button", { name: new RegExp(post.default_text!) }),
     ).toBeVisible();
     const read = await request.get(`${apiOrigin}/api/v1/posts/${post.id}`, { headers });
     expect(read.status()).toBe(200);
@@ -216,10 +223,7 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
         await phoneEditor.getByRole("button", { name: "Close", exact: true }).click();
         await expect(phoneEditor).toBeHidden();
         await memberships
-          .locator("[data-hour-canvas] button")
-          .filter({
-            has: page.locator(`time[datetime="${queuedPosts[1]!.queue_membership!.assigned_at}"]`),
-          })
+          .getByRole("button", { name: new RegExp(queuedPosts[1]!.default_text!) })
           .click();
         const phonePost = page.getByRole("dialog", { name: "Post details", exact: true });
         await expect(phonePost).toContainText(`Queue acceptance composition 1 ${queueName}`);
@@ -234,10 +238,7 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   await memberships
-    .locator("[data-hour-canvas] button")
-    .filter({
-      has: page.locator(`time[datetime="${queuedPosts[1]!.queue_membership!.assigned_at}"]`),
-    })
+    .getByRole("button", { name: new RegExp(queuedPosts[1]!.default_text!) })
     .click();
   await page
     .getByRole("dialog", { name: "Post details", exact: true })

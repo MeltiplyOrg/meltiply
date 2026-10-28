@@ -610,7 +610,7 @@
   "Create profile": "创建资料",
   "Delete Brand Profile": "删除品牌资料",
   "Delete profile": "删除资料",
-  "Deleting this Brand Profile permanently removes its posts and assets, disconnects its channels, and stops scheduled work. This cannot be undone.": "删除此品牌资料将永久移除其帖子和媒体文件，断开其频道连接，并停止已安排的工作。此操作无法撤销。",
+  "Deleting this Brand Profile permanently deletes its posts and asset records and disconnects its channels. Scheduled and queued work is cancelled, but attempts already running on a platform may still publish. This cannot be undone.": "删除此品牌资料将永久删除其帖子和媒体资源记录，并断开其频道连接。已安排和排队的工作将被取消，但已在平台上执行的发布尝试仍可能完成发布。此操作无法撤销。",
   "Edit profile": "编辑资料",
   "Profile name": "资料名称",
   "Update Brand Profile": "更新品牌资料",

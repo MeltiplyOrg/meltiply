@@ -610,7 +610,7 @@
   "Create profile": "Tạo hồ sơ",
   "Delete Brand Profile": "Xóa hồ sơ thương hiệu",
   "Delete profile": "Xóa hồ sơ",
-  "Deleting this Brand Profile permanently removes its posts and assets, disconnects its channels, and stops scheduled work. This cannot be undone.": "Việc xóa hồ sơ thương hiệu này sẽ xóa vĩnh viễn các bài viết và tệp phương tiện của hồ sơ, ngắt kết nối các kênh và dừng công việc đã lên lịch. Không thể hoàn tác thao tác này.",
+  "Deleting this Brand Profile permanently deletes its posts and asset records and disconnects its channels. Scheduled and queued work is cancelled, but attempts already running on a platform may still publish. This cannot be undone.": "Việc xóa hồ sơ thương hiệu này sẽ xóa vĩnh viễn các bài viết và bản ghi tài nguyên phương tiện, đồng thời ngắt kết nối các kênh của hồ sơ. Công việc đã lên lịch và đang trong hàng đợi sẽ bị hủy, nhưng các lần thử đang chạy trên nền tảng vẫn có thể đăng bài. Không thể hoàn tác thao tác này.",
   "Edit profile": "Chỉnh sửa hồ sơ",
   "Profile name": "Tên hồ sơ",
   "Update Brand Profile": "Cập nhật hồ sơ thương hiệu",

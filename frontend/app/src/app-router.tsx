@@ -9,6 +9,7 @@ import { WorkspaceLoadingSkeleton } from "@/components/layout/workspace-loading-
 const AnalyticsPage = lazy(() => import("@/app/(dashboard)/analytics/page"));
 const ChannelsPage = lazy(() => import("@/app/(dashboard)/channels/page"));
 const ChannelConnectPage = lazy(() => import("@/app/channel-connect-route"));
+const DeviceConsentRoute = lazy(() => import("@/app/device-consent-route"));
 const PostsPage = lazy(() => import("@/app/(dashboard)/posts/page"));
 const QueuesPage = lazy(() => import("@/app/(dashboard)/queues/page"));
 const SettingsPage = lazy(() => import("@/components/layout/workspace-settings"));
@@ -47,6 +48,7 @@ export function AppRouter(): React.ReactElement {
           }
         />
         <Route path="/invitations/accept" element={<InvitationAcceptRoute />} />
+        <Route path="/device" element={<DeviceConsentRoute />} />
         <Route element={<AuthenticatedShell />}>
           <Route path="/posts" element={<PostsPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />

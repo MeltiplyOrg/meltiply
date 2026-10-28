@@ -237,7 +237,10 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
         await expect(phoneEditor).toBeHidden();
         await memberships.getByRole("button", { name: "Queue Channel caption 1" }).click();
         const phonePost = page.getByRole("dialog", { name: "Post details", exact: true });
-        await expect(phonePost).toContainText(`Queue acceptance composition 1 ${queueName}`);
+        // The drawer reports the caption this Channel publishes and the Queue
+        // that assigned its instant, not the Post's shared text.
+        await expect(phonePost).toContainText("Queue Channel caption 1");
+        await expect(phonePost).toContainText(queueName);
         await phonePost.getByRole("button", { name: "Close", exact: true }).click();
         await expect(phonePost).toHaveCount(0);
       }
@@ -266,15 +269,15 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   await expect
     .poll(
       async () => {
-        // Wrangler does not run Cron automatically. Dispatch its real scheduled
-        // handler at wall-clock time; never change a stored due time or inject
-        // a future clock. Repeated ticks exercise the normal idempotent relay.
+        // Wrangler runs no cron locally, so ask the acceptance entry to invoke
+        // the real scheduled dispatcher at wall-clock time. Stored due times are
+        // never changed, and repeated ticks exercise the normal idempotent relay.
         if (Date.now() >= firstInstant.getTime()) {
-          const tick = await request.post(
-            `${apiOrigin}/cdn-cgi/local/explorer/api/local/scheduled?worker=meltiply-automation-local`,
-            { data: { cron: "0 * * * *" } },
-          );
-          expect(tick.status(), await tick.text()).toBe(200);
+          const tick = await request.post(`${apiOrigin}/__test__/automation/scheduled`, {
+            headers,
+            timeout: 120_000,
+          });
+          expect(tick.status(), await tick.text()).toBe(204);
         }
         const response = await request.get(`${apiOrigin}/api/v1/posts/${firstPost.id}`, {
           headers,

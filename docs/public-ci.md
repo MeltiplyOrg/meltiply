@@ -67,8 +67,11 @@ and deletion without unpublishing. It captures provider controls at desktop/phon
 widths in both palettes. Each journey resets disposable PostgreSQL state and uses
 the real API, storage, processor, transport and consumer with controlled external
 Providers; it does not certify live credentials, platform audit, or public posting.
-Browser failures are reported without automatic retries. Traces and screenshots
-are retained in the lane's artifact.
+Wrangler fires no cron triggers locally, so the acceptance API exposes a
+fixture-only route that invokes the Automation Worker's scheduled dispatcher
+through its existing service binding; stored due times stay unchanged. Browser
+failures are reported without automatic retries, and each journey's traces and
+screenshots are retained in the lane's artifact before the next journey runs.
 
 `portable-caching` runs the complete application gate and the portable read-cache
 acceptance journey; `portable-caching-smoke` repeats only that journey when the

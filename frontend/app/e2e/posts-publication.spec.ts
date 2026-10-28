@@ -385,8 +385,8 @@ async function waitForPostUnderStatus(
       async () => {
         // The reload drops the workspace scope, so reselecting the Brand Profile
         // issues the scoped collection read. Waiting for that response — instead
-        // of guessing a delay — makes the counted rows the loaded ones rather
-        // than the skeleton table, which never carries a caption.
+        // of guessing a delay — makes the rows below the loaded ones rather than
+        // the skeleton table.
         const scopedCollection = page.waitForResponse(
           (response) =>
             response.url().includes("/api/v1/posts?") &&
@@ -398,11 +398,19 @@ async function waitForPostUnderStatus(
         await reloadPostsWorkspace(page);
         await scopedCollection;
         await filterPostsByStatus(page, status);
-        return page.getByRole("row").filter({ hasText: caption }).count();
+        // Applying a filter and painting the rows are separate commits, so wait
+        // for the row itself instead of sampling one instant of the table.
+        return page
+          .getByRole("row")
+          .filter({ hasText: caption })
+          .first()
+          .waitFor({ state: "visible", timeout: 10_000 })
+          .then(() => true)
+          .catch(() => false);
       },
       { intervals: [3_000, 5_000, 8_000], timeout },
     )
-    .toBeGreaterThan(0);
+    .toBe(true);
   await clearPostStatusFilter(page);
 }
 

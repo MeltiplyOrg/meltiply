@@ -96,6 +96,26 @@ class AutomationAcceptanceEntrypoint extends AutomationEntrypoint {
   override scheduled(controller: ScheduledController) {
     return this.acceptanceHandler.scheduled!(controller, this.env, this.ctx);
   }
+
+  /**
+   * Runs one scheduled dispatcher pass on demand.
+   *
+   * Wrangler never fires cron triggers in local development, so the acceptance
+   * browser journey asks the API Worker to call this through the existing service
+   * binding. The production dispatcher still performs the due-work scan, retry
+   * policy and queue relay; only the trigger is supplied by the test, and stored
+   * instants are never rewritten.
+   *
+   * @param cron - Cron expression reported to the dispatcher; hourly by default.
+   * @returns Promise resolving once every due scheduled unit completes.
+   */
+  async runScheduledWork(cron = "0 * * * *"): Promise<void> {
+    await this.acceptanceHandler.scheduled!(
+      { cron, noRetry() {}, scheduledTime: Date.now() },
+      this.env,
+      this.ctx,
+    );
+  }
 }
 
 export default AutomationAcceptanceEntrypoint;

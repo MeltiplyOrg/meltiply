@@ -8,7 +8,7 @@ import { createApiApp } from "../src/app";
 import { betterAuthFor } from "../src/better-auth";
 import { CoreApiError } from "../src/core-types";
 import { systemPoolFor } from "../src/database";
-import type { ApiWorkerEnv } from "../src/env";
+import { applicationOrigin, type ApiWorkerEnv } from "../src/env";
 
 /**
  * Drives the complete melti-cli device-authorization lifecycle through the real
@@ -39,9 +39,9 @@ const systemConnectionString =
   "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable";
 
 /** Canonical installation origin used for auth requests and verification links. */
-const authOrigin = "http://auth.test";
+const authOrigin = "https://auth.test";
 /** Trusted browser origin used for credentialed sign-in and consent requests. */
-const appOrigin = "http://app.test";
+const appOrigin = "https://app.test";
 const seedPassword = "MeltiplyLocal1!";
 /** Same scrypt hash the local seed uses for every fixture member. */
 const seedPasswordHash =
@@ -756,6 +756,9 @@ describe("device code issuance contract", () => {
     const wrongClient = await issueDeviceCode({ clientId: "some-other-cli" });
     expect(wrongClient.response.status).toBe(400);
     expect(await deviceError(wrongClient.response)).toMatchObject({ error: "invalid_client" });
+    const paddedClient = await issueDeviceCode({ clientId: " melti-cli " });
+    expect(paddedClient.response.status).toBe(400);
+    expect(await deviceError(paddedClient.response)).toMatchObject({ error: "invalid_client" });
 
     const prebound = await issueDeviceCode({
       body: { user_id: gammaAuthUserId },
@@ -847,27 +850,32 @@ describe("browser verification and consent ownership", () => {
     expect((await decideDeviceCode(gamma.cookie, "approve", userCode)).status).toBe(200);
   });
 
-  it("fails closed when the verifying session binding is unavailable and recovers by verifying again", async () => {
-    const gamma = await signIn(gammaEmail);
+  it("denies a pending request after its claiming browser session ends instead of re-claiming it", async () => {
+    const claiming = await signIn(gammaEmail);
     const { body } = await issueDeviceCode();
     const userCode = stringField(body, "user_code");
-    expect((await verifyDeviceCode(gamma.cookie, userCode)).status).toBe(200);
+    const deviceCode = stringField(body, "device_code");
+    expect((await verifyDeviceCode(claiming.cookie, userCode)).status).toBe(200);
 
-    // Simulate a revoked verifying session whose foreign-key cleanup nulled the
-    // durable binding. Consent must fail closed rather than adopting an
-    // arbitrary same-member session.
-    await systemPoolFor(env).query(
-      `UPDATE "deviceCode" SET "claimSessionId" = NULL WHERE "userCode" = $1`,
-      [userCode],
+    const signedOut = await authPostJson(
+      "/api/auth/sign-out",
+      {},
+      { cookie: claiming.cookie },
     );
-    const unbound = await decideDeviceCode(gamma.cookie, "approve", userCode);
-    expect(unbound.status).toBe(403);
-    expect(await deviceError(unbound)).toMatchObject({ error: "access_denied" });
+    expect(signedOut.status).toBe(200);
 
-    // Re-verifying the code in the current session establishes a fresh
-    // binding, so the member can continue intentionally.
-    expect((await verifyDeviceCode(gamma.cookie, userCode)).status).toBe(200);
-    expect((await decideDeviceCode(gamma.cookie, "approve", userCode)).status).toBe(200);
+    const replacement = await signIn(gammaEmail);
+    const verification = await verifyDeviceCode(replacement.cookie, userCode);
+    expect(verification.status).toBe(200);
+    expect(recordOf(await verification.json()).status).toBe("denied");
+
+    const approval = await decideDeviceCode(replacement.cookie, "approve", userCode);
+    expect(approval.status).toBe(400);
+    expect(await deviceError(approval)).toMatchObject({ error: "invalid_request" });
+
+    const redemption = await redeemDeviceCode(deviceCode);
+    expect(redemption.status).toBe(400);
+    expect(await deviceError(redemption)).toMatchObject({ error: "access_denied" });
   });
 
   it("requires an authenticated browser session for approval, denial, and claims", async () => {
@@ -1292,6 +1300,35 @@ describe("existing credential policy", () => {
     );
   });
 
+  it("denies an approved grant when enabling two-factor authentication revokes its browser session", async () => {
+    const browser = await signIn(securityEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    const deviceCode = stringField(body, "device_code");
+    expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
+
+    const enrollment = await authPostJson(
+      "/api/auth/two-factor/enable",
+      { password: dedicatedPassword },
+      { cookie: browser.cookie },
+    );
+    expect(enrollment.status, await enrollment.clone().text()).toBe(200);
+    const enrollmentBody = recordOf(await enrollment.json());
+    const totpURI = stringField(enrollmentBody, "totpURI");
+    const confirmation = await authPostJson(
+      "/api/auth/two-factor/verify-totp",
+      { code: totpCode(totpURI), trustDevice: false },
+      { cookie: browser.cookie },
+    );
+    expect(confirmation.status, await confirmation.clone().text()).toBe(200);
+    expect(await (await getSessionWithCookie(browser.cookie)).json()).toBeNull();
+
+    const redemption = await redeemDeviceCode(deviceCode);
+    expect(redemption.status).toBe(400);
+    expect(await deviceError(redemption)).toMatchObject({ error: "access_denied" });
+  });
+
   it("enforces required mailbox verification before releasing a CLI session", async () => {
     // Local test composition allows the unverified fixture to sign in; the
     // deployed policy composition below is the authority that rejects it.
@@ -1404,6 +1441,24 @@ describe("distributed device abuse controls", () => {
     expect(otherDevice.status).toBe(400);
     expect(await deviceError(otherDevice)).toMatchObject({ error: "authorization_pending" });
   });
+  it("counts per-device throttled polls against the caller ceiling before a new code can allocate a bucket", async () => {
+    const ip = randomIp();
+    const { body } = await issueDeviceCode({ ip });
+    const deviceCode = stringField(body, "device_code");
+    const first = await redeemDeviceCode(deviceCode, { ip });
+    expect(await deviceError(first)).toMatchObject({ error: "authorization_pending" });
+
+    for (let attempt = 1; attempt < 120; attempt += 1) {
+      const throttled = await redeemDeviceCode(deviceCode, { ip });
+      expect(throttled.status).toBe(400);
+      expect(await deviceError(throttled)).toMatchObject({ error: "slow_down" });
+    }
+
+    const distinctCode = await redeemDeviceCode(`unknown-${crypto.randomUUID()}`, { ip });
+    expect(distinctCode.status).toBe(400);
+    expect(await deviceError(distinctCode)).toMatchObject({ error: "slow_down" });
+    expect(Number(distinctCode.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
 });
 
 describe("installation origin policy", () => {
@@ -1415,5 +1470,21 @@ describe("installation origin policy", () => {
         ENVIRONMENT: "staging",
       }),
     ).rejects.toThrow(/HTTPS/);
+  });
+
+  it("allows insecure origins only for local/test loopback hosts", () => {
+    expect(applicationOrigin({ ...env, APP_URL: "http://127.0.0.1:8787" })).toBe(
+      "http://127.0.0.1:8787",
+    );
+    expect(() =>
+      applicationOrigin({ ...env, APP_URL: "http://auth.test" }),
+    ).toThrow(/HTTPS/);
+    expect(() =>
+      applicationOrigin({
+        ...env,
+        APP_URL: "http://127.0.0.1:8787",
+        ENVIRONMENT: "staging",
+      }),
+    ).toThrow(/HTTPS/);
   });
 });

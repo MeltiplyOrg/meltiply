@@ -46,7 +46,8 @@ interoperate.
    effective permissions, then explicitly calls
    `POST /api/auth/device/approve` or `/deny`. Approval is bound to the browser
    session that verified the code; a different session of the same member
-   cannot consent.
+   cannot consent. Deleting that claiming session makes pending and approved
+   requests terminal, so a replacement session cannot reclaim them.
 5. While approval is pending, the CLI calls `POST /api/auth/device/token` at
    least five seconds apart. `authorization_pending` means wait; `slow_down`
    means back off further.
@@ -118,9 +119,10 @@ an unclaimed pending request. The response is `200`:
 
 `client_id` and `scope` are returned only to the member who owns the claim. A
 pending response without `client_id` belongs to another account (or an anonymous
-visitor) and must not enable consent. `scope` is informational; it is not an
-authority grant. `status` is `pending`, `approved`, or `denied`. Loading this
-endpoint never approves a request.
+visitor) and must not enable consent. Another session of the same member may see
+the request context, but only the original claiming session can decide it. `scope`
+is informational; it is not an authority grant. `status` is `pending`, `approved`,
+or `denied`. Loading this endpoint never approves a request.
 
 Errors: `400 invalid_request` for a malformed or unknown code, and
 `400 expired_token` for an expired request. The Worker applies a distributed
@@ -143,9 +145,10 @@ origin. Success is `200` with `{ "success": true }`.
   pending (already approved or denied). Treat this as terminal; verify again
   only to display the authoritative status.
 - `400 expired_token`: the pending request expired.
-- `403 access_denied`: the request belongs to another member, or to a different
-  browser session of the same member. The member must verify again in the
-  session that will consent, or start a new CLI login.
+- `403 access_denied`: the request belongs to another member or is bound to a
+  different browser session of the same member. Return to the original browser
+  session; if it is unavailable, run `melti-cli auth login` again for a new code.
+  A fresh browser session cannot take over the existing request.
 - Rate limiting returns `429 rate_limited` with `Retry-After`.
 
 Preserve the plugin's CSRF/origin checks; do not repeat either decision
@@ -183,22 +186,25 @@ a JWT. `scope` may be empty and is not a capability grant.
 
 RFC-style failures are `400` with `error` and `error_description`:
 
-| `error`                 | Meaning                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------- |
-| `authorization_pending` | Approval has not happened yet. Keep polling at the interval.                          |
-| `slow_down`             | Polled faster than the interval or the per-device budget allows. Honor `Retry-After`. |
-| `access_denied`         | The member denied the request. This response is consumed once.                        |
-| `expired_token`         | The pending request expired. Start a new CLI login.                                   |
-| `invalid_grant`         | Unknown, mismatched-client, replayed, or already-consumed device code.                |
-| `invalid_request`       | Malformed request.                                                                    |
-| `server_error`          | Session creation or policy evaluation failed.                                         |
+| `error`                 | Meaning                                                                                       |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| `authorization_pending` | Approval has not happened yet. Keep polling at the interval.                                  |
+| `slow_down`             | Polled faster than the interval or a rate budget allows. Honor `Retry-After`.                 |
+| `access_denied`         | The member denied the request or its claiming browser session is no longer active. Restart login. |
+| `expired_token`         | The pending request expired. Start a new CLI login.                                           |
+| `invalid_grant`         | Unknown, mismatched-client, replayed, or already-consumed device code.                        |
+| `invalid_request`       | Malformed request.                                                                            |
+| `server_error`          | Session creation or policy evaluation failed.                                                 |
 
 Token polling is limited per device code and per caller across Worker
-instances. A denial is deleted after reporting `access_denied`; later attempts
-report `invalid_grant`. Only one concurrent redemption can succeed. The server
-checks suspension, required mailbox verification, membership, and account
-activity before releasing the credential, and revokes the freshly minted session
-when the member is ineligible.
+instances. The caller IP budget is checked and counted first; the per-device
+bucket is touched only for admitted callers, and device-throttled polls still
+consume the caller budget. A denial is deleted after reporting `access_denied`;
+later attempts report `invalid_grant`. Only one concurrent redemption can
+succeed. Before releasing the credential, the server verifies that the exact
+claiming session is still live and checks suspension, required mailbox
+verification, membership, and account activity. If the claim session ended
+during exchange, the newly minted CLI session is revoked.
 
 ## Native session transport
 
@@ -234,16 +240,18 @@ Viewers remain read-only, Editors retain content write access, and no CLI-specif
 role exists. Current-user lookup, Post listing, and idempotent draft creation use
 the existing routes and contracts.
 
-### Sign-out and revocation
-
 `POST /api/auth/sign-out` with the CLI bearer credential and
 `Origin: <installation origin>` revokes that session and returns `200`. The
 approving browser session is unaffected. After sign-out, `get-session` returns
 `null` and previously minted JWTs fail with `401`. Existing security policy also
 applies: suspension, password change or reset, email verification changes, and
 two-factor activation or deactivation revoke affected sessions, including CLI
-sessions. The CLI must treat `null` from `get-session`, a `401` from `/api/v1`,
-or a revoked session as reauthentication required.
+sessions. Deleting the browser session that claimed a device code also denies
+any pending or approved unredeemed grant in the same database transaction; a
+new browser session cannot reclaim it. If deletion races with redemption, the
+new CLI session is linked to the original claim and is revoked with that session.
+The CLI must treat `null` from `get-session`, a `401` from `/api/v1`, or a
+revoked session as reauthentication required.
 
 ## Browser policy
 

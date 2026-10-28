@@ -321,16 +321,16 @@ describe("device consent route", () => {
     expect(screen.queryByRole("button", { name: "Deny request" })).not.toBeInTheDocument();
   });
 
-  it("refuses to let another signed-in account act on a claimed request", async () => {
+  it("explains that an unowned request needs its original browser session or a new CLI login", async () => {
     state.review = () => jsonResponse({ status: "pending", user_code: "ABCD2345" });
     installDeviceFetch();
 
     renderRoute("/device?user_code=ABCD2345");
 
     await screen.findByText(
-      "This request belongs to a different account. Sign out and sign in with the account that started it.",
+      "This request is bound to another account or browser session. Return to the browser session that verified it; if that session is unavailable, run melti-cli auth login again for a new code.",
     );
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve melti-cli" })).not.toBeInTheDocument();
   });
 
@@ -352,6 +352,31 @@ describe("device consent route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve melti-cli" }));
 
     await screen.findByRole("heading", { name: "This request was already approved" });
+  });
+
+  it("terminalizes a same-account wrong-session denial instead of allowing stale approval retries", async () => {
+    state.approve = () =>
+      jsonResponse(
+        {
+          error: "access_denied",
+          error_description: "This device request was verified in a different browser session.",
+        },
+        403,
+      );
+    installDeviceFetch();
+
+    renderRoute("/device?user_code=ABCD2345");
+    await screen.findByRole("heading", { name: "Approve melti-cli?" });
+    confirmMatchingCode();
+    fireEvent.click(screen.getByRole("button", { name: "Approve melti-cli" }));
+
+    await screen.findByRole("heading", { name: "This request cannot be approved here" });
+    await screen.findByText(
+      "This request is bound to another account or browser session. Return to the browser session that verified it; if that session is unavailable, run melti-cli auth login again for a new code.",
+    );
+    expect(screen.queryByRole("button", { name: "Approve melti-cli" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deny request" })).not.toBeInTheDocument();
+    expect(state.reviewCalls).toBe(1);
   });
 
   it("reports rate limiting with the server's delay and leaves the decision available", async () => {

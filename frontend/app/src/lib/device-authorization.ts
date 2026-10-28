@@ -1,4 +1,4 @@
-import { getApiBaseUrl } from "./env";
+import { authClient } from "./auth-client";
 
 /**
  * Verification state reported by Better Auth's device-authorization plugin.
@@ -149,14 +149,16 @@ async function deviceAuthorizationError(response: Response): Promise<DeviceAutho
 export async function verifyDeviceAuthorization(
   userCode: string,
 ): Promise<DeviceAuthorizationReview> {
-  const url = new URL(`${getApiBaseUrl()}/api/auth/device`);
-  url.searchParams.set("user_code", userCode);
-  const response = await fetch(url.toString(), {
-    cache: "no-store",
-    credentials: "include",
-    headers: { Accept: "application/json" },
-    method: "GET",
-  });
+  const query = new URLSearchParams({ user_code: userCode });
+  const response = await authClient.requestDeviceAuthorization(
+    "device",
+    {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+      method: "GET",
+    },
+    query,
+  );
   if (!response.ok) throw await deviceAuthorizationError(response);
 
   const body: unknown = await response.json().catch(() => null);
@@ -193,10 +195,10 @@ async function decideDeviceAuthorization(
   decision: "approve" | "deny",
   userCode: string,
 ): Promise<void> {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/device/${decision}`, {
+  const endpoint = decision === "approve" ? "device/approve" : "device/deny";
+  const response = await authClient.requestDeviceAuthorization(endpoint, {
     body: JSON.stringify({ userCode }),
     cache: "no-store",
-    credentials: "include",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     method: "POST",
   });

@@ -301,8 +301,9 @@ async function requestStringField(request: Request, field: string): Promise<stri
  * SHA-256 subject (`email:<hash>` for credential endpoints, `device:<hash>` for
  * token polling, and always `ip:<hash>`), so limits are distributed across
  * isolates and cannot be bypassed by rotating any identity dimension. Token
- * polling additionally applies a looser per-caller ceiling so a single device
- * cannot consume the installation's whole address budget. Fails closed: a
+ * polling checks and counts the caller IP before allocating or checking a
+ * per-device bucket, so caller exhaustion bounds distinct-code ledger growth and
+ * per-device throttling still consumes the caller budget. Fails closed: a
  * rate-limit store error propagates as a 500 rather than allowing unbounded
  * abuse.
  *
@@ -317,6 +318,34 @@ export async function checkAuthRateLimit(
   request: Request,
 ): Promise<AuthRateLimitResult> {
   const rule = AUTH_RATE_LIMITS[action] ?? AUTH_RATE_LIMITS.generic!;
+  const ip = clientIp(request);
+  const ipSubject = `ip:${await sha256Hex(ip ?? "unknown")}`;
+
+  if (action === "device-token") {
+    const callerRetryAfter = await authRateLimitHit(
+      env,
+      action,
+      ipSubject,
+      DEVICE_TOKEN_IP_RULE,
+    );
+    if (callerRetryAfter !== null) {
+      return { retryAfterSeconds: callerRetryAfter, status: "limited" };
+    }
+    const deviceCode = await requestStringField(request, "device_code");
+    if (deviceCode) {
+      const deviceRetryAfter = await authRateLimitHit(
+        env,
+        action,
+        `device:${await sha256Hex(deviceCode)}`,
+        rule,
+      );
+      if (deviceRetryAfter !== null) {
+        return { retryAfterSeconds: deviceRetryAfter, status: "limited" };
+      }
+    }
+    return { status: "ok" };
+  }
+
   const subjects: AuthRateLimitSubject[] = [];
   if (EMAIL_RATE_LIMIT_ACTIONS.has(action)) {
     const email = await requestEmail(request);
@@ -324,17 +353,7 @@ export async function checkAuthRateLimit(
       subjects.push({ rule, subject: `email:${await sha256Hex(email)}` });
     }
   }
-  if (action === "device-token") {
-    const deviceCode = await requestStringField(request, "device_code");
-    if (deviceCode) {
-      subjects.push({ rule, subject: `device:${await sha256Hex(deviceCode)}` });
-    }
-  }
-  const ip = clientIp(request);
-  subjects.push({
-    rule: action === "device-token" ? DEVICE_TOKEN_IP_RULE : rule,
-    subject: `ip:${await sha256Hex(ip ?? "unknown")}`,
-  });
+  subjects.push({ rule, subject: ipSubject });
   for (const { rule: subjectRule, subject } of subjects) {
     const retryAfterSeconds = await authRateLimitHit(env, action, subject, subjectRule);
     if (retryAfterSeconds !== null) {

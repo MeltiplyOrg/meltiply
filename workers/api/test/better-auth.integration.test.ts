@@ -128,10 +128,10 @@ function recordingMailBinding(): RecordingMail {
  */
 function localTestEnv(mail: RecordingMail) {
   return {
-    ALLOWED_ORIGINS: "http://app.test",
+    ALLOWED_ORIGINS: "https://app.test",
     BETTER_AUTH_SECRET: authSecret,
     AUTH_SETUP_SECRET: setupSecret,
-    APP_URL: "http://auth.test",
+    APP_URL: "https://auth.test",
     DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
     ENVIRONMENT: "test",
     MAIL: mail.binding,
@@ -147,7 +147,7 @@ function localTestEnv(mail: RecordingMail) {
  */
 function stagingEnv(mail: RecordingMail) {
   return {
-    ALLOWED_ORIGINS: "http://app.test",
+    ALLOWED_ORIGINS: "https://app.test",
     BETTER_AUTH_SECRET: authSecret,
     AUTH_SETUP_SECRET: setupSecret,
     APP_URL: "https://auth.test",
@@ -167,14 +167,14 @@ function stagingEnv(mail: RecordingMail) {
  */
 function systemEnv() {
   return {
-    ALLOWED_ORIGINS: "http://app.test",
+    ALLOWED_ORIGINS: "https://app.test",
     DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
     ENVIRONMENT: "test",
     VERSION: "1.0.0-target.0",
   } satisfies ApiWorkerEnv;
 }
 
-const baseURL = "http://auth.test";
+const baseURL = "https://auth.test";
 /** Staging fixtures use HTTPS so the installation-origin guard stays exercised. */
 const stagingOrigin = "https://auth.test";
 
@@ -350,7 +350,7 @@ describe("betterAuthFor local/test policy", () => {
 describe("betterAuthFor staging policy", () => {
   it("fails closed when mail configuration is missing instead of disabling verification", async () => {
     const env = {
-      ALLOWED_ORIGINS: "http://app.test",
+      ALLOWED_ORIGINS: "https://app.test",
       BETTER_AUTH_SECRET: authSecret,
       APP_URL: "https://auth.test",
       DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
@@ -373,7 +373,7 @@ describe("betterAuthFor staging policy", () => {
     const auth = await betterAuthFor(stagingEnv(mail));
 
     const signUp = await authPost(auth, "/api/auth/sign-up/email", {
-      callbackURL: "http://app.test/verified",
+      callbackURL: "https://app.test/verified",
       email: emails.stagingVerified,
       name: "Staging Tester",
       password: "correct horse battery staple",
@@ -396,7 +396,7 @@ describe("betterAuthFor staging policy", () => {
 
     const verified = await auth.handler(new Request(verifyLink));
     expect(verified.status).toBe(302);
-    expect(verified.headers.get("location")).toBe("http://app.test/verified");
+    expect(verified.headers.get("location")).toBe("https://app.test/verified");
     expect(sessionCookiePair(verified)).toBeTruthy();
 
     const signIn = await authPost(auth, "/api/auth/sign-in/email", {
@@ -408,7 +408,7 @@ describe("betterAuthFor staging policy", () => {
 
     const garbage = await auth.handler(
       new Request(
-        `${baseURL}/api/auth/verify-email?token=not-a-token&callbackURL=${encodeURIComponent("http://app.test/verified")}`,
+        `${baseURL}/api/auth/verify-email?token=not-a-token&callbackURL=${encodeURIComponent("https://app.test/verified")}`,
       ),
     );
     expect(garbage.status).toBe(302);
@@ -416,7 +416,7 @@ describe("betterAuthFor staging policy", () => {
 
     const expired = await auth.handler(
       new Request(
-        `${baseURL}/api/auth/verify-email?token=${verificationJwt(emails.stagingVerified, Math.floor(Date.now() / 1000) - 60, authSecret)}&callbackURL=${encodeURIComponent("http://app.test/verified")}`,
+        `${baseURL}/api/auth/verify-email?token=${verificationJwt(emails.stagingVerified, Math.floor(Date.now() / 1000) - 60, authSecret)}&callbackURL=${encodeURIComponent("https://app.test/verified")}`,
       ),
     );
     expect(expired.status).toBe(302);
@@ -438,7 +438,7 @@ describe("password recovery through the shared sender", () => {
 
     const request = await authPost(auth, "/api/auth/request-password-reset", {
       email: emails.reset,
-      redirectTo: "http://app.test/reset",
+      redirectTo: "https://app.test/reset",
     });
     expect(request.status).toBe(200);
 
@@ -453,7 +453,7 @@ describe("password recovery through the shared sender", () => {
     const callback = await auth.handler(new Request(resetLink));
     expect(callback.status).toBe(302);
     const callbackLocation = new URL(callback.headers.get("location")!);
-    expect(callbackLocation.origin).toBe("http://app.test");
+    expect(callbackLocation.origin).toBe("https://app.test");
     expect(callbackLocation.searchParams.get("token") === token).toBe(true);
 
     const reset = await authPost(auth, "/api/auth/reset-password", {
@@ -501,7 +501,7 @@ describe("password recovery through the shared sender", () => {
 
     await authPost(auth, "/api/auth/request-password-reset", {
       email: emails.resetExpired,
-      redirectTo: "http://app.test/reset",
+      redirectTo: "https://app.test/reset",
     });
     const resetMail = mail.sent.find(
       (message) => message.subject === "Reset your Meltiply password",
@@ -546,7 +546,7 @@ describe("password recovery through the shared sender", () => {
     // nothing, while a registered address submits exactly one recovery message.
     const missing = await authPost(auth, "/api/auth/request-password-reset", {
       email: unknown,
-      redirectTo: "http://app.test/reset",
+      redirectTo: "https://app.test/reset",
     });
     expect(missing.status).toBe(200);
     expect(await missing.json()).toMatchObject({ status: true });
@@ -555,7 +555,7 @@ describe("password recovery through the shared sender", () => {
 
     const known = await authPost(auth, "/api/auth/request-password-reset", {
       email: emails.enumeration,
-      redirectTo: "http://app.test/reset",
+      redirectTo: "https://app.test/reset",
     });
     expect(known.status).toBe(200);
     expect(await known.json()).toMatchObject({ status: true });
@@ -852,7 +852,7 @@ describe("bootstrap and invite-only sign-up", () => {
           auth,
           "/api/auth/change-password",
           { currentPassword: password, newPassword: nextPassword, revokeOtherSessions: true },
-          { Cookie: cookie, Origin: "http://app.test" },
+          { Cookie: cookie, Origin: "https://app.test" },
         )
       ).status,
     ).toBe(200);
@@ -869,7 +869,7 @@ describe("bootstrap and invite-only sign-up", () => {
     const second = await mintIdentity();
     await authPost(auth, "/api/auth/request-password-reset", {
       email: emails.reset,
-      redirectTo: "http://app.test/sign-in",
+      redirectTo: "https://app.test/sign-in",
     });
     const message = mail.sent.find((entry) => entry.subject === "Reset your Meltiply password");
     if (!message) throw new Error("Expected reset delivery");
@@ -921,7 +921,7 @@ describe("optional authenticator lifecycle", () => {
     const post = async (path: string, body: Record<string, unknown>) => {
       const response = await authPost(auth, `/api/auth/${path}`, body, {
         Cookie: [...jar].map(([key, value]) => `${key}=${value}`).join("; "),
-        Origin: "http://app.test",
+        Origin: "https://app.test",
       });
       capture(response);
       return response;
@@ -948,7 +948,7 @@ describe("optional authenticator lifecycle", () => {
     expect(
       (await (await authGetWithCookie(auth, "/api/auth/get-session", cookie)).json()) === null,
     ).toBe(true);
-    await post("request-password-reset", { email, redirectTo: "http://app.test/sign-in" });
+    await post("request-password-reset", { email, redirectTo: "https://app.test/sign-in" });
     const resetMail = mail.sent.find((entry) => entry.subject === "Reset your Meltiply password");
     if (!resetMail) throw new Error("Expected reset delivery");
     password = crypto.randomUUID();

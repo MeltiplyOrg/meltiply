@@ -31,10 +31,10 @@ type Decision = "approve" | "deny";
 
 /**
  * Terminal outcome of a device request.
- * `already-*` describes a request completed before this page acted, including
- * a second tab or another session owned by the same account.
+ * `already-*` describes a request completed before this page acted; `session-mismatch`
+ * means this browser cannot decide a request claimed by another account/session.
  */
-type Outcome = "already-approved" | "already-denied" | "approved" | "denied";
+type Outcome = "already-approved" | "already-denied" | "approved" | "denied" | "session-mismatch";
 
 /**
  * Consent surface phases. The review phase is reachable only after the auth
@@ -47,31 +47,30 @@ type Phase =
   | { kind: "review"; review: DeviceAuthorizationReview }
   | { decision: Decision; kind: "working"; review: DeviceAuthorizationReview };
 
-/** Recoveries that expose an account or session action beside the message. */
-type ConsentErrorAction = "ownership" | "session";
+/** Recovery actions that can actually resolve an authentication failure. */
+type ConsentErrorAction = "session";
 
 interface ConsentError {
   action?: ConsentErrorAction;
   message: string;
-  /** The decision failed as unprocessable; re-read status before retrying. */
+  /** The decision lost a race; re-read authoritative status before showing controls. */
   recheck?: true;
 }
 
 /**
- * Builds the single recovery shown when the plugin already bound the request
- * to another account. Verification and decision failures share the copy and
- * the sign-out action so the remedy cannot drift between paths.
+ * Builds truthful recovery copy for a request already bound to another member
+ * or browser session. A fresh browser session cannot take over that claim, so
+ * the member must return to the original session or restart the CLI request.
  *
  * @param t - Translation function from the active i18n context.
- * @returns Ownership error with the account-switch action.
+ * @returns Recovery message without a misleading sign-out action.
  */
-function ownershipConsentError(
+function claimConsentError(
   t: (message: string, values?: Record<string, number | string>) => string,
 ): ConsentError {
   return {
-    action: "ownership",
     message: t(
-      "This request belongs to a different account. Sign out and sign in with the account that started it.",
+      "This request is bound to another account or browser session. Return to the browser session that verified it; if that session is unavailable, run melti-cli auth login again for a new code.",
     ),
   };
 }
@@ -108,7 +107,7 @@ function consentErrorFor(
       return { action: "session", message: t("Your session ended. Sign in again to continue.") };
     }
     if (cause.code === "access_denied") {
-      return ownershipConsentError(t);
+      return claimConsentError(t);
     }
     if (cause.code === "invalid_request" || cause.code === "invalid_grant") {
       return {
@@ -189,7 +188,7 @@ function DeviceConsentSurface(): React.ReactElement {
  * unclaimed request for this browser session but never approves it. Approval
  * is issued only by the explicit Approve action after the member confirms the
  * code matches their terminal; Deny is equally explicit and needs no
- * confirmation. Terminal, expiry, ownership, session, and throttle outcomes
+ * confirmation. Terminal, expiry, ownership, wrong-session, and throttle outcomes
  * replace the decision controls so stale actions cannot be retried blindly.
  *
  * @param props.initialCode - Normalized code from the verification URL.
@@ -199,7 +198,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
   const { t } = useI18n();
   const navigate = useNavigate();
   const [, setParams] = useSearchParams();
-  const { signOut, user } = useMeltiplyAuth();
+  const { user } = useMeltiplyAuth();
   const scope = useSessionScope();
   const currentUser = useCurrentUser(scope);
   const [code, setCode] = useState(initialCode);
@@ -239,7 +238,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
         }
         if (!review.client_id) {
           setPhase({ kind: "enter" });
-          setError(ownershipConsentError(t));
+          setError(claimConsentError(t));
           return;
         }
         setPhase({ kind: "review", review });
@@ -285,6 +284,10 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
       setPhase({ kind: "outcome", outcome: decision === "approve" ? "approved" : "denied" });
     } catch (cause) {
       if (requestSequence.current !== request) return;
+      if (cause instanceof DeviceAuthorizationError && cause.code === "access_denied") {
+        setPhase({ kind: "outcome", outcome: "session-mismatch" });
+        return;
+      }
       const failure = consentErrorFor(t, cause);
       if (failure.recheck) {
         // A concurrent tab or session may have completed the request between
@@ -302,7 +305,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
           }
           if (!latest.client_id) {
             setPhase({ kind: "enter" });
-            setError(ownershipConsentError(t));
+            setError(claimConsentError(t));
             return;
           }
         } catch {
@@ -371,7 +374,9 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
             ? t("Access denied")
             : phase.outcome === "already-approved"
               ? t("This request was already approved")
-              : t("This request was already denied")
+              : phase.outcome === "already-denied"
+                ? t("This request was already denied")
+                : t("This request cannot be approved here")
         : t("Approve melti-cli?");
   const intro =
     phase.kind === "checking"
@@ -389,7 +394,11 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
               ? t(
                   "No further action is needed. Run melti-cli auth login if you meant to start a new request.",
                 )
-              : t("Run melti-cli auth login from your terminal to start a new request.")
+              : phase.outcome === "session-mismatch"
+                ? t(
+                    "This request is bound to another account or browser session. Return to the browser session that verified it; if that session is unavailable, run melti-cli auth login again for a new code.",
+                  )
+                : t("Run melti-cli auth login from your terminal to start a new request.")
         : phase.kind === "enter"
           ? t("Enter the code shown in your terminal to review the request.")
           : t("melti-cli is asking to use your Meltiply Workspace from a terminal.");
@@ -469,20 +478,6 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
                   onClick={() => navigate(signInPath, { replace: true })}
                 >
                   {t("Sign in again")}
-                </Button>
-              )}
-              {error.action === "ownership" && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => {
-                    void signOut()
-                      .catch(() => undefined)
-                      .then(() => navigate(signInPath, { replace: true }));
-                  }}
-                >
-                  {t("Sign out")}
                 </Button>
               )}
             </div>

@@ -136,9 +136,9 @@ export function requiresEmailVerification(env: ApiWorkerEnv): boolean {
  *
  * The application origin is the single trusted origin for browser sign-in,
  * device verification links, and auth callbacks. It must be a canonical
- * absolute origin (no credentials, path, query, or fragment). HTTPS is
- * mandatory outside local/test and non-loopback hosts; the loopback exception
- * keeps local development usable without weakening deployed deployments.
+ * absolute origin (no credentials, path, query, or fragment). HTTP is allowed
+ * only for loopback hosts in local/test; the environment label alone never
+ * permits plaintext traffic to a remote host.
  *
  * @param env - Worker environment bindings.
  * @returns Canonical application origin without a trailing slash.
@@ -169,21 +169,19 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("APP_URL must use HTTP or HTTPS");
   }
-  // Browsers and DNS resolvers treat localhost and *.localhost as loopback, so
-  // those hosts are the only non-HTTPS installation origins allowed.
+  // Browsers and DNS resolvers treat localhost and *.localhost as loopback.
+  // HTTP is permitted only when both the host is loopback and this is a
+  // local/test environment; deployed environments always require HTTPS.
   const loopback =
     url.hostname === "localhost" ||
     url.hostname.endsWith(".localhost") ||
     url.hostname === "127.0.0.1" ||
     url.hostname === "::1" ||
     url.hostname === "[::1]";
-  if (
-    url.protocol !== "https:" &&
-    !loopback &&
-    env.ENVIRONMENT !== "local" &&
-    env.ENVIRONMENT !== "test"
-  ) {
-    throw new Error("APP_URL must use HTTPS outside loopback-only local development");
+  const localLoopback =
+    (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test") && loopback;
+  if (url.protocol === "http:" && !localLoopback) {
+    throw new Error("APP_URL must use HTTPS outside loopback-only local/test development");
   }
   return url.origin;
 }

@@ -19,6 +19,18 @@ interface DeviceClaimRow extends Record<string, unknown> {
   status: string;
   user_id: string | null;
 }
+/** Approved grant ownership and the liveness of its consenting browser session. */
+interface DeviceRedemptionClaimRow extends Record<string, unknown> {
+  claim_session_id: string | null;
+  claim_session_live: boolean;
+  status: string;
+  user_id: string | null;
+}
+
+/** Session row returned when binding a redeemed CLI session to its browser grant. */
+interface DeviceClaimSessionRow extends Record<string, unknown> {
+  cli_session_id: string;
+}
 
 /** Result of resolving a freshly minted CLI session against member policy. */
 interface DeviceSessionEligibility {
@@ -135,7 +147,7 @@ export async function deviceCodeRequest(request: Request): Promise<Request | Res
   if (typeof clientId !== "string" || !clientId.trim()) {
     return deviceErrorResponse(400, "invalid_request", "client_id is required.");
   }
-  if (clientId.trim() !== DEVICE_CLIENT_ID) {
+  if (clientId !== DEVICE_CLIENT_ID) {
     return deviceErrorResponse(400, "invalid_client", "The client is not supported.");
   }
   if (
@@ -288,12 +300,12 @@ export async function deviceDecisionRequest(
  * Handles `POST /api/auth/device/token`.
  *
  * Better Auth owns the polling state machine, expiry/denial/approval outcomes,
- * atomic single-use consumption, and session creation. After a successful
- * issuance, this wrapper confirms that the new CLI session belongs to an
- * active, policy-eligible member before releasing the raw session credential:
- * suspended or deleted accounts, unverified accounts when verification is
- * required, and accounts without the shared Workspace membership are denied and
- * the freshly minted session is revoked. The credential is never logged.
+ * atomic single-use consumption, and session creation. Migration 024 makes
+ * deleting the claiming browser session terminal for pending and approved
+ * grants, then binds a consumed CLI session to that browser session so a
+ * concurrent deletion cascades to the new authority. The exact claiming
+ * session is checked before this handler releases a credential. Account
+ * eligibility is also rechecked. Credentials are never logged.
  *
  * @param env - Worker environment bindings.
  * @param auth - Production-composed Better Auth instance.
@@ -305,14 +317,57 @@ export async function deviceTokenRequest(
   auth: BetterAuthInstance,
   request: Request,
 ): Promise<Response> {
+  const body = await requestJsonRecord(request);
+  const deviceCode = body?.device_code;
+  let claimSession: { id: string; userId: string } | undefined;
+  if (
+    body?.client_id === DEVICE_CLIENT_ID &&
+    typeof deviceCode === "string" &&
+    deviceCode
+  ) {
+    // Exception: pg cannot be loaded in workerd unit-test isolates.
+    const { systemPoolFor } = await import("./database");
+    const pool = systemPoolFor(env);
+    const result = await pool.query<DeviceRedemptionClaimRow>(
+      `SELECT dc.status,
+              dc."claimSessionId" AS claim_session_id,
+              dc."userId" AS user_id,
+              EXISTS (
+                SELECT 1
+                FROM "session" s
+                WHERE s.id = dc."claimSessionId"
+                  AND s."userId" = dc."userId"
+                  AND s."expiresAt" > now()
+              ) AS claim_session_live
+       FROM "deviceCode" dc
+       WHERE dc."deviceCode" = $1
+       LIMIT 1`,
+      [deviceCode],
+    );
+    if (grant?.status === "approved") {
+      if (!grant.claim_session_id || !grant.user_id || !grant.claim_session_live) {
+        // Persist terminal denial, then let the plugin report and consume its
+        // own denial outcome rather than bypassing its polling state machine.
+        await pool.query(
+          `UPDATE "deviceCode"
+           SET status = 'denied'
+           WHERE "deviceCode" = $1 AND status = 'approved'`,
+          [deviceCode],
+        );
+      } else {
+        claimSession = { id: grant.claim_session_id, userId: grant.user_id };
+      }
+    }
+  }
+
   const response = await auth.handler(request);
   if (response.status !== 200) return noStore(response);
 
   let accessToken: string | undefined;
   try {
-    const body: unknown = await response.clone().json();
-    if (body !== null && typeof body === "object" && "access_token" in body) {
-      const value = body.access_token;
+    const tokenBody: unknown = await response.clone().json();
+    if (tokenBody !== null && typeof tokenBody === "object" && "access_token" in tokenBody) {
+      const value = tokenBody.access_token;
       if (typeof value === "string" && value) accessToken = value;
     }
   } catch {
@@ -323,8 +378,12 @@ export async function deviceTokenRequest(
   }
 
   let eligibility: DeviceSessionEligibility;
+  let claimSessionLive: boolean;
   try {
     eligibility = await deviceSessionEligibility(env, accessToken);
+    claimSessionLive = claimSession
+      ? await bindDeviceSessionToClaim(env, accessToken, claimSession.id, claimSession.userId)
+      : false;
   } catch {
     await revokeSessionByToken(env, accessToken);
     return deviceErrorResponse(500, "server_error", "The device grant could not be completed.");
@@ -337,7 +396,56 @@ export async function deviceTokenRequest(
       eligibility.reason ?? "This account is not eligible for CLI access.",
     );
   }
+  if (!claimSessionLive) {
+    await revokeSessionByToken(env, accessToken);
+    return deviceErrorResponse(
+      400,
+      "access_denied",
+      "The browser session that approved this request is no longer active.",
+    );
+  }
   return noStore(response);
+}
+
+/**
+ * Binds a newly redeemed CLI session to its live claiming browser session.
+ *
+ * The foreign key serializes this update against browser-session deletion:
+ * deletion before the binding makes it fail, while deletion afterward
+ * cascades to the CLI session. This closes the gap between plugin consumption
+ * and delivery without replacing its atomic one-time state machine.
+ *
+ * @param env - Worker environment bindings.
+ * @param sessionToken - Raw CLI credential returned by Better Auth.
+ * @param sessionId - Browser session that claimed and approved the request.
+ * @param userId - Member identity bound to that browser session.
+ * @returns Whether the CLI session was linked while the exact browser session remained live.
+ */
+async function bindDeviceSessionToClaim(
+  env: ApiWorkerEnv,
+  sessionToken: string,
+  sessionId: string,
+  userId: string,
+): Promise<boolean> {
+  // Exception: pg cannot be loaded in workerd unit-test isolates.
+  const { systemPoolFor } = await import("./database");
+  const result = await systemPoolFor(env).query<DeviceClaimSessionRow>(
+    `UPDATE "session" AS cli
+     SET "deviceAuthorizationClaimSessionId" = $2
+     WHERE cli.token = $1
+       AND cli."expiresAt" > now()
+       AND cli."userId" = $3
+       AND EXISTS (
+         SELECT 1
+         FROM "session" browser
+         WHERE browser.id = $2
+           AND browser."userId" = $3
+           AND browser."expiresAt" > now()
+       )
+     RETURNING cli.id AS cli_session_id`,
+    [sessionToken, sessionId, userId],
+  );
+  return result.rows.length === 1;
 }
 
 /**

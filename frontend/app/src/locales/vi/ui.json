@@ -610,7 +610,7 @@
   "Create profile": "Tạo hồ sơ",
   "Delete Brand Profile": "Xóa hồ sơ thương hiệu",
   "Delete profile": "Xóa hồ sơ",
-  "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days. You cannot restore it in this app.": "Việc xóa hồ sơ thương hiệu này sẽ hủy các bài viết đã lên lịch, ngắt kết nối các kênh và chặn công việc mới. Hồ sơ sẽ bị xóa vĩnh viễn sau 7 ngày. Bạn không thể khôi phục hồ sơ trong ứng dụng này.",
+  "Deleting this Brand Profile permanently removes its posts and assets, disconnects its channels, and stops scheduled work. This cannot be undone.": "Việc xóa hồ sơ thương hiệu này sẽ xóa vĩnh viễn các bài viết và tệp phương tiện của hồ sơ, ngắt kết nối các kênh và dừng công việc đã lên lịch. Không thể hoàn tác thao tác này.",
   "Edit profile": "Chỉnh sửa hồ sơ",
   "Profile name": "Tên hồ sơ",
   "Update Brand Profile": "Cập nhật hồ sơ thương hiệu",

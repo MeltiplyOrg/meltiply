@@ -353,7 +353,7 @@ function BrandProfileDialogForm({
             <CenterAlertDialogTitle>{t("Delete Brand Profile")}</CenterAlertDialogTitle>
             <CenterAlertDialogDescription>
               {t(
-                "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days. You cannot restore it in this app.",
+                "Deleting this Brand Profile permanently removes its posts and assets, disconnects its channels, and stops scheduled work. This cannot be undone.",
               )}
             </CenterAlertDialogDescription>
           </CenterAlertDialogHeader>

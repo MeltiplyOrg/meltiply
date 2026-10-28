@@ -370,10 +370,10 @@ export function useUpdateBrandProfile(scope: SessionScope) {
 }
 
 /**
- * TanStack mutation hook to soft-delete a Brand Profile with idempotency tracking.
- * Deletion cancels scheduled work and locally disconnects the profile's
+ * TanStack mutation hook to permanently delete a Brand Profile with idempotency tracking.
+ * Deletion removes owned content and locally disconnects the profile's
  * channels, so every profile-owned collection is invalidated alongside the
- * profile lists.
+ * profile list.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
  * @returns Mutation hook accepting the Brand Profile ID string.

@@ -610,7 +610,7 @@
   "Create profile": "Profil erstellen",
   "Delete Brand Profile": "Markenprofil löschen",
   "Delete profile": "Profil löschen",
-  "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days. You cannot restore it in this app.": "Das Löschen dieses Markenprofils storniert dessen geplante Beiträge, trennt die Kanäle und verhindert neue Arbeit. Das Profil wird nach 7 Tagen dauerhaft gelöscht. Du kannst es in dieser App nicht wiederherstellen.",
+  "Deleting this Brand Profile permanently removes its posts and assets, disconnects its channels, and stops scheduled work. This cannot be undone.": "Das Löschen dieses Markenprofils entfernt seine Beiträge und Mediendateien dauerhaft, trennt seine Kanäle und stoppt geplante Vorgänge. Dies kann nicht rückgängig gemacht werden.",
   "Edit profile": "Profil bearbeiten",
   "Profile name": "Profilname",
   "Update Brand Profile": "Markenprofil aktualisieren",

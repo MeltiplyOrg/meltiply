@@ -385,15 +385,15 @@ export function updateBrandProfile(
 }
 
 /**
- * Soft-deletes a Brand Profile. Workspace admins only.
+ * Permanently deletes a Brand Profile and its owned records. Workspace admins only.
  *
- * Deletion cancels scheduled work, locally disconnects the profile's channels,
- * blocks new work, and schedules an idempotent purge after 7 days.
+ * Channels are locally disconnected before ownership cascades remove Posts,
+ * Assets, and Distributions. The app has no undo or retention window.
  *
  * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
  * @param profileId Brand Profile UUID within the active workspace.
  * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the soft-deleted Brand Profile.
+ * @returns Effect resolving to the removed Brand Profile's final record.
  */
 export function deleteBrandProfile(
   workspaceId: string | null,
@@ -746,11 +746,7 @@ export function getAssetPreviewUrl(
  * @param options Request options including optional abort signal.
  * @returns Effect resolving to the presigned download URL response.
  */
-function getAssetDownloadUrl(
-  workspaceId: string | null,
-  id: string,
-  options?: ApiRequestOptions,
-) {
+function getAssetDownloadUrl(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
   return unwrap<SignedUrlResponse>(
     (signal) =>
       client().GET("/assets/{asset_id}/download-url", {

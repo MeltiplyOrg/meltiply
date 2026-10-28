@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test, type APIRequestContext, type APIResponse, type Page, type TestInfo } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type APIResponse,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import { Pool } from "pg";
 
 import { frontendOrigin } from "./ports";
@@ -80,7 +87,8 @@ function readString(record: Record<string, unknown>, key: string): string {
  */
 function readNumber(record: Record<string, unknown>, key: string): number {
   const value = record[key];
-  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Expected number ${key}`);
+  if (typeof value !== "number" || !Number.isFinite(value))
+    throw new Error(`Expected number ${key}`);
   return value;
 }
 
@@ -264,9 +272,7 @@ async function expectReview(page: Page, code: IssuedDeviceCode): Promise<void> {
   await expect(page.getByText(gammaEmail, { exact: true })).toBeVisible();
   await expect(page.getByText("Editor", { exact: true })).toBeVisible();
   await expect(page.getByText("Create and edit Posts.", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText(/Never approve a code someone sent you/),
-  ).toBeVisible();
+  await expect(page.getByText(/Never approve a code someone sent you/)).toBeVisible();
   const checkbox = page.getByRole("checkbox", {
     name: /code in my terminal matches this code/i,
   });
@@ -291,9 +297,9 @@ async function captureReview(
 ): Promise<void> {
   if (palette === "dark") await expect(page.locator("html")).toHaveClass(/dark/);
   else await expect(page.locator("html")).not.toHaveClass(/dark/);
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-  ).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath(`${name}.png`),
@@ -483,7 +489,9 @@ test("returns a signed-out member to the pending request and requires explicit a
   // offering stale decision controls. Read that before the CLI consumes the
   // one-time denial response.
   await page.reload();
-  await expect(page.getByRole("heading", { name: "This request was already denied" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "This request was already denied" }),
+  ).toBeVisible();
   const denied = await pollDeviceToken(request, deniedCode.deviceCode, ip);
   expect(denied.status).toBe(400);
   expect(denied.error?.error).toBe("access_denied");

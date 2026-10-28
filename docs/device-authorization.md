@@ -92,13 +92,13 @@ never contain `device_code`.
 
 Failures:
 
-| Status | `error`                                                       | Meaning                                                     |
-| ------ | ------------------------------------------------------------- | ----------------------------------------------------------- |
-| 400    | `invalid_request`                                             | Missing body/fields, non-JSON body, or unsupported `user_id`. |
-| 400    | `invalid_client`                                              | `client_id` is not exactly `melti-cli`.                     |
-| 403    | Worker error envelope `INVALID_ORIGIN` / `untrusted_origin`   | Request `Origin` is not a trusted installation origin.      |
-| 429    | Worker error envelope `rate_limited` with `Retry-After`       | Distributed issuance budget exhausted.                      |
-| 500    | `server_error`                                                | Code generation or persistence failed.                      |
+| Status | `error`                                                     | Meaning                                                       |
+| ------ | ----------------------------------------------------------- | ------------------------------------------------------------- |
+| 400    | `invalid_request`                                           | Missing body/fields, non-JSON body, or unsupported `user_id`. |
+| 400    | `invalid_client`                                            | `client_id` is not exactly `melti-cli`.                       |
+| 403    | Worker error envelope `INVALID_ORIGIN` / `untrusted_origin` | Request `Origin` is not a trusted installation origin.        |
+| 429    | Worker error envelope `rate_limited` with `Retry-After`     | Distributed issuance budget exhausted.                        |
+| 500    | `server_error`                                              | Code generation or persistence failed.                        |
 
 ## Browser review and consent
 
@@ -183,15 +183,15 @@ a JWT. `scope` may be empty and is not a capability grant.
 
 RFC-style failures are `400` with `error` and `error_description`:
 
-| `error`                 | Meaning                                                                 |
-| ----------------------- | ----------------------------------------------------------------------- |
-| `authorization_pending` | Approval has not happened yet. Keep polling at the interval.            |
+| `error`                 | Meaning                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------- |
+| `authorization_pending` | Approval has not happened yet. Keep polling at the interval.                          |
 | `slow_down`             | Polled faster than the interval or the per-device budget allows. Honor `Retry-After`. |
-| `access_denied`         | The member denied the request. This response is consumed once.         |
-| `expired_token`         | The pending request expired. Start a new CLI login.                      |
-| `invalid_grant`         | Unknown, mismatched-client, replayed, or already-consumed device code.  |
-| `invalid_request`       | Malformed request.                                                       |
-| `server_error`          | Session creation or policy evaluation failed.                            |
+| `access_denied`         | The member denied the request. This response is consumed once.                        |
+| `expired_token`         | The pending request expired. Start a new CLI login.                                   |
+| `invalid_grant`         | Unknown, mismatched-client, replayed, or already-consumed device code.                |
+| `invalid_request`       | Malformed request.                                                                    |
+| `server_error`          | Session creation or policy evaluation failed.                                         |
 
 Token polling is limited per device code and per caller across Worker
 instances. A denial is deleted after reporting `access_denied`; later attempts

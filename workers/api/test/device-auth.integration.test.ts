@@ -85,7 +85,11 @@ const dedicatedAccounts = [
   { authUserId: suspendedAuthUserId, email: suspendedEmail, internalId: suspendedInternalUserId },
   { authUserId: rateLimitAuthUserId, email: rateLimitEmail, internalId: rateLimitInternalUserId },
   { authUserId: twoFactorAuthUserId, email: twoFactorEmail, internalId: twoFactorInternalUserId },
-  { authUserId: unverifiedAuthUserId, email: unverifiedEmail, internalId: unverifiedInternalUserId },
+  {
+    authUserId: unverifiedAuthUserId,
+    email: unverifiedEmail,
+    internalId: unverifiedInternalUserId,
+  },
   { authUserId: securityAuthUserId, email: securityEmail, internalId: securityInternalUserId },
 ] as const;
 
@@ -222,7 +226,8 @@ function stringField(value: Record<string, unknown>, key: string): string {
  */
 function numberField(value: Record<string, unknown>, key: string): number {
   const field = value[key];
-  if (typeof field !== "number" || !Number.isFinite(field)) throw new Error(`expected number ${key}`);
+  if (typeof field !== "number" || !Number.isFinite(field))
+    throw new Error(`expected number ${key}`);
   return field;
 }
 
@@ -663,10 +668,19 @@ beforeEach(async () => {
   );
   if (present.rows[0]?.present) await pool.query(`DELETE FROM "deviceCode"`);
   await pool.query(`DELETE FROM auth_rate_limits`);
-  await pool.query(`UPDATE users SET suspended_at = NULL, suspension_reason = NULL
-    WHERE id = ANY($1::uuid[])`, [
-    [suspendedInternalUserId, rateLimitInternalUserId, twoFactorInternalUserId, unverifiedInternalUserId, securityInternalUserId],
-  ]);
+  await pool.query(
+    `UPDATE users SET suspended_at = NULL, suspension_reason = NULL
+    WHERE id = ANY($1::uuid[])`,
+    [
+      [
+        suspendedInternalUserId,
+        rateLimitInternalUserId,
+        twoFactorInternalUserId,
+        unverifiedInternalUserId,
+        securityInternalUserId,
+      ],
+    ],
+  );
   // Reset mutable auth policy state a prior case may have exercised, then drop
   // every session it created so each case starts from the seeded baseline.
   await pool.query(
@@ -696,10 +710,19 @@ afterEach(async () => {
        AND NOT (id = ANY($2::text[]))`,
     [trackedAuthUserIds, priorSessionIds],
   );
-  await pool.query(`UPDATE users SET suspended_at = NULL, suspension_reason = NULL
-    WHERE id = ANY($1::uuid[])`, [
-    [suspendedInternalUserId, rateLimitInternalUserId, twoFactorInternalUserId, unverifiedInternalUserId, securityInternalUserId],
-  ]);
+  await pool.query(
+    `UPDATE users SET suspended_at = NULL, suspension_reason = NULL
+    WHERE id = ANY($1::uuid[])`,
+    [
+      [
+        suspendedInternalUserId,
+        rateLimitInternalUserId,
+        twoFactorInternalUserId,
+        unverifiedInternalUserId,
+        securityInternalUserId,
+      ],
+    ],
+  );
 });
 
 afterAll(async () => {
@@ -754,7 +777,6 @@ describe("device code issuance contract", () => {
     const untrusted = await issueDeviceCode({ origin: "http://evil.test" });
     expect(untrusted.response.status).toBe(403);
   });
-
 });
 
 describe("browser verification and consent ownership", () => {
@@ -771,7 +793,11 @@ describe("browser verification and consent ownership", () => {
     const verified = await verifyDeviceCode(first.cookie, userCode);
     expect(verified.status).toBe(200);
     const review = recordOf(await verified.json());
-    expect(review).toMatchObject({ client_id: "melti-cli", status: "pending", user_code: userCode });
+    expect(review).toMatchObject({
+      client_id: "melti-cli",
+      status: "pending",
+      user_code: userCode,
+    });
 
     // A second browser session for the same member cannot consent for the
     // session that verified the code, even though Better Auth binds ownership
@@ -977,9 +1003,7 @@ describe("browser verification and consent ownership", () => {
       `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
       [gammaAuthUserId],
     );
-    expect(Number(sessionsAfter.rows[0]?.count)).toBe(
-      Number(sessionsBefore.rows[0]?.count) + 1,
-    );
+    expect(Number(sessionsAfter.rows[0]?.count)).toBe(Number(sessionsBefore.rows[0]?.count) + 1);
   });
 });
 
@@ -1096,22 +1120,12 @@ describe("native session transport and revocation", () => {
       (await verifyDeviceCode(delta.cookie, stringField(viewerCode.body, "user_code"))).status,
     ).toBe(200);
     expect(
-      (
-        await decideDeviceCode(
-          delta.cookie,
-          "approve",
-          stringField(viewerCode.body, "user_code"),
-        )
-      ).status,
+      (await decideDeviceCode(delta.cookie, "approve", stringField(viewerCode.body, "user_code")))
+        .status,
     ).toBe(200);
-    const viewerTokenResponse = await redeemDeviceCode(
-      stringField(viewerCode.body, "device_code"),
-    );
+    const viewerTokenResponse = await redeemDeviceCode(stringField(viewerCode.body, "device_code"));
     expect(viewerTokenResponse.status).toBe(200);
-    const viewerToken = stringField(
-      recordOf(await viewerTokenResponse.json()),
-      "access_token",
-    );
+    const viewerToken = stringField(recordOf(await viewerTokenResponse.json()), "access_token");
     const viewerSession = await getSessionWithBearer(viewerToken);
     const viewerJwt = viewerSession.headers.get("set-auth-jwt");
     expect(viewerJwt).toBeTruthy();
@@ -1130,22 +1144,12 @@ describe("native session transport and revocation", () => {
       (await verifyDeviceCode(gamma.cookie, stringField(editorCode.body, "user_code"))).status,
     ).toBe(200);
     expect(
-      (
-        await decideDeviceCode(
-          gamma.cookie,
-          "approve",
-          stringField(editorCode.body, "user_code"),
-        )
-      ).status,
+      (await decideDeviceCode(gamma.cookie, "approve", stringField(editorCode.body, "user_code")))
+        .status,
     ).toBe(200);
-    const editorTokenResponse = await redeemDeviceCode(
-      stringField(editorCode.body, "device_code"),
-    );
+    const editorTokenResponse = await redeemDeviceCode(stringField(editorCode.body, "device_code"));
     expect(editorTokenResponse.status).toBe(200);
-    const editorToken = stringField(
-      recordOf(await editorTokenResponse.json()),
-      "access_token",
-    );
+    const editorToken = stringField(recordOf(await editorTokenResponse.json()), "access_token");
     const editorJwt = (await getSessionWithBearer(editorToken)).headers.get("set-auth-jwt");
     expect(editorJwt).toBeTruthy();
 
@@ -1297,10 +1301,9 @@ describe("existing credential policy", () => {
     expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
     expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
 
-    await systemPoolFor(env).query(
-      `UPDATE "user" SET "emailVerified" = FALSE WHERE id = $1`,
-      [unverifiedAuthUserId],
-    );
+    await systemPoolFor(env).query(`UPDATE "user" SET "emailVerified" = FALSE WHERE id = $1`, [
+      unverifiedAuthUserId,
+    ]);
 
     const blockedSignIn = await verificationPostJson("/api/auth/sign-in/email", {
       email: unverifiedEmail,

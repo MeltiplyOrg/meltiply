@@ -445,7 +445,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
           // separately released CLI clients.
           const headers: Record<string, string> = {
             "Cache-Control": "no-store",
-            "Pragma": "no-cache",
+            Pragma: "no-cache",
           };
           if (retryAfter) headers["Retry-After"] = retryAfter["Retry-After"];
           return Response.json(

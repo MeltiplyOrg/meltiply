@@ -71,14 +71,8 @@ export function noStore(response: Response): Response {
  * @param description - Human-readable, non-secret explanation.
  * @returns Non-cacheable JSON error response.
  */
-export function deviceErrorResponse(
-  status: number,
-  error: string,
-  description: string,
-): Response {
-  return noStore(
-    Response.json({ error, error_description: description }, { status }),
-  );
+export function deviceErrorResponse(status: number, error: string, description: string): Response {
+  return noStore(Response.json({ error, error_description: description }, { status }));
 }
 
 /**
@@ -88,9 +82,7 @@ export function deviceErrorResponse(
  * @param request - Incoming auth request.
  * @returns The JSON object, or undefined when the body is absent or not an object.
  */
-async function requestJsonRecord(
-  request: Request,
-): Promise<Record<string, unknown> | undefined> {
+async function requestJsonRecord(request: Request): Promise<Record<string, unknown> | undefined> {
   try {
     const value: unknown = await request.clone().json();
     if (value !== null && typeof value === "object" && !Array.isArray(value)) {
@@ -208,7 +200,10 @@ export async function deviceVerificationRequest(
   try {
     const body: unknown = await response.clone().json();
     reviewable =
-      body !== null && typeof body === "object" && "client_id" in body && typeof body.client_id === "string";
+      body !== null &&
+      typeof body === "object" &&
+      "client_id" in body &&
+      typeof body.client_id === "string";
   } catch {
     // A non-JSON success is not a reviewable verification response.
   }

@@ -568,9 +568,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
               </p>
 
               <div className="space-y-2">
-                <h2 className="text-sm font-medium text-ink">
-                  {t("Access granted to melti-cli")}
-                </h2>
+                <h2 className="text-sm font-medium text-ink">{t("Access granted to melti-cli")}</h2>
                 <p className="text-xs leading-relaxed text-ink-2">
                   {t(
                     "melti-cli acts with your current Workspace permissions. It cannot do more than you can, and it never receives your password.",
@@ -621,9 +619,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
               </Alert>
 
               <p className="text-xs leading-relaxed text-ink-3">
-                {t(
-                  "melti-cli is waiting in your terminal. Nothing is granted until you approve.",
-                )}
+                {t("melti-cli is waiting in your terminal. Nothing is granted until you approve.")}
               </p>
 
               <label className="flex items-start gap-2.5 text-sm text-ink">

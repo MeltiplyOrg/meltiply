@@ -215,9 +215,7 @@ describe("device consent route", () => {
     expect(screen.getByText("Shared Studio", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("Admin", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("Create and edit Posts.")).toBeInTheDocument();
-    expect(
-      screen.getByText("Manage Workspace members and invitations."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Manage Workspace members and invitations.")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Approve only if you started melti-cli auth login on a device you control. Never approve a code someone sent you: approval gives that terminal access to your Workspace.",
@@ -282,9 +280,7 @@ describe("device consent route", () => {
     expect(screen.getByText("Viewer", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("Read Posts, Channels, and Analytics.")).toBeInTheDocument();
     expect(screen.queryByText("Create and edit Posts.")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Manage Workspace members and invitations."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Manage Workspace members and invitations.")).not.toBeInTheDocument();
   });
 
   it("explains an invalid code and keeps manual entry available", async () => {

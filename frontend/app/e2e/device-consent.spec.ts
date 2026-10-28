@@ -124,6 +124,7 @@ async function issueDeviceCode(api: APIRequestContext, ip: string): Promise<Issu
   expect(complete.origin).toBe(frontendOrigin);
   expect(complete.pathname).toBe("/device");
   const userCode = readString(body, "user_code");
+  expect(userCode).toHaveLength(6);
   expect(complete.searchParams.get("user_code")).toBe(userCode);
   const deviceCode = readString(body, "device_code");
   expect(deviceCode).not.toBe(userCode);

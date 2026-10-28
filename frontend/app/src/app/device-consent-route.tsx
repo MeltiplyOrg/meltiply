@@ -9,6 +9,7 @@ import { Input } from "@meltiply/ui/input";
 import { Skeleton } from "@meltiply/ui/skeleton";
 import { cn } from "@meltiply/ui/utils";
 
+import { DeviceCodeSlots, DEVICE_USER_CODE_LENGTH } from "@/app/device-code-slots";
 import { AppProviders } from "@/app/providers";
 import { AuthBoundary } from "@/components/auth/auth-boundary";
 import { useMeltiplyAuth } from "@/components/auth/auth-provider";
@@ -214,7 +215,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
   const verify = useCallback(
     async (value: string) => {
       const normalized = normalizeDeviceUserCode(value);
-      if (!normalized) {
+      if (normalized.length !== DEVICE_USER_CODE_LENGTH) {
         setPhase({ kind: "enter" });
         setError({ message: t("Enter the code shown in your terminal.") });
         return;
@@ -506,27 +507,17 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
               }}
             >
               <div className="space-y-2">
-                <label htmlFor="device-code" className="text-sm font-medium text-ink">
-                  {t("User code")}
-                </label>
-                <Input
-                  id="device-code"
-                  autoCapitalize="characters"
-                  autoComplete="one-time-code"
-                  autoCorrect="off"
-                  className="text-center font-mono tracking-widest uppercase"
-                  inputMode="text"
-                  maxLength={64}
-                  required
-                  spellCheck={false}
-                  value={code}
-                  onChange={(event) => setCode(event.target.value)}
-                />
-                <p className="text-xs text-ink-3">
+                <p className="text-sm font-medium text-ink">{t("User code")}</p>
+                <DeviceCodeSlots value={code} onChange={setCode} />
+                <p className="text-center text-xs text-ink-3">
                   {t("Separators and spaces are ignored. The code is not case-sensitive.")}
                 </p>
               </div>
-              <Button type="submit" className="w-full">
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={code.length !== DEVICE_USER_CODE_LENGTH}
+              >
                 {t("Find request")}
               </Button>
             </form>

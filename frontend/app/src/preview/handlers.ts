@@ -222,7 +222,7 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
   const previewDeviceHandlers = [
     http.post("/api/auth/device/code", ({ request }) => {
       const origin = new URL(request.url).origin;
-      const userCode = "PREVIEW1";
+      const userCode = "PRV234";
       return HttpResponse.json({
         device_code: "preview-device-code",
         expires_in: 600,
@@ -233,7 +233,7 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
       });
     }),
     http.get("/api/auth/device", ({ request }) => {
-      const userCode = new URL(request.url).searchParams.get("user_code") ?? "PREVIEW1";
+      const userCode = new URL(request.url).searchParams.get("user_code") ?? "PRV234";
       return HttpResponse.json({
         client_id: "melti-cli",
         scope: "",

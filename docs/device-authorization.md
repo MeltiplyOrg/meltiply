@@ -33,8 +33,8 @@ interoperate.
 
 ## Flow
 
-1. `POST /api/auth/device/code` returns a device code, a user code, and
-   verification links. Pending requests expire after ten minutes.
+1. `POST /api/auth/device/code` returns a device code, a six-character user
+   code, and verification links. Pending requests expire after ten minutes.
 2. The CLI displays `user_code` and opens `verification_uri_complete`, or the
    member opens `verification_uri` and types the code. A signed-out browser
    returns through the existing sign-in and two-factor flow to the same
@@ -79,9 +79,9 @@ Success: `200`
 ```json
 {
   "device_code": "unpredictable-secret",
-  "user_code": "ABCD2345",
+  "user_code": "ABC234",
   "verification_uri": "https://app.example/device",
-  "verification_uri_complete": "https://app.example/device?user_code=ABCD2345",
+  "verification_uri_complete": "https://app.example/device?user_code=ABC234",
   "expires_in": 600,
   "interval": 5
 }
@@ -110,7 +110,7 @@ an unclaimed pending request. The response is `200`:
 
 ```json
 {
-  "user_code": "ABCD2345",
+  "user_code": "ABC234",
   "status": "pending",
   "client_id": "melti-cli",
   "scope": null
@@ -134,7 +134,7 @@ verification budget; exceeding it returns the Worker error envelope with
 Request body:
 
 ```json
-{ "userCode": "ABCD2345" }
+{ "userCode": "ABC234" }
 ```
 
 Send the same browser session cookie and `Origin` equal to the installation

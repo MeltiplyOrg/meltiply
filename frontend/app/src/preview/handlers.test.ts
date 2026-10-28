@@ -97,15 +97,13 @@ describe("contract-driven UI preview HTTP boundary", () => {
     expect(issued).toMatchObject({
       expires_in: 600,
       interval: 5,
-      user_code: "PREVIEW1",
+      user_code: "PRV234",
       verification_uri: `${origin}/device`,
-      verification_uri_complete: `${origin}/device?user_code=PREVIEW1`,
+      verification_uri_complete: `${origin}/device?user_code=PRV234`,
     });
     expect(
-      await fetch(`${origin}/api/auth/device?user_code=PREVIEW1`).then((response) =>
-        response.json(),
-      ),
-    ).toMatchObject({ client_id: "melti-cli", status: "pending", user_code: "PREVIEW1" });
+      await fetch(`${origin}/api/auth/device?user_code=PRV234`).then((response) => response.json()),
+    ).toMatchObject({ client_id: "melti-cli", status: "pending", user_code: "PRV234" });
     expect((await fetch(`${origin}/api/auth/device/approve`, { method: "POST" })).status).toBe(200);
     expect((await fetch(`${origin}/api/auth/device/deny`, { method: "POST" })).status).toBe(200);
   });

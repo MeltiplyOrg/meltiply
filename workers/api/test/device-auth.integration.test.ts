@@ -740,6 +740,7 @@ describe("device code issuance contract", () => {
     const deviceCode = stringField(body, "device_code");
     const userCode = stringField(body, "user_code");
     expect(deviceCode.length).toBeGreaterThanOrEqual(32);
+    expect(userCode).toHaveLength(6);
     expect(deviceCode).not.toBe(userCode);
     expect(numberField(body, "expires_in")).toBe(600);
     expect(numberField(body, "interval")).toBe(5);

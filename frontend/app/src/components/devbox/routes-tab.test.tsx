@@ -20,7 +20,7 @@ afterEach(() => {
  */
 describe("Routes tab", () => {
   it("starts a device request and opens the consent route", async () => {
-    const destination = new URL("/device?user_code=ABCD2345", window.location.origin).href;
+    const destination = new URL("/device?user_code=ABC234", window.location.origin).href;
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       Response.json({ verification_uri_complete: destination }),
     );

@@ -92,7 +92,7 @@ function pendingReview(overrides: Record<string, unknown> = {}): Response {
     client_id: "melti-cli",
     scope: "",
     status: "pending",
-    user_code: "ABCD2345",
+    user_code: "ABC234",
     ...overrides,
   });
 }
@@ -198,18 +198,18 @@ describe("device consent route", () => {
     renderRoute("/device?user_code=abcd-2345");
 
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/sign-in"));
-    expect(redirectTarget()).toBe("/device?user_code=ABCD2345");
+    expect(redirectTarget()).toBe("/device?user_code=ABC234");
     expect(methods).toEqual([]);
   });
 
   it("verifies a prefilled user code, displays the request, and never approves on load", async () => {
     const methods = installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
 
     const heading = await screen.findByRole("heading", { name: "Approve melti-cli?" });
     await waitFor(() => expect(heading).toHaveFocus());
-    expect(screen.getByText("ABCD2345", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText("ABC234", { selector: "code" })).toBeInTheDocument();
     expect(screen.getByText("melti-cli", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("owner@meltiply.local", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("Shared Studio", { selector: "dd" })).toBeInTheDocument();
@@ -244,22 +244,32 @@ describe("device consent route", () => {
 
     renderRoute("/device");
     expect(screen.queryByRole("button", { name: "Approve melti-cli" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("User code"), {
-      target: { value: "abcd 2345" },
+    const slots = screen.getAllByRole("textbox");
+    expect(slots).toHaveLength(6);
+    fireEvent.change(slots[0]!, {
+      target: { value: "abc 234" },
     });
+    expect(screen.getAllByRole("textbox").map((slot) => (slot as HTMLInputElement).value)).toEqual([
+      "A",
+      "B",
+      "C",
+      "2",
+      "3",
+      "4",
+    ]);
     fireEvent.click(screen.getByRole("button", { name: "Find request" }));
 
-    await screen.findByText("ABCD2345", { selector: "code" });
+    await screen.findByText("ABC234", { selector: "code" });
     expect(methods.filter((method) => method === "POST")).toEqual([]);
     await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent("/device?user_code=ABCD2345"),
+      expect(screen.getByTestId("location")).toHaveTextContent("/device?user_code=ABC234"),
     );
   });
 
   it("denies a request without requiring the matching-code confirmation", async () => {
     const methods = installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
     await screen.findByRole("heading", { name: "Approve melti-cli?" });
     fireEvent.click(screen.getByRole("button", { name: "Deny request" }));
 
@@ -274,7 +284,7 @@ describe("device consent route", () => {
     };
     installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
     await screen.findByRole("heading", { name: "Approve melti-cli?" });
 
     expect(screen.getByText("Viewer", { selector: "dd" })).toBeInTheDocument();
@@ -288,12 +298,19 @@ describe("device consent route", () => {
       jsonResponse({ error: "invalid_request", error_description: "Invalid user code" }, 400);
     installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
 
     await screen.findByText(
       "That code doesn't match an active request. Check the code in your terminal and try again.",
     );
-    expect(screen.getByLabelText("User code")).toHaveValue("ABCD2345");
+    expect(screen.getAllByRole("textbox").map((slot) => (slot as HTMLInputElement).value)).toEqual([
+      "A",
+      "B",
+      "C",
+      "2",
+      "3",
+      "4",
+    ]);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve melti-cli" })).not.toBeInTheDocument();
   });
@@ -303,7 +320,7 @@ describe("device consent route", () => {
       jsonResponse({ error: "expired_token", error_description: "User code has expired" }, 400);
     installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
 
     await screen.findByText(
       "This code has expired. Run melti-cli auth login again to get a new code.",
@@ -311,10 +328,10 @@ describe("device consent route", () => {
   });
 
   it("shows a terminal outcome when the request was already approved", async () => {
-    state.review = () => jsonResponse({ status: "approved", user_code: "ABCD2345" });
+    state.review = () => jsonResponse({ status: "approved", user_code: "ABC234" });
     installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
 
     await screen.findByRole("heading", { name: "This request was already approved" });
     expect(screen.queryByRole("button", { name: "Approve melti-cli" })).not.toBeInTheDocument();
@@ -322,10 +339,10 @@ describe("device consent route", () => {
   });
 
   it("explains that an unowned request needs its original browser session or a new CLI login", async () => {
-    state.review = () => jsonResponse({ status: "pending", user_code: "ABCD2345" });
+    state.review = () => jsonResponse({ status: "pending", user_code: "ABC234" });
     installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
 
     await screen.findByText(
       "This request is bound to another account or browser session. Return to the browser session that verified it; if that session is unavailable, run melti-cli auth login again for a new code.",
@@ -337,7 +354,7 @@ describe("device consent route", () => {
   it("reports a concurrent approval as already processed instead of claiming success", async () => {
     state.review = () => {
       if (state.reviewCalls === 1) return pendingReview();
-      return jsonResponse({ status: "approved", user_code: "ABCD2345" });
+      return jsonResponse({ status: "approved", user_code: "ABC234" });
     };
     state.approve = () =>
       jsonResponse(
@@ -346,7 +363,7 @@ describe("device consent route", () => {
       );
     installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
     await screen.findByRole("heading", { name: "Approve melti-cli?" });
     confirmMatchingCode();
     fireEvent.click(screen.getByRole("button", { name: "Approve melti-cli" }));
@@ -365,7 +382,7 @@ describe("device consent route", () => {
       );
     installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
     await screen.findByRole("heading", { name: "Approve melti-cli?" });
     confirmMatchingCode();
     fireEvent.click(screen.getByRole("button", { name: "Approve melti-cli" }));
@@ -397,7 +414,7 @@ describe("device consent route", () => {
       );
     installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
     await screen.findByRole("heading", { name: "Approve melti-cli?" });
     confirmMatchingCode();
     fireEvent.click(screen.getByRole("button", { name: "Approve melti-cli" }));
@@ -412,7 +429,7 @@ describe("device consent route", () => {
       jsonResponse({ error: "unauthorized", error_description: "Authentication required" }, 401);
     installDeviceFetch();
 
-    renderRoute("/device?user_code=ABCD2345");
+    renderRoute("/device?user_code=ABC234");
     await screen.findByRole("heading", { name: "Approve melti-cli?" });
     confirmMatchingCode();
     fireEvent.click(screen.getByRole("button", { name: "Approve melti-cli" }));

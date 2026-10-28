@@ -536,6 +536,9 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
             deviceAuthorization({
               expiresIn: device.expiresIn,
               interval: device.interval,
+              // The consent surface always shows six slots; keep generation and
+              // matching codes aligned with that contract.
+              userCodeLength: 6,
               validateClient: (clientId: string) => clientId === deviceClientId,
               verificationUri: device.verificationUri,
             }),

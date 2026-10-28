@@ -237,11 +237,11 @@ try {
   await page.goto(`${origin}/posts`);
   const routesTab = await openRoutesTab(page);
   await routesTab.getByRole("button", { name: "Start device request", exact: true }).click();
-  await page.waitForURL(/\/device\?user_code=PREVIEW1/);
+  await page.waitForURL(/\/device\?user_code=PRV234/);
   await expect(
     page.getByRole("heading", { name: "Approve melti-cli?", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("PREVIEW1", { exact: true })).toBeVisible();
+  await expect(page.getByText("PRV234", { exact: true })).toBeVisible();
   for (const dark of [false, true])
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 900 });

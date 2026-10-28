@@ -561,6 +561,12 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
                 </div>
               </dl>
 
+              <p className="text-xs leading-relaxed text-ink-3">
+                {t(
+                  "If this is not the account you meant to authorize, deny the request and run melti-cli auth login again.",
+                )}
+              </p>
+
               <div className="space-y-2">
                 <h2 className="text-sm font-medium text-ink">
                   {t("Access granted to melti-cli")}

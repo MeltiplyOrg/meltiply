@@ -926,6 +926,7 @@
   "Workspace role": "Vai trò trong không gian làm việc",
   "Current Workspace role": "Vai trò hiện tại trong không gian làm việc",
   "Current Workspace": "Không gian làm việc hiện tại",
+  "If this is not the account you meant to authorize, deny the request and run melti-cli auth login again.": "Nếu đây không phải tài khoản bạn muốn ủy quyền, hãy từ chối yêu cầu và chạy lại melti-cli auth login.",
   "Access granted to melti-cli": "Quyền truy cập được cấp cho melti-cli",
   "melti-cli acts with your current Workspace permissions. It cannot do more than you can, and it never receives your password.": "melti-cli hoạt động với quyền hiện tại của bạn trong không gian làm việc. Nó không thể làm nhiều hơn bạn và không bao giờ nhận được mật khẩu của bạn.",
   "Read Posts, Channels, and Analytics.": "Đọc bài viết, kênh và phân tích.",

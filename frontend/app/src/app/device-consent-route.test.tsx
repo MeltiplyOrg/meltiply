@@ -223,6 +223,11 @@ describe("device consent route", () => {
         "Approve only if you started melti-cli auth login on a device you control. Never approve a code someone sent you: approval gives that terminal access to your Workspace.",
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "If this is not the account you meant to authorize, deny the request and run melti-cli auth login again.",
+      ),
+    ).toBeInTheDocument();
 
     const approve = screen.getByRole("button", { name: "Approve melti-cli" });
     expect(approve).toBeDisabled();

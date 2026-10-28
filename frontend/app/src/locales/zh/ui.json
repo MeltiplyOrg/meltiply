@@ -926,6 +926,7 @@
   "Workspace role": "工作区角色",
   "Current Workspace role": "当前工作区角色",
   "Current Workspace": "当前工作区",
+  "If this is not the account you meant to authorize, deny the request and run melti-cli auth login again.": "如果这不是你想授权的账户，请拒绝该请求，并重新运行 melti-cli auth login。",
   "Access granted to melti-cli": "授予 melti-cli 的访问权限",
   "melti-cli acts with your current Workspace permissions. It cannot do more than you can, and it never receives your password.": "melti-cli 以你当前的工作区权限执行操作。它不能超出你的权限，也绝不会收到你的密码。",
   "Read Posts, Channels, and Analytics.": "读取帖子、频道和分析。",

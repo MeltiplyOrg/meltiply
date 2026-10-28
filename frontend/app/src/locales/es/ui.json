@@ -926,6 +926,7 @@
   "Workspace role": "Rol en el espacio de trabajo",
   "Current Workspace role": "Rol actual en el espacio de trabajo",
   "Current Workspace": "Espacio de trabajo actual",
+  "If this is not the account you meant to authorize, deny the request and run melti-cli auth login again.": "Si no es la cuenta que querías autorizar, deniega la solicitud y ejecuta melti-cli auth login de nuevo.",
   "Access granted to melti-cli": "Acceso concedido a melti-cli",
   "melti-cli acts with your current Workspace permissions. It cannot do more than you can, and it never receives your password.": "melti-cli actúa con tus permisos actuales del espacio de trabajo. No puede hacer más que tú y nunca recibe tu contraseña.",
   "Read Posts, Channels, and Analytics.": "Leer publicaciones, canales y analíticas.",

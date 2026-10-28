@@ -1116,7 +1116,13 @@ describe("native session transport and revocation", () => {
     expect(expiredSession.status).toBe(200);
     expect(await expiredSession.json()).toBeNull();
     expect((await tenantRequest("/api/v1/posts", `Bearer ${jwt}`)).status).toBe(401);
-    expect(await (await getSessionWithCookie(browser.cookie)).json()).toBeNull();
+    // The CLI credential expiring must not end the browser session that
+    // approved it: they are separate sessions with separate lifecycles.
+    const browserStillLive = await getSessionWithCookie(browser.cookie);
+    expect(browserStillLive.status).toBe(200);
+    expect(stringField(recordOf(recordOf(await browserStillLive.json()).user), "email")).toBe(
+      securityEmail,
+    );
   });
 
   it("keeps Viewer read-only and Editor write access for CLI sessions", async () => {
@@ -1330,6 +1336,15 @@ describe("existing credential policy", () => {
   });
 
   it("enforces required mailbox verification before releasing a CLI session", async () => {
+    // Seed the unverified mailbox before sign-in. Changing emailVerified after
+    // approval would trip the security-session revocation trigger and deny the
+    // grant before this case could exercise the eligibility check.
+    await createDedicatedAccount({
+      authUserId: unverifiedAuthUserId,
+      email: unverifiedEmail,
+      emailVerified: false,
+      internalId: unverifiedInternalUserId,
+    });
     // Local test composition allows the unverified fixture to sign in; the
     // deployed policy composition below is the authority that rejects it.
     const browser = await signIn(unverifiedEmail);
@@ -1337,10 +1352,6 @@ describe("existing credential policy", () => {
     const userCode = stringField(body, "user_code");
     expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
     expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
-
-    await systemPoolFor(env).query(`UPDATE "user" SET "emailVerified" = FALSE WHERE id = $1`, [
-      unverifiedAuthUserId,
-    ]);
 
     const blockedSignIn = await verificationPostJson("/api/auth/sign-in/email", {
       email: unverifiedEmail,

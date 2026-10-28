@@ -155,13 +155,17 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
   } catch {
     throw new Error("APP_URL must be an absolute installation origin");
   }
-  if (
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash ||
-    url.origin !== configured.replace(/\/+$/, "")
-  ) {
+  // Compare against the parsed origin without a trailing-slash regex: the
+  // value is deployment input, so a linear string comparison avoids a
+  // polynomial scan on pathological slash runs.
+  const canonicalOrigin = url.origin;
+  const configuredOrigin =
+    configured === canonicalOrigin
+      ? canonicalOrigin
+      : configured === `${canonicalOrigin}/`
+        ? canonicalOrigin
+        : undefined;
+  if (url.username || url.password || url.search || url.hash || configuredOrigin === undefined) {
     throw new Error(
       "APP_URL must be a canonical installation origin without credentials, path, query, or fragment",
     );

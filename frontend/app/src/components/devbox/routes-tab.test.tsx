@@ -5,6 +5,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { getApiBaseUrl } from "@/lib/env";
+
 import { RoutesTab } from "./routes-tab";
 
 afterEach(() => {
@@ -33,7 +35,7 @@ describe("Routes tab", () => {
     const call = fetchMock.mock.calls[0];
     if (!call) throw new Error("Expected one device-code request");
     const [input, init] = call;
-    expect(String(input)).toBe(new URL("/api/auth/device/code", window.location.origin).href);
+    expect(String(input)).toBe(`${getApiBaseUrl()}/api/auth/device/code`);
     expect(JSON.parse(String(init?.body))).toEqual({ client_id: "melti-cli" });
   });
 

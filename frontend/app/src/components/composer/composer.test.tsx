@@ -621,10 +621,10 @@ describe("Composer provider publication choices", () => {
     });
     await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
     for (const name of ["Comments", "Duet", "Stitch"]) {
-      expect(screen.getByRole("switch", { name, exact: true })).not.toBeChecked();
-      expect(screen.getByRole("switch", { name, exact: true })).toBeDisabled();
+      expect(screen.getByRole("switch", { name })).not.toBeChecked();
+      expect(screen.getByRole("switch", { name })).toBeDisabled();
     }
-    fireEvent.click(screen.getByRole("radio", { name: "Now", exact: true }));
-    expect(screen.getByRole("button", { name: "Publish Now", exact: true })).toBeEnabled();
+    fireEvent.click(screen.getByRole("radio", { name: "Now" }));
+    expect(screen.getByRole("button", { name: "Publish Now" })).toBeEnabled();
   });
 });

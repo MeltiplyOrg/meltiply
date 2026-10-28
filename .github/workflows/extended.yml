@@ -70,6 +70,10 @@ jobs:
         run: |
           bash scripts/cloudflare-local/database.sh reset
           bun run --cwd frontend/app test:e2e e2e/posts-publication.spec.ts --project publication --trace on
+          bash scripts/cloudflare-local/database.sh reset
+          bun run --cwd frontend/app test:e2e e2e/publishing-queues.spec.ts --project queues --trace on
+          bash scripts/cloudflare-local/database.sh reset
+          bun run --cwd frontend/app test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies and retries only unfinished publishing" --trace on
       - name: Exercise native processor restart and replay
         if: inputs.lane == 'performance-media'
         run: bun run --filter @meltiply/automation-worker smoke:processor

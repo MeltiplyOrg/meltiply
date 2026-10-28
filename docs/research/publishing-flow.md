@@ -47,6 +47,35 @@ No source code was copied.
    gate and required subtype selection described by TikTok.
 4. Creator requirements must gate submission when unavailable, identify the actual
    creator, and apply per-target media rules rather than the Post's combined media.
+5. Reopening a manually scheduled Post restored its time but selected Draft.
+   Its primary save could therefore cancel pending delivery. Restore Schedule
+   intent from a pending scheduled Distribution, independently of historical dates.
+
+## Meta protocol cross-check
+
+- [Instagram content publishing](https://developers.facebook.com/documentation/instagram-platform/content-publishing)
+  separates container creation, readiness (`status_code`), and `media_publish`.
+  Images must be JPEG and provider retrieval needs an accessible media URL.
+  The current guide describes up to 20 carousel items; Meltiply deliberately
+  retains its documented, conservative 10-item subset on its configured API version.
+  This is not support for every newer Instagram publishing feature.
+- [Threads posts](https://developers.facebook.com/documentation/threads/posts)
+  uses `threads` then `threads_publish`, requires explicit media discriminators
+  (including carousel children), and supports up to 20 carousel attachments.
+  Advanced publishing access is separate from test-user access. Existing adapter
+  tests cover readiness, ordered children, and ambiguous final writes.
+- [Facebook Reels publishing](https://developers.facebook.com/documentation/video-api/guides/reels-publishing)
+  uses start, hosted-file upload, processing/status lookup, then finish.
+  Pages have implicit Public scope. Meltiply supports Page Reels, not personal
+  profiles, photo/feed posts, Stories, or the entire Facebook publishing API.
+  Existing upload and lookup paths preserve the operation through those phases.
+
+All three remote-ingest paths require provider-reachable media. Meltiply issues
+signed bearer delivery URLs only when dispatching an attempt and holds its frozen
+objects through the retrieval window (`provider-media.ts` and `distribution.ts`).
+No test substitutes a private bucket path for an externally fetchable URL.
+Protocol tests control provider HTTP; live networking and account approval remain
+separate acceptance requirements.
 
 ## End-to-end acceptance contract
 

@@ -195,7 +195,7 @@ describe("device consent route", () => {
     state.auth.isSignedIn = false;
     const methods = installDeviceFetch();
 
-    renderRoute("/device?user_code=abcd-2345");
+    renderRoute("/device?user_code=abc-234");
 
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/sign-in"));
     expect(redirectTarget()).toBe("/device?user_code=ABC234");

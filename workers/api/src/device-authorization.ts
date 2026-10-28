@@ -31,7 +31,6 @@ interface DeviceSessionRow extends Record<string, unknown> {
   email_verified: boolean;
   has_membership: boolean;
   member_id: string | null;
-  session_id: string;
   suspended_at: Date | string | null;
 }
 
@@ -274,7 +273,8 @@ export async function deviceDecisionRequest(
       );
       const claim = result.rows[0];
       if (
-        claim?.status === "pending" &&
+        claim &&
+        claim.status === "pending" &&
         claim.user_id === session.user.id &&
         claim.claim_session_id !== session.session.id
       ) {
@@ -360,8 +360,7 @@ async function deviceSessionEligibility(
   // Exception: pg cannot be loaded in workerd unit-test isolates.
   const { systemPoolFor } = await import("./database");
   const result = await systemPoolFor(env).query<DeviceSessionRow>(
-    `SELECT s.id AS session_id,
-            u."emailVerified" AS email_verified,
+    `SELECT u."emailVerified" AS email_verified,
             iu.id AS member_id,
             iu.suspended_at,
             EXISTS (

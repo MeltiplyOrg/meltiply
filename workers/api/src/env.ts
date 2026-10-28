@@ -132,26 +132,6 @@ export function requiresEmailVerification(env: ApiWorkerEnv): boolean {
 }
 
 /**
- * Reports whether a hostname addresses the local machine.
- *
- * Loopback HTTP is the only non-HTTPS installation origin allowed, so local
- * development and tooling can run without certificates while every deployed
- * member-facing origin stays encrypted.
- *
- * @param hostname - URL hostname, including IPv6 brackets when present.
- * @returns True for localhost, 127.0.0.1, or IPv6 loopback.
- */
-function loopbackHostname(hostname: string): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname === "127.0.0.1" ||
-    hostname === "::1" ||
-    hostname === "[::1]"
-  );
-}
-
-/**
  * Resolves and validates the installation application origin.
  *
  * The application origin is the single trusted origin for browser sign-in,
@@ -189,9 +169,17 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("APP_URL must use HTTP or HTTPS");
   }
+  // Browsers and DNS resolvers treat localhost and *.localhost as loopback, so
+  // those hosts are the only non-HTTPS installation origins allowed.
+  const loopback =
+    url.hostname === "localhost" ||
+    url.hostname.endsWith(".localhost") ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "::1" ||
+    url.hostname === "[::1]";
   if (
     url.protocol !== "https:" &&
-    !loopbackHostname(url.hostname) &&
+    !loopback &&
     env.ENVIRONMENT !== "local" &&
     env.ENVIRONMENT !== "test"
   ) {

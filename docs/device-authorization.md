@@ -186,25 +186,26 @@ a JWT. `scope` may be empty and is not a capability grant.
 
 RFC-style failures are `400` with `error` and `error_description`:
 
-| `error`                 | Meaning                                                                                       |
-| ----------------------- | --------------------------------------------------------------------------------------------- |
-| `authorization_pending` | Approval has not happened yet. Keep polling at the interval.                                  |
-| `slow_down`             | Polled faster than the interval or a rate budget allows. Honor `Retry-After`.                 |
+| `error`                 | Meaning                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------- |
+| `authorization_pending` | Approval has not happened yet. Keep polling at the interval.                                      |
+| `slow_down`             | Polled faster than the interval or a rate budget allows. Honor `Retry-After`.                     |
 | `access_denied`         | The member denied the request or its claiming browser session is no longer active. Restart login. |
-| `expired_token`         | The pending request expired. Start a new CLI login.                                           |
-| `invalid_grant`         | Unknown, mismatched-client, replayed, or already-consumed device code.                        |
-| `invalid_request`       | Malformed request.                                                                            |
-| `server_error`          | Session creation or policy evaluation failed.                                                 |
+| `expired_token`         | The pending request expired. Start a new CLI login.                                               |
+| `invalid_grant`         | Unknown, mismatched-client, replayed, or already-consumed device code.                            |
+| `invalid_request`       | Malformed request.                                                                                |
+| `server_error`          | Session creation or policy evaluation failed.                                                     |
 
 Token polling is limited per device code and per caller across Worker
 instances. The caller IP budget is checked and counted first; the per-device
 bucket is touched only for admitted callers, and device-throttled polls still
 consume the caller budget. A denial is deleted after reporting `access_denied`;
 later attempts report `invalid_grant`. Only one concurrent redemption can
-succeed. Before releasing the credential, the server verifies that the exact
-claiming session is still live and checks suspension, required mailbox
-verification, membership, and account activity. If the claim session ended
-during exchange, the newly minted CLI session is revoked.
+succeed. Before releasing the credential, the server holds a shared lock on the
+exact claiming browser session and checks suspension, required mailbox
+verification, membership, and account activity. A browser-session deletion that
+committed first denies the grant; one that races the exchange waits until
+redemption commits.
 
 ## Native session transport
 
@@ -248,10 +249,12 @@ applies: suspension, password change or reset, email verification changes, and
 two-factor activation or deactivation revoke affected sessions, including CLI
 sessions. Deleting the browser session that claimed a device code also denies
 any pending or approved unredeemed grant in the same database transaction; a
-new browser session cannot reclaim it. If deletion races with redemption, the
-new CLI session is linked to the original claim and is revoked with that session.
-The CLI must treat `null` from `get-session`, a `401` from `/api/v1`, or a
-revoked session as reauthentication required.
+new browser session cannot reclaim it. Redemption and deletion are ordered by a
+shared lock on the claiming session: deletion either denies the grant or waits
+for redemption to commit, and a CLI session issued before a later browser
+sign-out remains independently usable. The CLI must treat `null` from
+`get-session`, a `401` from `/api/v1`, or a revoked session as reauthentication
+required.
 
 ## Browser policy
 

@@ -956,7 +956,7 @@
   "This request cannot be approved here": "Questa richiesta non può essere approvata qui",
   "Return to your terminal to finish signing in. melti-cli receives its own session with your current Workspace access. Signing out of the CLI will not sign out this browser.": "Torna al terminale per completare l'accesso. melti-cli riceve una sessione propria con il tuo accesso attuale allo spazio di lavoro. Uscire dalla CLI non disconnetterà questo browser.",
   "melti-cli was not granted access. You can close this page, or run melti-cli auth login again from your terminal.": "L'accesso a melti-cli non è stato concesso. Puoi chiudere questa pagina o eseguire di nuovo melti-cli auth login dal terminale.",
-  "No further action is needed. Run melti-cli auth login if you meant to start a new request.": "Non serve another azione. Esegui melti-cli auth login se volevi avviare una nuova richiesta.",
+  "No further action is needed. Run melti-cli auth login if you meant to start a new request.": "Non è necessaria alcuna altra azione. Esegui melti-cli auth login se volevi avviare una nuova richiesta.",
   "Run melti-cli auth login from your terminal to start a new request.": "Esegui melti-cli auth login dal terminale per avviare una nuova richiesta.",
   "This code has expired. Run melti-cli auth login again to get a new code.": "Questo codice è scaduto. Esegui di nuovo melti-cli auth login per ottenere un nuovo codice.",
   "That code doesn't match an active request. Check the code in your terminal and try again.": "Questo codice non corrisponde a una richiesta attiva. Controlla il codice nel terminale e riprova.",

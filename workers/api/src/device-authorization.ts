@@ -27,11 +27,6 @@ interface DeviceRedemptionClaimRow extends Record<string, unknown> {
   user_id: string | null;
 }
 
-/** Session row returned when binding a redeemed CLI session to its browser grant. */
-interface DeviceClaimSessionRow extends Record<string, unknown> {
-  cli_session_id: string;
-}
-
 /** Result of resolving a freshly minted CLI session against member policy. */
 interface DeviceSessionEligibility {
   eligible: boolean;
@@ -302,10 +297,12 @@ export async function deviceDecisionRequest(
  * Better Auth owns the polling state machine, expiry/denial/approval outcomes,
  * atomic single-use consumption, and session creation. Migration 024 makes
  * deleting the claiming browser session terminal for pending and approved
- * grants, then binds a consumed CLI session to that browser session so a
- * concurrent deletion cascades to the new authority. The exact claiming
- * session is checked before this handler releases a credential. Account
- * eligibility is also rechecked. Credentials are never logged.
+ * grants. Redemption then holds a shared lock on the claiming browser session
+ * for the duration of the exchange: a deletion that already committed denies
+ * the grant, while a concurrent deletion waits until redemption commits and
+ * never revokes the independently issued CLI session afterwards. The exact
+ * claiming session is checked before this handler releases a credential.
+ * Account eligibility is also rechecked. Credentials are never logged.
  *
  * @param env - Worker environment bindings.
  * @param auth - Production-composed Better Auth instance.
@@ -319,7 +316,7 @@ export async function deviceTokenRequest(
 ): Promise<Response> {
   const body = await requestJsonRecord(request);
   const deviceCode = body?.device_code;
-  let claimSession: { id: string; userId: string } | undefined;
+  let claimLease: ClaimingSessionLease | undefined;
   if (body?.client_id === DEVICE_CLIENT_ID && typeof deviceCode === "string" && deviceCode) {
     // Exception: pg cannot be loaded in workerd unit-test isolates.
     const { systemPoolFor } = await import("./database");
@@ -342,7 +339,11 @@ export async function deviceTokenRequest(
     );
     const grant = result.rows[0];
     if (grant?.status === "approved") {
-      if (!grant.claim_session_id || !grant.user_id || !grant.claim_session_live) {
+      claimLease =
+        grant.claim_session_id && grant.user_id && grant.claim_session_live
+          ? await leaseClaimingBrowserSession(env, grant.claim_session_id, grant.user_id)
+          : undefined;
+      if (!claimLease) {
         // Persist terminal denial, then let the plugin report and consume its
         // own denial outcome rather than bypassing its polling state machine.
         await pool.query(
@@ -351,14 +352,21 @@ export async function deviceTokenRequest(
            WHERE "deviceCode" = $1 AND status = 'approved'`,
           [deviceCode],
         );
-      } else {
-        claimSession = { id: grant.claim_session_id, userId: grant.user_id };
       }
     }
   }
 
-  const response = await auth.handler(request);
-  if (response.status !== 200) return noStore(response);
+  let response: Response;
+  try {
+    response = await auth.handler(request);
+  } catch (cause) {
+    await settleClaimLease(claimLease, "rollback");
+    throw cause;
+  }
+  if (response.status !== 200) {
+    await settleClaimLease(claimLease, "rollback");
+    return noStore(response);
+  }
 
   let accessToken: string | undefined;
   try {
@@ -371,29 +379,30 @@ export async function deviceTokenRequest(
     // A 200 without a usable credential is never released.
   }
   if (!accessToken) {
+    await settleClaimLease(claimLease, "rollback");
     return deviceErrorResponse(500, "server_error", "The device grant could not be completed.");
   }
 
   let eligibility: DeviceSessionEligibility;
-  let claimSessionLive: boolean;
   try {
     eligibility = await deviceSessionEligibility(env, accessToken);
-    claimSessionLive = claimSession
-      ? await bindDeviceSessionToClaim(env, accessToken, claimSession.id, claimSession.userId)
-      : false;
   } catch {
     await revokeSessionByToken(env, accessToken);
+    await settleClaimLease(claimLease, "rollback");
     return deviceErrorResponse(500, "server_error", "The device grant could not be completed.");
   }
   if (!eligibility.eligible) {
     await revokeSessionByToken(env, accessToken);
+    await settleClaimLease(claimLease, "rollback");
     return deviceErrorResponse(
       403,
       "access_denied",
       eligibility.reason ?? "This account is not eligible for CLI access.",
     );
   }
-  if (!claimSessionLive) {
+  if (!claimLease) {
+    // A token response without an approved, live claiming session is never
+    // released: the plugin's own state machine cannot reach this path.
     await revokeSessionByToken(env, accessToken);
     return deviceErrorResponse(
       400,
@@ -401,48 +410,102 @@ export async function deviceTokenRequest(
       "The browser session that approved this request is no longer active.",
     );
   }
+  if (!(await settleClaimLease(claimLease, "commit"))) {
+    await revokeSessionByToken(env, accessToken);
+    return deviceErrorResponse(500, "server_error", "The device grant could not be completed.");
+  }
   return noStore(response);
 }
 
 /**
- * Binds a newly redeemed CLI session to its live claiming browser session.
+ * A transaction that holds a shared row lock on the approving browser session.
+ * The lock decides the race between browser-session deletion and redemption:
+ * deletion blocks while redemption commits, and later sign-out is independent
+ * because no foreign key ties the issued CLI session to the browser session.
+ */
+interface ClaimingSessionLease {
+  commit(): Promise<void>;
+  release(): void;
+  rollback(): Promise<void>;
+}
+
+/**
+ * Starts a transaction and locks the exact claiming browser session for the
+ * duration of the token exchange. A session that no longer exists yields no
+ * lease, which denies the grant before Better Auth can mint a CLI session.
  *
- * The foreign key serializes this update against browser-session deletion:
- * deletion before the binding makes it fail, while deletion afterward
- * cascades to the CLI session. This closes the gap between plugin consumption
- * and delivery without replacing its atomic one-time state machine.
+ * The lock is a shared row lock, so independent reads and the CLI-session
+ * insert are unaffected; only deletion of that same browser row waits.
  *
  * @param env - Worker environment bindings.
- * @param sessionToken - Raw CLI credential returned by Better Auth.
- * @param sessionId - Browser session that claimed and approved the request.
+ * @param sessionId - Browser session that verified and approved the request.
  * @param userId - Member identity bound to that browser session.
- * @returns Whether the CLI session was linked while the exact browser session remained live.
+ * @returns A lease when the live session was locked, or null when it is gone.
  */
-async function bindDeviceSessionToClaim(
+async function leaseClaimingBrowserSession(
   env: ApiWorkerEnv,
-  sessionToken: string,
   sessionId: string,
   userId: string,
-): Promise<boolean> {
+): Promise<ClaimingSessionLease | undefined> {
   // Exception: pg cannot be loaded in workerd unit-test isolates.
   const { systemPoolFor } = await import("./database");
-  const result = await systemPoolFor(env).query<DeviceClaimSessionRow>(
-    `UPDATE "session" AS cli
-     SET "deviceAuthorizationClaimSessionId" = $2
-     WHERE cli.token = $1
-       AND cli."expiresAt" > now()
-       AND cli."userId" = $3
-       AND EXISTS (
-         SELECT 1
-         FROM "session" browser
-         WHERE browser.id = $2
-           AND browser."userId" = $3
-           AND browser."expiresAt" > now()
-       )
-     RETURNING cli.id AS cli_session_id`,
-    [sessionToken, sessionId, userId],
-  );
-  return result.rows.length === 1;
+  const client = await systemPoolFor(env).connect();
+  try {
+    await client.query("BEGIN");
+    const locked = await client.query(
+      `SELECT id FROM "session"
+       WHERE id = $1 AND "userId" = $2 AND "expiresAt" > now()
+       FOR SHARE`,
+      [sessionId, userId],
+    );
+    if (locked.rows.length !== 1) {
+      await client.query("ROLLBACK");
+      client.release();
+      return undefined;
+    }
+    return {
+      commit: async () => {
+        await client.query("COMMIT");
+      },
+      release: () => {
+        client.release();
+      },
+      rollback: async () => {
+        await client.query("ROLLBACK");
+      },
+    };
+  } catch (cause) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    client.release();
+    throw cause;
+  }
+}
+
+/**
+ * Ends a claiming-session lease exactly once, releasing its connection even
+ * when the commit or rollback fails.
+ *
+ * @param lease - Lease to settle, when one was acquired.
+ * @param outcome - Whether redemption should commit or roll back.
+ * @returns True when the database transaction settled successfully.
+ */
+async function settleClaimLease(
+  lease: ClaimingSessionLease | undefined,
+  outcome: "commit" | "rollback",
+): Promise<boolean> {
+  if (!lease) return true;
+  try {
+    if (outcome === "commit") await lease.commit();
+    else await lease.rollback();
+    return true;
+  } catch {
+    // A failed commit can leave the transaction aborted; roll back before the
+    // connection returns to the pool.
+    await lease.rollback().catch(() => undefined);
+    return false;
+  } finally {
+    lease.release();
+  }
 }
 
 /**

@@ -1087,6 +1087,35 @@ describe("native session transport and revocation", () => {
     );
   });
 
+  it("keeps a redeemed CLI session after the approving browser signs out", async () => {
+    const browser = await signIn(gammaEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    const deviceCode = stringField(body, "device_code");
+    expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
+
+    const redeemed = await redeemDeviceCode(deviceCode);
+    expect(redeemed.status).toBe(200);
+    const accessToken = stringField(recordOf(await redeemed.json()), "access_token");
+    const sessionResponse = await getSessionWithBearer(accessToken);
+    expect(sessionResponse.status).toBe(200);
+    const jwt = sessionResponse.headers.get("set-auth-jwt");
+    expect(jwt).toBeTruthy();
+
+    // Redemption won the ordering race, so the browser signing out afterwards
+    // removes only the browser session; the independently issued CLI session
+    // remains usable.
+    const browserSignOut = await authPostJson("/api/auth/sign-out", {}, { cookie: browser.cookie });
+    expect(browserSignOut.status).toBe(200);
+    expect(await (await getSessionWithCookie(browser.cookie)).json()).toBeNull();
+
+    const cliSession = await getSessionWithBearer(accessToken);
+    expect(cliSession.status).toBe(200);
+    expect(stringField(recordOf(recordOf(await cliSession.json()).user), "email")).toBe(gammaEmail);
+    expect((await tenantRequest("/api/v1/posts", `Bearer ${jwt}`)).status).toBe(200);
+  });
+
   it("reports an expired CLI session as unusable", async () => {
     const browser = await signIn(securityEmail);
     const { body } = await issueDeviceCode();

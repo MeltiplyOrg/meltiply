@@ -265,6 +265,7 @@ jobs:
           assert.equal(rawCredential.status, 401, "the raw session credential must not authorize");
 
           const signOut = await fetch(`${origin}/api/auth/sign-out`, {
+            body: "{}",
             headers: headers({ Authorization: `Bearer ${token.access_token}` }),
             method: "POST",
           });

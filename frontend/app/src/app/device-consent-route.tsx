@@ -47,20 +47,14 @@ type Phase =
   | { kind: "review"; review: DeviceAuthorizationReview }
   | { decision: Decision; kind: "working"; review: DeviceAuthorizationReview };
 
-/** Recoveries the page can explain without exposing plugin prose. */
-type ConsentErrorKind =
-  | "expired"
-  | "input"
-  | "invalid"
-  | "offline"
-  | "ownership"
-  | "rate"
-  | "session"
-  | "unknown";
+/** Recoveries that expose an account or session action beside the message. */
+type ConsentErrorAction = "ownership" | "session";
 
 interface ConsentError {
-  kind: ConsentErrorKind;
+  action?: ConsentErrorAction;
   message: string;
+  /** The decision failed as unprocessable; re-read status before retrying. */
+  recheck?: true;
 }
 
 /**
@@ -79,26 +73,24 @@ function consentErrorFor(
   if (cause instanceof DeviceAuthorizationError) {
     if (cause.code === "expired_token") {
       return {
-        kind: "expired",
         message: t("This code has expired. Run melti-cli auth login again to get a new code."),
       };
     }
     if (cause.code === "rate_limited" || cause.status === 429) {
       return cause.retryAfterSeconds === undefined
-        ? { kind: "rate", message: t("Too many attempts. Try again in a moment.") }
+        ? { message: t("Too many attempts. Try again in a moment.") }
         : {
-            kind: "rate",
             message: t("Too many attempts. Wait {seconds} seconds and try again.", {
               seconds: cause.retryAfterSeconds,
             }),
           };
     }
     if (cause.code === "unauthorized" || cause.status === 401) {
-      return { kind: "session", message: t("Your session ended. Sign in again to continue.") };
+      return { action: "session", message: t("Your session ended. Sign in again to continue.") };
     }
-    if (cause.code === "access_denied" || cause.status === 403) {
+    if (cause.code === "access_denied") {
       return {
-        kind: "ownership",
+        action: "ownership",
         message: t(
           "This request belongs to a different account. Sign out and sign in with the account that started it.",
         ),
@@ -106,20 +98,19 @@ function consentErrorFor(
     }
     if (cause.code === "invalid_request" || cause.code === "invalid_grant") {
       return {
-        kind: "invalid",
         message: t(
           "That code doesn't match an active request. Check the code in your terminal and try again.",
         ),
+        recheck: true,
       };
     }
   }
   if (cause instanceof TypeError) {
     return {
-      kind: "offline",
       message: t("We couldn't reach Meltiply. Check your connection and try again."),
     };
   }
-  return { kind: "unknown", message: t("The request could not be completed. Try again.") };
+  return { message: t("The request could not be completed. Try again.") };
 }
 
 /**
@@ -211,7 +202,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
       const normalized = normalizeDeviceUserCode(value);
       if (!normalized) {
         setPhase({ kind: "enter" });
-        setError({ kind: "input", message: t("Enter the code shown in your terminal.") });
+        setError({ message: t("Enter the code shown in your terminal.") });
         return;
       }
       const request = ++requestSequence.current;
@@ -234,7 +225,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
         if (!review.client_id) {
           setPhase({ kind: "enter" });
           setError({
-            kind: "ownership",
+            action: "ownership",
             message: t(
               "This request belongs to a different account. Sign out and sign in with the account that started it.",
             ),
@@ -285,7 +276,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
     } catch (cause) {
       if (requestSequence.current !== request) return;
       const failure = consentErrorFor(t, cause);
-      if (failure.kind === "invalid") {
+      if (failure.recheck) {
         // A concurrent tab or session may have completed the request between
         // review and decision; re-read the authoritative status before retrying.
         try {
@@ -297,6 +288,16 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
           }
           if (latest.status === "denied") {
             setPhase({ kind: "outcome", outcome: "already-denied" });
+            return;
+          }
+          if (!latest.client_id) {
+            setPhase({ kind: "enter" });
+            setError({
+              action: "ownership",
+              message: t(
+                "This request belongs to a different account. Sign out and sign in with the account that started it.",
+              ),
+            });
             return;
           }
         } catch {
@@ -455,7 +456,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
           {error && (
             <div className="space-y-3">
               <Alert variant="destructive">{error.message}</Alert>
-              {error.kind === "session" && (
+              {error.action === "session" && (
                 <Button
                   type="button"
                   variant="outline"
@@ -465,7 +466,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
                   {t("Sign in again")}
                 </Button>
               )}
-              {error.kind === "ownership" && (
+              {error.action === "ownership" && (
                 <Button
                   type="button"
                   variant="outline"

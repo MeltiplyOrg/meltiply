@@ -1,5 +1,5 @@
 import type { ChannelIntegration, PostContentItem } from "@/api/types";
-import type { WorkspaceView } from "@/components/layout/navigation-shell";
+import type { WorkspaceView } from "@/lib/navigation";
 import type {
   Asset,
   BrandProfile,

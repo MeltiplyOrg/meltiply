@@ -905,5 +905,7 @@
   "Actions for {name}": "Aktionen für {name}",
   "Current time: {time}": "Aktuelle Uhrzeit: {time}",
   "Next in this view": "Als Nächstes in dieser Ansicht",
-  "No upcoming Posts in this view.": "Keine bevorstehenden Posts in dieser Ansicht."
+  "No upcoming Posts in this view.": "Keine bevorstehenden Posts in dieser Ansicht.",
+  "Creating…": "Wird erstellt…",
+  "Updating…": "Wird aktualisiert…"
 }

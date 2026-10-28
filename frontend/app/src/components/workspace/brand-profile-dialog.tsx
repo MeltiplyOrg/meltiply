@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@meltiply/ui/button";
 import {
@@ -33,6 +33,63 @@ export interface BrandProfileDialogProps {
   profile?: BrandProfile | null;
   onSuccess?: (profile: BrandProfile) => void;
   onDeleteSuccess?: (profileId: string) => void;
+}
+
+/**
+ * Failure alert and action footer pinned to the dialog's scrollport bottom.
+ *
+ * The dialog keeps native whole-surface scrolling, so the 51-swatch palette can
+ * extend far below a phone viewport. This opaque block keeps Delete, Cancel,
+ * the primary action, and any mutation failure reachable without scrolling
+ * first, while its normal flow position at the end of the content leaves the
+ * final swatch fully visible at maximum scroll.
+ *
+ * It also republishes its live height as the dialog's `scroll-padding-bottom`.
+ * Without that reserve, arrow-key navigation can focus a swatch underneath the
+ * pinned block because the browser considers the swatch already in view. The
+ * effect belongs to this child, not the form: Radix mounts the modal portal
+ * after the form's first commit, so a form-level layout effect would run before
+ * this node exists.
+ *
+ * @param props.children - The error alert and action footer to keep visible.
+ * @returns Sticky wrapper carrying the pinned-region test hook.
+ */
+function BrandProfileDialogActions({ children }: { children: ReactNode }) {
+  const regionRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const region = regionRef.current;
+    const dialog = region?.closest<HTMLElement>('[role="dialog"]');
+    if (!region || !dialog) return;
+
+    const syncScrollPadding = () => {
+      dialog.style.scrollPaddingBottom = `${region.offsetHeight}px`;
+    };
+    syncScrollPadding();
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        dialog.style.scrollPaddingBottom = "";
+      };
+    }
+    // The block grows when the failure alert appears and when coarse-pointer
+    // buttons grow, so observe it rather than assuming one height.
+    const observer = new ResizeObserver(syncScrollPadding);
+    observer.observe(region);
+    return () => {
+      observer.disconnect();
+      dialog.style.scrollPaddingBottom = "";
+    };
+  }, []);
+
+  return (
+    <div
+      ref={regionRef}
+      data-brand-profile-dialog-actions=""
+      className="sticky bottom-0 z-20 -mx-4 flex flex-col gap-2.5 border-t border-line bg-surface px-4 pb-4 pt-3 sm:-mx-6 sm:px-6 sm:pb-6"
+    >
+      {children}
+    </div>
+  );
 }
 /**
  * Internal form presentation for Brand Profile creation and editing.
@@ -80,6 +137,15 @@ function BrandProfileDialogForm({
   const isSubmitting =
     createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
   const mutationError = createMutation.error ?? updateMutation.error ?? deleteMutation.error;
+  // Pending copy names the lifecycle that is actually in flight; the footer keeps
+  // the idle label until the owning mutation reports pending state.
+  const submitLabel = isEditing
+    ? updateMutation.isPending
+      ? t("Updating…")
+      : t("Update profile")
+    : createMutation.isPending
+      ? t("Creating…")
+      : t("Create profile");
 
   /**
    * Submits the trimmed name, optional 280-character summary, and palette color
@@ -164,7 +230,7 @@ function BrandProfileDialogForm({
   ]);
 
   return (
-    <CenterDialogContent closeLabel={t("Close")}>
+    <CenterDialogContent closeLabel={t("Close")} className="pb-0 sm:pb-0">
       <CenterDialogHeader>
         <CenterDialogTitle>
           {isEditing ? t("Update Brand Profile") : t("Create Brand Profile")}
@@ -227,50 +293,58 @@ function BrandProfileDialogForm({
         </div>
       </div>
 
-      {mutationError ? (
-        <p className="text-xs text-destructive" role="alert">
-          {mutationError instanceof Error ? mutationError.message : t("Something went wrong")}
-        </p>
-      ) : null}
+      {/*
+        The palette is taller than a phone dialog, so the failure text and the
+        actions share one sticky block at the scroll container's bottom edge.
+        Native dialog scrolling is unchanged: the block reserves its own flow
+        space at the end, which keeps the last swatch reachable at max scroll.
+      */}
+      <BrandProfileDialogActions>
+        {mutationError ? (
+          <p className="text-xs text-destructive" role="alert">
+            {mutationError instanceof Error ? mutationError.message : t("Something went wrong")}
+          </p>
+        ) : null}
 
-      <CenterDialogFooter className="flex items-center justify-between gap-2 sm:justify-between">
-        {isEditing ? (
-          <Button
-            variant="destructive"
-            size="sm"
-            type="button"
-            onClick={() => setDeleteConfirmOpen(true)}
-            disabled={isSubmitting}
-          >
-            <Trash2 className="size-3.5" />
-            {t("Delete profile")}
-          </Button>
-        ) : (
-          <div />
-        )}
+        <CenterDialogFooter className="flex items-center justify-between gap-2 sm:justify-between">
+          {isEditing ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              type="button"
+              onClick={() => setDeleteConfirmOpen(true)}
+              disabled={isSubmitting}
+            >
+              <Trash2 className="size-3.5" />
+              {t("Delete profile")}
+            </Button>
+          ) : (
+            <div />
+          )}
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={onClose}
-            disabled={isSubmitting}
-          >
-            {t("Cancel")}
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            type="button"
-            onClick={handleSave}
-            disabled={!name.trim() || isSubmitting}
-            className="rounded-control font-medium text-xs"
-          >
-            {isEditing ? t("Update profile") : t("Create profile")}
-          </Button>
-        </div>
-      </CenterDialogFooter>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={onClose}
+              disabled={isSubmitting}
+            >
+              {t("Cancel")}
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              type="button"
+              onClick={handleSave}
+              disabled={!name.trim() || isSubmitting}
+              className="rounded-control font-medium text-xs"
+            >
+              {submitLabel}
+            </Button>
+          </div>
+        </CenterDialogFooter>
+      </BrandProfileDialogActions>
 
       {/* Destructive confirmation; portals out as the top layer while open. */}
       <CenterAlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>

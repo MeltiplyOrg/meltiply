@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { CenterDialog, NavigationDialogContent } from "@meltiply/ui/center-dialog";
-import { SidebarNav, type WorkspaceView } from "@/components/primitives/sidebar-nav";
+import { SidebarNav } from "@/components/primitives/sidebar-nav";
 import { useI18n } from "@/lib/i18n";
+import type { WorkspaceView } from "@/lib/navigation";
 
 interface MobileNavigationSidebarProps {
   open: boolean;

@@ -218,7 +218,7 @@ export default function WorkspaceSettings() {
       <div
         ref={contentRef}
         className={cn(
-          "min-h-0 min-w-0 px-4 pb-20 pt-5 sm:px-6 sm:pt-6",
+          "min-h-0 min-w-0 px-4 pb-20 pt-4 sm:px-6 sm:pt-6",
           section === "administration" ? "overflow-hidden" : "overflow-y-auto",
         )}
       >

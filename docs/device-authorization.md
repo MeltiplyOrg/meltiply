@@ -201,11 +201,11 @@ instances. The caller IP budget is checked and counted first; the per-device
 bucket is touched only for admitted callers, and device-throttled polls still
 consume the caller budget. A denial is deleted after reporting `access_denied`;
 later attempts report `invalid_grant`. Only one concurrent redemption can
-succeed. Before releasing the credential, the server holds a shared lock on the
-exact claiming browser session and checks suspension, required mailbox
-verification, membership, and account activity. A browser-session deletion that
-committed first denies the grant; one that races the exchange waits until
-redemption commits.
+succeed. Before releasing the credential, the server checks suspension, required
+mailbox verification, membership, account activity, and whether the exact
+claiming browser session still exists. A browser-session deletion that completed
+before that check revokes the minted credential; a later sign-out is independent
+of the CLI session.
 
 ## Native session transport
 
@@ -249,12 +249,11 @@ applies: suspension, password change or reset, email verification changes, and
 two-factor activation or deactivation revoke affected sessions, including CLI
 sessions. Deleting the browser session that claimed a device code also denies
 any pending or approved unredeemed grant in the same database transaction; a
-new browser session cannot reclaim it. Redemption and deletion are ordered by a
-shared lock on the claiming session: deletion either denies the grant or waits
-for redemption to commit, and a CLI session issued before a later browser
-sign-out remains independently usable. The CLI must treat `null` from
-`get-session`, a `401` from `/api/v1`, or a revoked session as reauthentication
-required.
+new browser session cannot reclaim it. Redemption rechecks the claiming session
+after consuming the grant: deletion completed before that check revokes the
+minted credential, while a later browser sign-out leaves the independent CLI
+session usable. The CLI must treat `null` from `get-session`, a `401` from
+`/api/v1`, or a revoked session as reauthentication required.
 
 ## Browser policy
 

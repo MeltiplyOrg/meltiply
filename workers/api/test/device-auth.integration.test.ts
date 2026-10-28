@@ -370,7 +370,7 @@ async function signIn(
     { email, password: seedPassword },
     { ip },
   );
-  expect(response.status, await response.clone().text()).toBe(200);
+  expect(response.status, "fixture sign-in").toBe(200);
   const body = recordOf(await response.json());
   const user = recordOf(body.user);
   return {
@@ -1009,6 +1009,56 @@ describe("browser verification and consent ownership", () => {
     );
     expect(Number(sessionsAfter.rows[0]?.count)).toBe(Number(sessionsBefore.rows[0]?.count) + 1);
   });
+
+  it("redeems a grant approved after the poll observed it as pending", async () => {
+    const browser = await signIn(gammaEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    const deviceCode = stringField(body, "device_code");
+    expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
+
+    // Approval can land after the wrapper reads the pending state but before
+    // Better Auth's own state read. The wrapped handler reproduces that exact
+    // interleaving through the real plugin and token endpoint.
+    const productionAuth = await betterAuthFor(env);
+    const approvingApp = createApiApp({
+      betterAuth: {
+        handler: async (request) => {
+          if (new URL(request.url).pathname === "/api/auth/device/token") {
+            await systemPoolFor(env).query(
+              `UPDATE "deviceCode" SET status = 'approved', "userId" = $2
+               WHERE "userCode" = $1 AND status = 'pending'`,
+              [userCode, browser.userId],
+            );
+          }
+          return productionAuth.handler(request);
+        },
+        ...(productionAuth.getSession ? { getSession: productionAuth.getSession } : {}),
+      },
+    });
+    const response = await approvingApp.request(
+      `${authOrigin}/api/auth/device/token`,
+      {
+        body: JSON.stringify({
+          client_id: "melti-cli",
+          device_code: deviceCode,
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        }),
+        headers: {
+          "CF-Connecting-IP": randomIp(),
+          "Content-Type": "application/json",
+          Origin: appOrigin,
+        },
+        method: "POST",
+      },
+      env,
+    );
+    expect(response.status, "device token exchange").toBe(200);
+    const accessToken = stringField(recordOf(await response.json()), "access_token");
+    const session = await getSessionWithBearer(accessToken);
+    expect(session.status).toBe(200);
+    expect(stringField(recordOf(recordOf(await session.json()).user), "email")).toBe(gammaEmail);
+  });
 });
 
 describe("native session transport and revocation", () => {
@@ -1268,7 +1318,7 @@ describe("existing credential policy", () => {
       { password: dedicatedPassword },
       { cookie: enrollment.cookie },
     );
-    expect(enable.status, await enable.clone().text()).toBe(200);
+    expect(enable.status, "two-factor enrollment").toBe(200);
     const pending = recordOf(await enable.json());
     const totpURI = stringField(pending, "totpURI");
     expect(Array.isArray(pending.backupCodes)).toBe(true);
@@ -1277,7 +1327,7 @@ describe("existing credential policy", () => {
       { code: totpCode(totpURI), trustDevice: false },
       { cookie: enrollment.cookie },
     );
-    expect(confirmedEnrollment.status, await confirmedEnrollment.clone().text()).toBe(200);
+    expect(confirmedEnrollment.status, "two-factor confirmation").toBe(200);
 
     // Enabling the factor revoked the enrollment session, so a fresh password
     // sign-in must challenge before any session exists to consent with.
@@ -1285,7 +1335,7 @@ describe("existing credential policy", () => {
       email: twoFactorEmail,
       password: dedicatedPassword,
     });
-    expect(challenge.status, await challenge.clone().text()).toBe(200);
+    expect(challenge.status, "two-factor challenge").toBe(200);
     expect(recordOf(await challenge.json()).twoFactorRedirect).toBe(true);
     expect(await (await getSessionWithCookie(cookieHeaderFor(challenge))).json()).toBeNull();
     const challengeCookies = cookieHeaderFor(challenge);
@@ -1316,7 +1366,7 @@ describe("existing credential policy", () => {
       { code: totpCode(totpURI), trustDevice: false },
       { cookie: challengeCookies },
     );
-    expect(verified.status, await verified.clone().text()).toBe(200);
+    expect(verified.status, "two-factor verification").toBe(200);
     const cookie = sessionCookiePair(verified);
 
     expect((await verifyDeviceCode(cookie, userCode)).status).toBe(200);
@@ -1344,7 +1394,7 @@ describe("existing credential policy", () => {
       { password: dedicatedPassword },
       { cookie: browser.cookie },
     );
-    expect(enrollment.status, await enrollment.clone().text()).toBe(200);
+    expect(enrollment.status, "two-factor enrollment").toBe(200);
     const enrollmentBody = recordOf(await enrollment.json());
     const totpURI = stringField(enrollmentBody, "totpURI");
     const confirmation = await authPostJson(
@@ -1352,7 +1402,7 @@ describe("existing credential policy", () => {
       { code: totpCode(totpURI), trustDevice: false },
       { cookie: browser.cookie },
     );
-    expect(confirmation.status, await confirmation.clone().text()).toBe(200);
+    expect(confirmation.status, "two-factor confirmation").toBe(200);
     expect(await (await getSessionWithCookie(browser.cookie)).json()).toBeNull();
 
     const redemption = await redeemDeviceCode(deviceCode);
@@ -1428,7 +1478,7 @@ describe("existing credential policy", () => {
       },
       { cookie: browser.cookie },
     );
-    expect(changed.status, await changed.clone().text()).toBe(200);
+    expect(changed.status, "password change").toBe(200);
 
     const revokedSession = await getSessionWithBearer(accessToken);
     expect(revokedSession.status).toBe(200);

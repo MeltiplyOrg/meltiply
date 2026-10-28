@@ -114,7 +114,7 @@ async function issueDeviceCode(api: APIRequestContext, ip: string): Promise<Issu
     data: { client_id: deviceClient },
     headers: authHeaders(ip),
   });
-  expect(response.status(), await response.text()).toBe(200);
+  expect(response.status(), "device code issuance").toBe(200);
   expect(response.headers()["cache-control"]).toContain("no-store");
   const body = readRecord(await response.json());
   const verificationUri = readString(body, "verification_uri");
@@ -446,7 +446,7 @@ test("returns a signed-out member to the pending request and requires explicit a
   const sessionResponse = await request.get("/api/auth/get-session", {
     headers: authHeaders(ip, { Authorization: `Bearer ${accessToken}` }),
   });
-  expect(sessionResponse.status(), await sessionResponse.text()).toBe(200);
+  expect(sessionResponse.status(), "CLI session transport").toBe(200);
   const sessionBody = readRecord(await sessionResponse.json());
   expect(readString(readRecord(sessionBody.user), "email")).toBe(gammaEmail);
   const jwt = sessionResponse.headers()["set-auth-jwt"];
@@ -454,7 +454,7 @@ test("returns a signed-out member to the pending request and requires explicit a
   const authorized = await request.get("/api/v1/posts", {
     headers: authHeaders(ip, { Authorization: `Bearer ${jwt}` }),
   });
-  expect(authorized.status(), await authorized.text()).toBe(200);
+  expect(authorized.status(), "CLI JWT authorization").toBe(200);
   const rawCredential = await request.get("/api/v1/posts", {
     headers: authHeaders(ip, { Authorization: `Bearer ${accessToken}` }),
   });
@@ -465,7 +465,7 @@ test("returns a signed-out member to the pending request and requires explicit a
     data: {},
     headers: authHeaders(ip, { Authorization: `Bearer ${accessToken}` }),
   });
-  expect(signOut.status(), await signOut.text()).toBe(200);
+  expect(signOut.status(), "CLI sign-out").toBe(200);
   const revokedSession = await request.get("/api/auth/get-session", {
     headers: authHeaders(ip, { Authorization: `Bearer ${accessToken}` }),
   });
@@ -515,12 +515,12 @@ test("preserves the second-factor challenge and returns to the pending device re
     data: { email: gammaEmail, password: gammaPassword },
     headers: authHeaders(ip),
   });
-  expect(enrollment.status(), await enrollment.text()).toBe(200);
+  expect(enrollment.status(), "fixture sign-in").toBe(200);
   const enable = await request.post("/api/auth/two-factor/enable", {
     data: { password: gammaPassword },
     headers: authHeaders(ip),
   });
-  expect(enable.status(), await enable.text()).toBe(200);
+  expect(enable.status(), "two-factor enrollment").toBe(200);
   const enrollmentBody = readRecord(await enable.json());
   const totpURI = readString(enrollmentBody, "totpURI");
   expect(Array.isArray(enrollmentBody.backupCodes)).toBe(true);
@@ -528,7 +528,7 @@ test("preserves the second-factor challenge and returns to the pending device re
     data: { code: totpCode(totpURI), trustDevice: false },
     headers: authHeaders(ip),
   });
-  expect(confirmed.status(), await confirmed.text()).toBe(200);
+  expect(confirmed.status(), "two-factor confirmation").toBe(200);
 
   const code = await issueDeviceCode(request, ip);
   await page.goto(code.verificationUriComplete);
@@ -563,5 +563,5 @@ test("preserves the second-factor challenge and returns to the pending device re
     data: { password: gammaPassword },
     headers: { Origin: frontendOrigin },
   });
-  expect(disable.status(), await disable.text()).toBe(200);
+  expect(disable.status(), "two-factor disable").toBe(200);
 });

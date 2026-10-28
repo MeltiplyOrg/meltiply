@@ -6,6 +6,9 @@
 -- A consumed grant also binds its minted CLI session to the claiming browser
 -- session, so a concurrent deletion cascades to that session instead of
 -- releasing durable authority after the grant row has been consumed.
+-- Superseded by migration 025: the session binding and cascade are removed so
+-- a later browser sign-out leaves an already-issued CLI session usable; the
+-- API now rechecks the claiming session after consumption instead.
 ALTER TABLE "session"
     ADD COLUMN "deviceAuthorizationClaimSessionId" TEXT
     REFERENCES "session"(id) ON DELETE CASCADE;

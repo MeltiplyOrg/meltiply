@@ -57,6 +57,19 @@ against R2 and MinIO. They run on GitHub-hosted machines without deployment
 secrets. A passing automatic `ci-gate` does not imply that a manual lane ran.
 Live deployments follow the [operator-run release path](../infra/cloudflare/README.md#operator-run-deployment).
 
+`publishing-flow` runs focused composer/YouTube regressions, changed-scope React
+review, the full application gate, documentation links, and browser publication,
+weekly Queue, and multi-profile recovery journeys. `publishing-browser` repeats
+only setup, documentation links, and those browser journeys when the application
+gate's code/configuration is unchanged. Publication verifies independent outcomes,
+retry without duplicate copies, real media bytes, draft settings, schedule edits,
+and deletion without unpublishing. It captures provider controls at desktop/phone
+widths in both palettes. Each journey resets disposable PostgreSQL state and uses
+the real API, storage, processor, transport and consumer with controlled external
+Providers; it does not certify live credentials, platform audit, or public posting.
+Browser failures are reported without automatic retries. Traces and screenshots
+are retained in the lane's artifact.
+
 `portable-caching` runs the complete application gate and the portable read-cache
 acceptance journey; `portable-caching-smoke` repeats only that journey when the
 application gate's code/configuration is unchanged. The journey records real HTTP

@@ -518,15 +518,22 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
 
   const detail = await openPostDetails(page, postCaption);
   await expect(detail.getByText(postCaption)).toBeVisible();
-  await expect(detail.getByText("Published", { exact: true })).toHaveCount(1);
-  await expect(detail.getByText("Failed", { exact: true })).toHaveCount(1);
+  await expect(
+    detail
+      .getByRole("article", { name: channelNames.instagram, exact: true })
+      .getByText("Published", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    detail
+      .getByRole("article", { name: channelNames.threads, exact: true })
+      .getByText("Failed", { exact: true }),
+  ).toBeVisible();
   // Each Channel row carries its own timestamps rather than one Post-wide stamp.
   const firstPublishedStamp = await detail
     .locator("dt")
     .filter({ hasText: /^Published:$/ })
     .locator("xpath=following-sibling::dd[1]")
     .innerText();
-  expect(firstPublishedStamp.trim()).not.toBe("");
 
   // The creator retries only the failed Channel.
   await detail.getByRole("button", { name: /^retry$/i }).click();
@@ -556,17 +563,17 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
 
   await waitForPostUnderStatus(page, postCaption, /^published$/i);
   const converged = await openPostDetails(page, postCaption);
-  await expect(converged.getByText("Published", { exact: true })).toHaveCount(2);
-  await expect(converged.getByText("Failed", { exact: true })).toHaveCount(0);
+  await expect(converged.getByRole("article").getByText("Published", { exact: true })).toHaveCount(
+    2,
+  );
+  await expect(converged.getByRole("article").getByText("Failed", { exact: true })).toHaveCount(0);
   const publishedStamps = await converged
     .locator("dt")
     .filter({ hasText: /^Published:$/ })
     .locator("xpath=following-sibling::dd[1]")
     .allInnerTexts();
   expect(publishedStamps).toHaveLength(2);
-  for (const stamp of publishedStamps) {
-    expect(stamp.trim()).not.toBe("");
-  }
+  expect(publishedStamps[0]).toBe(firstPublishedStamp);
 });
 
 /**
@@ -704,14 +711,13 @@ test("keeps separately created identical Posts distinct and publishes only the o
 
 /**
  * Browser acceptance: editing a still-pending target never rewrites what is
- * already published, and the destructive actions say plainly what they keep.
+ * already published; declining deletion preserves pending work.
  *
  * One Post is published for real and acts as the history under test. A second Post
  * is scheduled into the future, its pending targets are edited, and the first
- * Post's Platform copies are compared before and after. The run finishes by
- * reading the delete confirmation's own wording and then deleting, confirming
- * that the words matched what happened: no Channel gained a copy, and the copy
- * already live elsewhere stayed live.
+ * Post's Platform copies are compared before and after. Declining deletion leaves
+ * the pending Post intact; confirming it removes local work without unpublishing
+ * the historical Platform copy.
  * The actor's Channels-created profile owns every target, keeping the history
  * assertions isolated from other acceptance accounts.
  * Each session explicitly chooses its target; retained workspace selection

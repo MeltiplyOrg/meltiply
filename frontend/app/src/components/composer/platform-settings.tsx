@@ -671,7 +671,7 @@ interface PlatformSettingsProps {
   /** Platform account id — required to fetch live TikTok publishing requirements. */
   channelId: string;
   settings: Record<string, unknown>;
-  mediaKinds?: readonly ("image" | "video")[];
+  mediaKinds: readonly ("image" | "video")[];
   onChange: (newSettings: Record<string, unknown>) => void;
   /**
    * Reports the creator's live TikTok publishing requirements to the parent composer
@@ -709,7 +709,7 @@ export function PlatformSettings({
   provider,
   channelName,
   channelId,
-  mediaKinds = [],
+  mediaKinds,
   settings,
   onChange,
   onRequirementsChange,

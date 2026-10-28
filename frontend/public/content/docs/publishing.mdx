@@ -51,13 +51,15 @@ Click **Create post** (or **Edit** on an existing draft or scheduled post) to op
 - **Per-channel sections** follow shared text and media in the same scrollable editor, with provider logos in their headings and no account-name tags or tabs. Each channel's caption is editable immediately and follows **Shared Content** until you change it, including clearing it intentionally. **Remove Custom Override** appears only for edited captions and restores the shared text.
 - **Channel settings** — each channel's section provides persistent provider configuration:
 
-| Platform | Controls configured with the post                                                                                                                                                                                                                                                                                |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| YouTube  | **Video Title** (required, 2–100 characters) and **Tags** (comma-separated; combined length limited to 500 characters, count capped by channel capabilities).                                                                                                                                                    |
-| TikTok   | **Post Title** (optional), **Privacy Level** (required — options determined by creator account requirements), interaction toggles (**Duet**, **Stitch**, and **Comments** — enabled when supported by the creator account), and disclosure toggles (**Brand Content**, **Organic Brand**, and **AI Generated**). |
-| Threads  | Informational panel — Threads posts use standard post text and attached media with no provider-specific controls.                                                                                                                                                                                                |
+| Platform | Controls configured with the post                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| YouTube  | **Video Title** (required, 2–100 characters), **Tags** (comma-separated; combined length limited to 500 characters, count capped by channel capabilities), **Visibility** (Public, Unlisted, or Private), and an explicit **Made for kids** choice. Audience has no default; choose it before publishing.                                                                                                                                                                           |
+| TikTok   | **Post Title** (optional), creator identity, and **Privacy Level** selected from that creator's current permissions, without a default. **Comments**, **Duet**, and **Stitch** are opt-in and unavailable when the creator disallows them. Photo targets hide Duet, Stitch, and AI Generated. **Disclose commercial content** reveals **Organic Brand** and **Brand Content** choices; at least one must be selected when disclosure is enabled. Branded content cannot be private. |
+| Threads  | Informational panel — Threads posts use standard post text and attached media with no provider-specific controls.                                                                                                                                                                                                                                                                                                                                                                   |
 
 Facebook and Instagram channels publish using standard post text and attached media without provider-specific configuration panels in the composer.
+
+TikTok displays its Music Usage Confirmation before posting and its Branded Content Policy when applicable. Publishing confirms that declaration. Creator information must load before scheduling, queuing, or publishing; **Load TikTok creator information** retries a failed lookup. Drafts can still be saved while creator information or required choices are incomplete. TikTok may continue processing after submission; watch the Channel outcome rather than assuming the post is live.
 
 ### Validation
 
@@ -69,9 +71,9 @@ Inspecting another Post does not discard your open composition: its text, settin
 
 ## Draft, Queue, Schedule, or Publish Now
 
-- **Save Draft** — stores the post text without sending it anywhere. No channel selection is needed. Drafts appear in the **Drafts** status filter in Posts and can be edited, scheduled, or deleted later. Saving a draft for a post that was scheduled cancels its pending deliveries.
+- **Save Draft** — stores the post text without sending it anywhere. No channel selection is needed. Drafts appear in the **Draft** status filter in Posts and can be edited, scheduled, or deleted later. Saving a draft for a post that was scheduled cancels its pending deliveries.
 - **Queue** — assigns the next free future slot from a named weekly plan in the Post's single owning Brand Profile. Select a Queue, not a date and time. Text, media, selected Channels, and their settings remain part of the same Post.
-- **Schedule** — queues the post for the date and time in the picker.
+- **Schedule** — queues the post for the date and time in the picker. Reopening a manually scheduled Post retains **Schedule** and its pending delivery time; saving edits does not silently turn it into a draft.
 - **Publish Now** — queues the post for immediate delivery to every selected channel.
 
 "Queued" is a Channel delivery state, not membership in a named **Queue**. It means Meltiply accepted delivery for that Channel; Platform outcomes are reported individually — one Channel can publish while another is still processing or has failed.
@@ -142,7 +144,7 @@ Queue-assigned work uses the same durable Schedule, Due work, Outbox, and Provid
 
 ## Post statuses
 
-Each post shows a status per channel in the post details (open any post to see them). The group badge summarizes the most urgent channel state.
+Each post shows a status per channel in the post details (open any post to see them). The group badge and collection status filter summarize the most urgent channel state: a Post with one published Channel and one failed Channel appears under **Failed**. Details retains both independent outcomes; retrying the failed Channel does not publish the successful one again.
 
 | Status                                  | Meaning                                                                                                   |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------- |

@@ -80,7 +80,7 @@ We keep information for as long as your account and workspace need it to provide
 What the product does today:
 
 - Most workspace items remain until you remove them. Deleting a media asset or a draft is **permanent** — the confirmation dialogs state it cannot be undone, and there is no recovery path.
-- Deleting a Brand Profile removes the profile with the channels, assets, and posts it owns, and scheduled work on those channels stops. The backend retains soft-deleted Brand Profiles for 7 days before permanent purge; backend restore operations recover profile records, but its channels stay disconnected and its cancelled posts are not revived. An explicit deletion through the app is permanent and cannot be undone.
+- Deleting a Brand Profile permanently removes the profile and its owned channels, assets, and posts, and scheduled work on those channels stops. The app does not offer a recovery window or undo for this deletion. Backend operations for separately soft-deleted records do not recover a profile permanently deleted through the app.
 - Disconnecting a channel on the [Channels](/docs/channels) page stops its scheduled and queued posts and ends Meltiply's use of that connection for publishing and syncing. It deletes nothing in Meltiply and does not revoke the authorization on the platform's side — revoke that in the platform's own settings; you can reconnect anytime.
 - None of these actions — deleting content, disconnecting a channel, or ending an account — removes content already published to a platform. Published posts cannot be deleted from inside Meltiply; remove them on the platform itself.
 

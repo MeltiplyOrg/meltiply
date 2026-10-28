@@ -1,6 +1,13 @@
 import type { BetterAuthInstance, JwtIdentity } from "@meltiply/auth";
 import { CoreApiError } from "./core-types";
 import { sha256Hex } from "./crypto";
+import {
+  deviceCodeRequest,
+  deviceDecisionRequest,
+  deviceTokenRequest,
+  deviceVerificationRequest,
+  noStore,
+} from "./device-authorization";
 import { requiresEmailVerification, type ApiWorkerEnv } from "./env";
 
 /** Reads only the installation's public initialized bit; never returns owner details. */
@@ -251,8 +258,30 @@ export function authPolicyHandler(env: ApiWorkerEnv, auth: BetterAuthInstance): 
         const invalidProfile = await profileValidationResponse(request);
         if (invalidProfile) return invalidProfile;
       }
-      return auth.handler(request);
+      if (path === "/api/auth/device/code" && request.method === "POST") {
+        const sanitized = await deviceCodeRequest(request);
+        if (sanitized instanceof Response) return sanitized;
+        return noStore(await auth.handler(sanitized));
+      }
+      if (path === "/api/auth/device" && request.method === "GET") {
+        return deviceVerificationRequest(env, auth, request);
+      }
+      if (
+        request.method === "POST" &&
+        (path === "/api/auth/device/approve" || path === "/api/auth/device/deny")
+      ) {
+        return deviceDecisionRequest(env, auth, request);
+      }
+      if (path === "/api/auth/device/token" && request.method === "POST") {
+        return deviceTokenRequest(env, auth, request);
+      }
+      const response = await auth.handler(request);
+      if (path.startsWith("/api/auth/device") || path === "/api/auth/get-session") {
+        return noStore(response);
+      }
+      return response;
     },
+    getSession: auth.getSession,
   };
 }
 

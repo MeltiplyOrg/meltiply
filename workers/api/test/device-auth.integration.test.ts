@@ -3,7 +3,7 @@ import { createJwtVerifier, jwtClaims, type JwtIdentity } from "@meltiply/auth";
 
 import { activeIdentity } from "../src/auth-policy";
 import { createApiApp } from "../src/app";
-import { betterAuthFor, checkAuthRateLimit } from "../src/better-auth";
+import { betterAuthFor } from "../src/better-auth";
 import { systemPoolFor } from "../src/database";
 import type { ApiWorkerEnv } from "../src/env";
 
@@ -268,7 +268,10 @@ async function issueDeviceCode(
       client_id: options.clientId ?? "melti-cli",
       ...options.body,
     },
-    { ip: options.ip, origin: options.origin },
+    {
+      ip: options.ip,
+      origin: options.origin === undefined ? authOrigin : options.origin,
+    },
   );
   return { body: response.ok ? recordOf(await response.json()) : {}, response };
 }
@@ -327,7 +330,7 @@ function redeemDeviceCode(
       device_code: deviceCode,
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
     },
-    { ip: options.ip, origin: appOrigin },
+    { ip: options.ip, origin: authOrigin },
   );
 }
 
@@ -485,6 +488,16 @@ async function trackedSessionIds(): Promise<string[]> {
   return result.rows.map((row) => row.id);
 }
 
+/**
+ * Advances past the distributed five-second token-polling window without
+ * sleeping, so the next HTTP request observes the plugin's own polling state
+ * rather than the Worker-level budget denial. Production behavior is unchanged;
+ * this is the test equivalent of waiting for the advertised interval.
+ */
+async function advanceTokenPollingWindow(): Promise<void> {
+  await systemPoolFor(env).query(`DELETE FROM auth_rate_limits WHERE action = 'device-token'`);
+}
+
 beforeAll(async () => {
   const url = new URL(systemConnectionString);
   if (url.hostname !== "127.0.0.1" || url.pathname !== "/meltiply")
@@ -625,6 +638,7 @@ describe("browser verification and consent ownership", () => {
     expect(numberField(token, "expires_in")).toBeGreaterThan(0);
     expect(typeof token.access_token).toBe("string");
 
+    await advanceTokenPollingWindow();
     const replay = await redeemDeviceCode(deviceCode);
     expect(replay.status).toBe(400);
     expect(await deviceError(replay)).toMatchObject({ error: "invalid_grant" });
@@ -649,6 +663,29 @@ describe("browser verification and consent ownership", () => {
     expect(deltaDecision.status).toBe(403);
     expect(await deviceError(deltaDecision)).toMatchObject({ error: "access_denied" });
 
+    expect((await decideDeviceCode(gamma.cookie, "approve", userCode)).status).toBe(200);
+  });
+
+  it("fails closed when the verifying session binding is unavailable and recovers by verifying again", async () => {
+    const gamma = await signIn(gammaEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    expect((await verifyDeviceCode(gamma.cookie, userCode)).status).toBe(200);
+
+    // Simulate a revoked verifying session whose foreign-key cleanup nulled the
+    // durable binding. Consent must fail closed rather than adopting an
+    // arbitrary same-member session.
+    await systemPoolFor(env).query(
+      `UPDATE "deviceCode" SET "claimSessionId" = NULL WHERE "userCode" = $1`,
+      [userCode],
+    );
+    const unbound = await decideDeviceCode(gamma.cookie, "approve", userCode);
+    expect(unbound.status).toBe(403);
+    expect(await deviceError(unbound)).toMatchObject({ error: "access_denied" });
+
+    // Re-verifying the code in the current session establishes a fresh
+    // binding, so the member can continue intentionally.
+    expect((await verifyDeviceCode(gamma.cookie, userCode)).status).toBe(200);
     expect((await decideDeviceCode(gamma.cookie, "approve", userCode)).status).toBe(200);
   });
 
@@ -687,6 +724,7 @@ describe("browser verification and consent ownership", () => {
     expect(denied.status).toBe(400);
     expect(await deviceError(denied)).toMatchObject({ error: "access_denied" });
 
+    await advanceTokenPollingWindow();
     const replay = await redeemDeviceCode(deviceCode);
     expect(replay.status).toBe(400);
     expect(await deviceError(replay)).toMatchObject({ error: "invalid_grant" });
@@ -737,6 +775,9 @@ describe("browser verification and consent ownership", () => {
     expect(first.status).toBe(400);
     expect(await deviceError(first)).toMatchObject({ error: "authorization_pending" });
 
+    // Clear only the Worker-level window so this request exercises Better
+    // Auth's own lastPolledAt interval check for a too-frequent poll.
+    await advanceTokenPollingWindow();
     const tooFast = await redeemDeviceCode(deviceCode, { ip });
     expect(tooFast.status).toBe(400);
     expect(await deviceError(tooFast)).toMatchObject({ error: "slow_down" });
@@ -759,14 +800,31 @@ describe("browser verification and consent ownership", () => {
     expect((await verifyDeviceCode(cookie, userCode)).status).toBe(200);
     expect((await decideDeviceCode(cookie, "approve", userCode)).status).toBe(200);
 
+    const sessionsBefore = await systemPoolFor(env).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [gammaAuthUserId],
+    );
+
     const responses = await Promise.all([
       redeemDeviceCode(deviceCode),
       redeemDeviceCode(deviceCode),
     ]);
-    const statuses = responses.map((response) => response.status).sort();
-    expect(statuses).toEqual([200, 400]);
-    const rejection = responses.find((response) => response.status === 400)!;
-    expect(await deviceError(rejection)).toMatchObject({ error: "invalid_grant" });
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    const rejection = responses.find((response) => response.status !== 200)!;
+    expect(rejection.status).toBe(400);
+    // The distributed per-device poll budget may reject the concurrent retry
+    // before the plugin's atomic consume; either way the first redemption owns
+    // the code and no second session may be minted.
+    const rejectionError = await deviceError(rejection);
+    expect(["invalid_grant", "slow_down"]).toContain(rejectionError.error);
+
+    const sessionsAfter = await systemPoolFor(env).query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "session" WHERE "userId" = $1`,
+      [gammaAuthUserId],
+    );
+    expect(Number(sessionsAfter.rows[0]?.count)).toBe(
+      Number(sessionsBefore.rows[0]?.count) + 1,
+    );
   });
 });
 
@@ -955,72 +1013,45 @@ describe("native session transport and revocation", () => {
 });
 
 describe("distributed device abuse controls", () => {
-  it("budgets code issuance and verification per caller and token polling per device", async () => {
+  it("returns retryable HTTP outcomes for code-issuance and token-polling abuse", async () => {
     const codeIp = randomIp();
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const result = await checkAuthRateLimit(env, "device-code", codeRequest(codeIp));
-      expect(result.status, `code attempt ${attempt}`).toBe("ok");
+      const issued = await issueDeviceCode({ ip: codeIp });
+      expect(issued.response.status, `code attempt ${attempt}`).toBe(200);
     }
-    const limitedCode = await checkAuthRateLimit(env, "device-code", codeRequest(codeIp));
-    expect(limitedCode.status).toBe("limited");
-    expect(limitedCode.retryAfterSeconds! > 0).toBe(true);
-    expect(limitedCode.retryAfterSeconds!).toBeLessThanOrEqual(600);
+    const limitedCode = await issueDeviceCode({ ip: codeIp });
+    expect(limitedCode.response.status).toBe(429);
+    const retryAfter = Number(limitedCode.response.headers.get("retry-after"));
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(600);
 
+    // Token polling uses its own distributed per-device budget: the first
+    // request is admitted and reports pending, while the immediate retry backs
+    // off with the RFC-style slow_down error and a Retry-After hint.
     const deviceIp = randomIp();
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      const result = await checkAuthRateLimit(env, "device-token", tokenRequest("device-a", deviceIp));
-      expect(result.status, `poll attempt ${attempt}`).toBe("ok");
-    }
-    const limitedDevice = await checkAuthRateLimit(
-      env,
-      "device-token",
-      tokenRequest("device-a", deviceIp),
-    );
-    expect(limitedDevice.status).toBe("limited");
-    expect(limitedDevice.retryAfterSeconds! > 0).toBe(true);
-    expect(limitedDevice.retryAfterSeconds!).toBeLessThanOrEqual(60);
+    const firstCode = await issueDeviceCode({ ip: deviceIp });
+    const firstPoll = await redeemDeviceCode(stringField(firstCode.body, "device_code"), {
+      ip: deviceIp,
+    });
+    expect(firstPoll.status).toBe(400);
+    expect(await deviceError(firstPoll)).toMatchObject({ error: "authorization_pending" });
+    const tooFast = await redeemDeviceCode(stringField(firstCode.body, "device_code"), {
+      ip: deviceIp,
+    });
+    expect(tooFast.status).toBe(400);
+    expect(await deviceError(tooFast)).toMatchObject({ error: "slow_down" });
+    expect(Number(tooFast.headers.get("retry-after"))).toBeGreaterThan(0);
 
-    const otherDevice = await checkAuthRateLimit(
-      env,
-      "device-token",
-      tokenRequest("device-b", deviceIp),
-    );
-    expect(otherDevice.status).toBe("ok");
+    // A different device request from the same caller is not blocked by the
+    // first request's per-device budget.
+    const secondCode = await issueDeviceCode({ ip: deviceIp });
+    const otherDevice = await redeemDeviceCode(stringField(secondCode.body, "device_code"), {
+      ip: deviceIp,
+    });
+    expect(otherDevice.status).toBe(400);
+    expect(await deviceError(otherDevice)).toMatchObject({ error: "authorization_pending" });
   });
 });
-
-/**
- * Builds a device-code issuance request for the direct limiter seam.
- *
- * @param ip - Caller IP.
- * @returns Incoming request.
- */
-function codeRequest(ip: string): Request {
-  return new Request(`${authOrigin}/api/auth/device/code`, {
-    body: JSON.stringify({ client_id: "melti-cli" }),
-    headers: { "CF-Connecting-IP": ip, "Content-Type": "application/json" },
-    method: "POST",
-  });
-}
-
-/**
- * Builds a device-token polling request for the direct limiter seam.
- *
- * @param deviceCode - Secret device code.
- * @param ip - Caller IP.
- * @returns Incoming request.
- */
-function tokenRequest(deviceCode: string, ip: string): Request {
-  return new Request(`${authOrigin}/api/auth/device/token`, {
-    body: JSON.stringify({
-      client_id: "melti-cli",
-      device_code: deviceCode,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    }),
-    headers: { "CF-Connecting-IP": ip, "Content-Type": "application/json" },
-    method: "POST",
-  });
-}
 
 describe("installation origin policy", () => {
   it("fails closed on an insecure installation origin outside local development", async () => {
@@ -1029,9 +1060,6 @@ describe("installation origin policy", () => {
         ...env,
         APP_URL: "http://insecure.example",
         ENVIRONMENT: "staging",
-        MAIL: { send: async () => ({ messageId: "unused" }) },
-        MAIL_FROM_ADDRESS: "no-reply@meltiply.test",
-        MAIL_FROM_NAME: "Meltiply Test",
       }),
     ).rejects.toThrow(/HTTPS/);
   });

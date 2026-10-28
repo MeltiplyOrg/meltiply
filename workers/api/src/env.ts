@@ -131,6 +131,75 @@ export function requiresEmailVerification(env: ApiWorkerEnv): boolean {
   return env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test";
 }
 
+/**
+ * Reports whether a hostname addresses the local machine.
+ *
+ * Loopback HTTP is the only non-HTTPS installation origin allowed, so local
+ * development and tooling can run without certificates while every deployed
+ * member-facing origin stays encrypted.
+ *
+ * @param hostname - URL hostname, including IPv6 brackets when present.
+ * @returns True for localhost, 127.0.0.1, or IPv6 loopback.
+ */
+function loopbackHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "[::1]"
+  );
+}
+
+/**
+ * Resolves and validates the installation application origin.
+ *
+ * The application origin is the single trusted origin for browser sign-in,
+ * device verification links, and auth callbacks. It must be a canonical
+ * absolute origin (no credentials, path, query, or fragment). HTTPS is
+ * mandatory outside local/test and non-loopback hosts; the loopback exception
+ * keeps local development usable without weakening deployed deployments.
+ *
+ * @param env - Worker environment bindings.
+ * @returns Canonical application origin without a trailing slash.
+ * @throws {Error} When APP_URL is missing, malformed, non-canonical, or insecure.
+ */
+export function applicationOrigin(env: ApiWorkerEnv): string {
+  const configured = env.APP_URL?.trim();
+  if (!configured) {
+    throw new Error("APP_URL is required for the installation application origin");
+  }
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    throw new Error("APP_URL must be an absolute installation origin");
+  }
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.origin !== configured.replace(/\/+$/, "")
+  ) {
+    throw new Error(
+      "APP_URL must be a canonical installation origin without credentials, path, query, or fragment",
+    );
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("APP_URL must use HTTP or HTTPS");
+  }
+  if (
+    url.protocol !== "https:" &&
+    !loopbackHostname(url.hostname) &&
+    env.ENVIRONMENT !== "local" &&
+    env.ENVIRONMENT !== "test"
+  ) {
+    throw new Error("APP_URL must use HTTPS outside loopback-only local development");
+  }
+  return url.origin;
+}
+
 // Check mail capability and normalized sender configuration, not mere presence.
 const stagingMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
 
@@ -215,6 +284,7 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
  */
 export function validateProductionBindings(env: ApiWorkerEnv): void {
   if (env.ENVIRONMENT !== "staging") return;
+  applicationOrigin(env);
   if (requiresEmailVerification(env)) {
     if (typeof env.MAIL?.send !== "function") {
       throw new Error("MAIL must be an Email Sending binding exposing a callable send method");

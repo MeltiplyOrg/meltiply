@@ -203,6 +203,12 @@ const readinessCacheTtlMilliseconds = 30_000;
  * @returns Action key consumed by `checkAuthRateLimit`.
  */
 function authRateLimitAction(path: string): string {
+  if (path === "/api/auth/device/code") return "device-code";
+  if (path === "/api/auth/device/token") return "device-token";
+  if (path === "/api/auth/device") return "device-verify";
+  if (path === "/api/auth/device/approve" || path === "/api/auth/device/deny") {
+    return "device-approval";
+  }
   if (path.startsWith("/api/auth/sign-in/")) return "sign-in";
   if (path.startsWith("/api/auth/two-factor/")) return "two-factor";
   if (path === "/api/auth/change-password") return "change-password";
@@ -351,7 +357,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   // point, and each instance fixes its exposed-header list up front.
   const corsMiddlewareFor = (allowCredentials: boolean) => {
     const exposedHeaders = allowCredentials
-      ? "X-Request-ID, ETag, Retry-After, Idempotency-Replayed, Set-Auth-JWT"
+      ? "X-Request-ID, ETag, Retry-After, Idempotency-Replayed, Set-Auth-JWT, Set-Auth-Token"
       : "X-Request-ID, ETag, Retry-After, Idempotency-Replayed";
     return async (c: Context<ApiWorkerEnvironment>, next: () => Promise<void>) => {
       const origin = c.req.header("Origin");
@@ -424,17 +430,39 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   // than failing every auth request.
   app.all("/api/auth/*", async (c) => {
     if (authRateLimitAvailable(c.env)) {
-      const result = await authRateLimiter(c.env, authRateLimitAction(c.req.path), c.req.raw);
+      const action = authRateLimitAction(c.req.path);
+      const result = await authRateLimiter(c.env, action, c.req.raw);
       if (result.status === "limited") {
+        const retryAfter =
+          result.retryAfterSeconds !== undefined
+            ? { "Retry-After": String(result.retryAfterSeconds) }
+            : undefined;
+        if (action === "device-token") {
+          // Preserve the RFC 8628 polling contract: token polling back-off is
+          // communicated as the top-level slow_down error, exactly like the
+          // plugin's own interval enforcement, with the distributed budget's
+          // delay in Retry-After. The generic API error envelope would break
+          // separately released CLI clients.
+          const headers: Record<string, string> = {
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+          };
+          if (retryAfter) headers["Retry-After"] = retryAfter["Retry-After"];
+          return Response.json(
+            {
+              error: "slow_down",
+              error_description: "Polling too frequently. Wait before retrying.",
+            },
+            { headers, status: 400 },
+          );
+        }
         return errorResponse(
           c.get("requestId"),
           429,
           "rate_limited",
           "Too many authentication attempts. Retry later.",
           [],
-          result.retryAfterSeconds !== undefined
-            ? { "Retry-After": String(result.retryAfterSeconds) }
-            : undefined,
+          retryAfter,
         );
       }
     }

@@ -150,7 +150,7 @@ function stagingEnv(mail: RecordingMail) {
     ALLOWED_ORIGINS: "http://app.test",
     BETTER_AUTH_SECRET: authSecret,
     AUTH_SETUP_SECRET: setupSecret,
-    APP_URL: "http://auth.test",
+    APP_URL: "https://auth.test",
     DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
     ENVIRONMENT: "staging",
     MAIL: mail.binding,
@@ -175,6 +175,8 @@ function systemEnv() {
 }
 
 const baseURL = "http://auth.test";
+/** Staging fixtures use HTTPS so the installation-origin guard stays exercised. */
+const stagingOrigin = "https://auth.test";
 
 /** Sends a JSON POST to a Better Auth endpoint path under `/api/auth`. */
 function authPost(
@@ -350,7 +352,7 @@ describe("betterAuthFor staging policy", () => {
     const env = {
       ALLOWED_ORIGINS: "http://app.test",
       BETTER_AUTH_SECRET: authSecret,
-      APP_URL: "http://auth.test",
+      APP_URL: "https://auth.test",
       DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
       ENVIRONMENT: "staging",
       VERSION: "1.0.0-target.0",
@@ -660,7 +662,10 @@ describe("session cookie, bearer JWT, and sign-out", () => {
       false,
       ["verify"],
     );
-    const verifier = createJwtVerifier({ audience: baseURL, issuer: baseURL }, async () => key);
+    const verifier = createJwtVerifier(
+      { audience: stagingOrigin, issuer: stagingOrigin },
+      async () => key,
+    );
     expect(typeof (await verifier(jwt)).sessionId).toBe("string");
     let relays = 0;
     const app = createApiApp({

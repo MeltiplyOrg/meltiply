@@ -1,4 +1,10 @@
 import { createBetterAuth, type BetterAuthInstance } from "@meltiply/auth";
+import {
+  DEVICE_CLIENT_ID,
+  DEVICE_CODE_EXPIRES_IN,
+  DEVICE_POLL_INTERVAL,
+  deviceVerificationUri,
+} from "./device-authorization";
 import { requiresEmailVerification, type ApiWorkerEnv } from "./env";
 import { sha256Hex } from "./crypto";
 import { allowedOriginsFor } from "./verifier-cache";
@@ -45,10 +51,15 @@ interface RateLimitHitRow extends Record<string, unknown> {
  * by default, while local/test allow unverified sign-in. Required verification
  * fails closed when the mail binding or sender is unusable.
  *
+ * The installation application origin (`APP_URL`) is mandatory and validated
+ * here because device-authorization verification links are absolute and pinned
+ * to it; the API never derives consent URLs from a forwarded request host.
+ *
  * @param env - Worker environment bindings containing database and auth configuration.
  * @returns Configured Better Auth instance.
- * @throws {Error} When the secret is missing in a deployed environment or
- *   required email verification lacks a usable mail binding and sender.
+ * @throws {Error} When the secret or application origin is missing/insecure in
+ *   a deployed environment, or required email verification lacks a usable mail
+ *   binding and sender.
  */
 export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstance> {
   const isLocalOrTest = env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test";
@@ -61,6 +72,10 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     throw new Error("BETTER_AUTH_SECRET must be configured in staging and production");
   }
   const baseURL = env.APP_URL?.trim() || undefined;
+  // Validate the installation origin and pin the consent URL to it. This
+  // throws before any auth instance exists when APP_URL is missing, insecure
+  // outside local development, or not a canonical origin.
+  const deviceVerification = deviceVerificationUri(env);
   const origins = `${baseURL ?? ""}\n${env.ALLOWED_ORIGINS?.trim() || ""}`;
   const requireEmailVerification = requiresEmailVerification(env);
   const senderAddress = mailSenderConfiguration(env);
@@ -100,6 +115,12 @@ export async function betterAuthFor(env: ApiWorkerEnv): Promise<BetterAuthInstan
     await createBetterAuth({
       baseURL,
       database,
+      deviceAuthorization: {
+        clientId: DEVICE_CLIENT_ID,
+        expiresIn: DEVICE_CODE_EXPIRES_IN,
+        interval: DEVICE_POLL_INTERVAL,
+        verificationUri: deviceVerification,
+      },
       isAccountActive: async (userId: string) => {
         const result = await database.query<{ suspended_at: Date | string | null }>(
           `SELECT suspended_at FROM users WHERE auth_user_id = $1 LIMIT 1`,
@@ -162,7 +183,28 @@ const AUTH_RATE_LIMITS: Record<string, AuthRateLimitRule> = {
   "invitation-accept": { maxAttempts: 10, windowSeconds: 600 },
   "two-factor": { maxAttempts: 10, windowSeconds: 600 },
   "change-password": { maxAttempts: 10, windowSeconds: 600 },
+  // Device-flow abuse controls. Issuance and consent actions are per caller;
+  // token polling is additionally budgeted per device code so the advertised
+  // five-second interval is enforced across Worker isolates without relying on
+  // isolate-local state.
+  "device-code": { maxAttempts: 20, windowSeconds: 600 },
+  "device-verify": { maxAttempts: 30, windowSeconds: 600 },
+  "device-approval": { maxAttempts: 20, windowSeconds: 600 },
+  "device-token": { maxAttempts: 1, windowSeconds: 5 },
 };
+
+/**
+ * Per-subject rate-limit budget. Token polling uses a tight per-device window
+ * while retaining a looser per-caller ceiling, so one installation cannot be
+ * flooded by many devices behind the same address.
+ */
+interface AuthRateLimitSubject {
+  rule: AuthRateLimitRule;
+  subject: string;
+}
+
+/** Token polling callers may legitimately poll once per five seconds per device. */
+const DEVICE_TOKEN_IP_RULE: AuthRateLimitRule = { maxAttempts: 120, windowSeconds: 60 };
 
 const EMAIL_RATE_LIMIT_ACTIONS = new Set([
   "request-password-reset",
@@ -226,16 +268,28 @@ function clientIp(request: Request): string | undefined {
  * @returns Lowercased trimmed email, or undefined when absent or unparseable.
  */
 async function requestEmail(request: Request): Promise<string | undefined> {
+  const email = await requestStringField(request, "email");
+  return email?.toLowerCase();
+}
+
+/**
+ * Reads a non-empty string field from a cloned JSON auth request body without
+ * consuming it. Used to hash credential-bearing subjects before rate limiting,
+ * so device codes and emails never reach the limit store in plaintext.
+ *
+ * @param request - Incoming auth request.
+ * @param field - Top-level body field to read.
+ * @returns Trimmed value, or undefined when absent or not a non-empty string.
+ */
+async function requestStringField(request: Request, field: string): Promise<string | undefined> {
   try {
     const body: unknown = await request.clone().json();
-    if (body && typeof body === "object" && "email" in body) {
-      const email = body.email;
-      if (typeof email === "string" && email.trim()) {
-        return email.trim().toLowerCase();
-      }
+    if (body && typeof body === "object" && field in body) {
+      const value = (body as Record<string, unknown>)[field];
+      if (typeof value === "string" && value.trim()) return value.trim();
     }
   } catch {
-    // Non-JSON or missing bodies simply have no email identity.
+    // Non-JSON or missing bodies simply have no usable identity.
   }
   return undefined;
 }
@@ -244,10 +298,13 @@ async function requestEmail(request: Request): Promise<string | undefined> {
  * Enforces the database-backed fixed-window rate limit for one Better Auth request.
  *
  * Records attempts through `public.auth_rate_limit_hit()` keyed by action plus a
- * SHA-256 subject (`email:<hash>` for credential endpoints and always `ip:<hash>`),
- * so limits are distributed across isolates and cannot be bypassed by rotating
- * either identity dimension. Fails closed: a rate-limit store error propagates
- * as a 500 rather than allowing unbounded abuse.
+ * SHA-256 subject (`email:<hash>` for credential endpoints, `device:<hash>` for
+ * token polling, and always `ip:<hash>`), so limits are distributed across
+ * isolates and cannot be bypassed by rotating any identity dimension. Token
+ * polling additionally applies a looser per-caller ceiling so a single device
+ * cannot consume the installation's whole address budget. Fails closed: a
+ * rate-limit store error propagates as a 500 rather than allowing unbounded
+ * abuse.
  *
  * @param env - Worker environment bindings.
  * @param action - Rate-limit action key (e.g. `"sign-in"`, `"generic"`).
@@ -260,17 +317,26 @@ export async function checkAuthRateLimit(
   request: Request,
 ): Promise<AuthRateLimitResult> {
   const rule = AUTH_RATE_LIMITS[action] ?? AUTH_RATE_LIMITS.generic!;
-  const subjects: string[] = [];
+  const subjects: AuthRateLimitSubject[] = [];
   if (EMAIL_RATE_LIMIT_ACTIONS.has(action)) {
     const email = await requestEmail(request);
     if (email) {
-      subjects.push(`email:${await sha256Hex(email)}`);
+      subjects.push({ rule, subject: `email:${await sha256Hex(email)}` });
+    }
+  }
+  if (action === "device-token") {
+    const deviceCode = await requestStringField(request, "device_code");
+    if (deviceCode) {
+      subjects.push({ rule, subject: `device:${await sha256Hex(deviceCode)}` });
     }
   }
   const ip = clientIp(request);
-  subjects.push(`ip:${await sha256Hex(ip ?? "unknown")}`);
-  for (const subject of subjects) {
-    const retryAfterSeconds = await authRateLimitHit(env, action, subject, rule);
+  subjects.push({
+    rule: action === "device-token" ? DEVICE_TOKEN_IP_RULE : rule,
+    subject: `ip:${await sha256Hex(ip ?? "unknown")}`,
+  });
+  for (const { rule: subjectRule, subject } of subjects) {
+    const retryAfterSeconds = await authRateLimitHit(env, action, subject, subjectRule);
     if (retryAfterSeconds !== null) {
       return { retryAfterSeconds, status: "limited" };
     }

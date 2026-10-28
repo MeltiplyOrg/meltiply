@@ -58,6 +58,25 @@ interface ConsentError {
 }
 
 /**
+ * Builds the single recovery shown when the plugin already bound the request
+ * to another account. Verification and decision failures share the copy and
+ * the sign-out action so the remedy cannot drift between paths.
+ *
+ * @param t - Translation function from the active i18n context.
+ * @returns Ownership error with the account-switch action.
+ */
+function ownershipConsentError(
+  t: (message: string, values?: Record<string, number | string>) => string,
+): ConsentError {
+  return {
+    action: "ownership",
+    message: t(
+      "This request belongs to a different account. Sign out and sign in with the account that started it.",
+    ),
+  };
+}
+
+/**
  * Maps one device HTTP failure to localized recovery copy. Plugin codes drive
  * expiry, session, and ownership; transport failures are distinguished from
  * server rejections so the message matches what actually happened.
@@ -89,12 +108,7 @@ function consentErrorFor(
       return { action: "session", message: t("Your session ended. Sign in again to continue.") };
     }
     if (cause.code === "access_denied") {
-      return {
-        action: "ownership",
-        message: t(
-          "This request belongs to a different account. Sign out and sign in with the account that started it.",
-        ),
-      };
+      return ownershipConsentError(t);
     }
     if (cause.code === "invalid_request" || cause.code === "invalid_grant") {
       return {
@@ -116,7 +130,8 @@ function consentErrorFor(
 /**
  * Builds the same-origin return path for the existing sign-in flow. Only the
  * device route and a normalized code are ever encoded, so the redirect cannot
- * become an open redirect and the pending request survives email and 2FA.
+ * become an open redirect and the pending request survives the email/password
+ * and two-factor sign-in steps.
  *
  * @param code - Normalized code retained across sign-in, or an empty string.
  * @returns Device path with the code when one is present.
@@ -224,12 +239,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
         }
         if (!review.client_id) {
           setPhase({ kind: "enter" });
-          setError({
-            action: "ownership",
-            message: t(
-              "This request belongs to a different account. Sign out and sign in with the account that started it.",
-            ),
-          });
+          setError(ownershipConsentError(t));
           return;
         }
         setPhase({ kind: "review", review });
@@ -292,12 +302,7 @@ function DeviceConsent({ initialCode }: { initialCode: string }): React.ReactEle
           }
           if (!latest.client_id) {
             setPhase({ kind: "enter" });
-            setError({
-              action: "ownership",
-              message: t(
-                "This request belongs to a different account. Sign out and sign in with the account that started it.",
-              ),
-            });
+            setError(ownershipConsentError(t));
             return;
           }
         } catch {

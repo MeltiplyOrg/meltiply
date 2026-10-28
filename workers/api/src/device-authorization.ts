@@ -344,6 +344,7 @@ export async function deviceTokenRequest(
        LIMIT 1`,
       [deviceCode],
     );
+    const grant = result.rows[0];
     if (grant?.status === "approved") {
       if (!grant.claim_session_id || !grant.user_id || !grant.claim_session_live) {
         // Persist terminal denial, then let the plugin report and consume its

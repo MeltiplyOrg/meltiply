@@ -610,7 +610,7 @@
   "Create profile": "Create profile",
   "Delete Brand Profile": "Delete Brand Profile",
   "Delete profile": "Delete profile",
-  "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.",
+  "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days. You cannot restore it in this app.": "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days. You cannot restore it in this app.",
   "Edit profile": "Edit profile",
   "Profile name": "Profile name",
   "Update Brand Profile": "Update Brand Profile",

@@ -11,7 +11,6 @@ export const referenceFreshnessMs = 5 * 60_000;
 export const privateCacheRetentionMs = 30 * 60_000;
 
 const activeAssetStatuses = new Set(["pending_upload", "uploading", "processing", "deleting"]);
-const activeReplyStatuses = new Set(["queued", "processing"]);
 
 /**
  * Determines whether a failed query should be retried by TanStack Query.
@@ -61,9 +60,6 @@ function containsActiveState(value: unknown): boolean {
     if (activeAssetStatuses.has(record.status) || isInFlightPublicationStatus(record.status)) {
       return true;
     }
-  }
-  if (typeof record.reply_status === "string" && activeReplyStatuses.has(record.reply_status)) {
-    return true;
   }
   return Object.values(record).some(containsActiveState);
 }

@@ -110,7 +110,6 @@ export const queryKeys = {
   queues: (brandProfileId?: string) =>
     brandProfileId === undefined ? (["queues"] as const) : (["queues", brandProfileId] as const),
   brandProfiles: () => ["brand-profiles"] as const,
-  deletedBrandProfiles: () => ["brand-profiles", "deleted"] as const,
   asset: (id: string) => ["assets", id] as const,
   assetPreview: (id: string) => ["assets", id, "preview-url"] as const,
   platforms: (params?: PlatformQueryParams) =>
@@ -169,10 +168,10 @@ function runApiQuery<A>(
 }
 
 /**
- * Returns list-query prefixes whose data becomes visible again when a Brand Profile restores.
+ * Returns resource prefixes affected when a Brand Profile is deleted.
  *
- * Profile deletion and restoration both change the same profile-scoped resources, so callers
- * invalidate these prefixes alongside lifecycle lists to prevent cached empty views.
+ * Deletion hides owned content and cancels scheduled work, so cached Posts,
+ * attachments, Channels, outcomes, calendars, Queues, and Analytics must refresh.
  */
 function brandProfileResourceInvalidations(): QueryKey[] {
   return [
@@ -229,12 +228,6 @@ export const mutationInvalidations = {
   updateBrandProfile: () => [queryKeys.brandProfiles()],
   deleteBrandProfile: () => [
     queryKeys.brandProfiles(),
-    queryKeys.deletedBrandProfiles(),
-    ...brandProfileResourceInvalidations(),
-  ],
-  restoreBrandProfile: () => [
-    queryKeys.brandProfiles(),
-    queryKeys.deletedBrandProfiles(),
     ...brandProfileResourceInvalidations(),
   ],
   workspaceSettings: () => [

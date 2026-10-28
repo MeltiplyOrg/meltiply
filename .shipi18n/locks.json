@@ -2313,10 +2313,6 @@
       "sourceHash": "47311af432a79c40",
       "translationHash": "8023d1c480c80a24"
     },
-    "de::ui::Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": {
-      "sourceHash": "99052ffb383f09cd",
-      "translationHash": "9957e0423e919f98"
-    },
     "de::ui::Edit profile": {
       "sourceHash": "15c4aa13037eaf52",
       "translationHash": "4f2308fdddb26205"
@@ -4740,10 +4736,6 @@
     "es::ui::Delete profile": {
       "sourceHash": "47311af432a79c40",
       "translationHash": "52af709e3f5c6ec5"
-    },
-    "es::ui::Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": {
-      "sourceHash": "99052ffb383f09cd",
-      "translationHash": "92e32578253bcfa2"
     },
     "es::ui::Edit profile": {
       "sourceHash": "15c4aa13037eaf52",
@@ -7169,10 +7161,6 @@
       "sourceHash": "47311af432a79c40",
       "translationHash": "99d8f93eecb1f2c6"
     },
-    "fr::ui::Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": {
-      "sourceHash": "99052ffb383f09cd",
-      "translationHash": "ec609bacadba1276"
-    },
     "fr::ui::Edit profile": {
       "sourceHash": "15c4aa13037eaf52",
       "translationHash": "2bfb8d8e9bc19375"
@@ -9596,10 +9584,6 @@
     "it::ui::Delete profile": {
       "sourceHash": "47311af432a79c40",
       "translationHash": "7d088b07bb62cb5d"
-    },
-    "it::ui::Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": {
-      "sourceHash": "99052ffb383f09cd",
-      "translationHash": "cf2bdfc92f1ab80f"
     },
     "it::ui::Edit profile": {
       "sourceHash": "15c4aa13037eaf52",
@@ -12025,10 +12009,6 @@
       "sourceHash": "47311af432a79c40",
       "translationHash": "b89ddb23754d68f1"
     },
-    "pt-BR::ui::Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": {
-      "sourceHash": "99052ffb383f09cd",
-      "translationHash": "cd4d60a5b4a44d93"
-    },
     "pt-BR::ui::Edit profile": {
       "sourceHash": "15c4aa13037eaf52",
       "translationHash": "c10011b93f9c07a4"
@@ -14453,10 +14433,6 @@
       "sourceHash": "47311af432a79c40",
       "translationHash": "66974f5213ad7eed"
     },
-    "vi::ui::Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": {
-      "sourceHash": "99052ffb383f09cd",
-      "translationHash": "4b40f18143f870c3"
-    },
     "vi::ui::Edit profile": {
       "sourceHash": "15c4aa13037eaf52",
       "translationHash": "874fd197f3f0eb09"
@@ -16880,10 +16856,6 @@
     "zh::ui::Delete profile": {
       "sourceHash": "47311af432a79c40",
       "translationHash": "62624276f0ab6b92"
-    },
-    "zh::ui::Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": {
-      "sourceHash": "99052ffb383f09cd",
-      "translationHash": "05310f342dd854b6"
     },
     "zh::ui::Edit profile": {
       "sourceHash": "15c4aa13037eaf52",

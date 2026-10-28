@@ -462,6 +462,7 @@ test("returns a signed-out member to the pending request and requires explicit a
 
   // CLI logout revokes only the CLI session; the approving browser remains.
   const signOut = await request.post("/api/auth/sign-out", {
+    data: {},
     headers: authHeaders(ip, { Authorization: `Bearer ${accessToken}` }),
   });
   expect(signOut.status(), await signOut.text()).toBe(200);

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { AppAuthProvider, useMeltiplyAuth } from "@/components/auth/auth-provider";
 import { WorkspaceProvider } from "@/context/workspace.context";
 import { createAssetUpload, type AssetUploadTask } from "@/lib/upload";
-import type { Asset, BrandProfile, PlatformAccount, Post } from "@/types";
+import type { Asset, BrandProfile, PlatformAccount, Post, TikTokPublishingRequirements } from "@/types";
 
 import { Composer, type ComposerProps } from "./composer";
 import { authClient } from "@/lib/auth-client";
@@ -66,6 +66,8 @@ function renderComposer(
     brandProfiles?: BrandProfile[];
     /** Composer-initiated workspace navigation, e.g. Manage Queues. */
     onNavigate?: ComposerProps["onNavigate"];
+    /** Creator restrictions loaded for the TikTok destination, or unavailable. */
+    requirements?: TikTokPublishingRequirements | null;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -77,6 +79,15 @@ function renderComposer(
   queryClient.setQueryDefaults(queryKeys.platformCapabilities(), { staleTime: Infinity });
   queryClient.setQueryData(queryKeys.platforms(), options.accounts ?? []);
   queryClient.setQueryData(queryKeys.platformCapabilities(), options.capabilities ?? []);
+  for (const account of options.accounts ?? []) {
+    queryClient.setQueryDefaults(queryKeys.platformPublishingRequirements(account.id), {
+      staleTime: Infinity,
+    });
+    queryClient.setQueryData(
+      queryKeys.platformPublishingRequirements(account.id),
+      options.requirements ?? null,
+    );
+  }
   if (options.brandProfiles) {
     queryClient.setQueryDefaults(queryKeys.brandProfiles(), { staleTime: Infinity });
     queryClient.setQueryData(queryKeys.brandProfiles(), options.brandProfiles);
@@ -493,5 +504,67 @@ describe("Composer leave guard", () => {
 
     expect(onNavigate).toHaveBeenCalledWith("queues", undefined);
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("Composer provider publication choices", () => {
+  it("restores YouTube visibility and audience from the saved target", async () => {
+    const account = {
+      ...instagramAccount,
+      platform: "youtube" as const,
+      display_name: "Video destination",
+    };
+    renderComposer({
+      accounts: [account],
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      post: {
+        ...hydratedPost,
+        brand_profile_id: account.brand_profile_id,
+        targets: [{
+          platform_account_id: account.id,
+          attachment_ids: null,
+          title_override: "A saved video",
+          description_override: null,
+          hashtags: [],
+          provider_options: { youtube: { made_for_kids: true, privacy_status: "unlisted" } },
+        }],
+      },
+    });
+    expect(await screen.findByRole("combobox", { name: "Visibility" })).toHaveTextContent("Unlisted");
+    expect(screen.getByRole("combobox", { name: "Made for kids" })).toHaveTextContent("Yes");
+  });
+
+  it("requires TikTok interaction opt-in instead of granting it implicitly", async () => {
+    const account = { ...instagramAccount, platform: "tiktok" as const };
+    renderComposer({
+      accounts: [account],
+      brandProfiles: composerProfiles,
+      requirements: {
+        platform: "tiktok",
+        creator_display_name: "Creator",
+        creator_username: "creator",
+        creator_avatar_url: null,
+        comment_allowed: true,
+        duet_allowed: false,
+        stitch_allowed: true,
+        max_video_duration_sec: 60,
+        privacy_levels: ["SELF_ONLY"],
+      },
+    });
+    await fireEvent.click(await screen.findByRole("button", { name: "switch-profile" }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Comments" })).not.toBeChecked());
+    expect(screen.getByRole("switch", { name: "Duet" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Duet" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Stitch" })).not.toBeChecked();
+  });
+
+  it("does not offer invented TikTok privacy choices when creator information is unavailable", async () => {
+    renderComposer({
+      accounts: [{ ...instagramAccount, platform: "tiktok" }],
+      brandProfiles: composerProfiles,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "switch-profile" }));
+    expect(await screen.findByRole("combobox", { name: "Privacy Level" })).toBeDisabled();
   });
 });

@@ -216,7 +216,36 @@ export function createPreviewHandlers(options: PreviewOptions = {}) {
         },
       ),
     );
+  // The device-authorization endpoints are plugin-owned rather than OpenAPI
+  // operations. These synthetic handlers let the Routes tab open the real
+  // consent page in the isolated preview without a backend.
+  const previewDeviceHandlers = [
+    http.post("/api/auth/device/code", ({ request }) => {
+      const origin = new URL(request.url).origin;
+      const userCode = "PREVIEW1";
+      return HttpResponse.json({
+        device_code: "preview-device-code",
+        expires_in: 600,
+        interval: 5,
+        user_code: userCode,
+        verification_uri: `${origin}/device`,
+        verification_uri_complete: `${origin}/device?user_code=${userCode}`,
+      });
+    }),
+    http.get("/api/auth/device", ({ request }) => {
+      const userCode = new URL(request.url).searchParams.get("user_code") ?? "PREVIEW1";
+      return HttpResponse.json({
+        client_id: "melti-cli",
+        scope: "",
+        status: "pending",
+        user_code: userCode,
+      });
+    }),
+    http.post("/api/auth/device/approve", () => HttpResponse.json({ success: true })),
+    http.post("/api/auth/device/deny", () => HttpResponse.json({ success: true })),
+  ];
   return [
+    ...previewDeviceHandlers,
     ...generated,
     uploads.blobHandler,
     http.post("/__frontend-telemetry", () => new HttpResponse(null, { status: 204 })),

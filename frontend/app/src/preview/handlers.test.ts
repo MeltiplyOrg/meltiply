@@ -88,6 +88,28 @@ describe("contract-driven UI preview HTTP boundary", () => {
     );
   });
 
+  it("serves the device consent preview without a backend", async () => {
+    const issued = await fetch(`${origin}/api/auth/device/code`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "melti-cli" }),
+    }).then((response) => response.json());
+    expect(issued).toMatchObject({
+      expires_in: 600,
+      interval: 5,
+      user_code: "PREVIEW1",
+      verification_uri: `${origin}/device`,
+      verification_uri_complete: `${origin}/device?user_code=PREVIEW1`,
+    });
+    expect(
+      await fetch(`${origin}/api/auth/device?user_code=PREVIEW1`).then((response) =>
+        response.json(),
+      ),
+    ).toMatchObject({ client_id: "melti-cli", status: "pending", user_code: "PREVIEW1" });
+    expect((await fetch(`${origin}/api/auth/device/approve`, { method: "POST" })).status).toBe(200);
+    expect((await fetch(`${origin}/api/auth/device/deny`, { method: "POST" })).status).toBe(200);
+  });
+
   it("rejects requests outside the contract rather than contacting an upstream", async () => {
     const response = await fetch(`${origin}/api/v1/unhandled`, { method: "POST" });
     expect(response.status).toBe(501);

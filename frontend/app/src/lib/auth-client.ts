@@ -104,7 +104,7 @@ async function getSession(): Promise<AuthSessionResult | null> {
  * @returns Raw HTTP response for device-protocol validation.
  */
 function requestDeviceAuthorization(
-  endpoint: "device" | "device/approve" | "device/deny",
+  endpoint: "device" | "device/approve" | "device/code" | "device/deny",
   init: RequestInit,
   query?: URLSearchParams,
 ): Promise<Response> {

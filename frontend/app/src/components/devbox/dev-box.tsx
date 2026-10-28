@@ -48,6 +48,7 @@ import { stopRenderScanner } from "./render-scanner";
 import { clearViewportFrame } from "./viewport-frame";
 import { SkeletonsTab } from "./skeletons-tab";
 import { TraceTab } from "./trace-tab";
+import { RoutesTab } from "./routes-tab";
 
 const LazyAgentation = lazy(async () => {
   const { Agentation } = await import("agentation");
@@ -110,6 +111,7 @@ const tabLabels: Record<DevBoxTab, string> = {
   benchmark: "Benchmark",
   trace: "Trace",
   helpers: "Helpers",
+  routes: "Routes",
   preview: "Preview",
 };
 
@@ -490,6 +492,12 @@ export function DevBox({
                 className="mt-0 max-h-[420px] overflow-y-auto p-3 focus-visible:ring-0"
               >
                 <HelpersTab />
+              </TabsContent>
+              <TabsContent
+                value="routes"
+                className="mt-0 max-h-[420px] overflow-y-auto p-3 focus-visible:ring-0"
+              >
+                <RoutesTab />
               </TabsContent>
               {previewControls && (
                 <TabsContent

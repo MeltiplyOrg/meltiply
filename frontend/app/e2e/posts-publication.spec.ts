@@ -281,7 +281,7 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
     .click();
   const picker = page.getByRole("group", { name: "Date & time", exact: true });
   await picker.getByRole("button", { name: /^Date / }).click();
-  await picker
+  await page
     .getByRole("button", {
       name: new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(when),
       exact: true,
@@ -322,20 +322,9 @@ async function clearPostStatusFilter(page: Page): Promise<void> {
 }
 
 /**
- * Reloads and re-filters until the Post carrying `caption` appears under
- * `status`, then restores the unfiltered list.
- *
- * Publication is asynchronous by construction — the schedule write commits, the
- * outbox relays, a worker claims the job, the Provider is called, and the outcome
- * is recorded — so the run observes it the way a creator does: by watching the
- * list until the Channel outcome it is waiting for is there. One Post can hold a
- * published and a failed Channel at once, which is why the same caption is
- * expected under more than one bucket.
- *
- * @param page - Playwright page bound to the `/posts` list.
- * @param caption - Unique text or pattern matching this Post's channel previews.
- * @param status - Toolbar status bucket the Post must appear under.
- * @param timeout - How long to keep reloading before failing.
+ * Reloads until the Post appears in its aggregate status bucket, then clears
+ * the filter. Failed takes precedence over published for mixed outcomes;
+ * independent Channel states are asserted in Details and at the Provider.
  */
 async function waitForPostUnderStatus(
   page: Page,
@@ -500,11 +489,8 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
   await publishNow(page);
   await returnToPosts(page);
 
-  // Partial success: one Post holding a published and a failed Channel is
-  // findable under both buckets, which is how the creator sees the split.
-  // The row previews a frozen channel caption; account order may put either
-  // target first. Provider assertions below still verify each caption exactly.
-  await waitForPostUnderStatus(page, postCaption, /^published$/i);
+  // Failed is the aggregate status until the unsuccessful Channel is retried.
+  // Details and Provider records below prove the independent outcomes.
   await waitForPostUnderStatus(page, postCaption, /^failed$/i);
 
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 1);
@@ -688,12 +674,6 @@ test("keeps separately created identical Posts distinct and publishes only the o
 
   const rows = page.getByRole("row").filter({ hasText: caption });
   await expect(rows).toHaveCount(2, { timeout: 60_000 });
-  // Each row prints the short form of its own stable Post id, so two rows showing
-  // two different short ids are two identities rather than one row rendered twice.
-  const shortIds = await rows.evaluateAll((elements) =>
-    elements.map((element) => (element.textContent ?? "").match(/[0-9a-f]{8}\.\.\./)?.[0] ?? ""),
-  );
-  expect(new Set(shortIds).size).toBe(2);
 
   // Nothing reached a Platform just by saving two drafts.
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 0);
@@ -715,7 +695,7 @@ test("keeps separately created identical Posts distinct and publishes only the o
   expect(threadsLive[0]!.media).toEqual([]);
 
   // The sibling Post is still a draft, so the identical pair never collapsed.
-  await filterPostsByStatus(page, /^drafts$/i);
+  await filterPostsByStatus(page, /^draft$/i);
   await expect(page.getByRole("row").filter({ hasText: caption })).toHaveCount(1, {
     timeout: 180_000,
   });

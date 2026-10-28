@@ -16,6 +16,7 @@ on:
           - object-storage
           - publishing-queues
           - publishing-flow
+          - publishing-browser
           - portable-caching
           - portable-caching-smoke
           - performance-focused
@@ -56,24 +57,36 @@ jobs:
         working-directory: frontend/app
         run: npx --yes react-doctor@latest --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
       - name: Prepare publishing acceptance
-        if: inputs.lane == 'publishing-flow'
+        if: inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser'
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
-          bun run cloudflare:check
+          if [ "${{ inputs.lane }}" = publishing-flow ]; then bun run cloudflare:check; fi
           bun run docs:links
       - name: Exercise full publishing lifecycle
-        if: inputs.lane == 'publishing-flow'
+        if: inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser'
         env:
           MELTIPLY_E2E_ACCEPTANCE: "1"
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
         run: |
           bash scripts/cloudflare-local/database.sh reset
-          bun run --cwd frontend/app test:e2e e2e/posts-publication.spec.ts --project publication --trace on
+          bun run --cwd frontend/app test:e2e e2e/posts-publication.spec.ts --project publication --trace on --retries 0
+      - name: Exercise publishing queues
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+        env:
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: |
           bash scripts/cloudflare-local/database.sh reset
-          bun run --cwd frontend/app test:e2e e2e/publishing-queues.spec.ts --project queues --trace on
+          bun run --cwd frontend/app test:e2e e2e/publishing-queues.spec.ts --project queues --trace on --retries 0
+      - name: Exercise multi-profile delivery recovery
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+        env:
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: |
           bash scripts/cloudflare-local/database.sh reset
-          bun run --cwd frontend/app test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies and retries only unfinished publishing" --trace on
+          bun run --cwd frontend/app test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies and retries only unfinished publishing" --trace on --retries 0
       - name: Exercise native processor restart and replay
         if: inputs.lane == 'performance-media'
         run: bun run --filter @meltiply/automation-worker smoke:processor

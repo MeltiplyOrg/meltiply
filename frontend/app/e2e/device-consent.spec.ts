@@ -34,6 +34,22 @@ const gammaAuthUserId = "auth_user_local_gamma";
 test.use({ screenshot: "off", trace: "off" });
 test.setTimeout(180_000);
 
+// The fixed cookie notice overlaps the consent actions until a choice is
+// saved. Grant the optional purpose before every device journey, matching the
+// shared workspace-session fixture, so pointer interactions target the page.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    const consent = encodeURIComponent(
+      JSON.stringify({
+        expires: Date.now() + 180 * 24 * 60 * 60 * 1_000,
+        functional: true,
+        v: 1,
+      }),
+    );
+    document.cookie = `meltiply-consent=${consent}; Path=/; Max-Age=15552000; SameSite=Lax`;
+  });
+});
+
 /** Unique documentation-range client IP per journey, isolating auth budgets. */
 function clientIp(): string {
   return `2001:db8:${randomUUID().slice(0, 4)}::${Math.floor(Math.random() * 0xffff)}`;

@@ -610,7 +610,7 @@
   "Create profile": "Crea profilo",
   "Delete Brand Profile": "Elimina profilo di marca",
   "Delete profile": "Elimina profilo",
-  "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": "L'eliminazione di questo profilo di marca annulla le sue pubblicazioni programmate, scollega i suoi canali e blocca nuovi lavori. Il profilo viene eliminato definitivamente dopo 7 giorni; puoi ripristinarlo fino ad allora.",
+  "Deleting this Brand Profile permanently deletes its posts and asset records and disconnects its channels. Scheduled and queued work is cancelled, but attempts already running on a platform may still publish. This cannot be undone.": "L'eliminazione di questo profilo di marca cancella definitivamente i suoi post e i record dei contenuti multimediali e scollega i suoi canali. Le attività programmate e in coda vengono annullate, ma i tentativi già in corso su una piattaforma possono ancora pubblicare. Questa azione non può essere annullata.",
   "Edit profile": "Modifica profilo",
   "Profile name": "Nome profilo",
   "Update Brand Profile": "Aggiorna profilo di marca",

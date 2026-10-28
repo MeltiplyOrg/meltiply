@@ -610,7 +610,7 @@
   "Create profile": "创建资料",
   "Delete Brand Profile": "删除品牌资料",
   "Delete profile": "删除资料",
-  "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": "删除此品牌资料将取消其已安排的帖子，断开其频道连接，并阻止新工作。该资料将在 7 天后被永久清除；在此期间你可以恢复它。",
+  "Deleting this Brand Profile permanently deletes its posts and asset records and disconnects its channels. Scheduled and queued work is cancelled, but attempts already running on a platform may still publish. This cannot be undone.": "删除此品牌资料将永久删除其帖子和媒体资源记录，并断开其频道连接。已安排和排队的工作将被取消，但已在平台上执行的发布尝试仍可能完成发布。此操作无法撤销。",
   "Edit profile": "编辑资料",
   "Profile name": "资料名称",
   "Update Brand Profile": "更新品牌资料",

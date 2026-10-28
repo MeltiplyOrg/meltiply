@@ -110,7 +110,6 @@ export const queryKeys = {
   queues: (brandProfileId?: string) =>
     brandProfileId === undefined ? (["queues"] as const) : (["queues", brandProfileId] as const),
   brandProfiles: () => ["brand-profiles"] as const,
-  deletedBrandProfiles: () => ["brand-profiles", "deleted"] as const,
   asset: (id: string) => ["assets", id] as const,
   assetPreview: (id: string) => ["assets", id, "preview-url"] as const,
   platforms: (params?: PlatformQueryParams) =>
@@ -169,10 +168,10 @@ function runApiQuery<A>(
 }
 
 /**
- * Returns list-query prefixes whose data becomes visible again when a Brand Profile restores.
+ * Returns resource prefixes affected when a Brand Profile is deleted.
  *
- * Profile deletion and restoration both change the same profile-scoped resources, so callers
- * invalidate these prefixes alongside lifecycle lists to prevent cached empty views.
+ * Deletion hides owned content and cancels scheduled work, so cached Posts,
+ * attachments, Channels, outcomes, calendars, Queues, and Analytics must refresh.
  */
 function brandProfileResourceInvalidations(): QueryKey[] {
   return [
@@ -227,16 +226,7 @@ export const mutationInvalidations = {
   retryDistribution: () => [queryKeys.posts(), queryKeys.distributions(), queryKeys.calendar()],
   createBrandProfile: () => [queryKeys.brandProfiles()],
   updateBrandProfile: () => [queryKeys.brandProfiles()],
-  deleteBrandProfile: () => [
-    queryKeys.brandProfiles(),
-    queryKeys.deletedBrandProfiles(),
-    ...brandProfileResourceInvalidations(),
-  ],
-  restoreBrandProfile: () => [
-    queryKeys.brandProfiles(),
-    queryKeys.deletedBrandProfiles(),
-    ...brandProfileResourceInvalidations(),
-  ],
+  deleteBrandProfile: () => [queryKeys.brandProfiles(), ...brandProfileResourceInvalidations()],
   workspaceSettings: () => [
     queryKeys.installation(),
     queryKeys.workspaceMembers(),
@@ -380,10 +370,10 @@ export function useUpdateBrandProfile(scope: SessionScope) {
 }
 
 /**
- * TanStack mutation hook to soft-delete a Brand Profile with idempotency tracking.
- * Deletion cancels scheduled work and locally disconnects the profile's
+ * TanStack mutation hook to permanently delete a Brand Profile with idempotency tracking.
+ * Deletion removes owned content and locally disconnects the profile's
  * channels, so every profile-owned collection is invalidated alongside the
- * profile lists.
+ * profile list.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
  * @returns Mutation hook accepting the Brand Profile ID string.

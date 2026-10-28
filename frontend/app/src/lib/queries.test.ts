@@ -40,29 +40,6 @@ describe("React Query helpers", () => {
     }
   });
 
-  it("refreshes profile-scoped resource caches when a profile is restored", async () => {
-    const queryClient = new QueryClient();
-    const resourceKeys = [
-      queryKeys.posts({ brand_profile_id: "profile-1" }),
-      queryKeys.platforms({ brand_profile_id: "profile-1" }),
-      queryKeys.distributions({ brand_profile_id: "profile-1" }),
-      queryKeys.calendar({
-        brand_profile_id: "profile-1",
-        end: "2026-01-02",
-        start: "2026-01-01",
-      }),
-    ];
-    for (const queryKey of resourceKeys) {
-      queryClient.setQueryData(queryKey, []);
-    }
-
-    await invalidateQueryKeys(queryClient, mutationInvalidations.restoreBrandProfile());
-
-    for (const queryKey of resourceKeys) {
-      expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true);
-    }
-  });
-
   it("invalidates detail queries through their list prefixes", async () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(queryKeys.distribution("distribution-1"), { id: "distribution-1" });

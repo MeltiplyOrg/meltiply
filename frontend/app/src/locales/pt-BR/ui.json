@@ -610,7 +610,7 @@
   "Create profile": "Criar perfil",
   "Delete Brand Profile": "Excluir perfil de marca",
   "Delete profile": "Excluir perfil",
-  "Deleting this Brand Profile cancels its scheduled posts, disconnects its channels, and blocks new work. The profile is purged permanently after 7 days; you can restore it until then.": "Excluir este perfil de marca cancela suas publicações agendadas, desconecta seus canais e impede novos trabalhos. O perfil é permanentemente excluído após 7 dias; você pode restaurá-lo até lá.",
+  "Deleting this Brand Profile permanently deletes its posts and asset records and disconnects its channels. Scheduled and queued work is cancelled, but attempts already running on a platform may still publish. This cannot be undone.": "Excluir este perfil de marca apaga permanentemente suas publicações e registros de mídia e desconecta seus canais. O trabalho agendado e na fila é cancelado, mas as tentativas já em andamento em uma plataforma ainda podem publicar. Esta ação não pode ser desfeita.",
   "Edit profile": "Editar perfil",
   "Profile name": "Nome do perfil",
   "Update Brand Profile": "Atualizar perfil de marca",

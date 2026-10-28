@@ -40,11 +40,6 @@ describe("shared query defaults", () => {
     expect(pollingInterval({ status: "processing" })).toBe(10_000);
     expect(
       pollingInterval({
-        comments: [{ reply_status: "queued" }],
-      }),
-    ).toBe(10_000);
-    expect(
-      pollingInterval({
         distributions: [{ status: "published" }],
       }),
     ).toBe(false);

@@ -7,8 +7,6 @@ import type {
   AnalyticsDashboardQueryParams,
   AnalyticsPostsQueryParams,
   AnalyticsPostsResponse,
-  AnalyticsSummary,
-  AnalyticsSummaryQueryParams,
   Asset,
   AuditListResponse,
   AuditQueryParams,
@@ -23,8 +21,6 @@ import type {
   CreateUploadPartsResponse,
   CreateUploadSessionInput,
   Distribution,
-  DistributionListResponse,
-  DistributionQueryParams,
   InstallationSummary,
   InvitationPreview,
   OAuthSelection,
@@ -79,11 +75,9 @@ import {
   deletePost,
   disconnectPlatform,
   getAsset,
-  getAssetDownloadUrl,
   getAssetPreviewUrl,
   getAnalyticsDashboard,
   getAnalyticsPosts,
-  getAnalyticsSummary,
   getCalendar,
   getCurrentUser,
   getInstallation,
@@ -95,8 +89,6 @@ import {
   getPost,
   getUploadSession,
   listBrandProfiles,
-  listDeletedBrandProfiles,
-  listDistributions,
   listPlatformCapabilities,
   listPlatforms,
   listPosts,
@@ -106,7 +98,6 @@ import {
   reactivateInstallationMember,
   removeWorkspaceMember,
   resendWorkspaceInvitation,
-  restoreBrandProfile,
   retryDistribution,
   revokeWorkspaceInvitation,
   schedulePost,
@@ -167,9 +158,6 @@ export interface ApiClientServiceShape {
   readonly listBrandProfiles: (
     options?: ApiRequestOptions,
   ) => ApiClientEffect<BrandProfileListResponse>;
-  readonly listDeletedBrandProfiles: (
-    options?: ApiRequestOptions,
-  ) => ApiClientEffect<BrandProfileListResponse>;
   readonly createBrandProfile: (
     input: CreateBrandProfileInput,
     options?: ApiRequestOptions,
@@ -183,16 +171,8 @@ export interface ApiClientServiceShape {
     profileId: string,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<BrandProfile>;
-  readonly restoreBrandProfile: (
-    profileId: string,
-    options?: ApiRequestOptions,
-  ) => ApiClientEffect<BrandProfile>;
   readonly getAsset: (id: string, options?: ApiRequestOptions) => ApiClientEffect<Asset>;
   readonly getAssetPreviewUrl: (
-    id: string,
-    options?: ApiRequestOptions,
-  ) => ApiClientEffect<SignedUrlResponse>;
-  readonly getAssetDownloadUrl: (
     id: string,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<SignedUrlResponse>;
@@ -296,10 +276,6 @@ export interface ApiClientServiceShape {
     options?: ApiRequestOptions,
   ) => ApiClientEffect<PublishingRequirements>;
   readonly disconnectPlatform: (id: string, options?: ApiRequestOptions) => ApiClientEffect<void>;
-  readonly listDistributions: (
-    params?: DistributionQueryParams,
-    options?: ApiRequestOptions,
-  ) => ApiClientEffect<DistributionListResponse>;
   readonly getDistribution: (
     id: string,
     options?: ApiRequestOptions,
@@ -325,10 +301,6 @@ export interface ApiClientServiceShape {
     params: AnalyticsDashboardQueryParams,
     options?: ApiRequestOptions,
   ) => ApiClientEffect<AnalyticsDashboard>;
-  readonly getAnalyticsSummary: (
-    params: AnalyticsSummaryQueryParams,
-    options?: ApiRequestOptions,
-  ) => ApiClientEffect<AnalyticsSummary>;
   readonly getAnalyticsPosts: (
     params: AnalyticsPostsQueryParams,
     options?: ApiRequestOptions,
@@ -468,12 +440,10 @@ export function createApiClientServiceTest(
     deletePost: unstubbed("deletePost"),
     disconnectPlatform: unstubbed("disconnectPlatform"),
     getAsset: unstubbed("getAsset"),
-    getAssetDownloadUrl: unstubbed("getAssetDownloadUrl"),
     getAssetPreviewUrl: unstubbed("getAssetPreviewUrl"),
     getCalendar: unstubbed("getCalendar"),
     getAnalyticsDashboard: unstubbed("getAnalyticsDashboard"),
     getAnalyticsPosts: unstubbed("getAnalyticsPosts"),
-    getAnalyticsSummary: unstubbed("getAnalyticsSummary"),
     getCurrentUser: unstubbed("getCurrentUser"),
     getDistribution: unstubbed("getDistribution"),
     getDistributionAnalytics: unstubbed("getDistributionAnalytics"),
@@ -483,8 +453,6 @@ export function createApiClientServiceTest(
     getPost: unstubbed("getPost"),
     getUploadSession: unstubbed("getUploadSession"),
     listBrandProfiles: unstubbed("listBrandProfiles"),
-    listDeletedBrandProfiles: unstubbed("listDeletedBrandProfiles"),
-    listDistributions: unstubbed("listDistributions"),
     listPlatformCapabilities: unstubbed("listPlatformCapabilities"),
     listPlatforms: unstubbed("listPlatforms"),
     listPosts: unstubbed("listPosts"),
@@ -494,7 +462,6 @@ export function createApiClientServiceTest(
     reactivateInstallationMember: unstubbed("reactivateInstallationMember"),
     removeWorkspaceMember: unstubbed("removeWorkspaceMember"),
     resendWorkspaceInvitation: unstubbed("resendWorkspaceInvitation"),
-    restoreBrandProfile: unstubbed("restoreBrandProfile"),
     retryDistribution: unstubbed("retryDistribution"),
     revokeWorkspaceInvitation: unstubbed("revokeWorkspaceInvitation"),
     schedulePost: unstubbed("schedulePost"),
@@ -565,8 +532,6 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
     disconnectPlatform: (id, options) =>
       inWorkspace((workspaceId) => disconnectPlatform(workspaceId, id, options)),
     getAsset: (id, options) => inWorkspace((workspaceId) => getAsset(workspaceId, id, options)),
-    getAssetDownloadUrl: (id, options) =>
-      inWorkspace((workspaceId) => getAssetDownloadUrl(workspaceId, id, options)),
     getAssetPreviewUrl: (id, options) =>
       inWorkspace((workspaceId) => getAssetPreviewUrl(workspaceId, id, options)),
     getCalendar: (params, options) =>
@@ -575,8 +540,6 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => getAnalyticsDashboard(workspaceId, params, options)),
     getAnalyticsPosts: (params, options) =>
       inWorkspace((workspaceId) => getAnalyticsPosts(workspaceId, params, options)),
-    getAnalyticsSummary: (params, options) =>
-      inWorkspace((workspaceId) => getAnalyticsSummary(workspaceId, params, options)),
     getCurrentUser: () => inWorkspace((workspaceId) => getCurrentUser(workspaceId)),
     getDistribution: (id, options) =>
       inWorkspace((workspaceId) => getDistribution(workspaceId, id, options)),
@@ -591,10 +554,6 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       inWorkspace((workspaceId) => getUploadSession(workspaceId, sessionId, options)),
     listBrandProfiles: (options) =>
       inWorkspace((workspaceId) => listBrandProfiles(workspaceId, options)),
-    listDeletedBrandProfiles: (options) =>
-      inWorkspace((workspaceId) => listDeletedBrandProfiles(workspaceId, options)),
-    listDistributions: (params, options) =>
-      inWorkspace((workspaceId) => listDistributions(workspaceId, params, options)),
     listPlatformCapabilities: (options) =>
       inWorkspace((workspaceId) => listPlatformCapabilities(workspaceId, options)),
     listPlatforms: (params, options) =>
@@ -612,8 +571,6 @@ export const ApiClientServiceLive: Layer.Layer<ApiClientService, never, never> =
       removeWorkspaceMember(workspaceId, memberId, options),
     resendWorkspaceInvitation: (workspaceId, invitationId, options) =>
       resendWorkspaceInvitation(workspaceId, invitationId, options),
-    restoreBrandProfile: (profileId, options) =>
-      inWorkspace((workspaceId) => restoreBrandProfile(workspaceId, profileId, options)),
     retryDistribution: (id, options) =>
       inWorkspace((workspaceId) => retryDistribution(workspaceId, id, options)),
     revokeWorkspaceInvitation: (workspaceId, invitationId, options) =>

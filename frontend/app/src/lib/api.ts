@@ -6,8 +6,6 @@ import type {
   AccountLifecycle,
   AnalyticsPostsQueryParams,
   AnalyticsPostsResponse,
-  AnalyticsSummary,
-  AnalyticsSummaryQueryParams,
   Asset,
   AuditListResponse,
   AuditQueryParams,
@@ -22,8 +20,6 @@ import type {
   CreateUploadPartsResponse,
   CreateUploadSessionInput,
   Distribution,
-  DistributionListResponse,
-  DistributionQueryParams,
   InstallationSummary,
   InvitationPreview,
   OAuthSelection,
@@ -332,24 +328,6 @@ export function listBrandProfiles(workspaceId: string | null, options?: ApiReque
 }
 
 /**
- * Lists soft-deleted Brand Profiles awaiting the 7-day purge. Workspace admins only.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the soft-deleted brand profile list response.
- */
-export function listDeletedBrandProfiles(workspaceId: string | null, options?: ApiRequestOptions) {
-  return unwrap<BrandProfileListResponse>(
-    (signal) =>
-      client().GET("/brand-profiles/deleted", {
-        headers: workspaceHeaders(workspaceId),
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
  * Creates a Brand Profile in the active workspace. Workspace admins only.
  *
  * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
@@ -407,15 +385,15 @@ export function updateBrandProfile(
 }
 
 /**
- * Soft-deletes a Brand Profile. Workspace admins only.
+ * Permanently deletes a Brand Profile and its owned records. Workspace admins only.
  *
- * Deletion cancels scheduled work, locally disconnects the profile's channels,
- * blocks new work, and schedules an idempotent purge after 7 days.
+ * Channels are locally disconnected before ownership cascades remove Posts,
+ * Assets, and Distributions. The app has no undo or retention window.
  *
  * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
  * @param profileId Brand Profile UUID within the active workspace.
  * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the soft-deleted Brand Profile.
+ * @returns Effect resolving to the removed Brand Profile's final record.
  */
 export function deleteBrandProfile(
   workspaceId: string | null,
@@ -425,34 +403,6 @@ export function deleteBrandProfile(
   return unwrap<BrandProfile>(
     (signal) =>
       client().DELETE("/brand-profiles/{profile_id}", {
-        headers: workspaceHeaders(workspaceId),
-        params: {
-          path: { profile_id: profileId },
-          header: { "Idempotency-Key": mutationKey(options?.idempotencyKey) },
-        },
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
- * Restores a soft-deleted Brand Profile before its purge. Workspace admins only.
- * Channels stay disconnected and cancelled distributions are not revived.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param profileId Brand Profile UUID within the active workspace.
- * @param options Request options with optional idempotency key.
- * @returns Effect resolving to the restored active Brand Profile.
- */
-export function restoreBrandProfile(
-  workspaceId: string | null,
-  profileId: string,
-  options?: ApiRequestOptions,
-) {
-  return unwrap<BrandProfile>(
-    (signal) =>
-      client().POST("/brand-profiles/{profile_id}/restore", {
         headers: workspaceHeaders(workspaceId),
         params: {
           path: { profile_id: profileId },
@@ -796,11 +746,7 @@ export function getAssetPreviewUrl(
  * @param options Request options including optional abort signal.
  * @returns Effect resolving to the presigned download URL response.
  */
-export function getAssetDownloadUrl(
-  workspaceId: string | null,
-  id: string,
-  options?: ApiRequestOptions,
-) {
+function getAssetDownloadUrl(workspaceId: string | null, id: string, options?: ApiRequestOptions) {
   return unwrap<SignedUrlResponse>(
     (signal) =>
       client().GET("/assets/{asset_id}/download-url", {
@@ -1163,30 +1109,6 @@ export function disconnectPlatform(
 }
 
 /**
- * Retrieves a paginated list of publication distributions across connected platforms.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param params Query parameters (status, platform, limit, cursor).
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the paginated distribution list response.
- */
-export function listDistributions(
-  workspaceId: string | null,
-  params?: DistributionQueryParams,
-  options?: ApiRequestOptions,
-) {
-  return unwrap<DistributionListResponse>(
-    (signal) =>
-      client().GET("/distributions", {
-        headers: workspaceHeaders(workspaceId),
-        params: { query: params },
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
  * Fetches status, logs, and attempts for a specific distribution intent.
  *
  * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
@@ -1310,34 +1232,6 @@ export function getCalendar(
   return unwrap<CalendarResponse>(
     (signal) =>
       client().GET("/calendar", {
-        headers: workspaceHeaders(workspaceId),
-        params: { query: params },
-        signal,
-      }),
-    options?.signal,
-  );
-}
-
-/**
- * Reads the workspace's platform-level analytics for a published cohort.
- *
- * The window is a rolling pair of UTC instants; `brand_profile_id` omitted is
- * the read-only All Brand Profiles aggregate. The response carries per-platform
- * sums, published destination counts, coverage, and sync freshness.
- *
- * @param workspaceId Workspace UUID to scope this request to, or null for the personal workspace.
- * @param params Cohort bounds plus optional Platform and Brand Profile scope.
- * @param options Request options including optional abort signal.
- * @returns Effect resolving to the summary response.
- */
-export function getAnalyticsSummary(
-  workspaceId: string | null,
-  params: AnalyticsSummaryQueryParams,
-  options?: ApiRequestOptions,
-) {
-  return unwrap<AnalyticsSummary>(
-    (signal) =>
-      client().GET("/analytics", {
         headers: workspaceHeaders(workspaceId),
         params: { query: params },
         signal,

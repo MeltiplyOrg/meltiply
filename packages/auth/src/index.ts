@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { AuthenticationRequiredError, ForbiddenError } from "@meltiply/domain";
 import { escapeMailHtml } from "@meltiply/domain/mail-content";
+import type { TimeString } from "better-auth/plugins";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey, type JWTPayload } from "jose";
 
 /**
@@ -303,9 +304,9 @@ export interface BetterAuthDeviceAuthorizationConfig {
   /** Exact supported client identifier (melti-cli). */
   clientId: string;
   /** Short lifetime for a pending device request, in Better Auth time form. */
-  expiresIn: string;
+  expiresIn: TimeString;
   /** Minimum polling interval enforced by the plugin, in Better Auth time form. */
-  interval: string;
+  interval: TimeString;
   /** Absolute same-origin browser verification URL, e.g. `https://app.example/device`. */
   verificationUri: string;
 }

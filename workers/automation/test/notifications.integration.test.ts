@@ -149,6 +149,8 @@ describeIntegration("owner notification delivery", () => {
     const sent = sendMail.mock.calls[0]?.[0];
     expect(sent?.to).toBe("alpha@meltiply.local");
     expect(sent?.subject).toContain("Publication failed");
+    expect(sent?.subject).not.toMatch(/[\r\n]/);
+    expect(sent?.subject?.length).toBeLessThanOrEqual(160);
 
     const replay = await Effect.runPromise(
       processNotificationMessage(env, message(key, "publication_failed", aggregateId!)),
@@ -231,5 +233,64 @@ describeIntegration("owner notification delivery", () => {
         [target!.id, target!.status],
       ),
     );
+  });
+
+  it("alerts once on a live disconnect transition and not on deletion", async () => {
+    const disconnectOrganizationId = "9a000000-0000-4000-8000-0000000000a1";
+    const profileId = randomUUID();
+    const accountId = randomUUID();
+    await runSystemTransaction(env, async (client) => {
+      await client.query("DELETE FROM organizations WHERE id = $1", [disconnectOrganizationId]);
+      await client.query(
+        "INSERT INTO organizations (id, name, slug) VALUES ($1, 'Disconnect alerts', 'notification-disconnect')",
+        [disconnectOrganizationId],
+      );
+      await client.query(
+        "INSERT INTO brand_profiles (id, org_id, name, color) VALUES ($1, $2, 'Alerts', '#1d4ed8')",
+        [profileId, disconnectOrganizationId],
+      );
+      await client.query(
+        `INSERT INTO platform_accounts
+           (id, org_id, brand_profile_id, platform, platform_user_id, access_token,
+            connection_status, display_name)
+         VALUES ($1, $2, $3, 'youtube', $4, 'token', 'connected', 'Alert channel')`,
+        [accountId, disconnectOrganizationId, profileId, `disconnect-${accountId}`],
+      );
+    });
+    const alertCount = async () =>
+      (
+        await runSystemTransaction(env, (client) =>
+          client.query<{ count: number }>(
+            `SELECT count(*)::int AS count FROM outbox_events
+              WHERE aggregate_id = $1 AND topic = 'notification.delivery.requested'`,
+            [accountId],
+          ),
+        )
+      ).rows[0]!.count;
+
+    try {
+      expect(await alertCount()).toBe(0);
+      await runSystemTransaction(env, (client) =>
+        client.query(
+          `UPDATE platform_accounts
+              SET connection_status = 'reconnect_required', updated_at = now()
+            WHERE id = $1`,
+          [accountId],
+        ),
+      );
+      expect(await alertCount()).toBe(1);
+
+      // An explicit disconnect or Brand Profile teardown deletes the account;
+      // there is no Channel left to reconnect, so it must not enqueue another alert.
+      await runSystemTransaction(env, (client) =>
+        client.query("DELETE FROM platform_accounts WHERE id = $1", [accountId]),
+      );
+      expect(await alertCount()).toBe(1);
+    } finally {
+      await runSystemTransaction(env, async (client) => {
+        await client.query("DELETE FROM outbox_events WHERE aggregate_id = $1", [accountId]);
+        await client.query("DELETE FROM organizations WHERE id = $1", [disconnectOrganizationId]);
+      });
+    }
   });
 });

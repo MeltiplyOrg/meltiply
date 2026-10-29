@@ -44,11 +44,11 @@ ALTER TABLE distributions
     ADD CONSTRAINT distributions_signature_text_check
     CHECK (signature_text IS NULL OR length(signature_text) <= 1000);
 
--- Durable per-attempt delivery evidence for owner notifications. The outbox
--- carries the retry/lease/DLQ lifecycle; this row makes a redelivered message
--- idempotent and records whether the latest attempt skipped, delivered, or
--- failed. A recipient address is never stored here because the Worker resolves
--- the current Installation Owner at send time.
+-- Durable per-attempt delivery evidence for owner notifications. The outbox and
+-- Queue carry the retry/lease/DLQ lifecycle; this row makes a redelivered
+-- message idempotent and records whether the latest attempt skipped, delivered,
+-- or failed. A recipient address is never stored here because the Worker
+-- resolves the current Installation Owner at send time.
 CREATE TABLE IF NOT EXISTS notification_deliveries (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id          UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -59,7 +59,6 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
     channel         TEXT NOT NULL DEFAULT 'email',
     state           TEXT NOT NULL DEFAULT 'pending',
     attempt_count   INT NOT NULL DEFAULT 0,
-    next_attempt_at TIMESTAMPTZ,
     last_error      TEXT,
     delivered_at    TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -72,12 +71,6 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
         CHECK (state IN ('pending', 'sending', 'delivered', 'skipped', 'failed', 'dead')),
     CONSTRAINT notification_deliveries_attempt_count_check CHECK (attempt_count >= 0)
 );
-
-CREATE INDEX IF NOT EXISTS idx_notification_deliveries_due
-    ON notification_deliveries(state, next_attempt_at, created_at)
-    WHERE state IN ('pending', 'failed');
-CREATE INDEX IF NOT EXISTS idx_notification_deliveries_org
-    ON notification_deliveries(org_id, created_at DESC);
 
 DO $$
 BEGIN
@@ -186,77 +179,40 @@ LANGUAGE plpgsql
 AS $fn$
 DECLARE
     delivery_key TEXT;
-    account_status TEXT;
     account_name TEXT;
 BEGIN
-    -- A direct channel disconnect is the creator action worth alerting. Cascaded
-    -- deletes (Workspace or Brand Profile removal) run inside another trigger
-    -- and must not enqueue alerts while their owner is disappearing.
-    IF pg_trigger_depth() > 1 THEN
-        RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
-    END IF;
-    IF TG_OP = 'DELETE' THEN
-        IF NOT EXISTS (SELECT 1 FROM organizations WHERE id = OLD.org_id) THEN
-            RETURN OLD;
-        END IF;
-    ELSE
-        IF NOT EXISTS (SELECT 1 FROM organizations WHERE id = NEW.org_id) THEN
-            RETURN NEW;
-        END IF;
-    END IF;
-    IF TG_OP = 'DELETE' THEN
-        delivery_key := 'channel_disconnected:' || OLD.id::text || ':deleted';
-        account_status := 'revoked';
-        account_name := OLD.display_name;
-        INSERT INTO outbox_events
-            (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-        VALUES (
-            OLD.org_id,
-            'notification.delivery.requested',
-            'platform_account',
-            OLD.id,
-            delivery_key,
-            jsonb_build_object(
-                'version', 1,
-                'kind', 'channel_disconnected',
-                'delivery_key', delivery_key,
-                'aggregate_id', OLD.id,
-                'platform', OLD.platform,
-                'brand_profile_id', OLD.brand_profile_id,
-                'channel_name', account_name,
-                'connection_status', account_status
-            )
-        )
-        ON CONFLICT DO NOTHING;
-        RETURN OLD;
+    -- Only a live Channel that becomes unusable is alert-worthy. Deletion is an
+    -- explicit disconnect or a Brand Profile/Workspace teardown, where there is
+    -- no Channel left to reconnect and a large profile would otherwise enqueue
+    -- one alert per account.
+    IF NEW.connection_status NOT IN ('expired', 'reconnect_required')
+       OR OLD.connection_status IS NOT DISTINCT FROM NEW.connection_status
+    THEN
+        RETURN NEW;
     END IF;
 
-    IF NEW.connection_status IN ('expired', 'reconnect_required')
-       AND OLD.connection_status IS DISTINCT FROM NEW.connection_status
-    THEN
-        account_name := NEW.display_name;
-        delivery_key := 'channel_disconnected:' || NEW.id::text || ':' || NEW.connection_status || ':' || extract(epoch FROM COALESCE(NEW.reconnect_notified_at, NEW.updated_at))::text;
-        INSERT INTO outbox_events
-            (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
-        VALUES (
-            NEW.org_id,
-            'notification.delivery.requested',
-            'platform_account',
-            NEW.id,
-            delivery_key,
-            jsonb_build_object(
-                'version', 1,
-                'kind', 'channel_disconnected',
-                'delivery_key', delivery_key,
-                'aggregate_id', NEW.id,
-                'platform', NEW.platform,
-                'brand_profile_id', NEW.brand_profile_id,
-                'channel_name', account_name,
-                'connection_status', NEW.connection_status
-            )
+    account_name := NEW.display_name;
+    delivery_key := 'channel_disconnected:' || NEW.id::text || ':' || NEW.connection_status || ':' || extract(epoch FROM COALESCE(NEW.reconnect_notified_at, NEW.updated_at))::text;
+    INSERT INTO outbox_events
+        (org_id, topic, aggregate_type, aggregate_id, dedupe_key, payload)
+    VALUES (
+        NEW.org_id,
+        'notification.delivery.requested',
+        'platform_account',
+        NEW.id,
+        delivery_key,
+        jsonb_build_object(
+            'version', 1,
+            'kind', 'channel_disconnected',
+            'delivery_key', delivery_key,
+            'aggregate_id', NEW.id,
+            'platform', NEW.platform,
+            'brand_profile_id', NEW.brand_profile_id,
+            'channel_name', account_name,
+            'connection_status', NEW.connection_status
         )
-        ON CONFLICT DO NOTHING;
-    END IF;
+    )
+    ON CONFLICT DO NOTHING;
     RETURN NEW;
 END;
 $fn$;
@@ -267,6 +223,3 @@ AFTER UPDATE OF connection_status ON platform_accounts
 FOR EACH ROW EXECUTE FUNCTION public.enqueue_channel_disconnect_notification();
 
 DROP TRIGGER IF EXISTS platform_accounts_deleted_disconnect_notification ON platform_accounts;
-CREATE TRIGGER platform_accounts_deleted_disconnect_notification
-AFTER DELETE ON platform_accounts
-FOR EACH ROW EXECUTE FUNCTION public.enqueue_channel_disconnect_notification();

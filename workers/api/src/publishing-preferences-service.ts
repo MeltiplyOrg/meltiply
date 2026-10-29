@@ -14,7 +14,7 @@ import {
   hashIdempotencyRequestEffect,
   reserveIdempotencyEffect,
 } from "./idempotency";
-import { mailSenderConfiguration } from "./mail";
+import { mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import type { PostServiceError } from "./post-types";
 
 type Schemas = components["schemas"];
@@ -181,6 +181,18 @@ function validateNotifications(
   };
 }
 
+/**
+ * Projects a stored preference row onto the contract response.
+ *
+ * An untouched Workspace has no row; it reports the documented defaults
+ * (browser timezone, no templates, both events and email disabled) and the
+ * epoch as `updated_at` rather than inventing a write. `email_available` is
+ * always the current installation capability, not persisted state.
+ *
+ * @param row - Stored row, or undefined before the first save.
+ * @param emailAvailable - Whether this installation can actually deliver mail.
+ * @returns The current preferences document.
+ */
 function mapPreferences(
   row: PreferenceRow | undefined,
   emailAvailable: boolean,

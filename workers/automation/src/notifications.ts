@@ -1,4 +1,4 @@
-import { isMailSenderAddress, escapeMailHtml } from "@meltiply/domain/mail-content";
+import { escapeMailHtml, mailSenderConfiguration } from "@meltiply/domain/mail-content";
 import { Effect } from "effect";
 
 import { withSystemTransactionEffect } from "./database";
@@ -135,10 +135,27 @@ interface NotificationEmail {
   text: string;
 }
 
+/** Maximum characters kept in a subject line after collapsing whitespace. */
+const maximumSubjectLength = 160;
+
 /**
- * Renders the owner-facing message for one supported event. Every field is
- * bounded and HTML-escaped, and no token, header, or content beyond the Post's
- * own title/body and failure reason reaches the message.
+ * Collapses arbitrary Post text into one bounded subject line. Newlines and
+ * tabs are removed before submission so owner content cannot add mail headers,
+ * and the suffix keeps a long title from producing an oversized header.
+ *
+ * @param value - Candidate subject derived from the Post title or text.
+ * @returns Single-line subject no longer than {@link maximumSubjectLength}.
+ */
+function mailSubject(value: string): string {
+  const line = value.replace(/[\r\n\t]+/g, " ").trim();
+  return line.length <= maximumSubjectLength ? line : `${line.slice(0, maximumSubjectLength - 1)}…`;
+}
+
+/**
+ * Renders the owner-facing message for one supported event. Every interpolated
+ * field is HTML-escaped, the subject is collapsed to one bounded line, and no
+ * token, header, or content beyond the Post's own title/body and failure reason
+ * reaches the message.
  */
 function renderEmail(
   env: AutomationEnv,
@@ -178,7 +195,7 @@ function renderEmail(
       .join("\n");
     return {
       html: `<p>A publication failed${escapeMailHtml(profile)}.</p><ul><li><strong>Post:</strong> ${escapeMailHtml(title)}</li><li><strong>Platform:</strong> ${escapeMailHtml(context.platform)}</li><li><strong>Channel:</strong> ${escapeMailHtml(context.channelName ?? "unknown")}</li><li><strong>Reason:</strong> ${escapeMailHtml(reason)}</li></ul>${link ? `<p><a href="${escapeMailHtml(link)}">Review the Post</a></p>` : ""}`,
-      subject: `Publication failed for ${title}`,
+      subject: mailSubject(`Publication failed for ${title}`),
       text,
     };
   }
@@ -195,26 +212,22 @@ function renderEmail(
     .join("\n");
   return {
     html: `<p>A connected ${escapeMailHtml(context.platform)} channel${escapeMailHtml(profile)} needs attention (${escapeMailHtml(status)}).</p><ul><li><strong>Channel:</strong> ${escapeMailHtml(context.channelName ?? "unknown")}</li></ul><p>Reconnect it before scheduling more Posts.</p>${link ? `<p><a href="${escapeMailHtml(link)}">Open Channels</a></p>` : ""}`,
-    subject: `${context.platform} channel needs reconnecting`,
+    subject: mailSubject(`${context.platform} channel needs reconnecting`),
     text,
   };
 }
 
 /** Submits one message through the Cloudflare Email Sending binding exactly once. */
 async function submitMail(env: AutomationEnv, email: NotificationEmail, recipient: string) {
-  const sender = env.MAIL_FROM_ADDRESS?.trim();
-  if (
-    typeof env.MAIL?.send !== "function" ||
-    sender === undefined ||
-    !isMailSenderAddress(sender)
-  ) {
+  const sender = mailSenderConfiguration(env);
+  if (typeof env.MAIL?.send !== "function" || sender === undefined) {
     throw new RetryableJobError({
       cause: "notification_mail_unavailable",
       message: "Notification email delivery is not configured.",
     });
   }
-  const name = env.MAIL_FROM_NAME?.trim();
-  const from = name ? { email: sender, name } : sender;
+  const from =
+    sender.name !== undefined ? { email: sender.email, name: sender.name } : sender.email;
   const result = await env.MAIL.send({
     from,
     html: email.html,
@@ -323,7 +336,7 @@ export function processNotificationMessage(
       yield* withSystemTransactionEffect(env, (client) =>
         client.query(
           `UPDATE notification_deliveries
-              SET state = 'dead', next_attempt_at = NULL, updated_at = now()
+              SET state = 'dead', updated_at = now()
             WHERE id = $1`,
           [row.id],
         ),
@@ -359,7 +372,7 @@ export function processNotificationMessage(
     yield* withSystemTransactionEffect(env, (client) =>
       client.query(
         `UPDATE notification_deliveries
-            SET state = 'sending', next_attempt_at = now() + interval '5 minutes', updated_at = now()
+            SET state = 'sending', updated_at = now()
           WHERE id = $1`,
         [row.id],
       ),
@@ -382,8 +395,7 @@ export function processNotificationMessage(
       yield* withSystemTransactionEffect(env, (client) =>
         client.query(
           `UPDATE notification_deliveries
-              SET state = 'failed', last_error = $2, next_attempt_at = now(),
-                  updated_at = now()
+              SET state = 'failed', last_error = $2, updated_at = now()
             WHERE id = $1`,
           [row.id, messageText],
         ),
@@ -402,7 +414,7 @@ export function processNotificationMessage(
       client.query(
         `UPDATE notification_deliveries
             SET state = 'delivered', delivered_at = now(), last_error = NULL,
-                next_attempt_at = NULL, updated_at = now()
+                updated_at = now()
           WHERE id = $1`,
         [row.id],
       ),

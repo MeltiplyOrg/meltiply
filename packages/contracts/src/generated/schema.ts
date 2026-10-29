@@ -3024,10 +3024,12 @@ export interface components {
         /** @enum {string} */
         InstagramPostType: "feed" | "reel" | "story";
         /**
-         * @description Saved Instagram publication choices. feed is the default for a single
-         *     image or video, reel is the default for a single video, and story is
-         *     supported for a single image or video. trial_reel is valid only for a
-         *     reel and asks Instagram to test the reel with non-followers first.
+         * @description Saved Instagram publication choices. A single image defaults to feed
+         *     and a single video defaults to reel; multiple attachments publish as
+         *     one feed carousel. story is supported for a single image or video.
+         *     trial_reel is valid only for a reel and asks Instagram to test the
+         *     reel with non-followers first; trial_graduation applies only with
+         *     trial_reel.
          */
         InstagramPostOptions: {
             post_type?: components["schemas"]["InstagramPostType"];

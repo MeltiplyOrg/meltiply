@@ -122,8 +122,10 @@ All five implemented Providers exercise real authorization-state consumption,
 encrypted selection, explicit assignment, idempotent replay (including rejecting
 a changed Brand Profile), reconnection, and cancellation through API handlers and
 PostgreSQL persistence. Only actor authentication and external provider HTTP
-responses are controlled. The full application gate runs afterward, followed by a
-focused production-app browser journey covering mobile focus containment,
+responses are controlled. The full application gate runs afterward; because that
+gate deliberately transfers ownership and exhausts quota fixtures, the lane
+recreates the disposable seed before the browser step. The focused
+production-app browser journey covers mobile focus containment,
 portalled account-menu dismissal, and reconnect eligibility at desktop/phone widths
 in both palettes. Its owner, profiles, and Channels are real fixture state; pending
 selection metadata is controlled. Screenshots and traces are retained as artifacts.
@@ -143,11 +145,24 @@ must not attach Channels to the first seeded profile.
 The Analytics journey uses the same profile restoration before palette and phone
 captures. Its cohort values are deterministic, but Post and Distribution ids are
 unique per run so retries cannot collide in the shared Workspace.
+The suite clears sign-in buckets in the loopback test database between journeys,
+because more than ten owner sign-ins would otherwise hit the production
+per-email and per-address limits, and it gives proxied auth requests a unique
+edge IP. The limits themselves stay enforced in production and in integration
+coverage.
 User-facing journeys and screenshots use production assets without DevBox chrome.
+The performance step starts the local API and serves the built client through a
+compression-negotiating static preview, because Cloudflare compresses text assets
+at the edge while Vite's preview serves them identity-encoded. The existing
+Lighthouse budgets are applied to that production-like response.
 `frontend-ui` runs both frontend checks, dead-code detection,
 documentation links, React review, development CSS/font HTTP smoke, and the
-controlled-backend workspace/public browser journey. Artifacts include desktop,
-phone, and reported-user-width captures plus failure traces.
+controlled-backend workspace, Analytics, and public-site browser journeys. The
+public journeys cover landing and guide navigation, the clearly labeled
+interactive sample, build-time docs search and Markdown alternates, theme
+transfer between public surfaces, phone disclosure, and native reduced motion.
+Artifacts include desktop, phone, and reported-user-width captures plus failure
+traces.
 The React Doctor invocation is pinned in the workflow and receives no GitHub token.
 Its changed-scope comparison fetches the public base branch without credentials.
 The topology lane owns a separate backend process for load checks after smoke exits.

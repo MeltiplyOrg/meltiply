@@ -652,10 +652,36 @@ jobs:
       - name: Check production performance without rebuilding
         if: inputs.lane == 'frontend-full'
         working-directory: frontend/app
+        env:
+          WRANGLER_DEV_ALLOWED_ORIGINS: http://127.0.0.1:3000
+          WRANGLER_DEV_APP_URL: http://127.0.0.1:3000
         run: |
-          setsid bun run --no-install vp preview --host 127.0.0.1 --port 3000 --strictPort >/tmp/meltiply-preview.log 2>&1 &
+          mkdir -p ../../artifacts/performance
+          # The production preview proxies /api/* to the local Worker. Measure a
+          # working application, not a preview whose auth reads fail with 502.
+          setsid ../../scripts/cloudflare-local/dev-backend.sh >../../artifacts/performance/backend.log 2>&1 &
+          backend_pid=$!
+          # Cloudflare compresses text assets at the edge; the Vite preview does
+          # not. Serve the built client with production-like brotli/gzip so the
+          # budget measures the application rather than an encoding artifact.
+          setsid node ../../scripts/ci/lighthouse-preview.mjs --root dist/client --port 3000 >../../artifacts/performance/preview.log 2>&1 &
           preview_pid=$!
-          trap 'kill -TERM -- "-$preview_pid" 2>/dev/null || true' EXIT
+          cleanup() {
+            kill -TERM -- "-$preview_pid" 2>/dev/null || true
+            kill -TERM -- "-$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          backend_ready=false
+          for _ in $(seq 1 180); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:8787/api/v1/health >/dev/null 2>&1; then backend_ready=true; break; fi
+            if ! kill -0 "$backend_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$backend_ready" != true ]; then
+            echo "API did not report healthy within 180s" >&2
+            cat ../../artifacts/performance/backend.log >&2
+            exit 1
+          fi
           preview_ready=false
           for _ in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3000/posts >/dev/null; then preview_ready=true; break; fi
@@ -664,7 +690,7 @@ jobs:
           done
           if [ "$preview_ready" != true ]; then
             echo "Preview did not report ready within 60s" >&2
-            cat /tmp/meltiply-preview.log >&2
+            cat ../../artifacts/performance/preview.log >&2
             exit 1
           fi
           ../../scripts/ci/lighthouse.sh http://127.0.0.1:3000/posts ../../artifacts/performance/lighthouse.json

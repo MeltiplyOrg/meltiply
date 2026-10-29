@@ -1033,17 +1033,20 @@ function loadRenditionCandidatesEffect(
 
 /**
  * Requires complete saved answers before creating Distribution options.
- * An absent Provider subtree retains its existing semantics; a supplied but
- * unanswered audience/privacy choice or unfinished disclosure fails with 422.
+ * The resolved YouTube Platform requires an explicit audience even without an
+ * options subtree. Other absent subtrees retain their existing semantics;
+ * supplied unanswered choices or unfinished disclosure fail with 422.
  * The draft-only disclosure gate never enters the Provider publication payload.
  */
 function publicationProviderOptions(
   options: PostProviderOptions | undefined,
+  platform: Platform,
 ): ProviderPublishOptions | undefined {
-  if (!options) return undefined;
+  if (!options && platform !== "youtube") return undefined;
   const result: ProviderPublishOptions = {};
-  if (options.youtube) {
-    const { madeForKids, privacyStatus } = options.youtube;
+  if (platform === "youtube" || options?.youtube) {
+    const madeForKids = options?.youtube?.madeForKids;
+    const privacyStatus = options?.youtube?.privacyStatus;
     if (madeForKids === undefined) {
       throw new CoreApiError(
         422,
@@ -1053,7 +1056,7 @@ function publicationProviderOptions(
     }
     result.youtube = { madeForKids, ...(privacyStatus ? { privacyStatus } : {}) };
   }
-  if (options.tiktok) {
+  if (options?.tiktok) {
     const { privacyLevel, discloseCommercialContent, ...choices } = options.tiktok;
     if (privacyLevel === undefined) {
       throw new CoreApiError(
@@ -1199,7 +1202,7 @@ function validateTargetScheduleEffect(
     let providerOptions: ProviderPublishOptions | undefined;
     try {
       validateTargetOverrides(target);
-      providerOptions = publicationProviderOptions(target.providerOptions);
+      providerOptions = publicationProviderOptions(target.providerOptions, platform);
       validateProviderOptions(providerOptions, platform, selection, candidates);
     } catch (cause) {
       return cause instanceof CoreApiError ? Effect.fail(cause) : Effect.die(cause);

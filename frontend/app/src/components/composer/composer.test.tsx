@@ -74,6 +74,7 @@ function composerTextarea() {
 function renderComposer(
   options: {
     initialPostId?: string;
+    initialDate?: ComposerProps["initialDate"];
     post?: Post;
     /** Connected accounts the workspace sees; the composer selects eligible ones. */
     accounts?: PlatformAccount[];
@@ -115,7 +116,11 @@ function renderComposer(
       <I18nProvider>
         <AppAuthProvider>
           <WorkspaceProvider>
-            <Composer initialPostId={options.initialPostId} onNavigate={options.onNavigate} />
+            <Composer
+              initialPostId={options.initialPostId}
+              initialDate={options.initialDate}
+              onNavigate={options.onNavigate}
+            />
             <ProfileSwitchProbe profileId="profile-b" />
           </WorkspaceProvider>
         </AppAuthProvider>
@@ -521,6 +526,67 @@ describe("Composer leave guard", () => {
 
     expect(onNavigate).toHaveBeenCalledWith("queues", undefined);
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("Composer schedule restoration", () => {
+  it("preserves stored local midnight when reopening a scheduled Post", async () => {
+    renderComposer({
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      post: {
+        ...hydratedPost,
+        distributions: [
+          {
+            id: "midnight-distribution",
+            brand_profile_id: hydratedPost.brand_profile_id,
+            org_id: hydratedPost.org_id,
+            post_id: hydratedPost.id,
+            platform_account_id: null,
+            platform: "threads",
+            status: "scheduled",
+            scheduled_at: new Date(2028, 1, 29, 0, 0).toISOString(),
+            published_at: null,
+            platform_post_id: null,
+            platform_url: null,
+            publication: null,
+            title_override: null,
+            description_override: null,
+            hashtags: [],
+            attempt_count: 0,
+            last_attempt_at: null,
+            next_attempt_at: null,
+            failure: null,
+            created_at: hydratedPost.created_at,
+            updated_at: hydratedPost.updated_at,
+          },
+        ],
+      },
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    expect(screen.getByRole("radio", { name: "Schedule" })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: /hour/i })).toHaveAttribute("aria-valuenow", "0");
+    expect(screen.getByRole("spinbutton", { name: /minute/i })).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
+  });
+
+  it("keeps the daytime suggestion for a new calendar-day composition", async () => {
+    renderComposer({
+      brandProfiles: composerProfiles,
+      initialDate: new Date(2028, 1, 29, 0, 0),
+    });
+    await waitFor(() => expect(composerTextarea()).toBeEnabled());
+    expect(screen.getByRole("radio", { name: "Schedule" })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: /hour/i })).toHaveAttribute(
+      "aria-valuenow",
+      "10",
+    );
+    expect(screen.getByRole("spinbutton", { name: /minute/i })).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
   });
 });
 

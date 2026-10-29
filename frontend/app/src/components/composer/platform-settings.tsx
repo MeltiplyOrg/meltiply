@@ -442,9 +442,6 @@ function TikTokEditor({
             />
           </label>
           <p className="text-xs text-ink-3">{t("Branded content cannot be private.")}</p>
-          {!tt.brand_content && !tt.brand_organic && (
-            <p className="text-xs text-red">{t("Choose your brand, branded content, or both.")}</p>
-          )}
           {(tt.brand_content || tt.brand_organic) && (
             <p className="text-xs text-ink-2">
               {tt.brand_content

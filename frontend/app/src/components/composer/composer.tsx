@@ -290,16 +290,22 @@ function isUploadCancellation(error: unknown): boolean {
 
 /**
  * Formats a Date or ISO string into the composer's local minute-precision value
- * ('YYYY-MM-DDTHH:mm'). Midnight on the supplied day becomes 10:00 local so a
- * calendar click offers a realistic daytime slot instead of the past.
+ * ('YYYY-MM-DDTHH:mm'). Calendar seeds default midnight to 10:00 local;
+ * restoring an existing schedule must opt out to preserve its chosen instant.
  *
  * @param dateOrStr - Date object or ISO timestamp.
+ * @param defaultMidnightToDaytime - Apply the calendar-click suggestion; defaults to true.
  * @returns Local datetime string, or an empty string when the input is unparseable.
  */
-function formatInitialScheduleDate(dateOrStr: Date | string): string {
+function formatInitialScheduleDate(
+  dateOrStr: Date | string,
+  defaultMidnightToDaytime = true,
+): string {
   const date = typeof dateOrStr === "string" ? new Date(dateOrStr) : new Date(dateOrStr.getTime());
   if (Number.isNaN(date.getTime())) return "";
-  if (date.getHours() === 0 && date.getMinutes() === 0) date.setHours(10, 0, 0, 0);
+  if (defaultMidnightToDaytime && date.getHours() === 0 && date.getMinutes() === 0) {
+    date.setHours(10, 0, 0, 0);
+  }
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -1005,7 +1011,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setAttachmentOverrides(attachmentOverridesFromPost(post));
       setSelectedChannelIds([...channelIds]);
       if (scheduledAt) {
-        setScheduleDate(formatInitialScheduleDate(scheduledAt));
+        setScheduleDate(formatInitialScheduleDate(scheduledAt, false));
         setPublishMode("schedule");
       }
       if (post.queue_membership) {

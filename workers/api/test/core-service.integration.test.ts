@@ -3189,6 +3189,8 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   /**
    * Schedules an Alpha Post against the supplied Channels.
+   * Supplies an explicit not-made-for-kids fixture answer for YouTube scenarios
+   * unrelated to audience validation. Missing-answer cases call the service directly.
    *
    * @param posts - Post service driving the scenario.
    * @param postId - Post being scheduled.
@@ -3209,7 +3211,15 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         env,
         alpha,
         postId,
-        { brandProfileId: alphaBrandProfileId, scheduledAt, targets },
+        {
+          brandProfileId: alphaBrandProfileId,
+          scheduledAt,
+          targets: targets.map((target) =>
+            target.platformAccountId === alphaYoutubeAccountId && !target.providerOptions
+              ? { ...target, providerOptions: { youtube: { madeForKids: false } } }
+              : target,
+          ),
+        },
         key,
       ),
     );
@@ -5016,6 +5026,46 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await restoreUsageCount(usageBefore);
     }
   });
+
+  it.each(["saved", "request"] as const)(
+    "rejects YouTube scheduling without an audience in %s targets but permits the draft",
+    async (source) => {
+      const posts = postServiceWith("youtube");
+      const usageBefore = await currentUsageCount();
+      const prefix = `integration-post-absent-youtube-${source}`;
+      const target: PostTargetInput = { platformAccountId: alphaYoutubeAccountId };
+      const draft = await createAlphaPost(
+        posts,
+        { attachmentIds: [alphaAssetId], targets: [target] },
+        `${prefix}-draft`,
+      );
+      try {
+        const reopened = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
+        expect(reopened.targets[0]?.provider_options).toBeNull();
+        await expect(
+          Effect.runPromise(
+            posts.schedulePost(
+              env,
+              alpha,
+              draft.value.id,
+              {
+                brandProfileId: alphaBrandProfileId,
+                scheduledAt: null,
+                ...(source === "request" ? { targets: [target] } : {}),
+              },
+              `${prefix}-schedule`,
+            ),
+          ),
+        ).rejects.toMatchObject({ code: "validation_error", status: 422 });
+        const unchanged = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
+        expect(unchanged.distributions).toEqual([]);
+        expect(unchanged.targets).toEqual(reopened.targets);
+      } finally {
+        await purgeIntegrationPosts([draft.value.id], [`${prefix}-draft`, `${prefix}-schedule`]);
+        await restoreUsageCount(usageBefore);
+      }
+    },
+  );
 
   it.each(["youtube", "tiktok"] as const)(
     "retains incomplete %s draft choices without accepting them for delivery",

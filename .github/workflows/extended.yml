@@ -55,7 +55,7 @@ jobs:
       - name: Review publishing React changes
         if: inputs.lane == 'publishing-flow'
         working-directory: frontend/app
-        run: npx --yes react-doctor@latest --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+        run: npx --yes react-doctor@0.9.18 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
       - name: Prepare publishing acceptance
         if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
         run: |

@@ -69,8 +69,10 @@ function formatPostDate(value: string | null | undefined, timeZone: string): str
  * by `datetime-local` inputs in the owner's publishing timezone.
  */
 function toLocalInputValue(value: string | null | undefined, timeZone: string): string {
+  // A stored schedule keeps its exact wall clock, including local midnight;
+  // only a fresh slot gets the composer's 10:00 calendar suggestion.
   return value
-    ? instantToWallClock(value, timeZone)
+    ? instantToWallClock(value, timeZone, false)
     : instantToWallClock(new Date(Date.now() + 60 * 60 * 1000), timeZone);
 }
 

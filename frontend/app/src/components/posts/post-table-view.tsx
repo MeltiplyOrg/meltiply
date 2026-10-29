@@ -11,7 +11,7 @@ import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import { StatusBadge } from "./status-badge";
 import { useI18n } from "@/lib/i18n";
 import { usePublishingTimeZone } from "@/context/publishing-timezone.context";
-import { abbreviateRecordId } from "@/lib/format";
+import { abbreviateRecordId, postDateFormatters } from "@/lib/format";
 import { cn } from "@meltiply/ui/utils";
 import { normalizePostStatus, resolveRowCaption, resolveRowProviders } from "./posts-helpers";
 import { groupPostRows, type PostGroupBy } from "./post-groups";
@@ -131,9 +131,9 @@ function PostSelectionCheckbox({
 const POST_SELECTION_CELL_CLASS = "relative";
 
 /**
- * Publish-date column formatters are created per row from the owner's
- * publishing timezone, so changing the preference changes display without
- * rewriting stored Schedule instants.
+ * Publish-date column formats resolve once per publishing timezone through the
+ * shared `postDateFormatters` cache, so changing the preference changes display
+ * without rewriting stored Schedule instants or rebuilding a formatter per row.
  */
 const METRIC_FORMAT = new Intl.NumberFormat("en-US");
 type AnalyticsColumn = PostAnalyticsColumn;
@@ -193,22 +193,7 @@ const PostTableRow = React.memo(function PostTableRow({
   const { t } = useI18n();
   const providers = resolveRowProviders(post);
   const publishDate = new Date(post.date);
-  const dateFormats = React.useMemo(
-    () => ({
-      day: new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        day: "numeric",
-        timeZone,
-      }),
-      time: new Intl.DateTimeFormat("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-        timeZone,
-      }),
-    }),
-    [timeZone],
-  );
+  const dateFormats = postDateFormatters(timeZone);
   const attachments = post.post?.attachments.length ?? 0;
   const analytics =
     post.post?.status !== "draft" && post.channels.some((channel) => channel.status === "published")

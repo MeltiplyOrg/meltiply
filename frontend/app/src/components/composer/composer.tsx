@@ -77,6 +77,7 @@ import {
 import { createAssetUpload, type AssetUploadStatus, type AssetUploadTask } from "@/lib/upload";
 import { RollingCount } from "@meltiply/ui/rolling-count";
 import {
+  captionWithSignature,
   defaultSignatureTemplate,
   instantToWallClock,
   resolveSignature,
@@ -1983,9 +1984,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
         const capability = capabilityByPlatform.get(platform);
         const channelAttachments = attachmentsForChannel(channel.id);
         const channelSignature = signatureFor(channel);
-        const finalCaption = [content.trim(), channelSignature?.trim()]
-          .filter(Boolean)
-          .join("\n\n");
+        const finalCaption = captionWithSignature(content, channelSignature);
 
         if (!content.trim() && channelAttachments.length === 0) {
           errors.push(t("{name}: post text is empty for this channel.", { name }));
@@ -2887,9 +2886,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             const channelCaptionLimit = captionLimitFor(channel);
             const channelContent = resolvedContentFor(channel.id);
             const channelSignature = signatureFor(channel);
-            const channelCaption = [channelContent.trim(), channelSignature?.trim()]
-              .filter(Boolean)
-              .join("\n\n");
+            const channelCaption = captionWithSignature(channelContent, channelSignature);
 
             return (
               <section

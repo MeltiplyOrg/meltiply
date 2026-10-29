@@ -15,7 +15,7 @@ import { Card, CardFooter } from "@meltiply/ui/card";
 import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { useI18n } from "@/lib/i18n";
 import { usePublishingTimeZone } from "@/context/publishing-timezone.context";
-import { abbreviateRecordId } from "@/lib/format";
+import { abbreviateRecordId, postDateFormatters } from "@/lib/format";
 import {
   formatAnalyticsCompact,
   formatAnalyticsInteger,
@@ -68,10 +68,7 @@ export const PostCard = React.memo(function PostCard({
 }: PostCardProps) {
   const { t, language } = useI18n();
   const timeZone = usePublishingTimeZone();
-  const dateFormat = React.useMemo(
-    () => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone }),
-    [timeZone],
-  );
+  const dateFormat = postDateFormatters(timeZone).day;
   const providers = resolveRowProviders(post);
   const preview = resolveRowPreviewAttachment(post);
   const image = preview?.asset.thumbnail_url ?? preview?.asset.download_url;

@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
-import { useWorkspace } from "@/context/workspace.context";
 import { useSessionScope } from "@/hooks/use-session-scope";
 import { useI18n } from "@/lib/i18n";
 import { usePublishingPreferences, useUpdatePublishingPreferences } from "@/lib/queries";
@@ -12,13 +11,35 @@ import { Button } from "@meltiply/ui/button";
 import { Input } from "@meltiply/ui/input";
 import { Switch } from "@meltiply/ui/switch";
 import { Textarea } from "@meltiply/ui/textarea";
-import type { PublishingPreferencesUpdate, SignatureTemplate } from "@/types";
+import type {
+  PublishingPreferences,
+  PublishingPreferencesUpdate,
+  SignatureTemplate,
+} from "@/types";
 
 const MAX_TEMPLATES = 10;
 
 /** Derives a stable display name for one template row's controls. */
 function templateFieldId(template: SignatureTemplate, suffix: string): string {
   return `signature-${template.id}-${suffix}`;
+}
+
+/**
+ * Projects the server document onto the replacement shape the form edits.
+ * A whole-document draft keeps timezone, ordered templates, and notification
+ * choices atomic, matching the single PUT the form submits.
+ *
+ * @param data - Current server read, or undefined before it settles.
+ * @returns The editable draft, or null when no document has loaded.
+ */
+function draftOf(data: PublishingPreferences | undefined): PublishingPreferencesUpdate | null {
+  return data
+    ? {
+        notifications: data.notifications,
+        signature_templates: data.signature_templates,
+        timezone: data.timezone,
+      }
+    : null;
 }
 
 /**
@@ -33,9 +54,8 @@ function templateFieldId(template: SignatureTemplate, suffix: string): string {
  */
 export function PublishingPreferencesSection(): React.ReactElement {
   const { t } = useI18n();
-  const { canManageSettings } = useWorkspace();
   const scope = useSessionScope();
-  const query = usePublishingPreferences(scope, canManageSettings);
+  const query = usePublishingPreferences(scope);
   const update = useUpdatePublishingPreferences(scope);
   const [edited, setEdited] = useState<{
     source: typeof query.data;
@@ -44,15 +64,7 @@ export function PublishingPreferencesSection(): React.ReactElement {
   const [saving, setSaving] = useState(false);
   const browserTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const draft: PublishingPreferencesUpdate | null =
-    edited && edited.source === query.data
-      ? edited.value
-      : query.data
-        ? {
-            notifications: query.data.notifications,
-            signature_templates: query.data.signature_templates,
-            timezone: query.data.timezone,
-          }
-        : null;
+    edited && edited.source === query.data ? edited.value : draftOf(query.data);
 
   /**
    * Applies one local edit against the current server-backed draft. A new query
@@ -64,27 +76,12 @@ export function PublishingPreferencesSection(): React.ReactElement {
   ) {
     setEdited((previous) => {
       const base =
-        previous && previous.source === query.data
-          ? previous.value
-          : query.data
-            ? {
-                notifications: query.data.notifications,
-                signature_templates: query.data.signature_templates,
-                timezone: query.data.timezone,
-              }
-            : null;
+        previous && previous.source === query.data ? previous.value : draftOf(query.data);
       const next = updater(base);
       return next !== null && query.data ? { source: query.data, value: next } : previous;
     });
   }
 
-  if (!canManageSettings) {
-    return (
-      <Alert variant="destructive">
-        {t("Only Workspace Admins can change publishing preferences.")}
-      </Alert>
-    );
-  }
   if (query.error) {
     return <Alert variant="destructive">{t("Publishing preferences could not be loaded.")}</Alert>;
   }

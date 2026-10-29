@@ -106,9 +106,11 @@ export default function WorkspaceSettings() {
   };
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSection = searchParams.get("section");
+  // Publishing preferences are admin-managed, so the section roster is the
+  // canonical list minus that destination for everyone else.
   const sectionIds: readonly SettingsSection[] = canManageSettings
-    ? ["administration", "appearance", "language", "publishing", "account", "security"]
-    : ["appearance", "language", "account", "security"];
+    ? ["administration", ...SECTION_IDS]
+    : SECTION_IDS.filter((id) => id !== "publishing");
   const section = sectionIds.find((id) => id === requestedSection) ?? "appearance";
   const current = sections[section];
   const handleSignOut = useWorkspaceSignOut();

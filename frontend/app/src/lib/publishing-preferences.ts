@@ -34,6 +34,24 @@ export function resolveSignature(body: string, values: SignatureValues): string 
 }
 
 /**
+ * Appends a resolved signature to a Channel caption as its own paragraph.
+ *
+ * The composer preview, caption-limit validation, and the target snapshot all
+ * use this one join so whitespace-only signatures never add a blank paragraph
+ * and the counted text matches what the Provider receives.
+ *
+ * @param content - Channel caption text, possibly empty.
+ * @param signature - Resolved signature, or null when none applies.
+ * @returns Caption with the signature appended, or the trimmed caption alone.
+ */
+export function captionWithSignature(
+  content: string,
+  signature: string | null | undefined,
+): string {
+  return [content.trim(), signature?.trim()].filter(Boolean).join("\n\n");
+}
+
+/**
  * Selects the default template from a saved list.
  *
  * @param templates - Persisted signature templates.

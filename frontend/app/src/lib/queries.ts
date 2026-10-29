@@ -946,7 +946,10 @@ export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryPara
 /**
  * Reads the Workspace's persistent publishing preferences. The timezone and
  * signature list are shared by every member; the composer and scheduling
- * surfaces use the same read so their interpretation cannot drift.
+ * surfaces use the same read so their interpretation cannot drift. Successful
+ * data is reused for five minutes, and the preference mutation invalidates it
+ * immediately, so the dashboard provider does not refetch on every focus or
+ * route mount.
  *
  * @param scope Session scope gating execution.
  * @param enabled Whether the query is active; defaults to true.
@@ -957,7 +960,7 @@ export function usePublishingPreferences(scope: SessionScope, enabled = true) {
     queryKey: queryKeys.publishingPreferences(),
     queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getPublishingPreferences(), signal),
     enabled: scope.isSignedIn && enabled,
-    staleTime: 0,
+    staleTime: referenceFreshnessMs,
   });
 }
 

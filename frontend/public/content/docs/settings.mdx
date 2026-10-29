@@ -27,7 +27,7 @@ Workspace Admins can choose the timezone every new schedule interprets and every
 
 Signatures are reusable text appended to new Posts. Add up to ten templates, name each one, and choose exactly one default. A template may use `{brand_profile}`, `{platform}`, and `{channel}`; the composer resolves them against the actual destination and shows the result before saving. A saved or published Post keeps the signature it stored, so later template edits do not rewrite it. Signature text counts toward each Platform's caption limit.
 
-Notification choices cover failed publications and connected Channels that need reconnecting. Both events are off until you enable them. **Email** is offered only when this installation has working mail delivery; it sends to the Installation Owner's current address. Enabled alerts run through the durable queue with bounded retries, and a redelivery does not send the same event twice.
+Notification choices cover failed publications and connected Channels that need reconnecting. Both events are off until you enable them. **Email** is offered only when this installation has working mail delivery; it sends to the Installation Owner's current address. Enabled alerts run through the durable queue with bounded retries, and recorded delivery evidence stops a replay from sending the same event again.
 
 ## Account
 

@@ -11,6 +11,7 @@ const workerConfigs = {
   api: "workers/api/wrangler.jsonc",
   automation: "workers/automation/wrangler.jsonc",
   state: "workers/state/wrangler.jsonc",
+  frontend: "frontend/app/wrangler.jsonc",
 };
 
 const queueBindings = {
@@ -620,7 +621,7 @@ function replaceBinding(entries, identifier, replacement, key = "binding") {
 }
 
 /**
- * Renders concrete Cloudflare Wrangler configuration trees for the api, automation, and state Workers.
+ * Renders concrete Cloudflare Wrangler configuration trees for all four release Workers.
  * Injects selected environment variables, Hyperdrive bindings, the selected object storage settings, queue producers,
  * allowed CORS origins, the sender-restricted send_email MAIL binding, Zero Trust Access bindings,
  * and per-version preview URLs on the API Worker (the stable workers.dev route stays disabled).
@@ -629,12 +630,32 @@ function replaceBinding(entries, identifier, replacement, key = "binding") {
  * @param {Record<string, object>} sourceConfigs - Base source Wrangler configurations loaded from disk
  * @param {object} spec - Validated release specification
  * @param {object} iac - Validated post-apply IaC outputs
- * @returns {{ api: object, automation: object, state: object }} Complete rendered Wrangler configurations
+ * @returns {{ api: object, automation: object, state: object, frontend: object }} Complete rendered Wrangler configurations
  */
 export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   const state = structuredClone(sourceConfigs.state);
   const automation = structuredClone(sourceConfigs.automation);
   const api = structuredClone(sourceConfigs.api);
+  const frontend = structuredClone(sourceConfigs.frontend);
+  const frontendEnvironment = frontend.env?.[spec.environment] ?? {};
+  delete frontend.env;
+  Object.assign(frontend, frontendEnvironment, {
+    name: iac.frontend_worker_name,
+    vars: { ENVIRONMENT: spec.environment, VERSION: spec.git_sha },
+    services: (frontendEnvironment.services ?? frontend.services ?? []).map((binding) =>
+      binding.binding === "API" ? { ...binding, service: iac.worker_names.api } : binding,
+    ),
+  });
+  // Vite selects Cloudflare environments at build time, before flattening.
+  // Retain only the reviewed environment; never inherit local API_ORIGIN.
+  frontend.env = {
+    [spec.environment]: {
+      name: frontend.name,
+      services: frontend.services,
+      vars: frontend.vars,
+      workers_dev: frontend.workers_dev,
+    },
+  };
   api.name = iac.worker_names.api;
   automation.name = iac.worker_names.automation;
   state.name = iac.worker_names.state;
@@ -734,6 +755,7 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
     api: stableValue(api),
     automation: stableValue(automation),
     state: stableValue(state),
+    frontend: stableValue(frontend),
   };
 }
 /**
@@ -780,7 +802,7 @@ export async function loadReleaseSpec(inputPath) {
 }
 
 /**
- * Loads and parses JSONC Wrangler configurations for state, automation, and api Workers.
+ * Loads and parses source Wrangler configurations for all four release Workers.
  *
  * @param {string} repoRoot - Repository root directory path
  * @returns {Promise<Record<string, object>>} Parsed source Wrangler configurations
@@ -809,7 +831,7 @@ function rewriteConfigRelativePath(configDir, sourceDir, value) {
 }
 
 /**
- * Rewrites schema, main script, and container image/build-context relative paths
+ * Rewrites schema, script, asset directory, and container relative paths
  * and generates a composite SHA-256 config digest.
  *
  * Wrangler resolves those paths against the directory holding the config file,
@@ -830,13 +852,18 @@ export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
   const configDir = path.join(outDir, "wrangler");
   await mkdir(configDir, { mode: 0o700, recursive: true });
   const paths = {};
-  for (const worker of ["state", "automation", "api"]) {
+  for (const worker of ["state", "automation", "api", "frontend"]) {
     const sourceDir = path.dirname(path.join(repoRoot, workerConfigs[worker]));
     for (const field of ["$schema", "main"]) {
       configs[worker][field] = rewriteConfigRelativePath(
         configDir,
         sourceDir,
         configs[worker][field],
+      );
+    }
+    if (configs[worker].assets?.directory) {
+      configs[worker].assets.directory = rewriteConfigRelativePath(
+        configDir, sourceDir, configs[worker].assets.directory,
       );
     }
     for (const container of configs[worker].containers ?? []) {
@@ -852,7 +879,7 @@ export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
     paths[worker] = outputPath;
   }
   const digest = createHash("sha256")
-    .update(["state", "automation", "api"].map((worker) => json(configs[worker])).join("\0"))
+    .update(["state", "automation", "api", "frontend"].map((worker) => json(configs[worker])).join("\0"))
     .digest("hex");
   return { config_digest: digest, paths };
 }
@@ -945,7 +972,7 @@ export function validateDatabaseEnvironment(environment) {
  * send_email binding, so no delivery credential is required.
  *
  * @param {object} spec - Release specification object
- * @returns {{ api: Array<string>, automation: Array<string>, state: Array<string> }} Required secret names by worker
+ * @returns {{ api: Array<string>, automation: Array<string>, state: Array<string>, frontend: Array<string> }} Required secret names by worker
  */
 function requiredRemoteSecrets(spec) {
   const storage =
@@ -961,7 +988,7 @@ function requiredRemoteSecrets(spec) {
       automation.push(fields.secret);
     }
   }
-  return { api: api.sort(), automation: automation.sort(), state: [] };
+  return { api: api.sort(), automation: automation.sort(), state: [], frontend: [] };
 }
 
 /**

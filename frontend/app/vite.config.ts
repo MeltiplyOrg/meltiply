@@ -213,6 +213,8 @@ export default defineConfig(({ mode, command }) => {
       // environments omit API_ORIGIN and route through the API service binding.
       !uiPreview &&
         cloudflare({
+          // Stable output path for release packaging, independent of a fork's Worker name.
+          viteEnvironment: { name: "frontend" },
           config: (config) =>
             localApp
               ? {

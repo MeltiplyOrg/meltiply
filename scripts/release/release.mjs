@@ -54,16 +54,16 @@ async function readSecretStdin(stream) {
  * Maps Worker service and release mode to the expected prerequisite IaC phase.
  *
  * During update releases, all workers require "domains-paused" state.
- * During bootstrap releases, the API worker requires "consumers-paused",
+ * During bootstrap releases, API and frontend require "consumers-paused",
  * while foundation workers (state, automation) require "foundation".
  *
  * @param {object} spec - Release specification with deployment_mode
- * @param {string} worker - Target Worker service ("api", "automation", "state")
+ * @param {string} worker - Target release Worker service
  * @returns {string} Expected IaC state phase name
  */
 function workerIacPhase(spec, worker) {
   if (spec.deployment_mode === "update") return "domains-paused";
-  return worker === "api" ? "consumers-paused" : "foundation";
+  return worker === "api" || worker === "frontend" ? "consumers-paused" : "foundation";
 }
 
 /**
@@ -251,10 +251,12 @@ export async function runReleaseCli(argv, dependencies = {}) {
     return deployWorkerStep({
       approvals,
       environment,
+      iac,
       outDir: options.outDir,
       phase: options.phase,
       planDigest: options.planDigest,
       runCommand: commandRunner,
+      repoRoot: checkoutRoot,
       spec,
       step: options.step,
     });

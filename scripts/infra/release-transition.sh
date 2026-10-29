@@ -75,6 +75,25 @@ verify_release_context() {
     fail "protected release input or backend does not match the reviewed release context"
 }
 
+# Domain attachment requires the reviewed frontend code and its full deployment.
+# Run before backend initialization as well as apply; missing evidence never reaches a provider.
+verify_frontend_deployment() {
+  [[ "$phase" == "domain" ]] || return 0
+  node --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const [root, inputPath, outDir] = process.argv.slice(1);
+    try {
+      const { loadReleaseInputs } = await import(pathToFileURL(`${root}/scripts/release/release-lib.mjs`));
+      const { assertFrontendReleaseEvidence } = await import(pathToFileURL(`${root}/scripts/release/release-frontend.mjs`));
+      const { iac, spec } = await loadReleaseInputs({ inputPath, iacOutputsPath: `${outDir}/iac-outputs.json` });
+      await assertFrontendReleaseEvidence({ iac, outDir, spec });
+    } catch (error) {
+      console.error(`frontend deploy step is required before domain transition: ${error.message}`);
+      process.exit(1);
+    }
+  ' "$repository_root" "$MELTIPLY_RELEASE_INPUT" "$release_dir"
+}
+
 initialize_backend() {
   : "${MELTIPLY_TF_BACKEND_CONFIG:?MELTIPLY_TF_BACKEND_CONFIG must point to protected backend.hcl}"
   [[ -r "$MELTIPLY_TF_BACKEND_CONFIG" ]] ||
@@ -151,6 +170,7 @@ umask 077
 mkdir -p "$release_dir"
 verify_release_sha
 verify_release_context
+verify_frontend_deployment
 initialize_backend
 
 case "$action" in

@@ -405,7 +405,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
           "Access-Control-Allow-Headers",
           "Authorization, Content-Type, X-Request-ID, X-Workspace-ID, X-Setup-Secret, X-Invitation-Token, Idempotency-Key, If-None-Match",
         );
-        c.header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+        c.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
         c.header("Access-Control-Max-Age", "600");
         return c.body(null, 204);
       }

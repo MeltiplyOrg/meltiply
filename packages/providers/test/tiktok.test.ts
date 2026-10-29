@@ -432,15 +432,9 @@ describe("createTikTokAdapter", () => {
     const photoUrl = `${mediaUrlPrefix}org/asset/photo.jpg?signature=safe`;
     const providerCalls = sequence(
       () => creator({ duet_disabled: true, stitch_disabled: true }),
-      (_url, init) => {
-        const body = JSON.parse(String(init.body)) as {
-          post_info: { auto_add_music?: boolean };
-        };
-        expect(body.post_info.auto_add_music).toBe(true);
-        return success({ publish_id: "p_pub_url~v2.789" });
-      },
+      () => success({ publish_id: "p_pub_url~v2.789" }),
     );
-    await adapter(providerCalls.fetcher).publish!(
+    const result = await adapter(providerCalls.fetcher).publish!(
       context,
       credentials,
       publishInput({
@@ -469,6 +463,14 @@ describe("createTikTokAdapter", () => {
         },
       }),
     );
+    expect(result).toEqual({
+      outcome: "confirmed_success",
+      providerOperationId: "publish:p_pub_url~v2.789",
+    });
+    const body = JSON.parse(String(providerCalls.calls[1]!.init.body)) as {
+      post_info: { auto_add_music?: boolean };
+    };
+    expect(body.post_info.auto_add_music).toBe(true);
   });
 
   it("rejects automatic music on a video target instead of dropping the choice", async () => {

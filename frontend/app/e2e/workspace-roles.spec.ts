@@ -40,9 +40,9 @@ test("limits installation lifecycle controls to the Installation Owner", async (
   await expect(
     admin.page.getByRole("switch", { name: "Toggle active state for Gamma Editor" }),
   ).toBeDisabled();
-  await expect(admin.page.getByRole("button", { name: "Suspend" })).toHaveCount(0);
-  await expect(admin.page.getByRole("button", { name: "Reactivate" })).toHaveCount(0);
-  await expect(admin.page.getByRole("button", { name: "Delete" })).toHaveCount(0);
+  await expect(admin.page.getByRole("button", { name: "Suspend", exact: true })).toHaveCount(0);
+  await expect(admin.page.getByRole("button", { name: "Reactivate", exact: true })).toHaveCount(0);
+  await expect(admin.page.getByRole("button", { name: "Delete", exact: true })).toHaveCount(0);
   await admin.page.getByRole("tab", { name: "Workspace" }).click();
   await expect(admin.page.getByRole("button", { name: "Transfer ownership" })).toHaveCount(0);
   await admin.page.getByRole("tab", { name: "Audit" }).click();

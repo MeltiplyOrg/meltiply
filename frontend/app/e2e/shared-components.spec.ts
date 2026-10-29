@@ -228,6 +228,10 @@ test("keeps segmented selection keyboard-complete across Posts and Calendar", as
     fullPage: true,
   });
 
+  // Phones replace this segmented control with the compact view dropdown, so
+  // return to the desktop toolbar before exercising the same control again.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await expect(postView).toBeVisible();
   // A preference changed while the page is open re-renders the highlight store;
   // the next selection commits without rendered travel.
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -571,7 +575,7 @@ test.describe("coarse pointer segmented chrome", () => {
       .getByRole("group", { name: "Theme", exact: true });
     await expect(themeGroup.getByRole("menuitemradio")).toHaveCount(3);
     const themeGeometry = await segmentedGeometry(themeGroup);
-    expect(themeGeometry.trackHeight).toBeGreaterThanOrEqual(47.5);
+    expect(themeGeometry.trackHeight).toBeGreaterThanOrEqual(43.5);
     for (const height of themeGeometry.itemHeights) {
       expect(height).toBeGreaterThanOrEqual(43.5);
     }

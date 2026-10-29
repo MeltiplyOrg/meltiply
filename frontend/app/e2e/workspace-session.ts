@@ -1,7 +1,8 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
 import { Pool } from "pg";
 import { activeBrandProfileName } from "./publication-fixtures";
+import { frontendOrigin } from "./ports";
 
 export type GeneratedCredentials = Readonly<{ name: string; email: string; password: string }>;
 
@@ -16,13 +17,20 @@ const isolatedAuthPages = new WeakSet<Page>();
 /** Gives loopback Worker browser actors distinct edge-IP fixtures; never changes external requests. */
 async function isolateLocalAuthClient(page: Page) {
   if (isolatedAuthPages.has(page) || process.env.STAGING_E2E_BASE_URL) return;
-  const origin = new URL(process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://127.0.0.1:8787");
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname)) return;
+  const apiOrigin = new URL(
+    process.env.MELTIPLY_E2E_API_BASE_URL?.trim() || "http://127.0.0.1:8787",
+  );
+  const origins = [apiOrigin, new URL(frontendOrigin)]
+    .filter((origin) => ["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname))
+    .map((origin) => origin.origin);
+  if (origins.length === 0) return;
   const identifier = randomUUID().replaceAll("-", "").slice(0, 24);
   const address = `2001:db8:${Array.from({ length: 6 }, (_, index) => identifier.slice(index * 4, index * 4 + 4)).join(":")}`;
-  await page.route(`${origin.origin}/api/auth/**`, (route) =>
-    route.continue({ headers: { ...route.request().headers(), "cf-connecting-ip": address } }),
-  );
+  for (const origin of origins) {
+    await page.route(`${origin}/api/auth/**`, (route) =>
+      route.continue({ headers: { ...route.request().headers(), "cf-connecting-ip": address } }),
+    );
+  }
   isolatedAuthPages.add(page);
 }
 
@@ -62,27 +70,25 @@ export async function openOwnerWorkspace(page: Page, credentials: GeneratedCrede
 }
 
 /**
- * Clears the seeded owner's sign-in budget in the disposable local database.
+ * Clears sign-in rate-limit buckets in the disposable local database.
  *
- * Production allows ten sign-in attempts per email per ten minutes. The full
- * browser suite signs the same fixture owner in far more often, so without this
- * reset later journeys receive a real 429 and never reach the surface under
- * test. Only a loopback test database is touched; hosted staging runs without
- * the admin URL skip the reset, and the production limit is never relaxed.
+ * Production allows ten sign-in attempts per email and per caller address in a
+ * ten-minute window. The full browser suite signs the seeded members in far
+ * more often, so without this reset later journeys receive a real 429 and never
+ * reach the surface under test. Only the loopback test database is touched;
+ * hosted staging runs without the admin URL skip the reset, and the production
+ * limit stays enforced in production and in its integration coverage.
  */
-async function clearOwnerSignInBudget(email: string): Promise<void> {
+async function clearSignInRateLimits(): Promise<void> {
   const connectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL?.trim();
   if (!connectionString) return;
   const url = new URL(connectionString);
   if (!["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/meltiply") {
-    throw new Error("Owner sign-in budget reset requires the dedicated loopback test database");
+    throw new Error("Sign-in budget reset requires the dedicated loopback test database");
   }
-  const subject = `email:${createHash("sha256").update(email.trim().toLowerCase()).digest("hex")}`;
   const pool = new Pool({ connectionString });
   try {
-    await pool.query("DELETE FROM auth_rate_limits WHERE action = 'sign-in' AND subject = $1", [
-      subject,
-    ]);
+    await pool.query("DELETE FROM auth_rate_limits WHERE action = 'sign-in'");
   } finally {
     await pool.end();
   }
@@ -92,7 +98,7 @@ async function clearOwnerSignInBudget(email: string): Promise<void> {
 export async function signIn(page: Page, credentials: GeneratedCredentials) {
   await allowFunctionalConsent(page);
   await isolateLocalAuthClient(page);
-  await clearOwnerSignInBudget(credentials.email);
+  await clearSignInRateLimits();
   await page.goto("/sign-in");
   await page.getByLabel(/email address/i).fill(credentials.email);
   await page.getByLabel(/^password$/i).fill(credentials.password);

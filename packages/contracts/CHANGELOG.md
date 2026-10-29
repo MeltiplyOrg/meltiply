@@ -2,13 +2,13 @@
 
 ## Unreleased
 
+## 1.0.0 - 2026-10-29
+
 - Separate saved `PostProviderOptions` from complete `ProviderPublishOptions`.
   Post targets retain YouTube visibility with an unanswered audience and TikTok
   privacy/disclosure choices before completion. Scheduling rejects unanswered
   choices or an enabled disclosure without a subtype; draft-only
   `disclose_commercial_content` never enters Distribution publication options.
-
-## 1.0.0 - 2026-10-29
 
 - Publish source-bound, automatically versioned contract release artifacts with
   JSON/YAML, checksums, and machine-readable change notes. Gate PR and release

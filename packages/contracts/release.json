@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "previousVersion": null,
   "changeType": "initial",
-  "contractSha256": "93acfacb8460e1083c985184d95fad47dde0a3d3039b64f3d43866710d2a165d",
+  "contractSha256": "8f33909de2b76e6b895c41413b41864c7d2216d5ae5939ffd54b3bf2d9e9ce86",
   "changes": [
+    "Separate saved `PostProviderOptions` from complete `ProviderPublishOptions`. Post targets retain YouTube visibility with an unanswered audience and TikTok privacy/disclosure choices before completion. Scheduling rejects unanswered choices or an enabled disclosure without a subtype; draft-only `disclose_commercial_content` never enters Distribution publication options.",
     "Publish source-bound, automatically versioned contract release artifacts with JSON/YAML, checksums, and machine-readable change notes. Gate PR and release compatibility against their real bases; intentional breaks require a fresh exact-change changelog review. Public health consumers retain Git-SHA deployment checks while validating the distinct contract version. Promote only `getHealth` to `worker-preview` with immutable hosted release/conformance evidence.",
     "Add required `Health.contract_version` to unauthenticated `GET /health`, distinct from the application `version`. Clients compare this machine-readable contract version before login or mutation; the server does not reject older clients.",
     "**Breaking:** `POST /oauth-selections/{selection_id}/confirm` (`OAuthSelectionConfirmRequest`) now requires `brand_profile_id` alongside `account_id`. Clients must send the active Brand Profile UUID that will own the connected Channel; authorization no longer selects that owner in advance.",

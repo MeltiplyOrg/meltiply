@@ -5,6 +5,7 @@ import {
   type JwtIdentity,
   type SessionClaims,
 } from "@meltiply/auth";
+import { CONTRACT_VERSION } from "@meltiply/contracts";
 import type { components } from "@meltiply/contracts/schema";
 import {
   createRequestId,
@@ -584,6 +585,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   app.get("/api/v1/health", (c) =>
     jsonResponse(
       {
+        contract_version: CONTRACT_VERSION,
         environment: c.env.ENVIRONMENT,
         status: "ok",
         version: c.env.VERSION,

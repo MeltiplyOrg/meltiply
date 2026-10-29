@@ -91,6 +91,7 @@ paths:
               example:
                 status: ok
                 version: 01JZRELEASE
+                contract_version: 1.0.0-target.0
                 environment: staging
   /ready:
     get:
@@ -3078,13 +3079,16 @@ components:
     Health:
       type: object
       additionalProperties: false
-      required: [status, version, environment]
+      required: [status, version, contract_version, environment]
       properties:
         status:
           type: string
           const: ok
         version:
           type: string
+        contract_version:
+          type: string
+          description: Semantic version of the API contract implemented by this installation.
         environment:
           type: string
     ReadinessComponent:

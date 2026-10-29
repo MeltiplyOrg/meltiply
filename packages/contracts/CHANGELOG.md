@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add required `Health.contract_version` to unauthenticated `GET /health`, distinct
+  from the application `version`. Clients compare this machine-readable contract
+  version before login or mutation; the server does not reject older clients.
+
 - **Breaking:** `POST /oauth-selections/{selection_id}/confirm`
   (`OAuthSelectionConfirmRequest`) now requires `brand_profile_id` alongside
   `account_id`. Clients must send the active Brand Profile UUID that will own

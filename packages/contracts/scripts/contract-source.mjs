@@ -10,11 +10,11 @@ export function git(...args) {
   return result.stdout.trim();
 }
 
-/** Returns the newest reachable contract release tag, or undefined for the initial release. */
-export function latestContractTag(ref = "HEAD") {
+/** Returns the newest reachable stable contract tag, optionally excluding the release being validated. */
+export function latestContractTag(ref = "HEAD", exclude) {
   return git("tag", "--merged", ref, "--list", "contract-v*", "--sort=-version:refname")
     .split("\n")
-    .find((tag) => /^contract-v\d+\.\d+\.\d+$/.test(tag));
+    .find((tag) => /^contract-v\d+\.\d+\.\d+$/.test(tag) && tag !== exclude);
 }
 
 /** Serializes JSON-compatible contract values deterministically, ignoring YAML presentation. */

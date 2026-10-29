@@ -115,7 +115,15 @@ try {
   /** Commits the fixture contract without relying on global Git author configuration. */
   const commit = () => {
     fixtureGit("add", ".");
-    fixtureGit("-c", "user.name=Contract test", "-c", "user.email=contract-test@example.test", "commit", "-m", "fixture");
+    fixtureGit(
+      "-c",
+      "user.name=Contract test",
+      "-c",
+      "user.email=contract-test@example.test",
+      "commit",
+      "-m",
+      "fixture",
+    );
     return fixtureGit("rev-parse", "HEAD");
   };
   const source = join(contracts, "openapi.yaml");
@@ -130,12 +138,23 @@ try {
   const baseTip = commit();
   fixtureGit("checkout", "--detach", common);
   const head = fixtureGit("rev-parse", "HEAD");
-  writeFileSync(eventPath, JSON.stringify({ pull_request: { base: { sha: baseTip }, head: { sha: head } } }));
+  writeFileSync(
+    eventPath,
+    JSON.stringify({ pull_request: { base: { sha: baseTip }, head: { sha: head } } }),
+  );
   /** Invokes CI baseline selection through event metadata, with no mocked comparator or Git calls. */
-  const ci = (name, ref = "refs/heads/feature") => spawnSync(process.execPath, [script, "--ci"], {
-    cwd: repository, encoding: "utf8",
-    env: { ...process.env, GITHUB_EVENT_NAME: name, GITHUB_EVENT_PATH: eventPath, GITHUB_REF: ref, GITHUB_STEP_SUMMARY: "" },
-  });
+  const ci = (name, ref = "refs/heads/feature") =>
+    spawnSync(process.execPath, [script, "--ci"], {
+      cwd: repository,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_EVENT_NAME: name,
+        GITHUB_EVENT_PATH: eventPath,
+        GITHUB_REF: ref,
+        GITHUB_STEP_SUMMARY: "",
+      },
+    });
   const mergeBase = ci("pull_request");
   assert.equal(mergeBase.status, 0, `${mergeBase.stdout}${mergeBase.stderr}`);
   assert.match(mergeBase.stdout, new RegExp(`unchanged against ${common}`));
@@ -144,6 +163,11 @@ try {
   const pushBreak = ci("push", "refs/heads/master");
   assert.equal(pushBreak.status, 1, `${pushBreak.stdout}${pushBreak.stderr}`);
   assert.match(`${pushBreak.stdout}${pushBreak.stderr}`, /\/probe/);
+  fixtureGit("tag", "contract-v1.1.0");
+  const tagBreak = ci("push", "refs/tags/contract-v1.1.0");
+  assert.equal(tagBreak.status, 1, `${tagBreak.stdout}${tagBreak.stderr}`);
+  assert.match(`${tagBreak.stdout}${tagBreak.stderr}`, /\/probe/);
+  fixtureGit("tag", "-d", "contract-v1.1.0");
   fixtureGit("tag", "-d", "contract-v1.0.0");
   const initial = ci("push", "refs/heads/master");
   assert.equal(initial.status, 0, initial.stderr);

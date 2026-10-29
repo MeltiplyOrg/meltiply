@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -24,7 +31,7 @@ function option(name) {
   return value;
 }
 
-/** Selects a PR merge base or the previous reachable release on default-branch pushes. */
+/** Selects a PR merge base or the previous reachable release for default-branch and release-tag pushes. */
 function ciBase() {
   const event = process.env.GITHUB_EVENT_PATH
     ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"))
@@ -41,6 +48,10 @@ function ciBase() {
   ) {
     return latestContractTag();
   }
+  if (process.env.GITHUB_EVENT_NAME === "push" &&
+      process.env.GITHUB_REF?.startsWith("refs/tags/contract-v")) {
+    return latestContractTag("HEAD", process.env.GITHUB_REF.slice("refs/tags/".length));
+  }
   return undefined;
 }
 
@@ -50,7 +61,9 @@ function main() {
   const base = option("--base") ?? (ci ? ciBase() : undefined);
   if (!base) {
     if (ci) {
-      report("Contract compatibility: skipped explicitly; no PR merge base or previous default-branch contract release is available.");
+      report(
+        "Contract compatibility: skipped explicitly; no PR merge base or previous default-branch contract release is available.",
+      );
       return 0;
     }
     throw new Error(
@@ -87,7 +100,10 @@ function main() {
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
     if (process.env.GITHUB_STEP_SUMMARY && (result.stdout || result.stderr)) {
-      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n\`\`\`text\n${`${result.stdout}${result.stderr}`.slice(0, 64_000)}\n\`\`\`\n`);
+      appendFileSync(
+        process.env.GITHUB_STEP_SUMMARY,
+        `\n\`\`\`text\n${`${result.stdout}${result.stderr}`.slice(0, 64_000)}\n\`\`\`\n`,
+      );
     }
     if (result.error) throw result.error;
     if (result.status === 0) {

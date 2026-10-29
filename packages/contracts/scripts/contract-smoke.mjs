@@ -102,9 +102,19 @@ async function releaseSmoke() {
     prepared.info.summary = "A correction made after release preparation";
     await writeFile(resolve(contracts, "openapi.yaml"), YAML.stringify(prepared));
     release(["prepare"], directory);
-    assert.equal(YAML.parse(await readFile(resolve(contracts, "openapi.yaml"), "utf8")).info.version, "1.2.4");
-    assert.equal((await readFile(resolve(contracts, "CHANGELOG.md"), "utf8")).match(/^## 1\.2\.4 - /gm)?.length, 1);
-    assert.deepEqual(JSON.parse(await readFile(resolve(contracts, "release.json"), "utf8")).changes, ["**Patch:** Correct the summary."]);
+    assert.equal(
+      YAML.parse(await readFile(resolve(contracts, "openapi.yaml"), "utf8")).info.version,
+      "1.2.4",
+    );
+    assert.equal(
+      (await readFile(resolve(contracts, "CHANGELOG.md"), "utf8")).match(/^## 1\.2\.4 - /gm)
+        ?.length,
+      1,
+    );
+    assert.deepEqual(
+      JSON.parse(await readFile(resolve(contracts, "release.json"), "utf8")).changes,
+      ["**Patch:** Correct the summary."],
+    );
     assert.match(
       release(["artifacts", "--tag", "contract-v1.2.3"], directory, 1),
       /tag must equal/,

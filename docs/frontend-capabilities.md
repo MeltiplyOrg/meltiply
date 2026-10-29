@@ -2,6 +2,16 @@
 
 This document records the current creator-facing interface. Backend endpoints and reference-design examples do not imply a shipped screen. Use [UI ownership](frontend-ui.md) and [layout](frontend-layout.md) for implementation; [`COMMUNITY_LIMITS`](../packages/domain/src/index.ts) leaves community resource allowances unrestricted while retaining quota machinery for hosted policies.
 
+The production-built app is available on either
+[managed Cloudflare staging/production](../infra/cloudflare/README.md#release-and-rollback)
+or [self-hosted Compose](self-hosting.md), not only the development stack.
+Deployment does not certify external Platform access: Provider acceptance flags,
+credentials, scopes and app review determine connection/publishing readiness.
+An installation can run with every acceptance flag false; its capability and
+readiness responses report connections and publishing unavailable, and Channels
+keeps those actions unavailable. Setting a flag is an operator attestation after
+real acceptance, not an automated review or a UI feature switch.
+
 ## App surfaces
 
 | Surface                        | Current workflow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |

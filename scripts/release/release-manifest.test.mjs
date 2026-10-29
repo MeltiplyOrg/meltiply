@@ -17,6 +17,7 @@ const previousVersionId = "33333333-3333-3333-3333-333333333333";
 const automationVersionId = "44444444-4444-4444-4444-444444444444";
 const stateVersionId = "55555555-5555-5555-5555-555555555555";
 const automationSecretsId = "66666666-6666-6666-6666-666666666666";
+const frontendVersionId = "77777777-7777-4777-8777-777777777777";
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 
 const digests = {
@@ -157,6 +158,37 @@ function healthEvidence(extra = {}) {
   };
 }
 
+
+/** Reviewed frontend config bytes shared by fixture evidence and private rendered artifacts. */
+function frontendConfig(spec) {
+  return JSON.stringify({
+    name: `meltiply-frontend-${spec.environment}`,
+    services: [{ binding: "API", service: spec.environment === "staging" ? "meltiply-api" : "meltiply-api-production" }],
+    vars: { ENVIRONMENT: spec.environment, VERSION: spec.git_sha },
+  });
+}
+
+/** Frontend activates its code candidate directly, without a secrets version. */
+function frontendEvidenceSet(spec, foundation) {
+  const base = {
+    schema_version: 1, git_sha: spec.git_sha, release_id: spec.release_id,
+    approvals: [foundation], plan_digest: digests.initial, worker: "frontend",
+    worker_name: `meltiply-frontend-${spec.environment}`,
+    config_digest: sha256(frontendConfig(spec)), build_config_digest: sha256(frontendConfig(spec)),
+    version_id: frontendVersionId,
+  };
+  return {
+    "worker-frontend-candidate.json": {
+      ...base, deployment_mode: spec.deployment_mode,
+      step: spec.deployment_mode === "bootstrap" ? "initialize" : "upload",
+      previous_version_id: spec.deployment_mode === "bootstrap" ? null : previousVersionId,
+      preview_alias_url: null, preview_url: null,
+    },
+    "worker-frontend-deployment.json": {
+      ...base, traffic: [{ percentage: 100, version_id: frontendVersionId }],
+    },
+  };
+}
 // Builds a complete, internally consistent update-mode release directory.
 function updateEvidenceSet(spec) {
   const base = {
@@ -204,6 +236,7 @@ function updateEvidenceSet(spec) {
   });
 
   return {
+    ...frontendEvidenceSet(spec, foundation),
     "approval-foundation.json": foundation,
     "approval-queue-resume.json": resumeApproval,
     "approval-traffic.json": trafficApproval,
@@ -362,6 +395,12 @@ async function seedReleaseDir(outDir, files, { includeFinal = true } = {}) {
   await writeFile(path.join(outDir, "wrangler", "api.json"), "{}", {
     mode: 0o600,
   });
+  const frontend = files["worker-frontend-candidate.json"];
+  if (frontend) {
+    const config = frontendConfig({ environment: frontend.release_id.split("-")[0], git_sha: frontend.git_sha });
+    await writeFile(path.join(outDir, "wrangler/frontend.json"), config);
+    await writeFile(path.join(outDir, "wrangler/frontend-built.json"), config);
+  }
   for (const [name, content] of Object.entries(files)) {
     const body = typeof content === "string" ? content : `${JSON.stringify(content, null, 2)}\n`;
     await writeFile(path.join(outDir, name), body, { mode: 0o600 });
@@ -464,7 +503,7 @@ test("manifest accepts production provenance and rejects mixed installations", a
   const outDir = await withReleaseDir(context, files);
   assert.equal((await buildReleaseManifest(manifestParams(outDir, spec))).environment, "production");
   const staging = updateEvidenceSet(validateReleaseSpec(releaseInput()));
-  for (const name of ["approval-foundation.json", "domain-plan-summary.json", "smoke-version.json", "worker-api-candidate.json", "iac-outputs-domain.json"]) {
+  for (const name of ["approval-foundation.json", "domain-plan-summary.json", "smoke-version.json", "worker-api-candidate.json", "worker-frontend-candidate.json", "worker-frontend-deployment.json", "iac-outputs-domain.json"]) {
     const mixed = await withReleaseDir(context, { ...files, [name]: staging[name] });
     await assert.rejects(buildReleaseManifest(manifestParams(mixed, spec)));
   }
@@ -634,19 +673,20 @@ function bootstrapEvidenceSet(spec) {
     release_id: spec.release_id,
     schema_version: 1,
   };
-  const foundation = approval("staging-foundation-approval", digests.initial, "88888881");
-  const trafficApproval = approval("staging-traffic-approval", digests.domain, "88888882");
-  const resumeApproval = approval("staging-queue-resume-approval", digests.unpause, "88888883");
+  const foundation = approval(`${spec.environment}-foundation-approval`, digests.initial, "88888881");
+  const trafficApproval = approval(`${spec.environment}-traffic-approval`, digests.domain, "88888882");
+  const resumeApproval = approval(`${spec.environment}-queue-resume-approval`, digests.unpause, "88888883");
   const baseWith = (planDigest, signoff) => ({
     ...base,
     approvals: [signoff],
     plan_digest: planDigest,
   });
   const consumersDigest = "7".repeat(64);
-  const hostname = "meltiply-api.example.workers.dev";
+  const hostname = new URL(spec.api_workers_dev_url).hostname;
   const traffic100 = (versionId) => [{ percentage: 100, version_id: versionId }];
 
   return {
+    ...frontendEvidenceSet(spec, foundation),
     "approval-foundation.json": foundation,
     "approval-queue-resume.json": resumeApproval,
     "approval-traffic.json": trafficApproval,
@@ -664,22 +704,24 @@ function bootstrapEvidenceSet(spec) {
       status: "empty",
       worker: "automation",
     },
-    "domain-plan-summary.json": planSummary("domain", transition(true, true, true)),
+    "domain-plan-summary.json": planSummary("domain", transition(true, true, true, spec.environment)),
     "domain-plan.sha256": `${digests.domain}\n`,
-    "foundation-plan-summary.json": planSummary("foundation", transition(false, false, true)),
+    "foundation-plan-summary.json": planSummary("foundation", transition(false, false, true, spec.environment)),
     "foundation-plan.sha256": `${digests.initial}\n`,
-    "iac-outputs-domain.json": iacOutput({ queue_delivery_paused: true }),
+    "iac-outputs-domain.json": iacOutput({ environment: spec.environment, queue_delivery_paused: true }),
     "iac-outputs-foundation.json": iacOutput({
+      environment: spec.environment,
       app_custom_domains_attached: false,
       queue_consumers_attached: false,
       queue_delivery_paused: true,
     }),
     "iac-outputs-paused-consumers.json": iacOutput({
+      environment: spec.environment,
       app_custom_domains_attached: false,
       queue_consumers_attached: true,
       queue_delivery_paused: true,
     }),
-    "iac-outputs-unpause.json": iacOutput(),
+    "iac-outputs-unpause.json": iacOutput({ environment: spec.environment }),
     "migration-evidence.json": {
       ...baseWith(digests.initial, foundation),
       already_applied: [],
@@ -695,7 +737,7 @@ function bootstrapEvidenceSet(spec) {
     },
     "paused-consumers-plan-summary.json": planSummary(
       "paused-consumers",
-      transition(false, true, true),
+      transition(false, true, true, spec.environment),
     ),
     "paused-consumers-plan.sha256": `${consumersDigest}\n`,
     "restore-point-evidence.json": {
@@ -723,7 +765,7 @@ function bootstrapEvidenceSet(spec) {
     "smoke-live.json": {
       ...base,
       attempts: 1,
-      health: healthEvidence(),
+      health: healthEvidence({ environment: spec.environment, url: `${spec.app_url}/api/v1/health` }),
       percentage: 100,
       phase: "live",
       status: "passed",
@@ -736,7 +778,7 @@ function bootstrapEvidenceSet(spec) {
       attempts: 1,
       candidate_version_id: candidateVersionId,
       health: {
-        environment: "staging",
+        environment: spec.environment,
         status: "ok",
         url: `https://${secretsVersionId.slice(0, 8)}-${hostname}/api/v1/health`,
         version: gitSha,
@@ -746,7 +788,7 @@ function bootstrapEvidenceSet(spec) {
       version_id: secretsVersionId,
       worker: "api",
     },
-    "unpause-plan-summary.json": planSummary("unpause", transition(true, true, false)),
+    "unpause-plan-summary.json": planSummary("unpause", transition(true, true, false, spec.environment)),
     "unpause-plan.sha256": `${digests.unpause}\n`,
     "worker-api-candidate.json": {
       ...baseWith(digests.initial, foundation),
@@ -902,4 +944,34 @@ test("manifest rejects bootstrap identity drift and update-only artifacts", asyn
     buildReleaseManifest(manifestParams(outDir, spec)),
     /unexpected version URL/,
   );
+});
+
+/** Neither missing frontend proof nor a deployment borrowed from another installation completes a release. */
+test("manifest requires frontend candidate and same-release activation", async (context) => {
+  const spec = validateReleaseSpec(releaseInput());
+  const files = updateEvidenceSet(spec);
+  const missing = { ...files };
+  delete missing["worker-frontend-candidate.json"];
+  let outDir = await withReleaseDir(context, missing);
+  await assert.rejects(buildReleaseManifest(manifestParams(outDir, spec)), /incomplete.*worker-frontend-candidate/);
+  outDir = await withReleaseDir(context, {
+    ...files,
+    "worker-frontend-deployment.json": {
+      ...files["worker-frontend-deployment.json"], worker_name: "meltiply-frontend-production",
+    },
+  });
+  await assert.rejects(buildReleaseManifest(manifestParams(outDir, spec)), /frontend deploy step/);
+});
+
+/** Production bootstrap requires the same complete four-Worker evidence as staging. */
+test("manifest accepts a complete production bootstrap including frontend", async (context) => {
+  const spec = validateReleaseSpec(releaseInput({
+    deployment_mode: "bootstrap", environment: "production",
+    release_id: `production-${gitSha.slice(0, 12)}`, app_url: "https://production.meltiply.com",
+    api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
+  }));
+  const outDir = await withReleaseDir(context, bootstrapEvidenceSet(spec));
+  const manifest = await buildReleaseManifest(manifestParams(outDir, spec));
+  assert.equal(manifest.environment, "production");
+  assert.ok(manifest.evidence.some((entry) => entry.file === "worker-frontend-deployment.json"));
 });

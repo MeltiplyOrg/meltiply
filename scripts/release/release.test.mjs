@@ -309,6 +309,7 @@ test("production validation and rendering keep all workload bindings environment
     api: { services: [{ binding: "AUTOMATION", service: "meltiply-automation" }], durable_objects: { bindings: [{ name: "OAUTH_STATE", script_name: "meltiply-state" }] } },
     automation: { containers: [{ name: "meltiply-media-processor" }], workflows: [{ binding: "REPLY_WORKFLOW", name: "meltiply-reply-staging" }] },
     state: {},
+    frontend: { assets: { binding: "ASSETS", run_worker_first: ["/api", "/api/*"] }, env: { production: { services: [{ binding: "API", service: "meltiply-api" }] } } },
   }, spec, iac);
   assert.equal(rendered.api.name, "meltiply-api-production");
   assert.equal(rendered.api.services[0].service, "meltiply-automation-production");
@@ -317,6 +318,12 @@ test("production validation and rendering keep all workload bindings environment
   assert.equal(rendered.automation.workflows[0].name, "meltiply-reply-production");
   assert.equal(rendered.api.vars.ENVIRONMENT, "production");
   assert.equal(rendered.automation.vars.ENVIRONMENT, "production");
+  assert.equal(rendered.frontend.name, "fork-frontend-production");
+  assert.equal(rendered.frontend.vars.VERSION, gitSha);
+  assert.equal(rendered.frontend.vars.ENVIRONMENT, "production");
+  assert.deepEqual(rendered.frontend.services, [{ binding: "API", service: "meltiply-api-production" }]);
+  assert.deepEqual(rendered.frontend.assets.run_worker_first, ["/api", "/api/*"]);
+  assert.equal(rendered.frontend.env.production.name, "fork-frontend-production");
   assert.deepEqual(
     rendered.automation.queues.producers.find((entry) => entry.binding === "TIKTOK_PUBLISH_QUEUE"),
     { binding: "TIKTOK_PUBLISH_QUEUE", queue: "meltiply-publish-tiktok-production" },
@@ -387,6 +394,7 @@ test("rendering replaces placeholders with reviewed non-secret bindings", () => 
         queues: { producers: [] },
       },
       state: { name: "meltiply-state", migrations: [{ tag: "v1" }] },
+      frontend: { env: { staging: { services: [{ binding: "API", service: "meltiply-api" }] } } },
     },
     spec,
     iac,
@@ -450,6 +458,14 @@ test("rendered files are deterministic and private", async (context) => {
       allowed_sender_addresses: ["auth@staging.meltiply.com"],
     },
   ]);
+  const frontend = JSON.parse(await readFile(first.paths.frontend, "utf8"));
+  assert.equal(path.resolve(path.dirname(first.paths.frontend), frontend.main), path.join(repoRoot, "frontend/app/src/worker.ts"));
+  assert.equal(path.resolve(path.dirname(first.paths.frontend), frontend.assets.directory), path.join(repoRoot, "frontend/app/dist/client"));
+  assert.equal(frontend.vars.API_ORIGIN, undefined);
+  const renamed = await writeRenderedConfigs({
+    iac: { ...iac, frontend_worker_name: "fork-frontend-staging" }, outDir, repoRoot, spec,
+  });
+  assert.notEqual(renamed.config_digest, first.config_digest, "frontend identity participates in the review digest");
 });
 
 test("connected preflight requires matching Cloudflare and TLS database credentials", async () => {

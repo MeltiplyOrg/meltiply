@@ -14,6 +14,7 @@ import {
   validateIacOutputs,
 } from "./release-lib.mjs";
 import { validateWorkerVersionId } from "./release-worker.mjs";
+import { assertFrontendReleaseEvidence } from "./release-frontend.mjs";
 
 const manifestName = "release-manifest.json";
 const maximumFileBytes = 512 * 1024;
@@ -82,6 +83,8 @@ const evidenceByMode = Object.freeze({
     "worker-automation-secrets.json",
     "worker-state-candidate.json",
     "worker-state-deployment.json",
+    "worker-frontend-candidate.json",
+    "worker-frontend-deployment.json",
   ]),
   bootstrap: Object.freeze([
     "foundation-plan-summary.json",
@@ -525,6 +528,7 @@ function validateEvidenceDocument({ content, context, name, spec }) {
       api: context.secretsVersionId,
       automation: context.candidate.automation_secrets,
       state: context.candidate.state,
+      frontend: context.candidate.frontend,
     };
     if (evidence.version_id !== deployedIds[worker]) {
       throw new TypeError(`${name} activated the wrong Worker version`);
@@ -859,6 +863,7 @@ export async function buildReleaseManifest({
       automation: documents.get("worker-automation-candidate.json")?.version_id,
       automation_secrets: documents.get("worker-automation-secrets.json")?.version_id,
       state: documents.get("worker-state-candidate.json")?.version_id,
+      frontend: documents.get("worker-frontend-candidate.json")?.version_id,
     },
     domainDigest,
     expectedTraffic,
@@ -877,6 +882,7 @@ export async function buildReleaseManifest({
     }
     validateEvidenceDocument({ content: parsed, context, name, spec });
   }
+  await assertFrontendReleaseEvidence({ iac, outDir, spec });
 
   // The final post-apply outputs must equal the unpause outputs byte-for-byte,
   // must equal the outputs supplied for validation, and must prove the fully

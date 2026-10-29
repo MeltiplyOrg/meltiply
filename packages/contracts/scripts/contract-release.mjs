@@ -18,7 +18,6 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-
 /** Splits Markdown bullets with their continuation text into machine-readable change entries. */
 function changesIn(section) {
   return (section.match(/^- .*(?:\n(?!- |## ).+)*/gm) ?? []).map((entry) =>
@@ -49,7 +48,10 @@ async function releaseState(excludeCurrentVersion = true) {
   const document = YAML.parse(source);
   if (typeof document?.info?.version !== "string")
     throw new Error("OpenAPI info.version is required");
-  const tag = latestContractTag("HEAD", excludeCurrentVersion ? `contract-v${document.info.version}` : undefined);
+  const tag = latestContractTag(
+    "HEAD",
+    excludeCurrentVersion ? `contract-v${document.info.version}` : undefined,
+  );
   const previous = tag
     ? YAML.parse(git("show", `${tag}:packages/contracts/openapi.yaml`))
     : undefined;
@@ -58,11 +60,12 @@ async function releaseState(excludeCurrentVersion = true) {
   return { source, document, tag, previous };
 }
 
-/** Prepares or refreshes one untagged release; preserves its notes and never edits a published version. */
+/** Prepares or refreshes one untagged release; unchanged published source is a no-op and keeps its version. */
 async function prepare() {
   const { source, document, tag, previous } = await releaseState(false);
   if (previous && contractDigest(previous) === contractDigest(document)) {
-    throw new Error("No contract content changed since the latest release; nothing to publish");
+    console.log("No contract content changed since the latest release; nothing to publish");
+    return;
   }
   const changelogPath = resolve(root, "CHANGELOG.md");
   const changelog = await readFile(changelogPath, "utf8");

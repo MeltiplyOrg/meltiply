@@ -95,9 +95,10 @@ several merged PRs: record a fresh exact-change review token for that complete s
 in the prepared version's changelog section. A release-tag check repeats this
 comparison even if each individual PR was compatible with its own merge base.
 
-Preparation compares with the last reachable `contract-v*` release, rejects an
-unchanged contract, derives the next version, updates `info.version` and catalog
-version, creates source-bound [release.json](release.json), moves Unreleased notes
+Preparation compares with the last reachable `contract-v*` release and leaves
+unchanged published content at its existing version. Otherwise it derives the next
+version, updates `info.version` and catalog version, creates source-bound
+[release.json](release.json), moves Unreleased notes
 to the versioned changelog, and regenerates types, the runtime version and readiness
 view. `**Breaking:**` notes select major, exclusively `**Patch:**` notes select
 patch, and other changes select minor. Commit those generated source changes in the

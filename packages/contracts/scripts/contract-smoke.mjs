@@ -120,7 +120,11 @@ async function releaseSmoke() {
       /tag must equal/,
     );
     commit("contract-v1.2.4");
-    assert.match(release(["prepare"], directory, 1), /No contract content changed/);
+    release(["prepare"], directory);
+    assert.equal(
+      YAML.parse(await readFile(resolve(contracts, "openapi.yaml"), "utf8")).info.version,
+      "1.2.4",
+    );
     source.info.version = "1.2.4";
     source.info.summary = "Documented breaking contract change";
     await writeFile(resolve(contracts, "openapi.yaml"), YAML.stringify(source));
@@ -135,7 +139,7 @@ async function releaseSmoke() {
       "2.0.0",
     );
     console.log(
-      "Release smoke: exact artifacts pass; corruption, internal files, tag mismatch, stale version and unchanged releases rejected; patch and breaking versions advance automatically.",
+      "Release smoke: exact artifacts pass; corruption, internal files, tag mismatch and stale versions rejected; unchanged sources keep their version; patch and breaking versions advance automatically.",
     );
   } finally {
     await rm(directory, { force: true, recursive: true });

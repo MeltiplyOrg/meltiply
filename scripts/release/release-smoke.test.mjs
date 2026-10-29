@@ -148,13 +148,25 @@ async function seedCandidate(outDir, spec, overrides = {}) {
 test("health probe accepts the contract version without confusing application identity", async (context) => {
   const origin = await withServer(context, (_request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({
-      contract_version: contractVersion, environment: "staging", status: "ok", version: gitSha,
-    }));
+    response.end(
+      JSON.stringify({
+        contract_version: contractVersion,
+        environment: "staging",
+        status: "ok",
+        version: gitSha,
+      }),
+    );
   });
-  const health = await fetchHealth({ fetchImpl: healthFetch(origin), origin: "https://staging.meltiply.com", requestBudgetMs: 5000 });
+  const health = await fetchHealth({
+    fetchImpl: healthFetch(origin),
+    origin: "https://staging.meltiply.com",
+    requestBudgetMs: 5000,
+  });
   assert.deepEqual(health, {
-    contract_version: contractVersion, environment: "staging", status: "ok", version: gitSha,
+    contract_version: contractVersion,
+    environment: "staging",
+    status: "ok",
+    version: gitSha,
   });
 });
 
@@ -162,10 +174,39 @@ test("health probe accepts the contract version without confusing application id
 test("health probe rejects mismatched and malformed envelopes", async (context) => {
   const spec = validateReleaseSpec(releaseInput());
   const cases = [
-    [{ contract_version: contractVersion, environment: "production", status: "ok", version: gitSha }], // wrong env
-    [{ contract_version: contractVersion, environment: "staging", status: "degraded", version: gitSha }], // not ok
-    [{ contract_version: contractVersion, environment: "staging", status: "ok", version: "not-a-sha" }], // unpinned application
-    [{ contract_version: contractVersion, environment: "staging", status: "ok", version: gitSha, debug: 1 }], // extra key
+    [
+      {
+        contract_version: contractVersion,
+        environment: "production",
+        status: "ok",
+        version: gitSha,
+      },
+    ], // wrong env
+    [
+      {
+        contract_version: contractVersion,
+        environment: "staging",
+        status: "degraded",
+        version: gitSha,
+      },
+    ], // not ok
+    [
+      {
+        contract_version: contractVersion,
+        environment: "staging",
+        status: "ok",
+        version: "not-a-sha",
+      },
+    ], // unpinned application
+    [
+      {
+        contract_version: contractVersion,
+        environment: "staging",
+        status: "ok",
+        version: gitSha,
+        debug: 1,
+      },
+    ], // extra key
     [{ contract_version: contractVersion, environment: "staging", version: gitSha }], // missing status
     [{ environment: "staging", status: "ok", version: gitSha }], // missing contract version
     [{ contract_version: "", environment: "staging", status: "ok", version: gitSha }], // empty contract version
@@ -205,7 +246,14 @@ test("version smoke fails closed on evidence, binding, and health drift", async 
   const spec = validateReleaseSpec(releaseInput());
   const origin = await withServer(context, (_request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ contract_version: contractVersion, environment: "staging", status: "ok", version: gitSha }));
+    response.end(
+      JSON.stringify({
+        contract_version: contractVersion,
+        environment: "staging",
+        status: "ok",
+        version: gitSha,
+      }),
+    );
   });
   const base = {
     environment: {},
@@ -352,7 +400,14 @@ test("live smoke rejects wrong mode, stale traffic, and foreign versions", async
 
   const origin = await withServer(context, (_request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ contract_version: contractVersion, environment: "staging", status: "ok", version: gitSha }));
+    response.end(
+      JSON.stringify({
+        contract_version: contractVersion,
+        environment: "staging",
+        status: "ok",
+        version: gitSha,
+      }),
+    );
   });
   const params = {
     environment: {},
@@ -421,7 +476,14 @@ test("version smoke retries a transport reset before recording healthy evidence"
       return;
     }
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ contract_version: contractVersion, environment: "staging", status: "ok", version: gitSha }));
+    response.end(
+      JSON.stringify({
+        contract_version: contractVersion,
+        environment: "staging",
+        status: "ok",
+        version: gitSha,
+      }),
+    );
   });
   const evidence = await smokeVersionCandidate({
     environment: {},

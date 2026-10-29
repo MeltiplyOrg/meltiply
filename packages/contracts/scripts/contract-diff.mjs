@@ -48,8 +48,10 @@ function ciBase() {
   ) {
     return latestContractTag();
   }
-  if (process.env.GITHUB_EVENT_NAME === "push" &&
-      process.env.GITHUB_REF?.startsWith("refs/tags/contract-v")) {
+  if (
+    process.env.GITHUB_EVENT_NAME === "push" &&
+    process.env.GITHUB_REF?.startsWith("refs/tags/contract-v")
+  ) {
     return latestContractTag("HEAD", process.env.GITHUB_REF.slice("refs/tags/".length));
   }
   return undefined;

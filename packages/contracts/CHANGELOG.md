@@ -2,14 +2,14 @@
 
 ## Unreleased
 
+## 1.0.0 - 2026-10-29
+
 - Publish source-bound, automatically versioned contract release artifacts with
   JSON/YAML, checksums, and machine-readable change notes. Gate PR and release
   compatibility against their real bases; intentional breaks require a fresh
   exact-change changelog review. Public health consumers retain Git-SHA deployment
   checks while validating the distinct contract version. Promote only `getHealth`
   to `worker-preview` with immutable hosted release/conformance evidence.
-
-## 1.0.0 - 2026-10-29
 
 - Add required `Health.contract_version` to unauthenticated `GET /health`, distinct
   from the application `version`. Clients compare this machine-readable contract

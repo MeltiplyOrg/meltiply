@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { Effect } from "effect";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { AutomationEnv } from "../src/env";
 import type { OutboxMessage } from "../src/messages";
@@ -17,6 +17,8 @@ if (!process.env.MELTIPLY_DATABASE_TEST_URL) {
 }
 
 interface SentMail {
+  html?: string;
+  text?: string;
   subject?: string;
   to?: string;
 }
@@ -84,6 +86,10 @@ async function setPreferences(
     ),
   );
 }
+
+beforeEach(() => {
+  sendMail.mockReset().mockResolvedValue({ messageId: "mail_accepted_1" });
+});
 
 beforeAll(async () => {
   await runSystemTransaction(env, (client) =>
@@ -165,6 +171,141 @@ describeIntegration("owner notification delivery", () => {
       ),
     );
     expect(row.rows[0]?.state).toBe("delivered");
+  });
+
+  it("defers a duplicate sender without consuming an attempt", async () => {
+    await setPreferences({ channel_disconnected: true, publication_failed: false }, true);
+    const key = `notification-test:concurrent:${randomUUID()}`;
+    const event = message(key, "channel_disconnected", randomUUID());
+    let markStarted!: () => void;
+    let releaseSend!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseSend = resolve;
+    });
+    sendMail.mockImplementationOnce(async () => {
+      markStarted();
+      await release;
+      return { messageId: "mail_concurrent" };
+    });
+    const first = Effect.runPromise(processNotificationMessage(env, event));
+    try {
+      await started;
+      const duplicate = await Effect.runPromise(
+        Effect.flip(processNotificationMessage(env, event)),
+      );
+      expect(duplicate).toMatchObject({
+        _tag: "RetryableJobError",
+        cause: "notification_delivery_busy",
+      });
+      const evidence = await runSystemTransaction(env, (client) =>
+        client.query<{ attempt_count: number; state: string }>(
+          "SELECT state, attempt_count FROM notification_deliveries WHERE org_id = $1 AND dedupe_key = $2",
+          [organizationId, key],
+        ),
+      );
+      expect(evidence.rows[0]).toMatchObject({ state: "sending", attempt_count: 1 });
+      expect(sendMail).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseSend();
+      await first;
+    }
+    expect(await Effect.runPromise(processNotificationMessage(env, event))).toBe("skipped");
+    expect(sendMail).toHaveBeenCalledTimes(1);
+  });
+
+  it("reclaims an expired sending lease", async () => {
+    await setPreferences({ channel_disconnected: true, publication_failed: false }, true);
+    const key = `notification-test:expired:${randomUUID()}`;
+    const event = message(key, "channel_disconnected", randomUUID());
+    await runSystemTransaction(env, (client) =>
+      client.query(
+        `INSERT INTO notification_deliveries
+           (org_id, dedupe_key, kind, aggregate_type, aggregate_id, state, attempt_count, updated_at)
+         VALUES ($1, $2, 'channel_disconnected', 'platform_account', $3, 'sending', 1,
+                 now() - interval '6 minutes')`,
+        [organizationId, key, event.aggregate_id],
+      ),
+    );
+
+    expect(await Effect.runPromise(processNotificationMessage(env, event))).toBe("processed");
+    const evidence = await runSystemTransaction(env, (client) =>
+      client.query<{ attempt_count: number; state: string }>(
+        "SELECT state, attempt_count FROM notification_deliveries WHERE org_id = $1 AND dedupe_key = $2",
+        [organizationId, key],
+      ),
+    );
+    expect(evidence.rows[0]).toMatchObject({ state: "delivered", attempt_count: 2 });
+    expect(sendMail).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a specific mail submission failure in the error and delivery evidence", async () => {
+    await setPreferences({ channel_disconnected: true, publication_failed: false }, true);
+    const key = `notification-test:ambiguous:${randomUUID()}`;
+    sendMail.mockResolvedValueOnce({ messageId: "" });
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        processNotificationMessage(env, message(key, "channel_disconnected", randomUUID())),
+      ),
+    );
+    const expectedMessage = "Notification email submission did not return an accepted message id.";
+    expect(failure).toMatchObject({
+      _tag: "RetryableJobError",
+      cause: "notification_mail_ambiguous",
+      message: expectedMessage,
+    });
+    const evidence = await runSystemTransaction(env, (client) =>
+      client.query<{ last_error: string; state: string }>(
+        "SELECT state, last_error FROM notification_deliveries WHERE org_id = $1 AND dedupe_key = $2",
+        [organizationId, key],
+      ),
+    );
+    expect(evidence.rows[0]).toEqual({ state: "failed", last_error: expectedMessage });
+  });
+
+  it("bounds multiline Post and Provider text before putting it in mail", async () => {
+    await setPreferences({ channel_disconnected: false, publication_failed: true }, true);
+    const postId = randomUUID();
+    const distributionId = randomUUID();
+    const key = `notification-test:excerpts:${randomUUID()}`;
+    await runSystemTransaction(env, async (client) => {
+      const profile = await client.query<{ id: string }>(
+        "SELECT id FROM brand_profiles WHERE org_id = $1 ORDER BY id LIMIT 1",
+        [organizationId],
+      );
+      await client.query(
+        "INSERT INTO posts (id, org_id, brand_profile_id, default_text) VALUES ($1, $2, $3, $4)",
+        [postId, organizationId, profile.rows[0]!.id, `Launch\n\t${"x".repeat(300)}`],
+      );
+      await client.query(
+        `INSERT INTO distributions
+           (id, org_id, brand_profile_id, post_id, platform, status, error_message)
+         VALUES ($1, $2, $3, $4, 'youtube', 'failed', $5)`,
+        [
+          distributionId,
+          organizationId,
+          profile.rows[0]!.id,
+          postId,
+          `Provider\n\t${"r".repeat(600)}`,
+        ],
+      );
+    });
+    try {
+      await Effect.runPromise(
+        processNotificationMessage(env, message(key, "publication_failed", distributionId)),
+      );
+      const sent = sendMail.mock.calls[0]?.[0];
+      expect(sent?.text).toContain(`Post: Launch ${"x".repeat(192)}…\n`);
+      expect(sent?.text).toContain(`Reason: Provider ${"r".repeat(490)}…\n`);
+      expect(sent?.subject).not.toMatch(/\s{2,}|[\r\n\t]/);
+      expect(sent?.subject?.length).toBeLessThanOrEqual(160);
+    } finally {
+      await runSystemTransaction(env, (client) =>
+        client.query("DELETE FROM posts WHERE id = $1", [postId]),
+      );
+    }
   });
 
   it("retries transient failures and stops at the bounded attempt limit", async () => {

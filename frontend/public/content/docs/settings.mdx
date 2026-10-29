@@ -29,6 +29,10 @@ Signatures are reusable text appended to new Posts. Add up to ten templates, nam
 
 Notification choices cover failed publications and connected Channels that need reconnecting. Both events are off until you enable them. **Email** is offered only when this installation has working mail delivery; it sends to the Installation Owner's current address. Enabled alerts run through the durable queue with bounded retries, and recorded delivery evidence stops a replay from sending the same event again.
 
+Concurrent deliveries of the same alert wait for the active sending attempt
+without consuming another attempt. Post titles and Provider failure reasons are
+shown as bounded, single-line excerpts.
+
 ## Account
 
 Review your name, email, and workspace as read-only identity details. **Sign out** is available here on desktop and phones, as well as in **Account menu → Sign out** at the bottom of the desktop sidebar or mobile navigation panel. The same menu opens Account settings and offers **Light / Dark / System** theme controls directly; changes apply immediately without leaving the menu.

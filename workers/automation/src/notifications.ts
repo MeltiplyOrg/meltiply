@@ -1,5 +1,5 @@
 import { escapeMailHtml, mailSenderConfiguration } from "@meltiply/domain/mail-content";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 
 import { withSystemTransactionEffect } from "./database";
 import type { AutomationEnv } from "./env";
@@ -51,6 +51,8 @@ interface PublicationFailureRow extends Record<string, unknown> {
 
 /** Maximum delivery attempts before a notification is retained as dead. */
 const maximumDeliveryAttempts = 5;
+/** A crashed sender's claim may be retried after five minutes. */
+const sendingLeaseSeconds = 300;
 
 /** Classifies notification payloads without trusting arbitrary queue contents. */
 function notificationPayload(value: Record<string, unknown>): NotificationPayload | null {
@@ -139,6 +141,16 @@ interface NotificationEmail {
 const maximumSubjectLength = 160;
 
 /**
+ * Normalizes arbitrary Post/Provider text into a bounded, single-line excerpt
+ * before it reaches any mail header or body. The ellipsis is included in the
+ * supplied character limit.
+ */
+function boundedMailText(value: string, maximumLength: number): string {
+  const line = value.replace(/\s+/g, " ").trim();
+  return line.length <= maximumLength ? line : `${line.slice(0, maximumLength - 1)}…`;
+}
+
+/**
  * Collapses arbitrary Post text into one bounded subject line. Newlines and
  * tabs are removed before submission so owner content cannot add mail headers,
  * and the suffix keeps a long title from producing an oversized header.
@@ -147,8 +159,7 @@ const maximumSubjectLength = 160;
  * @returns Single-line subject no longer than {@link maximumSubjectLength}.
  */
 function mailSubject(value: string): string {
-  const line = value.replace(/[\r\n\t]+/g, " ").trim();
-  return line.length <= maximumSubjectLength ? line : `${line.slice(0, maximumSubjectLength - 1)}…`;
+  return boundedMailText(value, maximumSubjectLength);
 }
 
 /**
@@ -175,12 +186,17 @@ function renderEmail(
   const appUrl = env.APP_URL?.replace(/\/+$/, "") ?? "";
   const profile = context.brandProfileName ? ` in ${context.brandProfileName}` : "";
   if (kind === "publication_failed") {
-    const title = context.postTitle?.trim() || context.postText?.trim() || "Untitled Post";
+    const title = boundedMailText(
+      context.postTitle?.trim() || context.postText?.trim() || "Untitled Post",
+      200,
+    );
     const link = context.postId
       ? `${appUrl}/posts?post=${encodeURIComponent(context.postId)}`
       : appUrl;
-    const reason =
-      context.errorMessage?.trim() || context.failureCode || "The Provider rejected it";
+    const reason = boundedMailText(
+      context.errorMessage?.trim() || context.failureCode || "The Provider rejected it",
+      500,
+    );
     const text = [
       `A publication failed${profile}.`,
       "",
@@ -249,9 +265,10 @@ async function submitMail(env: AutomationEnv, email: NotificationEmail, recipien
  * The outbox row was written in the same transaction as the failure or
  * disconnection, so a lost Queue message is retried by the relay. Delivery
  * evidence is keyed by the payload's delivery key: a redelivery observes the
- * terminal state and acks without sending again, while transient mail failures
- * leave `failed` with a bounded attempt count. Disabled preferences and an
- * unavailable mail channel are recorded as skipped, never sent.
+ * terminal state and acks without sending again. Claiming atomically marks
+ * `sending`, uses `updated_at` as the lease start, and counts only claimed send
+ * attempts; a deferred duplicate leaves the lease and attempt count untouched.
+ * Disabled preferences are recorded as skipped, never sent.
  *
  * @param env - Automation bindings including the Email Sending binding.
  * @param message - Validated outbox message carrying a notification payload.
@@ -290,59 +307,65 @@ export function processNotificationMessage(
         ? events?.publication_failed === true
         : events?.channel_disconnected === true;
 
-    const delivery = yield* withSystemTransactionEffect(env, (client) =>
-      client.query<DeliveryRow>(
-        `INSERT INTO notification_deliveries
-           (org_id, dedupe_key, kind, aggregate_type, aggregate_id, state, attempt_count)
-         VALUES ($1, $2, $3, $4, $5, 'pending', 0)
-         ON CONFLICT (org_id, dedupe_key) DO UPDATE
-           SET attempt_count = notification_deliveries.attempt_count + 1,
-               updated_at = now()
-         RETURNING id, state, attempt_count`,
-        [
-          message.organization_id,
-          payload.delivery_key,
-          payload.kind,
-          payload.kind === "publication_failed" ? "distribution" : "platform_account",
-          payload.aggregate_id,
-        ],
-      ),
-    );
-    const row = delivery.rows[0];
-    if (!row || ["delivered", "skipped", "dead"].includes(row.state)) return "skipped" as const;
-
-    if (!enabled || channels?.email !== true || email === null) {
-      yield* withSystemTransactionEffect(env, (client) =>
-        client.query(
-          `UPDATE notification_deliveries
-              SET state = 'skipped',
-                  last_error = $2,
-                  updated_at = now()
-            WHERE id = $1`,
+    const row = yield* withSystemTransactionEffect(env, (client) =>
+      Effect.gen(function* () {
+        // The upsert locks an existing row but must not refresh its sending
+        // lease or count a duplicate as a new mail attempt.
+        const delivery = yield* client.query<DeliveryRow>(
+          `INSERT INTO notification_deliveries
+             (org_id, dedupe_key, kind, aggregate_type, aggregate_id, state, attempt_count)
+           VALUES ($1, $2, $3, $4, $5, 'pending', 0)
+           ON CONFLICT (org_id, dedupe_key) DO UPDATE
+             SET dedupe_key = EXCLUDED.dedupe_key
+           RETURNING id, state, attempt_count`,
           [
-            row.id,
-            !enabled
-              ? "The owner disabled this notification event."
-              : channels?.email !== true
-                ? "The email channel is disabled."
-                : "The Installation Owner has no delivery address.",
+            message.organization_id,
+            payload.delivery_key,
+            payload.kind,
+            payload.kind === "publication_failed" ? "distribution" : "platform_account",
+            payload.aggregate_id,
           ],
-        ),
-      );
-      return "skipped" as const;
-    }
-
-    if (row.attempt_count >= maximumDeliveryAttempts) {
-      yield* withSystemTransactionEffect(env, (client) =>
-        client.query(
+        );
+        const existing = delivery.rows[0];
+        if (!existing || ["delivered", "skipped", "dead"].includes(existing.state)) {
+          return existing;
+        }
+        const disabledReason = !enabled
+          ? "The owner disabled this notification event."
+          : channels?.email !== true
+            ? "The email channel is disabled."
+            : email === null
+              ? "The Installation Owner has no delivery address."
+              : null;
+        const nextState = disabledReason
+          ? "skipped"
+          : existing.attempt_count >= maximumDeliveryAttempts
+            ? "dead"
+            : "sending";
+        const claimed = yield* client.query<DeliveryRow>(
           `UPDATE notification_deliveries
-              SET state = 'dead', updated_at = now()
-            WHERE id = $1`,
-          [row.id],
-        ),
+              SET state = $2,
+                  attempt_count = attempt_count + CASE WHEN $2 = 'sending' THEN 1 ELSE 0 END,
+                  last_error = CASE WHEN $2 = 'skipped' THEN $3 ELSE last_error END,
+                  updated_at = now()
+            WHERE id = $1
+              AND (state <> 'sending'
+                   OR updated_at <= now() - ($4 * interval '1 second'))
+            RETURNING id, state, attempt_count`,
+          [existing.id, nextState, disabledReason, sendingLeaseSeconds],
+        );
+        return claimed.rows[0];
+      }),
+    );
+    if (!row) {
+      return yield* Effect.fail(
+        new RetryableJobError({
+          cause: "notification_delivery_busy",
+          message: "Another notification delivery attempt holds the sending lease.",
+        }),
       );
-      return "skipped" as const;
     }
+    if (row.state !== "sending" || email === null) return "skipped" as const;
 
     const context =
       payload.kind === "publication_failed"
@@ -369,15 +392,6 @@ export function processNotificationMessage(
       postTitle: failure?.post_title,
     });
 
-    yield* withSystemTransactionEffect(env, (client) =>
-      client.query(
-        `UPDATE notification_deliveries
-            SET state = 'sending', updated_at = now()
-          WHERE id = $1`,
-        [row.id],
-      ),
-    );
-
     const sent = yield* Effect.tryPromise({
       catch: (cause) =>
         cause instanceof RetryableJobError
@@ -390,14 +404,17 @@ export function processNotificationMessage(
     }).pipe(Effect.exit);
 
     if (sent._tag === "Failure") {
-      const cause = sent.cause;
+      if (Cause.hasDies(sent.cause) || Cause.hasInterruptsOnly(sent.cause)) {
+        return yield* Effect.failCause(sent.cause);
+      }
+      const cause = Cause.squash(sent.cause);
       const messageText = safeErrorMessage(cause, "Notification email delivery failed.");
       yield* withSystemTransactionEffect(env, (client) =>
         client.query(
           `UPDATE notification_deliveries
               SET state = 'failed', last_error = $2, updated_at = now()
-            WHERE id = $1`,
-          [row.id, messageText],
+            WHERE id = $1 AND state = 'sending' AND attempt_count = $3`,
+          [row.id, messageText, row.attempt_count],
         ),
       );
       return yield* Effect.fail(
@@ -415,8 +432,8 @@ export function processNotificationMessage(
         `UPDATE notification_deliveries
             SET state = 'delivered', delivered_at = now(), last_error = NULL,
                 updated_at = now()
-          WHERE id = $1`,
-        [row.id],
+          WHERE id = $1 AND state = 'sending' AND attempt_count = $2`,
+        [row.id, row.attempt_count],
       ),
     );
     return "processed" as const;

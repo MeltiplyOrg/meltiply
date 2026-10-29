@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { assertDatabaseRoles } from "../lib/database-roles.mjs";
 import { readBoundedJsonResponse } from "../release/release-http.mjs";
 
 const MAXIMUM_API_RESPONSE_BYTES = 1024 * 1024;
@@ -217,10 +218,11 @@ async function upsertConfiguration({ accountId, apiToken, existingId, fetchImpl,
 
 /**
  * Bootstraps Cloudflare Hyperdrive configurations for both authenticated and system database roles.
- * Enforces role isolation (authenticated and system must use distinct database users), ensures distinct
- * config IDs, and provides partial failure recovery state if the second configuration upsert fails.
+ * Verifies both protected login identities and role attributes before provider access,
+ * enforces distinct config IDs, and provides partial recovery state after an upsert failure.
  *
  * @param {object} [options={}] - Execution options
+ * @param {Function} [options.clientFactory] - PostgreSQL client factory for role verification
  * @param {Record<string, string | undefined>} [options.environment=process.env] - Environment variable lookup
  * @param {typeof fetch} [options.fetchImpl=fetch] - HTTP fetch implementation
  * @returns {Promise<{ authenticated_hyperdrive_config_id: string, system_hyperdrive_config_id: string }>} Resulting config IDs
@@ -263,6 +265,7 @@ export async function bootstrapHyperdrive(options = {}) {
   if (authenticatedExistingId && systemExistingId && authenticatedExistingId === systemExistingId) {
     throw new TypeError("authenticated and system Hyperdrive IDs must differ");
   }
+  await assertDatabaseRoles({ clientFactory: options.clientFactory, environment });
 
   let authenticatedId;
   try {

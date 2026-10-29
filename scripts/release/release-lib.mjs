@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { isMailSenderAddress, isMailSenderName } from "../../packages/domain/src/mail-content.mjs";
+import { assertDatabaseRoles } from "../lib/database-roles.mjs";
 import { parseJsonc } from "../lib/jsonc.mjs";
 import { releaseEnvironments } from "../lib/release-environments.mjs";
 
@@ -966,10 +967,11 @@ function requiredRemoteSecrets(spec) {
 /**
  * Runs release preflight checks: verifies git HEAD commit matches release spec git_sha,
  * asserts a clean tracked working tree and pinned Wrangler CLI version via Bun without downloading tools,
- * and validates Cloudflare account ID, API tokens, and Neon database connection strings.
+ * and validates Cloudflare credentials plus both database login identities and role attributes.
  * The CI/release toolchain stays pinned together so reviewed evidence cannot drift.
  *
  * @param {object} params - Preflight parameters
+ * @param {Function} [params.clientFactory] - Injectable PostgreSQL client factory
  * @param {Record<string, string | undefined>} params.environment - Environment variable lookup
  * @param {boolean} params.offline - Flag indicating offline mode (skips remote account/token checks)
  * @param {string} params.repoRoot - Repository root directory path
@@ -978,7 +980,14 @@ function requiredRemoteSecrets(spec) {
  * @returns {Promise<object>} Preflight status summary object
  * @throws {Error} If commit mismatch, dirty checkout, wrong Wrangler version, or credentials fail validation
  */
-export async function preflightRelease({ environment, offline, repoRoot, runCommand, spec }) {
+export async function preflightRelease({
+  clientFactory,
+  environment,
+  offline,
+  repoRoot,
+  runCommand,
+  spec,
+}) {
   const [head, status, wranglerVersion] = await Promise.all([
     runCommand("git", ["rev-parse", "HEAD"], { cwd: repoRoot }),
     runCommand("git", ["status", "--porcelain", "--untracked-files=no"], {
@@ -996,6 +1005,7 @@ export async function preflightRelease({ environment, offline, repoRoot, runComm
     throw new Error("release requires Wrangler 4.148.0");
   }
   const requiredSecrets = requiredRemoteSecrets(spec);
+  let databaseRoles = { reason: "offline", status: "skipped" };
   if (!offline) {
     const accountId = environment.CLOUDFLARE_ACCOUNT_ID?.trim();
     if (!accountId || accountId !== spec.runtime.r2_account_id) {
@@ -1005,9 +1015,11 @@ export async function preflightRelease({ environment, offline, repoRoot, runComm
       throw new Error("CLOUDFLARE_API_TOKEN is required");
     }
     validateDatabaseEnvironment(environment);
+    databaseRoles = await assertDatabaseRoles({ clientFactory, environment });
   }
 
   return {
+    database_roles: databaseRoles,
     environment: spec.environment,
     deployment_mode: spec.deployment_mode,
     git_sha: spec.git_sha,

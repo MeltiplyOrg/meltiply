@@ -59,6 +59,18 @@ the two configurations through the API; only their non-secret IDs enter OpenTofu
 and Worker bindings. Ambiguous names fail closed; a partial failure returns the
 completed ID for recovery. See [the bootstrap implementation](../../scripts/infra/hyperdrive-bootstrap.mjs).
 
+Before bootstrap or online preflight, provision `meltiply_system` with
+`BYPASSRLS` and `meltiply_rls` with `NOBYPASSRLS NOSUPERUSER`. Supply their
+own login credentials through `MELTIPLY_SYSTEM_DATABASE_URL` and
+`MELTIPLY_AUTHENTICATED_DATABASE_URL`. Bootstrap, online preflight, and migrations
+verify both roles through both protected connections and reject an unexpected
+login identity without exposing credentials. Migration role failures happen
+before advisory locks, transactions, or ledger writes. After migration, the
+runner requires the `auth` schema, `auth.jwt()` claims accessor, and an enabled
+tenant policy for `meltiply_rls`; an already skipped RLS setup is not repaired.
+Offline preflight reports `database_roles.status=skipped` with reason `offline`;
+it does not prove database readiness.
+
 Use separate account-scoped identities for Hyperdrive bootstrap, infrastructure
 planning/apply, Worker deployment, and protected secret injection. Grant only
 the required resource permissions; keep the secret-writing capability confined

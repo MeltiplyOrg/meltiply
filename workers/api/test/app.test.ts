@@ -9,7 +9,7 @@ import type { ResolvedActor } from "../src/actor-resolution";
 import { CoreApiError } from "../src/core-types";
 import worker from "../src/index";
 import type { ApiWorkerEnv, AutomationRelayStub, OAuthStateStub } from "../src/env";
-import { requiresEmailVerification, validateProductionBindings } from "../src/env";
+import { bindingStatuses, requiresEmailVerification, validateProductionBindings } from "../src/env";
 import { logRecords } from "./log-records";
 
 afterEach(() => {
@@ -154,6 +154,68 @@ describe("API Worker foundation", () => {
       }),
     );
   });
+
+  it.each(["staging", "production"] as const)(
+    "validates every required binding in %s",
+    (ENVIRONMENT) => {
+      const env = {
+        ...stagingEnv,
+        ENVIRONMENT,
+        FACEBOOK_LIVE_ACCEPTED: "false",
+        INSTAGRAM_LIVE_ACCEPTED: "false",
+        INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED: "false",
+        THREADS_LIVE_ACCEPTED: "false",
+        THREADS_ENGAGEMENT_LIVE_ACCEPTED: "false",
+        TIKTOK_LIVE_ACCEPTED: "false",
+        YOUTUBE_LIVE_ACCEPTED: "false",
+      };
+      expect(() => validateProductionBindings(env)).not.toThrow();
+      expect(bindingStatuses(env)).toEqual(bindingStatuses(stagingEnv));
+      for (const binding of bindingStatuses(env)) {
+        expect(() =>
+          validateProductionBindings({ ...env, [binding.name]: undefined }),
+        ).toThrow();
+      }
+      expect(() =>
+        validateProductionBindings({ ...env, BETTER_AUTH_SECRET: "short" }),
+      ).toThrow();
+      expect(() =>
+        validateProductionBindings({ ...env, AUTH_SETUP_SECRET: "short" }),
+      ).toThrow();
+      expect(() =>
+        validateProductionBindings({ ...env, THREADS_LIVE_ACCEPTED: "true" }),
+      ).toThrow("requires client ID and client secret");
+    },
+  );
+
+  it.each(["local", "test"] as const)(
+    "keeps %s exempt from deployed validation and binding reports",
+    (ENVIRONMENT) => {
+      const env = { ENVIRONMENT, VERSION: "test" };
+      expect(() => validateProductionBindings(env)).not.toThrow();
+      expect(requiresEmailVerification(env)).toBe(false);
+      for (const name of ["BETTER_AUTH_SECRET", "MAIL", "AUTOMATION"]) {
+        expect(bindingStatuses(env).map((binding) => binding.name)).not.toContain(name);
+      }
+    },
+  );
+
+  it.each(["staging", "production"] as const)(
+    "reports its %s environment in public health",
+    async (ENVIRONMENT) => {
+      const response = await createApiApp().request(
+        "/api/v1/health",
+        {},
+        { ...stagingEnv, ENVIRONMENT },
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        environment: ENVIRONMENT,
+        status: "ok",
+        version: "test",
+      });
+    },
+  );
 
   it("validates accepted provider bindings without making false mandatory", () => {
     expect(() =>
@@ -328,56 +390,71 @@ describe("API Worker foundation", () => {
     ).toThrow("MAIL_FROM_ADDRESS/MAIL_FROM_NAME must configure a valid sender");
   });
 
-  it("allows missing mail when verification is explicitly disabled", () => {
+  it.each(["staging", "production"] as const)(
+    "requires verification and mail in %s even when explicitly disabled",
+    (ENVIRONMENT) => {
+      const env = {
+        ...stagingEnv,
+        ENVIRONMENT,
+        MAIL: undefined,
+        MAIL_FROM_ADDRESS: undefined,
+        REQUIRE_EMAIL_VERIFICATION: "false",
+      };
+      expect(requiresEmailVerification(env)).toBe(true);
+      expect(() => validateProductionBindings(env)).toThrow("MAIL");
+    },
+  );
+
+  it("preserves the self-hosted verification opt-out without exempting other bindings", () => {
     const env = {
       ...stagingEnv,
+      ENVIRONMENT: "selfhost" as const,
       MAIL: undefined,
       MAIL_FROM_ADDRESS: undefined,
-      MAIL_FROM_NAME: undefined,
       REQUIRE_EMAIL_VERIFICATION: "false",
     };
     expect(requiresEmailVerification(env)).toBe(false);
     expect(() => validateProductionBindings(env)).not.toThrow();
+    expect(() =>
+      validateProductionBindings({ ...env, AUTOMATION: undefined }),
+    ).toThrow("AUTOMATION");
+    expect(requiresEmailVerification({ ...env, REQUIRE_EMAIL_VERIFICATION: undefined })).toBe(true);
   });
 
-  it("keeps verification enabled by default in deployed environments", () => {
-    expect(requiresEmailVerification(stagingEnv)).toBe(true);
-    expect(requiresEmailVerification({ ...stagingEnv, ENVIRONMENT: "local" })).toBe(false);
-    expect(requiresEmailVerification({ ...stagingEnv, REQUIRE_EMAIL_VERIFICATION: "true" })).toBe(
-      true,
-    );
-  });
+  it.each(["staging", "production"] as const)(
+    "logs invalid %s configuration and returns only a generic response",
+    async (ENVIRONMENT) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const response = await worker.fetch(
+        new Request("https://api.example.test/api/v1/health", {
+          headers: { "X-Request-ID": "request-config-1" },
+        }) as Parameters<NonNullable<typeof worker.fetch>>[0],
+        {
+          ...stagingEnv,
+          ENVIRONMENT,
+          BETTER_AUTH_SECRET: undefined,
+        },
+        createExecutionContext(),
+      );
 
-  it("logs invalid staging configuration and returns only a generic response", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const response = await worker.fetch(
-      new Request("https://api.example.test/api/v1/health", {
-        headers: { "X-Request-ID": "request-config-1" },
-      }) as Parameters<NonNullable<typeof worker.fetch>>[0],
-      {
-        ...stagingEnv,
-        BETTER_AUTH_SECRET: undefined,
-      },
-      createExecutionContext(),
-    );
-
-    expect(response.status).toBe(500);
-    await expect(response.text()).resolves.toBe("An error has occurred.");
-    expect(logRecords(error)).toContainEqual(
-      expect.objectContaining({
-        context: expect.objectContaining({
-          error_code: "configuration_invalid",
-          event: "worker_configuration_failed",
-          unavailable_bindings: ["BETTER_AUTH_SECRET"],
+      expect(response.status).toBe(500);
+      await expect(response.text()).resolves.toBe("An error has occurred.");
+      expect(logRecords(error)).toContainEqual(
+        expect.objectContaining({
+          context: expect.objectContaining({
+            error_code: "configuration_invalid",
+            event: "worker_configuration_failed",
+            unavailable_bindings: ["BETTER_AUTH_SECRET"],
+          }),
+          error: expect.objectContaining({
+            fingerprint: expect.stringMatching(/^[0-9a-f]{16}$/),
+            name: "Error",
+          }),
+          request_id: "request-config-1",
         }),
-        error: expect.objectContaining({
-          fingerprint: expect.stringMatching(/^[0-9a-f]{16}$/),
-          name: "Error",
-        }),
-        request_id: "request-config-1",
-      }),
-    );
-  });
+      );
+    },
+  );
 
   it("logs a safe diagnostic for unhandled API errors without exposing the cause", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -427,36 +504,46 @@ describe("API Worker foundation", () => {
     });
   });
 
-  it("reports auth and mail bindings unavailable in staging readiness", async () => {
-    const app = createApiApp();
-    const response = await app.request(
-      "/api/v1/ready",
-      {},
-      {
-        ...stagingEnv,
-        BETTER_AUTH_SECRET: undefined,
-        MAIL: undefined,
-        MAIL_FROM_ADDRESS: "not-an-email",
-      },
-    );
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
-      components: expect.arrayContaining([
-        { name: "BETTER_AUTH_SECRET", status: "unavailable" },
-        { name: "MAIL", status: "unavailable" },
-        { name: "MAIL_FROM_ADDRESS", status: "unavailable" },
-      ]),
-      status: "unavailable",
-    });
-  });
+  it.each(["staging", "production"] as const)(
+    "reports the full unavailable binding set in %s readiness",
+    async (ENVIRONMENT) => {
+      const app = createApiApp();
+      const response = await app.request(
+        "/api/v1/ready",
+        {},
+        {
+          ...stagingEnv,
+          ENVIRONMENT,
+          AUTOMATION: undefined,
+          AUTH_SETUP_SECRET: undefined,
+          REQUIRE_EMAIL_VERIFICATION: "false",
+          BETTER_AUTH_SECRET: undefined,
+          MAIL: undefined,
+          MAIL_FROM_ADDRESS: "not-an-email",
+        },
+      );
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        components: expect.arrayContaining([
+          { name: "AUTOMATION", status: "unavailable" },
+          { name: "AUTH_SETUP_SECRET", status: "unavailable" },
+          { name: "BETTER_AUTH_SECRET", status: "unavailable" },
+          { name: "MAIL", status: "unavailable" },
+          { name: "MAIL_FROM_ADDRESS", status: "unavailable" },
+        ]),
+        status: "unavailable",
+      });
+    },
+  );
 
-  it("reports ready without mail when verification is disabled", async () => {
+  it("reports self-hosted readiness without mail when verification is disabled", async () => {
     const app = createApiApp();
     const response = await app.request(
       "/api/v1/ready",
       {},
       {
         ...stagingEnv,
+        ENVIRONMENT: "selfhost",
         MAIL: undefined,
         MAIL_FROM_ADDRESS: undefined,
         MAIL_FROM_NAME: undefined,

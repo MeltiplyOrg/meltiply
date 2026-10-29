@@ -347,14 +347,39 @@ describe("betterAuthFor local/test policy", () => {
   });
 });
 
-describe("betterAuthFor staging policy", () => {
+describe("betterAuthFor self-hosted policy", () => {
+  it("allows unverified sign-in without mail only through the self-hosted opt-out", async () => {
+    const auth = await betterAuthFor({
+      ...stagingEnv(recordingMailBinding()),
+      ENVIRONMENT: "selfhost",
+      MAIL: undefined,
+      MAIL_FROM_ADDRESS: undefined,
+      REQUIRE_EMAIL_VERIFICATION: "false",
+    });
+    const signUp = await authPost(auth, "/api/auth/sign-up/email", {
+      email: emails.localUnverified,
+      name: "Self-hosted Tester",
+      password: "correct horse battery staple",
+    });
+    expect(signUp.status).toBe(200);
+    const signIn = await authPost(auth, "/api/auth/sign-in/email", {
+      email: emails.localUnverified,
+      password: "correct horse battery staple",
+    });
+    expect(signIn.status).toBe(200);
+    expect(sessionCookiePair(signIn)).toBeTruthy();
+  });
+});
+
+describe.each(["staging", "production"] as const)("betterAuthFor %s policy", (ENVIRONMENT) => {
   it("fails closed when mail configuration is missing instead of disabling verification", async () => {
     const env = {
       ALLOWED_ORIGINS: "https://app.test",
       BETTER_AUTH_SECRET: authSecret,
       APP_URL: "https://auth.test",
       DB_SYSTEM: { connectionString: systemConnectionString } as Hyperdrive,
-      ENVIRONMENT: "staging",
+      ENVIRONMENT,
+      REQUIRE_EMAIL_VERIFICATION: "false",
       VERSION: "1.0.0-target.0",
     } satisfies ApiWorkerEnv;
     await expect(betterAuthFor(env)).rejects.toThrow(/MAIL/);
@@ -363,6 +388,7 @@ describe("betterAuthFor staging policy", () => {
     await expect(
       betterAuthFor({
         ...malformedSender,
+        ENVIRONMENT,
         MAIL_FROM_ADDRESS: "not an address",
       }),
     ).rejects.toThrow(/MAIL/);
@@ -370,7 +396,11 @@ describe("betterAuthFor staging policy", () => {
 
   it("requires verification before sign-in, honors the emailed link, and blocks invalid/expired tokens", async () => {
     const mail = recordingMailBinding();
-    const auth = await betterAuthFor(stagingEnv(mail));
+    const auth = await betterAuthFor({
+      ...stagingEnv(mail),
+      ENVIRONMENT,
+      REQUIRE_EMAIL_VERIFICATION: "false",
+    });
 
     const signUp = await authPost(auth, "/api/auth/sign-up/email", {
       callbackURL: "https://app.test/verified",

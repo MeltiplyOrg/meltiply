@@ -125,6 +125,7 @@ export async function runReleaseCli(argv, dependencies = {}) {
   if (options.command === "preflight") {
     const spec = await loadReleaseSpec(options.inputPath);
     return preflightRelease({
+      clientFactory: dependencies.clientFactory,
       environment,
       offline: options.offline,
       repoRoot: checkoutRoot,

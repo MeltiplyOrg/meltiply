@@ -86,6 +86,14 @@ run "staging_plan" {
     error_message = "The default plan must bootstrap safely without Worker attachments and with Queue delivery paused."
   }
 
+  assert {
+    condition = (
+      output.zone_security.manages_rulesets &&
+      length(output.zone_security.entrypoints) == 1 &&
+      output.zone_security.entrypoints["http_ratelimit"].expression == "(http.host eq \"staging.meltiply.com\" and starts_with(http.request.uri.path, \"/api/\"))"
+    )
+    error_message = "Existing staging must retain sole ownership and its original single-host rate protection by default."
+  }
 }
 
 run "worker_integrations_attached_paused" {
@@ -139,7 +147,8 @@ run "preview_plan_rejected" {
   }
 
   variables {
-    environment = "preview"
+    environment          = "preview"
+    manage_zone_security = true
   }
 
   expect_failures = [var.environment]
@@ -224,8 +233,12 @@ run "production_plan" {
   }
 
   variables {
-    environment = "production"
-    app_url     = "https://app.example.com"
+    environment             = "production"
+    app_url                 = "https://app.example.com"
+    protected_app_hostnames = {
+      staging    = "staging.example.com"
+      production = "app.example.com"
+    }
   }
 
   assert {
@@ -241,6 +254,11 @@ run "production_plan" {
     )
     error_message = "Production resources and reviewed Worker identities must be isolated from legacy staging."
   }
+
+  assert {
+    condition     = length(output.zone_security.entrypoints) == 0
+    error_message = "Production must not compete with the staging owner's zone entrypoints."
+  }
 }
 
 run "production_frontend_wrong_suffix_rejected" {
@@ -248,6 +266,7 @@ run "production_frontend_wrong_suffix_rejected" {
 
   variables {
     environment          = "production"
+    manage_zone_security = true
     frontend_worker_name = "meltiply-frontend"
   }
 
@@ -258,8 +277,9 @@ run "production_bucket_wrong_suffix_rejected" {
   command = plan
 
   variables {
-    environment        = "production"
-    assets_bucket_name = "meltiply-assets-staging"
+    environment          = "production"
+    manage_zone_security = true
+    assets_bucket_name   = "meltiply-assets-staging"
   }
 
   expect_failures = [var.assets_bucket_name]
@@ -270,10 +290,157 @@ run "production_backend_wrong_suffix_rejected" {
 
   variables {
     environment            = "production"
+    manage_zone_security   = true
     api_worker_name        = "meltiply-api"
     automation_worker_name = "meltiply-automation"
     state_worker_name      = "meltiply-state"
   }
 
   expect_failures = [var.api_worker_name, var.automation_worker_name, var.state_worker_name]
+}
+
+run "shared_zone_owner_protects_both_hosts" {
+  command = plan
+
+  plan_options {
+    refresh = false
+  }
+
+  variables {
+    managed_waf_ruleset_id  = "cccccccccccccccccccccccccccccccc"
+    protected_app_hostnames = {
+      staging    = "staging.meltiply.com"
+      production = "app.meltiply.com"
+    }
+  }
+
+  assert {
+    condition = (
+      output.zone_security.manages_rulesets &&
+      length(output.zone_security.entrypoints) == 2 &&
+      output.zone_security.entrypoints["http_ratelimit"].expression == "(http.host in {\"app.meltiply.com\" \"staging.meltiply.com\"} and starts_with(http.request.uri.path, \"/api/\"))" &&
+      output.zone_security.entrypoints["http_request_firewall_managed"].expression == "http.host in {\"app.meltiply.com\" \"staging.meltiply.com\"}"
+    )
+    error_message = "One zone owner must rate-limit both API hosts and apply approved managed WAF protection to both hosts."
+  }
+}
+
+run "shared_zone_non_owner_has_no_entrypoints" {
+  command = plan
+
+  variables {
+    environment             = "production"
+    app_url                 = "https://app.meltiply.com"
+    managed_waf_ruleset_id  = "cccccccccccccccccccccccccccccccc"
+    protected_app_hostnames = {
+      staging    = "staging.meltiply.com"
+      production = "app.meltiply.com"
+    }
+  }
+
+  assert {
+    condition = (
+      !output.zone_security.manages_rulesets &&
+      length(output.zone_security.entrypoints) == 0
+    )
+    error_message = "A non-owner must not create either zone entrypoint, even with a managed WAF ID configured."
+  }
+}
+
+run "first_production_can_explicitly_own_zone" {
+  command = plan
+
+  variables {
+    environment          = "production"
+    app_url              = "https://app.example.com"
+    manage_zone_security = true
+  }
+
+  assert {
+    condition = (
+      output.zone_security.manages_rulesets &&
+      length(output.zone_security.entrypoints) == 1 &&
+      output.zone_security.entrypoints["http_ratelimit"].expression == "(http.host eq \"app.example.com\" and starts_with(http.request.uri.path, \"/api/\"))"
+    )
+    error_message = "A first production installation without staging must explicitly own its zone security."
+  }
+}
+
+run "non_owner_requires_explicit_hostname_coverage" {
+  command = plan
+
+  variables {
+    environment = "production"
+    app_url     = "https://app.example.com"
+  }
+
+  expect_failures = [var.protected_app_hostnames]
+}
+
+run "owner_cannot_omit_own_hostname" {
+  command = plan
+
+  variables {
+    protected_app_hostnames = {
+      production = "app.meltiply.com"
+    }
+  }
+
+  expect_failures = [var.protected_app_hostnames]
+}
+
+run "non_owner_cannot_declare_different_hostname" {
+  command = plan
+
+  variables {
+    environment = "production"
+    app_url     = "https://app.example.com"
+    protected_app_hostnames = {
+      production = "other.example.com"
+    }
+  }
+
+  expect_failures = [var.protected_app_hostnames]
+}
+
+run "hostname_expression_injection_rejected" {
+  command = plan
+
+  variables {
+    protected_app_hostnames = {
+      staging = "staging.meltiply.com\" or true"
+    }
+  }
+
+  expect_failures = [var.protected_app_hostnames]
+}
+
+run "unsupported_protected_environment_rejected" {
+  command = plan
+
+  variables {
+    protected_app_hostnames = {
+      staging = "staging.meltiply.com"
+      preview = "preview.meltiply.com"
+    }
+  }
+
+  expect_failures = [var.protected_app_hostnames]
+}
+
+run "staging_can_explicitly_follow_production_owner" {
+  command = plan
+
+  variables {
+    manage_zone_security = false
+    protected_app_hostnames = {
+      staging    = "staging.meltiply.com"
+      production = "app.meltiply.com"
+    }
+  }
+
+  assert {
+    condition     = length(output.zone_security.entrypoints) == 0
+    error_message = "First staging in a production-owned zone must be able to opt out of entrypoint ownership."
+  }
 }

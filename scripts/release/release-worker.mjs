@@ -36,7 +36,10 @@ const deployPhases = new Map([
   ["state-bootstrap", { mode: "bootstrap", steps: new Set(["initialize"]), worker: "state" }],
   ["state-update", { mode: "update", steps: new Set(["activate", "upload"]), worker: "state" }],
   ["frontend-bootstrap", { mode: "bootstrap", steps: new Set(["initialize"]), worker: "frontend" }],
-  ["frontend-update", { mode: "update", steps: new Set(["activate", "upload"]), worker: "frontend" }],
+  [
+    "frontend-update",
+    { mode: "update", steps: new Set(["activate", "upload"]), worker: "frontend" },
+  ],
 ]);
 
 /**
@@ -688,33 +691,52 @@ export async function deployWorkerStep({
   const configSource = await readFile(configPath, "utf8");
   const config = parseJson(configSource, "rendered Worker config");
   const workerName = config.name;
-  if (typeof workerName !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(workerName) ||
-      (spec.environment === "production" && !workerName.endsWith(`-${spec.environment}`))) {
+  if (
+    typeof workerName !== "string" ||
+    !/^[a-z0-9][a-z0-9-]*$/.test(workerName) ||
+    (spec.environment === "production" && !workerName.endsWith(`-${spec.environment}`))
+  ) {
     throw new TypeError("rendered Worker config has the wrong installation name");
   }
-  if (intent.worker === "frontend" && (workerName !== iac.frontend_worker_name ||
-      config.vars?.VERSION !== spec.git_sha || config.vars?.ENVIRONMENT !== spec.environment ||
+  if (
+    intent.worker === "frontend" &&
+    (workerName !== iac.frontend_worker_name ||
+      config.vars?.VERSION !== spec.git_sha ||
+      config.vars?.ENVIRONMENT !== spec.environment ||
       config.vars?.API_ORIGIN !== undefined ||
-      config.services?.find((binding) => binding.binding === "API")?.service !== iac.worker_names.api)) {
-    throw new TypeError("frontend config does not match the reviewed IaC Worker/environment/API target");
+      config.services?.find((binding) => binding.binding === "API")?.service !==
+        iac.worker_names.api)
+  ) {
+    throw new TypeError(
+      "frontend config does not match the reviewed IaC Worker/environment/API target",
+    );
   }
   const configDigest = sha256(configSource);
   const tag = releaseTag(spec, intent.worker, "code");
   let frontendCandidate;
   if (intent.worker === "frontend") {
     try {
-      frontendCandidate = await readJsonFile(candidatePath(outDir, "frontend"), "frontend candidate");
+      frontendCandidate = await readJsonFile(
+        candidatePath(outDir, "frontend"),
+        "frontend candidate",
+      );
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
-    if (frontendCandidate && (frontendCandidate.config_digest !== configDigest ||
-        frontendCandidate.git_sha !== spec.git_sha || frontendCandidate.release_id !== spec.release_id ||
-        frontendCandidate.worker_name !== workerName)) {
+    if (
+      frontendCandidate &&
+      (frontendCandidate.config_digest !== configDigest ||
+        frontendCandidate.git_sha !== spec.git_sha ||
+        frontendCandidate.release_id !== spec.release_id ||
+        frontendCandidate.worker_name !== workerName)
+    ) {
       throw new TypeError("frontend candidate does not match this release/config");
     }
-    if (frontendCandidate && sha256(
-      await readFile(path.join(outDir, "wrangler/frontend-built.json"), "utf8"),
-    ) !== frontendCandidate.build_config_digest) {
+    if (
+      frontendCandidate &&
+      sha256(await readFile(path.join(outDir, "wrangler/frontend-built.json"), "utf8")) !==
+        frontendCandidate.build_config_digest
+    ) {
       throw new TypeError("frontend built config does not match the candidate");
     }
   }
@@ -754,9 +776,19 @@ export async function deployWorkerStep({
       if (frontendCandidate) {
         const builtPath = path.join(outDir, "wrangler/frontend-built.json");
         // The candidate's exact built config was verified before any provider call.
-        frontendBuild = { configPath: builtPath, build_config_digest: frontendCandidate.build_config_digest };
+        frontendBuild = {
+          configPath: builtPath,
+          build_config_digest: frontendCandidate.build_config_digest,
+        };
       } else {
-        frontendBuild = await buildFrontend({ configPath, environment, outDir, repoRoot, runCommand, spec });
+        frontendBuild = await buildFrontend({
+          configPath,
+          environment,
+          outDir,
+          repoRoot,
+          runCommand,
+          spec,
+        });
       }
     }
 
@@ -820,7 +852,9 @@ export async function deployWorkerStep({
     const evidence = {
       approvals,
       config_digest: configDigest,
-      ...(frontendBuild ? { build_config_digest: frontendBuild.build_config_digest, worker_name: workerName } : {}),
+      ...(frontendBuild
+        ? { build_config_digest: frontendBuild.build_config_digest, worker_name: workerName }
+        : {}),
       deployment_mode: intent.mode,
       git_sha: spec.git_sha,
       plan_digest: planDigest,
@@ -835,7 +869,10 @@ export async function deployWorkerStep({
     };
     await writeEvidence(outDir, `worker-${intent.worker}-candidate.json`, evidence);
 
-    if (intent.mode === "bootstrap" && (intent.worker === "state" || intent.worker === "frontend")) {
+    if (
+      intent.mode === "bootstrap" &&
+      (intent.worker === "state" || intent.worker === "frontend")
+    ) {
       const traffic = await getWorkerTraffic({
         configPath,
         environment,
@@ -844,7 +881,13 @@ export async function deployWorkerStep({
       assertWorkerTraffic(traffic, [{ percentage: 100, version_id: uploaded.version_id }]);
       await writeEvidence(outDir, `worker-${intent.worker}-deployment.json`, {
         approvals,
-        ...(frontendBuild ? { build_config_digest: frontendBuild.build_config_digest, config_digest: configDigest, worker_name: workerName } : {}),
+        ...(frontendBuild
+          ? {
+              build_config_digest: frontendBuild.build_config_digest,
+              config_digest: configDigest,
+              worker_name: workerName,
+            }
+          : {}),
         git_sha: spec.git_sha,
         plan_digest: planDigest,
         release_id: spec.release_id,
@@ -879,9 +922,10 @@ export async function deployWorkerStep({
     tag: expectedTag,
     worker: intent.worker,
   });
-  const alreadyActive = intent.worker === "frontend" && JSON.stringify(
-    await getWorkerTraffic({ configPath, environment, runCommand }),
-  ) === JSON.stringify([{ percentage: 100, version_id: selectedVersionId }]);
+  const alreadyActive =
+    intent.worker === "frontend" &&
+    JSON.stringify(await getWorkerTraffic({ configPath, environment, runCommand })) ===
+      JSON.stringify([{ percentage: 100, version_id: selectedVersionId }]);
   if (!alreadyActive) {
     await runWrangler({
       args: [
@@ -908,11 +952,13 @@ export async function deployWorkerStep({
   assertWorkerTraffic(traffic, [{ percentage: 100, version_id: selectedVersionId }]);
   const evidence = {
     approvals,
-    ...(intent.worker === "frontend" ? {
-      build_config_digest: source.build_config_digest,
-      config_digest: configDigest,
-      worker_name: workerName,
-    } : {}),
+    ...(intent.worker === "frontend"
+      ? {
+          build_config_digest: source.build_config_digest,
+          config_digest: configDigest,
+          worker_name: workerName,
+        }
+      : {}),
     git_sha: spec.git_sha,
     plan_digest: planDigest,
     release_id: spec.release_id,

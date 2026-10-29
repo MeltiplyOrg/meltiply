@@ -299,8 +299,11 @@ function assertReleaseEvidence(evidence, name, spec) {
  * @throws {TypeError} If the Worker identity or schedules are invalid
  */
 function canonicalSchedules(config, spec) {
-  if (typeof config?.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(config.name) ||
-      (spec.environment === "production" && !config.name.endsWith(`-${spec.environment}`))) {
+  if (
+    typeof config?.name !== "string" ||
+    !/^[a-z0-9][a-z0-9-]*$/.test(config.name) ||
+    (spec.environment === "production" && !config.name.endsWith(`-${spec.environment}`))
+  ) {
     throw new TypeError("rendered Automation config has the wrong Worker name");
   }
   const schedules = cronSet(config?.triggers?.crons, "rendered Automation Cron schedules");

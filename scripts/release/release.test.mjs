@@ -70,10 +70,17 @@ function iacOutput(overrides = {}) {
     assets_bucket_name: "meltiply-assets-staging",
     authenticated_hyperdrive_id: authenticatedHyperdriveId,
     dead_letter_queue_ids: {},
-    dead_letter_queue_names: Object.fromEntries(Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`])),
+    dead_letter_queue_names: Object.fromEntries(
+      Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`]),
+    ),
     environment: "staging",
     frontend_worker_name: "meltiply-frontend-staging",
-    worker_names: { api: "meltiply-api", automation: "meltiply-automation", state: "meltiply-state", frontend: "meltiply-frontend-staging" },
+    worker_names: {
+      api: "meltiply-api",
+      automation: "meltiply-automation",
+      state: "meltiply-state",
+      frontend: "meltiply-frontend-staging",
+    },
     operator_access_aud: null,
     operator_hostname: null,
     queue_consumers_attached: false,
@@ -283,11 +290,13 @@ test("provider acceptance requires its public client configuration", () => {
 
 /** Both installations derive release, resource, and rendered identity from their selected environment. */
 test("production validation and rendering keep all workload bindings environment-scoped", () => {
-  const spec = validateReleaseSpec(releaseInput({
-    environment: "production",
-    api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
-    release_id: `production-${gitSha.slice(0, 12)}`,
-  }));
+  const spec = validateReleaseSpec(
+    releaseInput({
+      environment: "production",
+      api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
+      release_id: `production-${gitSha.slice(0, 12)}`,
+    }),
+  );
   const queues = Object.fromEntries(
     Object.keys(queueNames()).map((workload) => [workload, `meltiply-${workload}-production`]),
   );
@@ -295,7 +304,12 @@ test("production validation and rendering keep all workload bindings environment
     environment: "production",
     assets_bucket_name: "fork-assets-production",
     frontend_worker_name: "fork-frontend-production",
-    worker_names: { api: "meltiply-api-production", automation: "meltiply-automation-production", state: "meltiply-state-production", frontend: "fork-frontend-production" },
+    worker_names: {
+      api: "meltiply-api-production",
+      automation: "meltiply-automation-production",
+      state: "meltiply-state-production",
+      frontend: "fork-frontend-production",
+    },
     queue_names: queues,
     dead_letter_queue_names: Object.fromEntries(
       Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`]),
@@ -305,12 +319,25 @@ test("production validation and rendering keep all workload bindings environment
   const iac = validateIacOutputs(outputs, spec);
   assert.equal(spec.environment, "production");
   assert.equal(iac.frontend_worker_name, "fork-frontend-production");
-  const rendered = renderWranglerConfigs({
-    api: { services: [{ binding: "AUTOMATION", service: "meltiply-automation" }], durable_objects: { bindings: [{ name: "OAUTH_STATE", script_name: "meltiply-state" }] } },
-    automation: { containers: [{ name: "meltiply-media-processor" }], workflows: [{ binding: "REPLY_WORKFLOW", name: "meltiply-reply-staging" }] },
-    state: {},
-    frontend: { assets: { binding: "ASSETS", run_worker_first: ["/api", "/api/*"] }, env: { production: { services: [{ binding: "API", service: "meltiply-api" }] } } },
-  }, spec, iac);
+  const rendered = renderWranglerConfigs(
+    {
+      api: {
+        services: [{ binding: "AUTOMATION", service: "meltiply-automation" }],
+        durable_objects: { bindings: [{ name: "OAUTH_STATE", script_name: "meltiply-state" }] },
+      },
+      automation: {
+        containers: [{ name: "meltiply-media-processor" }],
+        workflows: [{ binding: "REPLY_WORKFLOW", name: "meltiply-reply-staging" }],
+      },
+      state: {},
+      frontend: {
+        assets: { binding: "ASSETS", run_worker_first: ["/api", "/api/*"] },
+        env: { production: { services: [{ binding: "API", service: "meltiply-api" }] } },
+      },
+    },
+    spec,
+    iac,
+  );
   assert.equal(rendered.api.name, "meltiply-api-production");
   assert.equal(rendered.api.services[0].service, "meltiply-automation-production");
   assert.equal(rendered.api.durable_objects.bindings[0].script_name, "meltiply-state-production");
@@ -321,7 +348,9 @@ test("production validation and rendering keep all workload bindings environment
   assert.equal(rendered.frontend.name, "fork-frontend-production");
   assert.equal(rendered.frontend.vars.VERSION, gitSha);
   assert.equal(rendered.frontend.vars.ENVIRONMENT, "production");
-  assert.deepEqual(rendered.frontend.services, [{ binding: "API", service: "meltiply-api-production" }]);
+  assert.deepEqual(rendered.frontend.services, [
+    { binding: "API", service: "meltiply-api-production" },
+  ]);
   assert.deepEqual(rendered.frontend.assets.run_worker_first, ["/api", "/api/*"]);
   assert.equal(rendered.frontend.env.production.name, "fork-frontend-production");
   assert.deepEqual(
@@ -333,14 +362,22 @@ test("production validation and rendering keep all workload bindings environment
     { assets_bucket_name: "fork-assets-staging" },
     { frontend_worker_name: "fork-frontend" },
     { queue_names: queueNames() },
-    { dead_letter_queue_names: { ...outputs.release_resources.value.dead_letter_queue_names, analytics: "meltiply-analytics-staging-dlq" } },
+    {
+      dead_letter_queue_names: {
+        ...outputs.release_resources.value.dead_letter_queue_names,
+        analytics: "meltiply-analytics-staging-dlq",
+      },
+    },
   ]) {
     const invalid = structuredClone(outputs);
     Object.assign(invalid.release_resources.value, mismatch);
     assert.throws(() => validateIacOutputs(invalid, spec));
   }
   assert.throws(() => validateReleaseSpec(releaseInput({ environment: "preview" })), /environment/);
-  assert.throws(() => validateReleaseSpec(releaseInput({ environment: "production" })), /release_id/);
+  assert.throws(
+    () => validateReleaseSpec(releaseInput({ environment: "production" })),
+    /release_id/,
+  );
 });
 
 test("IaC outputs must be non-sensitive, staging-scoped, and internally consistent", () => {
@@ -459,13 +496,26 @@ test("rendered files are deterministic and private", async (context) => {
     },
   ]);
   const frontend = JSON.parse(await readFile(first.paths.frontend, "utf8"));
-  assert.equal(path.resolve(path.dirname(first.paths.frontend), frontend.main), path.join(repoRoot, "frontend/app/src/worker.ts"));
-  assert.equal(path.resolve(path.dirname(first.paths.frontend), frontend.assets.directory), path.join(repoRoot, "frontend/app/dist/client"));
+  assert.equal(
+    path.resolve(path.dirname(first.paths.frontend), frontend.main),
+    path.join(repoRoot, "frontend/app/src/worker.ts"),
+  );
+  assert.equal(
+    path.resolve(path.dirname(first.paths.frontend), frontend.assets.directory),
+    path.join(repoRoot, "frontend/app/dist/client"),
+  );
   assert.equal(frontend.vars.API_ORIGIN, undefined);
   const renamed = await writeRenderedConfigs({
-    iac: { ...iac, frontend_worker_name: "fork-frontend-staging" }, outDir, repoRoot, spec,
+    iac: { ...iac, frontend_worker_name: "fork-frontend-staging" },
+    outDir,
+    repoRoot,
+    spec,
   });
-  assert.notEqual(renamed.config_digest, first.config_digest, "frontend identity participates in the review digest");
+  assert.notEqual(
+    renamed.config_digest,
+    first.config_digest,
+    "frontend identity participates in the review digest",
+  );
 });
 
 test("connected preflight requires matching Cloudflare and TLS database credentials", async () => {
@@ -507,9 +557,12 @@ function databaseEnvironment() {
 }
 
 /** Models each protected connection's catalog view and effective login identity. */
-function roleClientFactory(
-  { missing, systemBypass = true, authenticatedBypass = false, identity } = {},
-) {
+function roleClientFactory({
+  missing,
+  systemBypass = true,
+  authenticatedBypass = false,
+  identity,
+} = {}) {
   return async (url) => {
     const role = new URL(url).username;
     return {
@@ -537,7 +590,10 @@ test("connected preflight rejects missing, unsafe, and misresolved database role
     [{ missing: "meltiply_rls" }, /meltiply_rls.*missing.*MELTIPLY_AUTHENTICATED_DATABASE_URL/],
     [{ missing: "meltiply_system" }, /meltiply_system.*missing.*MELTIPLY_SYSTEM_DATABASE_URL/],
     [{ systemBypass: false }, /meltiply_system.*BYPASSRLS.*MELTIPLY_SYSTEM_DATABASE_URL/],
-    [{ authenticatedBypass: true }, /meltiply_rls.*NOBYPASSRLS.*MELTIPLY_AUTHENTICATED_DATABASE_URL/],
+    [
+      { authenticatedBypass: true },
+      /meltiply_rls.*NOBYPASSRLS.*MELTIPLY_AUTHENTICATED_DATABASE_URL/,
+    ],
     [{ identity: "neondb_owner" }, /MELTIPLY_SYSTEM_DATABASE_URL.*meltiply_system/],
   ]) {
     await assert.rejects(
@@ -720,26 +776,42 @@ test("production CLI preflight and rendering retain the selected installation", 
     release_id: `production-${gitSha.slice(0, 12)}`,
     api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
   });
-  const queues = Object.fromEntries(Object.keys(queueNames()).map((workload) => [workload, `meltiply-${workload}-production`]));
+  const queues = Object.fromEntries(
+    Object.keys(queueNames()).map((workload) => [workload, `meltiply-${workload}-production`]),
+  );
   const outputs = iacOutput({
     environment: "production",
     frontend_worker_name: "meltiply-frontend-production",
-    worker_names: { api: "meltiply-api-production", automation: "meltiply-automation-production", state: "meltiply-state-production", frontend: "meltiply-frontend-production" },
+    worker_names: {
+      api: "meltiply-api-production",
+      automation: "meltiply-automation-production",
+      state: "meltiply-state-production",
+      frontend: "meltiply-frontend-production",
+    },
     assets_bucket_name: "meltiply-assets-production",
     queue_names: queues,
-    dead_letter_queue_names: Object.fromEntries(Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`])),
+    dead_letter_queue_names: Object.fromEntries(
+      Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`]),
+    ),
   });
   outputs.worker_bindings.value.queues = queues;
   await writeFile(inputPath, JSON.stringify(spec));
   await writeFile(iacOutputsPath, JSON.stringify(outputs));
   const preflight = await runReleaseCli(["preflight", "--offline", "--input", inputPath], {
-    environment: {}, runCommand: successfulPreflightCommand,
+    environment: {},
+    runCommand: successfulPreflightCommand,
   });
   assert.equal(preflight.environment, "production");
-  const rendered = await runReleaseCli(["render", "--input", inputPath, "--iac-outputs", iacOutputsPath, "--out-dir", outDir], { environment: {} });
+  const rendered = await runReleaseCli(
+    ["render", "--input", inputPath, "--iac-outputs", iacOutputsPath, "--out-dir", outDir],
+    { environment: {} },
+  );
   assert.equal(rendered.environment, "production");
   const config = JSON.parse(await readFile(path.join(outDir, "wrangler/api.json"), "utf8"));
   assert.equal(config.name, "meltiply-api-production");
   assert.equal(config.vars.ENVIRONMENT, "production");
-  assert.equal(config.services.find((binding) => binding.binding === "AUTOMATION").service, "meltiply-automation-production");
+  assert.equal(
+    config.services.find((binding) => binding.binding === "AUTOMATION").service,
+    "meltiply-automation-production",
+  );
 });

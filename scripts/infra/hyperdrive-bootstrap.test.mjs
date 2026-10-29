@@ -41,8 +41,8 @@ function roleClientFactory({ connection, missing, bypass, identity, superuser = 
             ...(affected && row.rolname === "meltiply_rls"
               ? { rolbypassrls: bypass ?? false, rolsuper: superuser }
               : {}),
-            current_user: affected ? identity ?? role : role,
-            session_user: affected ? identity ?? role : role,
+            current_user: affected ? (identity ?? role) : role,
+            session_user: affected ? (identity ?? role) : role,
           })),
       }),
     };

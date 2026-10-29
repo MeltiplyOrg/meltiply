@@ -501,12 +501,19 @@ export function validateIacOutputs(input, spec) {
   const workerNames = assertPlainObject(resources.worker_names, "release_resources.worker_names");
   assertExactKeys(workerNames, new Set(["api", "automation", "state", "frontend"]), "worker_names");
   for (const worker of ["api", "automation", "state", "frontend"]) {
-    const name = requiredString(workerNames[worker], `worker_names.${worker}`, /^[a-z0-9][a-z0-9-]*$/);
+    const name = requiredString(
+      workerNames[worker],
+      `worker_names.${worker}`,
+      /^[a-z0-9][a-z0-9-]*$/,
+    );
     if (spec.environment !== "staging" && !name.endsWith(`-${spec.environment}`)) {
       throw new TypeError(`worker_names.${worker} must carry the release environment suffix`);
     }
   }
-  if (new Set(Object.values(workerNames)).size !== 4 || workerNames.frontend !== frontendWorkerName) {
+  if (
+    new Set(Object.values(workerNames)).size !== 4 ||
+    workerNames.frontend !== frontendWorkerName
+  ) {
     throw new TypeError("IaC Worker names must be distinct and consistent");
   }
   if (!new URL(spec.api_workers_dev_url).hostname.startsWith(`${workerNames.api}.`)) {
@@ -540,11 +547,16 @@ export function validateIacOutputs(input, spec) {
   if (JSON.stringify(stableValue(queues)) !== JSON.stringify(stableValue(resources.queue_names))) {
     throw new TypeError("queue names differ between IaC outputs");
   }
-  const deadLetters = assertPlainObject(resources.dead_letter_queue_names, "dead_letter_queue_names");
+  const deadLetters = assertPlainObject(
+    resources.dead_letter_queue_names,
+    "dead_letter_queue_names",
+  );
   assertExactKeys(deadLetters, new Set(Object.keys(queueBindings)), "dead_letter_queue_names");
   for (const workload of Object.keys(queueBindings)) {
     if (deadLetters[workload] !== `meltiply-${workload}-${spec.environment}-dlq`) {
-      throw new TypeError(`dead-letter queue ${workload} is not the expected ${spec.environment} queue`);
+      throw new TypeError(
+        `dead-letter queue ${workload} is not the expected ${spec.environment} queue`,
+      );
     }
   }
 
@@ -661,11 +673,15 @@ export function renderWranglerConfigs(sourceConfigs, spec, iac) {
   state.name = iac.worker_names.state;
   state.vars = { ...state.vars, ENVIRONMENT: spec.environment, VERSION: spec.git_sha };
   api.services = (api.services ?? []).map((binding) =>
-    binding.binding === "AUTOMATION" ? { ...binding, service: iac.worker_names.automation } : binding,
+    binding.binding === "AUTOMATION"
+      ? { ...binding, service: iac.worker_names.automation }
+      : binding,
   );
   if (api.durable_objects?.bindings) {
     api.durable_objects.bindings = api.durable_objects.bindings.map((binding) =>
-      binding.name === "OAUTH_STATE" ? { ...binding, script_name: iac.worker_names.state } : binding,
+      binding.name === "OAUTH_STATE"
+        ? { ...binding, script_name: iac.worker_names.state }
+        : binding,
     );
   }
   if (spec.environment !== "staging") {
@@ -863,7 +879,9 @@ export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
     }
     if (configs[worker].assets?.directory) {
       configs[worker].assets.directory = rewriteConfigRelativePath(
-        configDir, sourceDir, configs[worker].assets.directory,
+        configDir,
+        sourceDir,
+        configs[worker].assets.directory,
       );
     }
     for (const container of configs[worker].containers ?? []) {
@@ -879,7 +897,9 @@ export async function writeRenderedConfigs({ outDir, repoRoot, spec, iac }) {
     paths[worker] = outputPath;
   }
   const digest = createHash("sha256")
-    .update(["state", "automation", "api", "frontend"].map((worker) => json(configs[worker])).join("\0"))
+    .update(
+      ["state", "automation", "api", "frontend"].map((worker) => json(configs[worker])).join("\0"),
+    )
     .digest("hex");
   return { config_digest: digest, paths };
 }

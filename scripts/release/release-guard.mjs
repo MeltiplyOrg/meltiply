@@ -130,8 +130,13 @@ export function validateApprovalMetadata(input, spec) {
   if (job.status !== "success") {
     throw new TypeError("approval metadata approval_job.status must be success");
   }
-  if (typeof job.name !== "string" || !new RegExp(`^${spec.environment}-[a-z0-9-]+-approval$`).test(job.name)) {
-    throw new TypeError("approval metadata approval_job.name is invalid for the release environment");
+  if (
+    typeof job.name !== "string" ||
+    !new RegExp(`^${spec.environment}-[a-z0-9-]+-approval$`).test(job.name)
+  ) {
+    throw new TypeError(
+      "approval metadata approval_job.name is invalid for the release environment",
+    );
   }
 
   return {

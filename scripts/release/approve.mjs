@@ -15,7 +15,9 @@ if (!Object.hasOwn(scopes, scope ?? "") || !inputPath || !planPath || !operator 
 const spec = validateReleaseSpec(await readJsonFile(inputPath, "release input"));
 const digest = sha256(await readFile(planPath));
 if (confirmation !== `approve ${spec.environment} ${spec.git_sha} ${digest}`) {
-  throw new Error("Confirmation must identify the environment, exact release commit, and reviewed plan SHA-256");
+  throw new Error(
+    "Confirmation must identify the environment, exact release commit, and reviewed plan SHA-256",
+  );
 }
 const outDir = path.resolve(process.env.MELTIPLY_RELEASE_DIR ?? ".release");
 let session;

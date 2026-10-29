@@ -10,6 +10,15 @@ api_worker_name       = "meltiply-api"
 automation_worker_name = "meltiply-automation"
 assets_bucket_name    = "meltiply-assets-staging"
 
+# Keep the existing staging backend as the sole zone-security owner.
+# Before adding production in this zone, add production = "app.meltiply.com"
+# here and in every protected phase file, then apply the owner's security update.
+# If production already owns this zone, set false and copy its full hostname map.
+manage_zone_security = true
+protected_app_hostnames = {
+  staging = "staging.meltiply.com"
+}
+
 # Safe bootstrap defaults. Attach consumers only after the Automation Worker
 # exists, attach domains only after frontend and API Workers exist, and resume Queue
 # delivery only after rollout checks pass.

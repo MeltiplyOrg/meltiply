@@ -1,7 +1,8 @@
 # Cloudflare infrastructure
 
 This OpenTofu root manages either `staging` or `production` account/zone resources.
-They are separate installations, with separate protected inputs and state. No
+They are separate installations, with separate protected inputs and state, except
+that one installation's state owns security entrypoints shared by their DNS zone. No
 other environment or preview stack is supported. Worker code and version
 deployment remain Wrangler-owned; use the release CLI rather than deploying
 checked-in placeholder configs directly. This runbook describes operator actions,
@@ -177,13 +178,13 @@ Worker deployment, secret injection, and monitoring. Load credentials from your
 protected environment; do not paste them into shell history or evidence. Required
 operator variables are:
 
-| Variable | Purpose |
-| --- | --- |
-| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | Selected account and step-specific control-plane permissions; account ID must match `runtime.r2_account_id` |
-| `TF_HTTP_USERNAME`, `TF_HTTP_PASSWORD` | Selected installation's protected locking state service |
-| `MELTIPLY_SYSTEM_DATABASE_URL` | TLS Neon URL logging in directly as `meltiply_system` |
-| `MELTIPLY_AUTHENTICATED_DATABASE_URL` | Same endpoint/database, logging in directly as `meltiply_rls` |
-| `NEON_API_KEY`, `MELTIPLY_NEON_PROJECT_ID`, `MELTIPLY_NEON_BRANCH_ID` | Snapshot creation; IDs must match the release input |
+| Variable                                                              | Purpose                                                                                                     |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`                       | Selected account and step-specific control-plane permissions; account ID must match `runtime.r2_account_id` |
+| `TF_HTTP_USERNAME`, `TF_HTTP_PASSWORD`                                | Selected installation's protected locking state service                                                     |
+| `MELTIPLY_SYSTEM_DATABASE_URL`                                        | TLS Neon URL logging in directly as `meltiply_system`                                                       |
+| `MELTIPLY_AUTHENTICATED_DATABASE_URL`                                 | Same endpoint/database, logging in directly as `meltiply_rls`                                               |
+| `NEON_API_KEY`, `MELTIPLY_NEON_PROJECT_ID`, `MELTIPLY_NEON_BRANCH_ID` | Snapshot creation; IDs must match the release input                                                         |
 
 Online preflight validates credentials' presence/account selection and queries
 the database roles; it is not a blanket API permission or Email Sending delivery
@@ -308,23 +309,23 @@ its bytes/path and the protected input to the session before contacting OpenTofu
 Create complete protected tfvars files with identical installation settings and
 only these reviewed activation differences:
 
-| File under `$protected` | `attach_queue_consumers` | `attach_app_custom_domains` | `queue_delivery_paused` |
-| --- | --- | --- | --- |
-| `foundation.tfvars` | `false` | `false` | `true` |
-| `paused-consumers.tfvars` | `true` | `false` | `true` |
-| `domain.tfvars` | `true` | `true` | `true` |
-| `unpause.tfvars` | `true` | `true` | `false` |
-| `pause.tfvars` (updates only) | `true` | `true` | `true` |
+| File under `$protected`       | `attach_queue_consumers` | `attach_app_custom_domains` | `queue_delivery_paused` |
+| ----------------------------- | ------------------------ | --------------------------- | ----------------------- |
+| `foundation.tfvars`           | `false`                  | `false`                     | `true`                  |
+| `paused-consumers.tfvars`     | `true`                   | `false`                     | `true`                  |
+| `domain.tfvars`               | `true`                   | `true`                      | `true`                  |
+| `unpause.tfvars`              | `true`                   | `true`                      | `false`                 |
+| `pause.tfvars` (updates only) | `true`                   | `true`                      | `true`                  |
 
 Review the names that `release_resources` will output:
 
-| Service/resource | Existing staging name | Production name |
-| --- | --- | --- |
-| API | `meltiply-api` | `meltiply-api-production` |
-| Automation | `meltiply-automation` | `meltiply-automation-production` |
-| State | `meltiply-state` | `meltiply-state-production` |
-| Frontend | `meltiply-frontend-staging` | `meltiply-frontend-production` |
-| Asset bucket | `meltiply-assets-staging` | `meltiply-assets-production` |
+| Service/resource     | Existing staging name                                             | Production name                                                         |
+| -------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| API                  | `meltiply-api`                                                    | `meltiply-api-production`                                               |
+| Automation           | `meltiply-automation`                                             | `meltiply-automation-production`                                        |
+| State                | `meltiply-state`                                                  | `meltiply-state-production`                                             |
+| Frontend             | `meltiply-frontend-staging`                                       | `meltiply-frontend-production`                                          |
+| Asset bucket         | `meltiply-assets-staging`                                         | `meltiply-assets-production`                                            |
 | Workload Queue / DLQ | `meltiply-<workload>-staging` / `meltiply-<workload>-staging-dlq` | `meltiply-<workload>-production` / `meltiply-<workload>-production-dlq` |
 
 Staging's existing unsuffixed backend services remain unchanged; do not rename
@@ -333,6 +334,97 @@ namespaces are isolated from staging. The frontend name is reviewed via
 `frontend_worker_name`; its `API` service binding targets `worker_names.api`
 from the same outputs. The app hostname serves frontend assets and forwards
 `/api/*` to that API; an enabled operator hostname attaches to the API.
+
+### Choose and verify the zone-security owner
+
+Cloudflare permits [at most one entrypoint ruleset per phase per zone](https://developers.cloudflare.com/ruleset-engine/about/rulesets/#entry-point-ruleset).
+Environment suffixes do not isolate these resources. Exactly **one protected
+backend per zone** must own `http_ratelimit` and, when enabled,
+`http_request_firewall_managed`. Do not import the same entrypoint into two states,
+create a second entrypoint, or disable an existing owner to make production apply.
+
+`manage_zone_security` defaults to staging ownership and production non-ownership.
+`protected_app_hostnames` maps supported environments to their app hostnames.
+An owner with no explicit map protects its own hostname; a non-owner must supply
+an explicit map containing its exact app hostname or planning fails. This map is
+a declaration, **not proof that another state has applied protection**. Verify
+the owner as described below before the non-owner's foundation or domain phase.
+The owner applies the API-path rate limit and any configured approved managed WAF
+to every hostname in the map, while each installation still owns only its own
+custom domains. Managed WAF remains optional and plan-dependent, not a substitute
+for the mandatory rate limit.
+
+- **First staging, empty zone:** keep `manage_zone_security = true`; use the
+  staging-only map from the example. Confirm neither phase already has an owner.
+- **Existing staging plus production in the same zone:** retain the staging
+  backend as owner. Set this map in **every** protected phase file for both
+  installations, substituting their actual same-zone hostnames:
+
+  ```hcl
+  protected_app_hostnames = {
+    staging    = "staging.example.com"
+    production = "app.example.com"
+  }
+  ```
+
+  Keep `manage_zone_security = true` in staging and `false` in production.
+  Preserve the existing owner's approved `managed_waf_ruleset_id` and rate limit.
+  Apply the staging owner's coverage extension **before production foundation**.
+- **First production, no staging or other zone owner:** explicitly set
+  `manage_zone_security = true` and a production-only map. If staging is added
+  later in the same zone, first extend the production owner's map, then configure
+  staging with `manage_zone_security = false` and the identical full map.
+- **Different zones:** select one owner independently in each zone. Inspect
+  existing Cloudflare phase entrypoints and protected state inventories first;
+  unrelated existing zone security must be reconciled into the sole owner rather
+  than overwritten. Ownership transfer between backends is not a release step.
+
+For an already-running owner, extending coverage is a **separate reviewed
+infrastructure maintenance operation**, not a `pause`, `domain`, `unpause`, or
+`paused-consumers` transition. Their narrow plan scopes are unchanged and reject
+security-resource mutations. Preserve all current attachment/delivery flags and
+resource values in the owner's active tfvars; do not replay bootstrap foundation.
+For example, on a trusted checkout with the owner's credentials and protected
+backend (replace `unpause.tfvars` with its actual current active configuration):
+
+```bash
+owner=/protected/meltiply/staging
+.bin/tofu -chdir=infra/cloudflare init -input=false -lockfile=readonly \
+  -reconfigure -backend-config="$owner/backend.hcl"
+.bin/tofu -chdir=infra/cloudflare plan -input=false \
+  -var-file="$owner/unpause.tfvars" -out="$owner/zone-security.tfplan"
+.bin/tofu -chdir=infra/cloudflare show "$owner/zone-security.tfplan"
+.bin/tofu -chdir=infra/cloudflare show -json "$owner/zone-security.tfplan" \
+  > "$owner/zone-security-plan.json"
+node scripts/infra/policy-check.mjs "$owner/zone-security-plan.json"
+# Stop for independent operator review before applying the exact saved plan.
+.bin/tofu -chdir=infra/cloudflare apply -input=false "$owner/zone-security.tfplan"
+.bin/tofu -chdir=infra/cloudflare output -json zone_security \
+  > "$owner/zone-security-applied.json"
+```
+
+The approved plan must extend protection in place with no deletes/replacements
+and no domain, Queue, consumer, storage, or other unrelated changes. The included
+`moved` block relocates the existing staging rate-limit state address from
+`module.edge.cloudflare_ruleset.rate_limit` to
+`module.edge.cloudflare_ruleset.rate_limit[0]` without changing its Cloudflare ID.
+An existing managed WAF remains at
+`module.edge.cloudflare_ruleset.managed_waf[0]`. Do not run `state mv`, migrate
+backends, remove the old resources, or accept a recreate to enact this change.
+
+Retain the reviewed plan and applied owner output as protected release evidence.
+Verify `zone_id`, `manages_rulesets = true`, both exact app hostnames in
+`protected_app_hostnames`, and `entrypoints.http_ratelimit` with an ID and an
+expression covering **both** API hosts. When managed WAF is configured, verify
+`entrypoints.http_request_firewall_managed` likewise covers both hosts. Confirm
+those IDs against the zone's live phase entrypoints in Cloudflare, and inspect
+both backends' state inventories to prove only the designated owner holds them.
+The non-owner's reviewed `zone_security` output must declare the same map and
+zone, `manages_rulesets = false`, and empty `entrypoints`. Its plan must create
+neither ruleset. Stop if coverage, IDs, or single-state ownership cannot be
+verified; **do not attach or release an unprotected production hostname**.
+Use the non-owner's own backend for the subsequent release commands; the
+transition wrapper reconfigures it explicitly.
 
 ### Bootstrap Hyperdrive and paused foundation
 
@@ -584,6 +676,7 @@ foundation or `paused-consumers` against an attached stack:
 
    Review all four successful outcomes before proceeding; breaking the loop is
    **not** acceptance. Both Queue delivery and Cron remain paused throughout.
+
 7. Follow the same approved `unpause`, `cron-activate`, and manifest commands.
    Keep previous versions, snapshot and rollback evidence until acceptance.
 

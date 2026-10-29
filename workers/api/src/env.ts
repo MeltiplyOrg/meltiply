@@ -127,7 +127,8 @@ const deployedAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET", "AUT
  * @returns True when email verification gates sign-in and owner authorization.
  */
 export function requiresEmailVerification(env: ApiWorkerEnv): boolean {
-  if (env.ENVIRONMENT === "selfhost" && env.REQUIRE_EMAIL_VERIFICATION?.trim() === "false") return false;
+  if (env.ENVIRONMENT === "selfhost" && env.REQUIRE_EMAIL_VERIFICATION?.trim() === "false")
+    return false;
   return env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test";
 }
 

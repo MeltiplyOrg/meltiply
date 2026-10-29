@@ -248,6 +248,33 @@ test("narrow phases reject unrelated non-destructive drift", () => {
   );
 });
 
+test("zone security maintenance cannot broaden narrow release phases", () => {
+  for (const resource of ["rate_limit", "managed_waf"]) {
+    const securityUpdate = change(
+      `module.edge.cloudflare_ruleset.${resource}[0]`,
+      "cloudflare_ruleset",
+      ["update"],
+    );
+    for (const phase of ["pause", "paused-consumers", "domain", "unpause"]) {
+      assert.throws(
+        () =>
+          verifyReleasePlan(
+            planFor(
+              {
+                attachAppCustomDomains: phase !== "paused-consumers",
+                attachQueueConsumers: true,
+                queueDeliveryPaused: phase !== "unpause",
+              },
+              [securityUpdate],
+            ),
+            phase,
+          ),
+        /contains a non-(Queue|consumer|domain) transition/,
+      );
+    }
+  }
+});
+
 test("unpause ignores unrelated no-op resources", () => {
   const plan = planFor(
     {

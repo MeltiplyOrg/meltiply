@@ -11,6 +11,15 @@ automation_worker_name = "meltiply-automation-production"
 state_worker_name      = "meltiply-state-production"
 assets_bucket_name     = "meltiply-assets-production"
 
+# Same-zone default: staging's protected backend owns both security entrypoints.
+# Apply the identical hostname map in that owner BEFORE production foundation.
+# Without any existing zone owner, explicitly set manage_zone_security = true.
+manage_zone_security = false
+protected_app_hostnames = {
+  staging    = "staging.example.com"
+  production = "app.example.com"
+}
+
 # Preserve the reviewed phase triples; do not attach domains/consumers early.
 attach_queue_consumers    = false
 attach_app_custom_domains = false

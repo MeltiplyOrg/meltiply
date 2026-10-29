@@ -1233,6 +1233,38 @@ describe("createFacebookAdapter", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it.each(["complete", "completed"])(
+    "recognizes Meta publishing phase %s as published",
+    async (publishing) => {
+      const providerCalls = sequence(() =>
+        json(reelStatus("video-1", { processing: "completed", publishing, video: "ready" })),
+      );
+      await expect(
+        adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
+          providerOperationId: "finish_submitted:video-1",
+        }),
+      ).resolves.toMatchObject({
+        state: "published",
+        result: { outcome: "confirmed_success", providerPostId: "video-1" },
+      });
+    },
+  );
+
+  it.each(["expired", "upload_failed"])(
+    "terminates a Reel whose video status is %s",
+    async (video) => {
+      const providerCalls = sequence(() => json(reelStatus("video-1", { video })));
+      await expect(
+        adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
+          providerOperationId: "finishing:video-1",
+        }),
+      ).resolves.toMatchObject({
+        state: "failed",
+        result: { outcome: "confirmed_failure", failure: { retryable: false } },
+      });
+    },
+  );
+
   it("polls a confirmed finish until Facebook proves publication", async () => {
     const providerCalls = sequence(
       () => json(reelStatus("video-1")),

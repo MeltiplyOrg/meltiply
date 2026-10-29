@@ -33,7 +33,6 @@ import {
   insertOutboxBatchEffect,
   mapDistribution,
   publicationSnapshotColumn,
-  toWireProviderOptions,
   usageGuardEffect,
   validateTargetOverrides,
 } from "./distribution-service";
@@ -42,6 +41,7 @@ import type {
   DeletePostInput,
   PostApiService,
   PostFilters,
+  PostProviderOptions,
   PostServiceError,
   PostTargetInput,
   SchedulePostInput,
@@ -103,7 +103,7 @@ interface TargetRow extends Record<string, unknown> {
   hashtags: string[] | null;
   platform_account_id: string;
   post_id?: string;
-  provider_options: ProviderPublishOptions | null;
+  provider_options: PostProviderOptions | null;
   title_override: string | null;
 }
 
@@ -161,7 +161,7 @@ interface DistributionSummaryRow extends Record<string, unknown> {
 interface ResolvedTargetRow {
   platform: Platform;
   platformAccountId: string;
-  target: PostTargetInput;
+  target: Omit<PostTargetInput, "providerOptions"> & { providerOptions?: ProviderPublishOptions };
 }
 
 /**
@@ -213,6 +213,46 @@ const EDITABLE_DISTRIBUTION_STATUSES: ReadonlySet<Schemas["DistributionStatus"]>
 ]);
 
 /**
+ * Projects saved Post choices without filling unanswered audience/privacy fields.
+ * Unlike Distribution publication options, drafts retain the disclosure gate
+ * independently of completed subtypes. Empty stored maps still project to null.
+ */
+function toWirePostProviderOptions(
+  options: PostProviderOptions | null,
+): Schemas["PostProviderOptions"] | null {
+  const tiktok = options?.tiktok;
+  const youtube = options?.youtube;
+  if (!tiktok && !youtube) return null;
+  return {
+    ...(tiktok
+      ? {
+          tiktok: {
+            allow_comment: tiktok.allowComment,
+            allow_duet: tiktok.allowDuet,
+            allow_stitch: tiktok.allowStitch,
+            brand_content: tiktok.brandContent,
+            brand_organic: tiktok.brandOrganic,
+            ...(tiktok.discloseCommercialContent !== undefined
+              ? { disclose_commercial_content: tiktok.discloseCommercialContent }
+              : {}),
+            is_ai_generated: tiktok.isAiGenerated,
+            music_usage_confirmed: tiktok.musicUsageConfirmed,
+            ...(tiktok.privacyLevel !== undefined ? { privacy_level: tiktok.privacyLevel } : {}),
+          },
+        }
+      : {}),
+    ...(youtube
+      ? {
+          youtube: {
+            ...(youtube.madeForKids !== undefined ? { made_for_kids: youtube.madeForKids } : {}),
+            ...(youtube.privacyStatus ? { privacy_status: youtube.privacyStatus } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
  * Maps a saved target row onto the public `PostTarget` read model.
  *
  * Provider options are stored as JSON `{}` when a Channel has no explicit
@@ -229,7 +269,7 @@ function mapTarget(row: TargetRow): Schemas["PostTarget"] {
     description_override: row.description_override,
     hashtags: row.hashtags ?? [],
     platform_account_id: row.platform_account_id,
-    provider_options: toWireProviderOptions(row.provider_options),
+    provider_options: toWirePostProviderOptions(row.provider_options),
     title_override: row.title_override,
   };
 }
@@ -992,6 +1032,59 @@ function loadRenditionCandidatesEffect(
 }
 
 /**
+ * Requires complete saved answers before creating Distribution options.
+ * The resolved YouTube Platform requires explicit audience and visibility even
+ * without an options subtree. Other absent subtrees retain their existing semantics;
+ * supplied unanswered choices or unfinished disclosure fail with 422.
+ * The draft-only disclosure gate never enters the Provider publication payload.
+ */
+function publicationProviderOptions(
+  options: PostProviderOptions | undefined,
+  platform: Platform,
+): ProviderPublishOptions | undefined {
+  if (!options && platform !== "youtube") return undefined;
+  const result: ProviderPublishOptions = {};
+  if (platform === "youtube" || options?.youtube) {
+    const madeForKids = options?.youtube?.madeForKids;
+    const privacyStatus = options?.youtube?.privacyStatus;
+    if (madeForKids === undefined) {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "Choose whether the YouTube video is made for kids before publishing.",
+      );
+    }
+    if (privacyStatus === undefined) {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "Choose a YouTube visibility before publishing.",
+      );
+    }
+    result.youtube = { madeForKids, privacyStatus };
+  }
+  if (options?.tiktok) {
+    const { privacyLevel, discloseCommercialContent, ...choices } = options.tiktok;
+    if (privacyLevel === undefined) {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "Choose a TikTok privacy level before publishing.",
+      );
+    }
+    if (discloseCommercialContent && !choices.brandContent && !choices.brandOrganic) {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "Choose a TikTok commercial content subtype before publishing.",
+      );
+    }
+    result.tiktok = { ...choices, privacyLevel };
+  }
+  return result;
+}
+
+/**
  * Enforces the provider-option rules that depend on the resolved media mix.
  *
  * TikTok requires explicit creator choices on every publish, and its Duet and
@@ -1068,7 +1161,7 @@ function validateProviderOptions(
  * @param capability - Capability descriptor for the account's platform.
  * @param candidates - Ready objects grouped by asset id, smallest first.
  * @param now - Reference instant for connection-expiry checks.
- * @returns Effect resolving to the target's platform; fails with the actionable cause otherwise.
+ * @returns Effect resolving to the platform and complete publication target, or an actionable failure.
  */
 function validateTargetScheduleEffect(
   post: PostRow,
@@ -1078,7 +1171,7 @@ function validateTargetScheduleEffect(
   capability: PlatformCapability | undefined,
   candidates: ReadonlyMap<string, CandidateRow[]>,
   now: Date,
-): Effect.Effect<Platform, CoreApiError> {
+): Effect.Effect<ResolvedTargetRow, CoreApiError> {
   return Effect.suspend(() => {
     if (!account?.platform) {
       return Effect.fail(
@@ -1113,9 +1206,11 @@ function validateTargetScheduleEffect(
         new CoreApiError(422, "unsupported_capability", `${platform} does not support publishing.`),
       );
     }
+    let providerOptions: ProviderPublishOptions | undefined;
     try {
       validateTargetOverrides(target);
-      validateProviderOptions(target.providerOptions, platform, selection, candidates);
+      providerOptions = publicationProviderOptions(target.providerOptions, platform);
+      validateProviderOptions(providerOptions, platform, selection, candidates);
     } catch (cause) {
       return cause instanceof CoreApiError ? Effect.fail(cause) : Effect.die(cause);
     }
@@ -1161,7 +1256,7 @@ function validateTargetScheduleEffect(
       hashtags: target.hashtags ?? [],
       idempotencyKey: "",
       media,
-      ...(target.providerOptions ? { providerOptions: target.providerOptions } : {}),
+      ...(providerOptions ? { providerOptions } : {}),
     });
     if (issues.length > 0) {
       return Effect.fail(
@@ -1181,7 +1276,11 @@ function validateTargetScheduleEffect(
         ),
       );
     }
-    return Effect.succeed(platform);
+    return Effect.succeed({
+      platform,
+      platformAccountId: target.platformAccountId,
+      target: { ...target, providerOptions },
+    });
   });
 }
 
@@ -1909,7 +2008,7 @@ export function createPostApiService(
             const created: ResolvedTargetRow[] = [];
             for (const entry of actionable) {
               const account = accounts.get(entry.target.platformAccountId);
-              const platform = yield* validateTargetScheduleEffect(
+              const row = yield* validateTargetScheduleEffect(
                 post,
                 entry.target,
                 entry.selection,
@@ -1918,11 +2017,6 @@ export function createPostApiService(
                 candidates,
                 now,
               );
-              const row: ResolvedTargetRow = {
-                platform,
-                platformAccountId: entry.target.platformAccountId,
-                target: entry.target,
-              };
               if (entry.distributionId === null) {
                 created.push(row);
               } else {

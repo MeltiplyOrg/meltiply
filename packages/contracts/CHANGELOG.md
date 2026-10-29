@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Separate saved `PostProviderOptions` from complete `ProviderPublishOptions`.
+  Post targets retain YouTube visibility with an unanswered audience and TikTok
+  privacy/disclosure choices before completion. Scheduling rejects unanswered
+  choices or an enabled disclosure without a subtype; draft-only
+  `disclose_commercial_content` never enters Distribution publication options.
+
 - **Breaking:** `POST /oauth-selections/{selection_id}/confirm`
   (`OAuthSelectionConfirmRequest`) now requires `brand_profile_id` alongside
   `account_id`. Clients must send the active Brand Profile UUID that will own

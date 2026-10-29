@@ -8754,6 +8754,7 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
                 description_override: "Black-box integration description",
                 hashtags: ["blackbox"],
                 platform_account_id: "50000000-0000-4000-8000-000000000001",
+                provider_options: { youtube: { made_for_kids: false, privacy_status: "public" } },
                 title_override: "Black-box integration title",
               },
             ],

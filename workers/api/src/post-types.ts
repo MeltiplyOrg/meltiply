@@ -2,7 +2,11 @@ import type { Effect } from "effect";
 import type { SessionClaims } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 import type { DatabaseError, DomainError } from "@meltiply/domain";
-import type { ProviderPublishOptions } from "@meltiply/providers";
+import type {
+  TikTokPrivacyLevel,
+  TikTokPublishOptions,
+  YouTubePublishOptions,
+} from "@meltiply/providers";
 
 import type { CoreApiError, IdempotentResult } from "./core-types";
 import type { ApiWorkerEnv } from "./env";
@@ -25,6 +29,19 @@ interface PostFilters {
 }
 
 /**
+ * Persisted Post choices may be incomplete without inventing required answers.
+ * The TikTok disclosure gate survives independently of its subtypes; scheduling
+ * validates these choices and converts them to strict ProviderPublishOptions.
+ */
+export interface PostProviderOptions {
+  tiktok?: Omit<TikTokPublishOptions, "privacyLevel"> & {
+    privacyLevel?: TikTokPrivacyLevel;
+    discloseCommercialContent?: boolean;
+  };
+  youtube?: Partial<YouTubePublishOptions>;
+}
+
+/**
  * Saved per-Channel settings for one Post target.
  *
  * `attachmentIds` narrows the publication to an ordered subset of the Post's
@@ -36,7 +53,7 @@ interface PostTargetInput {
   descriptionOverride?: string | null;
   hashtags?: string[];
   platformAccountId: string;
-  providerOptions?: ProviderPublishOptions;
+  providerOptions?: PostProviderOptions;
   titleOverride?: string | null;
 }
 

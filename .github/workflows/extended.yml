@@ -16,6 +16,8 @@ on:
           - device-authorization
           - object-storage
           - publishing-queues
+          - publishing-flow
+          - publishing-browser
           - portable-caching
           - portable-caching-smoke
           - performance-focused
@@ -44,6 +46,64 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/install-workspace
+      - name: Exercise publishing regressions
+        if: inputs.lane == 'publishing-flow'
+        run: |
+          status=0
+          bun run --cwd frontend/app test src/components/composer/composer.test.tsx src/lib/platform-capabilities-retention.test.tsx --coverage.enabled=false || status=1
+          bun run --cwd packages/providers test test/facebook.test.ts test/instagram.test.ts test/threads.test.ts test/tiktok.test.ts test/youtube.test.ts --coverage.enabled=false || status=1
+          exit "$status"
+      - name: Review publishing React changes
+        if: inputs.lane == 'publishing-flow'
+        working-directory: frontend/app
+        run: npx --yes react-doctor@0.9.18 --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
+      - name: Prepare publishing acceptance
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+        run: |
+          bun run setup --skip-dependencies --skip-image-pull
+          bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+          status=0
+          if [ "${{ inputs.lane }}" = publishing-flow ]; then bun run cloudflare:check || status=1; fi
+          bun run docs:links || status=1
+          exit "$status"
+      - name: Exercise full publishing lifecycle
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+        env:
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: |
+          bash scripts/cloudflare-local/database.sh reset
+          status=0
+          bun run --cwd frontend/app test:e2e e2e/posts-publication.spec.ts --project publication --trace on --retries 0 || status=1
+          # Each Playwright run clears test-results, so keep this journey's traces
+          # before the next journey overwrites them.
+          mkdir -p artifacts/publishing/publication
+          cp -R frontend/app/test-results/. artifacts/publishing/publication/ 2>/dev/null || true
+          exit "$status"
+      - name: Exercise publishing queues
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+        env:
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: |
+          bash scripts/cloudflare-local/database.sh reset
+          status=0
+          bun run --cwd frontend/app test:e2e e2e/publishing-queues.spec.ts --project queues --trace on --retries 0 || status=1
+          mkdir -p artifacts/publishing/queues
+          cp -R frontend/app/test-results/. artifacts/publishing/queues/ 2>/dev/null || true
+          exit "$status"
+      - name: Exercise multi-profile delivery recovery
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
+        env:
+          MELTIPLY_E2E_ACCEPTANCE: "1"
+          MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable
+        run: |
+          bash scripts/cloudflare-local/database.sh reset
+          status=0
+          bun run --cwd frontend/app test:e2e e2e/posts-composer.spec.ts --project composer --grep "recovers independent profile copies and retries only unfinished publishing" --trace on --retries 0 || status=1
+          mkdir -p artifacts/publishing/recovery
+          cp -R frontend/app/test-results/. artifacts/publishing/recovery/ 2>/dev/null || true
+          exit "$status"
       - name: Exercise native processor restart and replay
         if: inputs.lane == 'performance-media'
         run: bun run --filter @meltiply/automation-worker smoke:processor

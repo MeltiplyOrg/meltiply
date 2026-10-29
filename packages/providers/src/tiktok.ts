@@ -795,11 +795,16 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): ProviderAdap
           reason && /^[a-z0-9][a-z0-9._-]{0,79}$/.test(reason)
             ? `tiktok_${reason}`
             : "tiktok_publish_failed";
+        // These are terminal outcomes for this operation, not uncertain writes.
+        // TikTok explicitly permits retry after internal/retrieval failures;
+        // removed authorization instead requires reconnection, never a retry.
+        const status = ["internal", "video_pull_failed", "photo_pull_failed"].includes(reason ?? "")
+          ? 503
+          : reason === "auth_removed"
+            ? 401
+            : 422;
         return {
-          result: confirmedFailure(
-            classifyProviderFailure({ code, status: 422 }),
-            retainedOperationId,
-          ),
+          result: confirmedFailure(classifyProviderFailure({ code, status }), retainedOperationId),
           state: "failed",
         };
       }

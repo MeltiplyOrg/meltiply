@@ -62,6 +62,9 @@ describe("profile copy media readiness", () => {
       targetsByProfile: new Map([
         ["profile-a", [{ platform_account_id: "channel-a", attachment_ids: null, overrides: {} }]],
       ]),
+      publicationTargetsByProfile: new Map([
+        ["profile-a", [{ platform_account_id: "channel-a", attachment_ids: null }]],
+      ]),
       scheduledAt: null,
       mode: "now" as const,
       workspaceId: null,

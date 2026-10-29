@@ -4542,7 +4542,7 @@ components:
             pattern: "^[^#\\s]+$"
         provider_options:
           oneOf:
-            - $ref: "#/components/schemas/ProviderPublishOptions"
+            - $ref: "#/components/schemas/PostProviderOptions"
             - type: "null"
         attachment_ids:
           type: [array, "null"]
@@ -4825,7 +4825,7 @@ components:
             pattern: "^[^#\\s]+$"
         provider_options:
           oneOf:
-            - $ref: "#/components/schemas/ProviderPublishOptions"
+            - $ref: "#/components/schemas/PostProviderOptions"
             - type: "null"
         attachment_ids:
           type: [array, "null"]
@@ -5231,6 +5231,66 @@ components:
           type: boolean
         privacy_status:
           $ref: "#/components/schemas/YouTubePrivacyStatus"
+    TikTokPostOptions:
+      type: object
+      additionalProperties: false
+      description: |
+        Saved creator choices. Privacy may remain unanswered in a draft.
+        disclose_commercial_content retains the disclosure gate independently
+        of its subtypes; when true, scheduling requires at least one subtype.
+        Scheduling requires privacy and removes the draft-only disclosure gate
+        before creating complete TikTokPublishOptions for a Distribution.
+      required:
+        - allow_comment
+        - allow_duet
+        - allow_stitch
+        - brand_content
+        - brand_organic
+        - is_ai_generated
+        - music_usage_confirmed
+      properties:
+        privacy_level:
+          $ref: "#/components/schemas/TikTokPrivacyLevel"
+        allow_comment:
+          type: boolean
+        allow_duet:
+          type: boolean
+        allow_stitch:
+          type: boolean
+        brand_content:
+          type: boolean
+        brand_organic:
+          type: boolean
+        disclose_commercial_content:
+          type: boolean
+        is_ai_generated:
+          type: boolean
+        music_usage_confirmed:
+          type: boolean
+          const: true
+    YouTubePostOptions:
+      type: object
+      additionalProperties: false
+      description: |
+        Saved audience and visibility choices. An omitted made_for_kids is an
+        unanswered audience question, not false. Scheduling requires an explicit
+        boolean before creating YouTubePublishOptions for a Distribution.
+      properties:
+        made_for_kids:
+          type: boolean
+        privacy_status:
+          $ref: "#/components/schemas/YouTubePrivacyStatus"
+    PostProviderOptions:
+      type: object
+      additionalProperties: false
+      description: |
+        Provider choices saved on a Post, including incomplete drafts.
+        Scheduling validates completeness before creating publication options.
+      properties:
+        tiktok:
+          $ref: "#/components/schemas/TikTokPostOptions"
+        youtube:
+          $ref: "#/components/schemas/YouTubePostOptions"
     ProviderPublishOptions:
       type: object
       additionalProperties: false

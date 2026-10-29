@@ -564,7 +564,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
           yield* client.query(
             `INSERT INTO post_targets
                (post_id, platform_account_id, org_id, brand_profile_id,
-                title_override)
+                title_override, provider_options)
              SELECT
                ('c1000000-0000-4000-8000-' || lpad(post_item::text, 12, '0'))::uuid,
                (channel.prefix || '-0000-4000-8000-'
@@ -572,7 +572,10 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                'b2000000-0000-4000-8000-000000000001'::uuid,
                ('b4000000-0000-4000-8000-'
                  || lpad((((post_item - 1) % 20) + 1)::text, 12, '0'))::uuid,
-               'Query budget target'
+               'Query budget target',
+               CASE WHEN channel.prefix = 'b5000000'
+                 THEN '{"youtube":{"madeForKids":false,"privacyStatus":"public"}}'::jsonb
+                 ELSE '{}'::jsonb END
             FROM generate_series(1, 42) AS post_item
             CROSS JOIN (VALUES ('b5000000'), ('b6000000')) AS channel(prefix)`,
           );

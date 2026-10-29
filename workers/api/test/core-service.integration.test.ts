@@ -3189,6 +3189,8 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   /**
    * Schedules an Alpha Post against the supplied Channels.
+   * Supplies explicit public visibility and a not-made-for-kids fixture answer
+   * for unrelated scenarios. Missing-answer cases call the service directly.
    *
    * @param posts - Post service driving the scenario.
    * @param postId - Post being scheduled.
@@ -3209,7 +3211,18 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
         env,
         alpha,
         postId,
-        { brandProfileId: alphaBrandProfileId, scheduledAt, targets },
+        {
+          brandProfileId: alphaBrandProfileId,
+          scheduledAt,
+          targets: targets.map((target) =>
+            target.platformAccountId === alphaYoutubeAccountId && !target.providerOptions
+              ? {
+                  ...target,
+                  providerOptions: { youtube: { madeForKids: false, privacyStatus: "public" } },
+                }
+              : target,
+          ),
+        },
         key,
       ),
     );
@@ -5016,6 +5029,127 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       await restoreUsageCount(usageBefore);
     }
   });
+
+  it.each([
+    ["saved", "audience"],
+    ["request", "audience"],
+    ["saved", "visibility"],
+    ["request", "visibility"],
+  ] as const)(
+    "rejects YouTube scheduling from %s targets without %s but permits the draft",
+    async (source, missingChoice) => {
+      const posts = postServiceWith("youtube");
+      const usageBefore = await currentUsageCount();
+      const prefix = `integration-post-absent-youtube-${source}-${missingChoice}`;
+      const target: PostTargetInput = {
+        platformAccountId: alphaYoutubeAccountId,
+        ...(missingChoice === "visibility"
+          ? { providerOptions: { youtube: { madeForKids: false } } }
+          : {}),
+      };
+      const draft = await createAlphaPost(
+        posts,
+        { attachmentIds: [alphaAssetId], targets: [target] },
+        `${prefix}-draft`,
+      );
+      try {
+        const reopened = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
+        expect(reopened.targets[0]?.provider_options).toEqual(
+          missingChoice === "visibility" ? { youtube: { made_for_kids: false } } : null,
+        );
+        await expect(
+          Effect.runPromise(
+            posts.schedulePost(
+              env,
+              alpha,
+              draft.value.id,
+              {
+                brandProfileId: alphaBrandProfileId,
+                scheduledAt: null,
+                ...(source === "request" ? { targets: [target] } : {}),
+              },
+              `${prefix}-schedule`,
+            ),
+          ),
+        ).rejects.toMatchObject({ code: "validation_error", status: 422 });
+        const unchanged = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
+        expect(unchanged.distributions).toEqual([]);
+        expect(unchanged.targets).toEqual(reopened.targets);
+      } finally {
+        await purgeIntegrationPosts([draft.value.id], [`${prefix}-draft`, `${prefix}-schedule`]);
+        await restoreUsageCount(usageBefore);
+      }
+    },
+  );
+
+  it.each(["youtube", "tiktok"] as const)(
+    "retains incomplete %s draft choices without accepting them for delivery",
+    async (platform) => {
+      const posts = postServiceWith(platform);
+      const accountId = platform === "youtube" ? alphaYoutubeAccountId : alphaTiktokAccountId;
+      const prefix = `integration-post-incomplete-${platform}`;
+      const target: PostTargetInput = {
+        platformAccountId: accountId,
+        providerOptions:
+          platform === "youtube"
+            ? { youtube: { privacyStatus: "private" } }
+            : {
+                tiktok: {
+                  allowComment: false,
+                  allowDuet: false,
+                  allowStitch: false,
+                  brandContent: false,
+                  brandOrganic: false,
+                  discloseCommercialContent: true,
+                  isAiGenerated: false,
+                  musicUsageConfirmed: true,
+                  privacyLevel: "PUBLIC_TO_EVERYONE",
+                },
+              },
+      };
+      const draft = await createAlphaPost(
+        posts,
+        { attachmentIds: [alphaAssetId], targets: [target] },
+        `${prefix}-draft`,
+      );
+      try {
+        const reopened = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
+        expect(reopened.targets[0]?.provider_options).toEqual(
+          platform === "youtube"
+            ? { youtube: { privacy_status: "private" } }
+            : {
+                tiktok: {
+                  allow_comment: false,
+                  allow_duet: false,
+                  allow_stitch: false,
+                  brand_content: false,
+                  brand_organic: false,
+                  disclose_commercial_content: true,
+                  is_ai_generated: false,
+                  music_usage_confirmed: true,
+                  privacy_level: "PUBLIC_TO_EVERYONE",
+                },
+              },
+        );
+        await expect(
+          Effect.runPromise(
+            posts.schedulePost(
+              env,
+              alpha,
+              draft.value.id,
+              { brandProfileId: alphaBrandProfileId, scheduledAt: null },
+              `${prefix}-schedule`,
+            ),
+          ),
+        ).rejects.toMatchObject({ code: "validation_error", status: 422 });
+        const unchanged = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
+        expect(unchanged.distributions).toEqual([]);
+        expect(unchanged.targets).toEqual(reopened.targets);
+      } finally {
+        await purgeIntegrationPosts([draft.value.id], [`${prefix}-draft`, `${prefix}-schedule`]);
+      }
+    },
+  );
 
   // TikTok requires explicit creator choices on every publish, so a Channel
   // that omits them or states a contradictory combination is refused before any

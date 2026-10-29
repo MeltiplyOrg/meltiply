@@ -34,6 +34,8 @@ export interface ProfileCopyProgress {
  * Every draft is saved before scheduling begins. A failed save prevents all scheduling;
  * scheduling failures preserve completed intents so retry never resends successful profiles.
  * Only media used by a Channel target gates delivery; excluded media can remain in the draft.
+ * Draft targets retain selections independently of permission-clamped publication
+ * targets; both sets remap media to each profile's own uploaded Assets.
  * Each profile's readiness reads and polling share a five-minute deadline; timeout
  * reports a retryable profile failure without discarding its saved Post or media.
  * The caller retains `copies` for this composition only and aborts on identity change/unmount.
@@ -46,6 +48,7 @@ export async function persistProfileCopies({
   attachments,
   sharedContent,
   targetsByProfile,
+  publicationTargetsByProfile,
   scheduledAt,
   mode,
   workspaceId,
@@ -62,6 +65,7 @@ export async function persistProfileCopies({
   attachments: readonly CopyAttachment[];
   sharedContent: string;
   targetsByProfile: ReadonlyMap<string, readonly PostTargetDraft[]>;
+  publicationTargetsByProfile: ReadonlyMap<string, readonly PostTargetDraft[]>;
   scheduledAt: string | null;
   mode: "draft" | "schedule" | "now";
   workspaceId: string | null;
@@ -142,16 +146,31 @@ export async function persistProfileCopies({
         targets,
       };
       if (mode !== "draft") {
-        const fingerprint = JSON.stringify({ mode, ...profileInput, scheduledAt });
+        const publicationTargets = (publicationTargetsByProfile.get(profileId) ?? []).map(
+          (target) => ({
+            ...target,
+            ...(target.attachment_ids ? { attachment_ids: target.attachment_ids.map(remap) } : {}),
+          }),
+        );
+        const fingerprint = JSON.stringify({
+          mode,
+          ...profileInput,
+          publicationTargets,
+          scheduledAt,
+        });
         if (copy.postId && copy.scheduledIntent === fingerprint) {
           onProgress({ profileId, phase: "scheduled" });
           continue;
         }
         const assetIds = new Set<string>();
-        for (const target of targets)
+        for (const target of publicationTargets)
           for (const id of target.attachment_ids ?? attachmentIds) assetIds.add(id);
         intents.set(profileId, {
-          input: { brand_profile_id: profileId, scheduled_at: scheduledAt, targets },
+          input: {
+            brand_profile_id: profileId,
+            scheduled_at: scheduledAt,
+            targets: publicationTargets,
+          },
           fingerprint,
           assetIds,
         });

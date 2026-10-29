@@ -627,18 +627,6 @@ describe("createTikTokAdapter", () => {
         state: "published",
       },
     ],
-    [
-      "FAILED",
-      { fail_reason: "video_pull_failed" },
-      {
-        result: {
-          failure: { code: "tiktok_video_pull_failed", retryable: false },
-          outcome: "confirmed_failure",
-          providerOperationId: "publish:v_pub_url~v2.123",
-        },
-        state: "failed",
-      },
-    ],
   ])("maps %s publication status", async (status, patch, expected) => {
     const providerCalls = sequence((_url, init) => {
       expect(JSON.parse(String(init.body))).toEqual({
@@ -791,6 +779,31 @@ describe("createTikTokAdapter", () => {
     });
     await expect(provider.revoke!("access-rotated")).resolves.toBeUndefined();
   });
+
+  it.each([
+    ["internal", "transient", true],
+    ["video_pull_failed", "transient", true],
+    ["photo_pull_failed", "transient", true],
+    ["auth_removed", "auth", false],
+    ["spam_risk_user_banned_from_posting", "deterministic", false],
+  ])(
+    "classifies terminal TikTok status reason %s for safe recovery",
+    async (reason, classification, retryable) => {
+      const providerCalls = sequence(() => success({ status: "FAILED", fail_reason: reason }));
+      await expect(
+        adapter(providerCalls.fetcher).lookupPublication!(context, credentials, {
+          providerOperationId: "publish:v_pub_file~v2-1",
+        }),
+      ).resolves.toMatchObject({
+        state: "failed",
+        result: {
+          outcome: "confirmed_failure",
+          providerOperationId: "publish:v_pub_file~v2-1",
+          failure: { code: `tiktok_${reason}`, classification, retryable },
+        },
+      });
+    },
+  );
 
   it("normalizes TikTok error envelopes without leaking provider messages", async () => {
     const providerCalls = sequence(() =>

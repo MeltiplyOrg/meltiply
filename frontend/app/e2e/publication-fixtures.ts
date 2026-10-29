@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 
-import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import type { APIRequestContext, Locator, Page, Response } from "@playwright/test";
 
 import { expect } from "@playwright/test";
 import { Schema } from "effect";
@@ -29,11 +29,12 @@ export interface ControlledPublication {
   platform: string;
   publicationId: string;
   publishedAt: string;
+  providerOptions?: unknown;
   state: "cancelled" | "published";
 }
 
 /** Platforms the controlled Provider serves. */
-export type ControlledPlatform = "instagram" | "threads";
+export type ControlledPlatform = "facebook" | "instagram" | "threads" | "tiktok" | "youtube";
 
 /** A Channel the acceptance run asks the fixture to provision. */
 export interface ControlledChannelSpec {
@@ -100,6 +101,21 @@ function controlledProviderOrigin(): string {
  */
 function fixtureUrl(path: string): string {
   return `${controlledProviderOrigin()}${controlledProviderRoutePrefix}${path}`;
+}
+
+/**
+ * Builds an absolute URL for an acceptance-only route served by the API Worker
+ * itself, outside the browser-visible `/api/v1` namespace.
+ *
+ * The page reaches the API through the frontend dev proxy, which forwards only
+ * application paths, so fixture-only endpoints must be requested from the API
+ * origin directly.
+ *
+ * @param path - Endpoint path beginning with a slash.
+ * @returns Absolute URL on the local API origin.
+ */
+export function acceptanceApiUrl(path: string): string {
+  return `${controlledProviderOrigin()}${path}`;
 }
 
 /**
@@ -325,4 +341,74 @@ export async function scriptControlledFailures(
     response.status(),
     `scripting ${failNextPublishes} controlled failure(s) for ${accountId}`,
   ).toBe(200);
+}
+
+/**
+ * Creates a real UTC weekly Queue through its editor from future minute-aligned
+ * instants. Exercises searchable timezone selection and every supplied slot;
+ * returns the committed API response so callers can inspect ownership/reservations
+ * using the same authenticated request, not a database or allocation shortcut.
+ */
+export async function configurePublishingQueue(
+  page: Page,
+  profileName: string,
+  queueName: string,
+  instants: readonly Date[],
+): Promise<Response> {
+  await page.goto("/queues");
+  await page.getByRole("combobox", { name: "Queue Brand Profile", exact: true }).click();
+  await page.getByRole("option", { name: profileName, exact: true }).click();
+  await page.getByRole("button", { name: "Create Queue", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Create Queue", exact: true });
+  await editor.getByLabel("Queue name", { exact: true }).fill(queueName);
+  await editor.getByRole("button", { name: /^Queue timezone:/ }).click();
+  const timezoneSearch = editor.getByRole("textbox", { name: "Search timezones…", exact: true });
+  // Choose a different zone first: selecting the UTC default proves no change.
+  await timezoneSearch.fill("reykjavik");
+  await page.getByRole("option", { name: "Atlantic/Reykjavik", exact: true }).click();
+  await expect(editor.getByRole("button", { name: /^Queue timezone:/ })).toHaveAttribute(
+    "aria-label",
+    "Queue timezone: Atlantic/Reykjavik",
+  );
+  await editor.getByRole("button", { name: /^Queue timezone:/ }).click();
+  await timezoneSearch.fill("utc");
+  await page.getByRole("option", { name: "UTC", exact: true }).click();
+  await expect(editor.getByRole("button", { name: /^Queue timezone:/ })).toHaveAttribute(
+    "aria-label",
+    "Queue timezone: UTC",
+  );
+  await expect(timezoneSearch).toBeHidden();
+  for (const [index, instant] of instants.entries()) {
+    if (index > 0) await editor.getByRole("button", { name: "Add slot", exact: true }).click();
+    await editor.getByRole("combobox", { name: `Weekday ${index + 1}`, exact: true }).click();
+    const day = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(
+      instant,
+    );
+    await page.getByRole("option", { name: day, exact: true }).click();
+    await editor.getByRole("button", { name: "Choose time", exact: true }).nth(index).click();
+    const timePicker = page.getByRole("dialog", { name: "Choose time", exact: true });
+    await timePicker.getByRole("combobox", { name: "Hour", exact: true }).click();
+    await page
+      .getByRole("option", { name: instant.toISOString().slice(11, 13), exact: true })
+      .click();
+    await timePicker.getByRole("combobox", { name: "Minute", exact: true }).click();
+    await page
+      .getByRole("option", { name: instant.toISOString().slice(14, 16), exact: true })
+      .click();
+    await timePicker.getByRole("button", { name: "Done", exact: true }).click();
+  }
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/queues") && response.request().method() === "POST",
+  );
+  await editor.getByRole("button", { name: "Save Queue", exact: true }).click();
+  const response = await submitted;
+  expect(response.status(), await response.text()).toBe(201);
+  await expect(editor).toBeHidden();
+  await expect(
+    page
+      .getByRole("region", { name: "Publishing Queues", exact: true })
+      .getByRole("button", { name: queueName, exact: true }),
+  ).toBeVisible();
+  return response;
 }

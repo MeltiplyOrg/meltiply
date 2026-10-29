@@ -1087,8 +1087,9 @@ export function usePlatformCapabilities(scope: SessionScope) {
 }
 
 /**
- * TanStack query hook for dynamic publishing requirements and TikTok privacy settings.
- * Cached with 60-second stale time.
+ * Dynamic creator requirements must refresh whenever the publishing surface
+ * mounts, including an immediate draft reopen. Unlike deployment capabilities,
+ * creator permissions are never treated as fresh across composition sessions.
  *
  * @param scope Session scope: `isSignedIn` gates execution, `workspaceId` selects the Workspace.
  * @param id Platform account ID.
@@ -1101,7 +1102,7 @@ export function usePlatformPublishingRequirements(scope: SessionScope, id: strin
     queryFn: ({ signal }) =>
       runApiQuery(scope, (api) => api.getPlatformPublishingRequirements(id), signal),
     enabled: scope.isSignedIn && id.length > 0 && enabled,
-    staleTime: 60 * 1_000,
+    staleTime: 0,
   });
 }
 

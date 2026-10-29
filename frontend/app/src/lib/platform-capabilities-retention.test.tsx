@@ -139,6 +139,32 @@ afterEach(() => {
 });
 
 describe("scoped Platform capabilities retention", () => {
+  it("refreshes creator identity when the publishing surface reopens immediately", async () => {
+    const client = createScopedClient();
+    const first = renderConsumer(client);
+    await waitFor(() =>
+      expect(screen.getByLabelText("requirements")).toHaveTextContent(
+        requirements.creator.display_name,
+      ),
+    );
+    first.unmount();
+    vi.mocked(getPlatformPublishingRequirements).mockReturnValue(
+      Effect.succeed({
+        ...requirements,
+        creator: {
+          ...requirements.creator,
+          display_name: "Creator after account settings changed",
+        },
+      }),
+    );
+    renderConsumer(client);
+    await waitFor(() =>
+      expect(screen.getByLabelText("requirements")).toHaveTextContent(
+        "Creator after account settings changed",
+      ),
+    );
+  });
+
   /**
    * Navigation remounts consumers but keeps the Workspace-scoped QueryClient.
    * Advancing past the 60-second general policy proves the capability read is

@@ -6,11 +6,26 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { writeCookieConsent } from "@meltiply/ui/cookie-consent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { Effect } from "effect";
+import {
+  ApiError,
+  getPlatformPublishingRequirements,
+  getPost,
+  updatePost,
+  schedulePost,
+} from "@/lib/api";
+import type * as ApiModule from "@/lib/api";
 
 import { AppAuthProvider, useMeltiplyAuth } from "@/components/auth/auth-provider";
 import { WorkspaceProvider } from "@/context/workspace.context";
 import { createAssetUpload, type AssetUploadTask } from "@/lib/upload";
-import type { Asset, BrandProfile, PlatformAccount, Post } from "@/types";
+import type {
+  Asset,
+  BrandProfile,
+  PlatformAccount,
+  Post,
+  TikTokPublishingRequirements,
+} from "@/types";
 
 import { Composer, type ComposerProps } from "./composer";
 import { authClient } from "@/lib/auth-client";
@@ -21,6 +36,17 @@ vi.mock("@/lib/upload", async (importActual) => {
   const actual = await importActual<object>();
   return { ...actual, createAssetUpload: vi.fn() };
 });
+
+// Creator information is a live public API read even when a draft is reopened.
+// Keep composer tests isolated at that HTTP boundary, not by making stale
+// permission data permanently fresh in the QueryClient.
+vi.mock("@/lib/api", async (original) => ({
+  ...(await original<typeof ApiModule>()),
+  getPlatformPublishingRequirements: vi.fn(),
+  getPost: vi.fn(),
+  updatePost: vi.fn(),
+  schedulePost: vi.fn(),
+}));
 
 /**
  * Task whose transfer never settles on its own: the suite can only observe
@@ -57,6 +83,7 @@ function composerTextarea() {
 function renderComposer(
   options: {
     initialPostId?: string;
+    initialDate?: ComposerProps["initialDate"];
     post?: Post;
     /** Connected accounts the workspace sees; the composer selects eligible ones. */
     accounts?: PlatformAccount[];
@@ -66,6 +93,8 @@ function renderComposer(
     brandProfiles?: BrandProfile[];
     /** Composer-initiated workspace navigation, e.g. Manage Queues. */
     onNavigate?: ComposerProps["onNavigate"];
+    /** Creator restrictions loaded for the TikTok destination, or unavailable. */
+    requirements?: TikTokPublishingRequirements | null;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -77,17 +106,33 @@ function renderComposer(
   queryClient.setQueryDefaults(queryKeys.platformCapabilities(), { staleTime: Infinity });
   queryClient.setQueryData(queryKeys.platforms(), options.accounts ?? []);
   queryClient.setQueryData(queryKeys.platformCapabilities(), options.capabilities ?? []);
+  vi.mocked(getPlatformPublishingRequirements).mockImplementation(() =>
+    options.requirements
+      ? Effect.succeed(options.requirements)
+      : Effect.fail(
+          new ApiError(new Response(null, { status: 503 }), {
+            error: { code: "provider_unavailable", message: "Creator information unavailable" },
+          }),
+        ),
+  );
   if (options.brandProfiles) {
     queryClient.setQueryDefaults(queryKeys.brandProfiles(), { staleTime: Infinity });
     queryClient.setQueryData(queryKeys.brandProfiles(), options.brandProfiles);
   }
-  if (options.post) queryClient.setQueryData(queryKeys.post(options.post.id), options.post);
+  if (options.post) {
+    queryClient.setQueryData(queryKeys.post(options.post.id), options.post);
+    vi.mocked(getPost).mockReturnValue(Effect.succeed(options.post));
+  }
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
         <AppAuthProvider>
           <WorkspaceProvider>
-            <Composer initialPostId={options.initialPostId} onNavigate={options.onNavigate} />
+            <Composer
+              initialPostId={options.initialPostId}
+              initialDate={options.initialDate}
+              onNavigate={options.onNavigate}
+            />
             <ProfileSwitchProbe profileId="profile-b" />
           </WorkspaceProvider>
         </AppAuthProvider>
@@ -102,6 +147,9 @@ beforeEach(() => {
     user: { email: "user@example.com", id: "user-1" },
   });
   vi.mocked(createAssetUpload).mockReset().mockImplementation(neverSettlingUploadTask);
+  vi.mocked(getPost).mockReset();
+  vi.mocked(updatePost).mockReset();
+  vi.mocked(schedulePost).mockReset();
 });
 
 afterEach(() => {
@@ -493,5 +541,240 @@ describe("Composer leave guard", () => {
 
     expect(onNavigate).toHaveBeenCalledWith("queues", undefined);
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("Composer schedule restoration", () => {
+  it("preserves stored local midnight when reopening a scheduled Post", async () => {
+    renderComposer({
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      post: {
+        ...hydratedPost,
+        distributions: [
+          {
+            id: "midnight-distribution",
+            brand_profile_id: hydratedPost.brand_profile_id,
+            org_id: hydratedPost.org_id,
+            post_id: hydratedPost.id,
+            platform_account_id: null,
+            platform: "threads",
+            status: "scheduled",
+            scheduled_at: new Date(2028, 1, 29, 0, 0).toISOString(),
+            published_at: null,
+            platform_post_id: null,
+            platform_url: null,
+            publication: null,
+            title_override: null,
+            description_override: null,
+            hashtags: [],
+            attempt_count: 0,
+            last_attempt_at: null,
+            next_attempt_at: null,
+            failure: null,
+            created_at: hydratedPost.created_at,
+            updated_at: hydratedPost.updated_at,
+          },
+        ],
+      },
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    expect(screen.getByRole("radio", { name: "Schedule" })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: /hour/i })).toHaveAttribute("aria-valuenow", "0");
+    expect(screen.getByRole("spinbutton", { name: /minute/i })).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
+  });
+
+  it("keeps the daytime suggestion for a new calendar-day composition", async () => {
+    renderComposer({
+      brandProfiles: composerProfiles,
+      initialDate: new Date(2028, 1, 29, 0, 0),
+    });
+    await waitFor(() => expect(composerTextarea()).toBeEnabled());
+    expect(screen.getByRole("radio", { name: "Schedule" })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: /hour/i })).toHaveAttribute(
+      "aria-valuenow",
+      "10",
+    );
+    expect(screen.getByRole("spinbutton", { name: /minute/i })).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
+  });
+});
+
+describe("Composer provider publication choices", () => {
+  it("keeps unanswered YouTube visibility out of saved drafts and blocks delivery", async () => {
+    const account = { ...instagramAccount, platform: "youtube" as const };
+    const post: Post = {
+      ...hydratedPost,
+      brand_profile_id: account.brand_profile_id,
+      targets: [
+        {
+          platform_account_id: account.id,
+          attachment_ids: null,
+          title_override: "Audience answered, visibility unanswered",
+          description_override: null,
+          hashtags: [],
+          provider_options: { youtube: { made_for_kids: false } },
+        },
+      ],
+    };
+    vi.mocked(updatePost).mockReturnValue(Effect.succeed(post));
+    renderComposer({
+      accounts: [account],
+      capabilities: [platformCapability("youtube", null)],
+      brandProfiles: composerProfiles,
+      initialPostId: post.id,
+      post,
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(post.default_text));
+    expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveTextContent(
+      "Choose visibility",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updatePost).toHaveBeenCalled());
+    expect(vi.mocked(updatePost).mock.lastCall?.[2].targets?.[0]?.provider_options).toEqual({
+      youtube: { made_for_kids: false },
+    });
+    fireEvent.click(screen.getByRole("radio", { name: "Now" }));
+    expect(screen.getByRole("button", { name: "Publish Now" })).toBeDisabled();
+  });
+
+  it("restores YouTube visibility and audience from the saved target", async () => {
+    const account = {
+      ...instagramAccount,
+      platform: "youtube" as const,
+      display_name: "Video destination",
+    };
+    renderComposer({
+      accounts: [account],
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      post: {
+        ...hydratedPost,
+        brand_profile_id: account.brand_profile_id,
+        targets: [
+          {
+            platform_account_id: account.id,
+            attachment_ids: null,
+            title_override: "A saved video",
+            description_override: null,
+            hashtags: [],
+            provider_options: { youtube: { made_for_kids: true, privacy_status: "unlisted" } },
+          },
+        ],
+      },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveTextContent("Unlisted"),
+    );
+    expect(screen.getByRole("combobox", { name: "Made for kids" })).toHaveTextContent("Yes");
+  });
+
+  it("requires TikTok interaction opt-in instead of granting it implicitly", async () => {
+    const account = {
+      ...instagramAccount,
+      platform: "tiktok" as const,
+      brand_profile_id: "profile-a",
+    };
+    renderComposer({
+      accounts: [account],
+      brandProfiles: composerProfiles,
+      requirements: {
+        platform: "tiktok",
+        creator: { display_name: "Creator", username: "creator", avatar_url: null },
+        comment_allowed: true,
+        duet_allowed: false,
+        stitch_allowed: true,
+        max_video_duration_sec: 60,
+        privacy_levels: ["SELF_ONLY"],
+      },
+    });
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Comments" })).not.toBeChecked());
+    expect(screen.getByRole("switch", { name: "Duet" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Duet" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Stitch" })).not.toBeChecked();
+  });
+
+  it("does not offer invented TikTok privacy choices when creator information is unavailable", async () => {
+    renderComposer({
+      accounts: [{ ...instagramAccount, platform: "tiktok", brand_profile_id: "profile-a" }],
+      brandProfiles: composerProfiles,
+    });
+    expect(await screen.findByRole("combobox", { name: "Privacy Level" })).toBeDisabled();
+  });
+
+  it("preserves restricted TikTok interactions in drafts but disables them for delivery", async () => {
+    const account = { ...instagramAccount, platform: "tiktok" as const };
+    const savedPost = { ...hydratedPost, brand_profile_id: account.brand_profile_id };
+    vi.mocked(updatePost).mockReturnValue(Effect.succeed(savedPost));
+    vi.mocked(schedulePost).mockReturnValue(Effect.succeed(savedPost));
+    renderComposer({
+      accounts: [account],
+      brandProfiles: composerProfiles,
+      initialPostId: hydratedPost.id,
+      requirements: {
+        platform: "tiktok",
+        creator: { display_name: "Creator", username: "creator", avatar_url: null },
+        comment_allowed: false,
+        duet_allowed: false,
+        stitch_allowed: false,
+        max_video_duration_sec: 60,
+        privacy_levels: ["SELF_ONLY"],
+      },
+      post: {
+        ...hydratedPost,
+        brand_profile_id: account.brand_profile_id,
+        targets: [
+          {
+            platform_account_id: account.id,
+            attachment_ids: null,
+            title_override: null,
+            description_override: null,
+            hashtags: [],
+            provider_options: {
+              tiktok: {
+                privacy_level: "SELF_ONLY",
+                allow_comment: true,
+                allow_duet: true,
+                allow_stitch: true,
+                brand_content: false,
+                brand_organic: false,
+                is_ai_generated: false,
+                music_usage_confirmed: true,
+              },
+            },
+          },
+        ],
+      },
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(hydratedPost.default_text));
+    for (const name of ["Comments", "Duet", "Stitch"]) {
+      expect(screen.getByRole("switch", { name })).not.toBeChecked();
+      expect(screen.getByRole("switch", { name })).toBeDisabled();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updatePost).toHaveBeenCalled());
+    expect(
+      vi.mocked(updatePost).mock.lastCall?.[2].targets?.[0]?.provider_options?.tiktok,
+    ).toMatchObject({
+      allow_comment: true,
+      allow_duet: true,
+      allow_stitch: true,
+    });
+    fireEvent.click(screen.getByRole("radio", { name: "Now" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Publish Now" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Publish Now" }));
+    await waitFor(() => expect(schedulePost).toHaveBeenCalled());
+    expect(
+      vi.mocked(schedulePost).mock.lastCall?.[2].targets?.[0]?.provider_options?.tiktok,
+    ).toMatchObject({
+      allow_comment: false,
+      allow_duet: false,
+      allow_stitch: false,
+    });
   });
 });

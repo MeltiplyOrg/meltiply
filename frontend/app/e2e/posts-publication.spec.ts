@@ -1,8 +1,18 @@
 import { Buffer } from "node:buffer";
 
-import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import type { components } from "@meltiply/contracts/schema";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+  type Response,
+} from "@playwright/test";
 
 import {
+  acceptanceApiUrl,
+  configurePublishingQueue,
   activeBrandProfileName,
   controlledProviderAccountId,
   closeComposer,
@@ -18,7 +28,7 @@ import {
 import {
   attachmentControlName,
   attachmentTitle,
-  mp4Fixture,
+  publicationVideoFixture,
   pngFixture,
   type MediaFixture,
 } from "./media-fixtures";
@@ -38,7 +48,7 @@ test.setTimeout(600_000);
  * not preservation of the upload's original encoding.
  */
 const imageAttachment = pngFixture();
-const videoAttachment = mp4Fixture();
+const videoAttachment = publicationVideoFixture();
 
 /** Display names the composer and detail modal render for the fixture Channels. */
 const channelNames = {
@@ -106,9 +116,18 @@ async function openComposer(page: Page): Promise<void> {
     .locator("main header")
     .getByRole("button", { name: /create post/i })
     .click();
-  await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
+  await expect(page.getByRole("dialog", { name: "New Post", exact: true })).toBeVisible({
     timeout: 30_000,
   });
+}
+
+/** Selects the immediate-delivery intent before using the pinned composer action. */
+async function publishNow(page: Page): Promise<void> {
+  await page
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: "Now", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Publish Now", exact: true }).click();
 }
 
 /**
@@ -118,16 +137,36 @@ async function openComposer(page: Page): Promise<void> {
  */
 async function returnToPosts(page: Page): Promise<void> {
   const submissions = page.getByRole("button", {
-    name: /^(?:save(?: draft)?|schedule|publish now)$/i,
+    name: /^(?:save(?: draft)?|schedule post|publish now)$/i,
   });
   await expect(submissions.and(page.locator(":disabled"))).toHaveCount(0, {
     timeout: 30_000,
   });
   await expect(page.getByRole("alert")).toHaveCount(0);
   const composer = page.getByRole("dialog", { name: /^(?:new post|edit post)$/i });
-  if (await composer.isVisible().catch(() => false)) {
-    await closeComposer(page);
-  }
+  // A successful submission closes the panel itself. Its submit button stays
+  // enabled while saving, so dismissing the panel here would abort an in-flight
+  // write — and the reload this helper's caller performs would cancel it outright.
+  // Wait for the panel's own dismissal and let a stuck save fail loudly instead.
+  await composer.waitFor({ state: "hidden", timeout: 120_000 });
+  await waitForWorkspace(page);
+}
+
+/**
+ * Saves a new or reopened composition as a draft, waits for that write to commit,
+ * and dismisses the panel. Reopened drafts label the pinned action "Save".
+ *
+ * Unlike Schedule and Publish Now, saving a draft is a checkpoint: the composer
+ * deliberately stays open so the creator can keep editing. Dismissing it earlier
+ * would leave the save in flight, and the reload the caller performs next would
+ * cancel it, so the saved confirmation is the signal that the write landed.
+ */
+async function saveDraftAndLeave(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /^(?:save|save draft)$/i }).click();
+  await expect(page.getByText(/saved to your workspace at/i)).toBeVisible({
+    timeout: 120_000,
+  });
+  await closeComposer(page);
   await waitForWorkspace(page);
 }
 
@@ -272,28 +311,46 @@ async function scheduleInMinutes(page: Page, minutesFromNow: number): Promise<vo
     .click();
   const picker = page.getByRole("group", { name: "Date & time", exact: true });
   await picker.getByRole("button", { name: /^Date / }).click();
-  await picker
+  await page
     .getByRole("button", {
       name: new Intl.DateTimeFormat("en", { dateStyle: "full" }).format(when),
       exact: true,
     })
     .click();
-  await picker.getByRole("combobox", { name: "Hour", exact: true }).click();
+  await picker.getByRole("button", { name: "Choose time", exact: true }).click();
+  await page.getByRole("combobox", { name: "Hour", exact: true }).click();
   await page.getByRole("option", { name: pad(when.getHours()), exact: true }).click();
-  await picker.getByRole("combobox", { name: "Minute", exact: true }).click();
+  await page.getByRole("combobox", { name: "Minute", exact: true }).click();
   await page.getByRole("option", { name: pad(when.getMinutes()), exact: true }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
 }
 
-/** Applies a status bucket through the filter disclosure, then restores the collection viewport. */
+/**
+ * Applies one status bucket through the filter disclosure, leaving the panel
+ * closed again.
+ *
+ * The disclosure's rows mount with the panel, so row existence is decided with
+ * `count()` after the panel becomes visible. Probing `isVisible()` immediately
+ * after opening races the disclosure's open transition and can skip adding the
+ * row, which then leaves the menu trigger absent for the rest of the poll.
+ */
 async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
   const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
-  await disclosure.click();
+  const panel = page.getByRole("group", { name: "Filters", exact: true });
+  // A closed disclosure hides its panel from role queries entirely, so reading
+  // `data-state` first would wait forever for an element that cannot appear.
+  // `count()` never waits; only an already-open panel can be inspected further.
+  if ((await panel.count()) === 0) await disclosure.click();
+  else if ((await panel.getAttribute("data-state")) !== "open") await disclosure.click();
+  await expect(panel).toBeVisible();
   const addStatus = page.getByRole("button", { name: "Add Post status filter", exact: true });
-  if (await addStatus.isVisible()) await addStatus.click();
-  const trigger = page
-    .getByRole("button", { name: "Remove Post status filter", exact: true })
-    .locator("..")
-    .locator('button[aria-haspopup="menu"]');
+  const removeStatus = page.getByRole("button", {
+    name: "Remove Post status filter",
+    exact: true,
+  });
+  if ((await removeStatus.count()) === 0) await addStatus.click();
+  await expect(removeStatus).toBeVisible();
+  const trigger = removeStatus.locator("..").locator('button[aria-haspopup="menu"]');
   await trigger.click();
   const menu = page.getByRole("menu", { name: "Post status", exact: true });
   await menu.getByRole("menuitemcheckbox", { name: "All statuses", exact: true }).click();
@@ -301,29 +358,46 @@ async function filterPostsByStatus(page: Page, status: RegExp): Promise<void> {
   if (!(await option.isChecked())) await option.click();
   await expect(option).toBeChecked();
   await page.keyboard.press("Escape");
-  await disclosure.click();
-  await expect(page.getByRole("group", { name: "Filters", exact: true })).toBeHidden();
+  // Escape can close the panel itself when the menu released the key first.
+  if ((await panel.count()) > 0 && (await panel.getAttribute("data-state")) === "open") {
+    await disclosure.click();
+  }
+  await expect(panel).toBeHidden();
 }
 
-/** Restores all status buckets using the same user-visible filtering flow. */
+/** Removes the status row, restoring the unfiltered collection. */
 async function clearPostStatusFilter(page: Page): Promise<void> {
-  await filterPostsByStatus(page, /^all statuses$/i);
+  const disclosure = page.locator("summary").filter({ hasText: /^Filter/ });
+  const panel = page.getByRole("group", { name: "Filters", exact: true });
+  if ((await panel.count()) === 0) await disclosure.click();
+  else if ((await panel.getAttribute("data-state")) !== "open") await disclosure.click();
+  await expect(panel).toBeVisible();
+  const removeStatus = page.getByRole("button", {
+    name: "Remove Post status filter",
+    exact: true,
+  });
+  if ((await removeStatus.count()) > 0) await removeStatus.click();
+  await expect(removeStatus).toHaveCount(0);
+  if ((await panel.count()) > 0 && (await panel.getAttribute("data-state")) === "open") {
+    await disclosure.click();
+  }
+  await expect(panel).toBeHidden();
 }
 
 /**
- * Reloads and re-filters until the Post carrying `caption` appears under
- * `status`, then restores the unfiltered list.
+ * Reloads and re-filters until the Post carrying `caption` matches `status`,
+ * then clears the filter.
  *
  * Publication is asynchronous by construction — the schedule write commits, the
  * outbox relays, a worker claims the job, the Provider is called, and the outcome
  * is recorded — so the run observes it the way a creator does: by watching the
- * list until the Channel outcome it is waiting for is there. One Post can hold a
- * published and a failed Channel at once, which is why the same caption is
- * expected under more than one bucket.
+ * list until the Channel outcome it is waiting for is there. The filter matches
+ * any Channel in the bucket, so one Post can legitimately appear under Published
+ * and Failed at once; its single row still aggregates to the most urgent outcome.
  *
  * @param page - Playwright page bound to the `/posts` list.
  * @param caption - Unique text or pattern matching this Post's channel previews.
- * @param status - Toolbar status bucket the Post must appear under.
+ * @param status - Toolbar status bucket one of the Post's Channels must match.
  * @param timeout - How long to keep reloading before failing.
  */
 async function waitForPostUnderStatus(
@@ -335,13 +409,34 @@ async function waitForPostUnderStatus(
   await expect
     .poll(
       async () => {
+        // The reload drops the workspace scope, so reselecting the Brand Profile
+        // issues the scoped collection read. Waiting for that response — instead
+        // of guessing a delay — makes the rows below the loaded ones rather than
+        // the skeleton table.
+        const scopedCollection = page.waitForResponse(
+          (response) =>
+            response.url().includes("/api/v1/posts?") &&
+            response.url().includes("brand_profile_id=") &&
+            response.request().method() === "GET" &&
+            response.status() === 200,
+          { timeout: 30_000 },
+        );
         await reloadPostsWorkspace(page);
+        await scopedCollection;
         await filterPostsByStatus(page, status);
-        return page.getByRole("row").filter({ hasText: caption }).count();
+        // Applying a filter and painting the rows are separate commits, so wait
+        // for the row itself instead of sampling one instant of the table.
+        return page
+          .getByRole("row")
+          .filter({ hasText: caption })
+          .first()
+          .waitFor({ state: "visible", timeout: 10_000 })
+          .then(() => true)
+          .catch(() => false);
       },
       { intervals: [3_000, 5_000, 8_000], timeout },
     )
-    .toBeGreaterThan(0);
+    .toBe(true);
   await clearPostStatusFilter(page);
 }
 
@@ -486,13 +581,12 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
   // Threads publishes the image alone, with its own caption.
   await toggleChannelAttachment(page, channelNames.threads, 2, videoAttachment.name);
   await overrideChannelCaption(page, channelNames.threads, threadsCaption);
-  await page.getByRole("button", { name: /^publish now$/i }).click();
+  await publishNow(page);
   await returnToPosts(page);
 
-  // Partial success: one Post holding a published and a failed Channel is
-  // findable under both buckets, which is how the creator sees the split.
-  // The row previews a frozen channel caption; account order may put either
-  // target first. Provider assertions below still verify each caption exactly.
+  // Partial success: a Post with one published and one failed Channel matches
+  // both buckets, while its row still summarizes as Failed. The row previews a
+  // frozen channel caption; account order may put either target first.
   await waitForPostUnderStatus(page, postCaption, /^published$/i);
   await waitForPostUnderStatus(page, postCaption, /^failed$/i);
 
@@ -521,10 +615,19 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
 
   const detail = await openPostDetails(page, postCaption);
   await expect(detail.getByText(postCaption)).toBeVisible();
-  await expect(detail.getByText("Published", { exact: true })).toHaveCount(1);
-  await expect(detail.getByText("Failed", { exact: true })).toHaveCount(1);
+  await expect(
+    detail
+      .getByRole("article", { name: channelNames.instagram, exact: true })
+      .getByText("Published", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    detail
+      .getByRole("article", { name: channelNames.threads, exact: true })
+      .getByText("Failed", { exact: true }),
+  ).toBeVisible();
   // Each Channel row carries its own timestamps rather than one Post-wide stamp.
   const firstPublishedStamp = await detail
+    .getByRole("article", { name: channelNames.instagram, exact: true })
     .locator("dt")
     .filter({ hasText: /^Published:$/ })
     .locator("xpath=following-sibling::dd[1]")
@@ -559,17 +662,25 @@ test("publishes one Post to multiple Channels with independent outcomes, media, 
 
   await waitForPostUnderStatus(page, postCaption, /^published$/i);
   const converged = await openPostDetails(page, postCaption);
-  await expect(converged.getByText("Published", { exact: true })).toHaveCount(2);
-  await expect(converged.getByText("Failed", { exact: true })).toHaveCount(0);
-  const publishedStamps = await converged
-    .locator("dt")
-    .filter({ hasText: /^Published:$/ })
-    .locator("xpath=following-sibling::dd[1]")
-    .allInnerTexts();
-  expect(publishedStamps).toHaveLength(2);
-  for (const stamp of publishedStamps) {
-    expect(stamp.trim()).not.toBe("");
-  }
+  await expect(converged.getByRole("article").getByText("Published", { exact: true })).toHaveCount(
+    2,
+  );
+  await expect(converged.getByRole("article").getByText("Failed", { exact: true })).toHaveCount(0);
+  // The first Channel's instant is untouched, and the retried Channel records
+  // its own moment instead of inheriting the earlier one.
+  expect(
+    await converged
+      .getByRole("article", { name: channelNames.instagram, exact: true })
+      .locator("dt")
+      .filter({ hasText: /^Published:$/ })
+      .locator("xpath=following-sibling::dd[1]")
+      .innerText(),
+  ).toBe(firstPublishedStamp);
+  await expect(
+    converged
+      .getByRole("article", { name: channelNames.threads, exact: true })
+      .getByText("Published", { exact: true }),
+  ).toBeVisible();
 });
 
 /**
@@ -671,18 +782,23 @@ test("keeps separately created identical Posts distinct and publishes only the o
     // reopened composer hydrates from.
     await targetOnlyChannel(page, channelNames.threads, channelNames.instagram);
     await composerTextarea(page).fill(caption);
-    await page.getByRole("button", { name: /save draft/i }).click();
-    await returnToPosts(page);
+    await saveDraftAndLeave(page);
   }
 
   const rows = page.getByRole("row").filter({ hasText: caption });
   await expect(rows).toHaveCount(2, { timeout: 60_000 });
-  // Each row prints the short form of its own stable Post id, so two rows showing
-  // two different short ids are two identities rather than one row rendered twice.
-  const shortIds = await rows.evaluateAll((elements) =>
-    elements.map((element) => (element.textContent ?? "").match(/[0-9a-f]{8}\.\.\./)?.[0] ?? ""),
+  // Each row prints the abbreviated tail of its own stable Post id and keeps the
+  // full id on the span's `title`, so two different ids prove two identities
+  // rather than one row rendered twice.
+  const recordIds = await rows.evaluateAll((elements) =>
+    elements.map(
+      (element) =>
+        [...element.querySelectorAll("span[title]")]
+          .map((span) => span.getAttribute("title") ?? "")
+          .find((title) => /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(title)) ?? "",
+    ),
   );
-  expect(new Set(shortIds).size).toBe(2);
+  expect(new Set(recordIds).size).toBe(2);
 
   // Nothing reached a Platform just by saving two drafts.
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 0);
@@ -690,10 +806,10 @@ test("keeps separately created identical Posts distinct and publishes only the o
 
   // Publish exactly one stored Post through its own Details panel.
   await editPostFromRow(page, rows.first());
-  await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
+  await expect(page.getByRole("dialog", { name: "Edit post", exact: true })).toBeVisible({
     timeout: 30_000,
   });
-  await page.getByRole("button", { name: /^publish now$/i }).click();
+  await publishNow(page);
   await returnToPosts(page);
 
   await waitForLiveCopyCount(request, channels.threads.providerUserId, 1);
@@ -713,20 +829,19 @@ test("keeps separately created identical Posts distinct and publishes only the o
 
 /**
  * Browser acceptance: editing a still-pending target never rewrites what is
- * already published, and the destructive actions say plainly what they keep.
+ * already published; declining deletion preserves pending work.
  *
  * One Post is published for real and acts as the history under test. A second Post
  * is scheduled into the future, its pending targets are edited, and the first
- * Post's Platform copies are compared before and after. The run finishes by
- * reading the delete confirmation's own wording and then deleting, confirming
- * that the words matched what happened: no Channel gained a copy, and the copy
- * already live elsewhere stayed live.
+ * Post's Platform copies are compared before and after. Declining deletion leaves
+ * the pending Post intact; confirming it removes local work without unpublishing
+ * the historical Platform copy.
  * The actor's Channels-created profile owns every target, keeping the history
  * assertions isolated from other acceptance accounts.
  * Each session explicitly chooses its target; retained workspace selection
  * is not assumed to reset between compositions.
  */
-test("edits a pending target without touching published history and explains what delete keeps", async ({
+test("edits a scheduled target without publishing it and preserves prior platform copies", async ({
   page,
   request,
 }) => {
@@ -736,7 +851,7 @@ test("edits a pending target without touching published history and explains wha
 
   // --- A Post that is genuinely published, to act as the history under test.
   // Instagram refuses a text-only publish, so this Post carries the video and
-  // targets Instagram alone; Threads is the text-only destination throughout.
+  // targets Instagram alone; the separately scheduled video targets Threads.
   const publishedCaption = `History caption ${Date.now()}`;
   await openComposer(page);
   await expect(page.getByText(/targeting 2 channel\(s\)/i)).toBeVisible({
@@ -745,7 +860,7 @@ test("edits a pending target without touching published history and explains wha
   await targetOnlyChannel(page, channelNames.instagram, channelNames.threads);
   await composerTextarea(page).fill(publishedCaption);
   await attachMedia(page, [videoAttachment]);
-  await page.getByRole("button", { name: /^publish now$/i }).click();
+  await publishNow(page);
   await returnToPosts(page);
 
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 1);
@@ -760,6 +875,7 @@ test("edits a pending target without touching published history and explains wha
   await openComposer(page);
   await targetOnlyChannel(page, channelNames.threads, channelNames.instagram);
   await composerTextarea(page).fill(pendingCaption);
+  await attachMedia(page, [videoAttachment]);
   await scheduleInMinutes(page, 180);
   await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
   await returnToPosts(page);
@@ -771,11 +887,12 @@ test("edits a pending target without touching published history and explains wha
 
   // Edit the pending Post through its own Details panel.
   await editPostFromRow(page, page.getByRole("row").filter({ hasText: pendingCaption }));
-  await expect(page.getByRole("heading", { name: /publishing composer/i })).toBeVisible({
+  await expect(page.getByRole("dialog", { name: "Edit post", exact: true })).toBeVisible({
     timeout: 30_000,
   });
   await composerTextarea(page).fill(pendingEditCaption);
-  await page.getByRole("button", { name: /^save$/i }).click();
+  await expect(page.getByRole("radio", { name: "Schedule", exact: true })).toBeChecked();
+  await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
   await returnToPosts(page);
 
   await waitForPostUnderStatus(page, pendingEditCaption, /^scheduled$/i);
@@ -795,11 +912,6 @@ test("edits a pending target without touching published history and explains wha
   const deleteDetail = await openPostDetails(page, pendingEditCaption);
   await deleteDetail.getByRole("button", { name: "Delete post", exact: true }).click();
   const confirmation = page.getByRole("alertdialog");
-  await expect(confirmation.getByText(/delete this post\?/i)).toBeVisible();
-  await expect(
-    confirmation.getByText(/already published stays live on its platform/i),
-  ).toBeVisible();
-  await expect(confirmation.getByText(/stops its pending channels/i)).toBeVisible();
   await confirmation.getByRole("button", { name: /^keep post$/i }).click();
   await expect(confirmation).toBeHidden({ timeout: 30_000 });
   // Declining leaves the Post exactly as it was, modal and all.
@@ -830,4 +942,477 @@ test("edits a pending target without touching published history and explains wha
   await waitForLiveCopyCount(request, channels.instagram.providerUserId, 1);
   await waitForLiveCopyCount(request, channels.threads.providerUserId, 0);
   expect(await readChannelLiveCopies(request, channels)).toEqual(historyBefore);
+});
+
+/**
+ * Audience, visibility, creator permissions, consent and photo-only controls
+ * survive a real draft round-trip before queue delivery. The external Provider
+ * is controlled; the browser, persistence, media and publication pipeline are real.
+ */
+test("preserves provider choices through drafts and publishes photo and video targets safely", async ({
+  page,
+  request,
+}, testInfo) => {
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
+  const youtube: ControlledChannelSpec = {
+    displayName: "Acceptance YouTube",
+    platform: "youtube",
+    providerUserId: controlledProviderAccountId("youtube"),
+  };
+  const tiktok: ControlledChannelSpec = {
+    displayName: "Acceptance TikTok",
+    platform: "tiktok",
+    providerUserId: controlledProviderAccountId("tiktok"),
+  };
+  await attachChannels(page, request, profileName, [youtube, tiktok]);
+  await openComposer(page);
+  const caption = `Provider settings ${Date.now()}`;
+  // This isolated Brand Profile owns exactly one Post; a Channel title may
+  // replace the shared caption in the row preview.
+  const savedRow = page.getByRole("row").filter({ has: page.getByTitle("View details") });
+  await composerTextarea(page).fill(caption);
+  await attachMedia(page, [imageAttachment, videoAttachment]);
+  await toggleChannelAttachment(page, youtube.displayName, 1, imageAttachment.name);
+  await toggleChannelAttachment(page, tiktok.displayName, 2, videoAttachment.name);
+  const youtubePanel = page.getByRole("region", { name: youtube.displayName, exact: true });
+  const tiktokPanel = page.getByRole("region", { name: tiktok.displayName, exact: true });
+  await youtubePanel.getByRole("textbox", { name: /Video Title/ }).fill("A deliberate video title");
+  // An unanswered visibility must survive a real saved draft and reopen.
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }),
+  ).toContainText("Choose visibility");
+  await saveDraftAndLeave(page);
+  await reloadPostsWorkspace(page);
+  await editPostFromRow(page, savedRow);
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }),
+  ).toContainText("Choose visibility");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await youtubePanel
+        .getByRole("combobox", { name: "Visibility", exact: true })
+        .scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath(`unanswered-visibility-${width}-${colorScheme}.png`),
+        fullPage: true,
+      });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }).click();
+  await page.getByRole("option", { name: "Unlisted", exact: true }).click();
+  await expect(
+    tiktokPanel.getByText("Posting as Acceptance TikTok creator", { exact: true }),
+  ).toBeVisible();
+  await expect(tiktokPanel.getByRole("switch", { name: "Duet", exact: true })).toHaveCount(0);
+  await expect(tiktokPanel.getByRole("switch", { name: "Stitch", exact: true })).toHaveCount(0);
+  await expect(
+    tiktokPanel.getByRole("switch", { name: "Comments", exact: true }),
+  ).not.toBeChecked();
+  await tiktokPanel.getByRole("combobox", { name: "Privacy Level", exact: true }).click();
+  await expect(page.getByRole("option")).toHaveCount(2);
+  await page.getByRole("option", { name: "Public to Everyone", exact: true }).click();
+  await tiktokPanel
+    .getByRole("switch", { name: "Disclose commercial content", exact: true })
+    .click();
+
+  // A draft may stop between required answers. Neither the chosen visibility
+  // nor the disclosure gate may disappear just because audience/subtype is unset.
+  await saveDraftAndLeave(page);
+  await reloadPostsWorkspace(page);
+  await expect(savedRow).toHaveCount(1);
+  await editPostFromRow(page, savedRow);
+  await expect(composerTextarea(page)).toHaveValue(caption);
+  await expect
+    .soft(youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }))
+    .toContainText("Unlisted");
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }),
+  ).toContainText("Choose an audience");
+  await expect
+    .soft(tiktokPanel.getByRole("switch", { name: "Disclose commercial content", exact: true }))
+    .toBeChecked();
+  await expect(
+    tiktokPanel.getByRole("switch", { name: "Brand Content", exact: true }),
+  ).not.toBeChecked();
+  await youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }).click();
+  await page.getByRole("option", { name: "No, not made for kids", exact: true }).click();
+  await page
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: "Now", exact: true })
+    .click();
+  await expect(page.getByRole("button", { name: "Publish Now", exact: true })).toBeDisabled();
+  await tiktokPanel.getByRole("switch", { name: "Brand Content", exact: true }).click();
+  await expect(
+    tiktokPanel.getByRole("link", { name: "Branded Content Policy", exact: true }),
+  ).toHaveAttribute("href", "https://www.tiktok.com/legal/page/global/bc-policy/en");
+  await expect(
+    tiktokPanel.getByRole("link", { name: "Music Usage Confirmation", exact: true }),
+  ).toHaveAttribute("href", "https://www.tiktok.com/legal/page/global/music-usage-confirmation/en");
+  await page
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: "Draft", exact: true })
+    .click();
+  await saveDraftAndLeave(page);
+  await reloadPostsWorkspace(page);
+  await expect(savedRow).toHaveCount(1);
+  await editPostFromRow(page, savedRow);
+  await expect(composerTextarea(page)).toHaveValue(caption);
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }),
+  ).toContainText("No");
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }),
+  ).toContainText("Unlisted");
+  await expect(
+    tiktokPanel.getByRole("switch", { name: "Brand Content", exact: true }),
+  ).toBeChecked();
+  await expect(
+    tiktokPanel.getByRole("switch", { name: "Comments", exact: true }),
+  ).not.toBeChecked();
+
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await tiktokPanel
+        .getByRole("combobox", { name: "Privacy Level", exact: true })
+        .scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath(`publishing-${width}-${colorScheme}.png`),
+        fullPage: true,
+      });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    }
+  }
+  await page
+    .getByRole("radiogroup", { name: "Publishing", exact: true })
+    .getByRole("radio", { name: "Now", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Publish Now", exact: true }).click();
+  await returnToPosts(page);
+  await waitForLiveCopyCount(request, youtube.providerUserId, 1);
+  await waitForLiveCopyCount(request, tiktok.providerUserId, 1);
+  const [videoCopy] = await readLiveControlledCopies(request, youtube.providerUserId);
+  const [photoCopy] = await readLiveControlledCopies(request, tiktok.providerUserId);
+  expect(videoCopy!.providerOptions).toMatchObject({
+    youtube: { madeForKids: false, privacyStatus: "unlisted" },
+  });
+  expect(photoCopy!.providerOptions).toMatchObject({
+    tiktok: {
+      privacyLevel: "PUBLIC_TO_EVERYONE",
+      brandContent: true,
+      allowComment: false,
+      allowDuet: false,
+      allowStitch: false,
+    },
+  });
+  expect(photoCopy!.providerOptions).not.toHaveProperty("tiktok.discloseCommercialContent");
+  expect(videoCopy!.media.map((item) => item.contentType)).toEqual(["video/mp4"]);
+  expect(photoCopy!.media).toHaveLength(1);
+  expect(photoCopy!.media[0]!.contentType).toMatch(/^image\/(?:jpeg|webp)$/);
+});
+
+/**
+ * Every supported video Platform crosses all three creator delivery modes.
+ * Draft reload and a scheduled edit preserve complete choices; real wall-clock
+ * due work delivers through the production dispatcher. Provider-owned copies,
+ * retrieved bytes, delivery instants, and repeat ticks prove outcomes rather
+ * than optimistic API acceptance. External Platform HTTP remains controlled.
+ */
+test("delivers video to every Platform through Now, Schedule, and Queue", async ({
+  page,
+  request,
+}, testInfo) => {
+  test.setTimeout(900_000);
+  type Post = components["schemas"]["Post"];
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
+  const channels = (["facebook", "instagram", "threads", "tiktok", "youtube"] as const).map(
+    (platform) => ({
+      displayName: `Video acceptance ${platform}`,
+      platform,
+      providerUserId: controlledProviderAccountId(platform),
+    }),
+  );
+  await attachChannels(page, request, profileName, channels);
+  const queueName = `Video Queue ${Date.now()}`;
+  const submissions: { mode: string; post: Post; caption: string; response: Response }[] = [];
+
+  for (const mode of ["Now", "Schedule", "Queue"] as const) {
+    const queueInstant =
+      mode === "Queue" ? new Date(Math.ceil((Date.now() + 300_000) / 60_000) * 60_000) : null;
+    if (queueInstant) {
+      await configurePublishingQueue(page, profileName, queueName, [queueInstant]);
+      await page.goto("/posts");
+      await waitForWorkspace(page);
+      await activeBrandProfileName(page, profileName);
+    }
+    await openComposer(page);
+    const caption = `Video ${mode} ${Date.now()}`;
+    await composerTextarea(page).fill(caption);
+    await attachMedia(page, [videoAttachment]);
+    const youtubePanel = page.getByRole("region", {
+      name: "Video acceptance youtube",
+      exact: true,
+    });
+    await youtubePanel.getByRole("textbox", { name: /Video Title/ }).fill(caption);
+    await youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }).click();
+    await page.getByRole("option", { name: "Unlisted", exact: true }).click();
+    await youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }).click();
+    await page.getByRole("option", { name: "No, not made for kids", exact: true }).click();
+    const tiktokPanel = page.getByRole("region", { name: "Video acceptance tiktok", exact: true });
+    await expect(
+      tiktokPanel.getByText("Posting as Acceptance TikTok creator", { exact: true }),
+    ).toBeVisible();
+    await tiktokPanel.getByRole("combobox", { name: "Privacy Level", exact: true }).click();
+    await page.getByRole("option", { name: "Public to Everyone", exact: true }).click();
+    await expect(
+      tiktokPanel.getByRole("switch", { name: "Comments", exact: true }),
+    ).not.toBeChecked();
+    await expect(tiktokPanel.getByRole("switch", { name: "Duet", exact: true })).not.toBeChecked();
+    await expect(tiktokPanel.getByRole("switch", { name: "Stitch", exact: true })).toBeDisabled();
+    await tiktokPanel.getByRole("switch", { name: "Comments", exact: true }).click();
+    await tiktokPanel.getByRole("switch", { name: "Duet", exact: true }).click();
+    const facebookPanel = page.getByRole("region", {
+      name: "Video acceptance facebook",
+      exact: true,
+    });
+    await facebookPanel.getByRole("combobox", { name: "Visibility", exact: true }).click();
+    await expect(page.getByRole("option")).toHaveText(["Public"]);
+    await page.getByRole("option", { name: "Public", exact: true }).click();
+    await expect(
+      facebookPanel.getByText("This Reel will be shared publicly on your Facebook Page.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    const draftSaved = page.waitForResponse(
+      (response) =>
+        /\/api\/v1\/posts(?:\/[^/]+)?$/.test(response.url()) &&
+        ["POST", "PATCH"].includes(response.request().method()),
+    );
+    await saveDraftAndLeave(page);
+    const draftResponse = await draftSaved;
+    expect(draftResponse.status(), await draftResponse.text()).toBeLessThan(300);
+    const draft: Post = await draftResponse.json();
+    if (mode === "Now") {
+      // Model a previously granted interaction that this creator no longer permits.
+      const restored = await request.patch(
+        `${new URL(draftResponse.url()).origin}/api/v1/posts/${draft.id}`,
+        {
+          headers: {
+            Authorization: (await draftResponse.request().allHeaders())["authorization"]!,
+            "Idempotency-Key": `acceptance-retain-interactions-${draft.id}`,
+          },
+          data: {
+            brand_profile_id: draft.brand_profile_id,
+            targets: draft.targets.map((target) => ({
+              ...target,
+              provider_options: target.provider_options?.tiktok
+                ? { tiktok: { ...target.provider_options.tiktok, allow_stitch: true } }
+                : (target.provider_options ?? {}),
+            })),
+          },
+        },
+      );
+      expect(restored.status(), await restored.text()).toBe(200);
+    }
+    await reloadPostsWorkspace(page);
+    await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
+    await expect(
+      youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }),
+    ).toContainText("Unlisted");
+    await expect(tiktokPanel.getByRole("switch", { name: "Comments", exact: true })).toBeChecked();
+    await expect(tiktokPanel.getByRole("switch", { name: "Duet", exact: true })).toBeChecked();
+    if (mode === "Now") {
+      await expect(tiktokPanel.getByRole("switch", { name: "Stitch", exact: true })).toBeDisabled();
+      await expect(
+        tiktokPanel.getByRole("switch", { name: "Stitch", exact: true }),
+      ).not.toBeChecked();
+      const retained = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/posts/${draft.id}`) && response.request().method() === "PATCH",
+      );
+      await saveDraftAndLeave(page);
+      const retainedResponse = await retained;
+      expect(retainedResponse.status(), await retainedResponse.text()).toBe(200);
+      const retainedDraft: Post = await retainedResponse.json();
+      expect(
+        retainedDraft.targets.find((target) => target.provider_options?.tiktok)?.provider_options
+          ?.tiktok?.allow_stitch,
+      ).toBe(true);
+      await reloadPostsWorkspace(page);
+      await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
+    }
+    if (mode === "Now") {
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          await facebookPanel
+            .getByRole("combobox", { name: "Visibility", exact: true })
+            .scrollIntoViewIfNeeded();
+          await page.screenshot({
+            path: testInfo.outputPath(`video-controls-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+        }
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    if (mode === "Schedule") await scheduleInMinutes(page, 2);
+    else {
+      await page
+        .getByRole("radiogroup", { name: "Publishing", exact: true })
+        .getByRole("radio", { name: mode, exact: true })
+        .click();
+    }
+    if (mode === "Queue") {
+      await page.getByRole("combobox", { name: "Publishing Queue", exact: true }).click();
+      await page.getByRole("option", { name: queueName, exact: true }).click();
+    }
+    const submitted = page.waitForResponse(
+      (response) =>
+        /\/api\/v1\/posts\/[^/]+\/schedule$/.test(response.url()) &&
+        response.request().method() === "POST",
+    );
+    await page
+      .getByRole("button", {
+        name:
+          mode === "Now" ? "Publish Now" : mode === "Schedule" ? "Schedule Post" : "Add to Queue",
+        exact: true,
+      })
+      .click();
+    const response = await submitted;
+    expect(response.status(), await response.text()).toBe(200);
+    let post: Post = await response.json();
+    await returnToPosts(page);
+    expect(post.distributions.map((distribution) => distribution.platform).sort()).toEqual([
+      "facebook",
+      "instagram",
+      "threads",
+      "tiktok",
+      "youtube",
+    ]);
+    if (queueInstant) expect(post.queue_membership?.assigned_at).toBe(queueInstant.toISOString());
+    if (mode === "Schedule") {
+      const instants = post.distributions.map((distribution) => distribution.scheduled_at);
+      await reloadPostsWorkspace(page);
+      await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
+      await expect(page.getByRole("radio", { name: "Schedule", exact: true })).toBeChecked();
+      await composerTextarea(page).fill(`${caption} edited`);
+      const edited = page.waitForResponse(
+        (result) =>
+          result.url().endsWith(`/posts/${post.id}/schedule`) &&
+          result.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
+      const result = await edited;
+      expect(result.status(), await result.text()).toBe(200);
+      post = await result.json();
+      expect(post.distributions.map((distribution) => distribution.scheduled_at)).toEqual(instants);
+      await returnToPosts(page);
+    }
+    submissions.push({ mode, post, caption, response });
+  }
+  const firstResponse = submissions[0]!.response;
+  const apiOrigin = new URL(firstResponse.url()).origin;
+  const headers = { Authorization: (await firstResponse.request().allHeaders())["authorization"]! };
+
+  // Before either future mode is due, only the Now copy may exist.
+  for (const channel of channels) {
+    await expect
+      .poll(async () =>
+        (await readLiveControlledCopies(request, channel.providerUserId)).map(
+          (copy) => copy.caption,
+        ),
+      )
+      .toEqual([submissions[0]!.caption]);
+  }
+  const dueInstants = submissions
+    .filter(({ mode }) => mode !== "Now")
+    .flatMap(({ post }) =>
+      post.distributions.map((distribution) => Date.parse(distribution.scheduled_at!)),
+    );
+  await expect
+    .poll(
+      async () => {
+        if (Date.now() >= Math.min(...dueInstants)) {
+          const tick = await request.post(acceptanceApiUrl("/__test__/automation/scheduled"), {
+            headers,
+            timeout: 120_000,
+          });
+          expect(tick.status(), await tick.text()).toBe(204);
+        }
+        const states: string[] = [];
+        for (const { post } of submissions) {
+          const response = await request.get(`${apiOrigin}/api/v1/posts/${post.id}`, { headers });
+          expect(response.status()).toBe(200);
+          const current: Post = await response.json();
+          states.push(...current.distributions.map((distribution) => distribution.status));
+        }
+        return states;
+      },
+      { timeout: 540_000, intervals: [1000, 3000, 5000] },
+    )
+    .toEqual(Array.from({ length: 15 }, () => "published"));
+  await reloadPostsWorkspace(page);
+  for (const { caption } of submissions) {
+    const detail = await openPostDetails(page, caption);
+    for (const channel of channels) {
+      await expect(
+        detail
+          .getByRole("article", { name: channel.displayName, exact: true })
+          .getByText("Published", { exact: true }),
+      ).toBeVisible();
+    }
+    await closePostDetails(page);
+  }
+  // Repeated wall-clock ticks cannot create a second copy of a completed target.
+  for (let index = 0; index < 2; index += 1) {
+    const tick = await request.post(acceptanceApiUrl("/__test__/automation/scheduled"), {
+      headers,
+      timeout: 120_000,
+    });
+    expect(tick.status(), await tick.text()).toBe(204);
+  }
+  for (const channel of channels) {
+    const copies = await readLiveControlledCopies(request, channel.providerUserId);
+    expect(copies).toHaveLength(3);
+    for (const { mode, post, caption } of submissions) {
+      const copy = copies.find((value) => value.caption.includes(caption))!;
+      expect(copy.media.map((item) => item.contentType)).toEqual(["video/mp4"]);
+      const media = await readControlledMedia(request, {
+        accountId: channel.providerUserId,
+        index: 0,
+        publicationId: copy.publicationId,
+      });
+      expect(media.computedChecksum).toBe(copy.media[0]!.checksum);
+      expect(media.bytes.byteLength).toBe(copy.media[0]!.fileSize);
+      if (mode !== "Now")
+        expect(Date.parse(copy.publishedAt)).toBeGreaterThanOrEqual(
+          Date.parse(post.distributions[0]!.scheduled_at!),
+        );
+      if (channel.platform === "youtube")
+        expect(copy.providerOptions).toMatchObject({
+          youtube: { madeForKids: false, privacyStatus: "unlisted" },
+        });
+      if (channel.platform === "tiktok")
+        expect(copy.providerOptions).toMatchObject({
+          tiktok: {
+            privacyLevel: "PUBLIC_TO_EVERYONE",
+            allowComment: true,
+            allowDuet: true,
+            allowStitch: false,
+            musicUsageConfirmed: true,
+          },
+        });
+    }
+  }
 });

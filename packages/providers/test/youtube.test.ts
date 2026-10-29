@@ -680,7 +680,7 @@ describe("createYouTubeAdapter", () => {
               tags: ["launch"],
               title: "A square Short",
             },
-            status: { madeForKids: true, privacyStatus },
+            status: { selfDeclaredMadeForKids: true, privacyStatus },
           });
           return new Response(null, {
             headers: {

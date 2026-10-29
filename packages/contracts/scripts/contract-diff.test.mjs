@@ -33,12 +33,30 @@ const operation = {
 
 /** Writes a standalone OpenAPI fixture for observable CLI compatibility outcomes. */
 function document(paths) {
-  return JSON.stringify({ info: { title: "Compatibility probe", version: "1.0.0" }, openapi: "3.1.0", paths });
+  return JSON.stringify({
+    info: { title: "Compatibility probe", version: "1.0.0" },
+    openapi: "3.1.0",
+    paths,
+  });
 }
 
 /** Executes the real compatibility CLI and comparator, including its policy input files. */
 function run() {
-  return spawnSync(process.execPath, [script, "--base", base, "--current", current, "--changelog", changelog, "--base-changelog", baseChangelog], { encoding: "utf8" });
+  return spawnSync(
+    process.execPath,
+    [
+      script,
+      "--base",
+      base,
+      "--current",
+      current,
+      "--changelog",
+      changelog,
+      "--base-changelog",
+      baseChangelog,
+    ],
+    { encoding: "utf8" },
+  );
 }
 
 try {
@@ -63,11 +81,17 @@ try {
   const token = diagnostic.match(/contract-change:[a-f0-9]{64}/)?.[0];
   assert.ok(token, diagnostic);
 
-  writeFileSync(changelog, `## Unreleased\n\n- **Breaking:** [${token}] GET /probe (getProbe) removes response status; regenerate clients.\n`);
+  writeFileSync(
+    changelog,
+    `## Unreleased\n\n- **Breaking:** [${token}] GET /probe (getProbe) removes response status; regenerate clients.\n`,
+  );
   const reviewed = run();
   assert.equal(reviewed.status, 0, `${reviewed.stdout}${reviewed.stderr}`);
 
-  writeFileSync(baseChangelog, `## Unreleased\n\n- **Breaking:** [${token}] Previously reviewed change.\n`);
+  writeFileSync(
+    baseChangelog,
+    `## Unreleased\n\n- **Breaking:** [${token}] Previously reviewed change.\n`,
+  );
   assert.equal(run().status, 1, "pre-existing review must not authorize this change");
   writeFileSync(baseChangelog, "## Unreleased\n");
   writeFileSync(current, document({}));
@@ -77,7 +101,9 @@ try {
 
   writeFileSync(current, "invalid: [");
   assert.notEqual(run().status, 0, "invalid contracts must fail closed");
-  console.log("Compatibility CLI: additive pass; named field/operation removal rejected; exact fresh review passes; stale/mismatched review and malformed contract rejected.");
+  console.log(
+    "Compatibility CLI: additive pass; named field/operation removal rejected; exact fresh review passes; stale/mismatched review and malformed contract rejected.",
+  );
 } finally {
   rmSync(directory, { force: true, recursive: true });
 }

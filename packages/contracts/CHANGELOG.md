@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0 - 2026-10-29
+
 - Add required `Health.contract_version` to unauthenticated `GET /health`, distinct
   from the application `version`. Clients compare this machine-readable contract
   version before login or mutation; the server does not reject older clients.

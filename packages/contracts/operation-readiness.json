@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "1.0.0-target.0",
+  "contractVersion": "1.0.0",
   "operations": {
     "listQueues": {
       "state": "specified",

@@ -27,11 +27,15 @@ function ciBase() {
     }
     return git("merge-base", event.pull_request.base.sha, event.pull_request.head.sha);
   }
-  if (process.env.GITHUB_EVENT_NAME === "push" &&
-      process.env.GITHUB_REF === `refs/heads/${event?.repository?.default_branch}`) {
+  if (
+    process.env.GITHUB_EVENT_NAME === "push" &&
+    process.env.GITHUB_REF === `refs/heads/${event?.repository?.default_branch}`
+  ) {
     return latestContractTag();
   }
-  console.log("Contract compatibility: skipped explicitly; no PR merge base or default-branch release baseline applies.");
+  console.log(
+    "Contract compatibility: skipped explicitly; no PR merge base or default-branch release baseline applies.",
+  );
   return undefined;
 }
 
@@ -41,17 +45,24 @@ function main() {
   const base = option("--base") ?? (ci ? ciBase() : undefined);
   if (!base) {
     if (ci) {
-      console.log("Contract compatibility: skipped explicitly; no baseline is available (initial release).");
+      console.log(
+        "Contract compatibility: skipped explicitly; no baseline is available (initial release).",
+      );
       return 0;
     }
-    throw new Error("usage: bun run contract:diff --base <git-ref-or-openapi-file> [--current <file>] | --ci");
+    throw new Error(
+      "usage: bun run contract:diff --base <git-ref-or-openapi-file> [--current <file>] | --ci",
+    );
   }
   const current = resolve(option("--current") ?? "packages/contracts/openapi.yaml");
   const baseIsFile = existsSync(base);
-  const baseText = baseIsFile ? readFileSync(base, "utf8") : git("show", `${base}:packages/contracts/openapi.yaml`);
+  const baseText = baseIsFile
+    ? readFileSync(base, "utf8")
+    : git("show", `${base}:packages/contracts/openapi.yaml`);
   const before = YAML.parse(baseText);
   const after = YAML.parse(readFileSync(current, "utf8"));
-  if (!before?.paths || !after?.paths || !before?.info || !after?.info) throw new Error("Both contracts must be OpenAPI documents");
+  if (!before?.paths || !after?.paths || !before?.info || !after?.info)
+    throw new Error("Both contracts must be OpenAPI documents");
   if (contractDigest(before) === contractDigest(after)) {
     console.log(`Contract compatibility: unchanged against ${base}.`);
     return 0;
@@ -62,9 +73,14 @@ function main() {
     writeFileSync(baseFile, baseText);
     const binary = process.env.OASDIFF_BIN;
     const args = ["breaking", "--fail-on", "ERR", "--format", "text", baseFile, current];
-    const result = spawnSync(binary ?? "go", binary ? args : ["run", "github.com/oasdiff/oasdiff@v1.17.0", ...args], {
-      encoding: "utf8", maxBuffer: 8 * 1024 * 1024,
-    });
+    const result = spawnSync(
+      binary ?? "go",
+      binary ? args : ["run", "github.com/oasdiff/oasdiff@v1.17.0", ...args],
+      {
+        encoding: "utf8",
+        maxBuffer: 8 * 1024 * 1024,
+      },
+    );
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
     if (result.error) throw result.error;
@@ -73,21 +89,43 @@ function main() {
       return 0;
     }
     // oasdiff exits 1 for breaking ERR findings; parser/tool errors cannot be waived.
-    if (result.status !== 1 || !result.stdout.trim()) throw new Error(`oasdiff failed (${result.status})`);
+    if (result.status !== 1 || !result.stdout.trim())
+      throw new Error(`oasdiff failed (${result.status})`);
     const token = breakingReviewToken(before, after);
-    const changelog = readFileSync(resolve(option("--changelog") ?? "packages/contracts/CHANGELOG.md"), "utf8");
+    const changelog = readFileSync(
+      resolve(option("--changelog") ?? "packages/contracts/CHANGELOG.md"),
+      "utf8",
+    );
     const baseChangelogFile = option("--base-changelog");
-    const previous = baseChangelogFile ? readFileSync(baseChangelogFile, "utf8")
-      : baseIsFile ? "" : git("show", `${base}:packages/contracts/CHANGELOG.md`);
-    const eligible = changelog.split(/^## /m).filter((section) =>
-      section.startsWith("Unreleased\n") || section.startsWith(`${after.info.version} - `)).join("\n");
-    const acknowledged = eligible.split("\n").some((line) =>
-      line.startsWith("- **Breaking:** ") && line.includes(`[${token}]`) && line.replace(`[${token}]`, "").length > 40);
+    const previous = baseChangelogFile
+      ? readFileSync(baseChangelogFile, "utf8")
+      : baseIsFile
+        ? ""
+        : git("show", `${base}:packages/contracts/CHANGELOG.md`);
+    const eligible = changelog
+      .split(/^## /m)
+      .filter(
+        (section) =>
+          section.startsWith("Unreleased\n") || section.startsWith(`${after.info.version} - `),
+      )
+      .join("\n");
+    const acknowledged = eligible
+      .split("\n")
+      .some(
+        (line) =>
+          line.startsWith("- **Breaking:** ") &&
+          line.includes(`[${token}]`) &&
+          line.replace(`[${token}]`, "").length > 40,
+      );
     if (acknowledged && !previous.includes(token)) {
-      console.log(`Contract compatibility: intentional breaking change reviewed in CHANGELOG.md [${token}].`);
+      console.log(
+        `Contract compatibility: intentional breaking change reviewed in CHANGELOG.md [${token}].`,
+      );
       return 0;
     }
-    console.error(`Unreviewed breaking change. Add a NEW Unreleased entry describing affected operations/fields, migration and deprecation policy:\n- **Breaking:** [${token}] <change and client migration>`);
+    console.error(
+      `Unreviewed breaking change. Add a NEW Unreleased entry describing affected operations/fields, migration and deprecation policy:\n- **Breaking:** [${token}] <change and client migration>`,
+    );
     return 1;
   } finally {
     rmSync(directory, { force: true, recursive: true });

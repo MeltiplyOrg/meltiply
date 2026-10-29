@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Meltiply API
-  version: 1.0.0-target.0
+  version: 1.0.0
   summary: Contract for the Meltiply frontend and Worker API.
   license:
     name: All rights reserved

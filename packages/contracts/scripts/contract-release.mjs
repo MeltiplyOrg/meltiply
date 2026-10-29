@@ -20,13 +20,24 @@ function sha256(bytes) {
 
 /** Selects the prior release, excluding the tag currently being validated. */
 function previousTag(version) {
-  const tags = git("tag", "--merged", "HEAD", "--list", "contract-v*", "--sort=-version:refname").split("\n");
-  return tags.find((tag) => /^contract-v\d+\.\d+\.\d+$/.test(tag) && tag !== `contract-v${version}`);
+  const tags = git(
+    "tag",
+    "--merged",
+    "HEAD",
+    "--list",
+    "contract-v*",
+    "--sort=-version:refname",
+  ).split("\n");
+  return tags.find(
+    (tag) => /^contract-v\d+\.\d+\.\d+$/.test(tag) && tag !== `contract-v${version}`,
+  );
 }
 
 /** Splits Markdown bullets with their continuation text into machine-readable change entries. */
 function changesIn(section) {
-  return (section.match(/^- .*(?:\n(?!- |## ).+)*/gm) ?? []).map((entry) => entry.slice(2).replace(/\n\s*/g, " ").trim());
+  return (section.match(/^- .*(?:\n(?!- |## ).+)*/gm) ?? []).map((entry) =>
+    entry.slice(2).replace(/\n\s*/g, " ").trim(),
+  );
 }
 
 /** Determines SemVer severity from explicit breaking/patch notes; other contract changes are additive. */
@@ -38,7 +49,8 @@ function severity(changes) {
 /** Computes the only allowed next stable version; the first public release starts at 1.0.0. */
 function nextVersion(previous, changeType) {
   if (!previous) return "1.0.0";
-  if (!/^\d+\.\d+\.\d+$/.test(previous)) throw new Error("Previous release must have a stable semantic version");
+  if (!/^\d+\.\d+\.\d+$/.test(previous))
+    throw new Error("Previous release must have a stable semantic version");
   const [major, minor, patch] = previous.split(".").map(Number);
   if (changeType === "major") return `${major + 1}.0.0`;
   if (changeType === "minor") return `${major}.${minor + 1}.0`;
@@ -49,10 +61,14 @@ function nextVersion(previous, changeType) {
 async function releaseState(excludeCurrentVersion = true) {
   const source = await readFile(sourcePath, "utf8");
   const document = YAML.parse(source);
-  if (typeof document?.info?.version !== "string") throw new Error("OpenAPI info.version is required");
+  if (typeof document?.info?.version !== "string")
+    throw new Error("OpenAPI info.version is required");
   const tag = excludeCurrentVersion ? previousTag(document.info.version) : latestContractTag();
-  const previous = tag ? YAML.parse(git("show", `${tag}:packages/contracts/openapi.yaml`)) : undefined;
-  if (previous && tag !== `contract-v${previous.info.version}`) throw new Error("Previous release tag disagrees with OpenAPI version");
+  const previous = tag
+    ? YAML.parse(git("show", `${tag}:packages/contracts/openapi.yaml`))
+    : undefined;
+  if (previous && tag !== `contract-v${previous.info.version}`)
+    throw new Error("Previous release tag disagrees with OpenAPI version");
   return { source, document, tag, previous };
 }
 
@@ -62,7 +78,8 @@ async function prepare() {
   const latest = latestContractTag();
   if (latest) {
     const released = YAML.parse(git("show", `${latest}:packages/contracts/openapi.yaml`));
-    if (contractDigest(released) === contractDigest(document)) throw new Error("No contract content changed since the latest release; nothing to publish");
+    if (contractDigest(released) === contractDigest(document))
+      throw new Error("No contract content changed since the latest release; nothing to publish");
   }
   const changelogPath = resolve(root, "CHANGELOG.md");
   const changelog = await readFile(changelogPath, "utf8");
@@ -81,33 +98,56 @@ async function prepare() {
   const parsed = YAML.parseDocument(source);
   const scalar = parsed.getIn(["info", "version"], true);
   if (!scalar?.range) throw new Error("Cannot locate OpenAPI info.version");
-  await writeFile(sourcePath, `${source.slice(0, scalar.range[0])}${version}${source.slice(scalar.range[1])}`);
+  await writeFile(
+    sourcePath,
+    `${source.slice(0, scalar.range[0])}${version}${source.slice(scalar.range[1])}`,
+  );
   const catalogPath = resolve(root, "operation-readiness.json");
   const catalog = JSON.parse(await readFile(catalogPath, "utf8"));
   catalog.contractVersion = version;
   await writeFile(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`);
   const manifest = {
-    schemaVersion: 1, version, previousVersion: previous?.info.version ?? null,
-    changeType, contractSha256: contractDigest(document), changes,
+    schemaVersion: 1,
+    version,
+    previousVersion: previous?.info.version ?? null,
+    changeType,
+    contractSha256: contractDigest(document),
+    changes,
   };
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const date = new Date().toISOString().slice(0, 10);
-  await writeFile(changelogPath, changelog.replace(match[0], `## Unreleased\n\n## ${version} - ${date}\n${match[1]}`));
-  console.log(`Prepared contract-v${version} (${changeType}); regenerate, validate and commit the source before tagging.`);
+  await writeFile(
+    changelogPath,
+    changelog.replace(match[0], `## Unreleased\n\n## ${version} - ${date}\n${match[1]}`),
+  );
+  console.log(
+    `Prepared contract-v${version} (${changeType}); regenerate, validate and commit the source before tagging.`,
+  );
 }
 
 /** Validates source-bound release notes and the automatic SemVer decision against the prior tag. */
 function validateManifest(manifest, document, tag, previous) {
-  if (manifest.schemaVersion !== 1 || manifest.version !== document.info.version ||
-      !Array.isArray(manifest.changes) || manifest.changes.length === 0 ||
-      manifest.changes.some((change) => typeof change !== "string" || !change.trim()) ||
-      manifest.contractSha256 !== contractDigest(document) ||
-      manifest.previousVersion !== (previous?.info.version ?? null)) {
-    throw new Error("Release metadata is stale; run contract:release:prepare for the changed contract");
+  if (
+    manifest.schemaVersion !== 1 ||
+    manifest.version !== document.info.version ||
+    !Array.isArray(manifest.changes) ||
+    manifest.changes.length === 0 ||
+    manifest.changes.some((change) => typeof change !== "string" || !change.trim()) ||
+    manifest.contractSha256 !== contractDigest(document) ||
+    manifest.previousVersion !== (previous?.info.version ?? null)
+  ) {
+    throw new Error(
+      "Release metadata is stale; run contract:release:prepare for the changed contract",
+    );
   }
   const changeType = previous ? severity(manifest.changes) : "initial";
-  if (manifest.changeType !== changeType || manifest.version !== nextVersion(previous?.info.version, changeType)) {
-    throw new Error(`Version must advance automatically from ${tag ?? "the initial release"} with ${changeType} severity`);
+  if (
+    manifest.changeType !== changeType ||
+    manifest.version !== nextVersion(previous?.info.version, changeType)
+  ) {
+    throw new Error(
+      `Version must advance automatically from ${tag ?? "the initial release"} with ${changeType} severity`,
+    );
   }
 }
 
@@ -116,24 +156,33 @@ async function artifacts(tagArgument) {
   const { document, tag, previous } = await releaseState();
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   validateManifest(manifest, document, tag, previous);
-  if (!/^\d+\.\d+\.\d+$/.test(document.info.version)) throw new Error("Release version must be stable SemVer");
+  if (!/^\d+\.\d+\.\d+$/.test(document.info.version))
+    throw new Error("Release version must be stable SemVer");
   if (tagArgument) {
-    if (tagArgument !== `contract-v${document.info.version}`) throw new Error("Release tag must equal OpenAPI info.version");
-    if (git("rev-parse", `${tagArgument}^{commit}`) !== git("rev-parse", "HEAD")) throw new Error("Release tag must identify the checked-out source");
+    if (tagArgument !== `contract-v${document.info.version}`)
+      throw new Error("Release tag must equal OpenAPI info.version");
+    if (git("rev-parse", `${tagArgument}^{commit}`) !== git("rev-parse", "HEAD"))
+      throw new Error("Release tag must identify the checked-out source");
     git("diff", "--exit-code", "HEAD", "--", "packages/contracts");
   }
   const yaml = await readFile(resolve(root, "dist/openapi.yaml"));
   const json = await readFile(resolve(root, "dist/openapi.json"));
   const yamlDocument = YAML.parse(yaml.toString());
   const jsonDocument = JSON.parse(json.toString());
-  if (canonical(yamlDocument) !== canonical(jsonDocument) || canonical(yamlDocument) !== canonical(document)) {
+  if (
+    canonical(yamlDocument) !== canonical(jsonDocument) ||
+    canonical(yamlDocument) !== canonical(document)
+  ) {
     throw new Error("Release bundle differs from the checked-in OpenAPI contract");
   }
   await SwaggerParser.validate(structuredClone(jsonDocument));
   await mkdir(releaseDirectory, { recursive: true });
   await writeFile(resolve(releaseDirectory, "openapi.yaml"), yaml);
   await writeFile(resolve(releaseDirectory, "openapi.json"), json);
-  await writeFile(resolve(releaseDirectory, "changelog.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(
+    resolve(releaseDirectory, "changelog.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
   const sums = [];
   for (const name of names.filter((name) => name !== "SHA256SUMS")) {
     sums.push(`${sha256(await readFile(resolve(releaseDirectory, name)))}  ${name}`);
@@ -144,7 +193,8 @@ async function artifacts(tagArgument) {
 
 /** Verifies the actual distribution inventory, document equivalence, version and all asset checksums. */
 async function verify() {
-  if (canonical((await readdir(releaseDirectory)).sort()) !== canonical(names)) throw new Error("Unexpected release asset; internal files must not be published");
+  if (canonical((await readdir(releaseDirectory)).sort()) !== canonical(names))
+    throw new Error("Unexpected release asset; internal files must not be published");
   const sums = (await readFile(resolve(releaseDirectory, "SHA256SUMS"), "utf8")).trim().split("\n");
   if (sums.length !== 3) throw new Error("Release checksums must cover exactly the public assets");
   for (const name of names.filter((name) => name !== "SHA256SUMS")) {
@@ -157,9 +207,12 @@ async function verify() {
   const manifest = JSON.parse(await readFile(resolve(releaseDirectory, "changelog.json"), "utf8"));
   const state = await releaseState();
   validateManifest(manifest, source, state.tag, state.previous);
-  if (canonical(source) !== canonical(yaml) || canonical(source) !== canonical(json)) throw new Error("Distributed documents do not match source");
+  if (canonical(source) !== canonical(yaml) || canonical(source) !== canonical(json))
+    throw new Error("Distributed documents do not match source");
   await SwaggerParser.validate(structuredClone(json));
-  console.log(`Verified contract-v${source.info.version}: public JSON/YAML, source equivalence, automatic version, machine changelog and SHA-256 checksums.`);
+  console.log(
+    `Verified contract-v${source.info.version}: public JSON/YAML, source equivalence, automatic version, machine changelog and SHA-256 checksums.`,
+  );
 }
 
 try {
@@ -170,7 +223,10 @@ try {
     if (index >= 0 && !process.argv[index + 1]) throw new Error("--tag requires a value");
     await artifacts(index >= 0 ? process.argv[index + 1] : undefined);
   } else if (command === "verify") await verify();
-  else throw new Error("usage: contract-release.mjs prepare | artifacts [--tag contract-vX.Y.Z] | verify");
+  else
+    throw new Error(
+      "usage: contract-release.mjs prepare | artifacts [--tag contract-vX.Y.Z] | verify",
+    );
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;

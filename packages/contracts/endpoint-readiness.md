@@ -7,7 +7,7 @@ gates. This matrix records the highest verified environment, not
 implementation intent. Its canonical source is
 [operation-readiness.json](operation-readiness.json).
 
-Current version: contract/client/Worker `1.0.0-target.0`.
+Current version: contract/client/Worker `1.0.0`.
 
 | Operation                           | Current state | Checked-in evidence and remaining promotion gate                                                                                                           |
 | ----------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |

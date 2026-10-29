@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "result": "passed",
+  "operationIds": [
+    "getHealth"
+  ],
+  "sourceCommit": "02afe85caf10d53e989d982c049cc9d4987c6192",
+  "contractVersion": "1.0.0",
+  "runtime": "isolated local workerd via Wrangler; production API entry; no authentication or dependencies",
+  "workflowRun": "https://github.com/MeltiplyOrg/meltiply/actions/runs/40839398575",
+  "kind": "release"
+}

@@ -16,6 +16,8 @@ Automatic checks run in separate jobs:
 - `cloudflare-fast`: spelling, contracts, Worker bindings, package/Worker types,
   tests and builds, strict lint, dead code, formatting, drift/routing regressions,
   local-tooling and release regressions, supply-chain/SBOM policy, costs, and PostgreSQL integration tests.
+  Release regressions verify that API and Automation mail bindings restrict the
+  configured sender and that the notifications Queue is rendered from IaC outputs.
 - `frontend-performance`: seeds a deterministic populated installation, builds
   production assets, and measures real signed-in Posts, Posts-to-media, composer
   opening, and exact composer typing over the production Worker/API/auth stack.

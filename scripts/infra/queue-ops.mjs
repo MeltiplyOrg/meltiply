@@ -10,6 +10,7 @@ export const KNOWN_QUEUE_WORKLOADS = Object.freeze([
   "asset-processing",
   "channel-revocation",
   "comments",
+  "notifications",
   "publish-facebook",
   "publish-instagram",
   "publish-threads",

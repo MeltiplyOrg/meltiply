@@ -79,6 +79,10 @@ that failure. The matrix creates its future Queue slot when its Queue iteration
 begins, so preceding Now/Schedule work cannot consume that slot's lead time.
 Browser failures are reported without automatic retries, and each journey's traces
 and screenshots are retained in the lane's artifact before the next journey runs.
+After setup, the application gate and documentation-link check accumulate their
+failures independently: documentation links still run if the application gate
+fails, and either failure fails the step. The application gate runs only in
+`publishing-flow`; `publishing-browser` runs the documentation check alone.
 
 `device-authorization` runs the complete application gate, then starts the
 production Worker and built frontend preview against a fresh seeded database. A

@@ -62,8 +62,10 @@ jobs:
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium
-          if [ "${{ inputs.lane }}" = publishing-flow ]; then bun run cloudflare:check; fi
-          bun run docs:links
+          status=0
+          if [ "${{ inputs.lane }}" = publishing-flow ]; then bun run cloudflare:check || status=1; fi
+          bun run docs:links || status=1
+          exit "$status"
       - name: Exercise full publishing lifecycle
         if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
         env:

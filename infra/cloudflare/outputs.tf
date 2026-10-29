@@ -8,12 +8,14 @@ output "release_resources" {
     dead_letter_queue_ids       = module.queues.dead_letter_queue_ids
     dead_letter_queue_names     = module.queues.dead_letter_queue_names
     environment                 = var.environment
+    frontend_worker_name        = local.frontend_worker_name
     operator_access_aud         = var.enable_operator_access ? module.operator_access[0].application_aud : null
     operator_hostname           = var.enable_operator_access ? var.operator_hostname : null
     queue_consumers_attached    = module.queues.consumers_attached
     queue_delivery_paused       = module.queues.delivery_paused
     queue_names                 = module.queues.queue_names
     system_hyperdrive_id        = module.hyperdrive.system_config_id
+    worker_names                = local.worker_names
   }
 }
 

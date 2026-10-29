@@ -215,3 +215,65 @@ run "operator_access_plan" {
     error_message = "The enabled operator plan must export an Access audience."
   }
 }
+
+run "production_plan" {
+  command = plan
+
+  plan_options {
+    refresh = false
+  }
+
+  variables {
+    environment = "production"
+    app_url     = "https://app.example.com"
+  }
+
+  assert {
+    condition = (
+      output.release_resources.environment == "production" &&
+      output.release_resources.assets_bucket_name == "meltiply-assets-production" &&
+      output.release_resources.frontend_worker_name == "meltiply-frontend-production" &&
+      output.release_resources.worker_names.api == "meltiply-api-production" &&
+      output.release_resources.worker_names.automation == "meltiply-automation-production" &&
+      output.release_resources.worker_names.state == "meltiply-state-production" &&
+      output.worker_bindings.queues["publish-tiktok"] == "meltiply-publish-tiktok-production" &&
+      output.release_resources.dead_letter_queue_names["publish-tiktok"] == "meltiply-publish-tiktok-production-dlq"
+    )
+    error_message = "Production resources and reviewed Worker identities must be isolated from legacy staging."
+  }
+}
+
+run "production_frontend_wrong_suffix_rejected" {
+  command = plan
+
+  variables {
+    environment          = "production"
+    frontend_worker_name = "meltiply-frontend"
+  }
+
+  expect_failures = [var.frontend_worker_name]
+}
+
+run "production_bucket_wrong_suffix_rejected" {
+  command = plan
+
+  variables {
+    environment        = "production"
+    assets_bucket_name = "meltiply-assets-staging"
+  }
+
+  expect_failures = [var.assets_bucket_name]
+}
+
+run "production_backend_wrong_suffix_rejected" {
+  command = plan
+
+  variables {
+    environment            = "production"
+    api_worker_name        = "meltiply-api"
+    automation_worker_name = "meltiply-automation"
+    state_worker_name      = "meltiply-state"
+  }
+
+  expect_failures = [var.api_worker_name, var.automation_worker_name, var.state_worker_name]
+}

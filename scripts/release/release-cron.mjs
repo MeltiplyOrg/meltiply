@@ -294,11 +294,13 @@ function assertReleaseEvidence(evidence, name, spec) {
  * Extracts and validates the canonical cron triggers defined in the rendered Automation Worker config.
  *
  * @param {object} config - Parsed rendered Wrangler configuration for Automation Worker
+ * @param {object} spec - Selected release environment the rendered identity must match
  * @returns {Array<string>} Validated array of cron schedule pattern strings
- * @throws {TypeError} If worker name is not 'meltiply-automation' or schedules are empty/invalid
+ * @throws {TypeError} If the Worker identity or schedules are invalid
  */
-function canonicalSchedules(config) {
-  if (config?.name !== "meltiply-automation") {
+function canonicalSchedules(config, spec) {
+  if (typeof config?.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(config.name) ||
+      (spec.environment === "production" && !config.name.endsWith(`-${spec.environment}`))) {
     throw new TypeError("rendered Automation config has the wrong Worker name");
   }
   const schedules = cronSet(config?.triggers?.crons, "rendered Automation Cron schedules");
@@ -377,7 +379,7 @@ export async function transitionAutomationCron({
   if (!phaseNames.has(phase)) throw new TypeError(`unknown Cron phase: ${phase}`);
   const configPath = path.join(outDir, "wrangler", "automation.json");
   const config = await readJsonFile(configPath, "rendered Automation config", 1024 * 1024);
-  const schedules = canonicalSchedules(config);
+  const schedules = canonicalSchedules(config, spec);
   const activating = phase === "cron-activate";
   const expected = activating ? schedules : [];
 

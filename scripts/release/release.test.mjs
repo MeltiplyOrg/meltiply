@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -70,8 +70,10 @@ function iacOutput(overrides = {}) {
     assets_bucket_name: "meltiply-assets-staging",
     authenticated_hyperdrive_id: authenticatedHyperdriveId,
     dead_letter_queue_ids: {},
-    dead_letter_queue_names: {},
+    dead_letter_queue_names: Object.fromEntries(Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`])),
     environment: "staging",
+    frontend_worker_name: "meltiply-frontend-staging",
+    worker_names: { api: "meltiply-api", automation: "meltiply-automation", state: "meltiply-state", frontend: "meltiply-frontend-staging" },
     operator_access_aud: null,
     operator_hostname: null,
     queue_consumers_attached: false,
@@ -279,6 +281,61 @@ test("provider acceptance requires its public client configuration", () => {
   );
 });
 
+/** Both installations derive release, resource, and rendered identity from their selected environment. */
+test("production validation and rendering keep all workload bindings environment-scoped", () => {
+  const spec = validateReleaseSpec(releaseInput({
+    environment: "production",
+    api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
+    release_id: `production-${gitSha.slice(0, 12)}`,
+  }));
+  const queues = Object.fromEntries(
+    Object.keys(queueNames()).map((workload) => [workload, `meltiply-${workload}-production`]),
+  );
+  const outputs = iacOutput({
+    environment: "production",
+    assets_bucket_name: "fork-assets-production",
+    frontend_worker_name: "fork-frontend-production",
+    worker_names: { api: "meltiply-api-production", automation: "meltiply-automation-production", state: "meltiply-state-production", frontend: "fork-frontend-production" },
+    queue_names: queues,
+    dead_letter_queue_names: Object.fromEntries(
+      Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`]),
+    ),
+  });
+  outputs.worker_bindings.value.queues = queues;
+  const iac = validateIacOutputs(outputs, spec);
+  assert.equal(spec.environment, "production");
+  assert.equal(iac.frontend_worker_name, "fork-frontend-production");
+  const rendered = renderWranglerConfigs({
+    api: { services: [{ binding: "AUTOMATION", service: "meltiply-automation" }], durable_objects: { bindings: [{ name: "OAUTH_STATE", script_name: "meltiply-state" }] } },
+    automation: { containers: [{ name: "meltiply-media-processor" }], workflows: [{ binding: "REPLY_WORKFLOW", name: "meltiply-reply-staging" }] },
+    state: {},
+  }, spec, iac);
+  assert.equal(rendered.api.name, "meltiply-api-production");
+  assert.equal(rendered.api.services[0].service, "meltiply-automation-production");
+  assert.equal(rendered.api.durable_objects.bindings[0].script_name, "meltiply-state-production");
+  assert.equal(rendered.automation.containers[0].name, "meltiply-media-processor-production");
+  assert.equal(rendered.automation.workflows[0].name, "meltiply-reply-production");
+  assert.equal(rendered.api.vars.ENVIRONMENT, "production");
+  assert.equal(rendered.automation.vars.ENVIRONMENT, "production");
+  assert.deepEqual(
+    rendered.automation.queues.producers.find((entry) => entry.binding === "TIKTOK_PUBLISH_QUEUE"),
+    { binding: "TIKTOK_PUBLISH_QUEUE", queue: "meltiply-publish-tiktok-production" },
+  );
+  for (const mismatch of [
+    { environment: "staging" },
+    { assets_bucket_name: "fork-assets-staging" },
+    { frontend_worker_name: "fork-frontend" },
+    { queue_names: queueNames() },
+    { dead_letter_queue_names: { ...outputs.release_resources.value.dead_letter_queue_names, analytics: "meltiply-analytics-staging-dlq" } },
+  ]) {
+    const invalid = structuredClone(outputs);
+    Object.assign(invalid.release_resources.value, mismatch);
+    assert.throws(() => validateIacOutputs(invalid, spec));
+  }
+  assert.throws(() => validateReleaseSpec(releaseInput({ environment: "preview" })), /environment/);
+  assert.throws(() => validateReleaseSpec(releaseInput({ environment: "production" })), /release_id/);
+});
+
 test("IaC outputs must be non-sensitive, staging-scoped, and internally consistent", () => {
   const spec = validateReleaseSpec(releaseInput());
   const validated = validateIacOutputs(iacOutput(), spec);
@@ -357,6 +414,7 @@ test("rendering replaces placeholders with reviewed non-secret bindings", () => 
   assert.deepEqual(configs.state, {
     migrations: [{ tag: "v1" }],
     name: "meltiply-state",
+    vars: { ENVIRONMENT: "staging", VERSION: gitSha },
   });
 });
 
@@ -502,4 +560,39 @@ test("release CLI rejects ambiguous or command-inappropriate options", async () 
     runReleaseCli(["preflight", "--wat"]),
     /unknown option for preflight: --wat/,
   );
+});
+
+/** The operator CLI preserves a production input through offline preflight and real-file rendering. */
+test("production CLI preflight and rendering retain the selected installation", async (context) => {
+  const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-production-cli-"));
+  context.after(() => rm(outDir, { force: true, recursive: true }));
+  const inputPath = path.join(outDir, "release-input.json");
+  const iacOutputsPath = path.join(outDir, "iac-outputs.json");
+  const spec = releaseInput({
+    environment: "production",
+    release_id: `production-${gitSha.slice(0, 12)}`,
+    api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
+  });
+  const queues = Object.fromEntries(Object.keys(queueNames()).map((workload) => [workload, `meltiply-${workload}-production`]));
+  const outputs = iacOutput({
+    environment: "production",
+    frontend_worker_name: "meltiply-frontend-production",
+    worker_names: { api: "meltiply-api-production", automation: "meltiply-automation-production", state: "meltiply-state-production", frontend: "meltiply-frontend-production" },
+    assets_bucket_name: "meltiply-assets-production",
+    queue_names: queues,
+    dead_letter_queue_names: Object.fromEntries(Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`])),
+  });
+  outputs.worker_bindings.value.queues = queues;
+  await writeFile(inputPath, JSON.stringify(spec));
+  await writeFile(iacOutputsPath, JSON.stringify(outputs));
+  const preflight = await runReleaseCli(["preflight", "--offline", "--input", inputPath], {
+    environment: {}, runCommand: successfulPreflightCommand,
+  });
+  assert.equal(preflight.environment, "production");
+  const rendered = await runReleaseCli(["render", "--input", inputPath, "--iac-outputs", iacOutputsPath, "--out-dir", outDir], { environment: {} });
+  assert.equal(rendered.environment, "production");
+  const config = JSON.parse(await readFile(path.join(outDir, "wrangler/api.json"), "utf8"));
+  assert.equal(config.name, "meltiply-api-production");
+  assert.equal(config.vars.ENVIRONMENT, "production");
+  assert.equal(config.services.find((binding) => binding.binding === "AUTOMATION").service, "meltiply-automation-production");
 });

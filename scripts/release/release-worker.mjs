@@ -6,12 +6,6 @@ import { releaseInternals } from "./release-lib.mjs";
 
 const versionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-const workers = {
-  api: "meltiply-api",
-  automation: "meltiply-automation",
-  state: "meltiply-state",
-};
-
 const deployPhases = new Map([
   [
     "api-bootstrap",
@@ -682,9 +676,14 @@ export async function deployWorkerStep({
   step,
 }) {
   const intent = resolveDeployPhase(phase, step, spec);
-  const workerName = workers[intent.worker];
+  // The reviewed rendered config, not a fixed staging service, owns deployment identity.
   const configPath = workerConfigPath(outDir, intent.worker);
   const configSource = await readFile(configPath, "utf8");
+  const workerName = parseJson(configSource, "rendered Worker config").name;
+  if (typeof workerName !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(workerName) ||
+      (spec.environment === "production" && !workerName.endsWith(`-${spec.environment}`))) {
+    throw new TypeError("rendered Worker config has the wrong installation name");
+  }
   const configDigest = sha256(configSource);
   const tag = releaseTag(spec, intent.worker, "code");
 

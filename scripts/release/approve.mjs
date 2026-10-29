@@ -9,13 +9,13 @@ const scopes = { foundation: true, traffic: true, "queue-resume": true };
 const [scope, inputPath, planPath, operator, confirmation, ...extra] = process.argv.slice(2);
 if (!Object.hasOwn(scopes, scope ?? "") || !inputPath || !planPath || !operator || extra.length) {
   throw new Error(
-    'Usage: bun run release:approve <foundation|traffic|queue-resume> <input.json> <reviewed.tfplan> <operator> "approve <git-sha> <plan-sha256>"',
+    'Usage: bun run release:approve <foundation|traffic|queue-resume> <input.json> <reviewed.tfplan> <operator> "approve <environment> <git-sha> <plan-sha256>"',
   );
 }
 const spec = validateReleaseSpec(await readJsonFile(inputPath, "release input"));
 const digest = sha256(await readFile(planPath));
-if (confirmation !== `approve ${spec.git_sha} ${digest}`) {
-  throw new Error("Confirmation must identify the exact release commit and reviewed plan SHA-256");
+if (confirmation !== `approve ${spec.environment} ${spec.git_sha} ${digest}`) {
+  throw new Error("Confirmation must identify the environment, exact release commit, and reviewed plan SHA-256");
 }
 const outDir = path.resolve(process.env.MELTIPLY_RELEASE_DIR ?? ".release");
 let session;
@@ -39,7 +39,7 @@ const evidence = validateApprovalMetadata(
     plan_digest: digest,
     approval_job: {
       id: randomUUID(),
-      name: `staging-${scope}-approval`,
+      name: `${spec.environment}-${scope}-approval`,
       status: "success",
       approved_by: operator,
     },

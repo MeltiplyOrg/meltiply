@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { releaseEnvironments } from "../lib/release-environments.mjs";
+import { validateReleaseSpec } from "../release/release-lib.mjs";
 
 const transitionByPhase = Object.freeze({
   foundation: Object.freeze({
@@ -200,14 +202,14 @@ function assertPhaseResourceScope(plan, phase, expected) {
 
 /**
  * Validates that an OpenTofu execution plan conforms to the invariants and variable bindings
- * of a specific staging release phase ('foundation', 'paused-consumers', 'domain', 'pause', 'unpause').
- * Enforces staging environment, verifies input flags (custom domains, queue consumers, queue pause state),
+ * of a specific release phase ('foundation', 'paused-consumers', 'domain', 'pause', 'unpause').
+ * Enforces the shared environment allow-list and input flags (custom domains, queue consumers, queue pause state),
  * and confirms that planned resource changes are strictly non-destructive and scoped to the phase.
  *
  * @param {object} plan - Parsed OpenTofu JSON execution plan
  * @param {string} phase - Target release phase identifier
  * @returns {Readonly<object>} Frozen transition specification describing the verified phase state
- * @throws {Error} If phase is unrecognized, environment is not staging, variables mismatch, or resource scope is breached
+ * @throws {Error} If phase or environment is unrecognized, variables mismatch, or resource scope is breached
  */
 export function verifyReleasePlan(plan, phase) {
   const expected = transitionByPhase[phase];
@@ -220,8 +222,8 @@ export function verifyReleasePlan(plan, phase) {
   }
 
   const environment = plannedVariable(plan, "environment");
-  if (environment !== "staging") {
-    throw new Error(`release plan environment must be staging, got ${JSON.stringify(environment)}`);
+  if (!releaseEnvironments.includes(environment)) {
+    throw new Error(`release plan environment must be one of ${releaseEnvironments.join(", ")}, got ${JSON.stringify(environment)}`);
   }
 
   const transition = { environment };
@@ -278,15 +280,19 @@ export function summarizeReleasePlan(plan, phase) {
  * @throws {Error} If CLI arguments are invalid or plan verification fails
  */
 async function main() {
-  const [phase, planPath, summaryPath, ...extra] = process.argv.slice(2);
-  if (!phase || !planPath || !summaryPath || extra.length > 0) {
+  const [phase, planPath, summaryPath, inputPath, ...extra] = process.argv.slice(2);
+  if (!phase || !planPath || !summaryPath || !inputPath || extra.length > 0) {
     throw new Error(
-      "usage: node scripts/infra/release-plan.mjs <phase> <plan.json> <summary.json>",
+      "usage: node scripts/infra/release-plan.mjs <phase> <plan.json> <summary.json> <release-input.json>",
     );
   }
 
   const plan = JSON.parse(await readFile(resolve(planPath), "utf8"));
   const summary = summarizeReleasePlan(plan, phase);
+  const spec = validateReleaseSpec(JSON.parse(await readFile(resolve(inputPath), "utf8")));
+  if (summary.transition.environment !== spec.environment) {
+    throw new Error("release plan environment does not match the release input");
+  }
   const outputPath = resolve(summaryPath);
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(summary, null, 2)}\n`, {

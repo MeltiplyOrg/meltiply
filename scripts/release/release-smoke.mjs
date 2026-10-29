@@ -14,7 +14,6 @@ import {
   workerVersionBindingSha,
 } from "./release-worker.mjs";
 
-const apiWorkerName = "meltiply-api";
 const healthPath = "/api/v1/health";
 const maximumResponseBytes = 8 * 1024;
 const requestTimeoutMs = 10_000;
@@ -51,7 +50,7 @@ function assertReleaseEvidence(evidence, name, spec) {
  *
  * The deployable candidate is the secret-injected version: it is the version
  * promoted by activation and canary rollouts and the only version that can
- * satisfy staging binding validation over HTTP.
+ * satisfy deployed binding validation over HTTP.
  *
  * @param {string} outDir - Release evidence directory
  * @param {object} spec - Validated release specification
@@ -83,8 +82,8 @@ async function loadApiCandidateEvidence(outDir, spec) {
  * Cloudflare Version URLs use the first eight characters of the version UUID
  * as the hostname prefix on the Worker's workers.dev subdomain, matching the
  * URL Wrangler reports after `versions upload`. The subdomain is pinned by
- * the reviewed release input's api_workers_dev_url, which validates the
- * `meltiply-api.` label and the workers.dev suffix at load time.
+ * the reviewed release input's api_workers_dev_url, matched against the IaC
+ * API Worker name before CLI smoke begins.
  *
  * @param {object} spec - Validated release specification
  * @param {string} versionId - Worker version UUID
@@ -93,9 +92,6 @@ async function loadApiCandidateEvidence(outDir, spec) {
  */
 function versionUrlOrigin(spec, versionId) {
   const origin = new URL(spec.api_workers_dev_url);
-  if (!origin.hostname.startsWith(`${apiWorkerName}.`)) {
-    throw new TypeError("api_workers_dev_url does not match the API Worker name");
-  }
   return `https://${versionId.slice(0, 8)}-${origin.hostname}`;
 }
 
@@ -108,13 +104,14 @@ function versionUrlOrigin(spec, versionId) {
  * Git SHA without exposing internals.
  *
  * @param {object} params - Probe parameters
+ * @param {string} params.expectedEnvironment - Selected release environment
  * @param {typeof fetch} params.fetchImpl - HTTP client implementation
  * @param {string} params.origin - Absolute HTTPS origin to probe
  * @param {number} params.requestBudgetMs - Maximum time allowed for the request
  * @returns {Promise<object>} Validated health payload
  * @throws {TypeError|Error} If the response is not an exact health success envelope
  */
-export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
+export async function fetchHealth({ expectedEnvironment, fetchImpl, origin, requestBudgetMs }) {
   let response;
   try {
     response = await fetchImpl(new URL(`${origin}${healthPath}`), {
@@ -138,12 +135,12 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
     Array.isArray(body) ||
     JSON.stringify(Object.keys(body).sort()) !==
       JSON.stringify(["environment", "status", "version"]) ||
-    body.environment !== "staging" ||
+    body.environment !== expectedEnvironment ||
     body.status !== "ok" ||
     typeof body.version !== "string" ||
     !gitShaPattern.test(body.version)
   ) {
-    throw new TypeError("API health response is not the staging contract");
+    throw new TypeError(`API health response is not the ${expectedEnvironment} contract`);
   }
   return {
     environment: body.environment,
@@ -163,6 +160,7 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
  *
  * @param {object} params - Polling parameters
  * @param {Set<string>} params.acceptedVersions - Git SHAs the endpoint may legitimately serve
+ * @param {string} params.expectedEnvironment - Selected release environment
  * @param {typeof fetch} [params.fetchImpl=fetch] - HTTP client implementation
  * @param {number} [params.maximumElapsedMs=120000] - Hard deadline in milliseconds
  * @param {() => number} [params.now] - High-resolution timestamp provider
@@ -175,6 +173,7 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
  */
 async function pollHealth({
   acceptedVersions,
+  expectedEnvironment,
   fetchImpl = fetch,
   maximumElapsedMs = smokeDeadlineMs,
   now = () => performance.now(),
@@ -199,6 +198,7 @@ async function pollHealth({
     if (budget < 1) break;
     try {
       const health = await fetchHealth({
+        expectedEnvironment,
         fetchImpl,
         origin,
         requestBudgetMs: budget,
@@ -306,6 +306,7 @@ export async function smokeVersionCandidate({
   const origin = versionUrlOrigin(spec, versionId);
   const result = await pollHealth({
     acceptedVersions: new Set([spec.git_sha]),
+    expectedEnvironment: spec.environment,
     fetchImpl,
     origin,
     pause,
@@ -439,6 +440,7 @@ export async function smokeLiveApi({
   if (previousSha !== undefined) acceptedVersions.add(previousSha);
   const result = await pollHealth({
     acceptedVersions,
+    expectedEnvironment: spec.environment,
     fetchImpl,
     origin: spec.app_url,
     pause,

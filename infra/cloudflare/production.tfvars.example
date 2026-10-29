@@ -1,0 +1,25 @@
+# Non-secret example only. Keep the populated file, release input, and backend
+# configuration outside the repository, separate from the staging installation.
+account_id  = "00000000000000000000000000000000"
+zone_id     = "00000000000000000000000000000000"
+environment = "production"
+
+app_url                = "https://app.example.com"
+frontend_worker_name   = "meltiply-frontend-production"
+api_worker_name        = "meltiply-api-production"
+automation_worker_name = "meltiply-automation-production"
+state_worker_name      = "meltiply-state-production"
+assets_bucket_name     = "meltiply-assets-production"
+
+# Preserve the reviewed phase triples; do not attach domains/consumers early.
+attach_queue_consumers    = false
+attach_app_custom_domains = false
+queue_delivery_paused     = true
+
+authenticated_hyperdrive_config_id = "00000000000000000000000000000000"
+system_hyperdrive_config_id        = "11111111111111111111111111111111"
+
+enable_operator_access = false
+operator_hostname      = "ops.example.com"
+access_team_domain     = "https://example.cloudflareaccess.com"
+operator_email_domains = ["example.com"]

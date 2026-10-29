@@ -228,19 +228,22 @@ test("stdin secret bundles require exact worker-specific names without recording
   assert.throws(() => validateSecretBundle(source, spec, "state"), /only for API and Automation/);
 });
 
-test("Automation update uploads code, creates a stdin secret version, and activates it", async (context) => {
+for (const environment of ["staging", "production"]) {
+test(`${environment} Automation update uploads code, creates a stdin secret version, and activates it`, async (context) => {
+  const workerName = environment === "staging" ? "meltiply-automation" : "meltiply-automation-production";
   const outDir = await mkdtemp(path.join(tmpdir(), "release-worker-"));
   context.after(() => rm(outDir, { force: true, recursive: true }));
   await mkdir(path.join(outDir, "wrangler"));
   await writeFile(
     path.join(outDir, "wrangler/automation.json"),
-    JSON.stringify({ name: "meltiply-automation", main: "worker.ts" }),
+    JSON.stringify({ name: workerName, main: "worker.ts" }),
   );
 
   const gitSha = "a".repeat(40);
   const spec = {
     runtime: {},
     deployment_mode: "update",
+    environment,
     git_sha: gitSha,
     provider_acceptance: {
       facebook: false,
@@ -249,7 +252,7 @@ test("Automation update uploads code, creates a stdin secret version, and activa
       tiktok: false,
       youtube: false,
     },
-    release_id: `staging-${gitSha.slice(0, 12)}`,
+    release_id: `${environment}-${gitSha.slice(0, 12)}`,
   };
   const codeTag = `${spec.release_id}-automation-code`;
   const secretTag = `${spec.release_id}-automation-secrets`;
@@ -286,7 +289,7 @@ test("Automation update uploads code, creates a stdin secret version, and activa
         options.env.WRANGLER_OUTPUT_FILE_PATH,
         `${JSON.stringify({
           type: "version-upload",
-          worker_name: "meltiply-automation",
+          worker_name: workerName,
           version_id: otherVersion,
           preview_url: "https://candidate.example.workers.dev",
         })}\n`,
@@ -322,7 +325,7 @@ test("Automation update uploads code, creates a stdin secret version, and activa
       activeVersion = secretVersion;
       await writeFile(
         options.env.WRANGLER_OUTPUT_FILE_PATH,
-        `${JSON.stringify({ type: "version-deploy", worker_name: "meltiply-automation" })}\n`,
+        `${JSON.stringify({ type: "version-deploy", worker_name: workerName })}\n`,
       );
       return { code: 0, stderr: "", stdout: "" };
     }
@@ -381,3 +384,4 @@ test("Automation update uploads code, creates a stdin secret version, and activa
     3,
   );
 });
+}

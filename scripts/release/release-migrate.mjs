@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { assertDatabaseRoles, createDatabaseClient } from "../lib/database-roles.mjs";
 import { sha256, writeEvidence } from "./release-guard.mjs";
 import { validateDatabaseEnvironment } from "./release-lib.mjs";
 import { requireRestorePoint } from "./release-restore.mjs";
@@ -182,26 +183,48 @@ async function transaction(client, operation) {
 }
 
 /**
- * Creates and configures a PostgreSQL client using the `pg` library.
- * Pins application name to 'meltiply-release-migrator' and timeout to 15 seconds.
- *
- * @param {string} connectionString - PostgreSQL connection URI
- * @returns {Promise<object>} Instantiated pg Client
+ * Verifies the RLS objects installed by the reviewed migrations, not ledger success alone.
+ * Requires auth.jwt() returning jsonb and a public-table policy for meltiply_rls on an
+ * RLS-enabled table; unrelated policies cannot disguise a skipped authentication setup.
+ * Reads catalogs only and refuses to repair previously skipped migrations.
  */
-async function defaultClientFactory(connectionString) {
-  const { Client } = await import("pg");
-  return new Client({
-    application_name: "meltiply-release-migrator",
-    connectionString,
-    connectionTimeoutMillis: 15_000,
-  });
+async function assertRlsInstallation(client) {
+  const result = await client.query(`
+    SELECT
+      EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'auth') AS auth_schema,
+      EXISTS (
+        SELECT 1 FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'auth' AND p.proname = 'jwt' AND p.pronargs = 0
+          AND p.prorettype = 'jsonb'::regtype AND p.prokind = 'f'
+      ) AS claims_accessor,
+      EXISTS (
+        SELECT 1 FROM pg_catalog.pg_policy p
+        JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_roles r ON r.oid = ANY(p.polroles)
+        WHERE n.nspname = 'public' AND c.relrowsecurity AND r.rolname = 'meltiply_rls'
+      ) AS policies
+  `);
+  const installed = result.rows?.[0];
+  for (const [key, description] of [
+    ["auth_schema", "authentication schema auth"],
+    ["claims_accessor", "claims accessor auth.jwt()"],
+    ["policies", "enabled row-level-security policies for meltiply_rls"],
+  ]) {
+    if (installed?.[key] !== true) {
+      throw new Error(
+        `migration verification failed: missing ${description}; do not reuse a branch with skipped RLS migrations`,
+      );
+    }
+  }
 }
 
 /**
- * Executes database migrations gated by a verified restore point.
- * Acquires a global PostgreSQL advisory lock (`meltiply-release-schema-migrations-v1`),
- * ensures statement and lock timeouts, verifies contiguous ledger history, applies pending
- * migrations in discrete transactions, validates final ledger parity, and writes atomic evidence.
+ * Executes database migrations gated by a verified restore point and protected database roles.
+ * Checks identities/attributes before any advisory lock, transaction, or ledger mutation,
+ * applies reviewed migrations transactionally, then verifies ledger parity and installed
+ * authentication RLS objects before writing evidence.
  *
  * @param {object} params - Migration parameters
  * @param {Array<object>} params.approvals - Validated operator review records
@@ -218,7 +241,7 @@ async function defaultClientFactory(connectionString) {
  */
 export async function migrateDatabase({
   approvals,
-  clientFactory = defaultClientFactory,
+  clientFactory = createDatabaseClient,
   environment,
   now,
   outDir,
@@ -237,10 +260,19 @@ export async function migrateDatabase({
     spec,
   });
   const migrations = await loadMigrations(repoRoot);
-  const client = await clientFactory(validateDatabaseEnvironment(environment));
+  const systemUrl = validateDatabaseEnvironment(environment);
+  let client;
   let locked = false;
   try {
-    await client.connect();
+    try {
+      client = await clientFactory(systemUrl);
+      await client.connect();
+    } catch {
+      throw new Error(
+        "MELTIPLY_SYSTEM_DATABASE_URL: unable to connect as database role meltiply_system; check its protected credentials and database access",
+      );
+    }
+    await assertDatabaseRoles({ clientFactory, environment, systemClient: client });
     await client.query("SET statement_timeout = '15min'");
     await client.query("SET lock_timeout = '30s'");
     const lock = await client.query(
@@ -288,6 +320,7 @@ export async function migrateDatabase({
     if (parity.pending.length !== 0) {
       throw new Error("migration ledger does not match the reviewed migration set");
     }
+    await assertRlsInstallation(client);
     const evidence = {
       already_applied: plan.alreadyApplied,
       applied,
@@ -317,6 +350,6 @@ export async function migrateDatabase({
         // Closing the dedicated session releases the lock even if unlock fails.
       }
     }
-    await client.end().catch(() => {});
+    if (client) await client.end().catch(() => {});
   }
 }

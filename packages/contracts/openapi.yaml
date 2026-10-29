@@ -1367,6 +1367,65 @@ paths:
           $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /publishing-preferences:
+    parameters:
+      - $ref: "#/components/parameters/XWorkspaceId"
+    get:
+      tags: [Publishing]
+      operationId: getPublishingPreferences
+      summary: Read owner publishing preferences
+      description: |
+        Returns the Workspace's persistent publishing timezone, reusable
+        signature templates, and owner notification choices. An untouched
+        Workspace returns a null timezone, no templates, and both notification
+        events disabled. `email_available` reports whether the installation can
+        actually deliver mail; clients must not offer a channel when it is
+        false.
+      responses:
+        "200":
+          description: Current publishing preferences.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishingPreferences"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [Publishing]
+      operationId: updatePublishingPreferences
+      summary: Replace owner publishing preferences
+      description: |
+        Atomically replaces the complete timezone, signature template list, and
+        notification choices. A template list carries the full desired order,
+        so create, edit, reorder, delete, and default selection are one
+        replacement. Changing the display timezone never rewrites a stored
+        Schedule instant. Requires the workspace admin role.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishingPreferencesUpdate"
+      responses:
+        "200":
+          description: Preferences replaced.
+          headers:
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishingPreferences"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
   /platforms/capabilities:
     parameters:
       - $ref: "#/components/parameters/XWorkspaceId"
@@ -4514,15 +4573,17 @@ components:
           description_override,
           hashtags,
           provider_options,
+          signature,
           attachment_ids,
         ]
       description: |
         Saved per-Channel settings for one Platform account on this Post.
-        attachment_ids selects and orders this Channel's attachment subset:
-        null inherits the Post's ordered attachments, [] publishes text only,
-        and a list overrides both membership and order. Targets may exist
-        before any Distribution; readiness is enforced only when the target
-        is scheduled.
+        signature is the resolved default signature snapshot this target will
+        append; null means no signature. attachment_ids selects and orders this
+        Channel's attachment subset: null inherits the Post's ordered
+        attachments, [] publishes text only, and a list overrides both
+        membership and order. Targets may exist before any Distribution;
+        readiness is enforced only when the target is scheduled.
       properties:
         platform_account_id:
           type: string
@@ -4544,6 +4605,9 @@ components:
           oneOf:
             - $ref: "#/components/schemas/PostProviderOptions"
             - type: "null"
+        signature:
+          type: [string, "null"]
+          maxLength: 1000
         attachment_ids:
           type: [array, "null"]
           uniqueItems: true
@@ -4803,9 +4867,12 @@ components:
       required: [platform_account_id]
       description: |
         Per-Channel settings to persist for one Platform account.
-        attachment_ids: null or omitted inherits the Post's ordered
-        attachments, [] publishes text only, and a list overrides membership
-        and order for this target. Each account appears at most once.
+        signature is the resolved signature snapshot the composer previewed for
+        this target; the server stores it verbatim and later template edits do
+        not change it. attachment_ids: null or omitted inherits the Post's
+        ordered attachments, [] publishes text only, and a list overrides
+        membership and order for this target. Each account appears at most
+        once.
       properties:
         platform_account_id:
           type: string
@@ -4827,6 +4894,9 @@ components:
           oneOf:
             - $ref: "#/components/schemas/PostProviderOptions"
             - type: "null"
+        signature:
+          type: [string, "null"]
+          maxLength: 1000
         attachment_ids:
           type: [array, "null"]
           uniqueItems: true
@@ -5127,17 +5197,19 @@ components:
       required:
         - title
         - text
+        - signature
         - hashtags
         - provider_options
         - media
       description: |
         Immutable resolved composition one Provider publish attempt froze at
-        claim time. title and text are the caption the Channel was asked to
-        publish after applying its overrides; media is the exact ordered set
-        of media identities delivered, each carrying only descriptive facts —
-        never storage keys or signed capabilities. An attachment whose
-        rendition was not ready at claim keeps its position with null media
-        facts instead of silently dropping out of the published order.
+        claim time. title, text, and signature are the caption the Channel was
+        asked to publish after applying its overrides; media is the exact
+        ordered set of media identities delivered, each carrying only
+        descriptive facts — never storage keys or signed capabilities. An
+        attachment whose rendition was not ready at claim keeps its position
+        with null media facts instead of silently dropping out of the
+        published order.
       properties:
         title:
           type: string
@@ -5145,6 +5217,10 @@ components:
         text:
           type: string
           description: Frozen caption body; empty for media-only publications.
+        signature:
+          type: [string, "null"]
+          maxLength: 1000
+          description: Frozen signature appended to the caption, or null.
         hashtags:
           type: array
           uniqueItems: true
@@ -5215,6 +5291,11 @@ components:
         music_usage_confirmed:
           type: boolean
           const: true
+        auto_add_music:
+          type: boolean
+          description: |
+            Only applies to photo posts. When true TikTok adds recommended
+            music the creator can later change in the app.
     YouTubePrivacyStatus:
       type: string
       enum:
@@ -5268,6 +5349,8 @@ components:
         music_usage_confirmed:
           type: boolean
           const: true
+        auto_add_music:
+          type: boolean
     YouTubePostOptions:
       type: object
       additionalProperties: false
@@ -5280,6 +5363,129 @@ components:
           type: boolean
         privacy_status:
           $ref: "#/components/schemas/YouTubePrivacyStatus"
+    InstagramPostType:
+      type: string
+      enum:
+        - feed
+        - reel
+        - story
+    InstagramPostOptions:
+      type: object
+      additionalProperties: false
+      description: |
+        Saved Instagram publication choices. feed is the default for a single
+        image or video, reel is the default for a single video, and story is
+        supported for a single image or video. trial_reel is valid only for a
+        reel and asks Instagram to test the reel with non-followers first.
+      properties:
+        post_type:
+          $ref: "#/components/schemas/InstagramPostType"
+        trial_reel:
+          type: boolean
+        trial_graduation:
+          type: string
+          enum:
+            - manual
+            - performance
+    InstagramPublishOptions:
+      type: object
+      additionalProperties: false
+      properties:
+        post_type:
+          $ref: "#/components/schemas/InstagramPostType"
+        trial_reel:
+          type: boolean
+        trial_graduation:
+          type: string
+          enum:
+            - manual
+            - performance
+    SignatureTemplate:
+      type: object
+      additionalProperties: false
+      required: [id, name, body, is_default, position]
+      description: |
+        One reusable signature. body may use {brand_profile}, {platform}, and
+        {channel}; the composer resolves them against the actual target before
+        saving the Post snapshot.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        body:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        is_default:
+          type: boolean
+        position:
+          type: integer
+          minimum: 0
+    NotificationPreferences:
+      type: object
+      additionalProperties: false
+      required: [events, channels]
+      properties:
+        events:
+          type: object
+          additionalProperties: false
+          required: [publication_failed, channel_disconnected]
+          properties:
+            publication_failed:
+              type: boolean
+            channel_disconnected:
+              type: boolean
+        channels:
+          type: object
+          additionalProperties: false
+          required: [email]
+          properties:
+            email:
+              type: boolean
+    PublishingPreferences:
+      type: object
+      additionalProperties: false
+      required: [timezone, signature_templates, notifications, email_available, updated_at]
+      description: |
+        Persistent owner preferences for the shared Workspace. timezone null
+        means the browser's timezone remains in effect. email_available is
+        false when the installation has no working mail sender, and clients
+        must not offer to enable that channel.
+      properties:
+        timezone:
+          type: [string, "null"]
+          maxLength: 100
+        signature_templates:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/SignatureTemplate"
+        notifications:
+          $ref: "#/components/schemas/NotificationPreferences"
+        email_available:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    PublishingPreferencesUpdate:
+      type: object
+      additionalProperties: false
+      required: [timezone, signature_templates, notifications]
+      properties:
+        timezone:
+          type: [string, "null"]
+          maxLength: 100
+        signature_templates:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/SignatureTemplate"
+        notifications:
+          $ref: "#/components/schemas/NotificationPreferences"
     PostProviderOptions:
       type: object
       additionalProperties: false
@@ -5291,6 +5497,8 @@ components:
           $ref: "#/components/schemas/TikTokPostOptions"
         youtube:
           $ref: "#/components/schemas/YouTubePostOptions"
+        instagram:
+          $ref: "#/components/schemas/InstagramPostOptions"
     ProviderPublishOptions:
       type: object
       additionalProperties: false
@@ -5299,6 +5507,8 @@ components:
           $ref: "#/components/schemas/TikTokPublishOptions"
         youtube:
           $ref: "#/components/schemas/YouTubePublishOptions"
+        instagram:
+          $ref: "#/components/schemas/InstagramPublishOptions"
     UpdateDistributionRequest:
       type: object
       additionalProperties: false

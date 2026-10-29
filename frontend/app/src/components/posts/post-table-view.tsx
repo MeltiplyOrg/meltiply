@@ -10,6 +10,7 @@ import { PlatformIcon } from "@/components/primitives/platform-icon";
 import { useSmoothScrollContainer } from "@/components/layout/smooth-scroll";
 import { StatusBadge } from "./status-badge";
 import { useI18n } from "@/lib/i18n";
+import { usePublishingTimeZone } from "@/context/publishing-timezone.context";
 import { abbreviateRecordId } from "@/lib/format";
 import { cn } from "@meltiply/ui/utils";
 import { normalizePostStatus, resolveRowCaption, resolveRowProviders } from "./posts-helpers";
@@ -130,18 +131,10 @@ function PostSelectionCheckbox({
 const POST_SELECTION_CELL_CLASS = "relative";
 
 /**
- * Publish-date column formatters.
- *
- * The column renders the same two shapes in every row, and constructing an
- * `Intl.DateTimeFormat` is the expensive part of formatting, so both are built
- * once for the module instead of per row per render.
+ * Publish-date column formatters are created per row from the owner's
+ * publishing timezone, so changing the preference changes display without
+ * rewriting stored Schedule instants.
  */
-const PUBLISH_DAY_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-const PUBLISH_TIME_FORMAT = new Intl.DateTimeFormat("en-US", {
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: true,
-});
 const METRIC_FORMAT = new Intl.NumberFormat("en-US");
 type AnalyticsColumn = PostAnalyticsColumn;
 
@@ -179,6 +172,7 @@ const PostTableRow = React.memo(function PostTableRow({
   showDate,
   showProfile,
   analyticsColumns,
+  timeZone,
   onToggleSelection,
   onViewDetails,
 }: {
@@ -192,12 +186,29 @@ const PostTableRow = React.memo(function PostTableRow({
   showDate: boolean;
   showProfile: boolean;
   analyticsColumns: readonly AnalyticsColumn[];
+  timeZone: string;
   onToggleSelection: (postId: string) => void;
   onViewDetails: (postId: string) => void;
 }) {
   const { t } = useI18n();
   const providers = resolveRowProviders(post);
   const publishDate = new Date(post.date);
+  const dateFormats = React.useMemo(
+    () => ({
+      day: new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone,
+      }),
+      time: new Intl.DateTimeFormat("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone,
+      }),
+    }),
+    [timeZone],
+  );
   const attachments = post.post?.attachments.length ?? 0;
   const analytics =
     post.post?.status !== "draft" && post.channels.some((channel) => channel.status === "published")
@@ -270,9 +281,9 @@ const PostTableRow = React.memo(function PostTableRow({
       )}
       {showDate && (
         <PostRowCell className="px-2 whitespace-nowrap tabular-nums">
-          <time dateTime={post.date}>{PUBLISH_DAY_FORMAT.format(publishDate)}</time>
+          <time dateTime={post.date}>{dateFormats.day.format(publishDate)}</time>
           <span className="ml-1.5 text-(length:--font-size-micro) text-ink-3">
-            {PUBLISH_TIME_FORMAT.format(publishDate)}
+            {dateFormats.time.format(publishDate)}
           </span>
         </PostRowCell>
       )}
@@ -396,6 +407,7 @@ export const PostTableView = React.memo(function PostTableView({
   canSelect,
 }: PostTableViewProps) {
   const { t, tStatus } = useI18n();
+  const timeZone = usePublishingTimeZone();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const scrollRef = useSmoothScrollContainer();
   const groups = useMemo(
@@ -565,6 +577,7 @@ export const PostTableView = React.memo(function PostTableView({
                           showDate={showDate}
                           showProfile={showProfile}
                           analyticsColumns={analyticsColumns}
+                          timeZone={timeZone}
                           onToggleSelection={onToggleSelection}
                           onViewDetails={onViewDetails}
                         />

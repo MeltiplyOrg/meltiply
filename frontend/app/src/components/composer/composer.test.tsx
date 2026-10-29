@@ -24,6 +24,7 @@ import type {
   BrandProfile,
   PlatformAccount,
   Post,
+  PublishingPreferences,
   TikTokPublishingRequirements,
 } from "@/types";
 
@@ -44,6 +45,7 @@ vi.mock("@/lib/api", async (original) => ({
   ...(await original<typeof ApiModule>()),
   getPlatformPublishingRequirements: vi.fn(),
   getPost: vi.fn(),
+  getPublishingPreferences: vi.fn(),
   updatePost: vi.fn(),
   schedulePost: vi.fn(),
 }));
@@ -95,6 +97,8 @@ function renderComposer(
     onNavigate?: ComposerProps["onNavigate"];
     /** Creator restrictions loaded for the TikTok destination, or unavailable. */
     requirements?: TikTokPublishingRequirements | null;
+    /** Saved publishing preferences, including the default signature. */
+    preferences?: PublishingPreferences;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -106,6 +110,20 @@ function renderComposer(
   queryClient.setQueryDefaults(queryKeys.platformCapabilities(), { staleTime: Infinity });
   queryClient.setQueryData(queryKeys.platforms(), options.accounts ?? []);
   queryClient.setQueryData(queryKeys.platformCapabilities(), options.capabilities ?? []);
+  queryClient.setQueryDefaults(queryKeys.publishingPreferences(), { staleTime: Infinity });
+  queryClient.setQueryData(
+    queryKeys.publishingPreferences(),
+    options.preferences ?? {
+      email_available: false,
+      notifications: {
+        channels: { email: false },
+        events: { channel_disconnected: false, publication_failed: false },
+      },
+      signature_templates: [],
+      timezone: null,
+      updated_at: "2026-01-01T00:00:00.000Z",
+    },
+  );
   vi.mocked(getPlatformPublishingRequirements).mockImplementation(() =>
     options.requirements
       ? Effect.succeed(options.requirements)
@@ -619,6 +637,7 @@ describe("Composer provider publication choices", () => {
           description_override: null,
           hashtags: [],
           provider_options: { youtube: { made_for_kids: false } },
+          signature: null,
         },
       ],
     };
@@ -664,6 +683,7 @@ describe("Composer provider publication choices", () => {
             description_override: null,
             hashtags: [],
             provider_options: { youtube: { made_for_kids: true, privacy_status: "unlisted" } },
+            signature: null,
           },
         ],
       },
@@ -672,6 +692,60 @@ describe("Composer provider publication choices", () => {
       expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveTextContent("Unlisted"),
     );
     expect(screen.getByRole("combobox", { name: "Made for kids" })).toHaveTextContent("Yes");
+  });
+
+  it("preserves a saved signature snapshot when the default template changes", async () => {
+    const account = {
+      ...instagramAccount,
+      platform: "youtube" as const,
+      display_name: "Video destination",
+    };
+    const savedPost: Post = {
+      ...hydratedPost,
+      brand_profile_id: account.brand_profile_id,
+      targets: [
+        {
+          platform_account_id: account.id,
+          attachment_ids: null,
+          title_override: "A saved video",
+          description_override: null,
+          hashtags: [],
+          provider_options: { youtube: { made_for_kids: false, privacy_status: "public" } },
+          signature: "Saved footer",
+        },
+      ],
+    };
+    vi.mocked(updatePost).mockReturnValue(Effect.succeed(savedPost));
+    renderComposer({
+      accounts: [account],
+      brandProfiles: composerProfiles,
+      capabilities: [platformCapability("youtube", 5000)],
+      initialPostId: savedPost.id,
+      post: savedPost,
+      preferences: {
+        email_available: false,
+        notifications: {
+          channels: { email: false },
+          events: { channel_disconnected: false, publication_failed: false },
+        },
+        signature_templates: [
+          {
+            body: "New template footer",
+            id: "00000000-0000-4000-8000-000000000901",
+            is_default: true,
+            name: "Current default",
+            position: 0,
+          },
+        ],
+        timezone: "America/New_York",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(savedPost.default_text));
+    expect(screen.getByText("Saved footer")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updatePost).toHaveBeenCalled());
+    expect(vi.mocked(updatePost).mock.lastCall?.[2].targets?.[0]?.signature).toBe("Saved footer");
   });
 
   it("requires TikTok interaction opt-in instead of granting it implicitly", async () => {
@@ -747,6 +821,7 @@ describe("Composer provider publication choices", () => {
                 music_usage_confirmed: true,
               },
             },
+            signature: null,
           },
         ],
       },

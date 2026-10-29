@@ -323,6 +323,7 @@ fixtures:
     description_override: null
     hashtags: [launch]
     provider_options: null
+    signature: null
     attachment_ids: null
   post: &post
     id: 00000000-0000-4000-8000-000000000701
@@ -1073,6 +1074,51 @@ operations:
     errors:
       - status: 409
         body: *invalid_state_error
+  getPublishingPreferences:
+    headers: *bearer_authorization
+    success:
+      status: 200
+      body: &publishing_preferences
+        timezone: America/New_York
+        signature_templates:
+          - id: 00000000-0000-4000-8000-000000000901
+            name: Launch footer
+            body: "Follow {brand_profile} on {platform}."
+            is_default: true
+            position: 0
+        notifications:
+          events:
+            publication_failed: true
+            channel_disconnected: false
+          channels:
+            email: true
+        email_available: true
+        updated_at: 2026-01-01T00:00:00Z
+    errors:
+      - status: 401
+        body: *authentication_error
+  updatePublishingPreferences:
+    headers: *bearer_authorization
+    request:
+      timezone: America/New_York
+      signature_templates:
+        - id: 00000000-0000-4000-8000-000000000901
+          name: Launch footer
+          body: "Follow {brand_profile} on {platform}."
+          is_default: true
+          position: 0
+      notifications:
+        events:
+          publication_failed: true
+          channel_disconnected: false
+        channels:
+          email: true
+    success:
+      status: 200
+      body: *publishing_preferences
+    errors:
+      - status: 422
+        body: *validation_error
   listPosts:
     headers: *bearer_authorization
     success:
@@ -1095,6 +1141,7 @@ operations:
       targets:
         - platform_account_id: 00000000-0000-4000-8000-000000000201
           hashtags: [launch]
+          signature: null
           attachment_ids: null
     success:
       status: 201
@@ -1144,6 +1191,7 @@ operations:
       targets:
         - platform_account_id: 00000000-0000-4000-8000-000000000201
           hashtags: [launch]
+          signature: null
           attachment_ids: null
     success:
       status: 200
@@ -1277,6 +1325,7 @@ operations:
         publication:
           title: Launch note
           text: Hello world
+          signature: null
           hashtags: [launch]
           provider_options: null
           media:

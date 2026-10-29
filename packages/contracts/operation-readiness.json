@@ -2,6 +2,14 @@
   "schemaVersion": 1,
   "contractVersion": "1.0.0-target.0",
   "operations": {
+    "getPublishingPreferences": {
+      "state": "specified",
+      "evidenceAndGate": "Preference persistence and browser acceptance tracked in issues #6, #7, and #8; hosted mail delivery remains separate."
+    },
+    "updatePublishingPreferences": {
+      "state": "specified",
+      "evidenceAndGate": "Preference persistence and browser acceptance tracked in issues #6, #7, and #8; hosted mail delivery remains separate."
+    },
     "listQueues": {
       "state": "specified",
       "evidenceAndGate": "Queue HTTP and browser acceptance tracked in issue #23; live Platform credentials remain separate."

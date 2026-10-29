@@ -114,6 +114,7 @@ interface StoredPublicationSnapshot {
   content: {
     hashtags: string[];
     provider_options?: ProviderPublishOptions;
+    signature?: string | null;
     text: string;
     title: string;
   };
@@ -190,8 +191,18 @@ function toWireProviderOptions(
   if (!options) return null;
   const tiktok = options.tiktok;
   const youtube = options.youtube;
-  if (!tiktok && !youtube) return null;
+  const instagram = options.instagram;
+  if (!tiktok && !youtube && !instagram) return null;
   return {
+    ...(instagram
+      ? {
+          instagram: {
+            ...(instagram.postType ? { post_type: instagram.postType } : {}),
+            ...(instagram.trialReel !== undefined ? { trial_reel: instagram.trialReel } : {}),
+            ...(instagram.trialGraduation ? { trial_graduation: instagram.trialGraduation } : {}),
+          },
+        }
+      : {}),
     ...(tiktok
       ? {
           tiktok: {
@@ -202,6 +213,7 @@ function toWireProviderOptions(
             brand_organic: tiktok.brandOrganic,
             is_ai_generated: tiktok.isAiGenerated,
             music_usage_confirmed: tiktok.musicUsageConfirmed,
+            ...(tiktok.autoAddMusic !== undefined ? { auto_add_music: tiktok.autoAddMusic } : {}),
             privacy_level: tiktok.privacyLevel,
           },
         }
@@ -233,6 +245,7 @@ function mapPublicationSnapshot(
   return {
     title: snapshot.content.title,
     text: snapshot.content.text,
+    signature: snapshot.content.signature ?? null,
     hashtags: snapshot.content.hashtags,
     provider_options: toWireProviderOptions(snapshot.content.provider_options ?? null),
     media: [...snapshot.media]
@@ -320,6 +333,7 @@ export function mapDistribution(row: DistributionRow): Distribution {
 export function validateTargetOverrides(overrides: {
   descriptionOverride?: string | null;
   hashtags?: string[];
+  signature?: string | null;
   titleOverride?: string | null;
 }): void {
   if (overrides.titleOverride && overrides.titleOverride.length > 200) {
@@ -327,6 +341,9 @@ export function validateTargetOverrides(overrides: {
   }
   if (overrides.descriptionOverride && overrides.descriptionOverride.length > 5_000) {
     throw new CoreApiError(422, "validation_error", "description_override is too long.");
+  }
+  if (overrides.signature && overrides.signature.length > 1_000) {
+    throw new CoreApiError(422, "validation_error", "signature is too long.");
   }
   const hashtags = overrides.hashtags ?? [];
   if (hashtags.length > 30 || new Set(hashtags).size !== hashtags.length) {

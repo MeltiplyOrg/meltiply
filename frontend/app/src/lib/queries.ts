@@ -40,6 +40,7 @@ import type {
   PostQueryParams,
   Post,
   PostListResponse,
+  PublishingPreferencesUpdate,
   SchedulePostInput,
   CreateQueueInput,
   UpdateQueueInput,
@@ -95,6 +96,7 @@ function withBrandProfile<T extends object>(
 /** Cache identities for reads; assets() is only an invalidation prefix, not a library query. */
 export const queryKeys = {
   currentUser: () => ["current-user"] as const,
+  publishingPreferences: () => ["publishing-preferences"] as const,
   analytics: () => ["analytics"] as const,
   installation: () => ["installation"] as const,
   workspaceMembers: () => ["workspace-members"] as const,
@@ -206,6 +208,7 @@ function postResourceInvalidations(): QueryKey[] {
 
 export const mutationInvalidations = {
   queueConfiguration: () => [queryKeys.queues()],
+  publishingPreferences: () => [queryKeys.publishingPreferences()],
   removePostFromQueue: () => [...postResourceInvalidations(), queryKeys.queues()],
   createPost: () => postResourceInvalidations(),
   updatePost: () => postResourceInvalidations(),
@@ -938,6 +941,34 @@ export function useQueueCalendarPosts(scope: SessionScope, params: PostQueryPara
     collectionKey,
   );
   return { ...query, error: query.error ?? progressError };
+}
+
+/**
+ * Reads the Workspace's persistent publishing preferences. The timezone and
+ * signature list are shared by every member; the composer and scheduling
+ * surfaces use the same read so their interpretation cannot drift.
+ *
+ * @param scope Session scope gating execution.
+ * @param enabled Whether the query is active; defaults to true.
+ * @returns Query result with the current preferences.
+ */
+export function usePublishingPreferences(scope: SessionScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.publishingPreferences(),
+    queryFn: ({ signal }) => runApiQuery(scope, (api) => api.getPublishingPreferences(), signal),
+    enabled: scope.isSignedIn && enabled,
+    staleTime: 0,
+  });
+}
+
+/** Replaces the complete preference document and refreshes its single cache entry. */
+export function useUpdatePublishingPreferences(scope: SessionScope) {
+  return useIdempotentMutation(
+    scope,
+    (api, input: PublishingPreferencesUpdate, idempotencyKey) =>
+      api.updatePublishingPreferences(input, { idempotencyKey }),
+    mutationInvalidations.publishingPreferences,
+  );
 }
 
 /** Creates a recurring plan with the shared stable-key mutation lifecycle. */

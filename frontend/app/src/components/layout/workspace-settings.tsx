@@ -5,6 +5,7 @@ import {
   Monitor,
   Moon,
   Palette,
+  Send,
   ShieldCheck,
   Sun,
   UserRound,
@@ -20,9 +21,10 @@ import { useWorkspace } from "@/context/workspace.context";
 import { useTheme } from "@/lib/theme";
 import { supportedLanguages, useI18n } from "@/lib/i18n";
 import { AccountSecurity } from "@/components/auth/account-security";
+import { PublishingPreferencesSection } from "@/components/settings/publishing-preferences-section";
 import SettingsPage from "@/app/(dashboard)/settings/page";
 
-const SECTION_IDS = ["appearance", "language", "account", "security"] as const;
+const SECTION_IDS = ["appearance", "language", "publishing", "account", "security"] as const;
 type SettingsSection = (typeof SECTION_IDS)[number] | "administration";
 const LANGUAGE_CODES = supportedLanguages.map(({ code }) => code);
 
@@ -79,6 +81,14 @@ export default function WorkspaceSettings() {
       description: t("Choose the language used throughout your workspace."),
       icon: Languages,
     },
+    publishing: {
+      label: t("Publishing"),
+      navLabel: t("Publishing"),
+      description: t(
+        "Choose the publishing timezone, reusable signatures, and owner notifications.",
+      ),
+      icon: Send,
+    },
     account: {
       label: t("Account and workspace"),
       navLabel: t("Account"),
@@ -97,8 +107,8 @@ export default function WorkspaceSettings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSection = searchParams.get("section");
   const sectionIds: readonly SettingsSection[] = canManageSettings
-    ? ["administration", ...SECTION_IDS]
-    : SECTION_IDS;
+    ? ["administration", "appearance", "language", "publishing", "account", "security"]
+    : ["appearance", "language", "account", "security"];
   const section = sectionIds.find((id) => id === requestedSection) ?? "appearance";
   const current = sections[section];
   const handleSignOut = useWorkspaceSignOut();
@@ -328,6 +338,7 @@ export default function WorkspaceSettings() {
             </section>
           )}
           {section === "security" && <AccountSecurity />}
+          {section === "publishing" && <PublishingPreferencesSection />}
           {section === "administration" && <SettingsPage embedded />}
         </div>
       </div>

@@ -111,6 +111,18 @@ describe("composeCaption", () => {
     expect(composeCaption(source)).toBe("post title\n\npost body\n\n#launch #beta");
   });
 
+  it("appends a resolved signature between the body and hashtags", () => {
+    expect(
+      composeCaption({
+        ...source,
+        signature: "Follow Alpha Studio on Instagram.",
+      }),
+    ).toBe("post title\n\npost body\n\nFollow Alpha Studio on Instagram.\n\n#launch #beta");
+    expect(composeCaption({ ...source, hashtags: [], signature: "  " })).toBe(
+      "post title\n\npost body",
+    );
+  });
+
   it("prefers target overrides over the post's own content", () => {
     expect(
       composeCaption({

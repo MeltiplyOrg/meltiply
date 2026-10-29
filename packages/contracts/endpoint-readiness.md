@@ -52,6 +52,8 @@ Current version: contract/client/Worker `1.0.0-target.0`.
 | `updateBrandProfile`                | `specified`   | Contract specified in the Brand Profile cutover; Worker route, admin role check, normalized-name uniqueness, and conformance evidence remain.              |
 | `deleteBrandProfile`                | `specified`   | Contract specified in the Brand Profile cutover; Worker route, admin role check, durable soft-delete effects, and conformance evidence remain.             |
 | `restoreBrandProfile`               | `specified`   | Contract specified in the Brand Profile cutover; Worker route, admin role check, retention-window guard, and conformance evidence remain.                  |
+| `getPublishingPreferences`          | `specified`   | Preference persistence and browser acceptance tracked in issues #6, #7, and #8; hosted mail delivery remains separate.                                     |
+| `updatePublishingPreferences`       | `specified`   | Preference persistence and browser acceptance tracked in issues #6, #7, and #8; hosted mail delivery remains separate.                                     |
 | `listPlatformCapabilities`          | `specified`   | Worker returns all five fail-closed capability rows; preview conformance remains.                                                                          |
 | `listPlatformAccounts`              | `specified`   | Worker tenant/RLS integration passes; preview conformance remains.                                                                                         |
 | `startPlatformOAuth`                | `specified`   | PKCE, exact callback, user/org/provider state binding, and frontend relay tests pass; no provider is accepted yet.                                         |

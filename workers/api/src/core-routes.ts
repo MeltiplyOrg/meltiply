@@ -11,6 +11,8 @@ import {
   ProviderService,
   type OAuthConnection,
   type OAuthExchangeResult,
+  type InstagramPostType,
+  type InstagramTrialGraduation,
   type ProviderPublicationRequirements,
   type ProviderRegistry,
   type TikTokPrivacyLevel,
@@ -34,6 +36,7 @@ import type {
   SchedulePostInput,
 } from "./post-types";
 import type { PublishingQueueApiService } from "./publishing-queue-service";
+import type { PublishingPreferencesApiService } from "./publishing-preferences-service";
 import { registerPublishingQueueRoutes } from "./publishing-queue-routes";
 import type { StorageService } from "./effect/services/storage";
 import { scheduleInboxCommentSync } from "./inbox-comment-sync";
@@ -88,6 +91,7 @@ export interface CoreRouteDependencies {
   brandProfileService?: BrandProfileApiService;
   coreService?: CoreApiService;
   postService?: PostApiService;
+  publishingPreferencesService?: PublishingPreferencesApiService;
   publishingQueueService?: PublishingQueueApiService;
   providerRegistry?: ProviderRegistry;
   publicationRequirements?: PublicationRequirementsReader;
@@ -268,10 +272,54 @@ function providerOptionsField(body: Record<string, unknown>): PostProviderOption
     throw new CoreApiError(400, "validation_error", "provider_options must be an object.");
   }
   const options = value as Record<string, unknown>;
-  onlyKeys(options, ["tiktok", "youtube"]);
+  onlyKeys(options, ["tiktok", "youtube", "instagram"]);
   return {
+    ...(options.instagram !== undefined
+      ? { instagram: instagramOptionsField(options.instagram) }
+      : {}),
     ...(options.tiktok !== undefined ? { tiktok: tiktokOptionsField(options.tiktok) } : {}),
     ...(options.youtube !== undefined ? { youtube: youtubeOptionsField(options.youtube) } : {}),
+  };
+}
+
+/**
+ * Validates and normalizes the `provider_options.instagram` subtree.
+ *
+ * Accepts an unanswered post type for drafts while rejecting unknown enum
+ * values, non-boolean trial flags, and a graduation strategy without a trial.
+ * Scheduling validates that the chosen shape matches the actual media set.
+ *
+ * @param value - Raw `provider_options.instagram` value from the request payload.
+ * @returns Saved Instagram choices with camelCase fields.
+ * @throws {CoreApiError} 400 `validation_error` if option keys or types violate schema rules.
+ */
+function instagramOptionsField(value: unknown): NonNullable<PostProviderOptions["instagram"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      "provider_options.instagram must be an object.",
+    );
+  }
+  const instagram = value as Record<string, unknown>;
+  onlyKeys(instagram, ["post_type", "trial_reel", "trial_graduation"]);
+  const postType = instagram.post_type;
+  const trialGraduation = instagram.trial_graduation;
+  if (
+    (postType !== undefined &&
+      (typeof postType !== "string" || !["feed", "reel", "story"].includes(postType))) ||
+    (instagram.trial_reel !== undefined && typeof instagram.trial_reel !== "boolean") ||
+    (trialGraduation !== undefined &&
+      (typeof trialGraduation !== "string" || !["manual", "performance"].includes(trialGraduation)))
+  ) {
+    throw new CoreApiError(400, "validation_error", "provider_options.instagram is invalid.");
+  }
+  return {
+    ...(postType !== undefined ? { postType: postType as InstagramPostType } : {}),
+    ...(instagram.trial_reel !== undefined ? { trialReel: instagram.trial_reel } : {}),
+    ...(trialGraduation !== undefined
+      ? { trialGraduation: trialGraduation as InstagramTrialGraduation }
+      : {}),
   };
 }
 
@@ -300,6 +348,7 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
     "is_ai_generated",
     "music_usage_confirmed",
     "disclose_commercial_content",
+    "auto_add_music",
   ]);
   const privacyLevel = tiktok.privacy_level;
   const booleanKeys = [
@@ -316,6 +365,7 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
         !TIKTOK_PRIVACY_LEVELS.has(privacyLevel as TikTokPrivacyLevel))) ||
     (tiktok.disclose_commercial_content !== undefined &&
       typeof tiktok.disclose_commercial_content !== "boolean") ||
+    (tiktok.auto_add_music !== undefined && typeof tiktok.auto_add_music !== "boolean") ||
     booleanKeys.some((key) => typeof tiktok[key] !== "boolean") ||
     tiktok.music_usage_confirmed !== true
   ) {
@@ -329,6 +379,7 @@ function tiktokOptionsField(value: unknown): NonNullable<PostProviderOptions["ti
     brandOrganic: tiktok.brand_organic as boolean,
     isAiGenerated: tiktok.is_ai_generated as boolean,
     musicUsageConfirmed: true,
+    ...(typeof tiktok.auto_add_music === "boolean" ? { autoAddMusic: tiktok.auto_add_music } : {}),
     ...(privacyLevel !== undefined ? { privacyLevel: privacyLevel as TikTokPrivacyLevel } : {}),
     ...(typeof tiktok.disclose_commercial_content === "boolean"
       ? { discloseCommercialContent: tiktok.disclose_commercial_content }
@@ -418,14 +469,20 @@ function postTarget(body: Record<string, unknown>): PostTargetInput {
     "description_override",
     "hashtags",
     "provider_options",
+    "signature",
     "attachment_ids",
   ]);
+  const signature = optionalStringField(body, "signature");
+  if (signature !== null && signature !== undefined && signature.length > 1_000) {
+    throw new CoreApiError(400, "validation_error", "signature is too long.");
+  }
   return {
     attachmentIds: uuidArrayField(body, "attachment_ids"),
     descriptionOverride: optionalStringField(body, "description_override"),
     hashtags: stringArrayField(body, "hashtags"),
     platformAccountId: uuidParam(stringField(body, "platform_account_id"), "platform_account_id"),
     providerOptions: providerOptionsField(body),
+    signature: signature ?? null,
     titleOverride: optionalStringField(body, "title_override"),
   };
 }
@@ -483,6 +540,106 @@ function postComposition(body: Record<string, unknown>): {
     defaultText: postTextField(body, "default_text"),
     targets: postTargets(body),
     title: postTitleField(body, "title"),
+  };
+}
+
+/**
+ * Parses a complete publishing-preferences replacement.
+ *
+ * The document is intentionally whole-document: template create, edit,
+ * reorder, delete, and default selection are one authoritative write, so a
+ * partial merge can never leave two defaults or a stale position.
+ *
+ * @param body - Raw JSON body.
+ * @returns Validated replacement document with contract field names.
+ * @throws {CoreApiError} 400 when keys, types, or bounds violate the contract.
+ */
+function publishingPreferencesInput(
+  body: Record<string, unknown>,
+): components["schemas"]["PublishingPreferencesUpdate"] {
+  onlyKeys(body, ["timezone", "signature_templates", "notifications"]);
+  const timezone = body.timezone;
+  if (timezone !== null && typeof timezone !== "string") {
+    throw new CoreApiError(400, "validation_error", "timezone must be a string or null.");
+  }
+  if (typeof timezone === "string" && (timezone.length === 0 || timezone.length > 100)) {
+    throw new CoreApiError(400, "validation_error", "timezone is invalid.");
+  }
+  const rawTemplates = body.signature_templates;
+  if (!Array.isArray(rawTemplates) || rawTemplates.length > 10) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      "signature_templates must be an array of at most 10 templates.",
+    );
+  }
+  const signatureTemplates = rawTemplates.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new CoreApiError(400, "validation_error", "Each signature template must be an object.");
+    }
+    const template = value as Record<string, unknown>;
+    onlyKeys(template, ["id", "name", "body", "is_default", "position"]);
+    if (
+      typeof template.id !== "string" ||
+      typeof template.name !== "string" ||
+      typeof template.body !== "string" ||
+      typeof template.is_default !== "boolean"
+    ) {
+      throw new CoreApiError(400, "validation_error", "Signature template fields are invalid.");
+    }
+    return {
+      body: template.body,
+      id: template.id,
+      is_default: template.is_default,
+      name: template.name,
+      position: typeof template.position === "number" ? template.position : 0,
+    };
+  });
+  const rawNotifications = body.notifications;
+  if (
+    !rawNotifications ||
+    typeof rawNotifications !== "object" ||
+    Array.isArray(rawNotifications)
+  ) {
+    throw new CoreApiError(400, "validation_error", "notifications must be an object.");
+  }
+  const notifications = rawNotifications as Record<string, unknown>;
+  onlyKeys(notifications, ["events", "channels"]);
+  if (
+    !notifications.events ||
+    typeof notifications.events !== "object" ||
+    Array.isArray(notifications.events) ||
+    !notifications.channels ||
+    typeof notifications.channels !== "object" ||
+    Array.isArray(notifications.channels)
+  ) {
+    throw new CoreApiError(
+      400,
+      "validation_error",
+      "Notification events and channels are required.",
+    );
+  }
+  const events = notifications.events as Record<string, unknown>;
+  const channels = notifications.channels as Record<string, unknown>;
+  onlyKeys(events, ["publication_failed", "channel_disconnected"]);
+  onlyKeys(channels, ["email"]);
+  if (
+    typeof events.publication_failed !== "boolean" ||
+    typeof events.channel_disconnected !== "boolean" ||
+    typeof channels.email !== "boolean"
+  ) {
+    throw new CoreApiError(400, "validation_error", "Notification choices must be booleans.");
+  }
+  return {
+    notifications: {
+      channels: { email: channels.email },
+      events: {
+        channel_disconnected: events.channel_disconnected,
+        publication_failed: events.publication_failed,
+      },
+    },
+    signature_templates: signatureTemplates,
+    timezone,
   };
 }
 
@@ -837,6 +994,16 @@ export function registerCoreRoutes(
       module.createPostApiService(registry().capabilities()),
     );
     return postServicePromise;
+  };
+  let preferencesServicePromise: Promise<PublishingPreferencesApiService> | undefined;
+  const preferences = async (): Promise<PublishingPreferencesApiService> => {
+    if (dependencies.publishingPreferencesService) {
+      return dependencies.publishingPreferencesService;
+    }
+    preferencesServicePromise ??= import("./publishing-preferences-service").then((module) =>
+      module.createPublishingPreferencesApiService(),
+    );
+    return preferencesServicePromise;
   };
 
   app.get("/api/v1/brand-profiles", (c) =>
@@ -2684,6 +2851,33 @@ export function registerCoreRoutes(
           requestId(c),
         );
         return jsonResponse(result.value, 202, requestId(c), {
+          ...idempotencyHeaders(result.replayed),
+        });
+      }),
+    ),
+  );
+
+  app.get("/api/v1/publishing-preferences", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const service = yield* fromPromise(preferences);
+        const value = yield* service.get(c.env, c.get("actor").claims);
+        return jsonResponse(value, 200, requestId(c));
+      }),
+    ),
+  );
+
+  app.put("/api/v1/publishing-preferences", (c) =>
+    runRouteEffect(
+      c,
+      Effect.gen(function* () {
+        const body = yield* fromPromise(() => jsonBody(c));
+        const input = yield* fromPromise(() => publishingPreferencesInput(body));
+        const key = yield* fromPromise(() => idempotencyKey(c));
+        const service = yield* fromPromise(preferences);
+        const result = yield* service.replace(c.env, c.get("actor").claims, input, key);
+        return jsonResponse(result.value, 200, requestId(c), {
           ...idempotencyHeaders(result.replayed),
         });
       }),

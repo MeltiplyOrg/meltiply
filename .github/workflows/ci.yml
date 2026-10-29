@@ -153,13 +153,45 @@ jobs:
         if: always()
         run: ./scripts/cloudflare-local/database.sh stop
 
+  frontend-performance:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.cloudflare == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Prepare deterministic populated stack
+        run: bun run setup --skip-dependencies --skip-image-pull
+      - name: Install Chromium
+        run: bun run --cwd frontend/app --no-install playwright install --with-deps chromium
+      - name: Measure production publishing journeys
+        env:
+          MELTIPLY_E2E_START_PUBLIC: "1"
+          MELTIPLY_E2E_PUBLIC_BASE_URL: http://127.0.0.1:4321
+        run: bun run --cwd frontend/app test:performance
+      - name: Exercise publishing preferences in the browser
+        run: bun run --cwd frontend/app test:e2e e2e/publishing-preferences.spec.ts --project chromium
+      - name: Upload traces and reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: frontend-performance-${{ github.run_id }}
+          path: |
+            frontend/app/test-results/
+            frontend/app/playwright-report/
+          if-no-files-found: warn
+
   selfhost-images:
     needs: changes
     if: needs.changes.outputs.selfhost == 'true'
     uses: ./.github/workflows/selfhost-ci.yml
 
   ci-gate:
-    needs: [changes, baseline, frontend-fast, cloudflare-fast, selfhost-images]
+    needs:
+      [changes, baseline, frontend-fast, cloudflare-fast, frontend-performance, selfhost-images]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -172,6 +204,8 @@ jobs:
           FRONTEND: ${{ needs.frontend-fast.result }}
           CLOUDFLARE_SELECTED: ${{ needs.changes.outputs.cloudflare }}
           CLOUDFLARE: ${{ needs.cloudflare-fast.result }}
+          PERFORMANCE_SELECTED: ${{ needs.changes.outputs.frontend == 'true' || needs.changes.outputs.cloudflare == 'true' }}
+          PERFORMANCE: ${{ needs.frontend-performance.result }}
           SELFHOST_SELECTED: ${{ needs.changes.outputs.selfhost }}
           SELFHOST_IMAGES: ${{ needs.selfhost-images.result }}
         run: |
@@ -181,6 +215,11 @@ jobs:
             test "$SELFHOST_IMAGES" = success
           else
             test "$SELFHOST_IMAGES" = skipped
+          fi
+          if [ "$PERFORMANCE_SELECTED" = true ]; then
+            test "$PERFORMANCE" = success
+          else
+            test "$PERFORMANCE" = skipped
           fi
           if [ "$FRONTEND_SELECTED" = true ]; then
             test "$FRONTEND" = success

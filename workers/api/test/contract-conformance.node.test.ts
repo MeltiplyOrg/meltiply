@@ -1,6 +1,7 @@
 import type { JwtIdentity } from "@meltiply/auth";
 import type { components } from "@meltiply/contracts/schema";
 import type { PublishingQueueApiService } from "../src/publishing-queue-service";
+import type { PublishingPreferencesApiService } from "../src/publishing-preferences-service";
 import { TokenCipher } from "@meltiply/secrets";
 import { ContractValidator } from "@meltiply/contracts/test-support";
 import { ProviderRegistry } from "@meltiply/providers";
@@ -45,7 +46,7 @@ interface OperationCatalog {
 }
 
 interface ConformanceCase {
-  method: "DELETE" | "GET" | "PATCH" | "POST";
+  method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
   operationId: string;
   path: string;
 }
@@ -293,6 +294,16 @@ const cases: ConformanceCase[] = [
     path: "/api/v1/oauth-selections/select_session_alpha_1234567890",
   },
   { method: "GET", operationId: "listPosts", path: "/api/v1/posts" },
+  {
+    method: "GET",
+    operationId: "getPublishingPreferences",
+    path: "/api/v1/publishing-preferences",
+  },
+  {
+    method: "PUT",
+    operationId: "updatePublishingPreferences",
+    path: "/api/v1/publishing-preferences",
+  },
   { method: "POST", operationId: "createPost", path: "/api/v1/posts" },
   {
     method: "GET",
@@ -548,6 +559,15 @@ const publishingQueueService: PublishingQueueApiService = {
     Effect.succeed({
       replayed: false,
       value: body<components["schemas"]["Post"]>("removePostFromQueue"),
+    }),
+};
+
+const publishingPreferencesService: PublishingPreferencesApiService = {
+  get: () => Effect.succeed(body("getPublishingPreferences")),
+  replace: () =>
+    Effect.succeed({
+      replayed: false,
+      value: body("updatePublishingPreferences"),
     }),
 };
 
@@ -896,6 +916,7 @@ const app = createApiApp({
       stitchAllowed: true,
     }),
   postService,
+  publishingPreferencesService,
   publishingQueueService,
   resolveActor: async () => actorFixture,
   revokeOAuthConnection: () => Effect.succeed(undefined),
@@ -968,6 +989,10 @@ function errorApp(status: number) {
     providerRegistry: new ProviderRegistry(),
     publicationRequirements: effectFailure,
     postService: throwingPosts,
+    publishingPreferencesService: {
+      get: effectFailure,
+      replace: effectFailure,
+    },
     publishingQueueService: {
       list: effectFailure,
       get: effectFailure,

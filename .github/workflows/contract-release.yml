@@ -1,0 +1,98 @@
+name: Contract release
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["contract-v*"]
+    paths:
+      - packages/contracts/**
+      - .github/workflows/contract-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contract-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/install-workspace
+      - name: Require protected release ancestry
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          test "$REF_PROTECTED" = true
+          git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH"
+      - name: Prepare the next source version automatically
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: bun run contract:release:prepare
+      - name: Validate the authoritative contract
+        run: bun run contract:check
+      - name: Produce and verify public release artifacts
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            bun run contract:release:artifacts --tag "$RELEASE_TAG"
+          else
+            bun run contract:release:artifacts
+          fi
+          node packages/contracts/scripts/contract-smoke.mjs
+      - name: Format changed contract surfaces
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          bunx --no-install vp fmt package.json packages/contracts/scripts/*.mjs packages/contracts/src/index.ts packages/contracts/src/generated/version.ts packages/contracts/README.md packages/contracts/CHANGELOG.md packages/contracts/release.json packages/contracts/operation-readiness.json packages/contracts/endpoint-readiness.md packages/contracts/openapi.yaml packages/contracts/examples/operations.yaml workers/api/src/app.ts workers/api/test/app.test.ts .github/workflows/contract-release.yml docs/public-ci.md
+          mkdir -p artifacts
+          git add --intent-to-add packages/contracts/release.json
+          git diff --binary > artifacts/contract-preparation.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contract-release-artifacts
+          path: packages/contracts/dist/release/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        with:
+          name: contract-release-preparation
+          path: artifacts/contract-preparation.patch
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contract-preview-evidence
+          path: artifacts/contract-preview/
+          if-no-files-found: ignore
+
+  publish:
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/contract-v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: contract-release-artifacts
+          path: release
+      - name: Create an immutable version without replacing existing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            release/openapi.json release/openapi.yaml release/changelog.json release/SHA256SUMS \
+            --verify-tag --title "$RELEASE_TAG" --notes-file release/changelog.json

@@ -32,7 +32,6 @@ import {
 import type { MetaContainerOperation } from "./meta-common";
 import type {
   InstagramPostType,
-  InstagramPublishOptions,
   OAuthConnection,
   ProviderAdapter,
   ProviderCredentials,
@@ -42,6 +41,7 @@ import type {
   ProviderTokenSet,
   PublishInput,
 } from "./types";
+import { resolveInstagramOptions, type ResolvedInstagramOptions } from "./instagram-options";
 
 const apiOrigin = "https://graph.instagram.com";
 const exchangeOrigin = "https://api.instagram.com";
@@ -258,11 +258,10 @@ function carouselParentParameters(children: readonly string[], text: string): UR
 }
 
 /**
- * Resolves and validates Instagram's publication shape against the actual
- * attachment set. A single image defaults to a feed image, a single video to a
- * Reel, and a carousel to a feed carousel. Stories and trial Reels require one
- * attachment; a trial Reel must also be a Reel. Unknown or contradictory
- * choices fail closed instead of being replaced by a default.
+ * Resolves Instagram's publication shape against the actual attachment set,
+ * failing closed when the stored choices cannot apply to this media set. The
+ * rule lives in `instagram-options` so the pre-flight validator and this
+ * adapter cannot disagree.
  *
  * @param input - Composed caption plus the Post's ordered attachments.
  * @param attachments - Validated attachments in creator order.
@@ -272,25 +271,12 @@ function carouselParentParameters(children: readonly string[], text: string): UR
 function instagramOptions(
   input: PublishInput,
   attachments: readonly InstagramAttachment[],
-): Required<Pick<InstagramPublishOptions, "postType" | "trialGraduation" | "trialReel">> {
-  const supplied = input.providerOptions?.instagram;
-  const [only] = attachments;
-  const defaultPostType: InstagramPostType =
-    attachments.length === 1 && only?.kind === "video" ? "reel" : "feed";
-  const postType = supplied?.postType ?? defaultPostType;
-  const trialReel = supplied?.trialReel ?? false;
-  const trialGraduation = supplied?.trialGraduation ?? "manual";
-  const invalid =
-    !["feed", "reel", "story"].includes(postType) ||
-    attachments.length === 0 ||
-    (attachments.length > 1 && postType !== "feed") ||
-    (postType === "reel" && (attachments.length !== 1 || only?.kind !== "video")) ||
-    (postType === "story" && attachments.length !== 1) ||
-    (trialReel && postType !== "reel") ||
-    (supplied?.trialGraduation !== undefined && !trialReel) ||
-    (supplied?.trialGraduation !== undefined &&
-      !["manual", "performance"].includes(supplied.trialGraduation));
-  if (invalid) {
+): ResolvedInstagramOptions {
+  const resolved = resolveInstagramOptions(
+    input.providerOptions?.instagram,
+    attachments.map((attachment) => attachment.kind),
+  );
+  if (!resolved) {
     throw new ProviderAdapterError(
       classifyProviderFailure({
         code: "instagram_post_options_invalid",
@@ -298,7 +284,7 @@ function instagramOptions(
       }),
     );
   }
-  return { postType, trialGraduation, trialReel };
+  return resolved;
 }
 
 /**

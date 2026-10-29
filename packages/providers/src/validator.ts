@@ -1,5 +1,6 @@
 import type { PlatformCapability, ValidationIssue } from "@meltiply/contracts";
 
+import { resolveInstagramOptions } from "./instagram-options";
 import type { PublishInput } from "./types";
 
 export type { ValidationIssue } from "@meltiply/contracts";
@@ -292,18 +293,7 @@ export function validatePublishInput(
       const kinds = input.media.map((media) =>
         mediaKind(media.contentType.split(";", 1)[0]!.trim().toLowerCase()),
       );
-      const postType =
-        options.postType ?? (kinds.length === 1 && kinds[0] === "video" ? "reel" : "feed");
-      const trialReel = options.trialReel === true;
-      const invalidPostType =
-        !["feed", "reel", "story"].includes(postType) ||
-        (postType === "reel" && (kinds.length !== 1 || kinds[0] !== "video")) ||
-        (postType === "story" && kinds.length !== 1) ||
-        (trialReel && postType !== "reel") ||
-        (options.trialGraduation !== undefined && !trialReel) ||
-        (options.trialGraduation !== undefined &&
-          !["manual", "performance"].includes(options.trialGraduation));
-      if (invalidPostType) {
+      if (!resolveInstagramOptions(options, kinds)) {
         issues.push({
           constraint: "instagram_post_options_invalid",
           field: "providerOptions.instagram",

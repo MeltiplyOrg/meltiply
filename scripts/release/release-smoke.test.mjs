@@ -318,8 +318,9 @@ test("version smoke fails closed on evidence, binding, and health drift", async 
   assert.equal(hits, 1);
 });
 
-/** Partial canaries may serve the verified previous SHA without accepting an unrelated version. */
-test("update live smoke binds the rollout percentage and accepts the previous version", async (context) => {
+/** Partial canaries accept modern or legacy health only from the verified previous SHA. */
+for (const legacy of [false, true]) {
+test(`update live smoke accepts the previous ${legacy ? "legacy" : "versioned"} health response`, async (context) => {
   const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
   context.after(() => rm(outDir, { force: true, recursive: true }));
   const spec = validateReleaseSpec(releaseInput({ deployment_mode: "update" }));
@@ -352,7 +353,7 @@ test("update live smoke binds the rollout percentage and accepts the previous ve
     response.writeHead(200, { "content-type": "application/json" });
     response.end(
       JSON.stringify({
-        contract_version: contractVersion,
+        contract_version: legacy ? undefined : contractVersion,
         environment: "staging",
         status: "ok",
         version: previousSha,
@@ -373,6 +374,56 @@ test("update live smoke binds the rollout percentage and accepts the previous ve
   assert.equal(evidence.percentage, 5);
   const written = JSON.parse(await readFile(path.join(outDir, "smoke-live-5.json"), "utf8"));
   assert.equal(written.health.version, previousSha);
+  assert.equal(written.health.contract_version, legacy ? null : contractVersion);
+});
+}
+
+/** Legacy handling cannot authorize candidate/full-rollout, foreign, or malformed health responses. */
+test("legacy health remains rejected outside the previous partial-rollout version", async (context) => {
+  for (const scenario of [
+    { name: "candidate", candidate: true, version: gitSha },
+    { name: "bootstrap", bootstrap: true, version: gitSha },
+    { name: "partial candidate", version: gitSha },
+    { name: "full rollout", percentage: 100, version: gitSha },
+    { name: "foreign SHA", version: "c".repeat(40) },
+    { name: "same-SHA previous version", version: gitSha, previous: gitSha },
+    { name: "explicit null", version: previousSha, contract: null },
+    { name: "empty contract version", version: previousSha, contract: "" },
+    { name: "extra key", version: previousSha, extra: true },
+  ]) {
+    const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
+    context.after(() => rm(outDir, { force: true, recursive: true }));
+    const spec = validateReleaseSpec(releaseInput({ deployment_mode: scenario.bootstrap ? "bootstrap" : "update" }));
+    await seedCandidate(outDir, spec);
+    const percentage = scenario.bootstrap || scenario.candidate ? undefined : scenario.percentage ?? 5;
+    const traffic = percentage === 5
+      ? [{ percentage: 5, version_id: secretsVersionId }, { percentage: 95, version_id: previousVersionId }]
+        .sort((left, right) => left.version_id.localeCompare(right.version_id))
+      : [{ percentage: 100, version_id: secretsVersionId }];
+    if (!scenario.candidate) {
+      const filename = scenario.bootstrap ? "worker-api-deployment.json" : `api-rollout-${percentage}.json`;
+      await writeFile(path.join(outDir, filename), JSON.stringify({
+        git_sha: spec.git_sha, release_id: spec.release_id, schema_version: 1,
+        percentage, traffic, version_id: secretsVersionId, worker: "api",
+      }));
+    }
+    const origin = await withServer(context, (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        contract_version: scenario.contract, environment: "staging", status: "ok", version: scenario.version,
+        ...(scenario.extra ? { debug: true } : {}),
+      }));
+    });
+    const params = {
+      environment: {}, fetchImpl: healthFetch(origin), outDir, spec,
+      runCommand: controlPlane({ bindings: { [previousVersionId]: scenario.previous ?? previousSha }, traffic }),
+    };
+    await assert.rejects(
+      scenario.candidate ? smokeVersionCandidate(params) : smokeLiveApi({ ...params, percentage }),
+      /staging contract|outside the release traffic set/,
+      scenario.name,
+    );
+  }
 });
 
 /** Mode, traffic and serving-version guards prevent stale or foreign live deployments from passing. */

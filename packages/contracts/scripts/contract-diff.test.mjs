@@ -81,12 +81,25 @@ try {
   const token = diagnostic.match(/contract-change:[a-f0-9]{64}/)?.[0];
   assert.ok(token, diagnostic);
 
-  writeFileSync(
-    changelog,
-    `## Unreleased\n\n- **Breaking:** [${token}] GET /probe (getProbe) removes response status; regenerate clients.\n`,
-  );
+  const reviewedChangelog = `## Unreleased\n\n- **Breaking:** [${token}] GET /probe (getProbe) removes response status; regenerate clients.\n`;
+  writeFileSync(changelog, reviewedChangelog);
   const reviewed = run();
   assert.equal(reviewed.status, 0, `${reviewed.stdout}${reviewed.stderr}`);
+
+  for (const bullet of [
+    `- **Breaking:** [${token}]\n  GET /probe (getProbe) removes response status; regenerate clients.`,
+    `- **Breaking:**\n  [${token}] GET /probe (getProbe) removes response status; regenerate clients.`,
+  ]) {
+    writeFileSync(changelog, `## Unreleased\n\n${bullet}\n`);
+    const wrapped = run();
+    assert.equal(wrapped.status, 0, `${wrapped.stdout}${wrapped.stderr}`);
+  }
+  for (const boundary of ["- Another change", "### Other changes"]) {
+    writeFileSync(changelog, `## Unreleased\n\n- **Breaking:** GET /probe removes status.\n${boundary}\n  [${token}] Regenerate clients for this unrelated change.\n`);
+    const separated = run();
+    assert.equal(separated.status, 1, "review must not cross a bullet or section boundary");
+  }
+  writeFileSync(changelog, reviewedChangelog);
 
   writeFileSync(
     baseChangelog,

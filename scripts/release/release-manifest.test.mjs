@@ -456,6 +456,52 @@ test("manifest publishes deterministic redacted provenance for a complete update
   assert.deepEqual(second, manifest);
 });
 
+/** A partial rollout may record an unknown contract only for its proven previous Worker identity. */
+test("manifest accepts normalized legacy health for the previous partial-rollout version", async (context) => {
+  const spec = validateReleaseSpec(releaseInput());
+  const files = updateEvidenceSet(spec);
+  files["smoke-live-5.json"] = {
+    ...files["smoke-live-5.json"],
+    health: healthEvidence({ contract_version: null, version: previousSha }),
+    previous_version: { version_id: previousVersionId, git_sha: previousSha },
+  };
+  const outDir = await withReleaseDir(context, files);
+  const manifest = await buildReleaseManifest(manifestParams(outDir, spec));
+  assert.equal(manifest.status, "complete");
+});
+
+/** Legacy evidence never waives candidate/full-rollout checks or a mismatched previous identity. */
+test("manifest rejects legacy health without a matching partial-rollout previous version", async (context) => {
+  for (const scenario of [
+    { name: "candidate", file: "smoke-version.json" },
+    { name: "full rollout", file: "smoke-live-100.json" },
+    { name: "bootstrap", bootstrap: true, file: "smoke-live.json" },
+    { name: "partial candidate", version: gitSha },
+    { name: "foreign SHA", version: "c".repeat(40) },
+    { name: "wrong previous Worker", previousId: automationVersionId },
+    { name: "missing previous proof", missingProof: true },
+    { name: "missing explicit legacy marker", contract: undefined, missingMarker: true },
+    { name: "empty contract version", contract: "" },
+  ]) {
+    const spec = validateReleaseSpec(releaseInput({ deployment_mode: scenario.bootstrap ? "bootstrap" : "update" }));
+    const files = scenario.bootstrap ? bootstrapEvidenceSet(spec) : updateEvidenceSet(spec);
+    const filename = scenario.file ?? "smoke-live-5.json";
+    files[filename] = {
+      ...files[filename],
+      health: {
+        ...files[filename].health,
+        contract_version: scenario.missingMarker ? undefined : scenario.contract ?? null,
+        version: scenario.version ?? previousSha,
+      },
+      previous_version: scenario.missingProof ? undefined : {
+        version_id: scenario.previousId ?? previousVersionId, git_sha: previousSha,
+      },
+    };
+    const outDir = await withReleaseDir(context, files);
+    await assert.rejects(buildReleaseManifest(manifestParams(outDir, spec)), /staging contract|previous/, scenario.name);
+  }
+});
+
 test("manifest rejects incomplete and unclassified release directories", async (context) => {
   const spec = validateReleaseSpec(releaseInput());
   const files = updateEvidenceSet(spec);

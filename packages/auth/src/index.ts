@@ -450,11 +450,19 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
             if (config.isAccountActive && !(await config.isAccountActive(session.userId))) {
               return false;
             }
-            const previousChannel = context?.context.sessionClientChannel;
+            const requestContext = context?.context;
+            const previousChannel =
+              requestContext && "sessionClientChannel" in requestContext
+                ? requestContext.sessionClientChannel
+                : undefined;
+            const previousUserId =
+              requestContext && "sessionClientUserId" in requestContext
+                ? requestContext.sessionClientUserId
+                : undefined;
             const clientChannel =
               context?.path === "/device/token"
                 ? "cli"
-                : context?.context.sessionClientUserId === session.userId &&
+                : previousUserId === session.userId &&
                     (previousChannel === "web" ||
                       previousChannel === "cli" ||
                       previousChannel === "unknown")

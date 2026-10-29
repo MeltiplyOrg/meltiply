@@ -178,13 +178,14 @@ jobs:
         if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
         run: bun run cloudflare:check
       - name: Validate managed release infrastructure
-        if: inputs.lane == 'managed-release'
+        if: (success() || failure()) && inputs.lane == 'managed-release'
         run: |
           bun run iac:check
+          bun run release:test
           bun run test:staging
           bun run docs:links
       - name: Smoke credentials-free managed preflight
-        if: inputs.lane == 'managed-release'
+        if: (success() || failure()) && inputs.lane == 'managed-release'
         run: |
           node --input-type=module <<'NODE'
           import assert from "node:assert/strict";
@@ -214,7 +215,7 @@ jobs:
           }
           NODE
       - name: Smoke reviewed frontend bundles for both environments
-        if: inputs.lane == 'managed-release'
+        if: (success() || failure()) && inputs.lane == 'managed-release'
         run: |
           node --input-type=module <<'NODE'
           import assert from "node:assert/strict";
@@ -277,7 +278,7 @@ jobs:
           }
           NODE
       - name: Smoke role gates and migrations on fresh PostgreSQL
-        if: inputs.lane == 'managed-release'
+        if: (success() || failure()) && inputs.lane == 'managed-release'
         run: |
           docker run --detach --name managed-release-postgres \
             -p 127.0.0.1:5544:5432 -e POSTGRES_PASSWORD=managed-release-local postgres:18.6-alpine

@@ -385,6 +385,7 @@ describe("Better Auth device protocol HTTP composition", () => {
   it("completes a CLI grant and keeps browser and CLI session lifecycles separate", async () => {
     const origin = "https://auth.example.test";
     const email = "device-user@example.test";
+    const sessions: Record<string, unknown>[] = [];
     const auth = await createBetterAuth({
       baseURL: origin,
       // The installed memory adapter allocates records per pre-declared model;
@@ -394,7 +395,7 @@ describe("Better Auth device protocol HTTP composition", () => {
         deviceCode: [],
         jwks: [],
         rateLimit: [],
-        session: [],
+        session: sessions,
         twoFactor: [],
         user: [],
         verification: [],
@@ -470,16 +471,21 @@ describe("Better Auth device protocol HTTP composition", () => {
       email,
       name: "Device User",
       password: "device-password-for-http-test",
+      clientChannel: "cli",
     });
     expect(signUp.status).toBe(200);
     const browserCookie = sessionCookie(signUp);
     if (typeof auth.getSession !== "function") {
       throw new Error("Better Auth instance must expose its session lookup");
     }
-    expect(await auth.getSession(new Headers({ Cookie: browserCookie }))).toMatchObject({
+    const browserIdentity = await auth.getSession(new Headers({ Cookie: browserCookie }));
+    expect(browserIdentity).toMatchObject({
       session: { id: expect.any(String) },
       user: { id: expect.any(String) },
     });
+    expect(
+      sessions.find((session) => session.id === browserIdentity?.session.id)?.clientChannel,
+    ).toBe("web");
 
     const issued = await postJson("/api/auth/device/code", { client_id: "melti-cli" });
     expect(issued.status).toBe(200);
@@ -512,6 +518,7 @@ describe("Better Auth device protocol HTTP composition", () => {
       client_id: "melti-cli",
       device_code: deviceCode,
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      clientChannel: "web",
     });
     expect(exchange.status).toBe(200);
     const exchangeBody = await jsonRecord(exchange);
@@ -526,7 +533,10 @@ describe("Better Auth device protocol HTTP composition", () => {
     );
     expect(cliSession.status).toBe(200);
     expect(cliSession.headers.get("set-auth-jwt")).toBeTruthy();
-    expect((await jsonRecord(cliSession)).user).toMatchObject({ email });
+    const cliBody = await jsonRecord(cliSession);
+    expect(cliBody.user).toMatchObject({ email });
+    expect(cliBody.session).not.toHaveProperty("clientChannel");
+    expect(sessions.find((session) => session.token === accessToken)?.clientChannel).toBe("cli");
 
     const signOut = await auth.handler(
       new Request(`${origin}/api/auth/sign-out`, {
@@ -555,5 +565,33 @@ describe("Better Auth device protocol HTTP composition", () => {
       }),
     );
     expect((await jsonRecord(browserSession)).user).toMatchObject({ email });
+
+    // Password replacement revokes the original credential but must carry its
+    // hidden provenance forward, rather than accepting a body override or
+    // losing it when the public session projection omits the field.
+    const changed = await postJson(
+      "/api/auth/change-password",
+      {
+        currentPassword: "device-password-for-http-test",
+        newPassword: "replacement-password-for-http-test",
+        revokeOtherSessions: true,
+        clientChannel: "cli",
+      },
+      { Cookie: browserCookie },
+    );
+    expect(changed.status).toBe(200);
+    const replacement = await jsonRecord(changed);
+    expect(sessions.find((session) => session.token === replacement.token)?.clientChannel).toBe(
+      "web",
+    );
+    const replacedSession = await auth.handler(
+      new Request(`${origin}/api/auth/get-session`, {
+        headers: { Cookie: sessionCookie(changed) },
+      }),
+    );
+    const replacedBody = await jsonRecord(replacedSession);
+    expect(replacedBody.user).toMatchObject({ email });
+    expect(replacedBody.session).not.toHaveProperty("clientChannel");
+    expect(await auth.getSession(new Headers({ Cookie: browserCookie }))).toBeNull();
   });
 });

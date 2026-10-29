@@ -13,6 +13,7 @@ on:
           - cloudflare-integration
           - cloudflare-extended
           - cloudflare-full
+          - managed-release
           - device-authorization
           - object-storage
           - publishing-queues
@@ -133,7 +134,7 @@ jobs:
           bun build scripts/selfhost/queue-capacity-check.ts --target=node --external miniflare --external pg --external effect --external zod --outfile=scripts/selfhost/.queue-capacity-check.mjs
           QUEUE_CAPACITY_BUNDLE=artifacts/queue-capacity-worker/queue-capacity.js node scripts/selfhost/.queue-capacity-check.mjs
       - name: Prepare full gate database
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Exercise every provider connection through real state and persistence
 
@@ -147,8 +148,123 @@ jobs:
             --outfile=scripts/selfhost/.oauth-connection-check.mjs
           node scripts/selfhost/.oauth-connection-check.mjs
       - name: Validate complete application contract
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
         run: bun run cloudflare:check
+      - name: Validate managed release infrastructure
+        if: inputs.lane == 'managed-release'
+        run: |
+          bun run iac:check
+          bun run test:staging
+          bun run docs:links
+      - name: Smoke credentials-free managed preflight
+        if: inputs.lane == 'managed-release'
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { execFileSync } from "node:child_process";
+          import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+          import { tmpdir } from "node:os";
+          import path from "node:path";
+          const directory = await mkdtemp(path.join(tmpdir(), "managed-preflight-"));
+          try {
+            const template = JSON.parse(await readFile("scripts/release/release-input.example.json", "utf8"));
+            const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+            for (const environment of ["staging", "production"]) {
+              const input = { ...template, environment, git_sha: sha, release_id: `${environment}-${sha.slice(0, 12)}`,
+                api_workers_dev_url: `https://meltiply-api${environment === "production" ? "-production" : ""}.example.workers.dev`,
+                app_url: environment === "production" ? "https://app.meltiply.com" : template.app_url,
+                restore_point_expires_at: new Date(Date.now() + 14 * 86400000).toISOString() };
+              const file = path.join(directory, `${environment}.json`);
+              await writeFile(file, JSON.stringify(input));
+              const result = JSON.parse(execFileSync("node",
+                ["scripts/release/release.mjs", "preflight", "--offline", "--input", file],
+                { encoding: "utf8", env: { PATH: process.env.PATH, HOME: process.env.HOME, CI: "true" } }));
+              assert.equal(result.environment, environment);
+              console.log(JSON.stringify(result));
+            }
+          } finally {
+            await rm(directory, { recursive: true, force: true });
+          }
+          NODE
+      - name: Smoke role gates and migrations on fresh PostgreSQL
+        if: inputs.lane == 'managed-release'
+        run: |
+          docker run --detach --name managed-release-postgres \
+            -p 127.0.0.1:5544:5432 -e POSTGRES_PASSWORD=managed-release-local postgres:18.6-alpine
+          trap 'docker rm --force managed-release-postgres' EXIT
+          ready=false
+          for _ in $(seq 1 60); do
+            if docker exec managed-release-postgres pg_isready -U postgres; then ready=true; break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then docker logs managed-release-postgres; exit 1; fi
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { mkdtemp, rm, writeFile } from "node:fs/promises";
+          import { tmpdir } from "node:os";
+          import path from "node:path";
+          import { Client } from "pg";
+          import { migrateDatabase } from "./scripts/release/release-migrate.mjs";
+          import { sha256 } from "./scripts/release/release-guard.mjs";
+          const admin = new Client("postgres://postgres:managed-release-local@127.0.0.1:5544/postgres");
+          const outDir = await mkdtemp(path.join(tmpdir(), "managed-migration-"));
+          const createdAt = new Date().toISOString();
+          const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
+          const spec = { deployment_mode: "bootstrap", environment: "production", git_sha: "a".repeat(40),
+            neon_branch_id: "br-local-smoke", neon_project_id: "local-smoke",
+            release_id: "production-aaaaaaaaaaaa", restore_point_expires_at: expiresAt };
+          const host = "ep-smoke.us-east-2.aws.neon.tech";
+          const environment = {
+            MELTIPLY_SYSTEM_DATABASE_URL: `postgres://meltiply_system:local@${host}/managed_release?sslmode=require`,
+            MELTIPLY_AUTHENTICATED_DATABASE_URL: `postgres://meltiply_rls:local@${host}/managed_release?sslmode=require`,
+          };
+          // Redirect only the protected connection transport to this disposable database;
+          // the migrator still checks real session identities, catalog attributes and RLS.
+          const clientFactory = async (connectionString) => {
+            const url = new URL(connectionString);
+            return new Client({ host: "127.0.0.1", port: 5544, database: "managed_release",
+              user: decodeURIComponent(url.username), password: "local" });
+          };
+          const options = { approvals: [], clientFactory, environment, outDir, phase: "bootstrap",
+            planDigest: "b".repeat(64), repoRoot: process.cwd(), spec };
+          try {
+            await admin.connect();
+            await admin.query("CREATE ROLE meltiply_system LOGIN BYPASSRLS PASSWORD 'local'");
+            await admin.query("CREATE DATABASE managed_release OWNER meltiply_system");
+            await writeFile(path.join(outDir, "restore-point-evidence.json"), JSON.stringify({
+              approvals: [], created_at: createdAt, endpoint_host_digest: sha256(host), endpoint_id: "ep-smoke",
+              expires_at: expiresAt, git_sha: spec.git_sha, plan_digest: options.planDigest,
+              project_id: spec.neon_project_id, provider: "neon", release_id: spec.release_id,
+              schema_version: 1, snapshot_id: "snapshot-local-smoke", snapshot_name: `meltiply-${spec.release_id}`,
+              snapshot_digest: sha256(["snapshot-local-smoke", `meltiply-${spec.release_id}`,
+                spec.neon_branch_id, createdAt, expiresAt].join("\0")),
+              source_branch_id: spec.neon_branch_id, status: "ready",
+            }));
+            await assert.rejects(migrateDatabase(options), /meltiply_rls/);
+            const inspect = await clientFactory(environment.MELTIPLY_SYSTEM_DATABASE_URL);
+            await inspect.connect();
+            try {
+              assert.equal((await inspect.query("SELECT to_regclass('public.schema_migrations') AS ledger")).rows[0].ledger, null);
+            } finally { await inspect.end(); }
+            console.log("Missing authenticated role rejected; migration ledger untouched");
+            await admin.query("CREATE ROLE meltiply_rls LOGIN NOBYPASSRLS PASSWORD 'local'");
+            await admin.query("ALTER ROLE meltiply_system NOBYPASSRLS");
+            await assert.rejects(migrateDatabase(options), /BYPASSRLS/);
+            await admin.query("ALTER ROLE meltiply_system BYPASSRLS");
+            const evidence = await migrateDatabase(options);
+            assert.equal(evidence.status, "applied");
+            console.log(`Applied ${evidence.applied.length} reviewed migrations with verified RLS`);
+            const mutate = await clientFactory(environment.MELTIPLY_SYSTEM_DATABASE_URL);
+            await mutate.connect();
+            try { await mutate.query("DROP FUNCTION auth.jwt() CASCADE"); }
+            finally { await mutate.end(); }
+            await assert.rejects(migrateDatabase(options), /auth.jwt|claims accessor|row.level.security|RLS/i);
+            console.log("Rerun rejected missing claims accessor despite complete migration ledger");
+          } finally {
+            await admin.end();
+            await rm(outDir, { recursive: true, force: true });
+          }
+          NODE
       - name: Observe cold, warm, concurrent, and lifecycle cache behavior in workerd
         if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         env:

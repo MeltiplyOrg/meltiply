@@ -172,19 +172,13 @@ describe("API Worker foundation", () => {
       expect(() => validateProductionBindings(env)).not.toThrow();
       expect(bindingStatuses(env)).toEqual(bindingStatuses(stagingEnv));
       for (const binding of bindingStatuses(env)) {
-        expect(() =>
-          validateProductionBindings({ ...env, [binding.name]: undefined }),
-        ).toThrow();
+        expect(() => validateProductionBindings({ ...env, [binding.name]: undefined })).toThrow();
       }
-      expect(() =>
-        validateProductionBindings({ ...env, BETTER_AUTH_SECRET: "short" }),
-      ).toThrow();
-      expect(() =>
-        validateProductionBindings({ ...env, AUTH_SETUP_SECRET: "short" }),
-      ).toThrow();
-      expect(() =>
-        validateProductionBindings({ ...env, THREADS_LIVE_ACCEPTED: "true" }),
-      ).toThrow("requires client ID and client secret");
+      expect(() => validateProductionBindings({ ...env, BETTER_AUTH_SECRET: "short" })).toThrow();
+      expect(() => validateProductionBindings({ ...env, AUTH_SETUP_SECRET: "short" })).toThrow();
+      expect(() => validateProductionBindings({ ...env, THREADS_LIVE_ACCEPTED: "true" })).toThrow(
+        "requires client ID and client secret",
+      );
     },
   );
 
@@ -415,9 +409,9 @@ describe("API Worker foundation", () => {
     };
     expect(requiresEmailVerification(env)).toBe(false);
     expect(() => validateProductionBindings(env)).not.toThrow();
-    expect(() =>
-      validateProductionBindings({ ...env, AUTOMATION: undefined }),
-    ).toThrow("AUTOMATION");
+    expect(() => validateProductionBindings({ ...env, AUTOMATION: undefined })).toThrow(
+      "AUTOMATION",
+    );
     expect(requiresEmailVerification({ ...env, REQUIRE_EMAIL_VERIFICATION: undefined })).toBe(true);
   });
 

@@ -148,7 +148,8 @@ test("health probe matches the released environment rather than assuming staging
   for (const environment of ["production", "staging"]) {
     const probe = fetchHealth({
       expectedEnvironment: "production",
-      fetchImpl: async () => new Response(JSON.stringify({ environment, status: "ok", version: gitSha })),
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ environment, status: "ok", version: gitSha })),
       origin: "https://app.example.com",
       requestBudgetMs: 5000,
     });
@@ -161,22 +162,36 @@ test("health probe matches the released environment rather than assuming staging
 test("production version and live smoke reject a staging endpoint", async (context) => {
   const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-production-smoke-"));
   context.after(() => rm(outDir, { force: true, recursive: true }));
-  const spec = validateReleaseSpec(releaseInput({
-    environment: "production",
-    release_id: `production-${gitSha.slice(0, 12)}`,
-    api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
-  }));
+  const spec = validateReleaseSpec(
+    releaseInput({
+      environment: "production",
+      release_id: `production-${gitSha.slice(0, 12)}`,
+      api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
+    }),
+  );
   await seedCandidate(outDir, spec);
   const traffic = [{ percentage: 100, version_id: secretsVersionId }];
-  await writeFile(path.join(outDir, "worker-api-deployment.json"), JSON.stringify({
-    git_sha: spec.git_sha, release_id: spec.release_id, schema_version: 1,
-    traffic, version_id: secretsVersionId, worker: "api",
-  }));
+  await writeFile(
+    path.join(outDir, "worker-api-deployment.json"),
+    JSON.stringify({
+      git_sha: spec.git_sha,
+      release_id: spec.release_id,
+      schema_version: 1,
+      traffic,
+      version_id: secretsVersionId,
+      worker: "api",
+    }),
+  );
   let servedEnvironment = "production";
   const params = {
-    environment: {}, outDir, spec,
+    environment: {},
+    outDir,
+    spec,
     runCommand: controlPlane({ traffic, releaseTag: `${spec.release_id}-api-secrets` }),
-    fetchImpl: async () => new Response(JSON.stringify({ environment: servedEnvironment, status: "ok", version: gitSha })),
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({ environment: servedEnvironment, status: "ok", version: gitSha }),
+      ),
   };
   assert.equal((await smokeVersionCandidate(params)).health.environment, "production");
   assert.equal((await smokeLiveApi(params)).health.environment, "production");

@@ -2295,11 +2295,15 @@ describe("core API routes", () => {
   ] as const)(
     "enforces OAuth callback security in $ENVIRONMENT at $origin",
     async ({ ENVIRONMENT, origin, status }) => {
-      const { registry } = oauthRegistry();
-      const app = authenticatedApp(service({ platformCapabilities: () => registry.capabilities() }), {
-        brandProfileService: brandProfileService(),
-        providerRegistry: registry,
-      });
+      const { authorizationUrl, registry } = oauthRegistry();
+      const create = vi.fn(async () => undefined);
+      const app = authenticatedApp(
+        service({ platformCapabilities: () => registry.capabilities() }),
+        {
+          brandProfileService: brandProfileService(),
+          providerRegistry: registry,
+        },
+      );
       const response = await app.request(
         "/api/v1/platforms/threads/connect",
         { headers: bearerHeaders },
@@ -2308,7 +2312,7 @@ describe("core API routes", () => {
           ENVIRONMENT,
           APP_URL: origin,
           OAUTH_STATE: {
-            getByName: () => ({ create: async () => undefined }),
+            getByName: () => ({ create }),
           } as unknown as DurableObjectNamespace<OAuthStateStub>,
         },
       );
@@ -2319,6 +2323,9 @@ describe("core API routes", () => {
           `${origin}/api/v1/platforms/threads/callback`,
         );
       } else {
+        expect(response.headers.get("Location")).toBeNull();
+        expect(create).not.toHaveBeenCalled();
+        expect(authorizationUrl).not.toHaveBeenCalled();
         await expect(response.json()).resolves.toMatchObject({
           error: { code: "service_unavailable" },
         });

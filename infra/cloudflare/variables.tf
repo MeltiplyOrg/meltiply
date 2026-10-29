@@ -124,6 +124,37 @@ variable "system_hyperdrive_config_id" {
   type        = string
 }
 
+variable "manage_zone_security" {
+  description = "Own the zone's rate-limit and optional managed-WAF entrypoints in this state only. Null preserves staging ownership and makes production a non-owner."
+  type        = bool
+  default     = null
+  nullable    = true
+}
+
+variable "protected_app_hostnames" {
+  description = "Environment-to-app-hostname coverage of the single zone owner. Non-owners must explicitly declare coverage matching the applied owner's configuration."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for environment, hostname in var.protected_app_hostnames :
+      contains(jsondecode(file("${path.module}/../../scripts/lib/release-environments.json")), environment) &&
+      can(regex("^[a-z0-9][a-z0-9.-]*[a-z0-9]$", hostname))
+    ])
+    error_message = "Protected app hostnames must map supported environments to bare lowercase DNS hostnames."
+  }
+
+  validation {
+    condition = (
+      length(var.protected_app_hostnames) == 0
+      ? coalesce(var.manage_zone_security, var.environment == "staging")
+      : lookup(var.protected_app_hostnames, var.environment, "") == trimprefix(var.app_url, "https://")
+    )
+    error_message = "Zone security coverage must include this environment's exact app_url hostname; non-owners must explicitly declare the applied owner's coverage."
+  }
+}
+
 variable "managed_waf_ruleset_id" {
   description = "Approved Cloudflare managed WAF ruleset ID, when available for the plan."
   type        = string

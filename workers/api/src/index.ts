@@ -23,7 +23,8 @@ let deployedBindingsValidated = false;
  * @throws {Error} If any mandatory deployed binding is missing or malformed.
  */
 function validateDeployedBindingsOnce(env: ApiWorkerEnv): void {
-  if (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test" || deployedBindingsValidated) return;
+  if (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test" || deployedBindingsValidated)
+    return;
   validateProductionBindings(env);
   deployedBindingsValidated = true;
 }

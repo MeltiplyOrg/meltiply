@@ -1,6 +1,11 @@
 locals {
   assets_bucket_name   = coalesce(var.assets_bucket_name, "meltiply-assets-${var.environment}")
   frontend_worker_name = coalesce(var.frontend_worker_name, "meltiply-frontend-${var.environment}")
+
+  manage_zone_security    = coalesce(var.manage_zone_security, var.environment == "staging")
+  protected_app_hostnames = length(var.protected_app_hostnames) == 0 ? tomap({
+    (var.environment) = trimprefix(var.app_url, "https://")
+  }) : var.protected_app_hostnames
   # Preserve legacy staging services while keeping production independent in the same account.
   worker_suffix = var.environment == "staging" ? "" : "-${var.environment}"
   worker_names = {
@@ -106,15 +111,17 @@ module "hyperdrive" {
 module "edge" {
   source = "./modules/edge"
 
-  account_id             = var.account_id
-  app_hostname           = trimprefix(var.app_url, "https://")
-  frontend_worker_name   = local.frontend_worker_name
-  api_worker_name        = local.worker_names.api
-  attach_custom_domains  = var.attach_app_custom_domains
-  managed_waf_ruleset_id = var.managed_waf_ruleset_id
-  operator_hostname      = var.enable_operator_access ? var.operator_hostname : null
-  requests_per_minute    = var.rate_limit_requests_per_minute
-  zone_id                = var.zone_id
+  account_id              = var.account_id
+  app_hostname            = trimprefix(var.app_url, "https://")
+  frontend_worker_name    = local.frontend_worker_name
+  api_worker_name         = local.worker_names.api
+  attach_custom_domains   = var.attach_app_custom_domains
+  managed_waf_ruleset_id  = var.managed_waf_ruleset_id
+  manage_zone_security    = local.manage_zone_security
+  protected_app_hostnames = local.protected_app_hostnames
+  operator_hostname       = var.enable_operator_access ? var.operator_hostname : null
+  requests_per_minute     = var.rate_limit_requests_per_minute
+  zone_id                 = var.zone_id
 }
 
 module "operator_access" {

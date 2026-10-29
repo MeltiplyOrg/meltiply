@@ -40,3 +40,8 @@ output "operator_access_aud" {
     : null
   )
 }
+
+output "zone_security" {
+  description = "Zone-level security ownership and coverage to verify before another environment's foundation."
+  value       = module.edge.zone_security
+}

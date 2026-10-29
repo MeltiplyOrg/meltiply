@@ -223,7 +223,9 @@ export function verifyReleasePlan(plan, phase) {
 
   const environment = plannedVariable(plan, "environment");
   if (!releaseEnvironments.includes(environment)) {
-    throw new Error(`release plan environment must be one of ${releaseEnvironments.join(", ")}, got ${JSON.stringify(environment)}`);
+    throw new Error(
+      `release plan environment must be one of ${releaseEnvironments.join(", ")}, got ${JSON.stringify(environment)}`,
+    );
   }
 
   const transition = { environment };

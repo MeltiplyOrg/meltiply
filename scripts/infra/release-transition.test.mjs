@@ -58,12 +58,19 @@ esac
     "HEAD",
   ]);
   const input = join(root, "release-input.json");
-  const example = JSON.parse(await readFile(join(repositoryRoot, "scripts/release/release-input.example.json"), "utf8"));
-  await writeFile(input, JSON.stringify({
-    ...example, environment, git_sha: checkoutSha.trim(),
-    release_id: `${environment}-${checkoutSha.trim().slice(0, 12)}`,
-    restore_point_expires_at: "2026-08-05T12:00:00.000Z",
-  }));
+  const example = JSON.parse(
+    await readFile(join(repositoryRoot, "scripts/release/release-input.example.json"), "utf8"),
+  );
+  await writeFile(
+    input,
+    JSON.stringify({
+      ...example,
+      environment,
+      git_sha: checkoutSha.trim(),
+      release_id: `${environment}-${checkoutSha.trim().slice(0, 12)}`,
+      restore_point_expires_at: "2026-08-05T12:00:00.000Z",
+    }),
+  );
 
   return {
     root,
@@ -167,53 +174,104 @@ test("requires explicit reviewed-plan confirmation before applying infrastructur
 /** Production confirmation must name production; changing protected inputs cannot retarget a saved plan. */
 test("production plans require environment confirmation and the reviewed protected backend", async () => {
   const setup = await fixture("production");
-  await execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], { cwd: repositoryRoot, env: setup.env });
-  const digest = (await readFile(join(setup.releaseDir, "foundation-plan.sha256"), "utf8")).trim();
-  await assert.rejects(execFileAsync(transitionScript, ["apply", "foundation"], {
-    cwd: repositoryRoot, env: { ...setup.env, MELTIPLY_RELEASE_CONFIRM: `apply staging foundation ${setup.env.MELTIPLY_RELEASE_SHA} ${digest}` },
-  }), /MELTIPLY_RELEASE_CONFIRM/);
-  await execFileAsync(transitionScript, ["apply", "foundation"], {
-    cwd: repositoryRoot, env: { ...setup.env, MELTIPLY_RELEASE_CONFIRM: `apply production foundation ${setup.env.MELTIPLY_RELEASE_SHA} ${digest}` },
+  await execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
+    cwd: repositoryRoot,
+    env: setup.env,
   });
-  assert.equal(JSON.parse(await readFile(join(setup.releaseDir, "iac-outputs.json"), "utf8")).release_resources.value.environment, "production");
+  const digest = (await readFile(join(setup.releaseDir, "foundation-plan.sha256"), "utf8")).trim();
+  await assert.rejects(
+    execFileAsync(transitionScript, ["apply", "foundation"], {
+      cwd: repositoryRoot,
+      env: {
+        ...setup.env,
+        MELTIPLY_RELEASE_CONFIRM: `apply staging foundation ${setup.env.MELTIPLY_RELEASE_SHA} ${digest}`,
+      },
+    }),
+    /MELTIPLY_RELEASE_CONFIRM/,
+  );
+  await execFileAsync(transitionScript, ["apply", "foundation"], {
+    cwd: repositoryRoot,
+    env: {
+      ...setup.env,
+      MELTIPLY_RELEASE_CONFIRM: `apply production foundation ${setup.env.MELTIPLY_RELEASE_SHA} ${digest}`,
+    },
+  });
+  assert.equal(
+    JSON.parse(await readFile(join(setup.releaseDir, "iac-outputs.json"), "utf8")).release_resources
+      .value.environment,
+    "production",
+  );
   await writeFile(setup.backend, 'address = "https://other-state.invalid"\n');
-  await assert.rejects(execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
-    cwd: repositoryRoot, env: setup.env,
-  }), /does not match the reviewed release context/);
+  await assert.rejects(
+    execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
+      cwd: repositoryRoot,
+      env: setup.env,
+    }),
+    /does not match the reviewed release context/,
+  );
 });
 
 /** The wrapper must reject missing explicit inputs and a provider plan targeting another installation. */
 test("protected release selection is mandatory and mismatched plans fail before apply", async () => {
   const setup = await fixture("production");
-  await assert.rejects(execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
-    cwd: repositoryRoot, env: { ...setup.env, MELTIPLY_RELEASE_INPUT: "" },
-  }), /MELTIPLY_RELEASE_INPUT/);
+  await assert.rejects(
+    execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
+      cwd: repositoryRoot,
+      env: { ...setup.env, MELTIPLY_RELEASE_INPUT: "" },
+    }),
+    /MELTIPLY_RELEASE_INPUT/,
+  );
   await assert.rejects(readFile(setup.tofuLog));
   const plan = JSON.parse(await readFile(setup.env.FAKE_PLAN_JSON, "utf8"));
   plan.variables.environment.value = "staging";
   await writeFile(setup.env.FAKE_PLAN_JSON, JSON.stringify(plan));
-  await assert.rejects(execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
-    cwd: repositoryRoot, env: setup.env,
-  }), /environment does not match the release input/);
+  await assert.rejects(
+    execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
+      cwd: repositoryRoot,
+      env: setup.env,
+    }),
+    /environment does not match the release input/,
+  );
   assert.doesNotMatch(await readFile(setup.tofuLog, "utf8"), / apply /);
 });
 
 /** Approval creation names the installation and refuses a confirmation borrowed from staging. */
 test("production operator review requires environment-specific intent and emits scoped evidence", async () => {
   const setup = await fixture("production");
-  await execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], { cwd: repositoryRoot, env: setup.env });
+  await execFileAsync(transitionScript, ["plan", "foundation", setup.tfvars], {
+    cwd: repositoryRoot,
+    env: setup.env,
+  });
   const digest = (await readFile(join(setup.releaseDir, "foundation-plan.sha256"), "utf8")).trim();
   const args = [
-    join(repositoryRoot, "scripts/release/approve.mjs"), "foundation", setup.env.MELTIPLY_RELEASE_INPUT,
-    join(setup.releaseDir, "foundation.tfplan"), "operator",
+    join(repositoryRoot, "scripts/release/approve.mjs"),
+    "foundation",
+    setup.env.MELTIPLY_RELEASE_INPUT,
+    join(setup.releaseDir, "foundation.tfplan"),
+    "operator",
   ];
-  await assert.rejects(execFileAsync(process.execPath, [...args, `approve staging ${setup.env.MELTIPLY_RELEASE_SHA} ${digest}`], {
-    cwd: repositoryRoot, env: setup.env,
-  }), /Confirmation must identify the environment/);
-  await execFileAsync(process.execPath, [...args, `approve production ${setup.env.MELTIPLY_RELEASE_SHA} ${digest}`], {
-    cwd: repositoryRoot, env: setup.env,
-  });
-  const approval = JSON.parse(await readFile(join(setup.releaseDir, "approval-foundation.json"), "utf8"));
+  await assert.rejects(
+    execFileAsync(
+      process.execPath,
+      [...args, `approve staging ${setup.env.MELTIPLY_RELEASE_SHA} ${digest}`],
+      {
+        cwd: repositoryRoot,
+        env: setup.env,
+      },
+    ),
+    /Confirmation must identify the environment/,
+  );
+  await execFileAsync(
+    process.execPath,
+    [...args, `approve production ${setup.env.MELTIPLY_RELEASE_SHA} ${digest}`],
+    {
+      cwd: repositoryRoot,
+      env: setup.env,
+    },
+  );
+  const approval = JSON.parse(
+    await readFile(join(setup.releaseDir, "approval-foundation.json"), "utf8"),
+  );
   assert.equal(approval.approval_job.name, "production-foundation-approval");
   assert.equal(approval.plan_digest, digest);
 });
@@ -221,45 +279,117 @@ test("production operator review requires environment-specific intent and emits 
 /** Domain planning/applying must fail before even initializing a provider without this frontend release. */
 test("domain wrapper refuses missing, stale, or config-mismatched frontend evidence before provider mutation", async () => {
   const setup = await fixture("production");
-  const run = (action = "plan", env = setup.env) => execFileAsync(transitionScript,
-    action === "plan" ? ["plan", "domain", setup.tfvars] : ["apply", "domain"],
-    { cwd: repositoryRoot, env });
+  const run = (action = "plan", env = setup.env) =>
+    execFileAsync(
+      transitionScript,
+      action === "plan" ? ["plan", "domain", setup.tfvars] : ["apply", "domain"],
+      { cwd: repositoryRoot, env },
+    );
   await assert.rejects(run(), /frontend deploy step/);
   await assert.rejects(readFile(setup.tofuLog));
 
   const spec = JSON.parse(await readFile(setup.env.MELTIPLY_RELEASE_INPUT, "utf8"));
-  const names = { api: "meltiply-api-production", automation: "meltiply-automation-production", state: "meltiply-state-production", frontend: "fork-frontend-production" };
+  const names = {
+    api: "meltiply-api-production",
+    automation: "meltiply-automation-production",
+    state: "meltiply-state-production",
+    frontend: "fork-frontend-production",
+  };
   spec.api_workers_dev_url = "https://meltiply-api-production.example.workers.dev";
   await writeFile(setup.env.MELTIPLY_RELEASE_INPUT, JSON.stringify(spec));
   // The first failed domain request bound no provider state; start a fresh reviewed context.
   const { rm, mkdir } = await import("node:fs/promises");
   await rm(join(setup.releaseDir, "reviewed-context.json"));
-  const queues = Object.fromEntries(["analytics", "asset-processing", "channel-revocation", "comments", "publish-facebook", "publish-instagram", "publish-threads", "publish-tiktok", "publish-youtube", "replies", "token-refresh"].map((workload) => [workload, `meltiply-${workload}-production`]));
+  const queues = Object.fromEntries(
+    [
+      "analytics",
+      "asset-processing",
+      "channel-revocation",
+      "comments",
+      "publish-facebook",
+      "publish-instagram",
+      "publish-threads",
+      "publish-tiktok",
+      "publish-youtube",
+      "replies",
+      "token-refresh",
+    ].map((workload) => [workload, `meltiply-${workload}-production`]),
+  );
   const resources = {
-    environment: "production", worker_names: names, frontend_worker_name: names.frontend,
-    app_hostname: new URL(spec.app_url).hostname, app_custom_domains_attached: false,
-    assets_bucket_name: "meltiply-assets-production", authenticated_hyperdrive_id: "1".repeat(32), system_hyperdrive_id: "2".repeat(32),
-    queue_names: queues, dead_letter_queue_names: Object.fromEntries(Object.entries(queues).map(([key, value]) => [key, `${value}-dlq`])),
-    operator_access_aud: null, operator_hostname: null, queue_consumers_attached: true, queue_delivery_paused: true,
+    environment: "production",
+    worker_names: names,
+    frontend_worker_name: names.frontend,
+    app_hostname: new URL(spec.app_url).hostname,
+    app_custom_domains_attached: false,
+    assets_bucket_name: "meltiply-assets-production",
+    authenticated_hyperdrive_id: "1".repeat(32),
+    system_hyperdrive_id: "2".repeat(32),
+    queue_names: queues,
+    dead_letter_queue_names: Object.fromEntries(
+      Object.entries(queues).map(([key, value]) => [key, `${value}-dlq`]),
+    ),
+    operator_access_aud: null,
+    operator_hostname: null,
+    queue_consumers_attached: true,
+    queue_delivery_paused: true,
   };
-  await writeFile(join(setup.releaseDir, "iac-outputs.json"), JSON.stringify({
-    release_resources: { sensitive: false, value: resources },
-    worker_bindings: { sensitive: false, value: { ACCESS_POLICY_AUD: null, ACCESS_TEAM_DOMAIN: null, OPERATOR_HOSTNAME: null, ASSETS: resources.assets_bucket_name, DB_AUTHENTICATED: resources.authenticated_hyperdrive_id, DB_SYSTEM: resources.system_hyperdrive_id, queues } },
-  }));
+  await writeFile(
+    join(setup.releaseDir, "iac-outputs.json"),
+    JSON.stringify({
+      release_resources: { sensitive: false, value: resources },
+      worker_bindings: {
+        sensitive: false,
+        value: {
+          ACCESS_POLICY_AUD: null,
+          ACCESS_TEAM_DOMAIN: null,
+          OPERATOR_HOSTNAME: null,
+          ASSETS: resources.assets_bucket_name,
+          DB_AUTHENTICATED: resources.authenticated_hyperdrive_id,
+          DB_SYSTEM: resources.system_hyperdrive_id,
+          queues,
+        },
+      },
+    }),
+  );
   await mkdir(join(setup.releaseDir, "wrangler"));
-  const config = JSON.stringify({ name: names.frontend, services: [{ binding: "API", service: names.api }], vars: { VERSION: spec.git_sha, ENVIRONMENT: spec.environment } });
+  const config = JSON.stringify({
+    name: names.frontend,
+    services: [{ binding: "API", service: names.api }],
+    vars: { VERSION: spec.git_sha, ENVIRONMENT: spec.environment },
+  });
   await writeFile(join(setup.releaseDir, "wrangler/frontend.json"), config);
   await writeFile(join(setup.releaseDir, "wrangler/frontend-built.json"), config);
   const { createHash } = await import("node:crypto");
   const configDigest = createHash("sha256").update(config).digest("hex");
-  const evidence = { schema_version: 1, worker: "frontend", worker_name: names.frontend, git_sha: spec.git_sha, release_id: spec.release_id, config_digest: configDigest, build_config_digest: configDigest, version_id: "11111111-1111-4111-8111-111111111111" };
+  const evidence = {
+    schema_version: 1,
+    worker: "frontend",
+    worker_name: names.frontend,
+    git_sha: spec.git_sha,
+    release_id: spec.release_id,
+    config_digest: configDigest,
+    build_config_digest: configDigest,
+    version_id: "11111111-1111-4111-8111-111111111111",
+  };
   const candidate = { ...evidence, deployment_mode: "bootstrap", step: "initialize" };
-  const deployment = { ...evidence, traffic: [{ percentage: 100, version_id: evidence.version_id }] };
-  await writeFile(join(setup.releaseDir, "worker-frontend-candidate.json"), JSON.stringify(candidate));
-  await writeFile(join(setup.releaseDir, "worker-frontend-deployment.json"), JSON.stringify({ ...deployment, git_sha: "b".repeat(40) }));
+  const deployment = {
+    ...evidence,
+    traffic: [{ percentage: 100, version_id: evidence.version_id }],
+  };
+  await writeFile(
+    join(setup.releaseDir, "worker-frontend-candidate.json"),
+    JSON.stringify(candidate),
+  );
+  await writeFile(
+    join(setup.releaseDir, "worker-frontend-deployment.json"),
+    JSON.stringify({ ...deployment, git_sha: "b".repeat(40) }),
+  );
   await assert.rejects(run(), /frontend deploy step.*mismatched/);
   await assert.rejects(readFile(setup.tofuLog));
-  await writeFile(join(setup.releaseDir, "worker-frontend-deployment.json"), JSON.stringify(deployment));
+  await writeFile(
+    join(setup.releaseDir, "worker-frontend-deployment.json"),
+    JSON.stringify(deployment),
+  );
   await writeFile(join(setup.releaseDir, "wrangler/frontend-built.json"), config + "\n");
   await assert.rejects(run(), /frontend deploy step.*mismatched/);
   await assert.rejects(readFile(setup.tofuLog));
@@ -270,10 +400,25 @@ test("domain wrapper refuses missing, stale, or config-mismatched frontend evide
   await writeFile(setup.env.FAKE_PLAN_JSON, JSON.stringify(plan));
   await run();
   const digest = (await readFile(join(setup.releaseDir, "domain-plan.sha256"), "utf8")).trim();
-  await writeFile(join(setup.releaseDir, "worker-frontend-deployment.json"), JSON.stringify({ ...deployment, release_id: "staging-other" }));
-  await assert.rejects(run("apply", { ...setup.env, MELTIPLY_RELEASE_CONFIRM: `apply production domain ${spec.git_sha} ${digest}` }), /frontend deploy step/);
+  await writeFile(
+    join(setup.releaseDir, "worker-frontend-deployment.json"),
+    JSON.stringify({ ...deployment, release_id: "staging-other" }),
+  );
+  await assert.rejects(
+    run("apply", {
+      ...setup.env,
+      MELTIPLY_RELEASE_CONFIRM: `apply production domain ${spec.git_sha} ${digest}`,
+    }),
+    /frontend deploy step/,
+  );
   assert.doesNotMatch(await readFile(setup.tofuLog, "utf8"), / apply /);
-  await writeFile(join(setup.releaseDir, "worker-frontend-deployment.json"), JSON.stringify(deployment));
-  await run("apply", { ...setup.env, MELTIPLY_RELEASE_CONFIRM: `apply production domain ${spec.git_sha} ${digest}` });
+  await writeFile(
+    join(setup.releaseDir, "worker-frontend-deployment.json"),
+    JSON.stringify(deployment),
+  );
+  await run("apply", {
+    ...setup.env,
+    MELTIPLY_RELEASE_CONFIRM: `apply production domain ${spec.git_sha} ${digest}`,
+  });
   assert.match(await readFile(setup.tofuLog, "utf8"), / apply /);
 });

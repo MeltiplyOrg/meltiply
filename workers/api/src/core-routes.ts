@@ -1487,7 +1487,7 @@ export function registerCoreRoutes(
         const routingKey = yield* fromPromise(() => oauthStateRoutingKey(organizationId));
         const state = `${routingKey}.${randomBase64Url(32)}`;
         const verifier = randomBase64Url(32);
-        const redirectUri = oauthCallbackUrl(c.env, selected);
+        const redirectUri = yield* fromPromise(() => oauthCallbackUrl(c.env, selected));
         yield* fromPromise(() =>
           oauthStateStub(c.env, routingKey).create(state, {
             expires_at: Date.now() + 10 * 60 * 1_000,

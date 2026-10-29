@@ -622,7 +622,9 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     }
     if (activating) {
       assertPlanDigest(evidence, context.unpauseDigest, name);
-      const resumeApproval = context.approvalByName.get(`${spec.environment}-queue-resume-approval`);
+      const resumeApproval = context.approvalByName.get(
+        `${spec.environment}-queue-resume-approval`,
+      );
       assertApprovalEmbedded(evidence, resumeApproval, name, spec);
     } else {
       assertPlanDigest(evidence, context.initialDigest, name);
@@ -813,7 +815,10 @@ export async function buildReleaseManifest({
           approval.approval_job.name !==
           name
             .slice(9, -5)
-            .replace(/^(foundation|traffic|queue-resume)$/, (part) => `${spec.environment}-${part}-approval`)
+            .replace(
+              /^(foundation|traffic|queue-resume)$/,
+              (part) => `${spec.environment}-${part}-approval`,
+            )
         ) {
           throw new TypeError(`${name} holds an unexpected approval job`);
         }

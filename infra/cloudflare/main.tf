@@ -2,7 +2,7 @@ locals {
   assets_bucket_name   = coalesce(var.assets_bucket_name, "meltiply-assets-${var.environment}")
   frontend_worker_name = coalesce(var.frontend_worker_name, "meltiply-frontend-${var.environment}")
 
-  manage_zone_security    = coalesce(var.manage_zone_security, var.environment == "staging")
+  manage_zone_security = coalesce(var.manage_zone_security, var.environment == "staging")
   protected_app_hostnames = length(var.protected_app_hostnames) == 0 ? tomap({
     (var.environment) = trimprefix(var.app_url, "https://")
   }) : var.protected_app_hostnames

@@ -233,8 +233,8 @@ run "production_plan" {
   }
 
   variables {
-    environment             = "production"
-    app_url                 = "https://app.example.com"
+    environment = "production"
+    app_url     = "https://app.example.com"
     protected_app_hostnames = {
       staging    = "staging.example.com"
       production = "app.example.com"
@@ -307,7 +307,7 @@ run "shared_zone_owner_protects_both_hosts" {
   }
 
   variables {
-    managed_waf_ruleset_id  = "cccccccccccccccccccccccccccccccc"
+    managed_waf_ruleset_id = "cccccccccccccccccccccccccccccccc"
     protected_app_hostnames = {
       staging    = "staging.meltiply.com"
       production = "app.meltiply.com"
@@ -329,9 +329,9 @@ run "shared_zone_non_owner_has_no_entrypoints" {
   command = plan
 
   variables {
-    environment             = "production"
-    app_url                 = "https://app.meltiply.com"
-    managed_waf_ruleset_id  = "cccccccccccccccccccccccccccccccc"
+    environment            = "production"
+    app_url                = "https://app.meltiply.com"
+    managed_waf_ruleset_id = "cccccccccccccccccccccccccccccccc"
     protected_app_hostnames = {
       staging    = "staging.meltiply.com"
       production = "app.meltiply.com"

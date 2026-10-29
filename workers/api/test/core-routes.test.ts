@@ -31,9 +31,13 @@ import type { ApiWorkerEnv, OAuthStateStub } from "../src/env";
 import type { PostApiService } from "../src/post-types";
 import { logRecords } from "./log-records";
 
-// The route graph statically reaches ./database via workspace-lifecycle; an
-// empty mock keeps the `pg` client out of the workerd unit-test isolate.
-vi.mock("../src/database", () => ({}));
+// Keep pg out of the unit-test isolate while allowing real capability-service
+// construction. No route in this suite may unexpectedly open a transaction.
+vi.mock("../src/database", () => ({
+  withTenantTransactionEffect: () => {
+    throw new Error("unexpected database transaction");
+  },
+}));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -1398,6 +1402,64 @@ describe("core API routes", () => {
     });
   });
 
+  it.each(["staging", "production"] as const)(
+    "keeps connections and publishing unavailable in %s before provider acceptance",
+    async (ENVIRONMENT) => {
+      const app = createApiApp({
+        resolveActor: async () => actor,
+        verifyJwtToken: async () => jwtIdentity,
+      });
+      const deployedEnv = {
+        ...env,
+        ENVIRONMENT,
+        APP_URL: "https://app.example.test",
+        FACEBOOK_CLIENT_ID: "facebook-client",
+        FACEBOOK_CLIENT_SECRET: "facebook-secret",
+        FACEBOOK_LIVE_ACCEPTED: "false",
+        INSTAGRAM_CLIENT_ID: "instagram-client",
+        INSTAGRAM_CLIENT_SECRET: "instagram-secret",
+        INSTAGRAM_LIVE_ACCEPTED: "false",
+        INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED: "false",
+        THREADS_CLIENT_ID: "threads-client",
+        THREADS_CLIENT_SECRET: "threads-secret",
+        THREADS_LIVE_ACCEPTED: "false",
+        THREADS_ENGAGEMENT_LIVE_ACCEPTED: "false",
+        TIKTOK_CLIENT_KEY: "tiktok-client",
+        TIKTOK_CLIENT_SECRET: "tiktok-secret",
+        TIKTOK_LIVE_ACCEPTED: "false",
+        YOUTUBE_SHORTS_CLIENT_ID: "youtube-client",
+        YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-secret",
+        YOUTUBE_LIVE_ACCEPTED: "false",
+      };
+      const response = await app.request(
+        "/api/v1/platforms/capabilities",
+        { headers: bearerHeaders },
+        deployedEnv,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        capabilities: [
+          { connect_available: false, platform: "tiktok", publish: false },
+          { connect_available: false, platform: "youtube", publish: false },
+          { connect_available: false, platform: "instagram", publish: false },
+          { connect_available: false, platform: "facebook", publish: false },
+          { connect_available: false, platform: "threads", publish: false },
+        ],
+      });
+      for (const platform of ["tiktok", "youtube", "instagram", "facebook", "threads"]) {
+        const connect = await app.request(
+          `/api/v1/platforms/${platform}/connect`,
+          { headers: bearerHeaders },
+          deployedEnv,
+        );
+        expect(connect.status).toBe(422);
+        await expect(connect.json()).resolves.toMatchObject({
+          error: { code: "unsupported_capability" },
+        });
+      }
+    },
+  );
+
   it("returns normalized account-scoped publishing requirements", async () => {
     const publicationRequirements = vi.fn(() =>
       Effect.succeed({
@@ -2222,6 +2284,47 @@ describe("core API routes", () => {
       error: { code: "brand_profile_mismatch" },
     });
   });
+
+  it.each([
+    { ENVIRONMENT: "staging", origin: "http://localhost:3000", status: 503 },
+    { ENVIRONMENT: "production", origin: "http://localhost:3000", status: 503 },
+    { ENVIRONMENT: "staging", origin: "https://app.example.test", status: 307 },
+    { ENVIRONMENT: "production", origin: "https://app.example.test", status: 307 },
+    { ENVIRONMENT: "local", origin: "http://localhost:3000", status: 307 },
+    { ENVIRONMENT: "test", origin: "http://localhost:3000", status: 307 },
+  ] as const)(
+    "enforces OAuth callback security in $ENVIRONMENT at $origin",
+    async ({ ENVIRONMENT, origin, status }) => {
+      const { registry } = oauthRegistry();
+      const app = authenticatedApp(service({ platformCapabilities: () => registry.capabilities() }), {
+        brandProfileService: brandProfileService(),
+        providerRegistry: registry,
+      });
+      const response = await app.request(
+        "/api/v1/platforms/threads/connect",
+        { headers: bearerHeaders },
+        {
+          ...env,
+          ENVIRONMENT,
+          APP_URL: origin,
+          OAUTH_STATE: {
+            getByName: () => ({ create: async () => undefined }),
+          } as unknown as DurableObjectNamespace<OAuthStateStub>,
+        },
+      );
+      expect(response.status).toBe(status);
+      if (status === 307) {
+        const location = new URL(response.headers.get("Location")!);
+        expect(location.searchParams.get("redirect_uri")).toBe(
+          `${origin}/api/v1/platforms/threads/callback`,
+        );
+      } else {
+        await expect(response.json()).resolves.toMatchObject({
+          error: { code: "service_unavailable" },
+        });
+      }
+    },
+  );
 
   it("starts accepted OAuth with PKCE and user/org-bound consume-once state", async () => {
     const { authorizationUrl, registry } = oauthRegistry();

@@ -72,21 +72,33 @@ async function releaseState(excludeCurrentVersion = true) {
   return { source, document, tag, previous };
 }
 
-/** Automatically prepares the source version, catalogue and changelog; never edits a published version. */
+/** Prepares or refreshes one untagged release; preserves its notes and never edits a published version. */
 async function prepare() {
   const { source, document, tag, previous } = await releaseState(false);
-  const latest = latestContractTag();
-  if (latest) {
-    const released = YAML.parse(git("show", `${latest}:packages/contracts/openapi.yaml`));
-    if (contractDigest(released) === contractDigest(document))
-      throw new Error("No contract content changed since the latest release; nothing to publish");
+  if (previous && contractDigest(previous) === contractDigest(document)) {
+    throw new Error("No contract content changed since the latest release; nothing to publish");
   }
   const changelogPath = resolve(root, "CHANGELOG.md");
   const changelog = await readFile(changelogPath, "utf8");
   const match = /^## Unreleased\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m.exec(changelog);
-  const changes = changesIn(match?.[1] ?? "");
-  if (changes.length === 0) {
-    const prepared = JSON.parse(await readFile(manifestPath, "utf8"));
+  if (!match) throw new Error("CHANGELOG.md must have an Unreleased section");
+  const preparedText = await readFile(manifestPath, "utf8").catch((error) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  const prepared = preparedText ? JSON.parse(preparedText) : undefined;
+  const pending = prepared?.version === document.info.version &&
+    prepared?.previousVersion === (previous?.info.version ?? null) &&
+    tag !== `contract-v${document.info.version}`;
+  const preparedSection = pending ? changelog.split(/^## /m).find((section) =>
+    section.startsWith(`${document.info.version} - `)) : undefined;
+  if (pending && !preparedSection) throw new Error("Prepared release notes are missing from CHANGELOG.md");
+  const priorNotes = preparedSection?.slice(preparedSection.indexOf("\n") + 1).trim() ?? "";
+  const releaseNotes = [match[1].trim(), priorNotes].filter(Boolean).join("\n\n");
+  const changes = changesIn(releaseNotes);
+  if (changes.length === 0) throw new Error("A changed contract requires new Unreleased changelog notes");
+  if (pending && prepared.contractSha256 === contractDigest(document) &&
+      canonical(prepared.changes) === canonical(changes)) {
     validateManifest(prepared, document, tag, previous);
     console.log(`Contract ${prepared.version} is already prepared.`);
     return;
@@ -118,7 +130,8 @@ async function prepare() {
   const date = new Date().toISOString().slice(0, 10);
   await writeFile(
     changelogPath,
-    changelog.replace(match[0], `## Unreleased\n\n## ${version} - ${date}\n${match[1]}`),
+    (preparedSection ? changelog.replace(`## ${preparedSection}`, "") : changelog)
+      .replace(match[0], `## Unreleased\n\n## ${version} - ${date}\n\n${releaseNotes}\n\n`),
   );
   console.log(
     `Prepared contract-v${version} (${changeType}); regenerate, validate and commit the source before tagging.`,

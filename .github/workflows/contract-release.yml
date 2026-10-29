@@ -44,7 +44,7 @@ jobs:
           mkdir -p artifacts/contract-preview
           before="$RUNNER_TEMP/contract-health-before"
           git worktree add --detach "$before" 5cc66f9
-          ln -s "$GITHUB_WORKSPACE/node_modules" "$before/node_modules"
+          bun install --frozen-lockfile --cwd "$before"
           set +e
           bun run --cwd "$before/workers/api" --no-install vp test run test/app.test.ts --testNamePattern="serves contract-conformant liveness" --coverage.enabled=false > artifacts/contract-preview/health-before.log 2>&1
           result=$?
@@ -52,7 +52,7 @@ jobs:
           test "$result" -ne 0
           grep --fixed-strings "contract_version" artifacts/contract-preview/health-before.log
           bun run --cwd workers/api --no-install vp test run test/app.test.ts --testNamePattern="serves contract-conformant liveness" --coverage.enabled=false
-          git worktree remove "$before"
+          git worktree remove --force "$before"
       - name: Produce and verify public release artifacts
         env:
           RELEASE_TAG: ${{ github.ref_name }}

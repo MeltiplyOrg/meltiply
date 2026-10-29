@@ -55,8 +55,18 @@
       "evidenceAndGate": "One-use backup recovery; hosted database and browser acceptance required."
     },
     "getHealth": {
-      "state": "specified",
-      "evidenceAndGate": "Workerd route and OpenAPI conformance tests pass; isolated preview conformance is still required."
+      "state": "worker-preview",
+      "evidenceAndGate": "Hosted isolated workerd release and unauthenticated health conformance passed; managed staging smoke and telemetry remain.",
+      "promotionEvidence": {
+        "release": {
+          "url": "https://raw.githubusercontent.com/MeltiplyOrg/meltiply/561aedd2e9d1002f233ce507b4284b86d7194be1/packages/contracts/evidence/get-health/40839398575-release.json",
+          "digest": "sha256:8c593fc5410067427ab95a5f560affed96f5825ab8dda19359d85be8e345f5bc"
+        },
+        "conformance": {
+          "url": "https://raw.githubusercontent.com/MeltiplyOrg/meltiply/561aedd2e9d1002f233ce507b4284b86d7194be1/packages/contracts/evidence/get-health/40839398575-conformance.json",
+          "digest": "sha256:ebab1542d6d78964e6fdbc9400e7aff88997851675815ed8b2ddcb8452499c85"
+        }
+      }
     },
     "getReadiness": {
       "state": "specified",

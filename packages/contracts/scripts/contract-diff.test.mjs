@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,7 +55,7 @@ function run() {
       "--base-changelog",
       baseChangelog,
     ],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: { ...process.env, GITHUB_STEP_SUMMARY: "" } },
   );
 }
 
@@ -101,6 +101,55 @@ try {
 
   writeFileSync(current, "invalid: [");
   assert.notEqual(run().status, 0, "invalid contracts must fail closed");
+
+  // Diverging branch histories distinguish a PR merge base from the base branch's tip.
+  const repository = join(directory, "repository");
+  const contracts = join(repository, "packages/contracts");
+  mkdirSync(contracts, { recursive: true });
+  /** Executes fixture Git operations in an isolated repository and returns their output. */
+  const fixtureGit = (...args) => {
+    const result = spawnSync("git", args, { cwd: repository, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  /** Commits the fixture contract without relying on global Git author configuration. */
+  const commit = () => {
+    fixtureGit("add", ".");
+    fixtureGit("-c", "user.name=Contract test", "-c", "user.email=contract-test@example.test", "commit", "-m", "fixture");
+    return fixtureGit("rev-parse", "HEAD");
+  };
+  const source = join(contracts, "openapi.yaml");
+  const notes = join(contracts, "CHANGELOG.md");
+  const eventPath = join(directory, "event.json");
+  fixtureGit("init", "--quiet");
+  writeFileSync(source, document({ "/probe": operation }));
+  writeFileSync(notes, "## Unreleased\n");
+  const common = commit();
+  fixtureGit("tag", "contract-v1.0.0");
+  writeFileSync(source, document({ "/probe": operation, "/extra": extra }));
+  const baseTip = commit();
+  fixtureGit("checkout", "--detach", common);
+  const head = fixtureGit("rev-parse", "HEAD");
+  writeFileSync(eventPath, JSON.stringify({ pull_request: { base: { sha: baseTip }, head: { sha: head } } }));
+  /** Invokes CI baseline selection through event metadata, with no mocked comparator or Git calls. */
+  const ci = (name, ref = "refs/heads/feature") => spawnSync(process.execPath, [script, "--ci"], {
+    cwd: repository, encoding: "utf8",
+    env: { ...process.env, GITHUB_EVENT_NAME: name, GITHUB_EVENT_PATH: eventPath, GITHUB_REF: ref, GITHUB_STEP_SUMMARY: "" },
+  });
+  const mergeBase = ci("pull_request");
+  assert.equal(mergeBase.status, 0, `${mergeBase.stdout}${mergeBase.stderr}`);
+  assert.match(mergeBase.stdout, new RegExp(`unchanged against ${common}`));
+  writeFileSync(source, document({}));
+  writeFileSync(eventPath, JSON.stringify({ repository: { default_branch: "master" } }));
+  const pushBreak = ci("push", "refs/heads/master");
+  assert.equal(pushBreak.status, 1, `${pushBreak.stdout}${pushBreak.stderr}`);
+  assert.match(`${pushBreak.stdout}${pushBreak.stderr}`, /\/probe/);
+  fixtureGit("tag", "-d", "contract-v1.0.0");
+  const initial = ci("push", "refs/heads/master");
+  assert.equal(initial.status, 0, initial.stderr);
+  assert.match(initial.stdout, /skipped explicitly/);
+  writeFileSync(eventPath, "{}");
+  assert.equal(ci("pull_request").status, 2, "missing PR ancestry must fail closed, not skip");
   console.log(
     "Compatibility CLI: additive pass; named field/operation removal rejected; exact fresh review passes; stale/mismatched review and malformed contract rejected.",
   );

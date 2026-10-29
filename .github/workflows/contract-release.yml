@@ -39,6 +39,20 @@ jobs:
         run: bun run contract:release:prepare
       - name: Validate the authoritative contract
         run: bun run contract:check
+      - name: Prove the public health regression before and after implementation
+        run: |
+          mkdir -p artifacts/contract-preview
+          before="$RUNNER_TEMP/contract-health-before"
+          git worktree add --detach "$before" 5cc66f9
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$before/node_modules"
+          set +e
+          bun run --cwd "$before/workers/api" --no-install vp test run test/app.test.ts --testNamePattern="serves contract-conformant liveness" --coverage.enabled=false > artifacts/contract-preview/health-before.log 2>&1
+          result=$?
+          set -e
+          test "$result" -ne 0
+          grep --fixed-strings "contract_version" artifacts/contract-preview/health-before.log
+          bun run --cwd workers/api --no-install vp test run test/app.test.ts --testNamePattern="serves contract-conformant liveness" --coverage.enabled=false
+          git worktree remove "$before"
       - name: Produce and verify public release artifacts
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -53,7 +67,7 @@ jobs:
       - name: Format changed contract surfaces
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
-          bunx --no-install vp fmt package.json packages/contracts/scripts/*.mjs packages/contracts/src/index.ts packages/contracts/src/generated/version.ts packages/contracts/README.md packages/contracts/CHANGELOG.md packages/contracts/release.json packages/contracts/operation-readiness.json packages/contracts/endpoint-readiness.md packages/contracts/openapi.yaml packages/contracts/examples/operations.yaml workers/api/src/app.ts workers/api/test/app.test.ts .github/workflows/contract-release.yml docs/public-ci.md
+          bunx --no-install vp fmt package.json packages/contracts/scripts/*.mjs packages/contracts/src/index.ts packages/contracts/src/generated/version.ts packages/contracts/README.md packages/contracts/CHANGELOG.md packages/contracts/release.json packages/contracts/evidence/get-health/*.json packages/contracts/operation-readiness.json packages/contracts/endpoint-readiness.md packages/contracts/openapi.yaml packages/contracts/examples/operations.yaml workers/api/src/app.ts workers/api/test/app.test.ts .github/workflows/contract-release.yml .github/workflows/extended.yml docs/public-ci.md
           mkdir -p artifacts
           git add --intent-to-add packages/contracts/release.json
           git diff --binary > artifacts/contract-preparation.patch

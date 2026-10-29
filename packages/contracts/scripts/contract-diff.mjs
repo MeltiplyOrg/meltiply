@@ -1,11 +1,19 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import YAML from "yaml";
 
 import { breakingReviewToken, contractDigest, git, latestContractTag } from "./contract-source.mjs";
+
+/** Reports compatibility impact in logs and the existing CI job summary for PR reviewers. */
+function report(message) {
+  console.log(message);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Contract compatibility\n\n${message}\n\n`);
+  }
+}
 
 /** Reads an explicit option without treating a missing argument as a usable ref/path. */
 function option(name) {
@@ -33,9 +41,6 @@ function ciBase() {
   ) {
     return latestContractTag();
   }
-  console.log(
-    "Contract compatibility: skipped explicitly; no PR merge base or default-branch release baseline applies.",
-  );
   return undefined;
 }
 
@@ -45,9 +50,7 @@ function main() {
   const base = option("--base") ?? (ci ? ciBase() : undefined);
   if (!base) {
     if (ci) {
-      console.log(
-        "Contract compatibility: skipped explicitly; no baseline is available (initial release).",
-      );
+      report("Contract compatibility: skipped explicitly; no PR merge base or previous default-branch contract release is available.");
       return 0;
     }
     throw new Error(
@@ -64,7 +67,7 @@ function main() {
   if (!before?.paths || !after?.paths || !before?.info || !after?.info)
     throw new Error("Both contracts must be OpenAPI documents");
   if (contractDigest(before) === contractDigest(after)) {
-    console.log(`Contract compatibility: unchanged against ${base}.`);
+    report(`Contract compatibility: unchanged against ${base}.`);
     return 0;
   }
   const directory = mkdtempSync(join(tmpdir(), "meltiply-contract-diff-"));
@@ -83,9 +86,12 @@ function main() {
     );
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
+    if (process.env.GITHUB_STEP_SUMMARY && (result.stdout || result.stderr)) {
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n\`\`\`text\n${`${result.stdout}${result.stderr}`.slice(0, 64_000)}\n\`\`\`\n`);
+    }
     if (result.error) throw result.error;
     if (result.status === 0) {
-      console.log(`Contract compatibility: no breaking changes against ${base}.`);
+      report(`Contract compatibility: no breaking changes against ${base}.`);
       return 0;
     }
     // oasdiff exits 1 for breaking ERR findings; parser/tool errors cannot be waived.
@@ -118,12 +124,12 @@ function main() {
           line.replace(`[${token}]`, "").length > 40,
       );
     if (acknowledged && !previous.includes(token)) {
-      console.log(
+      report(
         `Contract compatibility: intentional breaking change reviewed in CHANGELOG.md [${token}].`,
       );
       return 0;
     }
-    console.error(
+    report(
       `Unreviewed breaking change. Add a NEW Unreleased entry describing affected operations/fields, migration and deprecation policy:\n- **Breaking:** [${token}] <change and client migration>`,
     );
     return 1;

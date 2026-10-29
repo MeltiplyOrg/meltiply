@@ -436,6 +436,12 @@ jobs:
             kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
             rm -f "$RUNNER_TEMP/device-backend.pid"
           fi
+      - name: Start fresh browser acceptance database
+        # The complete application gate deliberately exercises ownership
+        # transfer, suspension, and quota-boundary fixtures. Browser acceptance
+        # needs the deterministic seed, not the gate's exhausted state.
+        if: inputs.lane == 'cloudflare-full'
+        run: bash scripts/cloudflare-local/database.sh reset
       - name: Exercise navigation focus and reconnect assignment in the browser
         if: inputs.lane == 'cloudflare-full'
         env:

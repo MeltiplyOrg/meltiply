@@ -1,5 +1,5 @@
 import { objectStorageBindings } from "@meltiply/storage";
-import type { AccessClaims } from "@meltiply/auth";
+import type { AccessClaims, JwtIdentity } from "@meltiply/auth";
 
 import type { ResolvedActor } from "./actor-resolution";
 import { mailSenderConfiguration } from "./mail";
@@ -131,6 +131,65 @@ export function requiresEmailVerification(env: ApiWorkerEnv): boolean {
   return env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test";
 }
 
+/**
+ * Resolves and validates the installation application origin.
+ *
+ * The application origin is the single trusted origin for browser sign-in,
+ * device verification links, and auth callbacks. It must be a canonical
+ * absolute origin (no credentials, path, query, or fragment). HTTP is allowed
+ * only for loopback hosts in local/test; the environment label alone never
+ * permits plaintext traffic to a remote host.
+ *
+ * @param env - Worker environment bindings.
+ * @returns Canonical application origin without a trailing slash.
+ * @throws {Error} When APP_URL is missing, malformed, non-canonical, or insecure.
+ */
+export function applicationOrigin(env: ApiWorkerEnv): string {
+  const configured = env.APP_URL?.trim();
+  if (!configured) {
+    throw new Error("APP_URL is required for the installation application origin");
+  }
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    throw new Error("APP_URL must be an absolute installation origin");
+  }
+  // Compare against the parsed origin without a trailing-slash regex: the
+  // value is deployment input, so a linear string comparison avoids a
+  // polynomial scan on pathological slash runs.
+  const canonicalOrigin = url.origin;
+  const configuredOrigin =
+    configured === canonicalOrigin
+      ? canonicalOrigin
+      : configured === `${canonicalOrigin}/`
+        ? canonicalOrigin
+        : undefined;
+  if (url.username || url.password || url.search || url.hash || configuredOrigin === undefined) {
+    throw new Error(
+      "APP_URL must be a canonical installation origin without credentials, path, query, or fragment",
+    );
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("APP_URL must use HTTP or HTTPS");
+  }
+  // Browsers and DNS resolvers treat localhost and *.localhost as loopback.
+  // Plain HTTP is a loopback-only affordance: it must never carry credentials
+  // or consent links over a network, so a non-loopback origin always requires
+  // HTTPS regardless of the environment label. Loopback stays usable for
+  // self-hosted local installs that terminate TLS at their own gateway.
+  const loopback =
+    url.hostname === "localhost" ||
+    url.hostname.endsWith(".localhost") ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "::1" ||
+    url.hostname === "[::1]";
+  if (url.protocol === "http:" && !loopback) {
+    throw new Error("APP_URL must use HTTPS outside loopback-only development");
+  }
+  return url.origin;
+}
+
 // Check mail capability and normalized sender configuration, not mere presence.
 const stagingMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
 
@@ -215,6 +274,7 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
  */
 export function validateProductionBindings(env: ApiWorkerEnv): void {
   if (env.ENVIRONMENT !== "staging") return;
+  applicationOrigin(env);
   if (requiresEmailVerification(env)) {
     if (typeof env.MAIL?.send !== "function") {
       throw new Error("MAIL must be an Email Sending binding exposing a callable send method");
@@ -294,6 +354,7 @@ export type ApiWorkerEnvironment = {
   Bindings: ApiWorkerEnv;
   Variables: {
     actor: ResolvedActor;
+    identity: JwtIdentity;
     operator: AccessClaims;
     requestId: string;
     traceId: string;

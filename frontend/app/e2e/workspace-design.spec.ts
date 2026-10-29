@@ -708,6 +708,7 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await waitForWorkspace(page);
   await page.reload();
   await waitForWorkspace(page);
+  await activeBrandProfileName(page, workspace.profileName);
   await expect(page.locator("html")).toHaveClass(/dark/);
   await page.screenshot({
     animations: "disabled",
@@ -793,7 +794,8 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   });
   await page.keyboard.press("Escape");
   await expect(inspector).toBeHidden();
-  await viewSelector.getByRole("radio", { name: "Calendar", exact: true }).click();
+  await mobileViewMenu.click();
+  await page.getByRole("menuitemradio", { name: "Calendar", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Publishing calendar", exact: true }),
   ).toBeVisible();
@@ -814,7 +816,8 @@ test("keeps publishing work reachable through the redesigned workspace", async (
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
-  await viewSelector.getByRole("radio", { name: "Table", exact: true }).click();
+  await mobileViewMenu.click();
+  await page.getByRole("menuitemradio", { name: "Table", exact: true }).click();
   await mobileMenu.click();
   const mobileNavigation = page.getByRole("dialog", { name: "Workspace navigation", exact: true });
   await mobileNavigation.getByRole("button", { name: "Channels", exact: true }).click();

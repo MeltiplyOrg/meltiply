@@ -1,6 +1,8 @@
 import { Context, Effect, Layer } from "effect";
 import { AuthenticationRequiredError, ForbiddenError } from "@meltiply/domain";
 import { escapeMailHtml } from "@meltiply/domain/mail-content";
+import type { GenericEndpointContext } from "better-auth";
+import type { TimeString } from "better-auth/plugins";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey, type JWTPayload } from "jose";
 
 /**
@@ -9,6 +11,8 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey, type JWTPayload } 
  * `name` is present only when the token carried a non-empty display name.
  */
 export interface JwtIdentity {
+  /** Server-stored session provenance, resolved by the host's live-session check, not JWT claims. */
+  clientChannel?: "web" | "cli" | "unknown";
   email: string;
   /**
    * Live account verification state resolved from the database session. The
@@ -291,9 +295,35 @@ export interface AuthServiceShape {
  */
 export class AuthService extends Context.Service<AuthService, AuthServiceShape>()("AuthService") {}
 
+/**
+ * Settings for the installed Better Auth device-authorization plugin.
+ *
+ * The flow is a first-party session grant for the supported CLI client, not a
+ * general OAuth provider: the client identifier is matched exactly, no scope
+ * grants additional capabilities, and the host supplies the application-origin
+ * verification URL so links never follow a forwarded API origin.
+ */
+export interface BetterAuthDeviceAuthorizationConfig {
+  /** Exact supported client identifier (melti-cli). */
+  clientId: string;
+  /** Short lifetime for a pending device request, in Better Auth time form. */
+  expiresIn: TimeString;
+  /** Minimum polling interval enforced by the plugin, in Better Auth time form. */
+  interval: TimeString;
+  /** Absolute same-origin browser verification URL, e.g. `https://app.example/device`. */
+  verificationUri: string;
+}
+
 export interface BetterAuthConfig {
   baseURL?: string;
   database: unknown;
+  /**
+   * Enables the installed Better Auth device-authorization plugin as a
+   * first-party session grant for the supported CLI client. The browser
+   * verification URL must be absolute and same-origin with the installation
+   * application; the API never derives it from a forwarded request origin.
+   */
+  deviceAuthorization?: BetterAuthDeviceAuthorizationConfig;
   email?: BetterAuthEmailConfig;
   /**
    * Live account-activity check invoked before a session is created. The host
@@ -333,16 +363,55 @@ export interface BetterAuthEmailConfig {
 }
 
 /**
+ * Minimal live session identity the API Worker needs to bind browser consent
+ * to the browser session that verified a device code. Only identifiers are
+ * exposed; session tokens and user records stay inside Better Auth.
+ */
+export interface BetterAuthSessionIdentity {
+  session: { id: string };
+  user: { id: string };
+}
+
+/**
  * Minimal Better Auth surface the API Worker depends on: the fetch handler that
- * serves `/api/auth/*` (sign-in, sign-up, `/token`, `/jwks`). Session state stays
- * inside that surface; protected `/api/v1` routes authenticate exclusively with
- * the bearer JWT minted there.
+ * serves `/api/auth/*` (sign-in, sign-up, device authorization, `/token`,
+ * `/jwks`) plus a live-session lookup for consent ownership. Session state
+ * stays inside that surface; protected `/api/v1` routes authenticate exclusively
+ * with the bearer JWT minted there.
  */
 export interface BetterAuthShape {
   handler: (request: Request) => Promise<Response>;
+  /**
+   * Resolves the live browser session carried by request cookies. Returns
+   * identifiers only, so callers cannot read or transport the session secret.
+   */
+  getSession?: (headers: Headers) => Promise<BetterAuthSessionIdentity | null>;
 }
 
 export type BetterAuthInstance = BetterAuthShape;
+
+/**
+ * Retains hidden provenance in the authenticated request context before a
+ * password or account-security update can revoke its session through database
+ * triggers. Runs after bearer/session middleware, unlike global pre-hooks.
+ * Missing sessions leave no attribution; storage failures abort the update.
+ */
+async function retainSessionProvenance(context: GenericEndpointContext | null): Promise<void> {
+  const current = context?.context.session;
+  if (!context || !current) return;
+  const stored = await context.context.adapter.findOne<{
+    clientChannel: "web" | "cli" | "unknown";
+    userId: string;
+  }>({
+    model: "session",
+    where: [{ field: "id", value: current.session.id }],
+  });
+  if (!stored || stored.userId !== current.user.id) return;
+  Object.assign(context.context, {
+    sessionClientChannel: stored.clientChannel,
+    sessionClientUserId: stored.userId,
+  });
+}
 
 /**
  * Creates a self-hosted Better Auth instance backed by PostgreSQL.
@@ -356,6 +425,9 @@ export type BetterAuthInstance = BetterAuthShape;
  * checks that session on every protected operation, so revocation is immediate.
  * Cookie caching is disabled for the same reason. Password reset revokes all
  * sessions; TOTP enrollment requires confirmation and backup codes are encrypted.
+ * Session provenance is assigned from the issuing endpoint, never request
+ * fields or headers. Session replacements retain their authenticated
+ * predecessor's provenance; unrecognized issuance paths remain unknown.
  *
  * @param config - Database pool, secret, verification policy, optional baseURL/trustedOrigins, JWT claims, and email delivery.
  * @returns Configured Better Auth instance.
@@ -363,9 +435,30 @@ export type BetterAuthInstance = BetterAuthShape;
 export async function createBetterAuth(config: BetterAuthConfig): Promise<BetterAuthInstance> {
   // Exception: dynamic imports avoid loading pg and plugin code in workerd unit test isolates
   const { betterAuth } = await import("better-auth");
-  const { jwt, twoFactor } = await import("better-auth/plugins");
+  const { bearer, deviceAuthorization, jwt, twoFactor } = await import("better-auth/plugins");
   const email = config.email;
-  return betterAuth({
+  // Normalize and validate the device flow up front. The verification URL is
+  // always absolute (Better Auth would otherwise resolve it against the
+  // forwarded request origin) and same-origin with the configured installation
+  // base URL, so a proxy host can never redirect consent to another site.
+  const device = config.deviceAuthorization
+    ? {
+        ...config.deviceAuthorization,
+        clientId: config.deviceAuthorization.clientId.trim(),
+        verificationUri: new URL(config.deviceAuthorization.verificationUri).href,
+      }
+    : undefined;
+  if (device && !device.clientId) {
+    throw new TypeError("device authorization requires an exact client identifier");
+  }
+  const deviceClientId = device?.clientId;
+  if (device && config.baseURL) {
+    const installationOrigin = new URL(config.baseURL).origin;
+    if (new URL(device.verificationUri).origin !== installationOrigin) {
+      throw new TypeError("device authorization verification URI must be same-origin");
+    }
+  }
+  const instance = betterAuth({
     baseURL: config.baseURL,
     database: config.database,
     appName: "Meltiply",
@@ -373,13 +466,55 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
     // The API owns authoritative PostgreSQL rate limits; no isolate-local limit.
     rateLimit: { enabled: false },
     databaseHooks: {
+      account: {
+        update: {
+          before: async (account, context) => {
+            if (account.password !== undefined) await retainSessionProvenance(context);
+          },
+        },
+      },
+      user: {
+        update: {
+          before: async (user, context) => {
+            if (
+              "twoFactorEnabled" in user ||
+              user.emailVerified !== undefined ||
+              user.email !== undefined
+            )
+              await retainSessionProvenance(context);
+          },
+        },
+      },
       session: {
         create: {
-          before: async (session) => {
+          before: async (session, context) => {
             if (config.isAccountActive && !(await config.isAccountActive(session.userId))) {
               return false;
             }
-            return { data: session };
+            const requestContext = context?.context;
+            const previousChannel =
+              requestContext && "sessionClientChannel" in requestContext
+                ? requestContext.sessionClientChannel
+                : undefined;
+            const previousUserId =
+              requestContext && "sessionClientUserId" in requestContext
+                ? requestContext.sessionClientUserId
+                : undefined;
+            const clientChannel =
+              context?.path === "/device/token"
+                ? "cli"
+                : previousUserId === session.userId &&
+                    (previousChannel === "web" ||
+                      previousChannel === "cli" ||
+                      previousChannel === "unknown")
+                  ? previousChannel
+                  : context?.path === "/sign-in/email" ||
+                      context?.path === "/sign-up/email" ||
+                      context?.path === "/verify-email" ||
+                      context?.path?.startsWith("/two-factor/verify-")
+                    ? "web"
+                    : "unknown";
+            return { data: { ...session, clientChannel } };
           },
         },
       },
@@ -440,6 +575,11 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
         }
       : {}),
     plugins: [
+      // Accept the CLI session credential as a bearer transport for just the
+      // auth surface. Token issuing, renewal, and sign-out then share the same
+      // live-session checks as the browser cookie; /api/v1 still requires the
+      // short-lived JWT and never reads this credential.
+      bearer(),
       jwt({
         jwt: {
           ...(config.jwt?.audience ? { audience: config.jwt.audience } : {}),
@@ -458,15 +598,49 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
         trustDeviceMaxAge: 0,
         backupCodeOptions: { storeBackupCodes: "encrypted" },
       }),
+      // Standalone device flow: approval mints a first-party Better Auth
+      // session for the exact CLI client. Scope is not an authority grant, and
+      // the plugin's own expiry/polling/atomic-consume state machine remains
+      // authoritative.
+      ...(device
+        ? [
+            deviceAuthorization({
+              expiresIn: device.expiresIn,
+              interval: device.interval,
+              // The consent surface always shows six slots; keep generation and
+              // matching codes aligned with that contract.
+              userCodeLength: 6,
+              validateClient: (clientId: string) => clientId === deviceClientId,
+              verificationUri: device.verificationUri,
+            }),
+          ]
+        : []),
     ],
     secret: config.secret,
     session: {
+      additionalFields: {
+        clientChannel: {
+          type: ["web", "cli", "unknown"],
+          defaultValue: "unknown",
+          input: false,
+          returned: false,
+          required: true,
+        },
+      },
       cookieCache: { enabled: false },
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24,
     },
     trustedOrigins: config.trustedOrigins,
   });
+  return {
+    handler: (request) => instance.handler(request),
+    getSession: async (headers) => {
+      const resolved = await instance.api.getSession({ headers });
+      if (!resolved?.session?.id || !resolved.user?.id) return null;
+      return { session: { id: resolved.session.id }, user: { id: resolved.user.id } };
+    },
+  };
 }
 
 export interface CreateAuthServiceLiveOptions {

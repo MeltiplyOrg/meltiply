@@ -49,7 +49,9 @@ selected lanes: `frontend-full` for full browser/Lighthouse journeys,
 `bun run cloudflare:check`, `cloudflare-integration` for live-local topology/load,
 `cloudflare-extended` for release/staging/IaC checks, `publishing-queues` for the
 complete application gate, changed-scope React review, and real Queue browser/
-API/PostgreSQL/background delivery journey, and `object-storage` for provider
+API/PostgreSQL/background delivery journey, `device-authorization` for the
+complete application gate plus the real browser consent journey and CLI HTTP
+lifecycle over the running installation, and `object-storage` for provider
 switching. The storage lane builds a pinned MinIO release from source,
 checks live S3 operations, runs `bun run cloudflare:check`, then exercises
 application uploads, native media processing, private delivery, and retention
@@ -77,6 +79,20 @@ that failure. The matrix creates its future Queue slot when its Queue iteration
 begins, so preceding Now/Schedule work cannot consume that slot's lead time.
 Browser failures are reported without automatic retries, and each journey's traces
 and screenshots are retained in the lane's artifact before the next journey runs.
+
+`device-authorization` runs the complete application gate, then starts the
+production Worker and built frontend preview against a fresh seeded database. A
+real Chromium journey signs in through the existing form (including a second
+factor when enrolled), returns to the pending `/device` request, checks the
+desktop/phone layouts in both palettes, approves and denies with keyboard input,
+and confirms that a link visit grants nothing. A CLI-shaped HTTP smoke against
+the running installation issues and claims a code, approves and redeems it,
+obtains and exercises a JWT, verifies that the raw session credential is
+rejected by `/api/v1`, signs out, and confirms the browser session survives.
+Correlated Worker stdout must identify browser and CLI credentials despite
+spoofed client hints, leave revoked credentials unattributed, and contain only
+non-secret credential identifiers. This proves the production-composed local
+runtime, not a deployed installation.
 
 `portable-caching` runs the complete application gate and the portable read-cache
 acceptance journey; `portable-caching-smoke` repeats only that journey when the

@@ -209,7 +209,6 @@ export type QueueQueryParams = NonNullable<operations["listQueues"]["parameters"
 export type PostQueryParams = NonNullable<operations["listPosts"]["parameters"]["query"]>;
 
 export type Distribution = components["schemas"]["Distribution"];
-export type DistributionListResponse = components["schemas"]["DistributionListResponse"];
 export type UpdateDistributionInput = components["schemas"]["UpdateDistributionRequest"];
 export type DistributionQueryParams = NonNullable<
   operations["listDistributions"]["parameters"]["query"]
@@ -240,9 +239,6 @@ export type AnalyticsDaySeries = components["schemas"]["AnalyticsDaySeries"];
 export type AnalyticsBestTime = components["schemas"]["AnalyticsBestTime"];
 export type AnalyticsFormat = components["schemas"]["AnalyticsFormat"];
 export type AnalyticsPlatformBreakdown = components["schemas"]["AnalyticsPlatformBreakdown"];
-export type AnalyticsSummaryQueryParams = NonNullable<
-  operations["getAnalyticsSummary"]["parameters"]["query"]
->;
 export type AnalyticsPostsQueryParams = NonNullable<
   operations["getAnalyticsPosts"]["parameters"]["query"]
 >;

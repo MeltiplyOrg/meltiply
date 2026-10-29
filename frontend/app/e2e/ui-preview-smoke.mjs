@@ -27,8 +27,22 @@ async function openPreviewControls(page) {
   const expand = page.getByRole("button", { name: "Expand DevBox", exact: true });
   await expect(page.getByRole("region", { name: "Meltiply DevBox", exact: true })).toBeVisible();
   if (await expand.isVisible()) await expand.click();
+  const devbox = page.getByRole("region", { name: "Meltiply DevBox", exact: true });
+  const tabRows = await devbox
+    .getByRole("tab")
+    .evaluateAll((tabs) => new Set(tabs.map((tab) => tab.offsetTop)).size);
+  assert.equal(tabRows, 1, "DevBox tabs must stay on one row");
   await page.getByRole("tab", { name: "Preview", exact: true }).click();
   return page.getByRole("region", { name: "Preview controls", exact: true });
+}
+
+/** Opens the dev-only Routes tab, which lists the new device consent surface. */
+async function openRoutesTab(page) {
+  const expand = page.getByRole("button", { name: "Expand DevBox", exact: true });
+  await expect(page.getByRole("region", { name: "Meltiply DevBox", exact: true })).toBeVisible();
+  if (await expand.isVisible()) await expand.click();
+  await page.getByRole("tab", { name: "Routes", exact: true }).click();
+  return page.getByRole("region", { name: "Route previews", exact: true });
 }
 const browser = await chromium.launch();
 try {
@@ -217,6 +231,34 @@ try {
   const routes = await page.getByRole("option").allTextContents();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Collapse DevBox", exact: true }).click();
+
+  // The Routes tab starts a synthetic device request and renders the real
+  // consent page, including both terminal decisions.
+  await page.goto(`${origin}/posts`);
+  const routesTab = await openRoutesTab(page);
+  await routesTab.getByRole("button", { name: "Start device request", exact: true }).click();
+  await page.waitForURL(/\/device\?user_code=PRV234/);
+  await expect(
+    page.getByRole("heading", { name: "Approve melti-cli?", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("PRV234", { exact: true })).toBeVisible();
+  for (const dark of [false, true])
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(
+        (enabled) => document.documentElement.classList.toggle("dark", enabled),
+        dark,
+      );
+      await page.screenshot({
+        path: `artifacts/ui-preview/device-review-${dark ? "dark" : "light"}-${width}.png`,
+        fullPage: true,
+      });
+    }
+  await page.getByRole("button", { name: "Deny request", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Access denied", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => document.documentElement.classList.remove("dark"));
+
   for (const route of routes) {
     dialog = await openPreviewControls(page);
     await dialog.getByRole("combobox", { name: "Preview route", exact: true }).click();

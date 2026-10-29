@@ -286,6 +286,11 @@ challenges. Regenerating backup codes retains the current session until the owne
 saves them and signs out. Already committed durable work retains its original
 authorization; signing out is not a cancellation of scheduled publishing.
 
+`melti-cli` uses the same origin, sign-in, second-factor, suspension, and session
+policy through the [CLI device authorization protocol](device-authorization.md).
+Approval creates a separate revocable CLI session; no password or browser JWT is
+copied into the terminal.
+
 Protect database backups and preserve `BETTER_AUTH_SECRET` and encryption keys:
 factor material is encrypted, and replacing keys can make it unreadable.
 

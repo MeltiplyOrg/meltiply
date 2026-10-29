@@ -194,6 +194,23 @@ function readinessCacheKey(env: ApiWorkerEnv): string {
 const readinessCacheTtlMilliseconds = 30_000;
 
 /**
+ * Projects only authenticated credential provenance into request logs. Missing
+ * or rejected credentials remain unknown, including public and auth-lifecycle
+ * requests. Actor IDs use the internal member ID; credential IDs use the
+ * non-secret session row ID, never bearer tokens, cookies, or request headers.
+ */
+function requestAuthFields(c: Context<ApiWorkerEnvironment>) {
+  const identity = c.get("identity");
+  const actor = c.get("actor");
+  return {
+    client_channel: identity?.clientChannel ?? "unknown",
+    auth_method: identity ? "session_jwt" : "unknown",
+    ...(identity?.sessionId ? { credential_id: identity.sessionId } : {}),
+    ...(actor ? { actor_id: actor.userId } : {}),
+  };
+}
+
+/**
  * Maps a Better Auth route path to its rate-limit action key.
  *
  * Credential-bearing endpoints get dedicated budgets; every other auth endpoint
@@ -203,6 +220,12 @@ const readinessCacheTtlMilliseconds = 30_000;
  * @returns Action key consumed by `checkAuthRateLimit`.
  */
 function authRateLimitAction(path: string): string {
+  if (path === "/api/auth/device/code") return "device-code";
+  if (path === "/api/auth/device/token") return "device-token";
+  if (path === "/api/auth/device") return "device-verify";
+  if (path === "/api/auth/device/approve" || path === "/api/auth/device/deny") {
+    return "device-approval";
+  }
   if (path.startsWith("/api/auth/sign-in/")) return "sign-in";
   if (path.startsWith("/api/auth/two-factor/")) return "two-factor";
   if (path === "/api/auth/change-password") return "change-password";
@@ -237,7 +260,8 @@ function authRateLimitAvailable(env: ApiWorkerEnv): boolean {
  * split CORS (credentialed for `/api/auth/*`, bearer-only for `/api/v1/*`), health
  * checks, Better Auth JWT bearer verification into the `actor` context, tenant RLS
  * scoping, flow observability, eager outbox relays, and mounts core, operator, and
- * flow sub-routers.
+ * flow sub-routers. Request and failure logs include server-resolved credential
+ * provenance and non-secret actor/session identifiers after tenant authentication.
  *
  * @param dependencies - Optional dependency overrides for testing (auth resolution, service stubs).
  * @returns Configured Hono application instance ready to handle HTTP fetch events.
@@ -304,6 +328,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         version: c.env.VERSION,
       },
       {
+        ...requestAuthFields(c),
         ...(errorCode ? { error_code: errorCode } : {}),
         event: "http_request",
         latency_ms: elapsedMilliseconds(startedAt),
@@ -351,7 +376,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   // point, and each instance fixes its exposed-header list up front.
   const corsMiddlewareFor = (allowCredentials: boolean) => {
     const exposedHeaders = allowCredentials
-      ? "X-Request-ID, ETag, Retry-After, Idempotency-Replayed, Set-Auth-JWT"
+      ? "X-Request-ID, ETag, Retry-After, Idempotency-Replayed, Set-Auth-JWT, Set-Auth-Token"
       : "X-Request-ID, ETag, Retry-After, Idempotency-Replayed";
     return async (c: Context<ApiWorkerEnvironment>, next: () => Promise<void>) => {
       const origin = c.req.header("Origin");
@@ -424,17 +449,39 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   // than failing every auth request.
   app.all("/api/auth/*", async (c) => {
     if (authRateLimitAvailable(c.env)) {
-      const result = await authRateLimiter(c.env, authRateLimitAction(c.req.path), c.req.raw);
+      const action = authRateLimitAction(c.req.path);
+      const result = await authRateLimiter(c.env, action, c.req.raw);
       if (result.status === "limited") {
+        const retryAfter =
+          result.retryAfterSeconds !== undefined
+            ? { "Retry-After": String(result.retryAfterSeconds) }
+            : undefined;
+        if (action === "device-token") {
+          // Preserve the RFC 8628 polling contract: token polling back-off is
+          // communicated as the top-level slow_down error, exactly like the
+          // plugin's own interval enforcement, with the distributed budget's
+          // delay in Retry-After. The generic API error envelope would break
+          // separately released CLI clients.
+          const headers: Record<string, string> = {
+            "Cache-Control": "no-store",
+            Pragma: "no-cache",
+          };
+          if (retryAfter) headers["Retry-After"] = retryAfter["Retry-After"];
+          return Response.json(
+            {
+              error: "slow_down",
+              error_description: "Polling too frequently. Wait before retrying.",
+            },
+            { headers, status: 400 },
+          );
+        }
         return errorResponse(
           c.get("requestId"),
           429,
           "rate_limited",
           "Too many authentication attempts. Retry later.",
           [],
-          result.retryAfterSeconds !== undefined
-            ? { "Retry-After": String(result.retryAfterSeconds) }
-            : undefined,
+          retryAfter,
         );
       }
     }
@@ -518,6 +565,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         "Authentication is required.",
       );
     }
+    c.set("identity", identity);
     try {
       c.set("actor", await resolveRequestActor(c.env, identity, c.req.raw, c.get("requestId")));
     } catch (cause) {
@@ -770,6 +818,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         version: c.env?.VERSION ?? "test",
       },
       {
+        ...requestAuthFields(c),
         error_code: "internal_error",
         event: "request_failed",
         outcome: "internal_error",

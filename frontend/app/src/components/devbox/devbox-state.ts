@@ -9,13 +9,14 @@
 
 import { readFunctionalStorage, writeFunctionalStorage } from "@meltiply/ui/cookie-consent";
 
-export type DevBoxTab = "skeletons" | "benchmark" | "trace" | "helpers" | "preview";
+export type DevBoxTab = "skeletons" | "benchmark" | "trace" | "helpers" | "routes" | "preview";
 
 export const devBoxTabs: readonly DevBoxTab[] = [
   "skeletons",
   "benchmark",
   "trace",
   "helpers",
+  "routes",
   "preview",
 ];
 

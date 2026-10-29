@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import { memoryAdapter } from "better-auth/adapters/memory";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
@@ -14,6 +15,7 @@ import {
   createAccessTokenVerifier,
   createAuthServiceLive,
   createAuthServiceTest,
+  createBetterAuth,
   createJwtVerifier,
   createRemoteJwtVerifier,
   jwtClaims,
@@ -376,5 +378,225 @@ describe("Effect AuthService and verifier helpers", () => {
     if (customExit._tag === "Failure") {
       expect(customExit.cause.toString()).toContain("Custom JWT failure");
     }
+  });
+});
+
+describe("Better Auth device protocol HTTP composition", () => {
+  it("completes a CLI grant and keeps browser and CLI session lifecycles separate", async () => {
+    const origin = "https://auth.example.test";
+    const email = "device-user@example.test";
+    // Keep the database object: transaction commits replace its model arrays.
+    // Models must be pre-declared for the installed memory adapter.
+    const database: {
+      [model: string]: Record<string, unknown>[];
+      session: Record<string, unknown>[];
+    } = {
+      account: [],
+      deviceCode: [],
+      jwks: [],
+      rateLimit: [],
+      session: [],
+      twoFactor: [],
+      user: [],
+      verification: [],
+    };
+    const auth = await createBetterAuth({
+      baseURL: origin,
+      database: memoryAdapter(database),
+      deviceAuthorization: {
+        clientId: "melti-cli",
+        expiresIn: "10m",
+        interval: "5s",
+        verificationUri: `${origin}/device`,
+      },
+      isAccountActive: async () => true,
+      jwt: { audience: "meltiply-api", issuer: origin },
+      requireEmailVerification: false,
+      secret: "meltiply-auth-http-test-secret-32",
+      trustedOrigins: [origin],
+    });
+
+    /**
+     * Sends a same-origin JSON request to the real Better Auth HTTP handler.
+     *
+     * @param path - Auth API path.
+     * @param body - JSON request payload.
+     * @param headers - Optional request headers such as a session cookie.
+     * @returns The Better Auth HTTP response.
+     */
+    const postJson = (
+      path: string,
+      body: Record<string, unknown>,
+      headers: Record<string, string> = {},
+    ): Promise<Response> =>
+      auth.handler(
+        new Request(`${origin}${path}`, {
+          body: JSON.stringify(body),
+          headers: {
+            "Content-Type": "application/json",
+            Origin: origin,
+            ...headers,
+          },
+          method: "POST",
+        }),
+      );
+
+    /**
+     * Reads a JSON response as a record without trusting its runtime shape.
+     *
+     * @param response - Successful auth response.
+     * @returns Parsed object with unknown-valued fields.
+     */
+    const jsonRecord = async (response: Response): Promise<Record<string, unknown>> => {
+      const value: unknown = await response.json();
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new TypeError("Expected an object response");
+      }
+      return Object.fromEntries(Object.entries(value));
+    };
+
+    /**
+     * Extracts the Better Auth session cookie from a response.
+     *
+     * @param response - Sign-up or sign-in response.
+     * @returns `name=value` pair for subsequent browser requests.
+     */
+    const sessionCookie = (response: Response): string => {
+      const header = response.headers
+        .getSetCookie()
+        .find((entry) => entry.includes("session_token="));
+      const pair = header?.split(";", 1)[0];
+      if (!pair) throw new Error("Expected a browser session cookie");
+      return pair;
+    };
+
+    const signUp = await postJson("/api/auth/sign-up/email", {
+      email,
+      name: "Device User",
+      password: "device-password-for-http-test",
+      clientChannel: "cli",
+    });
+    expect(signUp.status).toBe(200);
+    const browserCookie = sessionCookie(signUp);
+    if (typeof auth.getSession !== "function") {
+      throw new Error("Better Auth instance must expose its session lookup");
+    }
+    const browserIdentity = await auth.getSession(new Headers({ Cookie: browserCookie }));
+    expect(browserIdentity).toMatchObject({
+      session: { id: expect.any(String) },
+      user: { id: expect.any(String) },
+    });
+    expect(
+      database.session.find((session) => session.id === browserIdentity?.session.id)?.clientChannel,
+    ).toBe("web");
+
+    const issued = await postJson("/api/auth/device/code", { client_id: "melti-cli" });
+    expect(issued.status).toBe(200);
+    const issuedBody = await jsonRecord(issued);
+    const deviceCode = issuedBody.device_code;
+    const userCode = issuedBody.user_code;
+    if (typeof deviceCode !== "string" || typeof userCode !== "string") {
+      throw new TypeError("Expected device and user codes");
+    }
+
+    const review = await auth.handler(
+      new Request(`${origin}/api/auth/device?user_code=${encodeURIComponent(userCode)}`, {
+        headers: { Cookie: browserCookie },
+      }),
+    );
+    const reviewBody = await jsonRecord(review);
+    expect(reviewBody).toMatchObject({
+      client_id: "melti-cli",
+      status: "pending",
+      user_code: userCode,
+    });
+    const approved = await postJson(
+      "/api/auth/device/approve",
+      { userCode },
+      { Cookie: browserCookie },
+    );
+    expect(approved.status).toBe(200);
+
+    const exchange = await postJson("/api/auth/device/token", {
+      client_id: "melti-cli",
+      device_code: deviceCode,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      clientChannel: "web",
+    });
+    expect(exchange.status).toBe(200);
+    const exchangeBody = await jsonRecord(exchange);
+    expect(exchangeBody.token_type).toBe("Bearer");
+    const accessToken = exchangeBody.access_token;
+    if (typeof accessToken !== "string") throw new TypeError("Expected a CLI session credential");
+
+    const cliSession = await auth.handler(
+      new Request(`${origin}/api/auth/get-session`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+    );
+    expect(cliSession.status).toBe(200);
+    expect(cliSession.headers.get("set-auth-jwt")).toBeTruthy();
+    const cliBody = await jsonRecord(cliSession);
+    expect(cliBody.user).toMatchObject({ email });
+    expect(cliBody.session).not.toHaveProperty("clientChannel");
+    expect(database.session.find((session) => session.token === accessToken)?.clientChannel).toBe(
+      "cli",
+    );
+
+    const signOut = await auth.handler(
+      new Request(`${origin}/api/auth/sign-out`, {
+        body: "{}",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Origin: origin,
+        },
+        method: "POST",
+      }),
+    );
+    expect(signOut.status).toBe(200);
+
+    const revokedCliSession = await auth.handler(
+      new Request(`${origin}/api/auth/get-session`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+    );
+    const revokedCliSessionBody: unknown = await revokedCliSession.json();
+    expect(revokedCliSessionBody).toBeNull();
+
+    const browserSession = await auth.handler(
+      new Request(`${origin}/api/auth/get-session`, {
+        headers: { Cookie: browserCookie },
+      }),
+    );
+    expect((await jsonRecord(browserSession)).user).toMatchObject({ email });
+
+    // Password replacement revokes the original credential but must carry its
+    // hidden provenance forward, rather than accepting a body override or
+    // losing it when the public session projection omits the field.
+    const changed = await postJson(
+      "/api/auth/change-password",
+      {
+        currentPassword: "device-password-for-http-test",
+        newPassword: "replacement-password-for-http-test",
+        revokeOtherSessions: true,
+        clientChannel: "cli",
+      },
+      { Cookie: browserCookie },
+    );
+    expect(changed.status).toBe(200);
+    const replacement = await jsonRecord(changed);
+    expect(
+      database.session.find((session) => session.token === replacement.token)?.clientChannel,
+    ).toBe("web");
+    const replacedSession = await auth.handler(
+      new Request(`${origin}/api/auth/get-session`, {
+        headers: { Cookie: sessionCookie(changed) },
+      }),
+    );
+    const replacedBody = await jsonRecord(replacedSession);
+    expect(replacedBody.user).toMatchObject({ email });
+    expect(replacedBody.session).not.toHaveProperty("clientChannel");
+    expect(await auth.getSession(new Headers({ Cookie: browserCookie }))).toBeNull();
   });
 });

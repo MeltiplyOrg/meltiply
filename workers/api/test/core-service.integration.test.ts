@@ -1064,6 +1064,64 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     );
   });
 
+  it.each(["staging", "production"] as const)(
+    "keeps connections and publishing unavailable in %s before provider acceptance",
+    async (ENVIRONMENT) => {
+      const app = createApiApp({
+        resolveActor,
+        verifyJwtToken: async () => alphaIdentity,
+      });
+      const deployedEnv = {
+        ...env,
+        ENVIRONMENT,
+        APP_URL: "https://app.example.test",
+        FACEBOOK_CLIENT_ID: "facebook-client",
+        FACEBOOK_CLIENT_SECRET: "facebook-secret",
+        FACEBOOK_LIVE_ACCEPTED: "false",
+        INSTAGRAM_CLIENT_ID: "instagram-client",
+        INSTAGRAM_CLIENT_SECRET: "instagram-secret",
+        INSTAGRAM_LIVE_ACCEPTED: "false",
+        INSTAGRAM_ENGAGEMENT_LIVE_ACCEPTED: "false",
+        THREADS_CLIENT_ID: "threads-client",
+        THREADS_CLIENT_SECRET: "threads-secret",
+        THREADS_LIVE_ACCEPTED: "false",
+        THREADS_ENGAGEMENT_LIVE_ACCEPTED: "false",
+        TIKTOK_CLIENT_KEY: "tiktok-client",
+        TIKTOK_CLIENT_SECRET: "tiktok-secret",
+        TIKTOK_LIVE_ACCEPTED: "false",
+        YOUTUBE_SHORTS_CLIENT_ID: "youtube-client",
+        YOUTUBE_SHORTS_CLIENT_SECRET: "youtube-secret",
+        YOUTUBE_LIVE_ACCEPTED: "false",
+      };
+      const response = await app.request(
+        "/api/v1/platforms/capabilities",
+        { headers: { Authorization: bearerAuthorization } },
+        deployedEnv,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        capabilities: [
+          { connect_available: false, platform: "tiktok", publish: false },
+          { connect_available: false, platform: "youtube", publish: false },
+          { connect_available: false, platform: "instagram", publish: false },
+          { connect_available: false, platform: "facebook", publish: false },
+          { connect_available: false, platform: "threads", publish: false },
+        ],
+      });
+      for (const platform of ["tiktok", "youtube", "instagram", "facebook", "threads"]) {
+        const connect = await app.request(
+          `/api/v1/platforms/${platform}/connect`,
+          { headers: { Authorization: bearerAuthorization } },
+          deployedEnv,
+        );
+        expect(connect.status).toBe(422);
+        await expect(connect.json()).resolves.toMatchObject({
+          error: { code: "unsupported_capability" },
+        });
+      }
+    },
+  );
+
   it("lists platform accounts only for the authenticated tenant", async () => {
     const alphaAccounts = await Effect.runPromise(service.listPlatformAccounts(env, alpha));
     // The Post scenarios seed three extra Channels into the same workspace, so

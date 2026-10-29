@@ -370,6 +370,7 @@ for the mandatory rate limit.
   Keep `manage_zone_security = true` in staging and `false` in production.
   Preserve the existing owner's approved `managed_waf_ruleset_id` and rate limit.
   Apply the staging owner's coverage extension **before production foundation**.
+
 - **First production, no staging or other zone owner:** explicitly set
   `manage_zone_security = true` and a production-only map. If staging is added
   later in the same zone, first extend the production owner's map, then configure

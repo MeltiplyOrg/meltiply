@@ -13,6 +13,7 @@ on:
           - cloudflare-integration
           - cloudflare-extended
           - cloudflare-full
+          - managed-release
           - device-authorization
           - object-storage
           - publishing-queues
@@ -133,7 +134,7 @@ jobs:
           bun build scripts/selfhost/queue-capacity-check.ts --target=node --external miniflare --external pg --external effect --external zod --outfile=scripts/selfhost/.queue-capacity-check.mjs
           QUEUE_CAPACITY_BUNDLE=artifacts/queue-capacity-worker/queue-capacity.js node scripts/selfhost/.queue-capacity-check.mjs
       - name: Prepare full gate database
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull
       - name: Exercise every provider connection through real state and persistence
 
@@ -147,8 +148,14 @@ jobs:
             --outfile=scripts/selfhost/.oauth-connection-check.mjs
           node scripts/selfhost/.oauth-connection-check.mjs
       - name: Validate complete application contract
-        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
+        if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching'
         run: bun run cloudflare:check
+      - name: Validate managed release infrastructure
+        if: inputs.lane == 'managed-release'
+        run: |
+          bun run iac:check
+          bun run test:staging
+          bun run docs:links
       - name: Observe cold, warm, concurrent, and lifecycle cache behavior in workerd
         if: inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         env:

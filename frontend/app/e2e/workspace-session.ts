@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
+import { Pool } from "pg";
 import { activeBrandProfileName } from "./publication-fixtures";
 
 export type GeneratedCredentials = Readonly<{ name: string; email: string; password: string }>;
@@ -60,10 +61,38 @@ export async function openOwnerWorkspace(page: Page, credentials: GeneratedCrede
   await signIn(page, credentials);
 }
 
+/**
+ * Clears the seeded owner's sign-in budget in the disposable local database.
+ *
+ * Production allows ten sign-in attempts per email per ten minutes. The full
+ * browser suite signs the same fixture owner in far more often, so without this
+ * reset later journeys receive a real 429 and never reach the surface under
+ * test. Only a loopback test database is touched; hosted staging runs without
+ * the admin URL skip the reset, and the production limit is never relaxed.
+ */
+async function clearOwnerSignInBudget(email: string): Promise<void> {
+  const connectionString = process.env.MELTIPLY_DATABASE_TEST_ADMIN_URL?.trim();
+  if (!connectionString) return;
+  const url = new URL(connectionString);
+  if (!["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/meltiply") {
+    throw new Error("Owner sign-in budget reset requires the dedicated loopback test database");
+  }
+  const subject = `email:${createHash("sha256").update(email.trim().toLowerCase()).digest("hex")}`;
+  const pool = new Pool({ connectionString });
+  try {
+    await pool.query("DELETE FROM auth_rate_limits WHERE action = 'sign-in' AND subject = $1", [
+      subject,
+    ]);
+  } finally {
+    await pool.end();
+  }
+}
+
 /** Signs the existing owner in through the actual form without resetting saved work or session state. */
 export async function signIn(page: Page, credentials: GeneratedCredentials) {
   await allowFunctionalConsent(page);
   await isolateLocalAuthClient(page);
+  await clearOwnerSignInBudget(credentials.email);
   await page.goto("/sign-in");
   await page.getByLabel(/email address/i).fill(credentials.email);
   await page.getByLabel(/^password$/i).fill(credentials.password);

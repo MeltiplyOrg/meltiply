@@ -133,6 +133,33 @@ jobs:
           trap 'rm -f scripts/selfhost/.queue-capacity-check.mjs' EXIT
           bun build scripts/selfhost/queue-capacity-check.ts --target=node --external miniflare --external pg --external effect --external zod --outfile=scripts/selfhost/.queue-capacity-check.mjs
           QUEUE_CAPACITY_BUNDLE=artifacts/queue-capacity-worker/queue-capacity.js node scripts/selfhost/.queue-capacity-check.mjs
+      - name: Check changed managed release formatting
+        if: inputs.lane == 'managed-release'
+        run: |
+          node --input-type=module <<'NODE'
+          import { execFileSync, spawnSync } from "node:child_process";
+          import { copyFile, mkdir } from "node:fs/promises";
+          import path from "node:path";
+          const changed = execFileSync("git", ["diff", "--name-only", "-z", "--diff-filter=ACMR",
+            "origin/${{ github.event.repository.default_branch }}...HEAD"], { encoding: "utf8" });
+          const files = changed.split("\0").filter((file) => /\.(?:[cm]?[jt]sx?|jsonc?|md|ya?ml)$/.test(file));
+          if (files.length) {
+            const checked = spawnSync("bunx", ["--no-install", "vp", "fmt", ...files, "--check"], { stdio: "inherit" });
+            if (checked.status !== 0) {
+              // Preserve formatter-owned replacements for maintainers without committing
+              // runner mutations or allowing a dirty checkout into release preflight.
+              const formatted = spawnSync("bunx", ["--no-install", "vp", "fmt", ...files], { stdio: "inherit" });
+              if (formatted.status === 0) {
+                for (const file of files) {
+                  const destination = path.join("artifacts/managed-release-formatted", file);
+                  await mkdir(path.dirname(destination), { recursive: true });
+                  await copyFile(file, destination);
+                }
+              }
+              process.exit(checked.status ?? 1);
+            }
+          }
+          NODE
       - name: Prepare full gate database
         if: inputs.lane == 'cloudflare-full' || inputs.lane == 'managed-release' || inputs.lane == 'device-authorization' || inputs.lane == 'publishing-queues' || inputs.lane == 'portable-caching' || inputs.lane == 'portable-caching-smoke'
         run: bun run setup --skip-dependencies --skip-image-pull

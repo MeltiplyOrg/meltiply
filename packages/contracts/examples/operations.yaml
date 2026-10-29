@@ -434,7 +434,7 @@ operations:
       body:
         status: ok
         version: 1.0.0-target.0
-        contract_version: 1.0.0-target.0
+        contract_version: 1.0.0
         environment: staging
     errors: []
   getReadiness:

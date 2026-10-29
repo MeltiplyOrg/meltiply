@@ -40,6 +40,13 @@ contract versions and whether the installation or client must be upgraded. The
 server reports its contract; it does not reject older clients. Version agreement
 does not promote planning-only operations: check their readiness as well.
 
+Deployment smoke preserves the first-version transition only for the verified
+previous SHA during partial rollouts: a missing contract version becomes explicit
+`contract_version: null` in evidence, alongside the control-plane-verified previous
+Worker ID and Git SHA. Manifest validation binds those identities to the previous
+rollout version. Candidate, bootstrap, and 100% rollout smoke remain strict; this
+transition does not make contract metadata optional in the public health schema.
+
 ## Change a contract
 
 Run from the repository root:

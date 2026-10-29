@@ -57,7 +57,7 @@ function ciBase() {
   return undefined;
 }
 
-/** Compares real contracts, then permits only a newly recorded review bound to the exact change. */
+/** Compares contracts; only fresh complete changelog bullets bound to the exact change may waive breaks. */
 function main() {
   const ci = process.argv.includes("--ci");
   const base = option("--base") ?? (ci ? ciBase() : undefined);
@@ -132,14 +132,14 @@ function main() {
         (section) =>
           section.startsWith("Unreleased\n") || section.startsWith(`${after.info.version} - `),
       )
-      .join("\n");
-    const acknowledged = eligible
-      .split("\n")
+      .join("\n## ");
+    const acknowledged = (eligible.match(/^- .*(?:\n(?!- |#{1,6}(?:[ \t]|$)).+)*/gm) ?? [])
+      .map((entry) => entry.replace(/\n\s*/g, " "))
       .some(
-        (line) =>
-          line.startsWith("- **Breaking:** ") &&
-          line.includes(`[${token}]`) &&
-          line.replace(`[${token}]`, "").length > 40,
+        (bullet) =>
+          bullet.startsWith("- **Breaking:** ") &&
+          bullet.includes(`[${token}]`) &&
+          bullet.replace(`[${token}]`, "").length > 40,
       );
     if (acknowledged && !previous.includes(token)) {
       report(

@@ -375,6 +375,9 @@ test(`update live smoke accepts the previous ${legacy ? "legacy" : "versioned"} 
   const written = JSON.parse(await readFile(path.join(outDir, "smoke-live-5.json"), "utf8"));
   assert.equal(written.health.version, previousSha);
   assert.equal(written.health.contract_version, legacy ? null : contractVersion);
+  assert.deepEqual(written.previous_version, legacy
+    ? { version_id: previousVersionId, git_sha: previousSha }
+    : undefined);
 });
 }
 

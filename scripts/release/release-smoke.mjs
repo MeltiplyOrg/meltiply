@@ -103,18 +103,19 @@ function versionUrlOrigin(spec, versionId) {
  * Performs one bounded GET against the public API health endpoint.
  *
  * Rejects redirects, non-200 statuses, non-JSON envelopes, and bodies with
- * unexpected keys. The health contract is exactly {contract_version, environment,
- * status, version}: the contract version is a distinct non-empty machine value,
- * while version binds the serving code to a concrete Git SHA without exposing internals.
+ * unexpected keys. Missing contract_version is accepted only for legacyVersion,
+ * the verified previous SHA during a partial rollout, and normalized to null.
+ * Candidate, bootstrap and full-rollout callers omit legacyVersion and remain strict.
  *
  * @param {object} params - Probe parameters
  * @param {typeof fetch} params.fetchImpl - HTTP client implementation
  * @param {string} params.origin - Absolute HTTPS origin to probe
  * @param {number} params.requestBudgetMs - Maximum time allowed for the request
+ * @param {string} [params.legacyVersion] - Only previous SHA permitted to omit contract_version
  * @returns {Promise<object>} Validated health payload
  * @throws {TypeError|Error} If the response is not an exact health success envelope
  */
-export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
+export async function fetchHealth({ fetchImpl, origin, requestBudgetMs, legacyVersion }) {
   let response;
   try {
     response = await fetchImpl(new URL(`${origin}${healthPath}`), {
@@ -132,14 +133,16 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
     throw new Error(`API health request failed with status ${response.status}`);
   }
   const body = await readBoundedJsonResponse(response, maximumResponseBytes, "API health response");
+  const legacy = body !== null && typeof body === "object" &&
+    !Object.hasOwn(body, "contract_version") && legacyVersion !== undefined &&
+    body.version === legacyVersion;
   if (
     !body ||
     typeof body !== "object" ||
     Array.isArray(body) ||
     JSON.stringify(Object.keys(body).sort()) !==
-      JSON.stringify(["contract_version", "environment", "status", "version"]) ||
-    typeof body.contract_version !== "string" ||
-    body.contract_version.length === 0 ||
+      JSON.stringify(legacy ? ["environment", "status", "version"] : ["contract_version", "environment", "status", "version"]) ||
+    (!legacy && (typeof body.contract_version !== "string" || body.contract_version.length === 0)) ||
     body.environment !== "staging" ||
     body.status !== "ok" ||
     typeof body.version !== "string" ||
@@ -148,7 +151,7 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
     throw new TypeError("API health response is not the staging contract");
   }
   return {
-    contract_version: body.contract_version,
+    contract_version: legacy ? null : body.contract_version,
     environment: body.environment,
     status: body.status,
     version: body.version,
@@ -163,10 +166,12 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
  * mismatches throw TypeError, which is terminal — a healthy endpoint cannot
  * fix a wrong binding by retrying — while transport errors retry until the
  * deadline or attempt ceiling.
+ * Missing contract metadata is allowed only for the explicitly verified previous SHA.
  *
  * @param {object} params - Polling parameters
  * @param {Set<string>} params.acceptedVersions - Git SHAs the endpoint may legitimately serve
  * @param {typeof fetch} [params.fetchImpl=fetch] - HTTP client implementation
+ * @param {string} [params.legacyVersion] - Previous partial-rollout SHA allowed to omit contract_version
  * @param {number} [params.maximumElapsedMs=120000] - Hard deadline in milliseconds
  * @param {() => number} [params.now] - High-resolution timestamp provider
  * @param {string} params.origin - Absolute origin to poll
@@ -179,6 +184,7 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
 async function pollHealth({
   acceptedVersions,
   fetchImpl = fetch,
+  legacyVersion,
   maximumElapsedMs = smokeDeadlineMs,
   now = () => performance.now(),
   origin,
@@ -203,6 +209,7 @@ async function pollHealth({
     try {
       const health = await fetchHealth({
         fetchImpl,
+        legacyVersion,
         origin,
         requestBudgetMs: budget,
       });
@@ -346,6 +353,8 @@ export async function smokeVersionCandidate({
  * and the previously serving version. The health probe then asserts the
  * hostname serves only Git SHAs that the verified traffic split permits —
  * fail-closed against a third version or a stale release.
+ * Legacy previous responses normalize contract_version to null and record the
+ * verified previous Worker ID/SHA; candidates and full rollouts remain strict.
  *
  * @param {object} params - Smoke parameters
  * @param {Record<string, string | undefined>} params.environment - Process environment
@@ -391,6 +400,7 @@ export async function smokeLiveApi({
   const configPath = workerConfigPath(outDir, "api");
   let expectedTraffic;
   let previousSha;
+  let previousVersionId;
   if (spec.deployment_mode === "bootstrap") {
     const deployment = assertReleaseEvidence(
       await readJsonFile(
@@ -422,6 +432,7 @@ export async function smokeLiveApi({
       if (!previousVersion) {
         throw new TypeError("partial rollout evidence lacks the previous version");
       }
+      previousVersionId = previousVersion.version_id;
       previousSha = await workerVersionBindingSha({
         configPath,
         environment,
@@ -444,6 +455,7 @@ export async function smokeLiveApi({
   const result = await pollHealth({
     acceptedVersions,
     fetchImpl,
+    legacyVersion: previousSha !== spec.git_sha ? previousSha : undefined,
     origin: spec.app_url,
     pause,
     pollAttempts,
@@ -467,6 +479,9 @@ export async function smokeLiveApi({
     release_id: spec.release_id,
     schema_version: 1,
     status: "passed",
+    ...(result.health.contract_version === null ? {
+      previous_version: { version_id: previousVersionId, git_sha: previousSha },
+    } : {}),
     traffic: observedTraffic,
     version_id: versionId,
     worker: "api",

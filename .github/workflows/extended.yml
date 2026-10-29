@@ -171,6 +171,8 @@ jobs:
             const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
             for (const environment of ["staging", "production"]) {
               const input = { ...template, environment, git_sha: sha, release_id: `${environment}-${sha.slice(0, 12)}`,
+                api_workers_dev_url: `https://meltiply-api${environment === "production" ? "-production" : ""}.example.workers.dev`,
+                app_url: environment === "production" ? "https://app.meltiply.com" : template.app_url,
                 restore_point_expires_at: new Date(Date.now() + 14 * 86400000).toISOString() };
               const file = path.join(directory, `${environment}.json`);
               await writeFile(file, JSON.stringify(input));

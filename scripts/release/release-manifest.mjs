@@ -357,13 +357,19 @@ function validateSmokeHealth(evidence, url, name, versionPinned, spec, previousV
     throw new TypeError(`${name} health probes the wrong URL`);
   }
   const previous = evidence.previous_version;
-  const legacy = !versionPinned && spec.deployment_mode === "update" &&
-    health.contract_version === null && previousVersionId !== undefined &&
+  const legacy =
+    !versionPinned &&
+    spec.deployment_mode === "update" &&
+    health.contract_version === null &&
+    previousVersionId !== undefined &&
     previous?.version_id === previousVersionId &&
-    typeof previous.git_sha === "string" && gitShaPattern.test(previous.git_sha) &&
-    previous.git_sha !== spec.git_sha && health.version === previous.git_sha;
+    typeof previous.git_sha === "string" &&
+    gitShaPattern.test(previous.git_sha) &&
+    previous.git_sha !== spec.git_sha &&
+    health.version === previous.git_sha;
   if (
-    (!legacy && (typeof health.contract_version !== "string" || health.contract_version.length === 0)) ||
+    (!legacy &&
+      (typeof health.contract_version !== "string" || health.contract_version.length === 0)) ||
     health.environment !== "staging" ||
     health.status !== "ok" ||
     !gitShaPattern.test(health.version)
@@ -614,7 +620,11 @@ function validateEvidenceDocument({ content, context, name, spec }) {
     // partial rollout; only a full (or bootstrap) deployment must serve the
     // release SHA deterministically.
     validateSmokeHealth(
-      evidence, `${spec.app_url}/api/v1/health`, name, percentage === 100, spec,
+      evidence,
+      `${spec.app_url}/api/v1/health`,
+      name,
+      percentage === 100,
+      spec,
       percentage !== 100 ? context.candidate.api_previous : undefined,
     );
     return;

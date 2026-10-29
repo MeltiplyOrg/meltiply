@@ -483,22 +483,31 @@ test("manifest rejects legacy health without a matching partial-rollout previous
     { name: "missing explicit legacy marker", contract: undefined, missingMarker: true },
     { name: "empty contract version", contract: "" },
   ]) {
-    const spec = validateReleaseSpec(releaseInput({ deployment_mode: scenario.bootstrap ? "bootstrap" : "update" }));
+    const spec = validateReleaseSpec(
+      releaseInput({ deployment_mode: scenario.bootstrap ? "bootstrap" : "update" }),
+    );
     const files = scenario.bootstrap ? bootstrapEvidenceSet(spec) : updateEvidenceSet(spec);
     const filename = scenario.file ?? "smoke-live-5.json";
     files[filename] = {
       ...files[filename],
       health: {
         ...files[filename].health,
-        contract_version: scenario.missingMarker ? undefined : scenario.contract ?? null,
+        contract_version: scenario.missingMarker ? undefined : (scenario.contract ?? null),
         version: scenario.version ?? previousSha,
       },
-      previous_version: scenario.missingProof ? undefined : {
-        version_id: scenario.previousId ?? previousVersionId, git_sha: previousSha,
-      },
+      previous_version: scenario.missingProof
+        ? undefined
+        : {
+            version_id: scenario.previousId ?? previousVersionId,
+            git_sha: previousSha,
+          },
     };
     const outDir = await withReleaseDir(context, files);
-    await assert.rejects(buildReleaseManifest(manifestParams(outDir, spec)), /staging contract|previous/, scenario.name);
+    await assert.rejects(
+      buildReleaseManifest(manifestParams(outDir, spec)),
+      /staging contract|previous/,
+      scenario.name,
+    );
   }
 });
 

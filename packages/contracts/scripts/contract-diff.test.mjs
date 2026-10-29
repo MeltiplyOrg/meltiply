@@ -95,7 +95,10 @@ try {
     assert.equal(wrapped.status, 0, `${wrapped.stdout}${wrapped.stderr}`);
   }
   for (const boundary of ["- Another change", "### Other changes"]) {
-    writeFileSync(changelog, `## Unreleased\n\n- **Breaking:** GET /probe removes status.\n${boundary}\n  [${token}] Regenerate clients for this unrelated change.\n`);
+    writeFileSync(
+      changelog,
+      `## Unreleased\n\n- **Breaking:** GET /probe removes status.\n${boundary}\n  [${token}] Regenerate clients for this unrelated change.\n`,
+    );
     const separated = run();
     assert.equal(separated.status, 1, "review must not cross a bullet or section boundary");
   }

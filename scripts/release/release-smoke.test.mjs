@@ -320,65 +320,66 @@ test("version smoke fails closed on evidence, binding, and health drift", async 
 
 /** Partial canaries accept modern or legacy health only from the verified previous SHA. */
 for (const legacy of [false, true]) {
-test(`update live smoke accepts the previous ${legacy ? "legacy" : "versioned"} health response`, async (context) => {
-  const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
-  context.after(() => rm(outDir, { force: true, recursive: true }));
-  const spec = validateReleaseSpec(releaseInput({ deployment_mode: "update" }));
-  await seedCandidate(outDir, spec);
-  const base = {
-    git_sha: spec.git_sha,
-    release_id: spec.release_id,
-    schema_version: 1,
-  };
-  const traffic = [
-    { percentage: 5, version_id: secretsVersionId },
-    { percentage: 95, version_id: previousVersionId },
-  ].sort((left, right) => left.version_id.localeCompare(right.version_id));
-  await writeFile(
-    path.join(outDir, "api-rollout-5.json"),
-    JSON.stringify({
-      ...base,
-      percentage: 5,
-      traffic,
-      version_id: secretsVersionId,
-      worker: "api",
-    }),
-    { mode: 0o600 },
-  );
-
-  // During a 5% rollout the hostname may legitimately serve the previous
-  // release; the control plane binds that version's SHA so a third-party
-  // version still fails closed.
-  const origin = await withServer(context, (_request, response) => {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(
+  test(`update live smoke accepts the previous ${legacy ? "legacy" : "versioned"} health response`, async (context) => {
+    const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
+    context.after(() => rm(outDir, { force: true, recursive: true }));
+    const spec = validateReleaseSpec(releaseInput({ deployment_mode: "update" }));
+    await seedCandidate(outDir, spec);
+    const base = {
+      git_sha: spec.git_sha,
+      release_id: spec.release_id,
+      schema_version: 1,
+    };
+    const traffic = [
+      { percentage: 5, version_id: secretsVersionId },
+      { percentage: 95, version_id: previousVersionId },
+    ].sort((left, right) => left.version_id.localeCompare(right.version_id));
+    await writeFile(
+      path.join(outDir, "api-rollout-5.json"),
       JSON.stringify({
-        contract_version: legacy ? undefined : contractVersion,
-        environment: "staging",
-        status: "ok",
-        version: previousSha,
+        ...base,
+        percentage: 5,
+        traffic,
+        version_id: secretsVersionId,
+        worker: "api",
       }),
+      { mode: 0o600 },
+    );
+
+    // During a 5% rollout the hostname may legitimately serve the previous
+    // release; the control plane binds that version's SHA so a third-party
+    // version still fails closed.
+    const origin = await withServer(context, (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          contract_version: legacy ? undefined : contractVersion,
+          environment: "staging",
+          status: "ok",
+          version: previousSha,
+        }),
+      );
+    });
+    const evidence = await smokeLiveApi({
+      environment: {},
+      fetchImpl: healthFetch(origin),
+      outDir,
+      percentage: 5,
+      runCommand: controlPlane({
+        bindings: { [previousVersionId]: previousSha },
+        traffic,
+      }),
+      spec,
+    });
+    assert.equal(evidence.percentage, 5);
+    const written = JSON.parse(await readFile(path.join(outDir, "smoke-live-5.json"), "utf8"));
+    assert.equal(written.health.version, previousSha);
+    assert.equal(written.health.contract_version, legacy ? null : contractVersion);
+    assert.deepEqual(
+      written.previous_version,
+      legacy ? { version_id: previousVersionId, git_sha: previousSha } : undefined,
     );
   });
-  const evidence = await smokeLiveApi({
-    environment: {},
-    fetchImpl: healthFetch(origin),
-    outDir,
-    percentage: 5,
-    runCommand: controlPlane({
-      bindings: { [previousVersionId]: previousSha },
-      traffic,
-    }),
-    spec,
-  });
-  assert.equal(evidence.percentage, 5);
-  const written = JSON.parse(await readFile(path.join(outDir, "smoke-live-5.json"), "utf8"));
-  assert.equal(written.health.version, previousSha);
-  assert.equal(written.health.contract_version, legacy ? null : contractVersion);
-  assert.deepEqual(written.previous_version, legacy
-    ? { version_id: previousVersionId, git_sha: previousSha }
-    : undefined);
-});
 }
 
 /** Legacy handling cannot authorize candidate/full-rollout, foreign, or malformed health responses. */
@@ -396,30 +397,57 @@ test("legacy health remains rejected outside the previous partial-rollout versio
   ]) {
     const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-smoke-"));
     context.after(() => rm(outDir, { force: true, recursive: true }));
-    const spec = validateReleaseSpec(releaseInput({ deployment_mode: scenario.bootstrap ? "bootstrap" : "update" }));
+    const spec = validateReleaseSpec(
+      releaseInput({ deployment_mode: scenario.bootstrap ? "bootstrap" : "update" }),
+    );
     await seedCandidate(outDir, spec);
-    const percentage = scenario.bootstrap || scenario.candidate ? undefined : scenario.percentage ?? 5;
-    const traffic = percentage === 5
-      ? [{ percentage: 5, version_id: secretsVersionId }, { percentage: 95, version_id: previousVersionId }]
-        .sort((left, right) => left.version_id.localeCompare(right.version_id))
-      : [{ percentage: 100, version_id: secretsVersionId }];
+    const percentage =
+      scenario.bootstrap || scenario.candidate ? undefined : (scenario.percentage ?? 5);
+    const traffic =
+      percentage === 5
+        ? [
+            { percentage: 5, version_id: secretsVersionId },
+            { percentage: 95, version_id: previousVersionId },
+          ].sort((left, right) => left.version_id.localeCompare(right.version_id))
+        : [{ percentage: 100, version_id: secretsVersionId }];
     if (!scenario.candidate) {
-      const filename = scenario.bootstrap ? "worker-api-deployment.json" : `api-rollout-${percentage}.json`;
-      await writeFile(path.join(outDir, filename), JSON.stringify({
-        git_sha: spec.git_sha, release_id: spec.release_id, schema_version: 1,
-        percentage, traffic, version_id: secretsVersionId, worker: "api",
-      }));
+      const filename = scenario.bootstrap
+        ? "worker-api-deployment.json"
+        : `api-rollout-${percentage}.json`;
+      await writeFile(
+        path.join(outDir, filename),
+        JSON.stringify({
+          git_sha: spec.git_sha,
+          release_id: spec.release_id,
+          schema_version: 1,
+          percentage,
+          traffic,
+          version_id: secretsVersionId,
+          worker: "api",
+        }),
+      );
     }
     const origin = await withServer(context, (_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({
-        contract_version: scenario.contract, environment: "staging", status: "ok", version: scenario.version,
-        ...(scenario.extra ? { debug: true } : {}),
-      }));
+      response.end(
+        JSON.stringify({
+          contract_version: scenario.contract,
+          environment: "staging",
+          status: "ok",
+          version: scenario.version,
+          ...(scenario.extra ? { debug: true } : {}),
+        }),
+      );
     });
     const params = {
-      environment: {}, fetchImpl: healthFetch(origin), outDir, spec,
-      runCommand: controlPlane({ bindings: { [previousVersionId]: scenario.previous ?? previousSha }, traffic }),
+      environment: {},
+      fetchImpl: healthFetch(origin),
+      outDir,
+      spec,
+      runCommand: controlPlane({
+        bindings: { [previousVersionId]: scenario.previous ?? previousSha },
+        traffic,
+      }),
     };
     await assert.rejects(
       scenario.candidate ? smokeVersionCandidate(params) : smokeLiveApi({ ...params, percentage }),

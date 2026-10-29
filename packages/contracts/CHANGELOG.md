@@ -2,12 +2,12 @@
 
 ## Unreleased
 
+## 1.0.0 - 2026-10-29
+
 - Align public health examples with the prepared contract version, recognize
   wrapped breaking-review bullets without crossing bullet/heading boundaries, and
   retain strict candidate/full-rollout health checks while recording legacy
   previous-version responses only during verified partial rollouts.
-
-## 1.0.0 - 2026-10-29
 
 - Separate saved `PostProviderOptions` from complete `ProviderPublishOptions`.
   Post targets retain YouTube visibility with an unanswered audience and TikTok

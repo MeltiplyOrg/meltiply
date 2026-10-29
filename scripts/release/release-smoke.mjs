@@ -133,16 +133,24 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs, legacyVe
     throw new Error(`API health request failed with status ${response.status}`);
   }
   const body = await readBoundedJsonResponse(response, maximumResponseBytes, "API health response");
-  const legacy = body !== null && typeof body === "object" &&
-    !Object.hasOwn(body, "contract_version") && legacyVersion !== undefined &&
+  const legacy =
+    body !== null &&
+    typeof body === "object" &&
+    !Object.hasOwn(body, "contract_version") &&
+    legacyVersion !== undefined &&
     body.version === legacyVersion;
   if (
     !body ||
     typeof body !== "object" ||
     Array.isArray(body) ||
     JSON.stringify(Object.keys(body).sort()) !==
-      JSON.stringify(legacy ? ["environment", "status", "version"] : ["contract_version", "environment", "status", "version"]) ||
-    (!legacy && (typeof body.contract_version !== "string" || body.contract_version.length === 0)) ||
+      JSON.stringify(
+        legacy
+          ? ["environment", "status", "version"]
+          : ["contract_version", "environment", "status", "version"],
+      ) ||
+    (!legacy &&
+      (typeof body.contract_version !== "string" || body.contract_version.length === 0)) ||
     body.environment !== "staging" ||
     body.status !== "ok" ||
     typeof body.version !== "string" ||
@@ -479,9 +487,11 @@ export async function smokeLiveApi({
     release_id: spec.release_id,
     schema_version: 1,
     status: "passed",
-    ...(result.health.contract_version === null ? {
-      previous_version: { version_id: previousVersionId, git_sha: previousSha },
-    } : {}),
+    ...(result.health.contract_version === null
+      ? {
+          previous_version: { version_id: previousVersionId, git_sha: previousSha },
+        }
+      : {}),
     traffic: observedTraffic,
     version_id: versionId,
     worker: "api",

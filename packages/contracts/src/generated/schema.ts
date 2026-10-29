@@ -3489,7 +3489,7 @@ export interface operations {
                      * @example {
                      *       "status": "ok",
                      *       "version": "01JZRELEASE",
-                     *       "contract_version": "1.0.0-target.0",
+                     *       "contract_version": "1.0.0",
                      *       "environment": "staging"
                      *     }
                      */

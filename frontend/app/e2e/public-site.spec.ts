@@ -213,14 +213,14 @@ test.describe("public site verification", () => {
       .getByRole("button", { name: /Switch to dark theme/ });
     await toggle.click();
     await expect(page.locator("html")).toHaveClass(/dark/);
-    await page.getByRole("link", { name: "Meltiply.com", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`${new URL(origin).origin}/?$`));
-    await expect(page.locator("html")).toHaveClass(/dark/);
     await page.screenshot({
       animations: "disabled",
       fullPage: true,
       path: testInfo.outputPath("public-docs-dark-1440.png"),
     });
+    await page.getByRole("link", { name: "Meltiply.com", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${new URL(origin).origin}/?$`));
+    await expect(page.locator("html")).toHaveClass(/dark/);
 
     // Unknown guide paths keep the public 404 and its way back.
     await page.goto(publicPath(origin, "/docs/not-a-guide"));
@@ -250,20 +250,23 @@ test.describe("public site verification", () => {
     expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(
       true,
     );
-    const channelsTab = page.getByRole("tab", { name: "Channels", exact: true });
-    await channelsTab.click();
+    // Dispatch the selection inside the page so WAAPI creation can be inspected
+    // synchronously. Polling for eventual inactivity would also pass if the
+    // shared engine ignored reduced motion and let a 240ms effect finish.
+    const panelAnimationTargets = await page.evaluate(() => {
+      const tab = document.getElementById("tab-channels");
+      if (!(tab instanceof HTMLButtonElement)) throw new Error("Channels tab is missing");
+      tab.click();
+      return document
+        .getAnimations()
+        .flatMap((animation) => {
+          const target = (animation.effect as KeyframeEffect | null)?.target;
+          return target instanceof Element && target.closest(".preview-main") ? [target] : [];
+        })
+        .map((target) => target.className || target.tagName);
+    });
+    expect(panelAnimationTargets).toEqual([]);
     const channelsPanel = page.getByRole("tabpanel", { name: "Channels", exact: true });
     await expect(channelsPanel).toBeVisible();
-    // The shared effect owner returns before creating WAAPI animations under
-    // native reduced motion; the panel's content therefore commits immediately.
-    await expect
-      .poll(() =>
-        channelsPanel.evaluate(
-          (panel) =>
-            panel.getAnimations().length === 0 &&
-            (panel.parentElement?.getAnimations().length ?? 0) === 0,
-        ),
-      )
-      .toBe(true);
   });
 });

@@ -250,6 +250,7 @@ const composerRecoverySchema = Schema.Struct({
       content: Schema.String,
       hasOverride: Schema.Boolean,
       settings: Schema.Record(Schema.String, Schema.Unknown),
+      signature: Schema.optional(Schema.NullOr(Schema.String)),
     }),
   ),
   removedAssetIds: Schema.Array(Schema.String),
@@ -1010,7 +1011,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setAttachmentOverrides(attachmentOverridesFromPost(post));
       setSelectedChannelIds([...channelIds]);
       if (scheduledAt) {
-        scheduleTouchedRef.current = true;
         scheduleTimeZoneRef.current = publishingTimeZone;
         setScheduleDate(instantToWallClock(scheduledAt, publishingTimeZone, false));
         setPublishMode("schedule");
@@ -1373,7 +1373,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     scheduleTimeZoneRef.current = publishingTimeZone;
     if (scheduleTouchedRef.current) return;
     const instant = wallClockToInstant(scheduleDate, previous);
-    if (instant) setScheduleDate(instantToWallClock(instant, publishingTimeZone));
+    if (instant) setScheduleDate(instantToWallClock(instant, publishingTimeZone, false));
   }, [publishingTimeZone, scheduleDate]);
 
   /**

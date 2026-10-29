@@ -49,6 +49,8 @@ interface ProviderEditorProps<S> {
   settings: Partial<S>;
   /** Merges one key into the raw settings map and reports the change upward. */
   update: (key: string, value: unknown) => void;
+  /** Applies related choices atomically against the same settings snapshot. */
+  updateMany: (patch: Record<string, unknown>) => void;
   /** Live TikTok publishing requirements when the descriptor opted in; otherwise null. */
   requirements: TikTokPublishingRequirements | null;
   /** Actual attachment kinds for this Channel, not the Post's full media set. */
@@ -146,6 +148,7 @@ function defineProviderDescriptor<S>(spec: ProviderSpec<S>): ProviderDescriptor 
       channelName={props.channelName}
       settings={read(props.settings)}
       update={props.update}
+      updateMany={props.updateMany}
       requirements={props.requirements}
       t={props.t}
       mediaKinds={props.mediaKinds}
@@ -521,6 +524,7 @@ function InstagramEditor({
   channelName,
   settings: instagram,
   update,
+  updateMany,
   mediaKinds,
   t,
 }: ProviderEditorProps<InstagramComposerSettings>): React.ReactElement {
@@ -536,10 +540,12 @@ function InstagramEditor({
         </label>
         <Select
           value={postType}
-          onValueChange={(value) => {
-            update("post_type", value);
-            if (value !== "reel") update("trial_reel", false);
-          }}
+          onValueChange={(value) =>
+            updateMany({
+              post_type: value,
+              ...(value !== "reel" ? { trial_reel: false } : {}),
+            })
+          }
         >
           <SelectTrigger id={`${fieldId}-post-type`}>
             <SelectValue placeholder={t("Choose the Instagram post type")} />
@@ -968,6 +974,11 @@ export function PlatformSettings({
     });
   };
 
+  /** Commits coupled Provider choices together so one cannot overwrite another. */
+  const updateMany = (patch: Record<string, unknown>) => {
+    onChange({ ...settings, ...patch });
+  };
+
   const Editor = descriptor.Editor;
   return (
     <>
@@ -975,6 +986,7 @@ export function PlatformSettings({
         channelName={channelName}
         settings={settings}
         update={update}
+        updateMany={updateMany}
         requirements={requirements}
         mediaKinds={mediaKinds}
         t={t}

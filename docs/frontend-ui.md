@@ -204,6 +204,12 @@ The composer uses `ComposerSection` for titled sections and `DestinationSelector
 
 A mounted composition keeps one async identity even after its first save. Subsequent single-Post edits recover under the saved Post id, so reopening that record restores unsaved work. A new multi-profile batch keeps its copy identities together under the new-composition key; learning an anchor copy id never moves partial progress into a different namespace.
 
+Recovery retains each Channel's resolved signature snapshot, including an explicit
+no-signature value, rather than applying a newer default template. Hydrating a
+Schedule is not a creator edit: an untouched field follows publishing-timezone
+changes while preserving its instant and midnight. Provider choices that must
+change together, such as Instagram post type and Trial Reel, commit atomically.
+
 Original-media reads use the canonical `lib/api.ts` binary adapter: a signed object-store download never receives API bearer headers or session cookies. Failed copy uploads release their sessions. A new draft write invalidates the previous accepted delivery marker because saving cancels pending deliveries; only an unchanged retry can skip a completed profile. Readiness follows each Channel's selected attachments, so unused media does not block a text-only delivery. Readiness reads and polling have a shared five-minute deadline per profile; expiry reports a failure and retains the saved copy for retry.
 Recovered original-media copies reconstruct a valid filename extension from the canonical domain MIME policy; a display title is not treated as an upload filename. The copy keeps that title and the original bytes, without weakening upload validation.
 

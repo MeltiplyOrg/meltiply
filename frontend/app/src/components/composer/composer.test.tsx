@@ -141,7 +141,7 @@ function renderComposer(
     queryClient.setQueryData(queryKeys.post(options.post.id), options.post);
     vi.mocked(getPost).mockReturnValue(Effect.succeed(options.post));
   }
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
         <AppAuthProvider>
@@ -157,6 +157,7 @@ function renderComposer(
       </I18nProvider>
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 beforeEach(() => {
@@ -354,6 +355,64 @@ describe("Composer recovery consent", () => {
     await waitFor(() => expect(textarea).toHaveValue("Recovered paragraph"));
     await waitFor(() => expect(textarea).toBeEnabled());
   });
+
+  it.each(["Recovered footer", null])(
+    "restores the saved signature snapshot %s instead of the current default",
+    async (signature) => {
+      const account = { ...instagramAccount, brand_profile_id: "profile-a" };
+      window.localStorage.setItem(
+        "meltiply.composer.v2.personal::profile-a::post-hydrated",
+        JSON.stringify({
+          version: 2,
+          updatedAt: "2026-10-01T12:00:00.000Z",
+          sharedContent: "Recovered composition",
+          scheduleDate: "",
+          attachments: [],
+          removedAssetIds: [],
+          channelOverrides: {
+            [account.id]: { content: "", hasOverride: false, settings: {}, signature },
+          },
+          attachmentOverrides: {},
+          profileIds: ["profile-a"],
+          selectedChannelIds: [account.id],
+          profileCopies: {},
+        }),
+      );
+      writeCookieConsent({ functional: true });
+      vi.mocked(updatePost).mockReturnValue(Effect.succeed(hydratedPost));
+      renderComposer({
+        initialPostId: hydratedPost.id,
+        post: hydratedPost,
+        brandProfiles: composerProfiles,
+        accounts: [account],
+        preferences: {
+          timezone: null,
+          signature_templates: [
+            {
+              id: "00000000-0000-4000-8000-000000000901",
+              body: "New default footer",
+              name: "Default",
+              is_default: true,
+              position: 0,
+            },
+          ],
+          email_available: false,
+          notifications: {
+            channels: { email: false },
+            events: { channel_disconnected: false, publication_failed: false },
+          },
+          updated_at: "2026-10-01T10:00:00.000Z",
+        },
+      });
+
+      await waitFor(() => expect(composerTextarea()).toHaveValue("Recovered composition"));
+      expect(screen.queryByText("New default footer")).not.toBeInTheDocument();
+      if (signature !== null) expect(screen.getByText(signature)).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(updatePost).toHaveBeenCalled());
+      expect(vi.mocked(updatePost).mock.lastCall?.[2].targets?.[0]?.signature).toBe(signature);
+    },
+  );
 });
 
 describe("Composer and collection scope", () => {
@@ -563,10 +622,20 @@ describe("Composer leave guard", () => {
 });
 
 describe("Composer schedule restoration", () => {
-  it("preserves stored local midnight when reopening a scheduled Post", async () => {
-    renderComposer({
+  it("keeps an untouched scheduled instant when the publishing timezone changes", async () => {
+    const { queryClient } = renderComposer({
       brandProfiles: composerProfiles,
       initialPostId: hydratedPost.id,
+      preferences: {
+        timezone: "UTC",
+        signature_templates: [],
+        email_available: false,
+        notifications: {
+          channels: { email: false },
+          events: { channel_disconnected: false, publication_failed: false },
+        },
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
       post: {
         ...hydratedPost,
         distributions: [
@@ -578,7 +647,7 @@ describe("Composer schedule restoration", () => {
             platform_account_id: null,
             platform: "threads",
             status: "scheduled",
-            scheduled_at: new Date(2028, 1, 29, 0, 0).toISOString(),
+            scheduled_at: "2028-02-29T00:00:00.000Z",
             published_at: null,
             platform_post_id: null,
             platform_url: null,
@@ -603,6 +672,23 @@ describe("Composer schedule restoration", () => {
       "aria-valuenow",
       "0",
     );
+    for (const [timezone, hour] of [
+      ["Asia/Tokyo", "9"],
+      ["UTC", "0"],
+    ] as const) {
+      act(() => {
+        queryClient.setQueryData<PublishingPreferences>(
+          queryKeys.publishingPreferences(),
+          (current) => current && { ...current, timezone },
+        );
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("spinbutton", { name: /hour/i })).toHaveAttribute(
+          "aria-valuenow",
+          hour,
+        ),
+      );
+    }
   });
 
   it("keeps the daytime suggestion for a new calendar-day composition", async () => {

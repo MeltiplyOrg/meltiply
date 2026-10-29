@@ -74,6 +74,23 @@ async function measureRepeated(
   return medianMetrics(samples);
 }
 
+/**
+ * Retains a journey's JSON evidence before checking its budget. Awaiting the
+ * attachment keeps the report intact even when the assertion fails.
+ */
+async function assertJourneyBudget(
+  attachmentName: string,
+  metrics: JourneyMetrics,
+  budget: JourneyBudget,
+  failureMessage: string,
+): Promise<void> {
+  await test.info().attach(attachmentName, {
+    body: JSON.stringify(metrics, null, 2),
+    contentType: "application/json",
+  });
+  expect(withinBudget(metrics, budget), failureMessage).toBe(true);
+}
+
 test.describe("production publishing journeys", () => {
   test.describe.configure({ retries: 0 });
   test.use({
@@ -93,14 +110,12 @@ test.describe("production publishing journeys", () => {
         timeout: 15_000,
       });
     });
-    test.info().attach("public-landing.json", {
-      body: JSON.stringify(landing, null, 2),
-      contentType: "application/json",
-    });
-    expect(
-      withinBudget(landing, budgets.signInScreen),
+    await assertJourneyBudget(
+      "public-landing.json",
+      landing,
+      budgets.signInScreen,
       `public landing exceeded budget: ${JSON.stringify(landing)}`,
-    ).toBe(true);
+    );
   });
 
   test("signs in to a populated workspace and reaches Posts", async ({ page }) => {
@@ -109,14 +124,12 @@ test.describe("production publishing journeys", () => {
       await page.goto("/sign-in");
       await expect(page.getByLabel(/email address/i)).toBeVisible({ timeout: 15_000 });
     });
-    test.info().attach("sign-in-screen.json", {
-      body: JSON.stringify(signInScreen, null, 2),
-      contentType: "application/json",
-    });
-    expect(
-      withinBudget(signInScreen, budgets.signInScreen),
+    await assertJourneyBudget(
+      "sign-in-screen.json",
+      signInScreen,
+      budgets.signInScreen,
       `sign-in screen exceeded budget: ${JSON.stringify(signInScreen)}`,
-    ).toBe(true);
+    );
 
     const cold = await measureJourney(page, async () => {
       await page.getByLabel(/email address/i).fill(credentials.email);
@@ -125,14 +138,12 @@ test.describe("production publishing journeys", () => {
       await page.waitForURL(/\/posts(?:\?|$)/, { timeout: 30_000 });
       await waitForPosts(page);
     });
-    test.info().attach("cold-signed-in-posts.json", {
-      body: JSON.stringify(cold, null, 2),
-      contentType: "application/json",
-    });
-    expect(
-      withinBudget(cold, budgets.coldSignIn),
+    await assertJourneyBudget(
+      "cold-signed-in-posts.json",
+      cold,
+      budgets.coldSignIn,
       `cold signed-in Posts exceeded budget: ${JSON.stringify(cold)}`,
-    ).toBe(true);
+    );
   });
 
   test("warms Posts, opens media, and types in the composer", async ({ page }) => {
@@ -144,35 +155,29 @@ test.describe("production publishing journeys", () => {
       await page.reload();
       await waitForPosts(page);
     });
-    test.info().attach("warm-posts.json", {
-      body: JSON.stringify(warm, null, 2),
-      contentType: "application/json",
-    });
-    expect(
-      withinBudget(warm, budgets.warmPosts),
+    await assertJourneyBudget(
+      "warm-posts.json",
+      warm,
+      budgets.warmPosts,
       `warm Posts exceeded budget: ${JSON.stringify(warm)}`,
-    ).toBe(true);
+    );
 
     const media = await measureJourney(page, () => openFirstPostMedia(page));
-    test.info().attach("posts-to-media.json", {
-      body: JSON.stringify(media, null, 2),
-      contentType: "application/json",
-    });
-    expect(
-      withinBudget(media, budgets.mediaNavigation),
+    await assertJourneyBudget(
+      "posts-to-media.json",
+      media,
+      budgets.mediaNavigation,
       `Posts-to-media navigation exceeded budget: ${JSON.stringify(media)}`,
-    ).toBe(true);
+    );
     await page.keyboard.press("Escape");
 
     const composer = await measureJourney(page, () => openComposer(page));
-    test.info().attach("composer-open.json", {
-      body: JSON.stringify(composer, null, 2),
-      contentType: "application/json",
-    });
-    expect(
-      withinBudget(composer, budgets.composerOpen),
+    await assertJourneyBudget(
+      "composer-open.json",
+      composer,
+      budgets.composerOpen,
       `composer opening exceeded budget: ${JSON.stringify(composer)}`,
-    ).toBe(true);
+    );
 
     const typed = "Launch copy with emoji 🚀 and exact spacing.";
     const textarea = page.getByPlaceholder(/what do you want to publish/i);
@@ -180,14 +185,12 @@ test.describe("production publishing journeys", () => {
       await textarea.click();
       await page.keyboard.type(typed);
     });
-    test.info().attach("composer-typing.json", {
-      body: JSON.stringify(typing, null, 2),
-      contentType: "application/json",
-    });
-    expect(
-      withinBudget(typing, budgets.composerTyping),
+    await assertJourneyBudget(
+      "composer-typing.json",
+      typing,
+      budgets.composerTyping,
       `composer typing exceeded budget: ${JSON.stringify(typing)}`,
-    ).toBe(true);
+    );
     expect(
       typedContentMatches(await textarea.inputValue(), typed),
       "the composer lost or reordered typed content",
@@ -239,19 +242,16 @@ test.describe("production publishing journeys", () => {
 
     // Layout movement: inserting a large banner above the loaded collection
     // shifts real layout; the same CLS budget must reject it.
-    await delayedPage.evaluate(() => {
-      const banner = document.createElement("div");
-      banner.style.height = "320px";
-      banner.style.background = "red";
-      document.body.prepend(banner);
+    const shifted = await measureJourney(delayedPage, async () => {
+      await delayedPage.evaluate(() => {
+        const banner = document.createElement("div");
+        banner.style.height = "320px";
+        banner.style.background = "red";
+        document.body.prepend(banner);
+      });
+      await delayedPage.waitForTimeout(500);
     });
-    await delayedPage.waitForTimeout(500);
-    const shifted = await delayedPage.evaluate(() => {
-      const value = Reflect.get(window, "__meltiplyPerf");
-      if (!value || typeof value !== "object" || !("cls" in value)) return 0;
-      return typeof value.cls === "number" ? value.cls : 0;
-    });
-    expect(shifted).toBeGreaterThan(budgets.warmPosts.cls);
+    expect(shifted.cls).toBeGreaterThan(budgets.warmPosts.cls);
     await delayedContext.close();
   });
 });

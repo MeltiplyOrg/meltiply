@@ -25,6 +25,8 @@ Automatic checks run in separate jobs:
   delayed readiness, lost input, and layout movement fail those budgets. A
   separate Settings → Publishing browser journey saves and reloads the timezone,
   signature, and notification choices. Traces and JSON reports are retained.
+  Journey evidence is attached before budget assertions, and the layout-shift
+  self-check resets its collector so page-load movement cannot make it pass.
 - `selfhost-images`: when production image inputs change, build the three images
   for both amd64 and ARM64 in six parallel native-runner jobs, then smoke the exact
   artifacts on each architecture, including crash recovery and HTTPS. Nothing is

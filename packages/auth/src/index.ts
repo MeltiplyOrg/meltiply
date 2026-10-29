@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { AuthenticationRequiredError, ForbiddenError } from "@meltiply/domain";
 import { escapeMailHtml } from "@meltiply/domain/mail-content";
+import type { GenericEndpointContext } from "better-auth";
 import type { TimeString } from "better-auth/plugins";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey, type JWTPayload } from "jose";
 
@@ -390,6 +391,29 @@ export interface BetterAuthShape {
 export type BetterAuthInstance = BetterAuthShape;
 
 /**
+ * Retains hidden provenance in the authenticated request context before a
+ * password or account-security update can revoke its session through database
+ * triggers. Runs after bearer/session middleware, unlike global pre-hooks.
+ * Missing sessions leave no attribution; storage failures abort the update.
+ */
+async function retainSessionProvenance(context: GenericEndpointContext | null): Promise<void> {
+  const current = context?.context.session;
+  if (!context || !current) return;
+  const stored = await context.context.adapter.findOne<{
+    clientChannel: "web" | "cli" | "unknown";
+    userId: string;
+  }>({
+    model: "session",
+    where: [{ field: "id", value: current.session.id }],
+  });
+  if (!stored || stored.userId !== current.user.id) return;
+  Object.assign(context.context, {
+    sessionClientChannel: stored.clientChannel,
+    sessionClientUserId: stored.userId,
+  });
+}
+
+/**
  * Creates a self-hosted Better Auth instance backed by PostgreSQL.
  * Dynamically loads Better Auth to prevent module-evaluation side effects in serverless isolates.
  * When `config.email` is provided, verification and password-recovery delivery are wired
@@ -412,8 +436,6 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
   // Exception: dynamic imports avoid loading pg and plugin code in workerd unit test isolates
   const { betterAuth } = await import("better-auth");
   const { bearer, deviceAuthorization, jwt, twoFactor } = await import("better-auth/plugins");
-  // Exception: the API entry also loads pg; keep it out of workerd unit-test module evaluation.
-  const { createAuthMiddleware, getSessionFromCtx } = await import("better-auth/api");
   const email = config.email;
   // Normalize and validate the device flow up front. The verification URL is
   // always absolute (Better Auth would otherwise resolve it against the
@@ -444,6 +466,25 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
     // The API owns authoritative PostgreSQL rate limits; no isolate-local limit.
     rateLimit: { enabled: false },
     databaseHooks: {
+      account: {
+        update: {
+          before: async (account, context) => {
+            if (account.password !== undefined) await retainSessionProvenance(context);
+          },
+        },
+      },
+      user: {
+        update: {
+          before: async (user, context) => {
+            if (
+              "twoFactorEnabled" in user ||
+              user.emailVerified !== undefined ||
+              user.email !== undefined
+            )
+              await retainSessionProvenance(context);
+          },
+        },
+      },
       session: {
         create: {
           before: async (session, context) => {
@@ -477,36 +518,6 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
           },
         },
       },
-    },
-    // Snapshot hidden provenance before security endpoints delete or replace
-    // their current session. Better Auth's public session projection omits
-    // returned:false fields, so the normal middleware cannot carry it forward.
-    hooks: {
-      before: createAuthMiddleware(async (context) => {
-        if (
-          context.path !== "/change-password" &&
-          context.path !== "/two-factor/enable" &&
-          context.path !== "/two-factor/disable" &&
-          !context.path?.startsWith("/two-factor/verify-")
-        )
-          return;
-        const current = await getSessionFromCtx(context);
-        if (!current) return;
-        const stored = await context.context.adapter.findOne<{
-          clientChannel: "web" | "cli" | "unknown";
-          userId: string;
-        }>({
-          model: "session",
-          where: [{ field: "id", value: current.session.id }],
-        });
-        if (!stored || stored.userId !== current.user.id) return;
-        return {
-          context: {
-            sessionClientChannel: stored.clientChannel,
-            sessionClientUserId: stored.userId,
-          },
-        };
-      }),
     },
     emailAndPassword: {
       enabled: true,

@@ -11,21 +11,21 @@ import { bindingStatuses, validateProductionBindings } from "./env";
 
 const app = createApiApp();
 
-let stagingBindingsValidated = false;
+let deployedBindingsValidated = false;
 
 /**
- * Validates production/staging Cloudflare bindings once per Worker isolate lifecycle.
+ * Validates deployed Cloudflare bindings once per Worker isolate lifecycle.
  *
- * Runs only when `ENVIRONMENT === 'staging'`, delegating to `validateProductionBindings`
- * and latching `stagingBindingsValidated` to prevent repeated validation on subsequent requests.
+ * Local/test requests stay exempt. Successful deployed validation latches until
+ * the isolate is replaced; failures remain retryable and never set the latch.
  *
  * @param env - Worker environment bindings.
- * @throws {Error} If any mandatory staging or production binding is missing or malformed.
+ * @throws {Error} If any mandatory deployed binding is missing or malformed.
  */
-function validateStagingBindingsOnce(env: ApiWorkerEnv): void {
-  if (env.ENVIRONMENT !== "staging" || stagingBindingsValidated) return;
+function validateDeployedBindingsOnce(env: ApiWorkerEnv): void {
+  if (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test" || deployedBindingsValidated) return;
   validateProductionBindings(env);
-  stagingBindingsValidated = true;
+  deployedBindingsValidated = true;
 }
 
 export default {
@@ -45,7 +45,7 @@ export default {
   fetch(request, env, executionContext) {
     configureLogSampling(env.LOG_SAMPLE_RATE);
     try {
-      validateStagingBindingsOnce(env);
+      validateDeployedBindingsOnce(env);
     } catch (cause) {
       const requestId = createRequestId(request.headers.get("X-Request-ID"));
       const traceId = createTraceId(request.headers.get("traceparent"), requestId);

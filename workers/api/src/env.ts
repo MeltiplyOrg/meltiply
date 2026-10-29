@@ -38,7 +38,7 @@ export interface ApiWorkerEnv {
   DATABASE_POOL_MODE?: "request";
   DB_AUTHENTICATED?: Hyperdrive;
   DB_SYSTEM?: Hyperdrive;
-  ENVIRONMENT: "local" | "preview" | "staging" | "test";
+  ENVIRONMENT: "local" | "preview" | "production" | "selfhost" | "staging" | "test";
   FACEBOOK_CLIENT_ID?: string;
   FACEBOOK_CLIENT_SECRET?: string;
   FACEBOOK_LIVE_ACCEPTED?: string;
@@ -46,7 +46,7 @@ export interface ApiWorkerEnv {
   MAIL?: SendEmail;
   MAIL_FROM_ADDRESS?: string;
   MAIL_FROM_NAME?: string;
-  /** `"false"` allows the owner to sign in before email verification; omitted keeps the deployed default. */
+  /** Only self-hosted installs may set `"false"` to allow sign-in without verification mail. */
   REQUIRE_EMAIL_VERIFICATION?: string;
   INSTAGRAM_CLIENT_ID?: string;
   INSTAGRAM_CLIENT_SECRET?: string;
@@ -112,22 +112,22 @@ const requiredBindings: (keyof ApiWorkerEnv)[] = [
   "TOKEN_ENCRYPTION_KEY",
 ];
 
-const stagingAutomationBindings: (keyof ApiWorkerEnv)[] = ["AUTOMATION"];
+const deployedAutomationBindings: (keyof ApiWorkerEnv)[] = ["AUTOMATION"];
 
-const stagingAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET", "AUTH_SETUP_SECRET"];
+const deployedAuthBindings: (keyof ApiWorkerEnv)[] = ["BETTER_AUTH_SECRET", "AUTH_SETUP_SECRET"];
 
 /**
  * Reports whether a deployed session must prove email ownership.
  *
- * Local and test environments never enforce verification. Deployments enforce
- * it unless the host explicitly sets `REQUIRE_EMAIL_VERIFICATION=false`, which
- * self-hosting uses when no SMTP transport is configured.
+ * Local and test environments never enforce verification. Managed deployments
+ * always enforce it. Only the self-hosted runtime may explicitly opt out with
+ * `REQUIRE_EMAIL_VERIFICATION=false` when no SMTP transport is configured.
  *
  * @param env - Worker environment bindings.
  * @returns True when email verification gates sign-in and owner authorization.
  */
 export function requiresEmailVerification(env: ApiWorkerEnv): boolean {
-  if (env.REQUIRE_EMAIL_VERIFICATION?.trim() === "false") return false;
+  if (env.ENVIRONMENT === "selfhost" && env.REQUIRE_EMAIL_VERIFICATION?.trim() === "false") return false;
   return env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test";
 }
 
@@ -191,7 +191,7 @@ export function applicationOrigin(env: ApiWorkerEnv): string {
 }
 
 // Check mail capability and normalized sender configuration, not mere presence.
-const stagingMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
+const deployedMailBindings: (keyof ApiWorkerEnv)[] = ["MAIL", "MAIL_FROM_ADDRESS"];
 
 /**
  * Reports the object-storage bindings the configured provider actually needs.
@@ -220,8 +220,8 @@ function objectStorageStatuses(env: ApiWorkerEnv): BindingStatus[] {
  * Reports readiness status for required and environment-specific Worker bindings.
  *
  * Evaluates core bindings for all environments, plus auth, mail delivery, and
- * Automation RPC bindings in staging, plus the object-storage bindings the
- * configured provider requires. Used by the `/api/v1/ready` probe.
+ * Automation RPC bindings outside local/test, plus the object-storage bindings
+ * the configured provider requires. Used by the `/api/v1/ready` probe.
  *
  * @param env - Worker environment bindings.
  * @returns Array of `BindingStatus` entries with name and "ready" | "unavailable" status.
@@ -229,12 +229,12 @@ function objectStorageStatuses(env: ApiWorkerEnv): BindingStatus[] {
 export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
   const requiresMail = requiresEmailVerification(env);
   const bindings =
-    env.ENVIRONMENT === "staging" || env.ENVIRONMENT === "preview"
+    env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test"
       ? [
           ...requiredBindings,
-          ...stagingAuthBindings,
-          ...(requiresMail ? stagingMailBindings : []),
-          ...stagingAutomationBindings,
+          ...deployedAuthBindings,
+          ...(requiresMail ? deployedMailBindings : []),
+          ...deployedAutomationBindings,
         ]
       : requiredBindings;
   return [
@@ -259,12 +259,12 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
 }
 
 /**
- * Validates mandatory production and staging Worker bindings, credentials, and provider configurations.
+ * Validates mandatory deployed Worker bindings, credentials, and provider configurations.
  *
- * Ensures all required environment variables, Hyperdrive databases, R2 storage, a usable
- * Email Sending binding with a valid sender and live-accepted provider
- * credentials (Meta, TikTok, YouTube) are fully configured in staging. TikTok's
- * media prefix is optional: the provider registry derives it from APP_URL.
+ * Outside local/test, requires auth, databases, object storage, Automation RPC,
+ * and credentials for live-accepted providers. Managed deployments additionally
+ * require usable Email Sending; self-hosted installations may opt out of verification.
+ * TikTok's media prefix is optional: the provider registry derives it from APP_URL.
  *
  * The mail checks run before the presence list so a malformed sender or
  * unusable binding reports a precise cause instead of a bare missing name.
@@ -273,7 +273,7 @@ export function bindingStatuses(env: ApiWorkerEnv): BindingStatus[] {
  * @throws {Error} If any required binding is missing or provider credential configuration is inconsistent.
  */
 export function validateProductionBindings(env: ApiWorkerEnv): void {
-  if (env.ENVIRONMENT !== "staging") return;
+  if (env.ENVIRONMENT === "local" || env.ENVIRONMENT === "test") return;
   applicationOrigin(env);
   if (requiresEmailVerification(env)) {
     if (typeof env.MAIL?.send !== "function") {
@@ -290,7 +290,7 @@ export function validateProductionBindings(env: ApiWorkerEnv): void {
     throw new Error(`missing required Worker bindings: ${missing.join(", ")}`);
   }
   if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.trim().length < 32) {
-    throw new Error("BETTER_AUTH_SECRET must be at least 32 characters in staging");
+    throw new Error("BETTER_AUTH_SECRET must be at least 32 characters in deployed environments");
   }
   const facebookAccepted = env.FACEBOOK_LIVE_ACCEPTED?.trim() ?? "false";
   const instagramAccepted = env.INSTAGRAM_LIVE_ACCEPTED?.trim() ?? "false";

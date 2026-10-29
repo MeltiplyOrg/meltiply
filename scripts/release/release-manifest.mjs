@@ -338,7 +338,7 @@ function validatePhaseOutputs(outputs, phase, spec) {
 }
 
 /**
- * Validates the health sub-record embedded in smoke evidence.
+ * Validates deployment and contract identities in the health sub-record embedded in smoke evidence.
  *
  * @param {object} evidence - Parsed smoke evidence record
  * @param {string} url - Expected probe URL (version URL or live hostname + path)
@@ -354,6 +354,8 @@ function validateSmokeHealth(evidence, url, name, versionPinned, spec) {
     throw new TypeError(`${name} health probes the wrong URL`);
   }
   if (
+    typeof health.contract_version !== "string" ||
+    health.contract_version.length === 0 ||
     health.environment !== "staging" ||
     health.status !== "ok" ||
     !gitShaPattern.test(health.version)

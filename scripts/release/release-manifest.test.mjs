@@ -153,6 +153,7 @@ function planSummary(phase, transitionFields) {
 // Builds the health sub-record embedded in smoke evidence.
 function healthEvidence(extra = {}) {
   return {
+    contract_version: "1.3.0",
     environment: "staging",
     status: "ok",
     url: "https://staging.meltiply.com/api/v1/health",
@@ -280,6 +281,7 @@ function updateEvidenceSet(spec) {
       attempts: 1,
       candidate_version_id: candidateVersionId,
       health: {
+        contract_version: "1.3.0",
         environment: "staging",
         status: "ok",
         url: `${versionOrigin}/api/v1/health`,
@@ -722,6 +724,7 @@ function bootstrapEvidenceSet(spec) {
       attempts: 1,
       candidate_version_id: candidateVersionId,
       health: {
+        contract_version: "1.3.0",
         environment: "staging",
         status: "ok",
         url: `https://${secretsVersionId.slice(0, 8)}-${hostname}/api/v1/health`,

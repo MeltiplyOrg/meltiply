@@ -57,7 +57,8 @@ real compatibility CLI regressions, comparison against the CI base, readiness an
 types. The existing Cloudflare fast lane invokes it; changing an unrelated file
 does not exempt a PR that changes the contract. PRs use the merge base of their
 base/head commits. Default-branch pushes use the newest reachable contract release
-tag. Local runs, feature-branch pushes and initial releases without an applicable
+tag; release-tag pushes compare against the preceding release, excluding themselves.
+Local runs, feature-branch pushes and initial releases without an applicable
 baseline print an explicit skip, never an implicit compatibility pass.
 
 An incompatible diff prints the operation/field diagnostics and an exact
@@ -88,6 +89,12 @@ bun run contract:release:artifacts
 bun run contract:release:verify
 ```
 
+If a previous release exists, also run `bun run contract:diff --base
+contract-v<previousVersion>` before tagging. Its full-release diff may combine
+several merged PRs: record a fresh exact-change review token for that complete span
+in the prepared version's changelog section. A release-tag check repeats this
+comparison even if each individual PR was compatible with its own merge base.
+
 Preparation compares with the last reachable `contract-v*` release, rejects an
 unchanged contract, derives the next version, updates `info.version` and catalog
 version, creates source-bound [release.json](release.json), moves Unreleased notes
@@ -96,6 +103,8 @@ view. `**Breaking:**` notes select major, exclusively `**Patch:**` notes select
 patch, and other changes select minor. Commit those generated source changes in the
 contract PR. A stale source-bound manifest, wrong tag/version or reuse of a released
 version fails rather than publishing a changed artifact under an old version.
+Re-running preparation refreshes an untagged release's source-bound metadata
+without losing its notes or creating duplicate version sections.
 
 [Contract release](../../.github/workflows/contract-release.yml) automatically runs
 the same preparation and artifact/runtime smoke on contract branch pushes. It

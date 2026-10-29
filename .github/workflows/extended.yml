@@ -93,6 +93,7 @@ jobs:
       - name: Exercise versioned release artifacts and public health
         if: inputs.lane == 'versioned-contract'
         run: |
+          bun run release:test
           bun run contract:release:artifacts
           node packages/contracts/scripts/contract-smoke.mjs
           bun run docs:links

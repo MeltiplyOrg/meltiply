@@ -103,9 +103,9 @@ function versionUrlOrigin(spec, versionId) {
  * Performs one bounded GET against the public API health endpoint.
  *
  * Rejects redirects, non-200 statuses, non-JSON envelopes, and bodies with
- * unexpected keys. The health contract is exactly {environment, status,
- * version} so a successful response binds the serving code to a concrete
- * Git SHA without exposing internals.
+ * unexpected keys. The health contract is exactly {contract_version, environment,
+ * status, version}: the contract version is a distinct non-empty machine value,
+ * while version binds the serving code to a concrete Git SHA without exposing internals.
  *
  * @param {object} params - Probe parameters
  * @param {typeof fetch} params.fetchImpl - HTTP client implementation
@@ -137,7 +137,9 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
     typeof body !== "object" ||
     Array.isArray(body) ||
     JSON.stringify(Object.keys(body).sort()) !==
-      JSON.stringify(["environment", "status", "version"]) ||
+      JSON.stringify(["contract_version", "environment", "status", "version"]) ||
+    typeof body.contract_version !== "string" ||
+    body.contract_version.length === 0 ||
     body.environment !== "staging" ||
     body.status !== "ok" ||
     typeof body.version !== "string" ||
@@ -146,6 +148,7 @@ export async function fetchHealth({ fetchImpl, origin, requestBudgetMs }) {
     throw new TypeError("API health response is not the staging contract");
   }
   return {
+    contract_version: body.contract_version,
     environment: body.environment,
     status: body.status,
     version: body.version,
@@ -317,6 +320,7 @@ export async function smokeVersionCandidate({
     candidate_version_id: candidate.version_id,
     git_sha: spec.git_sha,
     health: {
+      contract_version: result.health.contract_version,
       environment: result.health.environment,
       status: result.health.status,
       url: `${origin}${healthPath}`,
@@ -452,6 +456,7 @@ export async function smokeLiveApi({
     attempts: result.attempts,
     git_sha: spec.git_sha,
     health: {
+      contract_version: result.health.contract_version,
       environment: result.health.environment,
       status: result.health.status,
       url: `${spec.app_url}${healthPath}`,

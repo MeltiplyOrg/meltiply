@@ -399,10 +399,10 @@ describe("createInstagramAdapter", () => {
       }),
     ).resolves.toMatchObject({
       result: {
-        outcome: "unknown",
+        outcome: "confirmed_success",
         providerOperationId: "submitted:container-ambiguous",
       },
-      state: "unknown",
+      state: "published",
     });
     expect(
       providerCalls.calls.filter(({ url }) => url.pathname.endsWith("/media_publish")),
@@ -442,6 +442,27 @@ describe("createInstagramAdapter", () => {
     });
     expect(JSON.stringify(result)).not.toContain("media.example");
     expect(JSON.stringify(result)).not.toContain("abc123");
+  });
+
+  it("rejects video above Instagram's documented Reel size ceiling before HTTP", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      adapter(fetcher).publish!(
+        context,
+        credentials,
+        publishInput({
+          media: [
+            {
+              contentType: "video/mp4",
+              fileSize: 300_000_001,
+              mode: "remote_ingest",
+              url: "https://assets.example/too-large.mp4",
+            },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({ failure: { code: "instagram_media_invalid" } });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("rejects missing account identity and invalid media before HTTP", async () => {

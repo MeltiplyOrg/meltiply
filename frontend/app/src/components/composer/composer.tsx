@@ -290,16 +290,22 @@ function isUploadCancellation(error: unknown): boolean {
 
 /**
  * Formats a Date or ISO string into the composer's local minute-precision value
- * ('YYYY-MM-DDTHH:mm'). Midnight on the supplied day becomes 10:00 local so a
- * calendar click offers a realistic daytime slot instead of the past.
+ * ('YYYY-MM-DDTHH:mm'). Calendar seeds default midnight to 10:00 local;
+ * restoring an existing schedule must opt out to preserve its chosen instant.
  *
  * @param dateOrStr - Date object or ISO timestamp.
+ * @param defaultMidnightToDaytime - Apply the calendar-click suggestion; defaults to true.
  * @returns Local datetime string, or an empty string when the input is unparseable.
  */
-function formatInitialScheduleDate(dateOrStr: Date | string): string {
+function formatInitialScheduleDate(
+  dateOrStr: Date | string,
+  defaultMidnightToDaytime = true,
+): string {
   const date = typeof dateOrStr === "string" ? new Date(dateOrStr) : new Date(dateOrStr.getTime());
   if (Number.isNaN(date.getTime())) return "";
-  if (date.getHours() === 0 && date.getMinutes() === 0) date.setHours(10, 0, 0, 0);
+  if (defaultMidnightToDaytime && date.getHours() === 0 && date.getMinutes() === 0) {
+    date.setHours(10, 0, 0, 0);
+  }
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -686,11 +692,12 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   const [recoveryReadNamespace, setRecoveryReadNamespace] = useState<string | null>(null);
   /**
    * Live TikTok publishing requirements reported by a Channel's settings panel.
-   * Imperative scratch data: it is written by a child callback and read only when
-   * a submission is validated, so a ref keeps arriving requirements from
-   * re-rendering every composer surface.
+   * Availability gates publishing as well as validation, so arriving requirements
+   * update state; unchanged records retain identity to avoid notification loops.
    */
-  const tiktokRequirementsRef = useRef<Record<string, TikTokPublishingRequirements | null>>({});
+  const [tiktokRequirements, setTikTokRequirements] = useState<
+    Record<string, TikTokPublishingRequirements | null>
+  >({});
   const [pendingOwnershipAssetIds, setPendingOwnershipAssetIds] = useState<string[] | null>(null);
   const [isDragActive, setDragActive] = useState(false);
   /**
@@ -991,9 +998,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     for (const distribution of post.distributions) {
       if (distribution.platform_account_id) channelIds.add(distribution.platform_account_id);
     }
-    const scheduledAt = post.distributions
-      .map((distribution) => distribution.scheduled_at)
-      .find((value): value is string => Boolean(value));
+    const scheduledAt = post.distributions.find(
+      (distribution) => distribution.status === "scheduled" && distribution.scheduled_at,
+    )?.scheduled_at;
     // The rows are adopted in a deferred callback (the pattern this composer used
     // before the cutover) so hydration never interrupts the commit that first
     // rendered the loading state.
@@ -1003,7 +1010,10 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       setChannelOverrides(overridesFromPost(post, platformByAccountId));
       setAttachmentOverrides(attachmentOverridesFromPost(post));
       setSelectedChannelIds([...channelIds]);
-      if (scheduledAt) setScheduleDate(formatInitialScheduleDate(scheduledAt));
+      if (scheduledAt) {
+        setScheduleDate(formatInitialScheduleDate(scheduledAt, false));
+        setPublishMode("schedule");
+      }
       if (post.queue_membership) {
         setSelectedQueueId(post.queue_membership.queue_id);
         setPublishMode("queue");
@@ -1315,11 +1325,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    */
   const handleRequirementsChange = useCallback(
     (channelId: string, requirements: TikTokPublishingRequirements | null) => {
-      if (tiktokRequirementsRef.current[channelId] === requirements) return;
-      tiktokRequirementsRef.current = {
-        ...tiktokRequirementsRef.current,
-        [channelId]: requirements,
-      };
+      setTikTokRequirements((previous) =>
+        previous[channelId] === requirements
+          ? previous
+          : { ...previous, [channelId]: requirements },
+      );
     },
     [],
   );
@@ -1361,27 +1371,43 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * Builds the saved Post targets for the current Channel selection, mapping
    * provider settings through the descriptor boundary and recording per-channel
    * caption and attachment overrides. `attachment_ids` is omitted when the
-   * Channel inherits the Post's attachments.
+   * Channel inherits the Post's attachments. Drafts retain creator choices;
+   * publication targets clamp them to current Provider permissions.
    *
+   * @param purpose - Draft persistence by default, or validated delivery.
    * @returns One Post target input per selected Channel.
    */
-  const buildTargets = useCallback((): PostTargetDraft[] => {
-    return selectedChannels.map((channel) => {
-      const override = channelOverrides[channel.id];
-      const target: PostTargetDraft = { platform_account_id: channel.id };
-      providerDescriptorFor(channel.providerIdentifier)?.applyTarget?.(
-        target,
-        override?.settings ?? {},
-      );
-      // `null` means "inherit the shared caption"; an enabled override stays a
-      // string even when blank, because a blank caption is a real choice that
-      // `null` would silently turn back into the shared text on the next save.
-      target.description_override = override?.hasOverride ? override.content : null;
-      const attachmentIds = attachmentOverrides[channel.id];
-      if (attachmentIds) target.attachment_ids = [...attachmentIds];
-      return target;
-    });
-  }, [attachmentOverrides, channelOverrides, selectedChannels]);
+  const buildTargets = useCallback(
+    (purpose: "draft" | "publication" = "draft"): PostTargetDraft[] => {
+      return selectedChannels.map((channel) => {
+        const override = channelOverrides[channel.id];
+        const target: PostTargetDraft = { platform_account_id: channel.id };
+        providerDescriptorFor(channel.providerIdentifier)?.applyTarget?.(
+          target,
+          override?.settings ?? {},
+          attachmentsForChannel(channel.id).flatMap((attachment) =>
+            attachment.assetType ? [attachment.assetType] : [],
+          ),
+          tiktokRequirements[channel.id] ?? null,
+          purpose,
+        );
+        // `null` means "inherit the shared caption"; an enabled override stays a
+        // string even when blank, because a blank caption is a real choice that
+        // `null` would silently turn back into the shared text on the next save.
+        target.description_override = override?.hasOverride ? override.content : null;
+        const attachmentIds = attachmentOverrides[channel.id];
+        if (attachmentIds) target.attachment_ids = [...attachmentIds];
+        return target;
+      });
+    },
+    [
+      attachmentOverrides,
+      attachmentsForChannel,
+      channelOverrides,
+      selectedChannels,
+      tiktokRequirements,
+    ],
+  );
 
   /**
    * Merges partial override updates (custom caption, override enablement, or
@@ -1799,6 +1825,36 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
   );
 
   /**
+   * Provider settings gate every sending mode, but not draft saves. The same
+   * violations drive submission validation and the pinned action's readiness;
+   * each descriptor receives only this Channel's selected media kinds.
+   */
+  const providerValidationErrors = useMemo(
+    () =>
+      selectedChannels.flatMap(
+        (channel) =>
+          providerDescriptorFor(channel.providerIdentifier)?.validate?.({
+            channelName: channel.name,
+            settings: channelOverrides[channel.id]?.settings ?? {},
+            capability: capabilityByPlatform.get(channel.providerIdentifier.toLowerCase()),
+            requirements: tiktokRequirements[channel.id] ?? null,
+            mediaKinds: attachmentsForChannel(channel.id).flatMap((attachment) =>
+              attachment.assetType ? [attachment.assetType] : [],
+            ),
+            t,
+          }) ?? [],
+      ),
+    [
+      selectedChannels,
+      channelOverrides,
+      capabilityByPlatform,
+      tiktokRequirements,
+      attachmentsForChannel,
+      t,
+    ],
+  );
+
+  /**
    * Validates composer state against the Post contract and live Platform
    * capabilities before any mutation runs.
    *
@@ -1867,11 +1923,11 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       if (capabilitiesQuery.isPending) {
         errors.push(t("Platform publishing limits are still loading; try again in a moment."));
       }
+      errors.push(...providerValidationErrors);
 
       for (const channel of selectedChannels) {
         const name = channel.name;
         const platform = channel.providerIdentifier.toLowerCase();
-        const settings = channelOverrides[channel.id]?.settings ?? {};
         const content = resolvedContentFor(channel.id);
         const capability = capabilityByPlatform.get(platform);
         const channelAttachments = attachmentsForChannel(channel.id);
@@ -1967,19 +2023,6 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             );
           }
         }
-
-        const descriptor = providerDescriptorFor(channel.providerIdentifier);
-        if (descriptor?.validate) {
-          errors.push(
-            ...descriptor.validate({
-              channelName: name,
-              settings,
-              capability,
-              requirements: tiktokRequirementsRef.current[channel.id] ?? null,
-              t,
-            }),
-          );
-        }
       }
       return errors;
     },
@@ -1988,7 +2031,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
       attachmentsForChannel,
       capabilityByPlatform,
       capabilitiesQuery.isPending,
-      channelOverrides,
+      providerValidationErrors,
       resolvedContentFor,
       scheduleDate,
       hasSelectedQueue,
@@ -2076,13 +2119,20 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             profileCopiesRef.current.size > 0)
         ) {
           const targetsByProfile = new Map<string, PostTargetDraft[]>();
+          const publicationTargetsByProfile = new Map<string, PostTargetDraft[]>();
           const channelsById = new Map(selectedChannels.map((channel) => [channel.id, channel]));
-          for (const target of buildTargets()) {
-            const profileId = channelsById.get(target.platform_account_id)?.brandProfileId;
-            if (!profileId) continue;
-            const targets = targetsByProfile.get(profileId);
-            if (targets) targets.push(target);
-            else targetsByProfile.set(profileId, [target]);
+          for (const [purpose, grouped] of [
+            ["draft", targetsByProfile],
+            ["publication", publicationTargetsByProfile],
+          ] as const) {
+            if (type === "draft" && purpose === "publication") continue;
+            for (const target of buildTargets(purpose)) {
+              const profileId = channelsById.get(target.platform_account_id)?.brandProfileId;
+              if (!profileId) continue;
+              const targets = grouped.get(profileId);
+              if (targets) targets.push(target);
+              else grouped.set(profileId, [target]);
+            }
           }
           const controller = new AbortController();
           batchAbortRef.current = controller;
@@ -2093,6 +2143,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             sourcePostId: postId,
             sharedContent,
             targetsByProfile,
+            publicationTargetsByProfile,
             attachments: attachments.flatMap((attachment) =>
               attachment.assetId
                 ? [
@@ -2183,7 +2234,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               : {
                   scheduled_at: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
                 }),
-            targets: buildTargets(),
+            targets: buildTargets("publication"),
           },
         });
         clearRecoveryAfterSave(recoveryNamespaceAtSubmit);
@@ -2325,7 +2376,8 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
     Boolean(postLoadError) ||
     !scope.isSignedIn ||
     ownerProfileId === null ||
-    profileMismatch;
+    profileMismatch ||
+    (publishMode !== "draft" && providerValidationErrors.length > 0);
 
   return (
     <fieldset
@@ -2924,6 +2976,9 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
                     channelName={channel.name}
                     channelId={channel.id}
                     settings={override.settings}
+                    mediaKinds={channelAttachments.flatMap((attachment) =>
+                      attachment.assetType ? [attachment.assetType] : [],
+                    )}
                     onChange={(newSettings) =>
                       handleChannelOverrideChange(channel.id, { settings: newSettings })
                     }
@@ -3077,7 +3132,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
           title={
             publishMode === "draft"
               ? t("Saves this post's text, attachments, and channel settings without publishing")
-              : undefined
+              : providerValidationErrors[0]
           }
         >
           {isSubmitting ? (

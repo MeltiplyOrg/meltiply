@@ -873,10 +873,6 @@ describe("core API routes", () => {
       },
     },
     {
-      name: "a missing made_for_kids declaration",
-      providerOptions: { youtube: { privacy_status: "private" } },
-    },
-    {
       name: "a non-boolean made_for_kids value",
       providerOptions: { youtube: { made_for_kids: "no" } },
     },

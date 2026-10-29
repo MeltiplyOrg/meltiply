@@ -176,16 +176,15 @@ function frozenPublicationEffect(
 }
 
 /**
- * Converts stored provider options from the provider-domain shape the
- * publishing worker consumes into the contract's wire shape. Target rows and
- * frozen snapshots both store camelCase options while the HTTP contract
- * publishes snake_case; the domain type already guarantees mandatory TikTok
- * music consent.
+ * Converts complete frozen publication options from the provider-domain
+ * camelCase shape into the contract's snake_case wire shape. Post draft
+ * options have a separate projection because required answers may be absent.
+ * The publication domain type guarantees mandatory TikTok music consent.
  *
  * @param options - Stored provider options, or null when nothing was saved.
  * @returns Wire-shaped provider options, or null when there are none to return.
  */
-export function toWireProviderOptions(
+function toWireProviderOptions(
   options: ProviderPublishOptions | null,
 ): Schemas["ProviderPublishOptions"] | null {
   if (!options) return null;

@@ -1342,7 +1342,9 @@ export function createYouTubeAdapter(options: YouTubeAdapterOptions): ProviderAd
             title: upload.title,
           },
           status: {
-            ...(upload.madeForKids === undefined ? {} : { madeForKids: upload.madeForKids }),
+            ...(upload.madeForKids === undefined
+              ? {}
+              : { selfDeclaredMadeForKids: upload.madeForKids }),
             privacyStatus: upload.privacyStatus,
           },
         }),

@@ -78,6 +78,31 @@ publish a release. Protected `contract-v*` tags must belong to the default branc
 history. Only their publishing job receives release write permission. No tag
 protection means publication fails closed; no deployment is performed.
 
+`publishing-flow` runs focused composer/creator-freshness and all five Provider regressions, changed-scope React
+review, the full application gate, documentation links, and browser publication,
+weekly Queue, and multi-profile recovery journeys. `publishing-browser` repeats
+only setup, documentation links, and those browser journeys when the application
+gate's code/configuration is unchanged. Publication verifies independent outcomes,
+retry without duplicate copies, real media bytes, draft settings, schedule edits,
+deletion without unpublishing, and all five video Platforms through Now, manual
+Schedule, and weekly Queue. Queue retry/removal/history and multi-profile recovery
+also use real video. It captures provider controls at desktop/phone
+widths in both palettes. Each journey resets disposable PostgreSQL state and uses
+the real API, storage, processor, transport and consumer with controlled external
+Providers; it does not certify live credentials, platform audit, or public posting.
+Wrangler fires no cron triggers locally, so the acceptance API exposes a
+fixture-only route that invokes the Automation Worker's scheduled dispatcher
+through its existing service binding; stored due times stay unchanged. Browser
+publication journeys still execute after an earlier step fails without clearing
+that failure. The matrix creates its future Queue slot when its Queue iteration
+begins, so preceding Now/Schedule work cannot consume that slot's lead time.
+Browser failures are reported without automatic retries, and each journey's traces
+and screenshots are retained in the lane's artifact before the next journey runs.
+After setup, the application gate and documentation-link check accumulate their
+failures independently: documentation links still run if the application gate
+fails, and either failure fails the step. The application gate runs only in
+`publishing-flow`; `publishing-browser` runs the documentation check alone.
+
 `device-authorization` runs the complete application gate, then starts the
 production Worker and built frontend preview against a fresh seeded database. A
 real Chromium journey signs in through the existing form (including a second

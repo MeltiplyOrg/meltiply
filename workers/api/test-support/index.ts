@@ -15,9 +15,12 @@
  * Channels a signed-up workspace needs, because the OAuth connect boundary
  * requires an HTTPS provider origin that a plain-HTTP local stack cannot
  * provide, and (b) read back the controlled Provider's own durable publication
- * records and stored media bytes. Those endpoints exist only inside this
- * acceptance entry: no production route, service, or interface was added, and
- * the production `wrangler.local.jsonc` still points at `src/index.ts`.
+ * records and stored media bytes. It also mounts
+ * {@link automationScheduledRoute}, which runs one Automation Worker scheduled
+ * pass through the existing service binding because Wrangler fires no cron
+ * triggers locally. Those endpoints exist only inside this acceptance entry: no
+ * production route, service, or interface was added, and the production
+ * `wrangler.local.jsonc` still points at `src/index.ts`.
  */
 
 import {
@@ -71,12 +74,42 @@ function requireCount(value: unknown, field: string): number {
 }
 
 /**
- * Path prefix owned solely by this acceptance entry.
+ * Path the acceptance entry uses to run cron work on the Automation Worker.
  *
- * Kept disjoint from every production namespace so the fixture router can
- * never shadow a real route, and asserted by the acceptance specs themselves:
- * a production deployment answers this prefix with the ordinary not-found
- * envelope.
+ * Wrangler does not fire cron triggers in local development, so the queue
+ * acceptance journey asks this route to invoke the production scheduled handler
+ * through the API Worker's `AUTOMATION` service binding. The nominal scheduled
+ * instant therefore stays untouched; only the trigger comes from the test.
+ */
+const automationScheduledRoute = "/__test__/automation/scheduled";
+
+/**
+ * Invokes the Automation Worker's on-demand scheduled route through a service
+ * binding, without asserting the binding's production shape.
+ *
+ * The binding is a Fetcher at runtime; its declared type only names the RPC
+ * methods the application uses, so the runtime capability is checked here.
+ *
+ * @param binding - Runtime `AUTOMATION` binding, or undefined when unbound.
+ * @param cron - Cron expression the dispatcher should report.
+ * @returns True when the scheduled pass ran; false when the binding cannot run it.
+ */
+async function runAutomationScheduledWork(binding: unknown, cron: string): Promise<boolean> {
+  if (!binding || typeof binding !== "object" || !("fetch" in binding)) return false;
+  const forward = binding.fetch;
+  if (typeof forward !== "function") return false;
+  const response = await forward.call(
+    binding,
+    new Request(`https://automation.internal/__test__/scheduled?cron=${encodeURIComponent(cron)}`, {
+      method: "POST",
+    }),
+  );
+  return response.status === 204;
+}
+
+/**
+ * Path prefix owned solely by this acceptance entry.
+…
  */
 const controlledProviderRoutePrefix = "/controlled-provider/v1";
 /**
@@ -309,8 +342,19 @@ export default {
    * @param executionContext - Execution context used for logging and continuations.
    * @returns The response produced by the fixture router or the production app.
    */
-  fetch(request, env, executionContext) {
+  async fetch(request, env, executionContext) {
     const url = new URL(request.url);
+    if (url.pathname === automationScheduledRoute) {
+      if (request.method !== "POST") return new Response(null, { status: 405 });
+      if (env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "test") {
+        return new Response(null, { status: 404 });
+      }
+      const cron = url.searchParams.get("cron") ?? "0 * * * *";
+      if (!(await runAutomationScheduledWork(env.AUTOMATION, cron))) {
+        return new Response("Automation scheduled work is unavailable.", { status: 503 });
+      }
+      return new Response(null, { status: 204 });
+    }
     if (url.pathname.startsWith(controlledProviderRoutePrefix)) {
       return controlledProviderRouter.fetch(request, env, executionContext);
     }

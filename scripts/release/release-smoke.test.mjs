@@ -50,8 +50,8 @@ function releaseInput(overrides = {}) {
 // Deterministic control-plane stub: serves release-bound versions view and
 // deployment status payloads without touching Cloudflare. `bindings` maps a
 // version UUID to the VERSION binding SHA it reports; unknown IDs bind the
-// release SHA.
-function controlPlane({ bindings = {}, traffic } = {}) {
+// release SHA. `releaseTag` selects the installation's reviewed candidate.
+function controlPlane({ bindings = {}, traffic, releaseTag = tag } = {}) {
   return function runCommand(command, args) {
     assert.equal(command, "bun");
     assert.deepEqual(args.slice(0, 3), ["run", "--no-install", "wrangler"]);
@@ -60,7 +60,7 @@ function controlPlane({ bindings = {}, traffic } = {}) {
       return Promise.resolve({
         stderr: "",
         stdout: JSON.stringify({
-          annotations: { "workers/tag": tag },
+          annotations: { "workers/tag": releaseTag },
           id,
           resources: {
             bindings: [
@@ -143,6 +143,48 @@ async function seedCandidate(outDir, spec, overrides = {}) {
   );
 }
 
+/** A production probe accepts production health and rejects a staging endpoint at the same origin. */
+test("health probe matches the released environment rather than assuming staging", async () => {
+  for (const environment of ["production", "staging"]) {
+    const probe = fetchHealth({
+      expectedEnvironment: "production",
+      fetchImpl: async () => new Response(JSON.stringify({ environment, status: "ok", version: gitSha })),
+      origin: "https://app.example.com",
+      requestBudgetMs: 5000,
+    });
+    if (environment === "production") assert.equal((await probe).environment, "production");
+    else await assert.rejects(probe, /production contract/);
+  }
+});
+
+/** Both immutable and live smoke compare health against the selected production installation. */
+test("production version and live smoke reject a staging endpoint", async (context) => {
+  const outDir = await mkdtemp(path.join(tmpdir(), "meltiply-production-smoke-"));
+  context.after(() => rm(outDir, { force: true, recursive: true }));
+  const spec = validateReleaseSpec(releaseInput({
+    environment: "production",
+    release_id: `production-${gitSha.slice(0, 12)}`,
+    api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
+  }));
+  await seedCandidate(outDir, spec);
+  const traffic = [{ percentage: 100, version_id: secretsVersionId }];
+  await writeFile(path.join(outDir, "worker-api-deployment.json"), JSON.stringify({
+    git_sha: spec.git_sha, release_id: spec.release_id, schema_version: 1,
+    traffic, version_id: secretsVersionId, worker: "api",
+  }));
+  let servedEnvironment = "production";
+  const params = {
+    environment: {}, outDir, spec,
+    runCommand: controlPlane({ traffic, releaseTag: `${spec.release_id}-api-secrets` }),
+    fetchImpl: async () => new Response(JSON.stringify({ environment: servedEnvironment, status: "ok", version: gitSha })),
+  };
+  assert.equal((await smokeVersionCandidate(params)).health.environment, "production");
+  assert.equal((await smokeLiveApi(params)).health.environment, "production");
+  servedEnvironment = "staging";
+  await assert.rejects(smokeVersionCandidate(params), /production contract/);
+  await assert.rejects(smokeLiveApi(params), /production contract/);
+});
+
 /** Malformed or non-staging health responses cannot authorize release promotion. */
 test("health probe rejects mismatched and malformed envelopes", async (context) => {
   const spec = validateReleaseSpec(releaseInput());
@@ -160,6 +202,7 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
     });
     await assert.rejects(
       fetchHealth({
+        expectedEnvironment: spec.environment,
         fetchImpl: healthFetch(origin),
         origin: spec.app_url,
         requestBudgetMs: 5000,
@@ -172,6 +215,7 @@ test("health probe rejects mismatched and malformed envelopes", async (context) 
   });
   await assert.rejects(
     fetchHealth({
+      expectedEnvironment: spec.environment,
       fetchImpl: healthFetch(failing),
       origin: spec.app_url,
       requestBudgetMs: 5000,

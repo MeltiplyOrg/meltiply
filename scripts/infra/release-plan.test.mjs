@@ -19,6 +19,15 @@ function planFor(
   };
 }
 
+/** A plan uses the same environment model as release input and rejects unreviewed names. */
+test("release plans accept production and reject unknown environments", () => {
+  const plan = planFor();
+  plan.variables.environment.value = "production";
+  assert.equal(verifyReleasePlan(plan, "foundation").environment, "production");
+  plan.variables.environment.value = "preview";
+  assert.throws(() => verifyReleasePlan(plan, "foundation"), /environment/);
+});
+
 function change(address, type, actions, after = {}) {
   return { address, type, change: { actions, after } };
 }

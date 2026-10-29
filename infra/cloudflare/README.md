@@ -162,18 +162,24 @@ export MELTIPLY_RELEASE_DIR="$PWD/.release/initial-deployment"
 export MELTIPLY_TF_BACKEND_CONFIG=/protected/backend.hcl
 
 bun run release:preflight:offline
-./scripts/infra/staging-transition.sh plan foundation /protected/foundation.tfvars
+./scripts/infra/release-transition.sh plan foundation /protected/foundation.tfvars
 .bin/tofu -chdir=infra/cloudflare show "$MELTIPLY_RELEASE_DIR/foundation.tfplan"
 # Review the actual plan and policy summary before confirming their exact bytes.
 digest="$(cat "$MELTIPLY_RELEASE_DIR/foundation-plan.sha256")"
 bun run release:approve foundation "$MELTIPLY_RELEASE_INPUT" \
   "$MELTIPLY_RELEASE_DIR/foundation.tfplan" "$USER" \
-  "approve $MELTIPLY_RELEASE_SHA $digest"
-MELTIPLY_RELEASE_CONFIRM="apply foundation $MELTIPLY_RELEASE_SHA $digest" \
-  ./scripts/infra/staging-transition.sh apply foundation
+  "approve staging $MELTIPLY_RELEASE_SHA $digest"
+MELTIPLY_RELEASE_CONFIRM="apply staging foundation $MELTIPLY_RELEASE_SHA $digest" \
+  ./scripts/infra/release-transition.sh apply foundation
 export MELTIPLY_RELEASE_IAC_OUTPUTS="$MELTIPLY_RELEASE_DIR/iac-outputs.json"
 bun run release:render
 ```
+
+The neutral transition wrapper requires an explicit protected release input,
+backend configuration, and phase variables file for the selected installation.
+Use separate files and release directories for staging and production; the
+wrapper binds the protected input/backend bytes and commit before contacting
+OpenTofu. Its apply confirmation names the environment as well as the phase.
 
 The apply checks the checkout, saved-plan digest, and explicit phase/commit/digest
 confirmation before invoking OpenTofu, then removes the sensitive raw plan and
@@ -197,7 +203,7 @@ Every release CLI command that applies or deploys a change requires `--apply`,
 the exact `--confirm "release staging <git-sha>"`, `--plan-digest`, and the
 appropriate `--approval-metadata "$MELTIPLY_RELEASE_DIR/approval-<scope>.json"`.
 These requirements do not apply to the foundation apply performed by
-`staging-transition.sh`. The scopes are `foundation`, `traffic`, and
+`release-transition.sh`. The scopes are `foundation`, `traffic`, and
 `queue-resume`; each receipt binds one reviewed plan to the same release session.
 Never bypass missing restore-point, migration, identity, traffic, Queue, or Cron
 evidence.

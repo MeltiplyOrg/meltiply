@@ -71,7 +71,7 @@ function environmentValue(values, name, environmentName, environment) {
 }
 
 /**
- * Renders deterministic per-command usage text for the staging release CLI.
+ * Renders deterministic per-command usage text for the environment-aware release CLI.
  *
  * Booleans render bare, value options render `--name <name>`, and repeatable
  * options render `...`; a command with no options renders only its name.
@@ -94,7 +94,7 @@ export function releaseUsage(command) {
 }
 
 /**
- * Parses and strictly validates command-line arguments for the staging release CLI.
+ * Parses and strictly validates command-line arguments for the environment-aware release CLI.
  * Enforces command-specific option definitions, rejects duplicate arguments, enforces percentage bounds
  * (5, 25, 50, 100) for staged deployments, resolves filesystem paths, and collects repeatable approval metadata.
  *

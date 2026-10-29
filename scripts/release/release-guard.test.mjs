@@ -14,7 +14,7 @@ import {
 
 const gitSha = "a".repeat(40);
 const planDigest = "b".repeat(64);
-const spec = { deployment_mode: "bootstrap", git_sha: gitSha };
+const spec = { deployment_mode: "bootstrap", environment: "staging", git_sha: gitSha };
 
 function approval(overrides = {}) {
   return {
@@ -53,6 +53,21 @@ test("mutation guard requires explicit apply, exact SHA, and plan digest", () =>
   ]) {
     assert.throws(() => assertMutatingIntent({ ...value, spec }));
   }
+});
+
+/** A valid approval or confirmation from staging cannot authorize production. */
+test("production mutation intent and approvals cannot be borrowed from staging", () => {
+  const production = { ...spec, environment: "production" };
+  assert.throws(() => assertMutatingIntent({
+    apply: true, confirm: `release staging ${gitSha}`, currentSha: gitSha, planDigest, spec: production,
+  }), /release production/);
+  assert.doesNotThrow(() => assertMutatingIntent({
+    apply: true, confirm: `release production ${gitSha}`, currentSha: gitSha, planDigest, spec: production,
+  }));
+  assert.throws(() => validateApprovalMetadata(approval(), production), /environment/);
+  assert.equal(validateApprovalMetadata(approval({
+    approval_job: { ...approval().approval_job, name: "production-foundation-approval" },
+  }), production).approval_job.name, "production-foundation-approval");
 });
 
 test("approval metadata is exact, successful, and release-bound", () => {

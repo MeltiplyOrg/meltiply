@@ -58,25 +58,21 @@ function releaseInput(overrides = {}) {
 
 // Builds the OpenTofu outputs document the release contracts require.
 function iacOutput(overrides = {}) {
-  const queues = {
-    analytics: "meltiply-analytics-staging",
-    "asset-processing": "meltiply-asset-processing-staging",
-    "channel-revocation": "meltiply-channel-revocation-staging",
-    comments: "meltiply-comments-staging",
-    "publish-facebook": "meltiply-publish-facebook-staging",
-    "publish-instagram": "meltiply-publish-instagram-staging",
-    "publish-threads": "meltiply-publish-threads-staging",
-    "publish-tiktok": "meltiply-publish-tiktok-staging",
-    "publish-youtube": "meltiply-publish-youtube-staging",
-    replies: "meltiply-replies-staging",
-    "token-refresh": "meltiply-token-refresh-staging",
-  };
+  const environment = overrides.environment ?? "staging";
+  const suffix = environment === "staging" ? "" : `-${environment}`;
+  const queues = Object.fromEntries([
+    "analytics", "asset-processing", "channel-revocation", "comments", "publish-facebook",
+    "publish-instagram", "publish-threads", "publish-tiktok", "publish-youtube", "replies", "token-refresh",
+  ].map((workload) => [workload, `meltiply-${workload}-${environment}`]));
   const resources = {
     app_custom_domains_attached: true,
-    app_hostname: "staging.meltiply.com",
-    assets_bucket_name: "meltiply-assets-staging",
+    app_hostname: `${environment}.meltiply.com`,
+    assets_bucket_name: `meltiply-assets-${environment}`,
     authenticated_hyperdrive_id: "1".repeat(32),
-    environment: "staging",
+    environment,
+    frontend_worker_name: `meltiply-frontend-${environment}`,
+    worker_names: { api: `meltiply-api${suffix}`, automation: `meltiply-automation${suffix}`, state: `meltiply-state${suffix}`, frontend: `meltiply-frontend-${environment}` },
+    dead_letter_queue_names: Object.fromEntries(Object.entries(queues).map(([workload, name]) => [workload, `${name}-dlq`])),
     operator_access_aud: null,
     operator_hostname: null,
     queue_consumers_attached: true,
@@ -124,12 +120,12 @@ function approval(name, planDigest, index = "88888888") {
 }
 
 // Builds the release plan transition variable triple for a phase.
-function transition(attachDomains, attachConsumers, paused) {
+function transition(attachDomains, attachConsumers, paused, environment = "staging") {
   return {
-    attach_app_custom_domains: attachDomains,
-    attach_queue_consumers: attachConsumers,
-    environment: "staging",
-    queue_delivery_paused: paused,
+    attachAppCustomDomains: attachDomains,
+    attachQueueConsumers: attachConsumers,
+    environment,
+    queueDeliveryPaused: paused,
   };
 }
 
@@ -168,15 +164,15 @@ function updateEvidenceSet(spec) {
     release_id: spec.release_id,
     schema_version: 1,
   };
-  const foundation = approval("staging-foundation-approval", digests.initial, "88888881");
-  const trafficApproval = approval("staging-traffic-approval", digests.domain, "88888882");
-  const resumeApproval = approval("staging-queue-resume-approval", digests.unpause, "88888883");
+  const foundation = approval(`${spec.environment}-foundation-approval`, digests.initial, "88888881");
+  const trafficApproval = approval(`${spec.environment}-traffic-approval`, digests.domain, "88888882");
+  const resumeApproval = approval(`${spec.environment}-queue-resume-approval`, digests.unpause, "88888883");
   const baseWith = (planDigest, signoff) => ({
     ...base,
     approvals: [signoff],
     plan_digest: planDigest,
   });
-  const hostname = "meltiply-api.example.workers.dev";
+  const hostname = new URL(spec.api_workers_dev_url).hostname;
   const versionOrigin = `https://${secretsVersionId.slice(0, 8)}-${hostname}`;
 
   const rollout = (percentage) => {
@@ -198,7 +194,7 @@ function updateEvidenceSet(spec) {
   const smokeLive = (percentage) => ({
     ...base,
     attempts: 1,
-    health: healthEvidence(),
+    health: healthEvidence({ environment: spec.environment, url: `${spec.app_url}/api/v1/health` }),
     percentage,
     phase: "live",
     status: "passed",
@@ -225,11 +221,11 @@ function updateEvidenceSet(spec) {
       status: "empty",
       worker: "automation",
     },
-    "domain-plan-summary.json": planSummary("domain", transition(true, true, true)),
+    "domain-plan-summary.json": planSummary("domain", transition(true, true, true, spec.environment)),
     "domain-plan.sha256": `${digests.domain}\n`,
-    "iac-outputs-domain.json": iacOutput({ queue_delivery_paused: true }),
-    "iac-outputs-pause.json": iacOutput({ queue_delivery_paused: true }),
-    "iac-outputs-unpause.json": iacOutput(),
+    "iac-outputs-domain.json": iacOutput({ environment: spec.environment, queue_delivery_paused: true }),
+    "iac-outputs-pause.json": iacOutput({ environment: spec.environment, queue_delivery_paused: true }),
+    "iac-outputs-unpause.json": iacOutput({ environment: spec.environment }),
     "migration-evidence.json": {
       ...baseWith(digests.initial, foundation),
       already_applied: [],
@@ -243,7 +239,7 @@ function updateEvidenceSet(spec) {
       },
       status: "applied",
     },
-    "pause-plan-summary.json": planSummary("pause", transition(true, true, true)),
+    "pause-plan-summary.json": planSummary("pause", transition(true, true, true, spec.environment)),
     "pause-plan.sha256": `${digests.initial}\n`,
     "restore-point-evidence.json": {
       ...baseWith(digests.initial, foundation),
@@ -280,7 +276,7 @@ function updateEvidenceSet(spec) {
       attempts: 1,
       candidate_version_id: candidateVersionId,
       health: {
-        environment: "staging",
+        environment: spec.environment,
         status: "ok",
         url: `${versionOrigin}/api/v1/health`,
         version: gitSha,
@@ -290,7 +286,7 @@ function updateEvidenceSet(spec) {
       version_id: secretsVersionId,
       worker: "api",
     },
-    "unpause-plan-summary.json": planSummary("unpause", transition(true, true, false)),
+    "unpause-plan-summary.json": planSummary("unpause", transition(true, true, false, spec.environment)),
     "unpause-plan.sha256": `${digests.unpause}\n`,
     "worker-api-candidate.json": {
       ...baseWith(digests.initial, foundation),
@@ -373,7 +369,7 @@ async function seedReleaseDir(outDir, files, { includeFinal = true } = {}) {
   if (includeFinal) {
     await writeFile(
       path.join(outDir, "iac-outputs.json"),
-      `${JSON.stringify(iacOutput(), null, 2)}\n`,
+      `${JSON.stringify(files["iac-outputs-unpause.json"], null, 2)}\n`,
       { mode: 0o600 },
     );
   }
@@ -390,7 +386,7 @@ function manifestParams(outDir, spec, overrides = {}) {
       path.join(approvalDir, `approval-${name}.json`),
     ),
     environment: {},
-    iac: validateIacOutputs(iacOutput(), spec),
+    iac: validateIacOutputs(iacOutput({ environment: spec.environment }), spec),
     outDir,
     repoRoot,
     spec,
@@ -454,6 +450,24 @@ test("manifest publishes deterministic redacted provenance for a complete update
   // Re-running is byte-for-byte deterministic.
   const second = await buildReleaseManifest(manifestParams(outDir, spec));
   assert.deepEqual(second, manifest);
+});
+
+/** A complete production set is valid, but staging review, plan, health, and deployment evidence cannot be borrowed. */
+test("manifest accepts production provenance and rejects mixed installations", async (context) => {
+  const spec = validateReleaseSpec(releaseInput({
+    environment: "production",
+    release_id: `production-${gitSha.slice(0, 12)}`,
+    app_url: "https://production.meltiply.com",
+    api_workers_dev_url: "https://meltiply-api-production.example.workers.dev",
+  }));
+  const files = updateEvidenceSet(spec);
+  const outDir = await withReleaseDir(context, files);
+  assert.equal((await buildReleaseManifest(manifestParams(outDir, spec))).environment, "production");
+  const staging = updateEvidenceSet(validateReleaseSpec(releaseInput()));
+  for (const name of ["approval-foundation.json", "domain-plan-summary.json", "smoke-version.json", "worker-api-candidate.json", "iac-outputs-domain.json"]) {
+    const mixed = await withReleaseDir(context, { ...files, [name]: staging[name] });
+    await assert.rejects(buildReleaseManifest(manifestParams(mixed, spec)));
+  }
 });
 
 test("manifest rejects incomplete and unclassified release directories", async (context) => {

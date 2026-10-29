@@ -977,6 +977,30 @@ test("preserves provider choices through drafts and publishes photo and video ta
   const youtubePanel = page.getByRole("region", { name: youtube.displayName, exact: true });
   const tiktokPanel = page.getByRole("region", { name: tiktok.displayName, exact: true });
   await youtubePanel.getByRole("textbox", { name: /Video Title/ }).fill("A deliberate video title");
+  // An unanswered visibility must survive a real saved draft and reopen.
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }),
+  ).toContainText("Choose visibility");
+  await saveDraftAndLeave(page);
+  await reloadPostsWorkspace(page);
+  await editPostFromRow(page, savedRow);
+  await expect(
+    youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }),
+  ).toContainText("Choose visibility");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await youtubePanel
+        .getByRole("combobox", { name: "Visibility", exact: true })
+        .scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath(`unanswered-visibility-${width}-${colorScheme}.png`),
+        fullPage: true,
+      });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }).click();
   await page.getByRole("option", { name: "Unlisted", exact: true }).click();
   await expect(
@@ -1165,7 +1189,37 @@ test("delivers video to every Platform through Now, Schedule, and Queue", async 
         exact: true,
       }),
     ).toBeVisible();
+    const draftSaved = page.waitForResponse(
+      (response) =>
+        /\/api\/v1\/posts(?:\/[^/]+)?$/.test(response.url()) &&
+        ["POST", "PATCH"].includes(response.request().method()),
+    );
     await saveDraftAndLeave(page);
+    const draftResponse = await draftSaved;
+    expect(draftResponse.status(), await draftResponse.text()).toBeLessThan(300);
+    const draft: Post = await draftResponse.json();
+    if (mode === "Now") {
+      // Model a previously granted interaction that this creator no longer permits.
+      const restored = await request.patch(
+        `${new URL(draftResponse.url()).origin}/api/v1/posts/${draft.id}`,
+        {
+          headers: {
+            Authorization: (await draftResponse.request().allHeaders())["authorization"]!,
+            "Idempotency-Key": `acceptance-retain-interactions-${draft.id}`,
+          },
+          data: {
+            brand_profile_id: draft.brand_profile_id,
+            targets: draft.targets.map((target) => ({
+              ...target,
+              provider_options: target.provider_options?.tiktok
+                ? { tiktok: { ...target.provider_options.tiktok, allow_stitch: true } }
+                : (target.provider_options ?? {}),
+            })),
+          },
+        },
+      );
+      expect(restored.status(), await restored.text()).toBe(200);
+    }
     await reloadPostsWorkspace(page);
     await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
     await expect(
@@ -1173,6 +1227,26 @@ test("delivers video to every Platform through Now, Schedule, and Queue", async 
     ).toContainText("Unlisted");
     await expect(tiktokPanel.getByRole("switch", { name: "Comments", exact: true })).toBeChecked();
     await expect(tiktokPanel.getByRole("switch", { name: "Duet", exact: true })).toBeChecked();
+    if (mode === "Now") {
+      await expect(tiktokPanel.getByRole("switch", { name: "Stitch", exact: true })).toBeDisabled();
+      await expect(
+        tiktokPanel.getByRole("switch", { name: "Stitch", exact: true }),
+      ).not.toBeChecked();
+      const retained = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/posts/${draft.id}`) && response.request().method() === "PATCH",
+      );
+      await saveDraftAndLeave(page);
+      const retainedResponse = await retained;
+      expect(retainedResponse.status(), await retainedResponse.text()).toBe(200);
+      const retainedDraft: Post = await retainedResponse.json();
+      expect(
+        retainedDraft.targets.find((target) => target.provider_options?.tiktok)?.provider_options
+          ?.tiktok?.allow_stitch,
+      ).toBe(true);
+      await reloadPostsWorkspace(page);
+      await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
+    }
     if (mode === "Now") {
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });

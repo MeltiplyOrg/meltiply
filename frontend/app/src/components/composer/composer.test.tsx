@@ -7,7 +7,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { writeCookieConsent } from "@meltiply/ui/cookie-consent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { Effect } from "effect";
-import { ApiError, getPlatformPublishingRequirements } from "@/lib/api";
+import {
+  ApiError,
+  getPlatformPublishingRequirements,
+  getPost,
+  updatePost,
+  schedulePost,
+} from "@/lib/api";
 import type * as ApiModule from "@/lib/api";
 
 import { AppAuthProvider, useMeltiplyAuth } from "@/components/auth/auth-provider";
@@ -37,6 +43,9 @@ vi.mock("@/lib/upload", async (importActual) => {
 vi.mock("@/lib/api", async (original) => ({
   ...(await original<typeof ApiModule>()),
   getPlatformPublishingRequirements: vi.fn(),
+  getPost: vi.fn(),
+  updatePost: vi.fn(),
+  schedulePost: vi.fn(),
 }));
 
 /**
@@ -110,7 +119,10 @@ function renderComposer(
     queryClient.setQueryDefaults(queryKeys.brandProfiles(), { staleTime: Infinity });
     queryClient.setQueryData(queryKeys.brandProfiles(), options.brandProfiles);
   }
-  if (options.post) queryClient.setQueryData(queryKeys.post(options.post.id), options.post);
+  if (options.post) {
+    queryClient.setQueryData(queryKeys.post(options.post.id), options.post);
+    vi.mocked(getPost).mockReturnValue(Effect.succeed(options.post));
+  }
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
@@ -135,6 +147,9 @@ beforeEach(() => {
     user: { email: "user@example.com", id: "user-1" },
   });
   vi.mocked(createAssetUpload).mockReset().mockImplementation(neverSettlingUploadTask);
+  vi.mocked(getPost).mockReset();
+  vi.mocked(updatePost).mockReset();
+  vi.mocked(schedulePost).mockReset();
 });
 
 afterEach(() => {
@@ -591,6 +606,43 @@ describe("Composer schedule restoration", () => {
 });
 
 describe("Composer provider publication choices", () => {
+  it("keeps unanswered YouTube visibility out of saved drafts and blocks delivery", async () => {
+    const account = { ...instagramAccount, platform: "youtube" as const };
+    const post: Post = {
+      ...hydratedPost,
+      brand_profile_id: account.brand_profile_id,
+      targets: [
+        {
+          platform_account_id: account.id,
+          attachment_ids: null,
+          title_override: "Audience answered, visibility unanswered",
+          description_override: null,
+          hashtags: [],
+          provider_options: { youtube: { made_for_kids: false } },
+        },
+      ],
+    };
+    vi.mocked(updatePost).mockReturnValue(Effect.succeed(post));
+    renderComposer({
+      accounts: [account],
+      capabilities: [platformCapability("youtube", null)],
+      brandProfiles: composerProfiles,
+      initialPostId: post.id,
+      post,
+    });
+    await waitFor(() => expect(composerTextarea()).toHaveValue(post.default_text));
+    expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveTextContent(
+      "Choose visibility",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updatePost).toHaveBeenCalled());
+    expect(vi.mocked(updatePost).mock.lastCall?.[2].targets?.[0]?.provider_options).toEqual({
+      youtube: { made_for_kids: false },
+    });
+    fireEvent.click(screen.getByRole("radio", { name: "Now" }));
+    expect(screen.getByRole("button", { name: "Publish Now" })).toBeDisabled();
+  });
+
   it("restores YouTube visibility and audience from the saved target", async () => {
     const account = {
       ...instagramAccount,
@@ -655,8 +707,11 @@ describe("Composer provider publication choices", () => {
     expect(await screen.findByRole("combobox", { name: "Privacy Level" })).toBeDisabled();
   });
 
-  it("clears a saved interaction when the creator no longer permits it", async () => {
+  it("preserves restricted TikTok interactions in drafts but disables them for delivery", async () => {
     const account = { ...instagramAccount, platform: "tiktok" as const };
+    const savedPost = { ...hydratedPost, brand_profile_id: account.brand_profile_id };
+    vi.mocked(updatePost).mockReturnValue(Effect.succeed(savedPost));
+    vi.mocked(schedulePost).mockReturnValue(Effect.succeed(savedPost));
     renderComposer({
       accounts: [account],
       brandProfiles: composerProfiles,
@@ -701,7 +756,25 @@ describe("Composer provider publication choices", () => {
       expect(screen.getByRole("switch", { name })).not.toBeChecked();
       expect(screen.getByRole("switch", { name })).toBeDisabled();
     }
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updatePost).toHaveBeenCalled());
+    expect(
+      vi.mocked(updatePost).mock.lastCall?.[2].targets?.[0]?.provider_options?.tiktok,
+    ).toMatchObject({
+      allow_comment: true,
+      allow_duet: true,
+      allow_stitch: true,
+    });
     fireEvent.click(screen.getByRole("radio", { name: "Now" }));
-    expect(screen.getByRole("button", { name: "Publish Now" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Publish Now" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Publish Now" }));
+    await waitFor(() => expect(schedulePost).toHaveBeenCalled());
+    expect(
+      vi.mocked(schedulePost).mock.lastCall?.[2].targets?.[0]?.provider_options?.tiktok,
+    ).toMatchObject({
+      allow_comment: false,
+      allow_duet: false,
+      allow_stitch: false,
+    });
   });
 });

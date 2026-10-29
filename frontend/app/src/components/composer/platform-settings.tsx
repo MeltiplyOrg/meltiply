@@ -88,17 +88,18 @@ interface ProviderSpec<S> {
   read: (settings: Record<string, unknown>) => Partial<S>;
   /** Settings editor panel rendered inside the channel tab. */
   Editor: React.ComponentType<ProviderEditorProps<S>>;
-  /** Maps typed settings onto a saved Post target; omit when the provider emits no contract fields. */
+  /** Maps settings to draft intent or permission-clamped delivery; omit when no contract fields apply. */
   applyTarget?: (
     target: PostTargetDraft,
     settings: Partial<S>,
     mediaKinds: readonly ("image" | "video")[],
     requirements: TikTokPublishingRequirements | null,
+    purpose: "draft" | "publication",
   ) => void;
   /**
    * Rebuilds the raw settings map from a persisted Post target so an edited
    * post rehydrates its provider controls. Fields the provider does not write
-   * (or wrote as `null`) yield an empty map and therefore the control defaults.
+   * (or wrote as `null`) remain unanswered unless that control has a documented default.
    */
   readTarget?: (target: PostTargetDraft) => Partial<S>;
   /** Returns localized submit-time violations for the channel; empty when valid. */
@@ -120,6 +121,7 @@ export interface ProviderDescriptor {
     settings: Record<string, unknown>,
     mediaKinds: readonly ("image" | "video")[],
     requirements: TikTokPublishingRequirements | null,
+    purpose: "draft" | "publication",
   ) => void;
   readTarget?: (target: PostTargetDraft) => Record<string, unknown>;
   validate?: (context: ProviderValidationContext<Record<string, unknown>>) => string[];
@@ -154,8 +156,8 @@ function defineProviderDescriptor<S>(spec: ProviderSpec<S>): ProviderDescriptor 
     read,
     Editor: ErasedEditor,
     applyTarget: applyTarget
-      ? (target, settings, mediaKinds, requirements) =>
-          applyTarget(target, read(settings), mediaKinds, requirements)
+      ? (target, settings, mediaKinds, requirements, purpose) =>
+          applyTarget(target, read(settings), mediaKinds, requirements, purpose)
       : undefined,
     readTarget: readTarget ? (target) => ({ ...readTarget(target) }) : undefined,
     validate: validate
@@ -192,8 +194,8 @@ function ProviderPanel({
 
 /**
  * YouTube settings editor: title/tags plus the existing target's audience and
- * visibility options. Audience has no implicit answer; visibility retains the
- * provider's established public default. Every control survives draft reopen.
+ * visibility options. Both choices remain unanswered until explicitly selected
+ * and survive draft reopen without borrowing the adapter's Public default.
  */
 function YoutubeEditor({
   channelName,
@@ -252,9 +254,9 @@ function YoutubeEditor({
           <label htmlFor={`${fieldId}-visibility`} className="text-xs font-medium text-ink-3">
             {t("Visibility")}
           </label>
-          <Select value={yt.type ?? "public"} onValueChange={(value) => update("type", value)}>
+          <Select value={yt.type ?? ""} onValueChange={(value) => update("type", value)}>
             <SelectTrigger id={`${fieldId}-visibility`}>
-              <SelectValue />
+              <SelectValue placeholder={t("Choose visibility")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="public">{t("Public")}</SelectItem>
@@ -548,7 +550,7 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
           ...(yt.selfDeclaredMadeForKids !== undefined
             ? { made_for_kids: yt.selfDeclaredMadeForKids === "yes" }
             : {}),
-          privacy_status: yt.type ?? "public",
+          ...(yt.type ? { privacy_status: yt.type } : {}),
         },
       };
     },
@@ -558,7 +560,7 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
       return {
         title: target.title_override ?? undefined,
         tags: hashtags.map((tag) => ({ value: tag, label: tag })),
-        type: target.provider_options?.youtube?.privacy_status ?? "public",
+        type: target.provider_options?.youtube?.privacy_status,
         selfDeclaredMadeForKids:
           target.provider_options?.youtube?.made_for_kids !== undefined
             ? target.provider_options.youtube.made_for_kids
@@ -581,6 +583,9 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
         errors.push(
           t("{name}: choose whether this video is made for kids.", { name: channelName }),
         );
+      }
+      if (!yt.type) {
+        errors.push(t("{name}: choose a YouTube visibility.", { name: channelName }));
       }
       const tags = yt.tags ?? [];
       const maxHashtags = capability?.max_hashtags ?? 30;
@@ -607,17 +612,24 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
 
     read: (settings) => settings as Partial<TikTokComposerSettings>,
     Editor: TikTokEditor,
-    applyTarget: (target, tt, mediaKinds, requirements) => {
+    applyTarget: (target, tt, mediaKinds, requirements, purpose) => {
       const title = tt.title?.trim();
       if (title) target.title_override = title;
       const photo = mediaKinds.includes("image");
       const disclose = tt.disclose ?? Boolean(tt.brand_content || tt.brand_organic);
+      // Drafts retain creator intent; only delivery obeys current permissions.
+      const publishing = purpose === "publication";
       target.provider_options = {
         tiktok: {
           ...(tt.privacy_level ? { privacy_level: tt.privacy_level } : {}),
-          allow_comment: (requirements?.comment_allowed ?? true) && (tt.comment ?? false),
-          allow_duet: !photo && (requirements?.duet_allowed ?? true) && (tt.duet ?? false),
-          allow_stitch: !photo && (requirements?.stitch_allowed ?? true) && (tt.stitch ?? false),
+          allow_comment:
+            (!publishing || requirements?.comment_allowed === true) && (tt.comment ?? false),
+          allow_duet:
+            !photo && (!publishing || requirements?.duet_allowed === true) && (tt.duet ?? false),
+          allow_stitch:
+            !photo &&
+            (!publishing || requirements?.stitch_allowed === true) &&
+            (tt.stitch ?? false),
           brand_content: disclose && (tt.brand_content ?? false),
           brand_organic: disclose && (tt.brand_organic ?? false),
           disclose_commercial_content: disclose,

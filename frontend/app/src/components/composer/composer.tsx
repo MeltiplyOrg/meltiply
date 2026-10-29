@@ -1371,37 +1371,43 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
    * Builds the saved Post targets for the current Channel selection, mapping
    * provider settings through the descriptor boundary and recording per-channel
    * caption and attachment overrides. `attachment_ids` is omitted when the
-   * Channel inherits the Post's attachments.
+   * Channel inherits the Post's attachments. Drafts retain creator choices;
+   * publication targets clamp them to current Provider permissions.
    *
+   * @param purpose - Draft persistence by default, or validated delivery.
    * @returns One Post target input per selected Channel.
    */
-  const buildTargets = useCallback((): PostTargetDraft[] => {
-    return selectedChannels.map((channel) => {
-      const override = channelOverrides[channel.id];
-      const target: PostTargetDraft = { platform_account_id: channel.id };
-      providerDescriptorFor(channel.providerIdentifier)?.applyTarget?.(
-        target,
-        override?.settings ?? {},
-        attachmentsForChannel(channel.id).flatMap((attachment) =>
-          attachment.assetType ? [attachment.assetType] : [],
-        ),
-        tiktokRequirements[channel.id] ?? null,
-      );
-      // `null` means "inherit the shared caption"; an enabled override stays a
-      // string even when blank, because a blank caption is a real choice that
-      // `null` would silently turn back into the shared text on the next save.
-      target.description_override = override?.hasOverride ? override.content : null;
-      const attachmentIds = attachmentOverrides[channel.id];
-      if (attachmentIds) target.attachment_ids = [...attachmentIds];
-      return target;
-    });
-  }, [
-    attachmentOverrides,
-    attachmentsForChannel,
-    channelOverrides,
-    selectedChannels,
-    tiktokRequirements,
-  ]);
+  const buildTargets = useCallback(
+    (purpose: "draft" | "publication" = "draft"): PostTargetDraft[] => {
+      return selectedChannels.map((channel) => {
+        const override = channelOverrides[channel.id];
+        const target: PostTargetDraft = { platform_account_id: channel.id };
+        providerDescriptorFor(channel.providerIdentifier)?.applyTarget?.(
+          target,
+          override?.settings ?? {},
+          attachmentsForChannel(channel.id).flatMap((attachment) =>
+            attachment.assetType ? [attachment.assetType] : [],
+          ),
+          tiktokRequirements[channel.id] ?? null,
+          purpose,
+        );
+        // `null` means "inherit the shared caption"; an enabled override stays a
+        // string even when blank, because a blank caption is a real choice that
+        // `null` would silently turn back into the shared text on the next save.
+        target.description_override = override?.hasOverride ? override.content : null;
+        const attachmentIds = attachmentOverrides[channel.id];
+        if (attachmentIds) target.attachment_ids = [...attachmentIds];
+        return target;
+      });
+    },
+    [
+      attachmentOverrides,
+      attachmentsForChannel,
+      channelOverrides,
+      selectedChannels,
+      tiktokRequirements,
+    ],
+  );
 
   /**
    * Merges partial override updates (custom caption, override enablement, or
@@ -2113,13 +2119,20 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             profileCopiesRef.current.size > 0)
         ) {
           const targetsByProfile = new Map<string, PostTargetDraft[]>();
+          const publicationTargetsByProfile = new Map<string, PostTargetDraft[]>();
           const channelsById = new Map(selectedChannels.map((channel) => [channel.id, channel]));
-          for (const target of buildTargets()) {
-            const profileId = channelsById.get(target.platform_account_id)?.brandProfileId;
-            if (!profileId) continue;
-            const targets = targetsByProfile.get(profileId);
-            if (targets) targets.push(target);
-            else targetsByProfile.set(profileId, [target]);
+          for (const [purpose, grouped] of [
+            ["draft", targetsByProfile],
+            ["publication", publicationTargetsByProfile],
+          ] as const) {
+            if (type === "draft" && purpose === "publication") continue;
+            for (const target of buildTargets(purpose)) {
+              const profileId = channelsById.get(target.platform_account_id)?.brandProfileId;
+              if (!profileId) continue;
+              const targets = grouped.get(profileId);
+              if (targets) targets.push(target);
+              else grouped.set(profileId, [target]);
+            }
           }
           const controller = new AbortController();
           batchAbortRef.current = controller;
@@ -2130,6 +2143,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
             sourcePostId: postId,
             sharedContent,
             targetsByProfile,
+            publicationTargetsByProfile,
             attachments: attachments.flatMap((attachment) =>
               attachment.assetId
                 ? [
@@ -2220,7 +2234,7 @@ export function Composer({ initialPostId, initialDate, onPostSuccess, onNavigate
               : {
                   scheduled_at: type === "schedule" ? new Date(scheduleDate).toISOString() : null,
                 }),
-            targets: buildTargets(),
+            targets: buildTargets("publication"),
           },
         });
         clearRecoveryAfterSave(recoveryNamespaceAtSubmit);

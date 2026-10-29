@@ -186,6 +186,69 @@ jobs:
             await rm(directory, { recursive: true, force: true });
           }
           NODE
+      - name: Smoke reviewed frontend bundles for both environments
+        if: inputs.lane == 'managed-release'
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { execFileSync } from "node:child_process";
+          import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+          import { tmpdir } from "node:os";
+          import path from "node:path";
+          import { buildFrontend } from "./scripts/release/release-frontend.mjs";
+          import { loadReleaseInputs, releaseInternals } from "./scripts/release/release-lib.mjs";
+          import { runCommand } from "./scripts/release/command-runner.mjs";
+          const directory = await mkdtemp(path.join(tmpdir(), "managed-frontend-"));
+          try {
+            const template = JSON.parse(await readFile("scripts/release/release-input.example.json", "utf8"));
+            const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+            for (const environment of ["staging", "production"]) {
+              const outDir = path.join(directory, environment);
+              await mkdir(outDir);
+              const names = Object.fromEntries(["api", "automation", "state", "frontend"]
+                .map((worker) => [worker, `reviewed-${worker}-${environment}`]));
+              const queues = Object.fromEntries(Object.keys(releaseInternals.queueBindings)
+                .map((workload) => [workload, `meltiply-${workload}-${environment}`]));
+              const inputPath = path.join(outDir, "input.json");
+              const iacOutputsPath = path.join(outDir, "iac.json");
+              const input = { ...template, environment, git_sha: sha, release_id: `${environment}-${sha.slice(0, 12)}`,
+                api_workers_dev_url: `https://${names.api}.example.workers.dev`,
+                restore_point_expires_at: new Date(Date.now() + 14 * 86400000).toISOString() };
+              const resources = { environment, app_hostname: new URL(input.app_url).hostname,
+                app_custom_domains_attached: false, queue_consumers_attached: false, queue_delivery_paused: true,
+                assets_bucket_name: `meltiply-assets-${environment}`, frontend_worker_name: names.frontend,
+                worker_names: names, authenticated_hyperdrive_id: "1".repeat(32), system_hyperdrive_id: "2".repeat(32),
+                queue_names: queues, dead_letter_queue_names: Object.fromEntries(Object.entries(queues)
+                  .map(([workload, name]) => [workload, `${name}-dlq`])) };
+              await writeFile(inputPath, JSON.stringify(input));
+              await writeFile(iacOutputsPath, JSON.stringify({
+                release_resources: { value: resources },
+                worker_bindings: { value: { ASSETS: resources.assets_bucket_name,
+                  DB_AUTHENTICATED: resources.authenticated_hyperdrive_id, DB_SYSTEM: resources.system_hyperdrive_id,
+                  queues } },
+              }));
+              const rendered = execFileSync("node", ["scripts/release/release.mjs", "render",
+                "--input", inputPath, "--iac-outputs", iacOutputsPath, "--out-dir", outDir], { encoding: "utf8" });
+              console.log(rendered);
+              const { spec } = await loadReleaseInputs({ inputPath, iacOutputsPath });
+              await buildFrontend({ configPath: path.join(outDir, "wrangler/frontend.json"),
+                environment: process.env, outDir, repoRoot: process.cwd(), runCommand, spec });
+              const configPath = path.join(outDir, "wrangler/frontend-built.json");
+              const config = JSON.parse(await readFile(configPath, "utf8"));
+              assert.equal(config.name, names.frontend);
+              assert.equal(config.vars.ENVIRONMENT, environment);
+              assert.equal(config.vars.VERSION, sha);
+              assert.equal(config.services.find((binding) => binding.binding === "API").service, names.api);
+              const html = await readFile("frontend/app/dist/client/index.html", "utf8");
+              assert(!html.includes("/@vite/client"), "Deployed HTML contains a development client");
+              execFileSync("bun", ["run", "--no-install", "wrangler", "deploy", "--config", configPath,
+                "--dry-run", "--outdir", path.join(outDir, "dry-run")], { stdio: "inherit" });
+              console.log(`Packaged reviewed ${environment} frontend and API service target without credentials`);
+            }
+          } finally {
+            await rm(directory, { recursive: true, force: true });
+          }
+          NODE
       - name: Smoke role gates and migrations on fresh PostgreSQL
         if: inputs.lane == 'managed-release'
         run: |

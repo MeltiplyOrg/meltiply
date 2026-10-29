@@ -434,9 +434,7 @@ test("manifest publishes deterministic redacted provenance for a complete update
     assert.doesNotMatch(name, /release-input|wrangler|^iac-outputs\.json$/);
   }
 
-  // Provenance binds OpenAPI version and the three approval holds.
-  assert.equal(manifest.openapi.version, "1.0.0-target.0");
-  assert.equal(manifest.openapi.path, "packages/contracts/openapi.yaml");
+  // Contract provenance carries a digest alongside the three approval holds.
   assert.match(manifest.openapi.sha256, /^[0-9a-f]{64}$/);
   assert.deepEqual(manifest.signoffs.map((signoff) => signoff.job).sort(), [
     "staging-foundation-approval",

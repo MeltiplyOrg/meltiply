@@ -64,7 +64,7 @@ jobs:
           if [ "${{ inputs.lane }}" = publishing-flow ]; then bun run cloudflare:check; fi
           bun run docs:links
       - name: Exercise full publishing lifecycle
-        if: inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser'
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
         env:
           MELTIPLY_E2E_ACCEPTANCE: "1"
           MELTIPLY_DATABASE_TEST_ADMIN_URL: postgres://postgres:meltiply-admin-local@127.0.0.1:5433/meltiply?sslmode=disable

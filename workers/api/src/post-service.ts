@@ -1033,8 +1033,8 @@ function loadRenditionCandidatesEffect(
 
 /**
  * Requires complete saved answers before creating Distribution options.
- * The resolved YouTube Platform requires an explicit audience even without an
- * options subtree. Other absent subtrees retain their existing semantics;
+ * The resolved YouTube Platform requires explicit audience and visibility even
+ * without an options subtree. Other absent subtrees retain their existing semantics;
  * supplied unanswered choices or unfinished disclosure fail with 422.
  * The draft-only disclosure gate never enters the Provider publication payload.
  */
@@ -1054,7 +1054,14 @@ function publicationProviderOptions(
         "Choose whether the YouTube video is made for kids before publishing.",
       );
     }
-    result.youtube = { madeForKids, ...(privacyStatus ? { privacyStatus } : {}) };
+    if (privacyStatus === undefined) {
+      throw new CoreApiError(
+        422,
+        "validation_error",
+        "Choose a YouTube visibility before publishing.",
+      );
+    }
+    result.youtube = { madeForKids, privacyStatus };
   }
   if (options?.tiktok) {
     const { privacyLevel, discloseCommercialContent, ...choices } = options.tiktok;

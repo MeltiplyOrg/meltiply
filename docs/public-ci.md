@@ -72,8 +72,11 @@ Providers; it does not certify live credentials, platform audit, or public posti
 Wrangler fires no cron triggers locally, so the acceptance API exposes a
 fixture-only route that invokes the Automation Worker's scheduled dispatcher
 through its existing service binding; stored due times stay unchanged. Browser
-failures are reported without automatic retries, and each journey's traces and
-screenshots are retained in the lane's artifact before the next journey runs.
+publication journeys still execute after an earlier step fails without clearing
+that failure. The matrix creates its future Queue slot when its Queue iteration
+begins, so preceding Now/Schedule work cannot consume that slot's lead time.
+Browser failures are reported without automatic retries, and each journey's traces
+and screenshots are retained in the lane's artifact before the next journey runs.
 
 `portable-caching` runs the complete application gate and the portable read-cache
 acceptance journey; `portable-caching-smoke` repeats only that journey when the

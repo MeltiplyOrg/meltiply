@@ -574,7 +574,7 @@ describeIntegration("core API PostgreSQL query budgets", () => {
                  || lpad((((post_item - 1) % 20) + 1)::text, 12, '0'))::uuid,
                'Query budget target',
                CASE WHEN channel.prefix = 'b5000000'
-                 THEN '{"youtube":{"madeForKids":false}}'::jsonb
+                 THEN '{"youtube":{"madeForKids":false,"privacyStatus":"public"}}'::jsonb
                  ELSE '{}'::jsonb END
             FROM generate_series(1, 42) AS post_item
             CROSS JOIN (VALUES ('b5000000'), ('b6000000')) AS channel(prefix)`,

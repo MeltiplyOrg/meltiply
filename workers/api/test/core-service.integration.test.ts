@@ -3189,8 +3189,8 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
 
   /**
    * Schedules an Alpha Post against the supplied Channels.
-   * Supplies an explicit not-made-for-kids fixture answer for YouTube scenarios
-   * unrelated to audience validation. Missing-answer cases call the service directly.
+   * Supplies explicit public visibility and a not-made-for-kids fixture answer
+   * for unrelated scenarios. Missing-answer cases call the service directly.
    *
    * @param posts - Post service driving the scenario.
    * @param postId - Post being scheduled.
@@ -3216,7 +3216,10 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
           scheduledAt,
           targets: targets.map((target) =>
             target.platformAccountId === alphaYoutubeAccountId && !target.providerOptions
-              ? { ...target, providerOptions: { youtube: { madeForKids: false } } }
+              ? {
+                  ...target,
+                  providerOptions: { youtube: { madeForKids: false, privacyStatus: "public" } },
+                }
               : target,
           ),
         },
@@ -5027,13 +5030,23 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
     }
   });
 
-  it.each(["saved", "request"] as const)(
-    "rejects YouTube scheduling without an audience in %s targets but permits the draft",
-    async (source) => {
+  it.each([
+    ["saved", "audience"],
+    ["request", "audience"],
+    ["saved", "visibility"],
+    ["request", "visibility"],
+  ] as const)(
+    "rejects YouTube scheduling from %s targets without %s but permits the draft",
+    async (source, missingChoice) => {
       const posts = postServiceWith("youtube");
       const usageBefore = await currentUsageCount();
-      const prefix = `integration-post-absent-youtube-${source}`;
-      const target: PostTargetInput = { platformAccountId: alphaYoutubeAccountId };
+      const prefix = `integration-post-absent-youtube-${source}-${missingChoice}`;
+      const target: PostTargetInput = {
+        platformAccountId: alphaYoutubeAccountId,
+        ...(missingChoice === "visibility"
+          ? { providerOptions: { youtube: { madeForKids: false } } }
+          : {}),
+      };
       const draft = await createAlphaPost(
         posts,
         { attachmentIds: [alphaAssetId], targets: [target] },
@@ -5041,7 +5054,9 @@ describeIntegration("Worker core service with PostgreSQL RLS", () => {
       );
       try {
         const reopened = await Effect.runPromise(posts.getPost(env, alpha, draft.value.id));
-        expect(reopened.targets[0]?.provider_options).toBeNull();
+        expect(reopened.targets[0]?.provider_options).toEqual(
+          missingChoice === "visibility" ? { youtube: { made_for_kids: false } } : null,
+        );
         await expect(
           Effect.runPromise(
             posts.schedulePost(

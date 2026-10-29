@@ -1,7 +1,14 @@
 import { Buffer } from "node:buffer";
 
 import type { components } from "@meltiply/contracts/schema";
-import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+  type Response,
+} from "@playwright/test";
 
 import {
   acceptanceApiUrl,
@@ -1109,18 +1116,17 @@ test("delivers video to every Platform through Now, Schedule, and Queue", async 
   );
   await attachChannels(page, request, profileName, channels);
   const queueName = `Video Queue ${Date.now()}`;
-  const queueInstant = new Date(Math.ceil((Date.now() + 300_000) / 60_000) * 60_000);
-  const queueResponse = await configurePublishingQueue(page, profileName, queueName, [
-    queueInstant,
-  ]);
-  const apiOrigin = new URL(queueResponse.url()).origin;
-  const headers = { Authorization: (await queueResponse.request().allHeaders())["authorization"]! };
-  await page.goto("/posts");
-  await waitForWorkspace(page);
-  await activeBrandProfileName(page, profileName);
-  const submissions: { mode: string; post: Post; caption: string }[] = [];
+  const submissions: { mode: string; post: Post; caption: string; response: Response }[] = [];
 
   for (const mode of ["Now", "Schedule", "Queue"] as const) {
+    const queueInstant =
+      mode === "Queue" ? new Date(Math.ceil((Date.now() + 300_000) / 60_000) * 60_000) : null;
+    if (queueInstant) {
+      await configurePublishingQueue(page, profileName, queueName, [queueInstant]);
+      await page.goto("/posts");
+      await waitForWorkspace(page);
+      await activeBrandProfileName(page, profileName);
+    }
     await openComposer(page);
     const caption = `Video ${mode} ${Date.now()}`;
     await composerTextarea(page).fill(caption);
@@ -1220,8 +1226,7 @@ test("delivers video to every Platform through Now, Schedule, and Queue", async 
       "tiktok",
       "youtube",
     ]);
-    if (mode === "Queue")
-      expect(post.queue_membership?.assigned_at).toBe(queueInstant.toISOString());
+    if (queueInstant) expect(post.queue_membership?.assigned_at).toBe(queueInstant.toISOString());
     if (mode === "Schedule") {
       const instants = post.distributions.map((distribution) => distribution.scheduled_at);
       await reloadPostsWorkspace(page);
@@ -1240,8 +1245,11 @@ test("delivers video to every Platform through Now, Schedule, and Queue", async 
       expect(post.distributions.map((distribution) => distribution.scheduled_at)).toEqual(instants);
       await returnToPosts(page);
     }
-    submissions.push({ mode, post, caption });
+    submissions.push({ mode, post, caption, response });
   }
+  const firstResponse = submissions[0]!.response;
+  const apiOrigin = new URL(firstResponse.url()).origin;
+  const headers = { Authorization: (await firstResponse.request().allHeaders())["authorization"]! };
 
   // Before either future mode is due, only the Now copy may exist.
   for (const channel of channels) {

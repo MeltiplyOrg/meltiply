@@ -10,6 +10,8 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey, type JWTPayload } 
  * `name` is present only when the token carried a non-empty display name.
  */
 export interface JwtIdentity {
+  /** Server-stored session provenance, resolved by the host's live-session check, not JWT claims. */
+  clientChannel?: "web" | "cli" | "unknown";
   email: string;
   /**
    * Live account verification state resolved from the database session. The
@@ -399,6 +401,9 @@ export type BetterAuthInstance = BetterAuthShape;
  * checks that session on every protected operation, so revocation is immediate.
  * Cookie caching is disabled for the same reason. Password reset revokes all
  * sessions; TOTP enrollment requires confirmation and backup codes are encrypted.
+ * Session provenance is assigned from the issuing endpoint, never request
+ * fields or headers. Session replacements retain their authenticated
+ * predecessor's provenance; unrecognized issuance paths remain unknown.
  *
  * @param config - Database pool, secret, verification policy, optional baseURL/trustedOrigins, JWT claims, and email delivery.
  * @returns Configured Better Auth instance.
@@ -407,6 +412,8 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
   // Exception: dynamic imports avoid loading pg and plugin code in workerd unit test isolates
   const { betterAuth } = await import("better-auth");
   const { bearer, deviceAuthorization, jwt, twoFactor } = await import("better-auth/plugins");
+  // Exception: the API entry also loads pg; keep it out of workerd unit-test module evaluation.
+  const { createAuthMiddleware, getSessionFromCtx } = await import("better-auth/api");
   const email = config.email;
   // Normalize and validate the device flow up front. The verification URL is
   // always absolute (Better Auth would otherwise resolve it against the
@@ -439,14 +446,59 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
     databaseHooks: {
       session: {
         create: {
-          before: async (session) => {
+          before: async (session, context) => {
             if (config.isAccountActive && !(await config.isAccountActive(session.userId))) {
               return false;
             }
-            return { data: session };
+            const previousChannel = context?.context.sessionClientChannel;
+            const clientChannel =
+              context?.path === "/device/token"
+                ? "cli"
+                : context?.context.sessionClientUserId === session.userId &&
+                    (previousChannel === "web" ||
+                      previousChannel === "cli" ||
+                      previousChannel === "unknown")
+                  ? previousChannel
+                  : context?.path === "/sign-in/email" ||
+                      context?.path === "/sign-up/email" ||
+                      context?.path === "/verify-email" ||
+                      context?.path?.startsWith("/two-factor/verify-")
+                    ? "web"
+                    : "unknown";
+            return { data: { ...session, clientChannel } };
           },
         },
       },
+    },
+    // Snapshot hidden provenance before security endpoints delete or replace
+    // their current session. Better Auth's public session projection omits
+    // returned:false fields, so the normal middleware cannot carry it forward.
+    hooks: {
+      before: createAuthMiddleware(async (context) => {
+        if (
+          context.path !== "/change-password" &&
+          context.path !== "/two-factor/enable" &&
+          context.path !== "/two-factor/disable" &&
+          !context.path?.startsWith("/two-factor/verify-")
+        )
+          return;
+        const current = await getSessionFromCtx(context);
+        if (!current) return;
+        const stored = await context.context.adapter.findOne<{
+          clientChannel: "web" | "cli" | "unknown";
+          userId: string;
+        }>({
+          model: "session",
+          where: [{ field: "id", value: current.session.id }],
+        });
+        if (!stored || stored.userId !== current.user.id) return;
+        return {
+          context: {
+            sessionClientChannel: stored.clientChannel,
+            sessionClientUserId: stored.userId,
+          },
+        };
+      }),
     },
     emailAndPassword: {
       enabled: true,
@@ -547,6 +599,15 @@ export async function createBetterAuth(config: BetterAuthConfig): Promise<Better
     ],
     secret: config.secret,
     session: {
+      additionalFields: {
+        clientChannel: {
+          type: ["web", "cli", "unknown"],
+          defaultValue: "unknown",
+          input: false,
+          returned: false,
+          required: true,
+        },
+      },
       cookieCache: { enabled: false },
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24,

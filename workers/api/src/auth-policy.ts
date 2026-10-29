@@ -292,11 +292,12 @@ export function authPolicyHandler(env: ApiWorkerEnv, auth: BetterAuthInstance): 
  * configured policy. No cookie is accepted on this surface.
  *
  * The returned `emailVerified` lets actor resolution decide whether a pending
- * invitation may become an active membership.
+ * invitation may become an active membership. `clientChannel` comes from the
+ * live session row, never a JWT claim or client-supplied header.
  *
  * @param env - Worker environment bindings.
  * @param identity - Verified bearer JWT identity.
- * @returns The refreshed identity with live email verification state.
+ * @returns The refreshed identity with live verification state and credential provenance.
  * @throws {CoreApiError} 401 unauthenticated, 403 suspended or unverified.
  */
 export async function activeIdentity(
@@ -308,12 +309,14 @@ export async function activeIdentity(
   // Exception: pg cannot be loaded in workerd unit-test isolates.
   const { systemPoolFor } = await import("./database");
   const result = await systemPoolFor(env).query<{
+    client_channel: "web" | "cli" | "unknown";
     email: string;
     email_verified: boolean;
     name: string;
     suspended_at: Date | string | null;
   }>(
-    `SELECT u.email, u.name, u."emailVerified" AS email_verified, iu.suspended_at
+    `SELECT u.email, u.name, u."emailVerified" AS email_verified, iu.suspended_at,
+            s."clientChannel" AS client_channel
      FROM "session" s
      JOIN "user" u ON u.id = s."userId"
      LEFT JOIN users iu ON iu.auth_user_id = u.id
@@ -332,6 +335,7 @@ export async function activeIdentity(
   }
   return {
     ...identity,
+    clientChannel: account.client_channel,
     email: account.email,
     // Explicit verification policy also governs invitation activation; an
     // unverified account admitted by that policy must resolve consistently.

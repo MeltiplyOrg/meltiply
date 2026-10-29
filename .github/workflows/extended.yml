@@ -177,6 +177,8 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/device-auth-smoke.mjs" <<'NODE'
           import assert from "node:assert/strict";
+          import { readFile } from "node:fs/promises";
+          import { setTimeout } from "node:timers/promises";
 
           // Real runtime smoke against the proxied application origin and the
           // production-composed Worker/Better Auth/PostgreSQL stack. The script
@@ -211,7 +213,7 @@ jobs:
           assert.equal(new URL(code.verification_uri).origin, origin);
           assert.ok(!code.verification_uri_complete.includes(code.device_code));
 
-          const signIn = await post("/api/auth/sign-in/email", { email, password });
+          const signIn = await post("/api/auth/sign-in/email", { email, password, clientChannel: "cli" });
           assert.equal(signIn.status, 200, "fixture sign-in must succeed");
           const cookie = signIn.headers
             .getSetCookie()
@@ -255,8 +257,14 @@ jobs:
           const jwt = session.headers.get("set-auth-jwt");
           assert.ok(jwt, "get-session must expose the short-lived API JWT");
 
+          const cliRequestId = `provenance-cli-${crypto.randomUUID()}`;
           const authorized = await fetch(`${origin}/api/v1/posts`, {
-            headers: headers({ Authorization: `Bearer ${jwt}` }),
+            headers: headers({
+              Authorization: `Bearer ${jwt}`,
+              "X-Request-ID": cliRequestId,
+              "X-Client-Channel": "web",
+              "User-Agent": "Mozilla/5.0",
+            }),
           });
           assert.equal(authorized.status, 200, "the CLI JWT must authorize the core API");
           const rawCredential = await fetch(`${origin}/api/v1/posts`, {
@@ -275,8 +283,13 @@ jobs:
           });
           assert.equal(revoked.status, 200);
           assert.equal(await json(revoked), null, "the revoked CLI session must be unusable");
+          const revokedRequestId = `provenance-revoked-${crypto.randomUUID()}`;
           const revokedJwt = await fetch(`${origin}/api/v1/posts`, {
-            headers: headers({ Authorization: `Bearer ${jwt}` }),
+            headers: headers({
+              Authorization: `Bearer ${jwt}`,
+              "X-Request-ID": revokedRequestId,
+              "X-Client-Channel": "cli",
+            }),
           });
           assert.equal(revokedJwt.status, 401, "the minted JWT must fail after revocation");
 
@@ -284,14 +297,68 @@ jobs:
             headers: headers({ Cookie: cookie }),
           });
           assert.equal(browserSession.status, 200);
+          const browserBody = await json(browserSession);
           assert.equal(
-            (await json(browserSession)).user.email,
+            browserBody.user.email,
             email,
             "CLI sign-out must not revoke the approving browser session",
           );
+          const browserJwt = browserSession.headers.get("set-auth-jwt");
+          assert.ok(browserJwt, "browser session must mint an API JWT");
+          const webRequestId = `provenance-web-${crypto.randomUUID()}`;
+          const webRequest = await fetch(`${origin}/api/v1/users/me`, {
+            headers: headers({
+              Authorization: `Bearer ${browserJwt}`,
+              "X-Request-ID": webRequestId,
+              "X-Client-Channel": "cli",
+              "User-Agent": "melti-cli/spoof",
+            }),
+          });
+          assert.equal(webRequest.status, 200, "browser JWT must authorize");
+          const profile = await json(webRequest);
+
+          // Observe the actual Worker stdout, not a mocked logger. Wrangler may
+          // prefix a console line; only its JSON payload is decoded. Wait for
+          // the three correlated request records to flush before asserting.
+          const requestIds = [webRequestId, cliRequestId, revokedRequestId];
+          const records = new Map();
+          for (let attempt = 0; attempt < 50 && records.size < requestIds.length; attempt++) {
+            const stdout = await readFile("artifacts/device-auth/backend.log", "utf8");
+            for (const line of stdout.split("\n")) {
+              if (!requestIds.some((id) => line.includes(id))) continue;
+              try {
+                const record = JSON.parse(line.slice(line.indexOf("{")));
+                if (record.context?.event === "http_request" && requestIds.includes(record.request_id))
+                  records.set(record.request_id, record.context);
+              } catch {
+                // Non-JSON Wrangler status lines are not request evidence.
+              }
+            }
+            if (records.size < requestIds.length) await setTimeout(100);
+          }
+          for (const [id, channel, sessionId] of [
+            [webRequestId, "web", browserBody.session.id],
+            [cliRequestId, "cli", sessionBody.session.id],
+          ]) {
+            const context = records.get(id);
+            assert.ok(context, `missing ${channel} request log`);
+            assert.equal(context.client_channel, channel);
+            assert.equal(context.auth_method, "session_jwt");
+            assert.equal(context.actor_id, profile.id);
+            assert.equal(context.credential_id, sessionId);
+          }
+          const revokedContext = records.get(revokedRequestId);
+          assert.ok(revokedContext, "missing rejected request log");
+          assert.equal(revokedContext.client_channel, "unknown");
+          assert.equal(revokedContext.auth_method, "unknown");
+          assert.ok(!("actor_id" in revokedContext));
+          assert.ok(!("credential_id" in revokedContext));
+          const serialized = JSON.stringify([...records.values()]);
+          for (const secret of [jwt, browserJwt, token.access_token, code.device_code, cookie])
+            assert.ok(!serialized.includes(secret), "request provenance logs must not contain credentials");
 
           console.log(
-            "device-auth smoke: code, claim, approval, redemption, JWT authorization, and revocation verified",
+            "device-auth smoke: lifecycle, server-stored web/CLI provenance, safe request logs, and revocation verified",
           );
           NODE
           node "$RUNNER_TEMP/device-auth-smoke.mjs"

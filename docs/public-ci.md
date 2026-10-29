@@ -67,8 +67,11 @@ desktop/phone layouts in both palettes, approves and denies with keyboard input,
 and confirms that a link visit grants nothing. A CLI-shaped HTTP smoke against
 the running installation issues and claims a code, approves and redeems it,
 obtains and exercises a JWT, verifies that the raw session credential is
-rejected by `/api/v1`, signs out, and confirms the browser session survives. It
-proves the production-composed local runtime, not a deployed installation.
+rejected by `/api/v1`, signs out, and confirms the browser session survives.
+Correlated Worker stdout must identify browser and CLI credentials despite
+spoofed client hints, leave revoked credentials unattributed, and contain only
+non-secret credential identifiers. This proves the production-composed local
+runtime, not a deployed installation.
 
 `portable-caching` runs the complete application gate and the portable read-cache
 acceptance journey; `portable-caching-smoke` repeats only that journey when the

@@ -255,6 +255,38 @@ minted credential, while a later browser sign-out leaves the independent CLI
 session usable. The CLI must treat `null` from `get-session`, a `401` from
 `/api/v1`, or a revoked session as reauthentication required.
 
+### Request provenance in logs
+
+The auth issuer stores `clientChannel` on each session: browser sign-up,
+sign-in, email verification, and second-factor completion issue `web` sessions;
+successful device-token redemption issues `cli` sessions. Session renewal and
+authenticated security-session replacements retain that provenance. Existing
+sessions and unrecognized issuance paths remain `unknown`; request headers,
+body fields, User-Agent, and JWT hints never establish or override it.
+
+Tenant API `http_request` and `request_failed` log events include:
+
+| Field            | Meaning                                                                |
+| ---------------- | ---------------------------------------------------------------------- |
+| `client_channel` | Stored `web`, `cli`, or `unknown` credential provenance.               |
+| `auth_method`    | `session_jwt` after live-session validation; otherwise `unknown`.      |
+| `actor_id`       | Internal member ID, present only after actor resolution succeeds.      |
+| `credential_id`  | Non-secret session row ID, present only after credential validation.   |
+| `request_id`     | Existing request identifier for correlation with responses and traces. |
+
+Rejected credentials, public routes, and auth-lifecycle requests have unknown
+attribution rather than trusting caller hints. An authenticated request that
+later fails authorization retains its validated provenance. The session field
+stays internal: it is not added to public session responses or JWT claims.
+
+This identifies the credential's issuing flow, not the executable sending the
+request: a script using a CLI credential is still attributed to `cli`. There is
+no API-key authentication or `api` classification yet. Raw JWTs, session tokens,
+cookies, and device codes must never appear in these fields.
+
+Apply migration `026_session_client_channel.sql` before deploying the updated
+auth issuer and API Worker.
+
 ## Browser policy
 
 Sign-in, email verification when required, and any enrolled second factor happen

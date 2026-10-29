@@ -194,6 +194,23 @@ function readinessCacheKey(env: ApiWorkerEnv): string {
 const readinessCacheTtlMilliseconds = 30_000;
 
 /**
+ * Projects only authenticated credential provenance into request logs. Missing
+ * or rejected credentials remain unknown, including public and auth-lifecycle
+ * requests. Actor IDs use the internal member ID; credential IDs use the
+ * non-secret session row ID, never bearer tokens, cookies, or request headers.
+ */
+function requestAuthFields(c: Context<ApiWorkerEnvironment>) {
+  const identity = c.get("identity");
+  const actor = c.get("actor");
+  return {
+    client_channel: identity?.clientChannel ?? "unknown",
+    auth_method: identity ? "session_jwt" : "unknown",
+    ...(identity?.sessionId ? { credential_id: identity.sessionId } : {}),
+    ...(actor ? { actor_id: actor.userId } : {}),
+  };
+}
+
+/**
  * Maps a Better Auth route path to its rate-limit action key.
  *
  * Credential-bearing endpoints get dedicated budgets; every other auth endpoint
@@ -243,7 +260,8 @@ function authRateLimitAvailable(env: ApiWorkerEnv): boolean {
  * split CORS (credentialed for `/api/auth/*`, bearer-only for `/api/v1/*`), health
  * checks, Better Auth JWT bearer verification into the `actor` context, tenant RLS
  * scoping, flow observability, eager outbox relays, and mounts core, operator, and
- * flow sub-routers.
+ * flow sub-routers. Request and failure logs include server-resolved credential
+ * provenance and non-secret actor/session identifiers after tenant authentication.
  *
  * @param dependencies - Optional dependency overrides for testing (auth resolution, service stubs).
  * @returns Configured Hono application instance ready to handle HTTP fetch events.
@@ -310,6 +328,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         version: c.env.VERSION,
       },
       {
+        ...requestAuthFields(c),
         ...(errorCode ? { error_code: errorCode } : {}),
         event: "http_request",
         latency_ms: elapsedMilliseconds(startedAt),
@@ -546,6 +565,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         "Authentication is required.",
       );
     }
+    c.set("identity", identity);
     try {
       c.set("actor", await resolveRequestActor(c.env, identity, c.req.raw, c.get("requestId")));
     } catch (cause) {
@@ -798,6 +818,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         version: c.env?.VERSION ?? "test",
       },
       {
+        ...requestAuthFields(c),
         error_code: "internal_error",
         event: "request_failed",
         outcome: "internal_error",

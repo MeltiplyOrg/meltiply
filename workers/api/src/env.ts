@@ -1,5 +1,5 @@
 import { objectStorageBindings } from "@meltiply/storage";
-import type { AccessClaims } from "@meltiply/auth";
+import type { AccessClaims, JwtIdentity } from "@meltiply/auth";
 
 import type { ResolvedActor } from "./actor-resolution";
 import { mailSenderConfiguration } from "./mail";
@@ -354,6 +354,7 @@ export type ApiWorkerEnvironment = {
   Bindings: ApiWorkerEnv;
   Variables: {
     actor: ResolvedActor;
+    identity: JwtIdentity;
     operator: AccessClaims;
     requestId: string;
     traceId: string;

@@ -1,6 +1,15 @@
 import { createHmac } from "node:crypto";
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { createJwtVerifier, jwtClaims, type JwtIdentity } from "@meltiply/auth";
 
 import { activeIdentity } from "../src/auth-policy";
@@ -9,6 +18,7 @@ import { betterAuthFor } from "../src/better-auth";
 import { CoreApiError } from "../src/core-types";
 import { systemPoolFor } from "../src/database";
 import { applicationOrigin, type ApiWorkerEnv } from "../src/env";
+import { logRecords } from "./log-records";
 
 /**
  * Drives the complete melti-cli device-authorization lifecycle through the real
@@ -703,6 +713,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   const pool = systemPoolFor(env);
   await pool.query(
     `DELETE FROM "session"
@@ -1063,6 +1074,163 @@ describe("browser verification and consent ownership", () => {
 });
 
 describe("native session transport and revocation", () => {
+  it("logs stored credential provenance despite spoofed hints and clears attribution after revocation", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const signedIn = await authPostJson("/api/auth/sign-in/email", {
+      email: gammaEmail,
+      password: seedPassword,
+      clientChannel: "cli",
+    });
+    expect(signedIn.status).toBe(200);
+    const cookie = sessionCookiePair(signedIn);
+    const browserSession = await getSessionWithCookie(cookie);
+    const browserJwt = browserSession.headers.get("set-auth-jwt");
+    const browserId = stringField(recordOf(recordOf(await browserSession.json()).session), "id");
+    expect(browserJwt).toBeTruthy();
+
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    const deviceCode = stringField(body, "device_code");
+    expect((await verifyDeviceCode(cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(cookie, "approve", userCode)).status).toBe(200);
+    const redeemed = await authPostJson("/api/auth/device/token", {
+      client_id: "melti-cli",
+      device_code: deviceCode,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      clientChannel: "web",
+    });
+    expect(redeemed.status).toBe(200);
+    const accessToken = stringField(recordOf(await redeemed.json()), "access_token");
+    const cliSession = await getSessionWithBearer(accessToken);
+    const cliJwt = cliSession.headers.get("set-auth-jwt");
+    const cliId = stringField(recordOf(recordOf(await cliSession.json()).session), "id");
+    expect(cliJwt).toBeTruthy();
+    expect(cliId).not.toBe(browserId);
+
+    for (const [channel, jwt, sessionId] of [
+      ["web", browserJwt, browserId],
+      ["cli", cliJwt, cliId],
+    ] as const) {
+      const requestId = `provenance-${channel}-${crypto.randomUUID()}`;
+      const response = await tenantRequest("/api/v1/users/me", `Bearer ${jwt}`, {
+        headers: {
+          "X-Request-ID": requestId,
+          "X-Client-Channel": channel === "web" ? "cli" : "web",
+          "User-Agent": channel === "web" ? "melti-cli/spoof" : "Mozilla/5.0",
+        },
+      });
+      expect(response.status).toBe(200);
+      const profile = recordOf(await response.json());
+      expect(logRecords(info)).toContainEqual(
+        expect.objectContaining({
+          request_id: requestId,
+          context: expect.objectContaining({
+            event: "http_request",
+            client_channel: channel,
+            auth_method: "session_jwt",
+            actor_id: stringField(profile, "id"),
+            credential_id: sessionId,
+          }),
+        }),
+      );
+    }
+
+    // Renewal preserves provenance; pre-migration/directly inserted sessions
+    // remain unknown rather than being guessed from the caller's headers.
+    await systemPoolFor(env).query(
+      `UPDATE "session" SET "expiresAt" = now() + interval '1 hour' WHERE id = $1`,
+      [cliId],
+    );
+    const renewed = await getSessionWithBearer(accessToken);
+    const renewedJwt = renewed.headers.get("set-auth-jwt");
+    expect(renewedJwt).toBeTruthy();
+    expect(
+      (await activeIdentity(env, await (await jwtVerifier())(renewedJwt!))).clientChannel,
+    ).toBe("cli");
+    await systemPoolFor(env).query(
+      `UPDATE "session" SET "clientChannel" = 'unknown' WHERE id = $1`,
+      [cliId],
+    );
+    const unknownRequestId = `provenance-unknown-${crypto.randomUUID()}`;
+    expect(
+      (
+        await tenantRequest("/api/v1/users/me", `Bearer ${cliJwt}`, {
+          headers: { "X-Request-ID": unknownRequestId, "X-Client-Channel": "api" },
+        })
+      ).status,
+    ).toBe(200);
+    expect(logRecords(info)).toContainEqual(
+      expect.objectContaining({
+        request_id: unknownRequestId,
+        context: expect.objectContaining({
+          client_channel: "unknown",
+          auth_method: "session_jwt",
+          credential_id: cliId,
+        }),
+      }),
+    );
+
+    expect((await signOutWithBearer(accessToken)).status).toBe(200);
+    const revokedRequestId = `provenance-revoked-${crypto.randomUUID()}`;
+    expect(
+      (
+        await tenantRequest("/api/v1/users/me", `Bearer ${cliJwt}`, {
+          headers: { "X-Request-ID": revokedRequestId, "X-Client-Channel": "cli" },
+        })
+      ).status,
+    ).toBe(401);
+    const revokedLog = logRecords(info).find((record) => record.request_id === revokedRequestId);
+    const revokedContext = recordOf(revokedLog?.context);
+    expect(revokedContext).toMatchObject({
+      client_channel: "unknown",
+      auth_method: "unknown",
+      outcome: 401,
+    });
+    expect(revokedContext).not.toHaveProperty("actor_id");
+    expect(revokedContext).not.toHaveProperty("credential_id");
+    const serializedLogs = JSON.stringify(logRecords(info));
+    for (const secret of [accessToken, browserJwt!, cliJwt!, deviceCode, cookie]) {
+      expect(serializedLogs).not.toContain(secret);
+    }
+  });
+
+  it("retains CLI provenance when a password change replaces and revokes the original credential", async () => {
+    const browser = await signIn(securityEmail);
+    const { body } = await issueDeviceCode();
+    const userCode = stringField(body, "user_code");
+    expect((await verifyDeviceCode(browser.cookie, userCode)).status).toBe(200);
+    expect((await decideDeviceCode(browser.cookie, "approve", userCode)).status).toBe(200);
+    const redeemed = await redeemDeviceCode(stringField(body, "device_code"));
+    const original = stringField(recordOf(await redeemed.json()), "access_token");
+    const originalSession = await getSessionWithBearer(original);
+    const originalJwt = originalSession.headers.get("set-auth-jwt");
+    expect(originalJwt).toBeTruthy();
+
+    const changed = await authRequest("/api/auth/change-password", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${original}`,
+        "Content-Type": "application/json",
+        "CF-Connecting-IP": randomIp(),
+        Origin: appOrigin,
+      },
+      body: JSON.stringify({
+        currentPassword: dedicatedPassword,
+        newPassword: crypto.randomUUID(),
+        revokeOtherSessions: true,
+      }),
+    });
+    expect(changed.status).toBe(200);
+    const replacement = stringField(recordOf(await changed.json()), "token");
+    const session = await getSessionWithBearer(replacement);
+    const jwt = session.headers.get("set-auth-jwt");
+    expect(jwt).toBeTruthy();
+    const identity = await activeIdentity(env, await (await jwtVerifier())(jwt!));
+    expect(identity.clientChannel).toBe("cli");
+    expect((await tenantRequest("/api/v1/users/me", `Bearer ${jwt}`)).status).toBe(200);
+    expect((await tenantRequest("/api/v1/users/me", `Bearer ${originalJwt}`)).status).toBe(401);
+  });
+
   it("mints CLI JWTs, renews the session, and keeps the browser session after CLI sign-out", async () => {
     const browser = await signIn(gammaEmail);
     const { body } = await issueDeviceCode();

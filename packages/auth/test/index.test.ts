@@ -385,21 +385,24 @@ describe("Better Auth device protocol HTTP composition", () => {
   it("completes a CLI grant and keeps browser and CLI session lifecycles separate", async () => {
     const origin = "https://auth.example.test";
     const email = "device-user@example.test";
-    const sessions: Record<string, unknown>[] = [];
+    // Keep the database object: transaction commits replace its model arrays.
+    // Models must be pre-declared for the installed memory adapter.
+    const database: {
+      [model: string]: Record<string, unknown>[];
+      session: Record<string, unknown>[];
+    } = {
+      account: [],
+      deviceCode: [],
+      jwks: [],
+      rateLimit: [],
+      session: [],
+      twoFactor: [],
+      user: [],
+      verification: [],
+    };
     const auth = await createBetterAuth({
       baseURL: origin,
-      // The installed memory adapter allocates records per pre-declared model;
-      // an empty map fails the first insert with "Model user not found".
-      database: memoryAdapter({
-        account: [],
-        deviceCode: [],
-        jwks: [],
-        rateLimit: [],
-        session: sessions,
-        twoFactor: [],
-        user: [],
-        verification: [],
-      }),
+      database: memoryAdapter(database),
       deviceAuthorization: {
         clientId: "melti-cli",
         expiresIn: "10m",
@@ -484,7 +487,7 @@ describe("Better Auth device protocol HTTP composition", () => {
       user: { id: expect.any(String) },
     });
     expect(
-      sessions.find((session) => session.id === browserIdentity?.session.id)?.clientChannel,
+      database.session.find((session) => session.id === browserIdentity?.session.id)?.clientChannel,
     ).toBe("web");
 
     const issued = await postJson("/api/auth/device/code", { client_id: "melti-cli" });
@@ -536,7 +539,9 @@ describe("Better Auth device protocol HTTP composition", () => {
     const cliBody = await jsonRecord(cliSession);
     expect(cliBody.user).toMatchObject({ email });
     expect(cliBody.session).not.toHaveProperty("clientChannel");
-    expect(sessions.find((session) => session.token === accessToken)?.clientChannel).toBe("cli");
+    expect(database.session.find((session) => session.token === accessToken)?.clientChannel).toBe(
+      "cli",
+    );
 
     const signOut = await auth.handler(
       new Request(`${origin}/api/auth/sign-out`, {
@@ -581,9 +586,9 @@ describe("Better Auth device protocol HTTP composition", () => {
     );
     expect(changed.status).toBe(200);
     const replacement = await jsonRecord(changed);
-    expect(sessions.find((session) => session.token === replacement.token)?.clientChannel).toBe(
-      "web",
-    );
+    expect(
+      database.session.find((session) => session.token === replacement.token)?.clientChannel,
+    ).toBe("web");
     const replacedSession = await auth.handler(
       new Request(`${origin}/api/auth/get-session`, {
         headers: { Cookie: sessionCookie(changed) },

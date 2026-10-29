@@ -132,7 +132,7 @@ describe("DevBox shell", () => {
   it("renders the expanded dock with all four tabs", () => {
     renderDevBox();
     expect(screen.getByRole("region", { name: "Meltiply DevBox" })).toBeInTheDocument();
-    for (const tab of ["Skeletons", "Benchmark", "Trace", "Helpers"]) {
+    for (const tab of ["Skeletons", "Benchmark", "Trace", "Helpers", "Routes"]) {
       expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
     }
   });

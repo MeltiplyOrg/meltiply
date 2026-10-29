@@ -92,6 +92,28 @@ async function getSession(): Promise<AuthSessionResult | null> {
 }
 
 /**
+ * Sends device-consent HTTP requests through the canonical auth transport.
+ *
+ * The device protocol module owns typed payload and error handling; this
+ * adapter owns the installation URL and credentialed fetch so auth traffic
+ * continues to have one HTTP boundary.
+ *
+ * @param endpoint - Device verification, approval, or denial endpoint.
+ * @param init - Request method, headers, and optional body/cache policy.
+ * @param query - Optional query parameters for verification.
+ * @returns Raw HTTP response for device-protocol validation.
+ */
+function requestDeviceAuthorization(
+  endpoint: "device" | "device/approve" | "device/code" | "device/deny",
+  init: RequestInit,
+  query?: URLSearchParams,
+): Promise<Response> {
+  const url = new URL(`/api/auth/${endpoint}`, getApiBaseUrl());
+  if (query) url.search = query.toString();
+  return fetch(url.toString(), { ...init, credentials: "include" });
+}
+
+/**
  * Authenticates a user using email and password via Better Auth.
  * Issues `POST /api/auth/sign-in/email`, which either establishes the internal
  * HttpOnly session or returns a pending second-factor challenge. A successful
@@ -345,6 +367,7 @@ async function manageTwoFactor(
 }
 
 export const authClient = {
+  requestDeviceAuthorization,
   changePassword,
   requestPasswordReset,
   getSession,

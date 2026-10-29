@@ -49,15 +49,15 @@ jobs:
         if: inputs.lane == 'publishing-flow'
         run: |
           status=0
-          bun run --cwd frontend/app test src/components/composer/composer.test.tsx --coverage.enabled=false || status=1
-          bun run --cwd packages/providers test test/youtube.test.ts --coverage.enabled=false || status=1
+          bun run --cwd frontend/app test src/components/composer/composer.test.tsx src/lib/platform-capabilities-retention.test.tsx --coverage.enabled=false || status=1
+          bun run --cwd packages/providers test test/facebook.test.ts test/instagram.test.ts test/threads.test.ts test/tiktok.test.ts test/youtube.test.ts --coverage.enabled=false || status=1
           exit "$status"
       - name: Review publishing React changes
         if: inputs.lane == 'publishing-flow'
         working-directory: frontend/app
         run: npx --yes react-doctor@latest --verbose --scope changed --base origin/${{ github.event.repository.default_branch }}
       - name: Prepare publishing acceptance
-        if: inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser'
+        if: (success() || failure()) && (inputs.lane == 'publishing-flow' || inputs.lane == 'publishing-browser')
         run: |
           bun run setup --skip-dependencies --skip-image-pull
           bun run --cwd frontend/app --no-install playwright install --with-deps chromium

@@ -5,12 +5,13 @@ import {
   acceptanceApiUrl,
   activeBrandProfileName,
   closeComposer,
+  configurePublishingQueue,
   controlledProviderAccountId,
   provisionControlledChannels,
   readLiveControlledCopies,
   scriptControlledFailures,
 } from "./publication-fixtures";
-import { attachmentTitle, pngFixture } from "./media-fixtures";
+import { attachmentTitle, publicationVideoFixture } from "./media-fixtures";
 import { openIsolatedOwnerWorkspace, waitForWorkspace } from "./workspace-session";
 
 type Schemas = components["schemas"];
@@ -36,70 +37,17 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
   const provisioned = await provisionControlledChannels(request, profileName, [
     { displayName: channelName, platform: "threads", providerUserId: providerAccountId },
   ]);
-  await page.getByRole("button", { name: "Create Queue", exact: true }).click();
-  const editor = page.getByRole("dialog", { name: "Create Queue", exact: true });
   const queueName = `Acceptance Queue ${randomUUID().slice(0, 8)}`;
-  await editor.getByLabel("Queue name", { exact: true }).fill(queueName);
-  await editor.getByRole("button", { name: /^Queue timezone:/ }).click();
-  const timezoneSearch = editor.getByRole("textbox", {
-    name: "Search timezones…",
-    exact: true,
-  });
-  // Search and selection are proven with a zone other than the UTC default:
-  // pressing the already-selected zone reports no change, so the panel stays
-  // open and the assertion below would test nothing.
-  await timezoneSearch.fill("reykjavik");
-  await page.getByRole("option", { name: "Atlantic/Reykjavik", exact: true }).click();
-  await expect(editor.getByRole("button", { name: /^Queue timezone:/ })).toHaveAttribute(
-    "aria-label",
-    "Queue timezone: Atlantic/Reykjavik",
-  );
-  await editor.getByRole("button", { name: /^Queue timezone:/ }).click();
-  await timezoneSearch.fill("utc");
-  await page.getByRole("option", { name: "UTC", exact: true }).click();
-  await expect(editor.getByRole("button", { name: /^Queue timezone:/ })).toHaveAttribute(
-    "aria-label",
-    "Queue timezone: UTC",
-  );
-  await expect(timezoneSearch).toBeHidden();
   // Allow the real media processor and two submissions to settle before due work.
   const firstInstant = new Date(Math.ceil((Date.now() + 240_000) / 60_000) * 60_000);
   const secondInstant = new Date(firstInstant.getTime() + 60_000);
-  for (const [index, instant] of [firstInstant, secondInstant].entries()) {
-    if (index > 0) await editor.getByRole("button", { name: "Add slot", exact: true }).click();
-    await editor.getByRole("combobox", { name: `Weekday ${index + 1}`, exact: true }).click();
-    const day = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(
-      instant,
-    );
-    await page.getByRole("option", { name: day, exact: true }).click();
-    await editor.getByRole("button", { name: "Choose time", exact: true }).nth(index).click();
-    const timePicker = page.getByRole("dialog", { name: "Choose time", exact: true });
-    await timePicker.getByRole("combobox", { name: "Hour", exact: true }).click();
-    await page
-      .getByRole("option", { name: instant.toISOString().slice(11, 13), exact: true })
-      .click();
-    await timePicker.getByRole("combobox", { name: "Minute", exact: true }).click();
-    await page
-      .getByRole("option", { name: instant.toISOString().slice(14, 16), exact: true })
-      .click();
-    await timePicker.getByRole("button", { name: "Done", exact: true }).click();
-  }
-  const createdResponse = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/v1/queues") && response.request().method() === "POST",
-  );
-  await editor.getByRole("button", { name: "Save Queue", exact: true }).click();
-  const created = await createdResponse;
-  expect(created.status(), await created.text()).toBe(201);
+  const created = await configurePublishingQueue(page, profileName, queueName, [
+    firstInstant,
+    secondInstant,
+  ]);
   const plan: Schemas["PublishingQueue"] = await created.json();
   const apiOrigin = new URL(created.url()).origin;
   const headers = { Authorization: (await created.request().allHeaders())["authorization"]! };
-  await expect(editor).toBeHidden();
-  await expect(
-    page
-      .getByRole("region", { name: "Publishing Queues", exact: true })
-      .getByRole("button", { name: queueName, exact: true }),
-  ).toBeVisible();
   await scriptControlledFailures(request, providerAccountId, 1);
 
   const queuedPosts: Schemas["Post"][] = [];
@@ -115,10 +63,10 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
     const caption = `Queue acceptance composition ${index} ${queueName}`;
     await composer.getByPlaceholder(/what do you want to publish/i).fill(caption);
     if (index === 0) {
-      const image = pngFixture();
-      await composer.locator('input[type="file"]').setInputFiles(image);
+      const video = publicationVideoFixture();
+      await composer.locator('input[type="file"]').setInputFiles(video);
       await expect(
-        composer.getByRole("status").filter({ hasText: attachmentTitle(image.name) }),
+        composer.getByRole("status").filter({ hasText: attachmentTitle(video.name) }),
       ).toContainText(/Ready$/, { timeout: 180_000 });
     }
     const destinations = composer.getByRole("region", { name: "Destinations", exact: true });
@@ -164,7 +112,7 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
       { platform_account_id: provisioned.channels[0]!.id, description_override: override },
     ]);
     expect(post.attachments.map((attachment) => attachment.asset.asset_type)).toEqual(
-      index === 0 ? ["image"] : [],
+      index === 0 ? ["video"] : [],
     );
     expect(post.queue_membership).toMatchObject({
       queue_id: plan.id,
@@ -300,7 +248,7 @@ test("configures a Queue, preserves two Posts after reload, and delivers through
     )
     .toEqual(["Queue Channel caption 0"]);
   expect((await readLiveControlledCopies(request, providerAccountId))[0]?.media).toMatchObject([
-    { contentType: expect.stringMatching(/^image\//) },
+    { contentType: "video/mp4" },
   ]);
   const delivered: Schemas["Post"] = await (
     await request.get(`${apiOrigin}/api/v1/posts/${firstPost.id}`, { headers })

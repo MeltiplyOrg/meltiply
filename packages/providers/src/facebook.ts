@@ -282,22 +282,25 @@ function reelStatus(value: unknown, expectedId: string): ReelStatus {
 }
 
 /**
- * Determines whether any phase of Facebook Reel ingestion or publication has permanently failed.
- * Checks video status, uploading phase, processing phase, and publishing phase for 'error' or 'failed'.
- * Returns true if any phase indicates failure, false otherwise.
+ * Determines whether Meta has terminated Reel ingestion or publication.
+ * Error/failed phases and the documented expired/upload_failed video statuses
+ * are final failures, not indefinite processing.
  */
 function statusFailed(status: ReelStatus): boolean {
-  return [status.video, status.uploading, status.processing, status.publishing].some(
-    (value) => value === "error" || value === "failed",
+  return (
+    ["expired", "upload_failed"].includes(status.video) ||
+    [status.video, status.uploading, status.processing, status.publishing].some(
+      (value) => value === "error" || value === "failed",
+    )
   );
 }
 
 /**
  * Evaluates whether a Facebook Reel has completely finished publishing and is live on the Page.
- * Returns true if publishing phase status equals 'complete', false otherwise.
+ * Accepts Meta's documented "completed" and example-response "complete" phase values.
  */
 function statusPublished(status: ReelStatus): boolean {
-  return status.publishing === "complete";
+  return status.publishing === "completed" || status.publishing === "complete";
 }
 
 /**

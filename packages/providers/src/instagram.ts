@@ -46,7 +46,7 @@ const exchangeOrigin = "https://api.instagram.com";
 const authorizationOrigin = "https://www.instagram.com";
 const apiVersion = "v25.0";
 const imageMaximumBytes = 8 * 1024 * 1024;
-const videoMaximumBytes = 1024 * 1024 * 1024;
+const videoMaximumBytes = 300_000_000;
 const tokenLifetimeMaximumSeconds = 90 * 24 * 60 * 60;
 
 const publishingScopes = [
@@ -144,7 +144,7 @@ interface InstagramAttachment {
 /**
  * Validates one ordered attachment and returns the remote-ingest URL Instagram
  * will fetch, checking transfer mode, HTTPS shape, the JPEG-only 8 MiB image
- * ceiling, and the MP4/MOV 1 GiB Reel ceiling. Carousel items are validated
+ * ceiling, and a conservative 300 MB (decimal) MP4/MOV Reel ceiling. Carousel items are validated
  * identically to single posts because Instagram publishes them as one media item.
  * @param input - Publish input whose `media[index]` is being validated.
  * @param index - Attachment position, quoted in the thrown failure context.
@@ -388,7 +388,8 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
    * Reconciles a persisted Instagram container operation into a publication status.
    * Requests the documented `status_code` plus the `status` detail field; a 'created'
    * container that reports FINISHED is finalized exactly once through publishContainer,
-   * while a 'submitted' container is never republished. Container ERROR detail is
+   * while a 'submitted' container is never republished. PUBLISHED proves completion
+   * even when a lost final response withheld the media ID. Container ERROR detail is
    * normalized to a safe diagnostic category code so raw provider text never persists.
    * Returns ProviderPublicationStatus for the operation, or not_found when the
    * container no longer exists.
@@ -436,14 +437,11 @@ export function createInstagramAdapter(options: InstagramAdapterOptions): Provid
         };
       case "PUBLISHED":
         return {
-          result: unknownResult(
-            classifyProviderFailure({
-              code: "instagram_media_id_missing",
-              sideEffectPossible: true,
-            }),
-            containerOperationId("submitted", operation.id),
-          ),
-          state: "unknown",
+          result: {
+            outcome: "confirmed_success",
+            providerOperationId: containerOperationId("submitted", operation.id),
+          },
+          state: "published",
         };
       case "ERROR":
         return {

@@ -6,6 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { writeCookieConsent } from "@meltiply/ui/cookie-consent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { Effect } from "effect";
+import { ApiError, getPlatformPublishingRequirements } from "@/lib/api";
+import type * as ApiModule from "@/lib/api";
 
 import { AppAuthProvider, useMeltiplyAuth } from "@/components/auth/auth-provider";
 import { WorkspaceProvider } from "@/context/workspace.context";
@@ -27,6 +30,14 @@ vi.mock("@/lib/upload", async (importActual) => {
   const actual = await importActual<object>();
   return { ...actual, createAssetUpload: vi.fn() };
 });
+
+// Creator information is a live public API read even when a draft is reopened.
+// Keep composer tests isolated at that HTTP boundary, not by making stale
+// permission data permanently fresh in the QueryClient.
+vi.mock("@/lib/api", async (original) => ({
+  ...(await original<typeof ApiModule>()),
+  getPlatformPublishingRequirements: vi.fn(),
+}));
 
 /**
  * Task whose transfer never settles on its own: the suite can only observe
@@ -85,15 +96,15 @@ function renderComposer(
   queryClient.setQueryDefaults(queryKeys.platformCapabilities(), { staleTime: Infinity });
   queryClient.setQueryData(queryKeys.platforms(), options.accounts ?? []);
   queryClient.setQueryData(queryKeys.platformCapabilities(), options.capabilities ?? []);
-  for (const account of options.accounts ?? []) {
-    queryClient.setQueryDefaults(queryKeys.platformPublishingRequirements(account.id), {
-      staleTime: Infinity,
-    });
-    queryClient.setQueryData(
-      queryKeys.platformPublishingRequirements(account.id),
-      options.requirements ?? null,
-    );
-  }
+  vi.mocked(getPlatformPublishingRequirements).mockImplementation(() =>
+    options.requirements
+      ? Effect.succeed(options.requirements)
+      : Effect.fail(
+          new ApiError(new Response(null, { status: 503 }), {
+            error: { code: "provider_unavailable", message: "Creator information unavailable" },
+          }),
+        ),
+  );
   if (options.brandProfiles) {
     queryClient.setQueryDefaults(queryKeys.brandProfiles(), { staleTime: Infinity });
     queryClient.setQueryData(queryKeys.brandProfiles(), options.brandProfiles);

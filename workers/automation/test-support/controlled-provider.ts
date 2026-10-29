@@ -25,6 +25,7 @@
  */
 
 import {
+  createFacebookAdapter,
   createInstagramAdapter,
   createThreadsAdapter,
   createTikTokAdapter,
@@ -75,7 +76,13 @@ export interface ControlledProviderBucket {
 const controlledProviderPrefix = "controlled-provider";
 
 /** Platforms whose real capabilities the controlled fixture exercises. */
-export const controlledProviderPlatforms = ["instagram", "threads", "tiktok", "youtube"] as const;
+export const controlledProviderPlatforms = [
+  "facebook",
+  "instagram",
+  "threads",
+  "tiktok",
+  "youtube",
+] as const;
 
 /** One of the platforms the controlled fixture serves. */
 type ControlledProviderPlatform = (typeof controlledProviderPlatforms)[number];
@@ -288,19 +295,21 @@ function controlledCapability(platform: Platform): PlatformCapability {
     redirectUri: fixtureRedirectUri,
   };
   const adapter =
-    platform === "instagram"
-      ? createInstagramAdapter(options)
-      : platform === "threads"
-        ? createThreadsAdapter(options)
-        : platform === "youtube"
-          ? createYouTubeAdapter(options)
-          : platform === "tiktok"
-            ? createTikTokAdapter({
-                ...options,
-                clientKey: fixtureClientId,
-                mediaUrlPrefix: "https://controlled-provider.invalid/media/",
-              })
-            : undefined;
+    platform === "facebook"
+      ? createFacebookAdapter(options)
+      : platform === "instagram"
+        ? createInstagramAdapter(options)
+        : platform === "threads"
+          ? createThreadsAdapter(options)
+          : platform === "youtube"
+            ? createYouTubeAdapter(options)
+            : platform === "tiktok"
+              ? createTikTokAdapter({
+                  ...options,
+                  clientKey: fixtureClientId,
+                  mediaUrlPrefix: "https://controlled-provider.invalid/media/",
+                })
+              : undefined;
   if (!adapter) {
     throw new TypeError(`controlled provider does not serve ${platform}`);
   }

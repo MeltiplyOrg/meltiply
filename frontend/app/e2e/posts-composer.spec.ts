@@ -8,6 +8,7 @@ import {
   attachmentTitle,
   mp4Fixture,
   pngFixture,
+  publicationVideoFixture,
   quickTimeFixture,
   truncatedMp4Fixture,
 } from "./media-fixtures";
@@ -636,14 +637,14 @@ test("recovers independent profile copies and retries only unfinished publishing
   const caption = "Independent profile copies";
   const secondaryCaption = "Secondary profile caption";
   await composerTextarea(page).fill(caption);
-  const png = pngFixture();
-  await composerFileInput(page).setInputFiles(png);
-  await expectAttachmentPhases(page, [[png.name, "Ready"]]);
+  const video = publicationVideoFixture();
+  await composerFileInput(page).setInputFiles(video);
+  await expectAttachmentPhases(page, [[video.name, "Ready"]]);
   const secondaryPanel = page.getByRole("region", { name: "Secondary Threads", exact: true });
   await secondaryPanel.getByRole("textbox").fill(secondaryCaption);
   await secondaryPanel.getByRole("switch", { name: "Use post attachments", exact: true }).click();
   await secondaryPanel
-    .getByRole("button", { name: attachmentControlName("1. ", png.name) })
+    .getByRole("button", { name: attachmentControlName("1. ", video.name) })
     .click();
   const mutations = await watchPostMutations(page);
   let rejectSecondaryDraft = true;
@@ -736,7 +737,7 @@ test("recovers independent profile copies and retries only unfinished publishing
       .toMatchObject([
         {
           caption: content,
-          media: [expect.objectContaining({ contentType: expect.stringMatching(/^image\//) })],
+          media: [expect.objectContaining({ contentType: "video/mp4" })],
         },
       ]);
     expect(await readLiveControlledCopies(request, account)).toHaveLength(1);

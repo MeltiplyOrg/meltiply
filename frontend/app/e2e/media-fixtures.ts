@@ -108,6 +108,21 @@ export function mp4Fixture(): MediaFixture {
 }
 
 /**
+ * Publication fixture within all five Platforms' supported video bounds:
+ * four seconds, 540x960 portrait, 30 fps H.264/yuv420p, stereo AAC at 48 kHz
+ * and 128 kbps, with fast-start MP4. Generated and fully decoded by FFmpeg
+ * on a GitHub-hosted runner; unlike the tiny processor fixture it can meet
+ * Meta's three-second minimum and TikTok's minimum dimensions/frame rate.
+ */
+export function publicationVideoFixture(): MediaFixture {
+  return {
+    buffer: readFixture("composer-publish.mp4"),
+    mimeType: "video/mp4",
+    name: "composer-publish.mp4",
+  };
+}
+
+/**
  * Deterministic QuickTime fixture: a one-second ProRes clip carrying a PCM audio
  * track in a MOV container. It is the camera-codec shape a creator's phone
  * produces and a browser cannot play, so a preview can only be satisfied by the

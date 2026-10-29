@@ -486,6 +486,38 @@ function TikTokEditor({
 }
 
 /**
+ * Facebook Page Reels have implicit Public scope. Expose that sole audience
+ * choice and the sharing consequence without inventing unsupported privacy
+ * settings or storing a redundant target option.
+ */
+function FacebookEditor({
+  channelName,
+  t,
+}: ProviderEditorProps<Record<string, never>>): React.ReactElement {
+  const fieldId = useId();
+  return (
+    <ProviderPanel channelName={channelName} t={t}>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${fieldId}-visibility`} className="text-xs font-medium text-ink-3">
+          {t("Visibility")}
+        </label>
+        <Select value="public">
+          <SelectTrigger id={`${fieldId}-visibility`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="public">{t("Public")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <p className="text-xs text-ink-2">
+        {t("This Reel will be shared publicly on your Facebook Page.")}
+      </p>
+    </ProviderPanel>
+  );
+}
+
+/**
  * Threads settings editor: informational panel only — Threads posts use the
  * standard text and attached media with no provider-specific controls.
  */
@@ -646,6 +678,11 @@ const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
     },
   }),
   defineProviderDescriptor<Record<string, never>>({
+    providers: ["facebook"],
+    read: () => ({}),
+    Editor: FacebookEditor,
+  }),
+  defineProviderDescriptor<Record<string, never>>({
     providers: ["threads"],
     read: () => ({}),
     Editor: ThreadsEditor,
@@ -722,12 +759,15 @@ export function PlatformSettings({
   const { t } = useI18n();
   const requirementsQuery = usePlatformPublishingRequirements(scope, channelId, usesRequirements);
   const requirements =
-    requirementsQuery.data && requirementsQuery.data.platform === "tiktok"
+    requirementsQuery.isFetchedAfterMount &&
+    !requirementsQuery.isError &&
+    requirementsQuery.data &&
+    requirementsQuery.data.platform === "tiktok"
       ? requirementsQuery.data
       : null;
 
-  // Report live requirements upward so the composer can validate submissions
-  // even for channels whose settings tab was never opened after data arrived.
+  // Cached permissions cannot authorize a new composition before its live lookup.
+  // Failed refreshes also clear availability; draft settings still round-trip.
   useEffect(() => {
     onRequirementsChange?.(channelId, usesRequirements ? requirements : null);
   }, [channelId, usesRequirements, requirements, onRequirementsChange]);

@@ -1,8 +1,11 @@
 import { Buffer } from "node:buffer";
 
+import type { components } from "@meltiply/contracts/schema";
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 import {
+  acceptanceApiUrl,
+  configurePublishingQueue,
   activeBrandProfileName,
   controlledProviderAccountId,
   closeComposer,
@@ -18,7 +21,7 @@ import {
 import {
   attachmentControlName,
   attachmentTitle,
-  mp4Fixture,
+  publicationVideoFixture,
   pngFixture,
   type MediaFixture,
 } from "./media-fixtures";
@@ -38,7 +41,7 @@ test.setTimeout(600_000);
  * not preservation of the upload's original encoding.
  */
 const imageAttachment = pngFixture();
-const videoAttachment = mp4Fixture();
+const videoAttachment = publicationVideoFixture();
 
 /** Display names the composer and detail modal render for the fixture Channels. */
 const channelNames = {
@@ -841,7 +844,7 @@ test("edits a scheduled target without publishing it and preserves prior platfor
 
   // --- A Post that is genuinely published, to act as the history under test.
   // Instagram refuses a text-only publish, so this Post carries the video and
-  // targets Instagram alone; Threads is the text-only destination throughout.
+  // targets Instagram alone; the separately scheduled video targets Threads.
   const publishedCaption = `History caption ${Date.now()}`;
   await openComposer(page);
   await expect(page.getByText(/targeting 2 channel\(s\)/i)).toBeVisible({
@@ -865,6 +868,7 @@ test("edits a scheduled target without publishing it and preserves prior platfor
   await openComposer(page);
   await targetOnlyChannel(page, channelNames.threads, channelNames.instagram);
   await composerTextarea(page).fill(pendingCaption);
+  await attachMedia(page, [videoAttachment]);
   await scheduleInMinutes(page, 180);
   await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
   await returnToPosts(page);
@@ -1080,4 +1084,253 @@ test("preserves provider choices through drafts and publishes photo and video ta
   expect(videoCopy!.media.map((item) => item.contentType)).toEqual(["video/mp4"]);
   expect(photoCopy!.media).toHaveLength(1);
   expect(photoCopy!.media[0]!.contentType).toMatch(/^image\/(?:jpeg|webp)$/);
+});
+
+/**
+ * Every supported video Platform crosses all three creator delivery modes.
+ * Draft reload and a scheduled edit preserve complete choices; real wall-clock
+ * due work delivers through the production dispatcher. Provider-owned copies,
+ * retrieved bytes, delivery instants, and repeat ticks prove outcomes rather
+ * than optimistic API acceptance. External Platform HTTP remains controlled.
+ */
+test("delivers video to every Platform through Now, Schedule, and Queue", async ({
+  page,
+  request,
+}, testInfo) => {
+  test.setTimeout(900_000);
+  type Post = components["schemas"]["Post"];
+  const { profileName } = await openIsolatedOwnerWorkspace(page);
+  const channels = (["facebook", "instagram", "threads", "tiktok", "youtube"] as const).map(
+    (platform) => ({
+      displayName: `Video acceptance ${platform}`,
+      platform,
+      providerUserId: controlledProviderAccountId(platform),
+    }),
+  );
+  await attachChannels(page, request, profileName, channels);
+  const queueName = `Video Queue ${Date.now()}`;
+  const queueInstant = new Date(Math.ceil((Date.now() + 300_000) / 60_000) * 60_000);
+  const queueResponse = await configurePublishingQueue(page, profileName, queueName, [
+    queueInstant,
+  ]);
+  const apiOrigin = new URL(queueResponse.url()).origin;
+  const headers = { Authorization: (await queueResponse.request().allHeaders())["authorization"]! };
+  await page.goto("/posts");
+  await waitForWorkspace(page);
+  await activeBrandProfileName(page, profileName);
+  const submissions: { mode: string; post: Post; caption: string }[] = [];
+
+  for (const mode of ["Now", "Schedule", "Queue"] as const) {
+    await openComposer(page);
+    const caption = `Video ${mode} ${Date.now()}`;
+    await composerTextarea(page).fill(caption);
+    await attachMedia(page, [videoAttachment]);
+    const youtubePanel = page.getByRole("region", {
+      name: "Video acceptance youtube",
+      exact: true,
+    });
+    await youtubePanel.getByRole("textbox", { name: /Video Title/ }).fill(caption);
+    await youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }).click();
+    await page.getByRole("option", { name: "Unlisted", exact: true }).click();
+    await youtubePanel.getByRole("combobox", { name: "Made for kids", exact: true }).click();
+    await page.getByRole("option", { name: "No, not made for kids", exact: true }).click();
+    const tiktokPanel = page.getByRole("region", { name: "Video acceptance tiktok", exact: true });
+    await expect(
+      tiktokPanel.getByText("Posting as Acceptance TikTok creator", { exact: true }),
+    ).toBeVisible();
+    await tiktokPanel.getByRole("combobox", { name: "Privacy Level", exact: true }).click();
+    await page.getByRole("option", { name: "Public to Everyone", exact: true }).click();
+    await expect(
+      tiktokPanel.getByRole("switch", { name: "Comments", exact: true }),
+    ).not.toBeChecked();
+    await expect(tiktokPanel.getByRole("switch", { name: "Duet", exact: true })).not.toBeChecked();
+    await expect(tiktokPanel.getByRole("switch", { name: "Stitch", exact: true })).toBeDisabled();
+    await tiktokPanel.getByRole("switch", { name: "Comments", exact: true }).click();
+    await tiktokPanel.getByRole("switch", { name: "Duet", exact: true }).click();
+    const facebookPanel = page.getByRole("region", {
+      name: "Video acceptance facebook",
+      exact: true,
+    });
+    await facebookPanel.getByRole("combobox", { name: "Visibility", exact: true }).click();
+    await expect(page.getByRole("option")).toHaveText(["Public"]);
+    await page.getByRole("option", { name: "Public", exact: true }).click();
+    await expect(
+      facebookPanel.getByText("This Reel will be shared publicly on your Facebook Page.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await saveDraftAndLeave(page);
+    await reloadPostsWorkspace(page);
+    await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
+    await expect(
+      youtubePanel.getByRole("combobox", { name: "Visibility", exact: true }),
+    ).toContainText("Unlisted");
+    await expect(tiktokPanel.getByRole("switch", { name: "Comments", exact: true })).toBeChecked();
+    await expect(tiktokPanel.getByRole("switch", { name: "Duet", exact: true })).toBeChecked();
+    if (mode === "Now") {
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          await facebookPanel
+            .getByRole("combobox", { name: "Visibility", exact: true })
+            .scrollIntoViewIfNeeded();
+          await page.screenshot({
+            path: testInfo.outputPath(`video-controls-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+        }
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    if (mode === "Schedule") await scheduleInMinutes(page, 2);
+    else {
+      await page
+        .getByRole("radiogroup", { name: "Publishing", exact: true })
+        .getByRole("radio", { name: mode, exact: true })
+        .click();
+    }
+    if (mode === "Queue") {
+      await page.getByRole("combobox", { name: "Publishing Queue", exact: true }).click();
+      await page.getByRole("option", { name: queueName, exact: true }).click();
+    }
+    const submitted = page.waitForResponse(
+      (response) =>
+        /\/api\/v1\/posts\/[^/]+\/schedule$/.test(response.url()) &&
+        response.request().method() === "POST",
+    );
+    await page
+      .getByRole("button", {
+        name:
+          mode === "Now" ? "Publish Now" : mode === "Schedule" ? "Schedule Post" : "Add to Queue",
+        exact: true,
+      })
+      .click();
+    const response = await submitted;
+    expect(response.status(), await response.text()).toBe(200);
+    let post: Post = await response.json();
+    await returnToPosts(page);
+    expect(post.distributions.map((distribution) => distribution.platform).sort()).toEqual([
+      "facebook",
+      "instagram",
+      "threads",
+      "tiktok",
+      "youtube",
+    ]);
+    if (mode === "Queue")
+      expect(post.queue_membership?.assigned_at).toBe(queueInstant.toISOString());
+    if (mode === "Schedule") {
+      const instants = post.distributions.map((distribution) => distribution.scheduled_at);
+      await reloadPostsWorkspace(page);
+      await editPostFromRow(page, page.getByRole("row").filter({ hasText: caption }));
+      await expect(page.getByRole("radio", { name: "Schedule", exact: true })).toBeChecked();
+      await composerTextarea(page).fill(`${caption} edited`);
+      const edited = page.waitForResponse(
+        (result) =>
+          result.url().endsWith(`/posts/${post.id}/schedule`) &&
+          result.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Schedule Post", exact: true }).click();
+      const result = await edited;
+      expect(result.status(), await result.text()).toBe(200);
+      post = await result.json();
+      expect(post.distributions.map((distribution) => distribution.scheduled_at)).toEqual(instants);
+      await returnToPosts(page);
+    }
+    submissions.push({ mode, post, caption });
+  }
+
+  // Before either future mode is due, only the Now copy may exist.
+  for (const channel of channels) {
+    await expect
+      .poll(async () =>
+        (await readLiveControlledCopies(request, channel.providerUserId)).map(
+          (copy) => copy.caption,
+        ),
+      )
+      .toEqual([submissions[0]!.caption]);
+  }
+  const dueInstants = submissions
+    .filter(({ mode }) => mode !== "Now")
+    .flatMap(({ post }) =>
+      post.distributions.map((distribution) => Date.parse(distribution.scheduled_at!)),
+    );
+  await expect
+    .poll(
+      async () => {
+        if (Date.now() >= Math.min(...dueInstants)) {
+          const tick = await request.post(acceptanceApiUrl("/__test__/automation/scheduled"), {
+            headers,
+            timeout: 120_000,
+          });
+          expect(tick.status(), await tick.text()).toBe(204);
+        }
+        const states: string[] = [];
+        for (const { post } of submissions) {
+          const response = await request.get(`${apiOrigin}/api/v1/posts/${post.id}`, { headers });
+          expect(response.status()).toBe(200);
+          const current: Post = await response.json();
+          states.push(...current.distributions.map((distribution) => distribution.status));
+        }
+        return states;
+      },
+      { timeout: 540_000, intervals: [1000, 3000, 5000] },
+    )
+    .toEqual(Array.from({ length: 15 }, () => "published"));
+  await reloadPostsWorkspace(page);
+  for (const { caption } of submissions) {
+    const detail = await openPostDetails(page, caption);
+    for (const channel of channels) {
+      await expect(
+        detail
+          .getByRole("article", { name: channel.displayName, exact: true })
+          .getByText("Published", { exact: true }),
+      ).toBeVisible();
+    }
+    await closePostDetails(page);
+  }
+  // Repeated wall-clock ticks cannot create a second copy of a completed target.
+  for (let index = 0; index < 2; index += 1) {
+    const tick = await request.post(acceptanceApiUrl("/__test__/automation/scheduled"), {
+      headers,
+      timeout: 120_000,
+    });
+    expect(tick.status(), await tick.text()).toBe(204);
+  }
+  for (const channel of channels) {
+    const copies = await readLiveControlledCopies(request, channel.providerUserId);
+    expect(copies).toHaveLength(3);
+    for (const { mode, post, caption } of submissions) {
+      const copy = copies.find((value) => value.caption.includes(caption))!;
+      expect(copy.media.map((item) => item.contentType)).toEqual(["video/mp4"]);
+      const media = await readControlledMedia(request, {
+        accountId: channel.providerUserId,
+        index: 0,
+        publicationId: copy.publicationId,
+      });
+      expect(media.computedChecksum).toBe(copy.media[0]!.checksum);
+      expect(media.bytes.byteLength).toBe(copy.media[0]!.fileSize);
+      if (mode !== "Now")
+        expect(Date.parse(copy.publishedAt)).toBeGreaterThanOrEqual(
+          Date.parse(post.distributions[0]!.scheduled_at!),
+        );
+      if (channel.platform === "youtube")
+        expect(copy.providerOptions).toMatchObject({
+          youtube: { madeForKids: false, privacyStatus: "unlisted" },
+        });
+      if (channel.platform === "tiktok")
+        expect(copy.providerOptions).toMatchObject({
+          tiktok: {
+            privacyLevel: "PUBLIC_TO_EVERYONE",
+            allowComment: true,
+            allowDuet: true,
+            allowStitch: false,
+            musicUsageConfirmed: true,
+          },
+        });
+    }
+  }
 });

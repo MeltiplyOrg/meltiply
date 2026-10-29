@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -420,6 +420,137 @@ test("connected preflight requires matching Cloudflare and TLS database credenti
     }),
     /must be a complete TLS PostgreSQL URL/,
   );
+});
+
+/** Supplies both protected role credentials for connected preflight fixtures. */
+function databaseEnvironment() {
+  return {
+    MELTIPLY_SYSTEM_DATABASE_URL:
+      "postgresql://meltiply_system:system-secret@ep-staging.us-east-2.aws.neon.tech/meltiply?sslmode=require",
+    MELTIPLY_AUTHENTICATED_DATABASE_URL:
+      "postgresql://meltiply_rls:authenticated-secret@ep-staging.us-east-2.aws.neon.tech/meltiply?sslmode=require",
+  };
+}
+
+/** Models each protected connection's catalog view and effective login identity. */
+function roleClientFactory(
+  { missing, systemBypass = true, authenticatedBypass = false, identity } = {},
+) {
+  return async (url) => {
+    const role = new URL(url).username;
+    return {
+      connect: async () => {},
+      end: async () => {},
+      query: async () => ({
+        rows: [
+          { rolname: "meltiply_system", rolbypassrls: systemBypass, rolsuper: false },
+          { rolname: "meltiply_rls", rolbypassrls: authenticatedBypass, rolsuper: false },
+        ]
+          .filter((row) => row.rolname !== missing)
+          .map((row) => ({
+            ...row,
+            current_user: identity ?? role,
+            session_user: identity ?? role,
+          })),
+      }),
+    };
+  };
+}
+
+test("connected preflight rejects missing, unsafe, and misresolved database roles", async () => {
+  const spec = validateReleaseSpec(releaseInput());
+  for (const [fixture, diagnostic] of [
+    [{ missing: "meltiply_rls" }, /meltiply_rls.*missing.*MELTIPLY_AUTHENTICATED_DATABASE_URL/],
+    [{ missing: "meltiply_system" }, /meltiply_system.*missing.*MELTIPLY_SYSTEM_DATABASE_URL/],
+    [{ systemBypass: false }, /meltiply_system.*BYPASSRLS.*MELTIPLY_SYSTEM_DATABASE_URL/],
+    [{ authenticatedBypass: true }, /meltiply_rls.*NOBYPASSRLS.*MELTIPLY_AUTHENTICATED_DATABASE_URL/],
+    [{ identity: "neondb_owner" }, /MELTIPLY_SYSTEM_DATABASE_URL.*meltiply_system/],
+  ]) {
+    await assert.rejects(
+      preflightRelease({
+        clientFactory: roleClientFactory(fixture),
+        environment: {
+          ...databaseEnvironment(),
+          CLOUDFLARE_ACCOUNT_ID: spec.runtime.r2_account_id,
+          CLOUDFLARE_API_TOKEN: "set",
+        },
+        offline: false,
+        repoRoot: "/repo",
+        runCommand: successfulPreflightCommand,
+        spec,
+      }),
+      diagnostic,
+    );
+  }
+});
+
+test("preflight records verified roles online and an explicit credential-free offline skip", async () => {
+  const spec = validateReleaseSpec(releaseInput());
+  const common = { repoRoot: "/repo", runCommand: successfulPreflightCommand, spec };
+  const online = await preflightRelease({
+    ...common,
+    clientFactory: roleClientFactory(),
+    environment: {
+      ...databaseEnvironment(),
+      CLOUDFLARE_ACCOUNT_ID: spec.runtime.r2_account_id,
+      CLOUDFLARE_API_TOKEN: "set",
+    },
+    offline: false,
+  });
+  assert.equal(online.database_roles.status, "verified");
+  const offline = await preflightRelease({
+    ...common,
+    clientFactory: () => {
+      throw new Error("offline must not connect");
+    },
+    environment: {},
+    offline: true,
+  });
+  assert.deepEqual(offline.database_roles, { reason: "offline", status: "skipped" });
+});
+
+test("preflight database connection errors never disclose protected credentials", async () => {
+  const spec = validateReleaseSpec(releaseInput());
+  await assert.rejects(
+    preflightRelease({
+      clientFactory: async (url) => {
+        throw new Error(`password system-secret in ${url}`);
+      },
+      environment: {
+        ...databaseEnvironment(),
+        CLOUDFLARE_ACCOUNT_ID: spec.runtime.r2_account_id,
+        CLOUDFLARE_API_TOKEN: "set",
+      },
+      offline: false,
+      repoRoot: "/repo",
+      runCommand: successfulPreflightCommand,
+      spec,
+    }),
+    (error) => {
+      assert.match(error.message, /MELTIPLY_SYSTEM_DATABASE_URL.*meltiply_system/);
+      assert.doesNotMatch(error.message, /system-secret|postgresql:|password/);
+      return true;
+    },
+  );
+});
+
+test("the preflight CLI forwards the protected database client seam", async (context) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "release-preflight-"));
+  context.after(() => rm(directory, { force: true, recursive: true }));
+  const inputPath = path.join(directory, "release.json");
+  const input = releaseInput();
+  await writeFile(inputPath, JSON.stringify(input));
+  const result = await runReleaseCli(["preflight", "--input", inputPath], {
+    clientFactory: roleClientFactory(),
+    environment: {
+      ...databaseEnvironment(),
+      CLOUDFLARE_ACCOUNT_ID: input.runtime.r2_account_id,
+      CLOUDFLARE_API_TOKEN: "set",
+    },
+    repoRoot: directory,
+    runCommand: successfulPreflightCommand,
+  });
+  assert.equal(result.database_roles.status, "verified");
 });
 
 test("database validation binds both roles to one Neon endpoint", () => {

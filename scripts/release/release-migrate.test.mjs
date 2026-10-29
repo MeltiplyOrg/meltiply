@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -20,6 +20,45 @@ const bootstrapSpec = {
   release_id: "staging-20260722-a1b2c3d4",
   restore_point_expires_at: "2026-08-05T12:00:00.000Z",
 };
+
+const databaseEnvironment = {
+  MELTIPLY_SYSTEM_DATABASE_URL:
+    "postgresql://meltiply_system:secret@ep-staging-pooler.us-east-2.aws.neon.tech/meltiply?sslmode=require",
+  MELTIPLY_AUTHENTICATED_DATABASE_URL:
+    "postgresql://meltiply_rls:secret@ep-staging.us-east-2.aws.neon.tech/meltiply?sslmode=require",
+};
+
+/** Adds the protected login/catalog boundary to a staged migration database client. */
+function migrationClientFactory(
+  client,
+  { missing, installation = {}, systemBypass = true, authenticatedBypass = false, identity } = {},
+) {
+  return async (url) => {
+    const login = identity ?? new URL(url).username;
+    return {
+      connect: () => client.connect(),
+      end: () => client.end(),
+      query: async (text, values) => {
+        if (text.includes("FROM pg_catalog.pg_roles")) {
+          return {
+            rows: [
+              { rolname: "meltiply_system", rolbypassrls: systemBypass, rolsuper: false },
+              { rolname: "meltiply_rls", rolbypassrls: authenticatedBypass, rolsuper: false },
+            ]
+              .filter((row) => row.rolname !== missing)
+              .map((row) => ({ ...row, current_user: login, session_user: login })),
+          };
+        }
+        if (text.includes("AS claims_accessor")) {
+          return {
+            rows: [{ auth_schema: true, claims_accessor: true, policies: true, ...installation }],
+          };
+        }
+        return client.query(text, values);
+      },
+    };
+  };
+}
 
 async function writeRestorePoint(outDir, spec, planDigest = "b".repeat(64)) {
   await mkdir(outDir, { recursive: true });
@@ -168,17 +207,8 @@ test("migrator holds one advisory lock and records each migration transactionall
   };
   const evidence = await migrateDatabase({
     approvals: [],
-    clientFactory: async (url) => {
-      assert.equal(
-        url,
-        "postgresql://system:secret@ep-staging-pooler.us-east-2.aws.neon.tech/meltiply?sslmode=require",
-      );
-      return client;
-    },
-    environment: {
-      MELTIPLY_SYSTEM_DATABASE_URL:
-        "postgresql://system:secret@ep-staging-pooler.us-east-2.aws.neon.tech/meltiply?sslmode=require",
-    },
+    clientFactory: migrationClientFactory(client),
+    environment: databaseEnvironment,
     now: () => Date.parse("2026-07-22T12:00:00.000Z"),
     outDir,
     phase: "bootstrap",
@@ -226,11 +256,8 @@ test("migrator rolls back a failed migration and still closes the session", asyn
   await assert.rejects(
     migrateDatabase({
       approvals: [],
-      clientFactory: async () => client,
-      environment: {
-        MELTIPLY_SYSTEM_DATABASE_URL:
-          "postgresql://system:secret@ep-staging-pooler.us-east-2.aws.neon.tech/meltiply?sslmode=require",
-      },
+      clientFactory: migrationClientFactory(client),
+      environment: databaseEnvironment,
       now: () => Date.parse("2026-07-22T12:00:00.000Z"),
       outDir,
       phase: "bootstrap",
@@ -296,4 +323,93 @@ test("migrator never connects when the restore point has less than seven days re
     /less than seven days remaining/,
   );
   assert.equal(factoryCalled, false);
+});
+
+test("invalid roles leave the migration database and ledger untouched", async (context) => {
+  const repoRoot = await mkdtemp(path.join(tmpdir(), "release-role-gate-"));
+  context.after(() => rm(repoRoot, { force: true, recursive: true }));
+  const directory = path.join(repoRoot, "packages", "database", "migrations");
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, "001_first.sql"), "SELECT 1;\n");
+  const outDir = path.join(repoRoot, ".release");
+  await writeRestorePoint(outDir, bootstrapSpec);
+  for (const [fixture, diagnostic] of [
+    [{ missing: "meltiply_system" }, /meltiply_system.*missing/],
+    [{ missing: "meltiply_rls" }, /meltiply_rls.*missing/],
+    [{ systemBypass: false }, /meltiply_system.*BYPASSRLS/],
+    [{ authenticatedBypass: true }, /meltiply_rls.*NOBYPASSRLS/],
+    [{ identity: "neondb_owner" }, /MELTIPLY_SYSTEM_DATABASE_URL.*meltiply_system/],
+  ]) {
+    const databaseOperations = [];
+    const client = {
+      connect: async () => {},
+      end: async () => {},
+      query: async (text) => {
+        databaseOperations.push(text);
+        return { rows: [] };
+      },
+    };
+    await assert.rejects(
+      migrateDatabase({
+        approvals: [],
+        clientFactory: migrationClientFactory(client, fixture),
+        environment: databaseEnvironment,
+        now: () => Date.parse("2026-07-22T12:00:00.000Z"),
+        outDir,
+        phase: "bootstrap",
+        planDigest: "b".repeat(64),
+        repoRoot,
+        spec: bootstrapSpec,
+      }),
+      diagnostic,
+    );
+    assert.deepEqual(databaseOperations, []);
+    await assert.rejects(access(path.join(outDir, "migration-evidence.json")), /ENOENT/);
+  }
+});
+
+test("an applied ledger cannot pass without the installed authentication RLS objects", async (context) => {
+  const repoRoot = await mkdtemp(path.join(tmpdir(), "release-rls-gate-"));
+  context.after(() => rm(repoRoot, { force: true, recursive: true }));
+  const directory = path.join(repoRoot, "packages", "database", "migrations");
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, "001_first.sql"), "SELECT 1;\n");
+  const migrations = await loadMigrations(repoRoot);
+  const outDir = path.join(repoRoot, ".release");
+  await writeRestorePoint(outDir, bootstrapSpec);
+  for (const [missing, diagnostic] of [
+    ["auth_schema", /authentication schema auth/],
+    ["claims_accessor", /claims accessor auth.jwt\(\)/],
+    ["policies", /row-level.security polic/],
+  ]) {
+    const appliedRows = missing === "policies" ? [] : [...migrations];
+    const client = {
+      connect: async () => {},
+      end: async () => {},
+      query: async (text, values) => {
+        if (text.startsWith("SELECT pg_try_advisory_lock")) return { rows: [{ acquired: true }] };
+        if (text.startsWith("SELECT name, checksum")) return { rows: [...appliedRows] };
+        if (text.startsWith("INSERT INTO public.schema_migrations")) {
+          appliedRows.push({ name: values[0], checksum: values[1] });
+        }
+        return { rows: [] };
+      },
+    };
+    await assert.rejects(
+      migrateDatabase({
+        approvals: [],
+        clientFactory: migrationClientFactory(client, { installation: { [missing]: false } }),
+        environment: databaseEnvironment,
+        now: () => Date.parse("2026-07-22T12:00:00.000Z"),
+        outDir,
+        phase: "bootstrap",
+        planDigest: "b".repeat(64),
+        repoRoot,
+        spec: bootstrapSpec,
+      }),
+      diagnostic,
+    );
+    assert.equal(appliedRows.length, migrations.length);
+    await assert.rejects(access(path.join(outDir, "migration-evidence.json")), /ENOENT/);
+  }
 });

@@ -60,31 +60,28 @@ test("keeps analytics honest across scope, range, platform, and ranking changes"
   await expect(page.getByText(`${workspace.profileName} · Performance`)).toBeVisible();
 
   // KPI totals count cumulative snapshots at the range end. The launch Post
-  // contributes Instagram + Threads + one unsupported TikTok destination.
+  // contributes Instagram + Threads + TikTok destinations.
   await expect(page.getByLabel("Views: 4,080")).toBeVisible();
   await expect(page.getByLabel("Published destinations: 14")).toBeVisible();
-  await expect(
-    page.getByText("Partial data: no analytics are available for TikTok."),
-  ).toBeVisible();
   await expect(page.getByText(/Metrics are cumulative snapshots/)).toBeVisible();
 
-  // The chart exposes the same values as a table and omits unsupported TikTok.
+  // The chart exposes the same values as a table for every measured platform.
   const chartTable = page.locator("div.sr-only table").filter({ hasText: "Total engagement" });
   await expect(chartTable).toContainText("Instagram");
   await expect(chartTable).toContainText("3,820");
   await expect(chartTable).toContainText("Threads");
-  await expect(chartTable).not.toContainText("TikTok");
+  await expect(chartTable.getByRole("row", { name: /TikTok/ })).toContainText("60");
 
   // Default ranking is views descending. Ten rows load; Load more reaches the
-  // unsupported and not-yet-synced destinations that rank below them.
+  // not-yet-synced destinations that rank below them.
   const table = page.locator("div.hidden.lg\\:block table");
   await expect(table.locator("tbody tr")).toHaveCount(10);
   await expect(table.locator("tbody tr").first()).toContainText("Analytics E2E older");
-  await expect(table.getByText("Partial")).toBeVisible();
   await expect(table.getByText("Not supported")).toHaveCount(0);
   await page.getByRole("button", { name: "Load more" }).click();
   await expect(table.locator("tbody tr")).toHaveCount(12);
-  await expect(table.getByText("Not supported")).toHaveCount(4);
+  await expect(table.getByText("Not supported")).toHaveCount(0);
+  // One fully un-synced Post renders the state in its four content cells.
   await expect(table.getByText("Awaiting sync", { exact: true })).toHaveCount(4);
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 

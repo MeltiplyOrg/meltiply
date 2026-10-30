@@ -42,10 +42,11 @@ operations select the devcontainer overlay. Its `host` network is the
 devcontainer's namespace, not the outer host; PostgreSQL remains on port 5433.
 Do not install concurrently into the same checkout.
 
-Initialization builds a thin wrapper around the VibeCode Essential image before
-the Dev Container CLI inspects it. This removes the upstream host-socket metadata
-without replacing the coding toolchain. Startup prepares private cgroup v2
-delegation so nested containers can enforce CPU and memory limits.
+The VibeCode Essential image is used directly, without a project image build.
+The config overrides its inherited host-socket mount with read-only `/dev/null`.
+Lifecycle hooks stop the resulting inert socket proxy and start the image's
+bundled DinD daemon; the real host socket is never exposed. Startup also prepares
+private cgroup v2 delegation so nested containers can enforce CPU and memory limits.
 
 Rebuild existing devcontainers and run `make setup` after switching. The new inner
 daemon does not import or delete old host-daemon images, containers, or database

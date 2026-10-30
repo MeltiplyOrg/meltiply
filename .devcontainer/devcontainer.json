@@ -1,8 +1,7 @@
 {
   "name": "meltiply",
-  // initializeCommand builds this metadata-only wrapper before image inspection.
-  // A build: config would re-merge the upstream image's host-socket metadata.
-  "image": "meltiply-devcontainer-dind:local",
+  // Use the image's bundled Docker daemon; no project image or feature build.
+  "image": "ghcr.io/tmih06/herdr-devcontainer-vibecode-essential:latest",
   "privileged": true,
   "init": true,
   // Inner-daemon bind mounts resolve directly inside this devcontainer.
@@ -31,18 +30,25 @@
     "--cgroupns=private",
     "--label=meltiply.devcontainer.project=meltiply-${devcontainerId}"
   ],
-  // Build the socket-free image and create Wrangler's host-side config directory.
+  // Create Wrangler's host-side config directory before bind mounting it.
   "initializeCommand": ["bash", "${localWorkspaceFolder}/.devcontainer/initialize.sh"],
+  "onCreateCommand": ["bash", "/opt/meltiply-devcontainer/docker-init.sh"],
   // Prepare the Bun cache and derive GitHub-backed Git identity from mounted gh auth.
   "postCreateCommand": [
     "bash",
     "-lc",
     "sudo chown \"$(id -u):$(id -g)\" \"$BUN_INSTALL_CACHE_DIR\" && gh auth setup-git && gh api user --jq '\"git config --global user.name \" + (if (.name // \"\" | length) > 0 then .name else .login end | @sh), \"git config --global user.email \" + ((.id|tostring) + \"+\" + .login + \"@users.noreply.github.com\" | @sh)' | sh && sudo chown dev:dev /home/dev/.config && sudo mkdir -p \"${localEnv:HOME}/.local\" && if [ ! -e \"${localEnv:HOME}/.local/bin\" ]; then sudo ln -s /usr/local/bin \"${localEnv:HOME}/.local/bin\"; fi"
   ],
-  "postStartCommand": ["bash", "/opt/meltiply-devcontainer/container-network.sh", "start"],
+  "postStartCommand": [
+    "bash",
+    "-lc",
+    "bash /opt/meltiply-devcontainer/docker-init.sh && bash /opt/meltiply-devcontainer/container-network.sh start"
+  ],
   // OMP and Wrangler configs are shared read-write for state and OAuth refreshes.
   // GitHub login and WakaTime configuration are shared read-only.
   "mounts": [
+    // Override the image's inherited host-socket mount with an inert device.
+    "source=/dev/null,target=/var/run/docker-host.sock,type=bind,readonly",
     "source=meltiply-bun-cache,target=/home/dev/.bun/install/cache,type=volume",
     "source=meltiply-dind-docker-${devcontainerId},target=/var/lib/docker,type=volume",
     "source=meltiply-dind-containerd-${devcontainerId},target=/var/lib/containerd,type=volume",

@@ -37,9 +37,11 @@ wait_for_docker() {
 docker run -d --name meltiply-outer-proof busybox:1.37.0 sleep 600 >/dev/null
 result="$(devcontainer up --workspace-folder "$repo_root" --skip-post-create)"
 container="$(jq -r .containerId <<<"$result")"
+# Credential-dependent hooks are skipped; invoke the same DinD bootstrap manually.
+docker exec "$container" bash /opt/meltiply-devcontainer/docker-init.sh
 wait_for_docker
 test "$(docker inspect --format '{{.HostConfig.Privileged}}' "$container")" = true
-docker inspect "$container" | jq -e '.[0].Mounts | all(.[]; .Destination != "/var/run/docker-host.sock" and .Destination != "/var/run/docker.sock")' >/dev/null
+docker inspect "$container" | jq -e '.[0].Mounts | all(.[]; if .Destination == "/var/run/docker-host.sock" then .Type == "bind" and .Source == "/dev/null" and .RW == false else .Destination != "/var/run/docker.sock" end)' >/dev/null
 docker inspect "$container" | jq -e '.[0].Mounts | any(.[]; .Type == "volume" and .Destination == "/var/lib/docker") and any(.[]; .Type == "volume" and .Destination == "/var/lib/containerd")' >/dev/null
 outer_daemon="$(docker info --format '{{.ID}}')"
 inner_daemon="$(docker exec "$container" docker info --format '{{.ID}}')"
@@ -47,7 +49,8 @@ test "$outer_daemon" != "$inner_daemon"
 
 docker exec --workdir "$repo_root" "$container" bash -euc '
   test "$(id -un)" = dev
-  test ! -e /var/run/docker-host.sock
+  test -c /var/run/docker-host.sock
+  test ! -L /var/run/docker.sock
   if docker inspect meltiply-outer-proof >/dev/null 2>&1; then exit 1; fi
   build_dir=$(mktemp -d)
   printf "%s\n" "FROM busybox:1.37.0" "RUN echo nested-docker-works > /proof" "CMD [\"cat\", \"/proof\"]" > "$build_dir/Dockerfile"
@@ -108,6 +111,7 @@ NODE
 if docker inspect meltiply-inner-proof >/dev/null 2>&1; then echo 'Inner container leaked to outer daemon' >&2; exit 1; fi
 if docker image inspect meltiply-inner-proof:local >/dev/null 2>&1; then echo 'Inner image leaked to outer daemon' >&2; exit 1; fi
 docker restart "$container" >/dev/null
+docker exec "$container" bash /opt/meltiply-devcontainer/docker-init.sh
 wait_for_docker
 docker exec "$container" bash -euc '
   test "$(docker run --rm meltiply-inner-proof:local)" = nested-docker-works

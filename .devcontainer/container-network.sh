@@ -64,7 +64,7 @@ start_watching() {
 }
 
 # This script requires a local DinD daemon, never a forwarded host API socket.
-[[ "${MELTIPLY_DEVCONTAINER:-0}" == 1 && "${DOCKER_HOST:-unix:///var/run/docker.sock}" == unix:///var/run/docker.sock && ! -e /var/run/docker-host.sock && ! -L /var/run/docker.sock ]] || {
+[[ "${MELTIPLY_DEVCONTAINER:-0}" == 1 && "${DOCKER_HOST:-unix:///var/run/docker.sock}" == unix:///var/run/docker.sock && ! -S /var/run/docker-host.sock && ! -L /var/run/docker.sock ]] || {
   printf 'container-network.sh requires the devcontainer local Docker-in-Docker daemon\n' >&2
   exit 1
 }

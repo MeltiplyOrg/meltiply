@@ -14,7 +14,7 @@ The current app focuses on **Posts**, **Analytics**, **Channels**, and named wee
 
 ## Get started
 
-The devcontainer preserves the VibeCode Essential toolchain through the startup image declared in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json). It runs Docker-in-Docker with its own daemon and per-devcontainer Docker/containerd volumes; the host Docker socket is not mounted. Host OMP and Wrangler state plus GitHub and WakaTime config remain mounted as before. For manual setup, use the Node.js version in [`.node-version`](.node-version) and Bun version declared in [`package.json`](package.json); Docker Compose and Make are also required.
+The devcontainer uses the original VibeCode Essential image declared in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) directly, without a project image build. Lifecycle hooks start its bundled Docker-in-Docker daemon with per-devcontainer Docker/containerd volumes. The inherited host-socket mount is masked with read-only `/dev/null`, so the host Docker API is not exposed. Host OMP and Wrangler state plus GitHub and WakaTime config remain mounted as before. For manual setup, use the Node.js version in [`.node-version`](.node-version) and Bun version declared in [`package.json`](package.json); Docker Compose and Make are also required.
 
 Rebuild the devcontainer to switch an existing environment, then run `make setup`.
 The inner daemon starts with separate images and database volumes; existing

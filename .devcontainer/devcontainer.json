@@ -1,9 +1,11 @@
 {
   "name": "meltiply",
-  // The image bakes in docker-outside-of-docker, mounts the host socket, and
-  // includes the project toolchain. No features: no per-worktree derived image.
-  "image": "ghcr.io/tmih06/herdr-devcontainer-vibecode-essential:latest",
-  // Match daemon-host paths so Compose and docker run bind mounts resolve.
+  // initializeCommand builds this metadata-only wrapper before image inspection.
+  // A build: config would re-merge the upstream image's host-socket metadata.
+  "image": "meltiply-devcontainer-dind:local",
+  "privileged": true,
+  "init": true,
+  // Inner-daemon bind mounts resolve directly inside this devcontainer.
   "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
   "workspaceFolder": "${localWorkspaceFolder}",
   "remoteUser": "dev",
@@ -21,15 +23,15 @@
     "COMPOSE_PROJECT_NAME": "meltiply-${devcontainerId}",
     "MELTIPLY_DEVCONTAINER_WORKSPACE": "${localWorkspaceFolder}",
     "MELTIPLY_DEVCONTAINER_CONFIG": "/opt/meltiply-devcontainer",
-    "MELTIPLY_DEVCONTAINER_HOST_CONFIG": "${localWorkspaceFolder}/.devcontainer",
     "MELTIPLY_CLOUDFLARED_BIN": "/usr/local/bin/cloudflared"
   },
   "updateRemoteUserUID": true,
   "runArgs": [
     "--network=bridge",
+    "--cgroupns=private",
     "--label=meltiply.devcontainer.project=meltiply-${devcontainerId}"
   ],
-  // Create the host-side Wrangler config directory before the CLI bind-mounts it.
+  // Build the socket-free image and create Wrangler's host-side config directory.
   "initializeCommand": ["bash", "${localWorkspaceFolder}/.devcontainer/initialize.sh"],
   // Prepare the Bun cache and derive GitHub-backed Git identity from mounted gh auth.
   "postCreateCommand": [
@@ -42,6 +44,8 @@
   // GitHub login and WakaTime configuration are shared read-only.
   "mounts": [
     "source=meltiply-bun-cache,target=/home/dev/.bun/install/cache,type=volume",
+    "source=meltiply-dind-docker-${devcontainerId},target=/var/lib/docker,type=volume",
+    "source=meltiply-dind-containerd-${devcontainerId},target=/var/lib/containerd,type=volume",
     "source=${localWorkspaceFolder}/.devcontainer,target=/opt/meltiply-devcontainer,type=bind,readonly",
     "source=${localEnv:HOME}/.omp,target=/home/dev/.omp,type=bind",
     "source=${localEnv:HOME}/.config/gh,target=/home/dev/.config/gh,type=bind,readonly",

@@ -1,52 +1,51 @@
-# Local services share only their owning devcontainer's network namespace.
-# No daemon-host ports are published; volumes retain Compose project isolation.
-# Opt-in ownership lets the worktree launcher remove only this stack's resources.
+# The inner daemon's host namespace is this devcontainer, not the outer host.
+# Services use its loopback; no outer-host ports or Docker socket are exposed.
 x-worktree-labels: &worktree-labels
   wtdc.owner.workspace: "${MELTIPLY_DEVCONTAINER_WORKSPACE:?Owning worktree path is required}"
 
 services:
   postgres:
     labels: *worktree-labels
-    network_mode: "container:${HOSTNAME:?Owning devcontainer hostname is required}"
+    network_mode: host
     ports: !reset []
     command: [postgres, -p, "5433"]
     environment:
       PGPORT: "5433"
   tempo:
     labels: *worktree-labels
-    network_mode: "container:${HOSTNAME:?Owning devcontainer hostname is required}"
+    network_mode: host
     ports: !reset []
     volumes:
-      - "${MELTIPLY_DEVCONTAINER_HOST_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
+      - "${MELTIPLY_DEVCONTAINER_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
   loki:
     labels: *worktree-labels
-    network_mode: "container:${HOSTNAME:?Owning devcontainer hostname is required}"
+    network_mode: host
     ports: !reset []
     volumes:
-      - "${MELTIPLY_DEVCONTAINER_HOST_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
+      - "${MELTIPLY_DEVCONTAINER_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
   grafana:
     labels: *worktree-labels
-    network_mode: "container:${HOSTNAME:?Owning devcontainer hostname is required}"
+    network_mode: host
     ports: !reset []
     environment:
       GF_SERVER_HTTP_PORT: "3001"
     healthcheck:
       test: [CMD-SHELL, "wget -qO- http://127.0.0.1:3001/api/health >/dev/null 2>&1 || exit 1"]
     volumes:
-      - "${MELTIPLY_DEVCONTAINER_HOST_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
+      - "${MELTIPLY_DEVCONTAINER_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
   pushgateway:
     labels: *worktree-labels
-    network_mode: "container:${HOSTNAME:?Owning devcontainer hostname is required}"
+    network_mode: host
     ports: !reset []
     volumes:
-      - "${MELTIPLY_DEVCONTAINER_HOST_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
+      - "${MELTIPLY_DEVCONTAINER_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
   prometheus:
     labels: *worktree-labels
-    network_mode: "container:${HOSTNAME:?Owning devcontainer hostname is required}"
+    network_mode: host
     ports: !reset []
     extra_hosts: !reset []
     volumes:
-      - "${MELTIPLY_DEVCONTAINER_HOST_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
+      - "${MELTIPLY_DEVCONTAINER_CONFIG:-./.devcontainer}/service-hosts:/etc/hosts:ro"
 
 volumes:
   meltiply-cloudflare-postgres:

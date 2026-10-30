@@ -14,7 +14,12 @@ The current app focuses on **Posts**, **Analytics**, **Channels**, and named wee
 
 ## Get started
 
-The devcontainer uses the VibeCode Essential image declared in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) for the full coding toolchain. That config also mounts host OMP and Wrangler state plus GitHub and WakaTime config. For manual setup, use the Node.js version in [`.node-version`](.node-version) and Bun version declared in [`package.json`](package.json); Docker Compose and Make are also required.
+The devcontainer preserves the VibeCode Essential toolchain through the startup image declared in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json). It runs Docker-in-Docker with its own daemon and per-devcontainer Docker/containerd volumes; the host Docker socket is not mounted. Host OMP and Wrangler state plus GitHub and WakaTime config remain mounted as before. For manual setup, use the Node.js version in [`.node-version`](.node-version) and Bun version declared in [`package.json`](package.json); Docker Compose and Make are also required.
+
+Rebuild the devcontainer to switch an existing environment, then run `make setup`.
+The inner daemon starts with separate images and database volumes; existing
+host-daemon resources are neither migrated nor deleted. DinD requires privileged
+mode: it isolates Docker resources, not untrusted code from the host kernel.
 
 ```bash
 make setup

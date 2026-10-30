@@ -101,10 +101,9 @@ append_local_wrangler_container_flags() {
 }
 
 # Chooses the native-session R2 gateway host without changing WRANGLER_DEV_IP.
-# Native container sessions use the Docker-facing local interface or the host
-# override; API-only native sessions keep loopback. Inside a devcontainer the
-# gateway instead publishes a daemon-host relay and owns its final signed
-# authority. Only the narrow S3 route is exposed, not Wrangler management APIs.
+# Container sessions use the Docker-facing local interface or the host override;
+# API-only sessions keep loopback. DinD owns its bridge interface just like a
+# native Docker host. Only the narrow S3 route is exposed, not management APIs.
 #
 # @param $1 "true" when the container runtime is enabled for this session.
 configure_local_r2_endpoint_host() {

@@ -78,6 +78,12 @@ edit. The prepared release's versioned changelog section is also eligible, so
 version preparation does not discard the review. Reviewers must still judge the
 migration and window; the token proves scope and freshness, not human approval.
 
+For a breaking PR, when the target branch has a reachable contract release, the
+same bullet must contain both the PR merge-base token and the cumulative
+release-tag-to-head token printed by CI. Separate bullets cannot combine their
+acknowledgements. Without a prior release only the merge-base token applies.
+Default-branch validation still compares against the latest release tag.
+
 For a removal, first publish its deprecation and announce the earliest removal
 version/date in the changelog. Record the honored window and replacement in the
 breaking release; never silently remove a published operation. During the current
@@ -113,6 +119,9 @@ contract PR. A stale source-bound manifest, wrong tag/version or reuse of a rele
 version fails rather than publishing a changed artifact under an old version.
 Re-running preparation refreshes an untagged release's source-bound metadata
 without losing its notes or creating duplicate version sections.
+Both artifact creation and verification parse the versioned Markdown notes and
+require exact agreement with the machine-readable changes. Once that version is
+tagged, its Git-tagged `CHANGELOG.md` is authoritative rather than worktree edits.
 
 [Contract release](../../.github/workflows/contract-release.yml) automatically runs
 the same preparation and artifact/runtime smoke on contract branch pushes. It

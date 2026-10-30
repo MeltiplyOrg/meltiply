@@ -186,7 +186,7 @@ try {
   fixtureGit("tag", "-d", "contract-v1.1.0");
 
   // A PR based on unreleased changes needs both scopes in one breaking entry.
-  fixtureGit("checkout", "--detach", baseTip);
+  fixtureGit("checkout", "--detach", "--force", baseTip);
   writeFileSync(source, document({}));
   const breakingHead = commit();
   writeFileSync(eventPath, JSON.stringify({

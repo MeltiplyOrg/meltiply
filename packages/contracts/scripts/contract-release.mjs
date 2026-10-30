@@ -95,7 +95,7 @@ async function prepare() {
     prepared.contractSha256 === contractDigest(document) &&
     canonical(prepared.changes) === canonical(changes)
   ) {
-    validateManifest(prepared, document, tag, previous);
+    await validateManifest(prepared, document, tag, previous);
     console.log(`Contract ${prepared.version} is already prepared.`);
     return;
   }
@@ -136,8 +136,8 @@ async function prepare() {
   );
 }
 
-/** Validates source-bound release notes and the automatic SemVer decision against the prior tag. */
-function validateManifest(manifest, document, tag, previous) {
+/** Validates source/SemVer and exact versioned notes; existing tags are read from Git, never the worktree. */
+async function validateManifest(manifest, document, tag, previous) {
   if (
     manifest.schemaVersion !== 1 ||
     manifest.version !== document.info.version ||
@@ -160,13 +160,26 @@ function validateManifest(manifest, document, tag, previous) {
       `Version must advance automatically from ${tag ?? "the initial release"} with ${changeType} severity`,
     );
   }
+  const releaseTag = `contract-v${document.info.version}`;
+  const changelog = git("tag", "--list", releaseTag)
+    ? git("show", `${releaseTag}:packages/contracts/CHANGELOG.md`)
+    : await readFile(resolve(root, "CHANGELOG.md"), "utf8");
+  const sections = changelog.split(/^## /m).filter((section) =>
+    section.startsWith(`${document.info.version} - `) ||
+    section.startsWith(`${document.info.version}\n`));
+  const notes = sections.length === 1
+    ? changesIn(sections[0].slice(sections[0].indexOf("\n") + 1))
+    : undefined;
+  if (!notes || canonical(notes) !== canonical(manifest.changes)) {
+    throw new Error("Versioned changelog notes do not match release metadata");
+  }
 }
 
 /** Produces only allowlisted public assets from the existing validated bundle, with exact checksums. */
 async function artifacts(tagArgument) {
   const { document, tag, previous } = await releaseState();
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  validateManifest(manifest, document, tag, previous);
+  await validateManifest(manifest, document, tag, previous);
   if (!/^\d+\.\d+\.\d+$/.test(document.info.version))
     throw new Error("Release version must be stable SemVer");
   if (tagArgument) {
@@ -217,7 +230,7 @@ async function verify() {
   const json = JSON.parse(await readFile(resolve(releaseDirectory, "openapi.json"), "utf8"));
   const manifest = JSON.parse(await readFile(resolve(releaseDirectory, "changelog.json"), "utf8"));
   const state = await releaseState();
-  validateManifest(manifest, source, state.tag, state.previous);
+  await validateManifest(manifest, source, state.tag, state.previous);
   if (canonical(source) !== canonical(yaml) || canonical(source) !== canonical(json))
     throw new Error("Distributed documents do not match source");
   await SwaggerParser.validate(structuredClone(json));

@@ -184,6 +184,39 @@ try {
   assert.equal(tagBreak.status, 1, `${tagBreak.stdout}${tagBreak.stderr}`);
   assert.match(`${tagBreak.stdout}${tagBreak.stderr}`, /\/probe/);
   fixtureGit("tag", "-d", "contract-v1.1.0");
+
+  // A PR based on unreleased changes needs both scopes in one breaking entry.
+  fixtureGit("checkout", "--detach", baseTip);
+  writeFileSync(source, document({}));
+  const breakingHead = commit();
+  writeFileSync(eventPath, JSON.stringify({
+    pull_request: { base: { sha: baseTip }, head: { sha: breakingHead } },
+  }));
+  /** Obtains the exact-change review token from the real CLI's rejection diagnostics. */
+  const reviewToken = (ref) => {
+    const result = spawnSync(process.execPath, [script, "--base", ref], {
+      cwd: repository, encoding: "utf8", env: { ...process.env, GITHUB_STEP_SUMMARY: "" },
+    });
+    assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+    const value = `${result.stdout}${result.stderr}`.match(/contract-change:[a-f0-9]{64}/)?.[0];
+    assert.ok(value);
+    return value;
+  };
+  const mergeToken = reviewToken(baseTip);
+  const releaseToken = reviewToken("contract-v1.0.0");
+  assert.notEqual(mergeToken, releaseToken);
+  writeFileSync(notes, `## Unreleased\n\n- **Breaking:** [${mergeToken}] Remove probe operations; regenerate clients immediately.\n`);
+  const mergeOnly = ci("pull_request");
+  assert.equal(mergeOnly.status, 1, "PR review must also cover the cumulative release span");
+  assert.match(`${mergeOnly.stdout}${mergeOnly.stderr}`, new RegExp(releaseToken));
+  writeFileSync(notes, `## Unreleased\n\n- **Breaking:** [${mergeToken}] Remove probe operations; regenerate clients immediately.\n- **Breaking:** [${releaseToken}] Separate release acknowledgement must not waive the PR.\n`);
+  assert.equal(ci("pull_request").status, 1, "both tokens must occur in the same breaking entry");
+  writeFileSync(notes, `## Unreleased\n\n- **Breaking:** [${mergeToken}]\n  [${releaseToken}] Remove probe operations; regenerate clients immediately.\n`);
+  const bothScopes = ci("pull_request");
+  assert.equal(bothScopes.status, 0, `${bothScopes.stdout}${bothScopes.stderr}`);
+  writeFileSync(eventPath, JSON.stringify({ repository: { default_branch: "master" } }));
+  const cumulativePush = ci("push", "refs/heads/master");
+  assert.equal(cumulativePush.status, 0, `${cumulativePush.stdout}${cumulativePush.stderr}`);
   fixtureGit("tag", "-d", "contract-v1.0.0");
   const initial = ci("push", "refs/heads/master");
   assert.equal(initial.status, 0, initial.stderr);

@@ -125,7 +125,10 @@ async function releaseSmoke() {
     await mkdir(fixtureDist, { recursive: true });
     const fixtureSource = await readFile(resolve(contracts, "openapi.yaml"), "utf8");
     await writeFile(resolve(fixtureDist, "openapi.yaml"), fixtureSource);
-    await writeFile(resolve(fixtureDist, "openapi.json"), JSON.stringify(YAML.parse(fixtureSource)));
+    await writeFile(
+      resolve(fixtureDist, "openapi.json"),
+      JSON.stringify(YAML.parse(fixtureSource)),
+    );
     release(["artifacts", "--tag", "contract-v1.2.4"], directory);
     release(["verify"], directory);
     // Make all metadata and checksums self-consistent, but contradict the tagged Markdown notes.
@@ -138,7 +141,11 @@ async function releaseSmoke() {
     await writeFile(resolve(distributed, "changelog.json"), forgedText);
     const sums = [];
     for (const name of ["changelog.json", "openapi.json", "openapi.yaml"]) {
-      sums.push(`${createHash("sha256").update(await readFile(resolve(distributed, name))).digest("hex")}  ${name}`);
+      sums.push(
+        `${createHash("sha256")
+          .update(await readFile(resolve(distributed, name)))
+          .digest("hex")}  ${name}`,
+      );
     }
     await writeFile(resolve(distributed, "SHA256SUMS"), `${sums.join("\n")}\n`);
     assert.match(release(["artifacts"], directory, 1), /changelog notes.*match/i);
@@ -146,7 +153,10 @@ async function releaseSmoke() {
     // Editing the worktree to agree must not rewrite a tagged release's review history.
     const fixtureNotesPath = resolve(contracts, "CHANGELOG.md");
     const taggedNotes = await readFile(fixtureNotesPath, "utf8");
-    await writeFile(fixtureNotesPath, taggedNotes.replace("**Patch:** Correct the summary.", forged.changes[0]));
+    await writeFile(
+      fixtureNotesPath,
+      taggedNotes.replace("**Patch:** Correct the summary.", forged.changes[0]),
+    );
     assert.match(release(["artifacts"], directory, 1), /changelog notes.*match/i);
     assert.match(release(["verify"], directory, 1), /changelog notes.*match/i);
     await writeFile(fixtureNotesPath, taggedNotes);

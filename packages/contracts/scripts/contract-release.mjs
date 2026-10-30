@@ -164,12 +164,15 @@ async function validateManifest(manifest, document, tag, previous) {
   const changelog = git("tag", "--list", releaseTag)
     ? git("show", `${releaseTag}:packages/contracts/CHANGELOG.md`)
     : await readFile(resolve(root, "CHANGELOG.md"), "utf8");
-  const sections = changelog.split(/^## /m).filter((section) =>
-    section.startsWith(`${document.info.version} - `) ||
-    section.startsWith(`${document.info.version}\n`));
-  const notes = sections.length === 1
-    ? changesIn(sections[0].slice(sections[0].indexOf("\n") + 1))
-    : undefined;
+  const sections = changelog
+    .split(/^## /m)
+    .filter(
+      (section) =>
+        section.startsWith(`${document.info.version} - `) ||
+        section.startsWith(`${document.info.version}\n`),
+    );
+  const notes =
+    sections.length === 1 ? changesIn(sections[0].slice(sections[0].indexOf("\n") + 1)) : undefined;
   if (!notes || canonical(notes) !== canonical(manifest.changes)) {
     throw new Error("Versioned changelog notes do not match release metadata");
   }

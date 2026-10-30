@@ -2,12 +2,12 @@
 
 ## Unreleased
 
+## 1.0.0 - 2026-10-30
+
 - Require breaking PR review to acknowledge both merge-base and cumulative
   release scopes in one entry. Reject release artifacts whose machine-readable
   changes differ from the versioned changelog, using immutable tagged notes
   when the release tag exists.
-
-## 1.0.0 - 2026-10-29
 
 - Align public health examples with the prepared contract version, recognize
   wrapped breaking-review bullets without crossing bullet/heading boundaries, and

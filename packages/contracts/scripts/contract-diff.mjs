@@ -149,7 +149,8 @@ function main() {
         (bullet) =>
           bullet.startsWith("- **Breaking:** ") &&
           tokens.every((required) => bullet.includes(`[${required}]`)) &&
-          tokens.reduce((description, required) => description.replace(`[${required}]`, ""), bullet).length > 40,
+          tokens.reduce((description, required) => description.replace(`[${required}]`, ""), bullet)
+            .length > 40,
       );
     if (acknowledged && !previous.includes(token)) {
       report(

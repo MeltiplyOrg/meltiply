@@ -1,8 +1,4 @@
-import type {
-  InstagramPostType,
-  InstagramPublishOptions,
-  InstagramTrialGraduation,
-} from "./types";
+import type { InstagramPostType, InstagramPublishOptions, InstagramTrialGraduation } from "./types";
 
 /**
  * Attachment kind the option rules evaluate. `null` is an attachment whose
@@ -19,10 +15,7 @@ export interface ResolvedInstagramOptions {
 }
 
 const instagramPostTypes: readonly InstagramPostType[] = ["feed", "reel", "story"];
-const instagramTrialGraduations: readonly InstagramTrialGraduation[] = [
-  "manual",
-  "performance",
-];
+const instagramTrialGraduations: readonly InstagramTrialGraduation[] = ["manual", "performance"];
 
 /**
  * Resolves and validates Instagram's publication shape against the actual
@@ -41,8 +34,7 @@ export function resolveInstagramOptions(
   kinds: readonly InstagramMediaKind[],
 ): ResolvedInstagramOptions | null {
   const [only] = kinds;
-  const postType =
-    options?.postType ?? (kinds.length === 1 && only === "video" ? "reel" : "feed");
+  const postType = options?.postType ?? (kinds.length === 1 && only === "video" ? "reel" : "feed");
   const trialReel = options?.trialReel ?? false;
   const trialGraduation = options?.trialGraduation ?? "manual";
   const invalid =

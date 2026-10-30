@@ -106,6 +106,12 @@ const send = vi.fn(async () => ({
 const youtubePublishSend = vi.fn(async (..._arguments: unknown[]) => ({
   metadata: { metrics: { backlogBytes: 0, backlogCount: 0 } },
 }));
+// Publication failures now enqueue notification deliveries on the same outbox.
+// The relay claims every pending row in this shared database, so routing needs
+// the real binding shape even though these scenarios never assert its payload.
+const notificationsSend = vi.fn(async (..._arguments: unknown[]) => ({
+  metadata: { metrics: { backlogBytes: 0, backlogCount: 0 } },
+}));
 const env = {
   ASSET_PROCESSING_QUEUE: { sendBatch: send } as unknown as Queue<unknown>,
   DB_SYSTEM: {
@@ -113,6 +119,9 @@ const env = {
       "postgres://meltiply_system:meltiply-system-local@127.0.0.1:5433/meltiply?sslmode=disable",
   } as Hyperdrive,
   ENVIRONMENT: "test",
+  NOTIFICATIONS_QUEUE: {
+    sendBatch: notificationsSend,
+  } as unknown as Queue<unknown>,
   // These scenarios exercise the explicitly enabled recurring engagement product.
   RECURRING_COMMENTS_ENABLED: "true",
   VERSION: "1.0.0-target.0",
@@ -7710,10 +7719,12 @@ describeIntegration("Automation jobs with PostgreSQL", () => {
         });
         const events = await client.query<{ count: string }>(
           `SELECT COUNT(*)::text AS count FROM outbox_events
-           WHERE aggregate_id = $1`,
+           WHERE aggregate_id = $1 AND topic = 'distribution.reconcile.requested'`,
           [distributionId],
         );
-        // No further reconcile trigger is armed once the budget is spent.
+        // No further reconcile trigger is armed once the budget is spent. The
+        // terminal failure may still enqueue an unrelated notification event
+        // for the same aggregate, so only the reconcile topic is asserted.
         expect(events.rows[0]?.count).toBe("0");
       });
     } finally {
